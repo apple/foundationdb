@@ -488,7 +488,7 @@ void S3BlobStoreEndpoint::simulateRequestFailure(std::string const& verb,
                                                  std::string const& resource,
                                                  Reference<HTTP::IncomingResponse>& r) {
 	simulatedTokenError = false;
-	if (!g_network->isSimulated() || !BUGGIFY || deterministicRandom()->random01() >= 0.1) {
+	if (!g_network->isSimulated() || !buggify() || deterministicRandom()->random01() >= 0.1) {
 		return;
 	}
 	// Don't simulate token errors for multipart complete operations (POST with uploadId but no partNumber)
@@ -779,11 +779,12 @@ AsyncResult<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEndp
 			}
 
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
+			if (e.code() != error_code_actor_cancelled) {
 				TraceEvent(SevWarn, "S3BlobStoreEndpointListBucketResultParseError")
 				    .errorUnsuppressed(e)
 				    .suppressFor(60)
 				    .detail("Resource", fullResource);
+			}
 			throw http_bad_response();
 		}
 	}

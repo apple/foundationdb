@@ -42,13 +42,16 @@ bool isBlobstoreUrl(const std::string& url);
 // Append-only file interface for writing backup data
 // Once finish() is called the file cannot be further written to.
 // Backup containers should not attempt to use files for which finish was not called or did not complete.
-// TODO: Move the log file and range file format encoding/decoding stuff to this file and behind interfaces.
+// Log and range file format encoding/decoding helpers live in BackupFileFormat.h and BackupFileFormat.cpp.
 class IBackupFile {
 public:
 	explicit IBackupFile(const std::string& fileName) : m_fileName(fileName) {}
-	virtual ~IBackupFile() {}
+	virtual ~IBackupFile() = default;
 	// Backup files are append-only and cannot have more than 1 append outstanding at once.
 	virtual Future<Void> append(const void* data, int len) = 0;
+	// Non-virtual size_t overload: safely chunks large writes so len never overflows the int parameter
+	// of the virtual append(). Uses CLIENT_KNOBS->BACKUP_MANIFEST_WRITE_CHUNK_SIZE as the chunk size.
+	Future<Void> append(const void* data, size_t len);
 	virtual Future<Void> finish() = 0;
 	inline std::string getFileName() const { return m_fileName; }
 	virtual int64_t size() const = 0;
@@ -270,8 +273,8 @@ public:
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
-	IBackupContainer() {}
-	virtual ~IBackupContainer() {}
+	IBackupContainer() = default;
+	virtual ~IBackupContainer() = default;
 
 	// Create the container
 	virtual Future<Void> create() = 0;
@@ -322,6 +325,12 @@ public:
 		std::string step;
 		int total;
 		int done;
+		// The expire version actually requested, once resolved to an absolute version.
+		Version requestedEndVersion = invalidVersion;
+		// The version expiration was actually performed to, which can differ from requestedEndVersion
+		// because expiration cannot split a log file and will move the end version back to the
+		// beginning of a log file that would otherwise have been partially deleted.
+		Version actualEndVersion = invalidVersion;
 		std::string toString() const;
 	};
 	// Delete backup files which do not contain any data at or after (more recent than) expireEndVersion.

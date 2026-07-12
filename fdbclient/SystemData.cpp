@@ -538,6 +538,18 @@ bool serverHasKey(ValueRef storedValue) {
 	return assigned;
 }
 
+// See declaration in SystemData.h.
+bool isServerKeysUnassigned(const ValueRef& value) {
+	// Empty values are KRM boundary sentinels. serverKeysFalse ("not
+	// assigned") is written by both flavors on the drop-side of a move.
+	return value.empty() || value == serverKeysFalse;
+}
+
+// See declaration in SystemData.h.
+bool isServerKeysOldFormatAssigned(const ValueRef& value) {
+	return value == serverKeysTrue || value == serverKeysTrueEmptyRange;
+}
+
 Value serverKeysValue(const UID& id) {
 	if (!id.isValid()) {
 		return serverKeysFalse;
@@ -771,6 +783,201 @@ int8_t decodeTagLocalityListValue(ValueRef const& value) {
 	return s;
 }
 
+const KeyRangeRef cdcStreamNameKeys("\xff/cdc/name/"_sr, "\xff/cdc/name0"_sr);
+const KeyRef cdcMaxStreamIdKey = "\xff/cdc/maxStreamId"_sr;
+const KeyRangeRef cdcStreamKeys("\xff/cdc/keys/"_sr, "\xff/cdc/keys0"_sr);
+const KeyRangeRef cdcTagHistoryKeys("\xff/cdc/tagHistory/"_sr, "\xff/cdc/tagHistory0"_sr);
+const KeyRangeRef cdcMinVersionKeys("\xff\x02/cdc/minVersion/"_sr, "\xff\x02/cdc/minVersion0"_sr);
+const KeyRangeRef cdcRetiredTagPopKeys("\xff/cdc/retiredTagPop/"_sr, "\xff/cdc/retiredTagPop0"_sr);
+const KeyRangeRef cdcRetiredTagPopVersionKeys("\xff\x02/cdc/retiredTagPopVersion/"_sr,
+                                              "\xff\x02/cdc/retiredTagPopVersion0"_sr);
+const KeyRangeRef cdcProxyKeys("\xff/cdc/proxies/"_sr, "\xff/cdc/proxies0"_sr);
+const KeyRef cdcProxyAssignmentChangeKey = "\xff/cdc/proxyAssignmentChange"_sr;
+
+Key cdcStreamNameKeyFor(KeyRef const& streamName) {
+	return streamName.withPrefix(cdcStreamNameKeys.begin);
+}
+
+Key decodeCDCStreamNameKey(KeyRef const& key) {
+	return key.removePrefix(cdcStreamNameKeys.begin);
+}
+
+Value cdcStreamNameValue(CDCStreamId streamId) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withNativeCdc()));
+	wr << streamId;
+	return wr.toValue();
+}
+
+CDCStreamId decodeCDCStreamNameValue(ValueRef const& value) {
+	CDCStreamId streamId;
+	BinaryReader reader(value, IncludeVersion());
+	ASSERT_WE_THINK(reader.protocolVersion().hasNativeCdc());
+	reader >> streamId;
+	return streamId;
+}
+
+Value cdcMaxStreamIdValue(CDCStreamId streamId) {
+	return cdcStreamNameValue(streamId);
+}
+
+CDCStreamId decodeCDCMaxStreamIdValue(ValueRef const& value) {
+	return decodeCDCStreamNameValue(value);
+}
+
+Key cdcStreamKeyFor(CDCStreamId streamId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcStreamKeys.begin);
+	wr << streamId;
+	return wr.toValue();
+}
+
+CDCStreamId decodeCDCStreamKey(KeyRef const& key) {
+	CDCStreamId streamId;
+	BinaryReader reader(key.removePrefix(cdcStreamKeys.begin), Unversioned());
+	reader >> streamId;
+	return streamId;
+}
+
+Value cdcStreamKeysValue(KeyRangeRef const& keys) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withNativeCdc()));
+	wr << keys;
+	return wr.toValue();
+}
+
+KeyRange decodeCDCStreamKeysValue(ValueRef const& value) {
+	KeyRange keys;
+	BinaryReader reader(value, IncludeVersion());
+	ASSERT_WE_THINK(reader.protocolVersion().hasNativeCdc());
+	reader >> keys;
+	return keys;
+}
+
+static Key cdcTagHistoryPrefixFor(CDCStreamId streamId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcTagHistoryKeys.begin);
+	wr << streamId;
+	return wr.toValue();
+}
+
+Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcTagHistoryPrefixFor(streamId));
+
+	Version encodedVersion = bigEndian64(version);
+	Key versionBytes = makeString(sizeof(encodedVersion));
+	memcpy(mutateString(versionBytes), &encodedVersion, sizeof(encodedVersion));
+	wr.serializeBytes(versionBytes);
+	wr << tag;
+	return wr.toValue();
+}
+
+KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId) {
+	return prefixRange(cdcTagHistoryPrefixFor(streamId));
+}
+
+CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key) {
+	CDCStreamId streamId;
+	Version encodedVersion;
+	Tag tag;
+	BinaryReader reader(key.removePrefix(cdcTagHistoryKeys.begin), Unversioned());
+	reader >> streamId >> encodedVersion >> tag;
+	return CDCTagHistoryEntry(streamId, bigEndian64(encodedVersion), tag);
+}
+
+Key cdcMinVersionKeyFor(CDCStreamId streamId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcMinVersionKeys.begin);
+	wr << streamId;
+	return wr.toValue();
+}
+
+CDCStreamId decodeCDCMinVersionKey(KeyRef const& key) {
+	CDCStreamId streamId;
+	BinaryReader reader(key.removePrefix(cdcMinVersionKeys.begin), Unversioned());
+	reader >> streamId;
+	return streamId;
+}
+
+Value cdcMinVersionValue(Version version) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withNativeCdc()));
+	wr << version;
+	return wr.toValue();
+}
+
+Value cdcVersionstampedMinVersionValue() {
+	// Ten placeholder bytes followed by the versionstamp offset at byte zero.
+	return "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"_sr;
+}
+
+Version decodeCDCMinVersionValue(ValueRef const& value) {
+	if (value.size() == sizeof(Version) + sizeof(uint16_t)) {
+		Versionstamp versionstamp;
+		BinaryReader reader(value, Unversioned());
+		reader >> versionstamp;
+		return versionstamp.version;
+	}
+
+	Version version;
+	BinaryReader reader(value, IncludeVersion());
+	ASSERT_WE_THINK(reader.protocolVersion().hasNativeCdc());
+	reader >> version;
+	return version;
+}
+
+Key cdcRetiredTagPopKeyFor(Tag tag) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcRetiredTagPopKeys.begin);
+	wr << tag;
+	return wr.toValue();
+}
+
+Tag decodeCDCRetiredTagPopKey(KeyRef const& key) {
+	Tag tag;
+	BinaryReader reader(key.removePrefix(cdcRetiredTagPopKeys.begin), Unversioned());
+	reader >> tag;
+	return tag;
+}
+
+Key cdcRetiredTagPopVersionKeyFor(Tag tag) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcRetiredTagPopVersionKeys.begin);
+	wr << tag;
+	return wr.toValue();
+}
+
+Tag decodeCDCRetiredTagPopVersionKey(KeyRef const& key) {
+	Tag tag;
+	BinaryReader reader(key.removePrefix(cdcRetiredTagPopVersionKeys.begin), Unversioned());
+	reader >> tag;
+	return tag;
+}
+
+static Key cdcProxyPrefixFor(CDCStreamId streamId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcProxyKeys.begin);
+	wr << streamId;
+	return wr.toValue();
+}
+
+Key cdcProxyKeyFor(CDCStreamId streamId, UID proxyId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcProxyPrefixFor(streamId));
+	wr << proxyId;
+	return wr.toValue();
+}
+
+KeyRange cdcProxyRangeFor(CDCStreamId streamId) {
+	return prefixRange(cdcProxyPrefixFor(streamId));
+}
+
+std::pair<CDCStreamId, UID> decodeCDCProxyKey(KeyRef const& key) {
+	CDCStreamId streamId;
+	UID proxyId;
+	BinaryReader reader(key.removePrefix(cdcProxyKeys.begin), Unversioned());
+	reader >> streamId >> proxyId;
+	return { streamId, proxyId };
+}
+
 const KeyRangeRef datacenterReplicasKeys("\xff\x02/datacenterReplicas/"_sr, "\xff\x02/datacenterReplicas0"_sr);
 const KeyRef datacenterReplicasPrefix = datacenterReplicasKeys.begin;
 
@@ -920,7 +1127,7 @@ const KeyRangeRef configKeys("\xff/conf/"_sr, "\xff/conf0"_sr);
 const KeyRef configKeysPrefix = configKeys.begin;
 
 const KeyRef backupWorkerEnabledKey("\xff/conf/backup_worker_enabled"_sr);
-const KeyRef rangeBackupWorkerEnabledKey("\xff/conf/range_backup_worker_enabled"_sr);
+const KeyRef rangePartitionedBackupWorkerEnabledKey("\xff/conf/range_partitioned_backup_worker_enabled"_sr);
 const KeyRef perpetualStorageWiggleKey("\xff/conf/perpetual_storage_wiggle"_sr);
 const KeyRef perpetualStorageWiggleLocalityKey("\xff/conf/perpetual_storage_wiggle_locality"_sr);
 // The below two are there for compatible upgrade and downgrade. After 7.3, the perpetual wiggle related keys should use
@@ -1060,6 +1267,32 @@ WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
 	return status;
 }
 
+const KeyRangeRef backupPartitionMapHistoryKeys("\xff\x02/backupPartitionMap/"_sr, "\xff\x02/backupPartitionMap0"_sr);
+
+Key backupPartitionMapHistoryKeyFor(LogEpoch epoch, Version version) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	wr << bigEndian64(epoch) << bigEndian64(version);
+	return wr.toValue();
+}
+
+KeyRange backupPartitionMapHistoryRangeFor(LogEpoch epoch) {
+	BinaryWriter beginW(Unversioned());
+	beginW.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	beginW << bigEndian64(epoch);
+	BinaryWriter endW(Unversioned());
+	endW.serializeBytes(backupPartitionMapHistoryKeys.begin);
+	endW << bigEndian64(epoch + 1);
+	return KeyRangeRef(beginW.toValue(), endW.toValue());
+}
+
+std::pair<LogEpoch, Version> decodeBackupPartitionMapHistoryKey(const KeyRef& key) {
+	BinaryReader rd(key.removePrefix(backupPartitionMapHistoryKeys.begin), Unversioned());
+	int64_t epoch, version;
+	rd >> epoch >> version;
+	return { fromBigEndian64(epoch), fromBigEndian64(version) };
+}
+
 Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupStartValue()));
 	wr << ids;
@@ -1074,45 +1307,41 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 	return ids;
 }
 
+const KeyRef backupPartitionRequiredKey = "\xff\x02/backupPartitionRequired"_sr;
+const KeyRef backupPartitionListKey = "\xff\x02/backupPartitionList"_sr;
+
+Value backupPartitionRequiredValue(int8_t requestType) {
+	BinaryWriter wr(Unversioned());
+	wr << requestType;
+	return wr.toValue();
+}
+
+int8_t decodeBackupPartitionRequiredValue(const ValueRef& value) {
+	int8_t requestType = 0;
+	if (!value.empty()) {
+		BinaryReader reader(value, Unversioned());
+		reader >> requestType;
+	}
+	return requestType;
+}
+
+Value encodeBackupPartitionListValue(const std::vector<KeyRange>& partitions) {
+	BinaryWriter wr(IncludeVersion());
+	wr << partitions;
+	return wr.toValue();
+}
+
+std::vector<KeyRange> decodeBackupPartitionListValue(const ValueRef& value) {
+	std::vector<KeyRange> partitions;
+	if (!value.empty()) {
+		BinaryReader reader(value, IncludeVersion());
+		reader >> partitions;
+	}
+	return partitions;
+}
+
 bool mutationForKey(const MutationRef& m, const KeyRef& key) {
 	return isSingleKeyMutation((MutationRef::Type)m.type) && m.param1 == key;
-}
-
-// Backup keys related to Range Partitioned.
-const KeyRef backupRangePartitionedMapUploadedPrefix = "\xff\x02/backupRangePartitionedMapUploaded/"_sr;
-const KeyRangeRef backupRangePartitionedProgressKeys("\xff\x02/backupRangePartitionedProgress/"_sr,
-                                                     "\xff\x02/backupRangePartitionedProgress0"_sr);
-const KeyRef backupRangePartitionedProgressPrefix = backupRangePartitionedProgressKeys.begin;
-
-Key backupRangePartitionedMapUploadedKeyFor(Version v) {
-	return backupRangePartitionedMapUploadedPrefix.withSuffix(format("%lld", v));
-}
-
-Key backupRangePartitionedProgressKey(UID workerID) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(backupRangePartitionedProgressPrefix);
-	wr << workerID;
-	return wr.toValue();
-}
-
-Value backupRangePartitionedProgressValue(const WorkerBackupStatus& status) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupProgressValue()));
-	wr << status;
-	return wr.toValue();
-}
-
-UID decodeBackupRangePartitionedProgressKey(const KeyRef& key) {
-	UID serverID;
-	BinaryReader rd(key.removePrefix(backupRangePartitionedProgressPrefix), Unversioned());
-	rd >> serverID;
-	return serverID;
-}
-
-WorkerBackupStatus decodeBackupRangePartitionedProgressValue(const ValueRef& value) {
-	WorkerBackupStatus status;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> status;
-	return status;
 }
 
 const KeyRef previousCoordinatorsKey = "\xff/previousCoordinators"_sr;
@@ -1545,7 +1774,7 @@ void testSSISerdes(StorageServerInterface const& ssi) {
 	ASSERT(ssi.isTss() == ssi2.isTss());
 	ASSERT(ssi.isAcceptingRequests() == ssi2.isAcceptingRequests());
 	if (ssi.isTss()) {
-		ASSERT(ssi2.tssPairID.get() == ssi2.tssPairID.get());
+		ASSERT(ssi.tssPairID.get() == ssi2.tssPairID.get());
 	}
 	ASSERT(ssi.address() == ssi2.address());
 	ASSERT(ssi.getValue.getEndpoint().token == ssi2.getValue.getEndpoint().token);
@@ -1563,7 +1792,9 @@ TEST_CASE("/SystemData/SerDes/SSI") {
 	StorageServerInterface ssi;
 	ssi.uniqueID = UID(0x1234123412341234, 0x5678567856785678);
 	ssi.locality = localityData;
-	ssi.initEndpoints();
+	// This test only needs a serializable endpoint; registering one requires a FlowTransport instance.
+	ssi.getValue =
+	    PublicRequestStream<GetValueRequest>(Endpoint({ NetworkAddress(IPAddress(0x01010101), 1) }, UID(1, 2)));
 
 	testSSISerdes(ssi);
 
@@ -1682,6 +1913,51 @@ TEST_CASE("noSim/SystemData/DataMoveId") {
 	ASSERT(type == decodeType && reason == decodeReason);
 
 	printf("testing data move ID encoding/decoding complete\n");
+
+	return Void();
+}
+
+TEST_CASE("/SystemData/NativeCDC") {
+	const Key name = "orders"_sr;
+	const CDCStreamId streamId = 42;
+	const KeyRange keys(KeyRangeRef("a"_sr, "z"_sr));
+	const Version minVersion = 123456789;
+	const Tag tag(tagLocalityCDC, 9);
+	const UID proxyId(1, 2);
+
+	ASSERT_EQ(decodeCDCStreamNameKey(cdcStreamNameKeyFor(name)), name);
+	ASSERT_EQ(decodeCDCStreamNameValue(cdcStreamNameValue(streamId)), streamId);
+	ASSERT_EQ(decodeCDCMaxStreamIdValue(cdcMaxStreamIdValue(streamId)), streamId);
+	ASSERT_EQ(decodeCDCStreamKey(cdcStreamKeyFor(streamId)), streamId);
+	ASSERT_EQ(decodeCDCStreamKeysValue(cdcStreamKeysValue(keys)), keys);
+	ASSERT_EQ(decodeCDCMinVersionKey(cdcMinVersionKeyFor(streamId)), streamId);
+	ASSERT_EQ(decodeCDCMinVersionValue(cdcMinVersionValue(minVersion)), minVersion);
+	ASSERT(nonMetadataSystemKeys.contains(cdcMinVersionKeyFor(streamId)));
+	ASSERT_EQ(cdcVersionstampedMinVersionValue().size(), sizeof(Version) + sizeof(uint16_t) + sizeof(int32_t));
+	ASSERT_EQ(decodeCDCRetiredTagPopKey(cdcRetiredTagPopKeyFor(tag)), tag);
+	ASSERT(cdcRetiredTagPopKeys.contains(cdcRetiredTagPopKeyFor(tag)));
+	ASSERT_EQ(decodeCDCRetiredTagPopVersionKey(cdcRetiredTagPopVersionKeyFor(tag)), tag);
+	ASSERT(cdcRetiredTagPopVersionKeys.contains(cdcRetiredTagPopVersionKeyFor(tag)));
+	ASSERT(nonMetadataSystemKeys.contains(cdcRetiredTagPopVersionKeyFor(tag)));
+
+	const Key tagHistoryKey = cdcTagHistoryKeyFor(streamId, minVersion, tag);
+	const CDCTagHistoryEntry decodedTagHistory = decodeCDCTagHistoryKey(tagHistoryKey);
+	ASSERT_EQ(decodedTagHistory.streamId, streamId);
+	ASSERT_EQ(decodedTagHistory.version, minVersion);
+	ASSERT_EQ(decodedTagHistory.tag, tag);
+	ASSERT(cdcTagHistoryRangeFor(streamId).contains(tagHistoryKey));
+
+	const Value serializedTagHistory = ObjectWriter::toValue(decodedTagHistory, Unversioned());
+	const auto deserializedTagHistory =
+	    ObjectReader::fromStringRef<CDCTagHistoryEntry>(serializedTagHistory, Unversioned());
+	ASSERT_EQ(deserializedTagHistory.streamId, streamId);
+	ASSERT_EQ(deserializedTagHistory.version, minVersion);
+	ASSERT_EQ(deserializedTagHistory.tag, tag);
+
+	const auto [proxyStreamId, decodedProxyId] = decodeCDCProxyKey(cdcProxyKeyFor(streamId, proxyId));
+	ASSERT_EQ(proxyStreamId, streamId);
+	ASSERT_EQ(decodedProxyId, proxyId);
+	ASSERT(cdcProxyRangeFor(streamId).contains(cdcProxyKeyFor(streamId, proxyId)));
 
 	return Void();
 }

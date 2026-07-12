@@ -241,6 +241,14 @@ std::string IBlobStoreEndpoint::getResourceURL(std::string resource, std::string
 		params.append(knobParams);
 	}
 
+	if (!region.empty()) {
+		if (!params.empty()) {
+			params.append("&");
+		}
+		params.append("region=");
+		params.append(region);
+	}
+
 	for (const auto& [k, v] : extraHeaders) {
 		if (!params.empty()) {
 			params.append("&");
@@ -320,7 +328,7 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 		// hostPort is at least a host or IP address, optionally followed by :portNumber or :serviceName
 		StringRef h(hostPort);
 		StringRef host = h.eat(":");
-		if (host.size() == 0)
+		if (host.empty())
 			throw std::string("host cannot be empty");
 
 		StringRef service = h.eat();
@@ -333,7 +341,7 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 		HTTP::Headers extraHeaders;
 		while (1) {
 			StringRef name = t.eat("=");
-			if (name.size() == 0)
+			if (name.empty())
 				break;
 			StringRef value = t.eat("&");
 
@@ -342,7 +350,7 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 				StringRef originalValue = value;
 				StringRef headerFieldName = value.eat(":");
 				StringRef headerFieldValue = value;
-				if (headerFieldName.size() == 0 || headerFieldValue.size() == 0) {
+				if (headerFieldName.empty() || headerFieldValue.empty()) {
 					throw format("'%s' is not a valid value for '%s' parameter.  Format is <FieldName>:<FieldValue> "
 					             "where strings are not empty.",
 					             originalValue.toString().c_str(),

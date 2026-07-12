@@ -207,7 +207,7 @@ private:
 	// Sum of weights for all priorities with 1 or more waiters
 	int totalPendingWeights;
 
-	typedef Deque<Waiter> Queue;
+	using Queue = Deque<Waiter>;
 
 	struct Priority : boost::intrusive::list_base_hook<> {
 		Priority() : runners(0), weight(0), priority(-1) {}
@@ -232,7 +232,7 @@ private:
 	};
 
 	std::vector<Priority> priorities;
-	typedef boost::intrusive::list<Priority, boost::intrusive::constant_time_size<false>> WaitingPrioritiesList;
+	using WaitingPrioritiesList = boost::intrusive::list<Priority, boost::intrusive::constant_time_size<false>>;
 
 	// List of all priorities with 1 or more waiters.  This list exists so that the scheduling loop
 	// does not have to iterage over the priorities vector checking priorities without waiters.

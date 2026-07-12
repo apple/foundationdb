@@ -1,0 +1,34 @@
+[configuration]
+config = 'single commit_proxies=1 grv_proxies=2'
+singleRegion = true
+# Independent replacement coverage needs enough transaction workers in the primary data center for both proxies.
+datacenters = 1
+machineCount = 12
+statelessProcessClassesPerDC = 3
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+cdc_proxy_failure_coalesce_delay = 0.1
+
+[[test]]
+testTitle = 'NativeCdcAssignmentPublication'
+useDB = true
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+timeout = 180
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 1
+    minStreamCount = 1
+    maxStreamCount = 1
+    keyCount = 4
+    writesPerRound = 1
+    rounds = 1
+    assignmentPublicationChecks = 8
+    testProxyReplacement = true
+    drainProbability = 1.0
+    delayBetweenRounds = 0.0
+    operationTimeout = 60.0

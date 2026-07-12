@@ -20,11 +20,10 @@
 
 #include <boost/lexical_cast.hpp>
 
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
+#include "fdbclient/StatusSchema.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/actorcompiler.h" // This must be the last include
 
 struct DataDistributionMetricsWorkload : KVWorkload {
 	static constexpr auto NAME = "DataDistributionMetrics";

@@ -43,6 +43,7 @@
 #include "fdbserver/core/RatekeeperLimitReasons.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/StorageWiggleMetrics.h"
 
@@ -132,7 +133,7 @@ struct LatencyProbeState : ReferenceCounted<LatencyProbeState> {
 static AsyncResult<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
 	try {
 		EventLogRequest req =
-		    eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
+		    !eventName.empty() ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
 		ErrorOr<TraceEventFields> eventTrace =
 		    co_await errorOr(timeoutError(worker.eventLogRequest.getReply(req), 2.0));
 
@@ -233,8 +234,9 @@ static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 			if (errorFields.tryGetValue("Error", errorName)) {
 				statusObj["name"] = errorName;
 				description += ": " + errorName;
-			} else
+			} else {
 				statusObj["name"] = "process_error";
+			}
 
 			struct tm* timeinfo;
 			time_t t = (time_t)time;
@@ -605,7 +607,7 @@ struct RolesInfo {
 				rocksdbMetricsObj.setKeyRawNumber("throttled_commits", rocksdbMetrics.getValue("CommitDelayed"));
 				rocksdbMetricsObj.setKeyRawNumber("write_stall_microseconds", rocksdbMetrics.getValue("StallMicros"));
 
-				obj["rocksdb_metrics"] = std::move(rocksdbMetricsObj);
+				obj["rocksdb_metrics"] = rocksdbMetricsObj;
 			}
 
 		} catch (AttributeNotFoundError& e) {
@@ -699,7 +701,7 @@ struct RolesInfo {
 			}
 
 			// Add GRV Latency metrics (for all priorities) to parent node.
-			if (priorityStats.size()) {
+			if (!priorityStats.empty()) {
 				obj["grv_latency_statistics"] = priorityStats;
 			}
 
@@ -791,7 +793,7 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
 	std::vector<WorkerDetails>::iterator workerItr;
 	for (workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
 		co_await yield();
-		std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo>::iterator memInfo =
+		auto memInfo =
 		    machineMemoryUsage.insert(std::make_pair(workerItr->interf.locality.machineId(), MachineMemoryInfo()))
 		        .first;
 		try {
@@ -804,8 +806,9 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
 					memInfo->second.memoryUsage += processMetrics.getDouble("Memory");
 					memInfo->second.rssUsage += processMetrics.getDouble("ResidentMemory");
 					memInfo->second.aggregateLimit += programStart.getDouble("MemoryLimit");
-				} else
+				} else {
 					memInfo->second.invalidate();
+				}
 			}
 		} catch (Error& e) {
 			memInfo->second.invalidate();
@@ -835,6 +838,11 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
 				roles.addRole("router", it.interf());
 			}
 		}
+		for (auto& backupWorker : tLogSet.backupWorkers) {
+			if (backupWorker.present()) {
+				roles.addRole("backupworker", backupWorker.interf());
+			}
+		}
 	}
 
 	std::vector<OldTLogConf>::const_iterator oldTLogIter;
@@ -849,6 +857,11 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
 			for (auto& it : tLogSet.logRouters) {
 				if (it.present()) {
 					roles.addRole("router", it.interf());
+				}
+			}
+			for (auto& backupWorker : tLogSet.backupWorkers) {
+				if (backupWorker.present()) {
+					roles.addRole("backupworker", backupWorker.interf());
 				}
 			}
 		}
@@ -1040,7 +1053,7 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
 			std::string strAddress = address.toString();
 
 			// If this process has a process issue, identified by strAddress, then add it to messages array
-			for (auto issue : processIssues[strAddress]) {
+			for (const auto& issue : processIssues[strAddress]) {
 				messages.push_back(issue);
 			}
 
@@ -1172,7 +1185,7 @@ static JsonBuilderObject clientStatusFetcher(
 		versionsArray.push_back(ver);
 	}
 
-	if (versionsArray.size() > 0) {
+	if (!versionsArray.empty()) {
 		clientStatus["supported_versions"] = versionsArray;
 	}
 
@@ -1449,7 +1462,7 @@ static AsyncResult<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> versionEpochVal =
-				    co_await timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0);
+				    co_await timeoutError(buggify() ? Never() : tr.get(versionEpochKey), 5.0);
 				message["enabled"] = versionEpochVal.present();
 				if (!versionEpochVal.present()) {
 					break;
@@ -1483,7 +1496,7 @@ static Future<Void> consistencyCheckStatusFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> ccSuspendVal =
-				    co_await timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0);
+				    co_await timeoutError(buggify() ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0);
 				bool ccSuspend = ccSuspendVal.present()
 				                     ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned())
 				                     : false;
@@ -1797,7 +1810,7 @@ static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		futures.push_back(
 		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("TotalDataInFlightRemote"_sr)), 1.0));
 
-		std::vector<TraceEventFields> dataInfo = co_await getAll(futures);
+		std::vector<TraceEventFields> dataInfo = co_await getAllAsync(futures);
 
 		TraceEventFields startingStats = dataInfo[0];
 		TraceEventFields dataStats = dataInfo[1];
@@ -1952,20 +1965,20 @@ static AsyncResult<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
     std::vector<std::string> eventNames) {
 	std::vector<AsyncResult<Optional<TraceEventFields>>> futures;
-	for (auto s : servers) {
-		for (auto name : eventNames) {
+	for (const auto& s : servers) {
+		for (const auto& name : eventNames) {
 			futures.push_back(latestEventOnWorker(address_workers[s.address()], s.id().toString() + "/" + name));
 		}
 	}
 
-	std::vector<Optional<TraceEventFields>> eventTraces = co_await getAll(std::move(futures));
+	std::vector<Optional<TraceEventFields>> eventTraces = co_await getAllAsync(std::move(futures));
 
 	std::vector<std::pair<iface, EventMap>> results;
 	auto eventTraceItr = eventTraces.begin();
 
 	for (int i = 0; i < servers.size(); i++) {
 		EventMap serverResults;
-		for (auto name : eventNames) {
+		for (const auto& name : eventNames) {
 			ASSERT(eventTraceItr != eventTraces.end());
 			serverResults[name] = eventTraceItr->present() ? eventTraceItr->get() : TraceEventFields();
 			++eventTraceItr;
@@ -2039,7 +2052,7 @@ static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
 	std::set<StringRef> allZones;
 	std::map<Key, std::set<StringRef>> dcId_zone;
 	for (auto const& worker : workers) {
-		if (worker.processClass.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign &&
+		if (recruitment::machineClassFitness(worker.processClass, recruitment::TLog) < recruitment::NeverAssign &&
 		    !configuration.isExcludedServer(worker.interf.addresses(), worker.interf.locality)) {
 			allZones.insert(worker.interf.locality.zoneId().get());
 			if (worker.interf.locality.dcId().present()) {
@@ -2048,7 +2061,7 @@ static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
 		}
 	}
 
-	if (configuration.regions.size() == 0) {
+	if (configuration.regions.empty()) {
 		return allZones.size() - std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize);
 	}
 
@@ -2130,22 +2143,24 @@ static AsyncResult<JsonBuilderObject> workloadStatusFetcher(
 		}
 		for (auto& p : db->get().client.commitProxies) {
 			auto worker = getWorker(workersMap, p.address());
-			if (worker.present())
+			if (worker.present()) {
 				commitProxyStatFutures.push_back(timeoutError(
 				    worker.get().interf.eventLogRequest.getReply(EventLogRequest("ProxyMetrics"_sr)), 1.0));
-			else
+			} else {
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
+			}
 		}
 		for (auto& p : db->get().client.grvProxies) {
 			auto worker = getWorker(workersMap, p.address());
-			if (worker.present())
+			if (worker.present()) {
 				grvProxyStatFutures.push_back(timeoutError(
 				    worker.get().interf.eventLogRequest.getReply(EventLogRequest("GrvProxyMetrics"_sr)), 1.0));
-			else
+			} else {
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
+			}
 		}
-		std::vector<TraceEventFields> commitProxyStats = co_await getAll(commitProxyStatFutures);
-		std::vector<TraceEventFields> grvProxyStats = co_await getAll(grvProxyStatFutures);
+		std::vector<TraceEventFields> commitProxyStats = co_await getAllAsync(commitProxyStatFutures);
+		std::vector<TraceEventFields> grvProxyStats = co_await getAllAsync(grvProxyStatFutures);
 
 		StatusCounter txnStartOut;
 		StatusCounter txnSystemPriorityStartOut;
@@ -2406,7 +2421,7 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
 	int localSetsWithNonNegativeFaultTolerance = 0;
 
 	for (const auto& tLogSet : tLogs) {
-		if (tLogSet.tLogs.size() == 0) {
+		if (tLogSet.tLogs.empty()) {
 			// We can have LogSets where there are no tLogs but some LogRouters. It's the way
 			// recruiting is implemented for old LogRouters in LogSystem, where
 			// it adds an empty LogSet for missing locality.
@@ -2508,7 +2523,7 @@ static JsonBuilderArray tlogFetcher(int* logFaultTolerance,
 	tlogsArray.push_back(tlogsStatus);
 
 	// fetch all the old generations of TLogs.
-	for (auto it : db->get().logSystemConfig.oldTLogs) {
+	for (const auto& it : db->get().logSystemConfig.oldTLogs) {
 		JsonBuilderObject oldTlogsStatus = tlogFetcher(logFaultTolerance, it.tLogs, address_workers);
 		oldTlogsStatus["epoch"] = it.epoch;
 		oldTlogsStatus["current"] = false;
@@ -2604,7 +2619,7 @@ static std::map<std::string, std::vector<JsonBuilderObject>> getProcessIssuesAsM
 	std::map<std::string, std::vector<JsonBuilderObject>> issuesMap;
 
 	try {
-		for (auto processIssues : issues) {
+		for (const auto& processIssues : issues) {
 			for (auto issue : processIssues.issues) {
 				std::string issueStr = issue.toString();
 				issuesMap[processIssues.address.toString()].push_back(
@@ -2643,10 +2658,10 @@ static JsonBuilderArray getClientIssuesAsMessages(
 		}
 
 		// FIXME: add the log_group in addition to the network address
-		for (auto i : deduplicatedIssues) {
+		for (const auto& i : deduplicatedIssues) {
 			JsonBuilderObject message = JsonString::makeMessage(i.first.c_str(), getIssueDescription(i.first).c_str());
 			JsonBuilderArray addresses;
-			for (auto addr : i.second.second) {
+			for (const auto& addr : i.second.second) {
 				addresses.push_back(addr);
 			}
 
@@ -2854,7 +2869,7 @@ AsyncResult<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribut
 	}
 
 	try {
-		if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+		if (g_network->isSimulated() && buggify(0.01)) {
 			throw timed_out();
 		}
 
@@ -2978,7 +2993,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 
 		// Wait for all response pairs.
 		std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
-		    co_await getAll(std::move(workerEventFetchers));
+		    co_await getAllAsync(std::move(workerEventFetchers));
 
 		// Create a unique set of all workers who were unreachable for 1 or more of the event requests above.
 		// Since each event request is independent and to all workers, workers can have responded to some
@@ -2998,7 +3013,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 			JsonBuilderObject message =
 			    JsonBuilder::makeMessage("unreachable_processes", "The cluster has some unreachable processes.");
 			JsonBuilderArray unreachableProcs;
-			for (auto m : mergeUnreachable) {
+			for (const auto& m : mergeUnreachable) {
 				unreachableProcs.push_back(JsonBuilderObject().setKey("address", m));
 			}
 			message["unreachable_processes"] = unreachableProcs;
@@ -3016,7 +3031,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 		clusterSubsectionFetchers.push_back(errorOr(versionEpochStatusFetcher(cx, &status_incomplete_reasons)));
 
 		std::vector<ErrorOr<JsonBuilderObject>> clusterSubsectionStatuses =
-		    co_await getAll(std::move(clusterSubsectionFetchers));
+		    co_await getAllAsync(std::move(clusterSubsectionFetchers));
 
 		if (clusterSubsectionStatuses[0].isError()) {
 			throw clusterSubsectionStatuses[0].getError();
@@ -3162,7 +3177,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 				Future<std::vector<std::pair<UID, StorageWiggleValue>>> primaryWiggleValues;
 				Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
 				AsyncResult<JsonBuilderObject> storageWigglerFetcher;
-				double timeout = g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? 0.0 : 2.0;
+				double timeout = g_network->isSimulated() && buggify(0.01) ? 0.0 : 2.0;
 				primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
 				remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
 				storageWigglerFetcher =
@@ -3187,7 +3202,7 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 				}
 			}
 
-			std::vector<JsonBuilderObject> workerStatuses = co_await getAll(std::move(statusSectionFetchers));
+			std::vector<JsonBuilderObject> workerStatuses = co_await getAllAsync(std::move(statusSectionFetchers));
 			co_await primaryDCFO;
 
 			if (primaryDCFO.get().present()) {
@@ -3434,7 +3449,7 @@ AsyncResult<StatusReply> clusterGetStatus(
 	    delay(deadlineTimeout));
 
 	if (result.index() == 0) {
-		ErrorOr<Void> statusResult = std::get<0>(std::move(result));
+		ErrorOr<Void> statusResult = std::get<0>(result);
 		if (statusResult.isError()) {
 			status_incomplete_reasons.insert(
 			    fmt::format("Status collection threw: {}", statusResult.getError().what()));
@@ -3448,7 +3463,7 @@ AsyncResult<StatusReply> clusterGetStatus(
 
 	// cluster messages subsection;
 	JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientStatus);
-	if (clientIssuesArr.size() > 0) {
+	if (!clientIssuesArr.empty()) {
 		JsonBuilderObject clientIssueMessage =
 		    JsonBuilder::makeMessage("client_issues", "Some clients of this cluster have issues.");
 		clientIssueMessage["issues"] = clientIssuesArr;
@@ -3470,7 +3485,7 @@ AsyncResult<StatusReply> clusterGetStatus(
 		    JsonBuilder::makeMessage("status_incomplete", "Unable to retrieve all status information.");
 		// Make a JSON array of all of the reasons in the status_incomplete_reasons set.
 		JsonBuilderArray reasons;
-		for (auto i : status_incomplete_reasons) {
+		for (const auto& i : status_incomplete_reasons) {
 			reasons.push_back(JsonBuilderObject().setKey("description", i));
 		}
 		incomplete_message["reasons"] = reasons;
@@ -3939,10 +3954,10 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusTimeout") {
 	auto obj = mv.get_obj();
 
 	// Fields set in the outer clusterGetStatus are always present after deadline.
-	ASSERT(obj.count("messages") > 0);
-	ASSERT(obj.count("clients") > 0);
-	ASSERT(obj.count("incompatible_connections") > 0);
-	ASSERT(obj.count("datacenter_lag") > 0);
+	ASSERT(obj.contains("messages"));
+	ASSERT(obj.contains("clients"));
+	ASSERT(obj.contains("incompatible_connections"));
+	ASSERT(obj.contains("datacenter_lag"));
 
 	// Verify the deadline-exceeded message is in messages.
 	auto& messagesArr = obj["messages"].get_array();
@@ -3950,12 +3965,12 @@ TEST_CASE("/fdbserver/clustercontroller/clusterGetStatusTimeout") {
 	bool foundIncomplete = false;
 	for (auto& msg : messagesArr) {
 		auto& msgObj = msg.get_obj();
-		if (msgObj.count("name") && msgObj["name"].get_str() == "status_incomplete") {
+		if (msgObj.contains("name") && msgObj["name"].get_str() == "status_incomplete") {
 			foundIncomplete = true;
-			if (msgObj.count("reasons")) {
+			if (msgObj.contains("reasons")) {
 				for (auto& reason : msgObj["reasons"].get_array()) {
 					auto& reasonObj = reason.get_obj();
-					if (reasonObj.count("description") &&
+					if (reasonObj.contains("description") &&
 					    reasonObj["description"].get_str() == "Status collection deadline exceeded.") {
 						foundTimeoutMsg = true;
 					}

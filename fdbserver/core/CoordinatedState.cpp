@@ -27,7 +27,7 @@
 #include "flow/CoroUtils.h"
 
 Future<GenerationRegReadReply> waitAndSendRead(GenerationRegInterface stateServer, GenerationRegReadRequest req) {
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify())
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 	GenerationRegReadReply reply;
 	if (stateServer.hostname.present()) {
@@ -35,13 +35,13 @@ Future<GenerationRegReadReply> waitAndSendRead(GenerationRegInterface stateServe
 	} else {
 		reply = co_await retryBrokenPromise(stateServer.read, req);
 	}
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify())
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 	co_return reply;
 }
 
 Future<UniqueGeneration> waitAndSendWrite(GenerationRegInterface stateServer, GenerationRegWriteRequest req) {
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify())
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 	UniqueGeneration reply;
 	if (stateServer.hostname.present()) {
@@ -49,7 +49,7 @@ Future<UniqueGeneration> waitAndSendWrite(GenerationRegInterface stateServer, Ge
 	} else {
 		reply = co_await retryBrokenPromise(stateServer.write, req);
 	}
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || buggify())
 		co_await delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01());
 	co_return reply;
 }
@@ -169,22 +169,24 @@ struct CoordinatedStateImpl {
 
 		if (majorityEmpty.isReady()) {
 			int best = -1;
-			for (int i = 0; i < rep_empty_reply.size(); i++)
+			for (int i = 0; i < rep_empty_reply.size(); i++) {
 				if (rep_empty_reply[i].isReady() && !rep_empty_reply[i].isError()) {
 					if (best < 0 || rep_empty_reply[i].get().rgen > rep_empty_reply[best].get().rgen)
 						best = i;
 				}
+			}
 			ASSERT(best >= 0);
 			co_return rep_empty_reply[best].get();
 		} else {
 			int best = -1;
-			for (int i = 0; i < rep_reply.size(); i++)
+			for (int i = 0; i < rep_reply.size(); i++) {
 				if (rep_reply[i].isReady() && !rep_reply[i].isError()) {
 					if (best < 0 || rep_reply[i].get().gen > rep_reply[best].get().gen ||
 					    (rep_reply[i].get().gen == rep_reply[best].get().gen &&
 					     rep_reply[i].get().rgen > rep_reply[best].get().rgen))
 						best = i;
 				}
+			}
 			ASSERT(best >= 0);
 			co_return rep_reply[best].get();
 		}
@@ -261,8 +263,9 @@ struct MovableCoordinatedStateImpl {
 			if (!r.protocolVersion().hasMovableCoordinatedState()) {
 				// Old coordinated state, not a MovableValue
 				moveState.value = rawValue;
-			} else
+			} else {
 				r >> moveState;
+			}
 		}
 		// SOMEDAY: If moveState.mode == MovingFrom, read (without locking) old state and assert that it corresponds
 		// with our state and is ReallyTo(coordinators)
@@ -318,7 +321,7 @@ struct MovableCoordinatedStateImpl {
 			ASSERT(res.index() == 1);
 		}
 
-		if (BUGGIFY)
+		if (buggify())
 			co_await delay(5);
 
 		Value oldQuorumState = co_await cs.read();
@@ -342,7 +345,7 @@ struct MovableCoordinatedStateImpl {
 		    BinaryWriter::toValue(MovableValue(value, MovableValue::MaybeTo, nc.toString()),
 		                          IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2())));
 
-		if (BUGGIFY)
+		if (buggify())
 			co_await delay(5);
 
 		// SOMEDAY: If we are worried about someone magically getting the new cluster ID and interfering, do a second

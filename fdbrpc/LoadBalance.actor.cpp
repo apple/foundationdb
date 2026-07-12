@@ -19,13 +19,13 @@
  */
 
 #include "fdbrpc/LoadBalance.actor.h"
+#include "flow/CoroUtils.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // Throwing all_alternatives_failed will cause the client to issue a GetKeyLocationRequest to the proxy, so this actor
 // attempts to limit the number of these errors thrown by a single client to prevent it from saturating the proxies with
 // these requests
-ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture) {
+Future<Void> allAlternativesFailedDelay(Future<Void> okFuture) {
 	if (now() - g_network->networkInfo.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
 		g_network->networkInfo.oldestAlternativesFailure = now();
 	}
@@ -45,11 +45,8 @@ ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture) {
 
 	g_network->networkInfo.newestAlternativesFailure = now();
 
-	choose {
-		when(wait(okFuture)) {}
-		when(wait(::delayJittered(delay))) {
-			throw all_alternatives_failed();
-		}
+	auto res = co_await race(okFuture, ::delayJittered(delay));
+	if (res.index() == 1) {
+		throw all_alternatives_failed();
 	}
-	return Void();
 }

@@ -23,10 +23,11 @@
 #include "flow/flow.h"
 #include "flow/Platform.h"
 #include "flow/TLSConfig.h"
-#include "flow/actorcompiler.h"
 
 #include <iostream>
 #include <vector>
+
+#include "flow/actorcompiler.h"
 
 /// Use this file as means to play with flow code
 /// The goal is to give you a starting point with a boilerplate template

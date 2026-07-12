@@ -1,5 +1,6 @@
 fdb_find_sources(FDBSERVER_SRCS)
 list(FILTER FDBSERVER_SRCS EXCLUDE REGEX "^workloads/")
+list(REMOVE_ITEM FDBSERVER_SRCS FDBServerUnitTestMain.cpp)
 include(AddFdbServerLinkTest)
 
 function(configure_fdbserver_common_includes target_name)
@@ -28,6 +29,7 @@ add_subdirectory(core)
 add_subdirectory(kvstore)
 add_subdirectory(logsystem)
 add_subdirectory(mocks3)
+add_subdirectory(cdcproxy)
 add_subdirectory(clustercontroller)
 add_subdirectory(backupworker)
 add_subdirectory(commitproxy)
@@ -167,6 +169,7 @@ target_link_libraries(fdbserver PRIVATE
   "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbserver_workloads>"
   fdbserver_worker
   fdbserver_backupworker
+  fdbserver_cdcproxy
   fdbserver_clustercontroller
   fdbserver_commitproxy
   fdbserver_consistencyscan

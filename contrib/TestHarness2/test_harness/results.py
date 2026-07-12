@@ -1,3 +1,15 @@
+"""Ensemble-level CODE_PROBE coverage + statistics reporter.
+
+This is a SEPARATE, opt-in analysis run manually as `python3 -m
+test_harness.results <ensemble_id>`. It does NOT participate in Joshua's
+per-run pass/fail: an individual test run passes or fails on its own result
+(errors, ASSERTs, timeouts) in app.py, and an unhit CODE_PROBE never fails a
+run or the ensemble. This script only summarizes per-probe HitCounts across an
+ensemble after the fact. Its non-zero exit on missed coverage (see bottom)
+matters only to a caller that deliberately invokes it as a coverage gate;
+app.py / joshua.py do not call it.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -178,4 +190,7 @@ if __name__ == "__main__":
     results = EnsembleResults(config.cluster_file, args.ensemble_id)
     results.dump("  " if config.pretty_print else "")
     write_footer()
+    # Exit code reflects this report's own coverage_ok only; it has no effect on
+    # whether the ensemble's test runs passed. Only a caller using this script as
+    # an explicit coverage gate observes it.
     exit(0 if results.coverage_ok else 1)

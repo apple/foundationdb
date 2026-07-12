@@ -61,7 +61,7 @@ const std::string HTTP_VERB_PUT = "PUT";
 const std::string HTTP_VERB_POST = "POST";
 const std::string HTTP_VERB_CONNECT = "CONNECT";
 
-typedef std::map<std::string, std::string, is_iless> Headers;
+using Headers = std::map<std::string, std::string, is_iless>;
 
 std::string urlEncode(const std::string& s);
 // URL decode a percent-encoded string, converting %XX hex sequences to characters
@@ -86,7 +86,7 @@ bool verifyMD5(HTTPData<std::string>* data,
 
 template <class T>
 struct RequestBase : ReferenceCounted<RequestBase<T>> {
-	RequestBase() {}
+	RequestBase() = default;
 	virtual ~RequestBase() = default;
 	std::string verb;
 	std::string resource;

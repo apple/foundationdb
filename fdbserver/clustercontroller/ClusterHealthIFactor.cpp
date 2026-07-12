@@ -212,6 +212,25 @@ Future<Level> RecoveryStateFactor::fetchLevel(Reference<IWorkerEventProvider con
 	co_return level;
 }
 
+std::string_view CoordinatorReachabilityFactor::getName() const {
+	return "CoordinatorReachability";
+}
+
+Future<Level> CoordinatorReachabilityFactor::fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider,
+                                                        TrackCodeProbes trackCodeProbes) {
+	Optional<bool> allCoordinatorsReachable = co_await workerEventProvider->areAllCoordinatorsReachable();
+	if (!allCoordinatorsReachable.present()) {
+		co_return Level::METRICS_MISSING;
+	}
+
+	Level level = allCoordinatorsReachable.get() ? Level::HEALTHY : Level::INTERVENTION_REQUIRED;
+	CODE_PROBE(trackCodeProbes && level == Level::HEALTHY,
+	           "ClusterHealth CoordinatorReachabilityFactor returns HEALTHY");
+	CODE_PROBE(trackCodeProbes && level == Level::INTERVENTION_REQUIRED,
+	           "ClusterHealth CoordinatorReachabilityFactor returns INTERVENTION_REQUIRED");
+	co_return level;
+}
+
 std::string_view ProcessErrorsFactor::getName() const {
 	return "ProcessErrors";
 }

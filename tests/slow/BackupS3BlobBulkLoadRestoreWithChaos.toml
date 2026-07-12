@@ -94,7 +94,6 @@ timeout = 7200
     nodeCount = 200
     transactionsPerSecond = 150.0
     testDuration = 30.0
-    expectedRate = 0
 
     [[test.workload]]
     testName = 'BackupS3BlobCorrectness'

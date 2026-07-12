@@ -57,15 +57,17 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl(std::string filename, i
 	if (g_network->isSimulated()) {
 		auto cacheItr = simulatorPageCaches.find(g_network->getLocalAddress());
 		if (cacheItr == simulatorPageCaches.end()) {
-			int64_t pageCacheSize4k = (BUGGIFY) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K;
+			int64_t pageCacheSize4k =
+			    (buggify()) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K;
 			int64_t pageCacheSize64k =
-			    (BUGGIFY) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_64K : FLOW_KNOBS->SIM_PAGE_CACHE_64K;
+			    (buggify()) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_64K : FLOW_KNOBS->SIM_PAGE_CACHE_64K;
 			auto caches = std::make_pair(makeReference<EvictablePageCache>(4096, pageCacheSize4k),
 			                             makeReference<EvictablePageCache>(65536, pageCacheSize64k));
 			simulatorPageCaches[g_network->getLocalAddress()] = caches;
 			pageCache = (flags & IAsyncFile::OPEN_LARGE_PAGES) ? caches.second : caches.first;
-		} else
+		} else {
 			pageCache = (flags & IAsyncFile::OPEN_LARGE_PAGES) ? cacheItr->second.second : cacheItr->second.first;
+		}
 	} else {
 		if (flags & IAsyncFile::OPEN_LARGE_PAGES) {
 			if (!pc64k.present())

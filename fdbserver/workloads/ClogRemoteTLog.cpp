@@ -7,6 +7,7 @@
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/ServerDBInfo.h"
@@ -218,33 +219,69 @@ struct ClogRemoteTLog : TestWorkload {
 		return false;
 	}
 
-	static Future<bool> grayFailureStatusCheck(Database db, NetworkAddress cloggedRemoteTLog) {
+	// Returns true if the status response is incomplete, i.e. the cluster controller could not collect a full
+	// status. This happens when status collection races past its deadline or throws, which is common during the
+	// recoveries this workload induces (the exclusion of the clogged tlog is itself performed by a recovery). The
+	// gray_failure section is built last in clusterGetStatusImpl, so a partial status omits it. The incompleteness
+	// is reported as a cluster-level "status_incomplete" message; note statusError() above only inspects
+	// client-level messages and therefore does not catch this case.
+	static bool statusIncomplete(StatusObjectReader reader) {
+		StatusObjectReader cluster;
+		if (!reader.get("cluster", cluster) || !cluster.has("messages")) {
+			return false;
+		}
+		StatusArray messages = cluster["messages"].get_array();
+		for (StatusObjectReader message : messages) {
+			if (message.has("name") && message["name"].get_str() == "status_incomplete") {
+				TraceEvent("GrayFailureStatusIncomplete");
+				return true;
+			}
+		}
+		return false;
+	}
+
+	enum class GrayFailureCheckResult {
+		Confirmed, // a fully collected status contained the gray_failure section
+		Incomplete, // status was unavailable or incomplete; inconclusive, the caller should retry
+		Missing // a fully collected status was returned but lacked gray_failure (a real regression)
+	};
+
+	static Future<GrayFailureCheckResult> grayFailureStatusCheck(Database db, NetworkAddress cloggedRemoteTLog) {
 		StatusObject status = co_await StatusClient::statusFetcher(db);
 		StatusObjectReader reader(status);
 
-		if (statusError(reader)) {
-			// If there is some error to get the status (e.g. network issue), we let gray failure status check pass
-			// since that's not what we are testing for here.
-			co_return true;
+		// Check for the gray_failure section FIRST. Its presence is authoritative: gray_failure is only ever
+		// produced by the cluster controller, so if it's in the response we have what we're testing for -- even
+		// if the status is otherwise marked incomplete. This ordering matters under buggify: status collection
+		// frequently records a "status_incomplete" message because some unrelated subsection failed
+		// (status_incomplete_reasons is fed by errorOr'd subsections that don't abort the build), even when
+		// gray_failure was collected just fine. Treating that as a reason to discard a valid gray_failure section
+		// would make this check vacuous -- it would never confirm and the test would pass without verifying
+		// anything.
+		StatusObjectReader cluster;
+		StatusObjectReader grayFailure;
+		if (reader.get("cluster", cluster) && cluster.get("gray_failure", grayFailure)) {
+			ASSERT(grayFailure.has("excluded_servers"));
+			StatusArray excludedProcesses = grayFailure["excluded_servers"].get_array();
+			for (StatusObjectReader process : excludedProcesses) {
+				ASSERT(process.has("address"));
+				ASSERT(process.has("time"));
+				TraceEvent("GrayFailureStatus")
+				    .detail("Address", process["address"].get_str())
+				    .detail("Ts", process["time"].get_real());
+			}
+			co_return GrayFailureCheckResult::Confirmed;
 		}
 
-		StatusObjectReader cluster;
-		ASSERT(reader.get("cluster", cluster));
-		StatusObjectReader grayFailure;
-		if (!cluster.get("gray_failure", grayFailure)) {
-			TraceEvent("NoGrayFailure");
-			co_return false;
+		// The gray_failure section is absent. If the response was incomplete (a client/CC error, or the CC's
+		// status collection raced past its deadline / threw before building the section, which is built last),
+		// the result is inconclusive -- retry on a later iteration. Otherwise a fully collected status genuinely
+		// lacks gray_failure, which in simulation (CC_GRAY_FAILURE_STATUS_JSON always on) is a real regression.
+		if (statusError(reader) || statusIncomplete(reader)) {
+			co_return GrayFailureCheckResult::Incomplete;
 		}
-		ASSERT(grayFailure.has("excluded_servers"));
-		StatusArray excludedProcesses = grayFailure["excluded_servers"].get_array();
-		for (StatusObjectReader process : excludedProcesses) {
-			ASSERT(process.has("address"));
-			ASSERT(process.has("time"));
-			TraceEvent("GrayFailureStatus")
-			    .detail("Address", process["address"].get_str())
-			    .detail("Ts", process["time"].get_real());
-		}
-		co_return true;
+		TraceEvent("NoGrayFailure");
+		co_return GrayFailureCheckResult::Missing;
 	}
 
 	static Future<std::vector<IPAddress>> getRemoteSSIPs(Database db) {
@@ -326,7 +363,7 @@ struct ClogRemoteTLog : TestWorkload {
 		std::vector<IPAddress> processes;
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->startingClass != ProcessClass::TesterClass && ip != cc) {
+			if (getSimulatorProcessClass(process) != ProcessClass::TesterClass && ip != cc) {
 				processes.push_back(ip);
 			}
 		}
@@ -401,8 +438,15 @@ struct ClogRemoteTLog : TestWorkload {
 				    remoteTLogNotInDbInfo(self->cloggedRemoteTLog.get(), self->dbInfo->get())) {
 					localState = TestState::CLOGGED_REMOTE_TLOG_EXCLUDED;
 					if (!statusCheckPassed) {
-						statusCheckPassed = co_await grayFailureStatusCheck(db, self->cloggedRemoteTLog.get());
-						ASSERT(statusCheckPassed);
+						const GrayFailureCheckResult result =
+						    co_await grayFailureStatusCheck(db, self->cloggedRemoteTLog.get());
+						// A fully collected status that omits gray_failure is a real regression: in simulation
+						// CC_GRAY_FAILURE_STATUS_JSON is always enabled, so a complete status must include it.
+						ASSERT(result != GrayFailureCheckResult::Missing);
+						// Only stop probing once gray_failure was actually confirmed. An Incomplete status
+						// (common right after the recovery that performs the exclusion) is inconclusive, so keep
+						// checking on later iterations.
+						statusCheckPassed = (result == GrayFailureCheckResult::Confirmed);
 					}
 					stateTransition = localState != testState;
 				}

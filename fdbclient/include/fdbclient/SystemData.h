@@ -22,14 +22,18 @@
 #define FDBCLIENT_SYSTEMDATA_H
 #pragma once
 
+#include <tuple>
+
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/AccumulativeChecksum.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "flow/FileIdentifier.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
@@ -180,6 +184,17 @@ DataMoveMetaData decodeDataMoveValue(const ValueRef& value);
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
+// Returns true iff `value` is a format-neutral serverKeys entry — i.e.
+// serverKeysFalse ("this server does not own this range") or the empty
+// value that KRM uses as a range-boundary sentinel. Both are written by
+// both the tag-based (finishMoveKeys) and the shard-encoded
+// (finishMoveShards) paths, so they carry no format signal.
+bool isServerKeysUnassigned(const ValueRef& value);
+// Returns true iff `value` is an old-format (tag-based) serverKeys
+// "assigned" marker. Excludes serverKeysFalse and empty (see
+// isServerKeysUnassigned). New-format entries encode a UID and won't
+// equal these constants.
+bool isServerKeysOldFormatAssigned(const ValueRef& value);
 UID newDataMoveId(const uint64_t physicalShardId,
                   AssignEmptyRange assignEmptyRange,
                   const DataMoveType type,
@@ -264,6 +279,80 @@ Value tagLocalityListValue(int8_t const&);
 Optional<Value> decodeTagLocalityListKey(KeyRef const&);
 int8_t decodeTagLocalityListValue(ValueRef const&);
 
+// Native CDC stream routing and lifecycle metadata persisted in the transaction state store.
+// See design/cdc.md for the durable metadata layout and lifecycle semantics.
+// "\xff/cdc/name/[[streamName]]" := "[[CDCStreamId]]"
+extern const KeyRangeRef cdcStreamNameKeys;
+Key cdcStreamNameKeyFor(KeyRef const& streamName);
+Key decodeCDCStreamNameKey(KeyRef const& key);
+Value cdcStreamNameValue(CDCStreamId streamId);
+CDCStreamId decodeCDCStreamNameValue(ValueRef const& value);
+
+// "\xff/cdc/maxStreamId" := "[[CDCStreamId]]"
+extern const KeyRef cdcMaxStreamIdKey;
+Value cdcMaxStreamIdValue(CDCStreamId streamId);
+CDCStreamId decodeCDCMaxStreamIdValue(ValueRef const& value);
+
+// "\xff/cdc/keys/[[CDCStreamId]]" := "[[KeyRange]]"
+extern const KeyRangeRef cdcStreamKeys;
+Key cdcStreamKeyFor(CDCStreamId streamId);
+CDCStreamId decodeCDCStreamKey(KeyRef const& key);
+Value cdcStreamKeysValue(KeyRangeRef const& keys);
+KeyRange decodeCDCStreamKeysValue(ValueRef const& value);
+
+// "\xff/cdc/tagHistory/[[CDCStreamId]][[Version]][[Tag]]" := ""
+struct CDCTagHistoryEntry {
+	constexpr static FileIdentifier file_identifier = 13091844;
+
+	CDCStreamId streamId = 0;
+	Version version = invalidVersion;
+	Tag tag;
+
+	CDCTagHistoryEntry() = default;
+	CDCTagHistoryEntry(CDCStreamId streamId, Version version, Tag tag)
+	  : streamId(streamId), version(version), tag(tag) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, streamId, version, tag);
+	}
+};
+
+extern const KeyRangeRef cdcTagHistoryKeys;
+Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag);
+KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId);
+CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key);
+
+// Native CDC acknowledgement progress is regular storage-server-backed system data.
+// "\xff\x02/cdc/minVersion/[[CDCStreamId]]" := "[[Version]]"
+// The initial value is versionstamped at stream registration commit.
+extern const KeyRangeRef cdcMinVersionKeys;
+Key cdcMinVersionKeyFor(CDCStreamId streamId);
+CDCStreamId decodeCDCMinVersionKey(KeyRef const& key);
+Value cdcMinVersionValue(Version version);
+Value cdcVersionstampedMinVersionValue();
+Version decodeCDCMinVersionValue(ValueRef const& value);
+
+// "\xff/cdc/retiredTagPop/[[Tag]]" := ""
+// Marks tags with durable final-pop work, so recovery keeps a CDC proxy available.
+extern const KeyRangeRef cdcRetiredTagPopKeys;
+Key cdcRetiredTagPopKeyFor(Tag tag);
+Tag decodeCDCRetiredTagPopKey(KeyRef const& key);
+
+// "\xff\x02/cdc/retiredTagPopVersion/[[Tag]]" := "[[Version]]"
+// Stores bounded storage-backed final-pop watermarks for removed streams.
+extern const KeyRangeRef cdcRetiredTagPopVersionKeys;
+Key cdcRetiredTagPopVersionKeyFor(Tag tag);
+Tag decodeCDCRetiredTagPopVersionKey(KeyRef const& key);
+
+// "\xff/cdc/proxies/[[CDCStreamId]][[proxyUID]]" := ""
+extern const KeyRangeRef cdcProxyKeys;
+// Changed whenever durable CDC stream-to-proxy assignments change.
+extern const KeyRef cdcProxyAssignmentChangeKey;
+Key cdcProxyKeyFor(CDCStreamId streamId, UID proxyId);
+KeyRange cdcProxyRangeFor(CDCStreamId streamId);
+std::pair<CDCStreamId, UID> decodeCDCProxyKey(KeyRef const& key);
+
 //    "\xff\x02/datacenterReplicas/[[datacenterID]]" := "[[replicas]]"
 //	Provides the number of replicas for the given datacenterID.
 //	Used in the initialization of the Data Distributor.
@@ -318,7 +407,7 @@ extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
 
 extern const KeyRef backupWorkerEnabledKey;
-extern const KeyRef rangeBackupWorkerEnabledKey;
+extern const KeyRef rangePartitionedBackupWorkerEnabledKey;
 extern const KeyRef perpetualStorageWiggleKey;
 extern const KeyRef perpetualStorageWiggleLocalityKey;
 extern const KeyRef perpetualStorageWiggleIDPrefix;
@@ -420,19 +509,6 @@ Value backupProgressValue(const WorkerBackupStatus& status);
 UID decodeBackupProgressKey(const KeyRef& key);
 WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value);
 
-//   "\xff\x02/backupRangePartitionedProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
-extern const KeyRangeRef backupRangePartitionedProgressKeys;
-extern const KeyRef backupRangePartitionedProgressPrefix;
-Key backupRangePartitionedProgressKey(UID workerID);
-Value backupRangePartitionedProgressValue(const WorkerBackupStatus& status);
-UID decodeBackupRangePartitionedProgressKey(const KeyRef& key);
-WorkerBackupStatus decodeBackupRangePartitionedProgressValue(const ValueRef& value);
-
-// The key to signal when partition map has been uploaded for a given version.
-//    "\xff\x02/backupRangePartitionedMapUploaded/<version>" := "1"
-extern const KeyRef backupRangePartitionedMapUploadedPrefix;
-Key backupRangePartitionedMapUploadedKeyFor(Version v);
-
 // The key to signal backup workers a new backup job is submitted.
 //    "\xff\x02/backupStarted" := "[[vector<UID,Version1>]]"
 extern const KeyRef backupStartedKey;
@@ -444,6 +520,32 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 // 0 = Send a signal to resume/already resumed.
 // 1 = Send a signal to pause/already paused.
 extern const KeyRef backupPausedKey;
+
+//	"\xff\x02/backupPartitionMap/[8-byte epoch][8-byte version]" := "[[PartitionMap]]"
+//	One row per (epoch, version) where a partition map became effective.
+//	Read by catch-up backup workers during recovery.
+extern const KeyRangeRef backupPartitionMapHistoryKeys;
+Key backupPartitionMapHistoryKeyFor(LogEpoch epoch, Version version);
+KeyRange backupPartitionMapHistoryRangeFor(LogEpoch epoch);
+std::pair<LogEpoch, Version> decodeBackupPartitionMapHistoryKey(const KeyRef& key);
+
+// The key BackupAgent writes to request DataDistributor to (re)compute partitions for
+// range-partitioned backup, or to clear the partition state on backup stop. DD watches
+// this key, performs the requested action, and clears it (sets value back to 0).
+//    "\xff\x02/backupPartitionRequired" := "[[0|1|2]]"
+// 0 = cleared / no pending request.
+// 1 = initial partition or manual/adaptive re-partition.
+// 2 = cleanup partitionMap (issued on backup abort/stop when the last backup leaves).
+extern const KeyRef backupPartitionRequiredKey;
+Value backupPartitionRequiredValue(int8_t requestType);
+int8_t decodeBackupPartitionRequiredValue(const ValueRef& value);
+
+// The key DataDistributor writes the computed partition list to. CommitProxy will read this
+// in a later change to construct the PartitionMap.
+//    "\xff\x02/backupPartitionList" := "[[vector<KeyRange>]]"
+extern const KeyRef backupPartitionListKey;
+Value encodeBackupPartitionListValue(const std::vector<KeyRange>& partitions);
+std::vector<KeyRange> decodeBackupPartitionListValue(const ValueRef& value);
 
 //	"\xff/previousCoordinators" = "[[ClusterConnectionString]]"
 //	Set to the encoded structure of the cluster's previous set of coordinators.

@@ -1,16 +1,52 @@
 # LeakSanitizer suppressions file for FDB
 # https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer
 
-# Not all incoming connections are cleanly shut down in client API tests
-leak:ConnectionReaderActorState
-
 # Peer objects in TransportData::peers are intentionally not freed at shutdown.
 # FlowTransport is allocated into a global slot and never deleted because its
 # destructor triggers actor cancellation cascades that access freed state.
 # Peer::Peer covers allocations during Peer construction (DDSketch, AsyncTrigger).
-# connectionKeeper and connectionMonitor cover Promise allocations made during
-# the Peer's lifetime that are leaked along with the Peer.
+# connectionKeeper and connectionMonitor cover the coroutine frames held alive
+# by the Peer's Future<Void> connect member (catches broken_promise and retries).
+# ConnectionReaderActorState covers incoming connections not cleanly shut down.
 leak:TransportData::getOrOpenPeer
 leak:Peer::Peer
 leak:connectionKeeper
 leak:connectionMonitor
+leak:ConnectionReaderActorState
+
+# fdbcli does not release its ThreadSafeTransaction references before calling
+# stopNetwork(). The destructor defers cleanup via onMainThreadVoid() which
+# cannot execute after the network stops. This covers the transaction objects
+# and all their owned state (TransactionState, WriteMap, ReadVersion actors).
+leak:ThreadSafeDatabase::createTransaction
+leak:ThreadSafeTransaction::ThreadSafeTransaction
+
+# External client libraries (loaded via MultiVersionApi) create DatabaseContext
+# objects whose cleanup is deferred via onMainThreadVoid in ~ThreadSafeDatabase.
+# When the external library's network thread stops, the deferred cleanup cannot
+# execute, leaking the DatabaseContext and its members (DDSketch, etc.).
+# These are the same Peer/connection leaks suppressed above for the main client,
+# but LSAN cannot symbolize stacks inside the external .so copies so those
+# suppressions don't match. runNetworkThread is the thread entry point for
+# external client network threads — it does not affect main client leak detection.
+leak:Database::createDatabase
+leak:runNetworkThread
+
+# MultiVersionDatabase::DatabaseState::monitorProtocolVersion() calls
+# onMainThread into the external client's network thread. If that thread
+# has already stopped, the dispatched work leaks.
+leak:monitorProtocolVersion
+
+# CApiCancelTransactionCB drops fdb::Future objects from get() without
+# awaiting them, then calls done() which cancels the transaction. The
+# cancellation propagates asynchronously across the test process's local
+# fdb_c network thread and each external client's network thread. When
+# stopNetwork() runs, whichever Net2 reaches stopImmediately() first does
+# the leak check while the other Net2s' taskQueues are still intact;
+# afterwards taskQueue.clear() drops PromiseTasks (raw pointers, leaked
+# by design — see flow/Net2.cpp). The doOnMainThread actor frames waiting
+# on those Promises never wake, so process-exit LSan reports them. Suppress
+# on the test path so we mask only the test-induced shutdown race, not real
+# leaks on these code paths.
+leak:CancelTransactionWorkload::randomCancelGetTx
+leak:CancelTransactionWorkload::randomCancelAfterFirstResTx

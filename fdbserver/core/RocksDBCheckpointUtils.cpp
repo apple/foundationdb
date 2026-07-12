@@ -39,7 +39,7 @@
 #include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/IThreadPool.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 
@@ -719,9 +719,7 @@ Future<Void> RocksDBColumnFamilyReader::doClose(RocksDBColumnFamilyReader* self)
 	co_await f;
 
 	co_await self->threads->stop();
-	if (self->db != nullptr) {
-		delete self->db;
-	}
+	delete self->db;
 	delete self;
 }
 
@@ -784,6 +782,7 @@ bool RocksDBSstFileWriter::finish() {
 
 class RocksDBSstFileReader : public IRocksDBSstFileReader {
 public:
+	// NOLINTNEXTLINE(modernize-use-equals-default)
 	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())) {};
 
 	RocksDBSstFileReader(const KeyRange& rangeBoundary, size_t rowLimit, size_t byteLimit)
@@ -891,7 +890,7 @@ RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
 class RocksDBCheckpointByteSampleReader : public ICheckpointByteSampleReader {
 public:
 	explicit(false) RocksDBCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
-	~RocksDBCheckpointByteSampleReader() = default;
+	~RocksDBCheckpointByteSampleReader() override = default;
 
 	KeyValue next() override;
 

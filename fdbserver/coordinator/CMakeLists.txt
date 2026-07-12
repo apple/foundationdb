@@ -5,6 +5,10 @@ add_fdbserver_link_test(fdbserver_coordinatorlinktest
   fdbserver_coordinator
   fdbserver_kvstore
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_coordinator_test coordinator
+  fdbserver_coordinator
+  fdbserver_kvstore
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_coordinator)
 target_include_directories(fdbserver_coordinator

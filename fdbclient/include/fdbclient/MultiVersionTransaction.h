@@ -29,71 +29,71 @@
 #include "fdbclient/IClientApi.h"
 #include "flow/ApiVersion.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/WipedString.h"
 
 // FdbCApi is used as a wrapper around the FoundationDB C API that gets loaded from an external client library.
 // All of the required functions loaded from that external library are stored in function pointers in this struct.
 struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
-	typedef struct FDB_future FDBFuture;
-	typedef struct FDB_result FDBResult;
-	typedef struct FDB_cluster FDBCluster;
-	typedef struct FDB_database FDBDatabase;
-	typedef struct FDB_transaction FDBTransaction;
+	using FDBFuture = struct FDB_future;
+	using FDBResult = struct FDB_result;
+	using FDBCluster = struct FDB_cluster;
+	using FDBDatabase = struct FDB_database;
+	using FDBTransaction = struct FDB_transaction;
 
-	typedef int fdb_error_t;
-	typedef int fdb_bool_t;
+	using fdb_error_t = int;
+	using fdb_bool_t = int;
 
 #pragma pack(push, 4)
-	typedef struct key {
+	using FDBKey = struct key {
 		const uint8_t* key;
 		int keyLength;
-	} FDBKey;
-	typedef struct keyvalue {
+	};
+	using FDBKeyValue = struct keyvalue {
 		const void* key;
 		int keyLength;
 		const void* value;
 		int valueLength;
-	} FDBKeyValue;
+	};
 
 #pragma pack(pop)
 
 	/* Memory layout of KeySelectorRef. */
-	typedef struct keyselector {
+	using FDBKeySelector = struct keyselector {
 		FDBKey key;
 		/* orEqual and offset have not be tested in C binding. Just a placeholder. */
 		fdb_bool_t orEqual;
 		int offset;
-	} FDBKeySelector;
+	};
 
 	/* Memory layout of GetRangeReqAndResultRef. */
-	typedef struct getrangereqandresult {
+	using FDBGetRangeReqAndResult = struct getrangereqandresult {
 		FDBKeySelector begin;
 		FDBKeySelector end;
 		FDBKeyValue* data;
 		int m_size, m_capacity;
-	} FDBGetRangeReqAndResult;
+	};
 
-	typedef struct mappedkeyvalue {
+	using FDBMappedKeyValue = struct mappedkeyvalue {
 		FDBKey key;
 		FDBKey value;
 		/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange
 		 * and take the shortcut. */
 		FDBGetRangeReqAndResult getRange;
 		unsigned char buffer[32];
-	} FDBMappedKeyValue;
+	};
 
 #pragma pack(push, 4)
-	typedef struct keyrange {
+	using FDBKeyRange = struct keyrange {
 		const void* beginKey;
 		int beginKeyLength;
 		const void* endKey;
 		int endKeyLength;
-	} FDBKeyRange;
+	};
 
 #pragma pack(pop)
 
-	typedef void (*FDBCallback)(FDBFuture* future, void* callback_parameter);
+	using FDBCallback = void (*)(FDBFuture*, void*);
 
 	// Network
 	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
@@ -802,6 +802,7 @@ public:
 	bool hasNonFailedExternalClients();
 
 	void updateSupportedVersions();
+	void ignoreEnvironmentVariableNetworkOption(FDBNetworkOptions::Option option);
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
@@ -860,6 +861,7 @@ private:
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
+	std::set<FDBNetworkOptions::Option> ignoredEnvOptions;
 	volatile bool envOptionsLoaded;
 
 	friend struct MultiVersionDatabase::DatabaseState;

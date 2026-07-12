@@ -62,6 +62,14 @@ template <class T>
 class AsyncResult;
 
 namespace coro {
+struct DetachedCoroutinePromise;
+
+// Fire-and-forget coroutine result. The coroutine owns its frame until it
+// completes and does not allocate a Future/SAV result object.
+struct DetachedCoroutine {
+	using promise_type = DetachedCoroutinePromise;
+};
+
 template <class T>
 struct FutureIgnore;
 
@@ -91,6 +99,9 @@ struct QuorumAsyncResultCallback;
 
 template <class ValueType>
 struct GetAllAsyncResultCallback;
+
+template <class ValueType>
+struct GetAllAsyncResultStateCallback;
 
 template <class PromiseType, class ValueType>
 struct AwaitableFutureIgnore;
@@ -190,6 +201,8 @@ private:
 	friend struct coro::QuorumAsyncResultCallback;
 	template <class ValueType>
 	friend struct coro::GetAllAsyncResultCallback;
+	template <class ValueType>
+	friend struct coro::GetAllAsyncResultStateCallback;
 };
 
 #include "flow/CoroutinesImpl.h"
@@ -203,6 +216,7 @@ public:
 	explicit AsyncGenerator(PromiseStream<T>* promise, n_coroutine::coroutine_handle<> handle)
 	  : nextPromise(promise), handle(handle) {}
 
+	// NOLINTNEXTLINE(modernize-use-equals-default)
 	~AsyncGenerator() { handle.destroy(); }
 
 	Future<T> operator()() {
@@ -240,7 +254,7 @@ private:
 
 public:
 	explicit Generator(handle_type h) : handle(h) {}
-	Generator() {}
+	Generator() = default;
 	explicit(false) Generator(Generator const& other) : handle(other.handle) {
 		if (handle) {
 			handle.promise().addRef();

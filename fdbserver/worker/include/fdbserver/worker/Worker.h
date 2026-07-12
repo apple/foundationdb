@@ -28,6 +28,7 @@
 #include "fdbclient/ClientWorkerInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbrpc/Locality.h"
 #include "flow/flow.h"
 
@@ -38,6 +39,7 @@ Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                   LocalityData localities,
                   ProcessClass processClass,
                   std::string dataFolder,
+                  std::string tLogSpillFolder,
                   std::string coordFolder,
                   int64_t memoryLimit,
                   std::string metricsConnFile,

@@ -608,10 +608,11 @@ FDBFuture* validate_and_update_parameters(int& limit,
 
 		iteration = std::min(iteration, max_iteration);
 		mode_bytes = iteration_progression[iteration - 1];
-	} else if (mode >= 0 && mode <= FDB_STREAMING_MODE_SERIAL)
+	} else if (mode >= 0 && mode <= FDB_STREAMING_MODE_SERIAL) {
 		mode_bytes = mode_bytes_array[mode];
-	else
+	} else {
 		return TSAV_ERROR(Standalone<RangeResultRef>, client_invalid_operation);
+	}
 
 	if (target_bytes == GetRangeLimits::BYTE_LIMIT_UNLIMITED)
 		target_bytes = mode_bytes;

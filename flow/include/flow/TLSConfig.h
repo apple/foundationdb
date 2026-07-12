@@ -38,7 +38,7 @@
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 
-typedef int NID;
+using NID = int;
 
 enum class MatchType {
 	EXACT,

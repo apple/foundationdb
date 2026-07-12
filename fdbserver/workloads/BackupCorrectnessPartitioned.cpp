@@ -185,7 +185,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> _setup(Database cx, BackupAndRestorePartitionedCorrectnessWorkload* self) {
-		if (BUGGIFY) {
+		if (buggify()) {
 			for (auto r : getSystemBackupRanges()) {
 				self->backupRanges.push_back_deep(self->backupRanges.arena(), r);
 			}
@@ -285,7 +285,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
 		co_await delay(startDelay);
 
-		if (startDelay || BUGGIFY) {
+		if (startDelay || buggify()) {
 			TraceEvent("BARW_DoBackupAbortBackup1", randomID)
 			    .detail("Tag", printable(tag))
 			    .detail("StartDelay", startDelay);
@@ -335,7 +335,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			    .detail("DifferentialAfter", stopDifferentialDelay);
 
 			try {
-				if (BUGGIFY) {
+				if (buggify()) {
 					KeyBackedTag backupTag = makeBackupTag(tag.toString());
 					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName);
 
@@ -486,7 +486,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		    .detail("DifferentialAfter", stopDifferentialAfter);
 
 		UID randomID = nondeterministicRandom()->randomUniqueID();
-		if (allowPauses && BUGGIFY) {
+		if (allowPauses && buggify()) {
 			Future<Void> cp = changePaused(cx, &backupAgent);
 		}
 

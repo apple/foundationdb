@@ -1,0 +1,35 @@
+# Exercises the Data Distribution relocation pipeline back-pressure gate
+# (DD_MAX_PIPELINE_MOVES). Forces many small shards and then a burst of
+# failure-recovery relocations (machine kills) so that pipelineSize()
+# exceeds the limit, tripping the "DD Pipeline Full" code probe in
+# DDRelocationQueue.cpp. The limit is pinned to 20 -- the realistic
+# low end of the knob's range -- rather than an unrealistically small value
+# that would destabilize unrelated simulations.
+
+[[knobs]]
+dd_max_pipeline_moves = 20
+min_shard_bytes = 10000
+shard_bytes_per_sqrt_bytes = 0
+
+[[test]]
+testTitle = 'DDPipelineSaturation'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 5000.0
+    nodeCount = 60000
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 2
+    machinesToLeave = 5
+    reboot = true
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 2
+    machinesToLeave = 5
+    reboot = true
+    testDuration = 30.0

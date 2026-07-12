@@ -814,7 +814,7 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	totalTime = t_user + t_nice + t_system + t_idle + t_iowait + t_irq + t_softirq + t_steal + t_guest;
 	idleTime = t_idle + t_iowait;
 
-	if (!DEBUG_DETERMINISM && logDetails && !g_network->isSimulated())
+	if (!DEBUG_DETERMINISM && logDetails && !g_network->isSimulated()) {
 		TraceEvent("MachineLoadDetail")
 		    .detail("User", t_user)
 		    .detail("Nice", t_nice)
@@ -825,6 +825,7 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 		    .detail("SoftIRQ", t_softirq)
 		    .detail("Steal", t_steal)
 		    .detail("Guest", t_guest);
+	}
 }
 
 // This is inside the __linux__ ifdef
@@ -2209,7 +2210,7 @@ uint64_t getRandomSeed() {
 	uint64_t randomSeed;
 #ifdef _WIN32
 	uint32_t high, low;
-	if (rand_s(&low) != 0 || rand_s(&high) != 0 {
+	if (rand_s(&low) != 0 || rand_s(&high) != 0) {
 		TraceEvent(SevError, "WindowsRandomSeedError").log();
 		throw platform_error();
 	}
@@ -4270,7 +4271,7 @@ int testPathFunction2(const char* name,
                       bool mustExist,
                       ErrorOr<std::string> b) {
 	// Skip tests with resolveLinks set to false as the implementation is not complete
-	if (resolveLinks == false) {
+	if (!resolveLinks) {
 		printf("SKIPPED: %s('%s', %d, %d)\n", name, a.c_str(), resolveLinks, mustExist);
 		return 0;
 	}

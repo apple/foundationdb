@@ -74,18 +74,19 @@ struct MiniCycleWorkload : TestWorkload {
 
 	Future<bool> _check(Database cx, MiniCycleWorkload* self) {
 		std::vector<Future<Void>> cycleClients;
-		for (int c = 0; c < self->clientCount; c++)
+		for (int c = 0; c < self->clientCount; c++) {
 			cycleClients.push_back(
 			    timeout(self->cycleClient(cx->clone(), self, self->actorCount / self->transactionsPerSecond),
 			            self->testDuration,
 			            Void()));
+		}
 
 		Future<Void> end = delay(self->testDuration);
 		bool ok = true;
 		while (true) {
 			auto choice = co_await race(self->_checkCycle(cx->clone(), self, ok), end);
 			if (choice.index() == 0) {
-				bool ret = std::get<0>(std::move(choice));
+				bool ret = std::get<0>(choice);
 
 				ok = ret && ok;
 				if (!ok)

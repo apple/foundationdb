@@ -26,6 +26,17 @@ For a while, there was an informal competition within the engineering team to de
 
 Simulation's success has surpassed our expectation and has been vital to our engineering team. It seems unlikely that we would have been able to build FoundationDB without this technology.
 
+Running unit tests in simulation
+--------------------------------
+
+Several standalone unit-test binaries can also run their tests under Simulation. The ``fdbclient_test``, ``fdbrpc_test``, and ``fdbserver_*_test`` targets support the ``--simulation`` flag. For example:
+
+.. code-block:: bash
+
+   ./bin/fdbclient_test --simulation
+
+When a binary is run in simulation mode without an explicit test filter, tests whose names start with ``noSim/`` are skipped. The ``flow_test`` target does not support this option because it is not linked with simulator support.
+
 Performance testing with Circus
 ===============================
 

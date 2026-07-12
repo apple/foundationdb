@@ -178,7 +178,9 @@ if(NOT WIN32)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
     add_library(fdb_c_txn_size_test OBJECT test/txn_size_test.c test/test.h)
     add_library(fdb_c_client_memory_test OBJECT test/client_memory_test.cpp test/unit/fdb_api.cpp test/unit/fdb_api.hpp)
-    add_library(mako OBJECT ${MAKO_SRCS})
+    if(BUILD_MAKO)
+      add_library(mako OBJECT ${MAKO_SRCS})
+    endif()
     add_library(fdb_c_setup_tests OBJECT test/unit/setup_tests.cpp)
     add_library(fdb_c_unit_tests_version_510 OBJECT ${UNIT_TEST_VERSION_510_SRCS})
     add_library(trace_partial_file_suffix_test OBJECT ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
@@ -189,7 +191,9 @@ if(NOT WIN32)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
     add_executable(fdb_c_txn_size_test test/txn_size_test.c test/test.h)
     add_executable(fdb_c_client_memory_test test/client_memory_test.cpp test/unit/fdb_api.cpp test/unit/fdb_api.hpp)
-    add_executable(mako ${MAKO_SRCS})
+    if(BUILD_MAKO)
+      add_executable(mako ${MAKO_SRCS})
+    endif()
     add_executable(fdb_c_setup_tests test/unit/setup_tests.cpp)
     add_executable(fdb_c_unit_tests)
     target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c fdb_c_unit_tests_impl)
@@ -227,11 +231,16 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_client_config_tester PRIVATE SimpleOpt fdb_cpp fdb_c fdbclient Threads::Threads fmt::fmt)
   target_include_directories(fdb_c_client_config_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
 
-  # do not set RPATH for mako
-  set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
-  target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
-  if(NOT OPEN_FOR_IDE)
-    strip_debug_symbols(mako)
+  if(BUILD_MAKO)
+    # do not set RPATH for mako
+    set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
+    target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
+    if(NOT OPEN_FOR_IDE)
+      strip_debug_symbols(mako)
+      if(NOT GENERATE_DEBUG_PACKAGES)
+        add_custom_target(prepare_mako_install ALL DEPENDS strip_only_mako)
+      endif()
+    endif()
   endif()
 
   if(NOT OPEN_FOR_IDE)
@@ -376,7 +385,10 @@ if(NOT WIN32)
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
         --upgrade-path "${FDB_CURRENT_VERSION}" "wiggle"
         --disable-log-dump
-        --process-number 3
+        # A wiggle replaces every storage server; with only 3 processes the cluster
+        # has no spare capacity to recruit the replacements, so recovery can stall
+        # past the progress-check window. 5 processes gives the wiggle headroom.
+        --process-number 5
         --redundancy double
         )
 
@@ -386,9 +398,24 @@ if(NOT WIN32)
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
         --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "wiggle" "${FDB_CURRENT_VERSION}"
         --disable-log-dump
-        --process-number 3
+        # See fdb_c_wiggle_only: a wiggle needs spare process capacity to recruit
+        # replacement storage servers.
+        --process-number 5
         --redundancy double
         )
+
+      # These tests replace every process in a local cluster. Running them with
+      # other CTests can starve recovery long enough to trip the progress check.
+      # Worst-case budget: cluster startup + exclude/remove (120s) +
+      # wait_for_cluster_healthy (180s) + progress checks 3x30s (90s) = ~450s.
+      # Use 900s to leave margin for slow machines.
+      set_tests_properties(fdb_c_upgrade_to_future_version
+        fdb_c_upgrade_from_prev2_gradual
+        fdb_c_upgrade_from_prev2_direct
+        fdb_c_upgrade_from_prev
+        fdb_c_wiggle_only
+        fdb_c_wiggle_and_upgrade
+        PROPERTIES RUN_SERIAL TRUE TIMEOUT 900)
 
     endif()
   endif()

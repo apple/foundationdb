@@ -168,6 +168,9 @@ ERROR( bulkload_dataset_not_cover_required_range, 1249, "Bulkload dataset does n
 ERROR( bulkload_invalid_configuration, 1250, "BulkLoad requires cluster configuration with both shard_encode_location_metadata=1 and enable_read_lock_on_range=1" )
 ERROR( transaction_grv_queue_rejected, 1251, "GRV request rejected because estimated queue wait exceeds transaction limit" )
 ERROR( finish_move_keys_too_many_retries, 1252, "finishMoveKeys exceeded retry limit" )
+ERROR( start_move_keys_too_many_retries, 1253, "startMoveKeys exceeded retry limit" )
+ERROR( cdc_proxy_failed, 1254, "Cluster recovery terminating because a CDCProxy failed" )
+ERROR( cdc_tlog_peek_reply_too_large, 1255, "TLog CDC peek reply exceeds configured byte limit" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

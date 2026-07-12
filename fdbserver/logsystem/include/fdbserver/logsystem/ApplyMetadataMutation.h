@@ -35,7 +35,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/core/LogProtocolMessage.h"
-#include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "flow/FastRef.h"
 
 class AccumulativeChecksumBuilder;
@@ -56,10 +56,36 @@ struct ApplyMutationsData {
 	Reference<KeyRangeMap<Version>> keyVersion;
 };
 
+// Active CDC write routing reconstructed from durable stream and tag-history metadata.
+class CDCRoutingTable : NonCopyable {
+	struct StreamState {
+		Optional<KeyRange> keys;
+		Optional<std::pair<Version, Tag>> tag;
+	};
+
+	std::unordered_map<CDCStreamId, StreamState> streams;
+	KeyRangeMap<std::set<Tag>> tagsByRange;
+
+	void updateRange(CDCStreamId streamId, KeyRangeRef const& keys);
+	bool updateTag(CDCStreamId streamId, Version version, Tag tag);
+	void rebuildRanges();
+
+public:
+	CDCRoutingTable();
+	void setRange(CDCStreamId streamId, KeyRangeRef const& keys);
+	void setTag(CDCStreamId streamId, Version version, Tag tag);
+	void reload(IKeyValueStore* txnStateStore);
+	bool empty() const { return streams.empty(); }
+
+	const std::set<Tag>& tagsForKey(KeyRef const& key) const;
+	std::set<Tag> tagsForRange(KeyRangeRef const& keys) const;
+};
+
 struct ApplyMetadataProxyContext {
 	UID dbgid;
 	IKeyValueStore* txnStateStore = nullptr;
 	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
+	CDCRoutingTable* cdcRouting = nullptr;
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
 	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
 	PublicRequestStream<CommitTransactionRequest> commit;
@@ -83,7 +109,7 @@ struct ResolverData {
 	// Whether configuration changes. If so, a recovery is forced.
 	bool& confChanges;
 	bool initialCommit = false;
-	Reference<LogSystem> logSystem = Reference<LogSystem>();
+	Reference<LogSystemConsumer> logSystemConsumer = Reference<LogSystemConsumer>();
 	LogPushData* toCommit = nullptr;
 	Version popVersion = 0; // exclusive, usually set to commitVersion + 1
 	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
@@ -95,7 +121,7 @@ struct ResolverData {
 
 	// For transaction batches that contain metadata mutations
 	ResolverData(UID debugId,
-	             Reference<LogSystem> logSystem,
+	             Reference<LogSystemConsumer> logSystemConsumer,
 	             IKeyValueStore* store,
 	             KeyRangeMap<ServerCacheInfo>* info,
 	             LogPushData* toCommit,
@@ -103,15 +129,16 @@ struct ResolverData {
 	             Version popVersion,
 	             std::map<UID, Reference<StorageInfo>>* storageCache,
 	             std::unordered_map<UID, StorageServerInterface>* tssMapping)
-	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), logSystem(logSystem),
-	    toCommit(toCommit), popVersion(popVersion), storageCache(storageCache), tssMapping(tssMapping) {}
+	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery),
+	    logSystemConsumer(logSystemConsumer), toCommit(toCommit), popVersion(popVersion), storageCache(storageCache),
+	    tssMapping(tssMapping) {}
 };
 
 inline bool isMetadataMutation(MutationRef const& m) {
 	// FIXME: This is conservative - not everything in system keyspace is necessarily processed by
 	// applyMetadataMutations
 	if (m.type == MutationRef::SetValue) {
-		return (m.param1.size() && m.param1[0] == systemKeys.begin[0] &&
+		return (!m.param1.empty() && m.param1[0] == systemKeys.begin[0] &&
 		        !m.param1.startsWith(nonMetadataSystemKeys.begin));
 	} else if (m.type == MutationRef::ClearRange) {
 		return m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0] &&
@@ -128,7 +155,7 @@ Reference<StorageInfo> getStorageInfo(UID id,
 void applyMetadataMutations(SpanContext const& spanContext,
                             const ApplyMetadataProxyContext& proxyMetadata,
                             Arena& arena,
-                            Reference<LogSystem> logSystem,
+                            Reference<LogSystemConsumer> logSystemConsumer,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* pToCommit,
                             bool& confChange,

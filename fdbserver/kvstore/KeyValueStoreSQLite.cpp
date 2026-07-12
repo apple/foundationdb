@@ -41,7 +41,6 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 #include "template_fdb.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #if SQLITE_THREADSAFE == 0
 #define sqlite3_mutex_enter(x)
@@ -223,12 +222,13 @@ struct PageChecksumCodec {
 		} else {
 			// For Page Numbers other than 1, reserve size must be the size of the checksum.
 			if (self->reserveSize != sizeof(SumType)) {
-				if (!self->silent)
+				if (!self->silent) {
 					TraceEvent(SevWarnAlways, "SQLitePageChecksumFailureBadReserveSize")
 					    .detail("CodecPageSize", self->pageSize)
 					    .detail("CodecReserveSize", self->reserveSize)
 					    .detail("Filename", self->filename)
 					    .detail("PageNumber", pageNumber);
+				}
 
 				return nullptr;
 			}
@@ -353,8 +353,9 @@ struct SQLiteDB : NonCopyable {
 				// printf("#");
 				// threadSleep(.010);
 				sqlite3_sleep(10);
-			} else
+			} else {
 				checkError("checkpoint", rc);
+			}
 		}
 		// printf("Checkpoint (%0.1f ms): %d frames in log, %d checkpointed\n", (timer()-t)*1000, logSize,
 		// checkpointCount);
@@ -390,10 +391,11 @@ struct SQLiteDB : NonCopyable {
 					}
 
 					// If the line length found is not zero then print a trace event
-					if (*lineStart != '\0')
+					if (*lineStart != '\0') {
 						TraceEvent(SevError, "BTreeIntegrityCheck")
 						    .detail("Filename", filename)
 						    .detail("ErrorDetail", lineStart);
+					}
 					lineStart = lineEnd;
 				}
 			}
@@ -1049,8 +1051,9 @@ struct RawCursor {
 					else
 						cur.valid = false;
 				}
-			} else
+			} else {
 				kv = Optional<KeyValueRef>();
+			}
 		}
 
 		// advance cursor, parse and return key if valid
@@ -1478,12 +1481,13 @@ void SQLiteDB::open(bool writable) {
 			    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE |
 			        IAsyncFile::OPEN_LOCK,
 			    0600));
-			if (page_checksums)
+			if (page_checksums) {
 				waitFor(
 				    dbFile.get()->write(template_fdb_with_page_checksums, sizeof(template_fdb_with_page_checksums), 0));
-			else
+			} else {
 				waitFor(dbFile.get()->write(
 				    template_fdb_without_page_checksums, sizeof(template_fdb_without_page_checksums), 0));
+			}
 			waitFor(dbFile.get()->sync()); // renames filename.part to filename, fsyncs data and directory
 			TraceEvent("CreatedDBFile").detail("Filename", apath);
 		}
@@ -1520,7 +1524,7 @@ void SQLiteDB::open(bool writable) {
 	int chunkSize;
 	if (!g_network->isSimulated()) {
 		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES;
-	} else if (BUGGIFY) {
+	} else if (buggify()) {
 		chunkSize = 4096 * deterministicRandom()->randomInt(0, 100);
 	} else {
 		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES_SIM;
@@ -1699,18 +1703,20 @@ private:
 		};
 		void action(ReadValueAction& rv) {
 			// double t = timer();
-			if (rv.debugID.present())
+			if (rv.debugID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
 				                      rv.debugID.get().first(),
 				                      "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
+			}
 
 			rv.result.send(getCursor()->get().get(rv.key));
 			++counter;
 
-			if (rv.debugID.present())
+			if (rv.debugID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
 				                      rv.debugID.get().first(),
 				                      "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+			}
 			// t = timer()-t;
 			// if (t >= 1.0) TraceEvent("ReadValueActionSlow",dbgid).detail("Elapsed", t);
 		}
@@ -1727,18 +1733,20 @@ private:
 		};
 		void action(ReadValuePrefixAction& rv) {
 			// double t = timer();
-			if (rv.debugID.present())
+			if (rv.debugID.present()) {
 				g_traceBatch.addEvent("GetValuePrefixDebug",
 				                      rv.debugID.get().first(),
 				                      "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
+			}
 
 			rv.result.send(getCursor()->get().getPrefix(rv.key, rv.maxLength));
 			++counter;
 
-			if (rv.debugID.present())
+			if (rv.debugID.present()) {
 				g_traceBatch.addEvent("GetValuePrefixDebug",
 				                      rv.debugID.get().first(),
 				                      "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+			}
 			// t = timer()-t;
 			// if (t >= 1.0) TraceEvent("ReadValuePrefixActionSlow",dbgid).detail("Elapsed", t);
 		}
@@ -1892,11 +1900,12 @@ private:
 			cursor = new Cursor(conn, true);
 			checkFreePages();
 			++writesComplete;
-			if (t3 - a.issuedTime > 10.0 * deterministicRandom()->random01())
+			if (t3 - a.issuedTime > 10.0 * deterministicRandom()->random01()) {
 				TraceEvent("KVCommit10sSample", dbgid)
 				    .detail("Queued", t1 - a.issuedTime)
 				    .detail("Commit", t2 - t1)
 				    .detail("Checkpoint", t3 - t2);
+			}
 
 			diskBytesUsed = waitForAndGet(conn.dbFile->size()) + waitForAndGet(conn.walFile->size());
 

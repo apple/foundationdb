@@ -296,6 +296,7 @@ public:
 	double MAX_BUGGIFIED_DELAY;
 	double MAX_RUNLOOP_SLEEP_DELAY;
 	int SIM_CONNECT_ERROR_MODE;
+	double SIM_DNS_REMOVAL_MAX_DELAY;
 	double SIM_SPEEDUP_AFTER_SECONDS;
 	int MAX_TRACE_LINES;
 
@@ -397,5 +398,6 @@ public:
 // Flow knobs are needed before the knob collections are available, so a global FlowKnobs object is used to bootstrap
 extern FlowKnobs bootstrapGlobalFlowKnobs;
 extern FlowKnobs const* FLOW_KNOBS;
+void resetFlowKnobs(class Randomize randomize, class IsSimulated isSimulated);
 
 #endif

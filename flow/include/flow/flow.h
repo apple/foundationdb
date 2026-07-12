@@ -858,8 +858,9 @@ public:
 			promises = 0;
 			if (!futures)
 				destroy();
-		} else
+		} else {
 			--promises;
+		}
 	}
 	void delFutureRef() {
 		if (!--futures) {
@@ -1079,6 +1080,7 @@ template <class T>
 class SWIFT_SENDABLE StrictFuture : public Future<T> {
 public:
 	inline StrictFuture(Future<T> const& f) : Future<T>(f) {}
+	inline StrictFuture(Future<T>&& f) : Future<T>(std::move(f)) {}
 	inline StrictFuture(Never n) : Future<T>(n) {}
 
 private:
@@ -1238,8 +1240,9 @@ struct NotifiedQueue : private SingleCallback<T>
 		if (!--promises) {
 			if (futures) {
 				sendError(broken_promise());
-			} else
+			} else {
 				destroy();
+			}
 		}
 	}
 	void delFutureRef() {
@@ -1261,9 +1264,9 @@ struct NotifiedQueue : private SingleCallback<T>
 		ASSERT(SingleCallback<T>::next == this);
 		cb->insert(this);
 	}
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
-	virtual void fire(T&&) override { ASSERT(false); }
+	void unwait() override { delFutureRef(); }
+	void fire(T const&) override { ASSERT(false); }
+	void fire(T&&) override { ASSERT(false); }
 
 protected:
 	T popImpl() {
@@ -1531,13 +1534,13 @@ struct Actor<void> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	virtual void fire(ValueType const& value) override {
+	void fire(ValueType const& value) override {
 #ifdef ENABLE_SAMPLING
 		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 #endif
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
-	virtual void error(Error e) override {
+	void error(Error e) override {
 #ifdef ENABLE_SAMPLING
 		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 #endif

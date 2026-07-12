@@ -46,7 +46,7 @@
 
 class IThreadPoolReceiver {
 public:
-	virtual ~IThreadPoolReceiver() {}
+	virtual ~IThreadPoolReceiver() = default;
 	virtual void init() = 0;
 };
 
@@ -55,11 +55,11 @@ struct ThreadAction {
 	virtual void cancel() = 0;
 	virtual double getTimeEstimate() const = 0; // for simulation
 };
-typedef ThreadAction* PThreadAction;
+using PThreadAction = ThreadAction*;
 
 class IThreadPool {
 public:
-	virtual ~IThreadPool() {}
+	virtual ~IThreadPool() = default;
 	virtual Future<Void> getError() const = 0; // asynchronously throws an error if there is an internal error
 	virtual void addThread(IThreadPoolReceiver* userData, const char* name = nullptr) = 0;
 	virtual void post(PThreadAction action) = 0;
@@ -83,7 +83,7 @@ public:
 template <class T>
 class ThreadReturnPromise : NonCopyable {
 public:
-	ThreadReturnPromise() {}
+	ThreadReturnPromise() = default;
 	ThreadReturnPromise(const ThreadReturnPromise& p) = delete;
 	explicit(false) ThreadReturnPromise(ThreadReturnPromise&& other) : promise(std::move(other.promise)) {}
 
@@ -130,7 +130,7 @@ Reference<IThreadPool> createGenericThreadPool(int stackSize = 0, int pri = 10);
 
 class DummyThreadPool final : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
-	~DummyThreadPool() override {}
+	~DummyThreadPool() override = default;
 	DummyThreadPool() : thread(nullptr) {}
 	Future<Void> getError() const override { return errors.getFuture(); }
 	void addThread(IThreadPoolReceiver* userData, const char* name = nullptr) override {

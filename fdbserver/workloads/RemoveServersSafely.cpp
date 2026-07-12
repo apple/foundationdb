@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
@@ -284,13 +285,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		for (auto processInfo : getServers()) {
 			auto processNet = AddressExclusion(processInfo->address.ip, processInfo->address.port);
 			// Mark all of the unavailable as dead
-			if (!processInfo->isAvailable() || processInfo->isCleared())
+			if (!processInfo->isAvailable() || processInfo->isCleared()) {
 				processesDead.push_back(processInfo);
-			// Save all processes not specified within set
-			else if (killAddrs.find(processNet) == killAddrs.end())
+				// Save all processes not specified within set
+			} else if (killAddrs.find(processNet) == killAddrs.end()) {
 				processesLeft.push_back(processInfo);
-			else
+			} else {
 				killProcArray.push_back(processInfo);
+			}
 		}
 
 		// Identify the largest set of processes which can be killed
@@ -381,7 +383,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		// Include the servers, if unable to exclude
 		// Reinclude when buggify is on to increase the surface area of the next set of excludes
 		bool failed = true;
-		if (!bClearedFirst || BUGGIFY) {
+		if (!bClearedFirst || buggify()) {
 			// Get the updated list of processes which may have changed due to reboots, deletes, etc
 			TraceEvent("RemoveAndKill")
 			    .detail("Step", "include all first")
@@ -441,7 +443,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	std::vector<ISimulator::ProcessInfo*> killAddresses(std::set<AddressExclusion> const& killAddrs) {
 		UID functionId = nondeterministicRandom()->randomUniqueID();
-		bool removeViaClear = !BUGGIFY;
+		bool removeViaClear = !buggify();
 		std::vector<ISimulator::ProcessInfo*> killProcArray;
 		std::vector<AddressExclusion> toKillArray;
 
@@ -457,7 +459,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("ClusterAvailable", g_simulator->isAvailable())
 			    .detail("RemoveViaClear", removeViaClear);
 			for (auto& killProcess : killProcArray) {
-				if (g_simulator->isProtectedAddress(killProcess->address))
+				if (g_simulator->isProtectedAddress(killProcess->address)) {
 					TraceEvent("RemoveAndKill", functionId)
 					    .detail("Step", "NoKill Process")
 					    .detail("Process", describe(*killProcess))
@@ -465,7 +467,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 					    .detail("Rebooting", killProcess->rebooting)
 					    .detail("ClusterAvailable", g_simulator->isAvailable())
 					    .detail("Protected", g_simulator->isProtectedAddress(killProcess->address));
-				else if (removeViaClear) {
+				} else if (removeViaClear) {
 					g_simulator->rebootProcess(killProcess, ISimulator::KillType::RebootProcessAndDelete);
 					TraceEvent("RemoveAndKill", functionId)
 					    .detail("Step", "Clear Process")
@@ -578,7 +580,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::vector<AddressExclusion> toKillMarkFailedArray;
 		AddressExclusion coordExcl;
 		// Exclude a coordinator under buggify, but only if fault tolerance is > 0 and kill set is non-empty already
-		if (BUGGIFY && !toKill.empty()) {
+		if (buggify() && !toKill.empty()) {
 			Optional<ClusterConnectionString> csOptional = co_await getConnectionString(cx);
 			std::vector<NetworkAddress> coordinators;
 			if (csOptional.present()) {
@@ -612,7 +614,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				{
 					auto choice = co_await race(checkSafeExclusions(cx, toKillMarkFailedArray), delay(5.0));
 					if (choice.index() == 0) {
-						bool _safe = std::get<0>(std::move(choice));
+						bool _safe = std::get<0>(choice);
 
 						safe = _safe && protectServers(std::set<AddressExclusion>(toKillMarkFailedArray.begin(),
 						                                                          toKillMarkFailedArray.end()))
@@ -776,7 +778,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::vector<ISimulator::ProcessInfo*> machines;
 		std::vector<ISimulator::ProcessInfo*> all = g_simulator->getAllProcesses();
 		for (int i = 0; i < all.size(); i++) {
-			if (all[i]->name == std::string("Server") && all[i]->isAvailableClass()) {
+			if (all[i]->name == std::string("Server") && isAvailableSimulatorProcessClass(all[i])) {
 				machines.push_back(all[i]);
 			}
 		}

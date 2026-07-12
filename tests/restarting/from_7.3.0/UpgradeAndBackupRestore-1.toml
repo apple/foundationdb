@@ -1,3 +1,6 @@
+[[knobs]]
+dd_max_shards_on_large_teams = 0
+
 [configuration]
 storageEngineExcludeTypes=[3,5]
 tenantModes=['disabled']
@@ -33,7 +36,6 @@ disabledFailureInjectionWorkloads = 'Attrition'
     nodeCount = 30000
     transactionsPerSecond = 2500.0
     testDuration = 30.0
-    expectedRate = 0
     keyPrefix = 'BeforeRestart'
 
     [[test.workload]]

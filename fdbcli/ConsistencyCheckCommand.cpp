@@ -25,7 +25,7 @@
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 namespace fdb_cli {
 
 const KeyRef consistencyCheckSpecialKey = "\xff\xff/management/consistency_check_suspended"_sr;

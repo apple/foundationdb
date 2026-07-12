@@ -37,9 +37,9 @@ public:
 
 	IWorkloadControlIfc* getControlIfc() override;
 
-	virtual void stop() override;
+	void stop() override;
 
-	virtual void checkProgress() override;
+	void checkProgress() override;
 
 	// Workload specific setup phase.
 	virtual void setup(TTaskFct cont);
@@ -105,7 +105,7 @@ protected:
 	// In-memory store maintaining expected database state
 	std::unordered_map<std::optional<int>, KeyValueStore> stores;
 
-	ApiWorkload(const WorkloadConfig& config);
+	explicit ApiWorkload(const WorkloadConfig& config);
 
 	// Methods for generating random keys and values
 	fdb::Key randomKeyName();

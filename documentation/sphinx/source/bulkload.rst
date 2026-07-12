@@ -69,6 +69,27 @@ Workflow
 - Tasks complete and are marked as ``BulkLoadPhase::Complete`` or ``BulkLoadPhase::Error``
 - When all tasks finish, the job is finalized and moved to job history, and the range lock is released
 
+Per-Task Range Clear
+--------------------
+Before ingesting SST files for a task, the storage server clears the target
+shard range and waits for the clear to durably commit. This ensures that
+stale data is not retained when the new SST files are ingested over an
+existing range. The clear-then-ingest sequence is performed per shard inside
+the SS (see ``storageserver.actor.cpp``):
+
+1. ``getKeyValueStore()->clear(keys)`` — clear the target range
+2. Wait on ``durableVersion`` so the clear is committed before ingest
+3. ``compactRange(keys)`` to optimize storage before bulk insert
+4. ``ingestSSTFiles(localBulkLoadFileSets)`` — ingest the new data
+
+Because the SS clears each shard internally, BulkLoad does not require the
+destination cluster or range to be empty when the job starts. The exclusive
+range lock taken during ``submitBulkLoadJob()`` (see below) ensures no
+concurrent writes can race with the clear-and-ingest sequence. As a result,
+``fdbrestore start --mode bulkload`` is permitted to run against a
+non-empty destination database — unlike rangefile restore, which requires
+an empty destination.
+
 Range Locking
 -------------
 BulkLoad uses FoundationDB's range locking mechanism to ensure data consistency:

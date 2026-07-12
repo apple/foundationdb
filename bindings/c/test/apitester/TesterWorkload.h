@@ -49,7 +49,7 @@ public:
 // Workload interface
 class IWorkload {
 public:
-	virtual ~IWorkload() {}
+	virtual ~IWorkload() = default;
 
 	// Initialize the workload
 	virtual void init(WorkloadManager* manager) = 0;
@@ -106,7 +106,7 @@ struct WorkloadConfig {
 // Tracks if workload is active, notifies the workload manager when the workload completes
 class WorkloadBase : public IWorkload {
 public:
-	WorkloadBase(const WorkloadConfig& config);
+	explicit WorkloadBase(const WorkloadConfig& config);
 
 	// Initialize the workload
 	void init(WorkloadManager* manager) override;
@@ -278,6 +278,9 @@ private:
 
 	// Timer for printing statistics in regular intervals
 	std::unique_ptr<ITimer> statsTimer;
+
+	// Flag to stop the stats timer from re-scheduling
+	std::atomic<bool> statsStopped{ false };
 };
 
 // A workload factory
@@ -301,7 +304,7 @@ struct IWorkloadFactory {
  */
 template <class WorkloadType>
 struct WorkloadFactory : IWorkloadFactory {
-	WorkloadFactory(const char* name) { factories()[name] = this; }
+	explicit WorkloadFactory(const char* name) { factories()[name] = this; }
 	std::shared_ptr<IWorkload> create(const WorkloadConfig& config) override {
 		return std::make_shared<WorkloadType>(config);
 	}

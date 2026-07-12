@@ -72,6 +72,13 @@ public:
 	int DESIRED_UPDATE_BYTES;
 	double UPDATE_DELAY;
 	int MAXIMUM_PEEK_BYTES;
+	int64_t CDC_PROXY_CONSUME_REPLY_BYTES;
+	int64_t CDC_PROXY_BUFFER_BYTES;
+	double CDC_PROXY_CONSUME_POLL_TIMEOUT;
+	double CDC_PROXY_FAILURE_TIMEOUT;
+	double CDC_PROXY_FAILURE_COALESCE_DELAY; // Disabled by default; simulations can force a multi-failure batch.
+	double CDC_PROXY_POP_MIN_INTERVAL;
+	double CDC_PROXY_POP_SCAN_INTERVAL;
 	int APPLY_MUTATION_BYTES;
 	double BUGGIFY_RECOVER_MEMORY_LIMIT;
 	double BUGGIFY_WORKER_REMOVED_MAX_LAG;
@@ -126,6 +133,7 @@ public:
 	int TLOG_POP_BATCH_SIZE;
 	bool ENABLE_TLOG_TEMP_TAG_MESSAGES_RESERVE;
 	double BLOCKING_PEEK_TIMEOUT;
+	double PEEK_REPLY_TIMEOUT; // Sender-side timeout for non-parallel peek; 0 disables (old wait-forever behavior)
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 	double POP_FROM_LOG_DELAY;
@@ -615,6 +623,7 @@ public:
 	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
+	bool ROCKSDB_ENABLE_CACHE_USAGE_OVERRIDES;
 	bool ROCKSDB_ENABLE_NONDETERMINISM; // Whether rocksdb nondeterministic behavior should be enabled in simulation.
 	                                    // Note that turning this on in simulation could lead to non-deterministic runs
 	                                    // since we rely on rocksdb metadata. This knob also applies to sharded rocks
@@ -686,6 +695,8 @@ public:
 	double TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET;
 	int START_TRANSACTION_MAX_QUEUE_SIZE;
 	int KEY_LOCATION_MAX_QUEUE_SIZE;
+	double GRV_PROXY_PROGRESS_CHECK_INTERVAL;
+	int GRV_PROXY_MAX_MISSED_PROGRESS_CHECKS;
 
 	double COMMIT_PROXY_LIVENESS_TIMEOUT;
 	double COMMIT_PROXY_MAX_LIVENESS_TIMEOUT;
@@ -704,7 +715,11 @@ public:
 	double COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL;
 	double COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR;
 	double COMMIT_TRIGGER_DELAY;
-	bool ENABLE_READ_LOCK_ON_RANGE;
+	bool ENABLE_READ_LOCK_ON_RANGE; // Despite the name, this is a write-exclusion lock — commit proxies
+	                                // reject writes to a locked range, but reads are unaffected. The
+	                                // name reflects bulkload's perspective: "I'm ingesting data into
+	                                // this range, lock it so nobody else writes." Bulkload is currently
+	                                // the only consumer.
 
 	double RESOLVER_COALESCE_TIME;
 	int BUGGIFIED_ROW_LIMIT;
@@ -920,6 +935,7 @@ public:
 	int MOVE_KEYS_KRM_LIMIT;
 	int FINISH_MOVE_KEYS_MAX_RETRIES; // Max retries in finishMoveKeys before returning move to queue; set very high to
 	                                  // disable
+	int START_MOVE_KEYS_MAX_RETRIES;
 	int MOVE_KEYS_KRM_LIMIT_BYTES; // This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT
 	                               // (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an
 	                               // attempt to read a key range map
@@ -1062,6 +1078,9 @@ public:
 	// Rolling window duration over which the average bytes moved by DD is calculated for the 'MovingData' trace event.
 	double DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL;
 	int64_t MOVING_WINDOW_SAMPLE_SIZE;
+	// Probability of running the consistency check between teams and teamsByServerIDs
+	// in getTeamByServers (simulation only).
+	double DD_TEAMS_BY_SERVER_IDS_CONSISTENCY_CHECK_PROB_SIM;
 
 	// Storage Server
 	double STORAGE_LOGGING_DELAY;
@@ -1210,6 +1229,7 @@ public:
 	int PROBABILITY_FACTOR_SHARDED_ROCKSDB_ENGINE_SELECTED_SIM;
 	int PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM;
 	int PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM;
+	int PROBABILITY_FACTOR_REDWOOD_ENGINE_SELECTED_SIM;
 	int PROBABILITY_FACTOR_MEMORY_SELECTED_SIM;
 
 	// Coordination

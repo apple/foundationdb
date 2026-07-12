@@ -282,6 +282,12 @@ var (
 	ErrTransactionGRVQueueRejected = Error{Code: 1251}
 	// finishMoveKeys exceeded retry limit
 	ErrFinishMoveKeysTooManyRetries = Error{Code: 1252}
+	// startMoveKeys exceeded retry limit
+	ErrStartMoveKeysTooManyRetries = Error{Code: 1253}
+	// Cluster recovery terminating because a CDCProxy failed
+	ErrCdcProxyFailed = Error{Code: 1254}
+	// TLog CDC peek reply exceeds configured byte limit
+	ErrCdcTLogPeekReplyTooLarge = Error{Code: 1255}
 	// Platform error
 	ErrPlatformError = Error{Code: 1500}
 	// Large block allocation failed

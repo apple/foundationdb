@@ -1137,8 +1137,7 @@ Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, GetTopKMe
 
 Future<Void> fetchTopKShardMetrics(DataDistributionTracker* self, GetTopKMetricsRequest req) {
 	// simulate time_out
-	Future<Void> f =
-	    g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? Never() : fetchTopKShardMetrics_impl(self, req);
+	Future<Void> f = g_network->isSimulated() && buggify(0.01) ? Never() : fetchTopKShardMetrics_impl(self, req);
 	if (auto const res = co_await timeout(f, SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT); !res.present()) {
 		CODE_PROBE(true, "TopK DD_SHARD_METRICS_TIMEOUT");
 		req.reply.send(GetTopKMetricsReply());
@@ -1797,7 +1796,7 @@ std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> PhysicalShardCollec
 		return { Optional<ShardsAffectedByTeamFailure::Team>(), false };
 	}
 	for (const auto& team : physicalShardInstances[inputPhysicalShardID].teams) {
-		if (team.primary == false) {
+		if (!team.primary) {
 			/*TraceEvent("TryGetRemoteTeamWith")
 			    .detail("PhysicalShardID", inputPhysicalShardID)
 			    .detail("Team", team.toString())

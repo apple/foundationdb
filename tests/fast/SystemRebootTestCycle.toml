@@ -6,7 +6,6 @@ clearAfterTest = false
     testName = 'Cycle'
     transactionsPerSecond = 250.0
     testDuration = 20.0
-    expectedRate = 0.01
     nodeCount = 50000
 
     [[test.workload]]
@@ -38,4 +37,3 @@ runSetup = false
     nodeCount = 50000
     transactionsPerSecond = 250.0
     testDuration = 10.0
-    expectedRate = 0.70

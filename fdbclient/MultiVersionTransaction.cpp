@@ -26,7 +26,7 @@
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/Trace.h"
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
@@ -1903,6 +1903,18 @@ const char* MultiVersionApi::getClientVersion() {
 	return localClient->api->getClientVersion();
 }
 
+void MultiVersionApi::ignoreEnvironmentVariableNetworkOption(FDBNetworkOptions::Option option) {
+	if (FDBNetworkOptions::optionInfo.find(option) == FDBNetworkOptions::optionInfo.end()) {
+		throw invalid_option();
+	}
+
+	MutexHolder holder(lock);
+	if (envOptionsLoaded) {
+		throw invalid_option();
+	}
+	ignoredEnvOptions.insert(option);
+}
+
 void MultiVersionApi::useFutureProtocolVersion() {
 	localClient->api->useFutureProtocolVersion();
 }
@@ -2020,7 +2032,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 			TraceEvent("CopyingExternalClient")
 			    .detail("FileName", filename)
 			    .detail("LibraryPath", path)
-			    .detail("TempPath", tempName);
+			    .detail("TempPath", std::string(tempName));
 
 			constexpr size_t buf_sz = 4096;
 			char buf[buf_sz];
@@ -2396,6 +2408,14 @@ void MultiVersionApi::stopNetwork() {
 	localClient->api->stopNetwork();
 
 	if (!bypassMultiClientApi) {
+#ifdef ADDRESS_SANITIZER
+		// Give external client network threads time to process pending
+		// onMainThreadVoid cleanup callbacks (database/transaction destroy)
+		// before stopping their networks. A deterministic flush isn't possible
+		// because we cannot dispatch work to external client network threads
+		// and wait for completion through the DL API.
+		threadSleep(3);
+#endif
 		runOnExternalClientsAllThreads([](Reference<ClientInfo> client) { client->api->stopNetwork(); }, true);
 	}
 }
@@ -2596,6 +2616,13 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 
 	for (const auto& option : FDBNetworkOptions::optionInfo) {
 		if (!option.second.hidden) {
+			{
+				MutexHolder holder(lock);
+				if (ignoredEnvOptions.contains(option.first)) {
+					continue;
+				}
+			}
+
 			std::string valueStr;
 			try {
 				if (platform::getEnvironmentVar(("FDB_NETWORK_OPTION_" + option.second.name).c_str(), valueStr)) {

@@ -414,7 +414,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 
 		if (cacheResult) {
 			// Enabled is the default, but sometimes set it explicitly
-			if (BUGGIFY) {
+			if (buggify()) {
 				tr.setOption(FDBTransactionOptions::READ_SERVER_SIDE_CACHE_ENABLE);
 			}
 		} else {
@@ -530,11 +530,12 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		clientBegin = now();
 		for (int c = 0; c < actorCount; c++) {
 			Future<Void> worker;
-			if (useRYW)
+			if (useRYW) {
 				worker =
 				    randomReadWriteClient<ReadYourWritesTransaction>(cx, this, actorCount / transactionsPerSecond, c);
-			else
+			} else {
 				worker = randomReadWriteClient<Transaction>(cx, this, actorCount / transactionsPerSecond, c);
+			}
 			clients.push_back(worker);
 		}
 
@@ -545,11 +546,12 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	}
 
 	int64_t getRandomKey(uint64_t nodeCount) {
-		if (forceHotProbability && deterministicRandom()->random01() < forceHotProbability)
+		if (forceHotProbability && deterministicRandom()->random01() < forceHotProbability) {
 			return deterministicRandom()->randomInt64(0, nodeCount * hotKeyFraction) /
 			       hotKeyFraction; // spread hot keys over keyspace
-		else
+		} else {
 			return deterministicRandom()->randomInt64(0, nodeCount);
+		}
 	}
 
 	double sweepAlpha(double startTime) {

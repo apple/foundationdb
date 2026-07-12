@@ -217,7 +217,7 @@ Future<int> consistencyCheckReadData(UID myId,
 	req.tags = TagSet();
 
 	// buggify read limits in simulation
-	if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+	if (g_network->isSimulated() && buggify(0.01)) {
 		if (deterministicRandom()->coinflip()) {
 			req.limit = deterministicRandom()->randomInt(2, 10);
 		}
@@ -1115,7 +1115,7 @@ Future<Void> sometimesRandomlyClearStatsInSim(Database db, Reference<Consistency
 	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	ConsistencyScanState cs;
 
-	if (BUGGIFY_WITH_PROB(0.1) && !g_simulator->speedUpSimulation) {
+	if (buggify(0.1) && !g_simulator->speedUpSimulation) {
 		TraceEvent("ConsistencyScan_RandomStatClearWaiting", memState->csId).log();
 		co_await delay(deterministicRandom()->randomInt(1, 60));
 
@@ -1245,14 +1245,14 @@ Future<bool> getKeyServers(
 	std::vector<Future<ErrorOr<GetKeyServerLocationsReply>>> keyServerLocationFutures;
 	Key begin = kr.begin;
 	Key end = kr.end;
-	int limitKeyServers = BUGGIFY ? 1 : 100;
+	int limitKeyServers = buggify() ? 1 : 100;
 	Span span(SpanContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64()),
 	          "WL:ConsistencyCheck"_loc);
 
 	while (begin < end) {
 		Reference<CommitProxyInfo> commitProxyInfo = co_await cx->getCommitProxiesFuture(UseProvisionalProxies::False);
 		keyServerLocationFutures.clear();
-		for (int i = 0; i < commitProxyInfo->size(); i++)
+		for (int i = 0; i < commitProxyInfo->size(); i++) {
 			keyServerLocationFutures.push_back(
 			    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
 			        .getReplyUnlessFailedFor(
@@ -1260,6 +1260,7 @@ Future<bool> getKeyServers(
 			                span.context, begin, end, limitKeyServers, false, latestVersion, Arena()),
 			            2,
 			            0));
+		}
 
 		bool keyServersInsertedForThisIteration = false;
 
@@ -1720,11 +1721,12 @@ Future<Void> checkDataConsistency(Database cx,
 				for (int s = 0; s < serverListValues.size(); s++) {
 					if (serverListValues[s].present())
 						storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
-					else if (performQuiescentChecks)
+					else if (performQuiescentChecks) {
 						testFailure("/FF/serverList changing in a quiescent database",
 						            performQuiescentChecks,
 						            success,
 						            failureIsError);
+					}
 				}
 
 				break;
@@ -1759,13 +1761,13 @@ Future<Void> checkDataConsistency(Database cx,
 
 		if (firstClient) {
 			// If there was an error retrieving shard estimated size
-			if (performQuiescentChecks && estimatedBytes.empty())
+			if (performQuiescentChecks && estimatedBytes.empty()) {
 				testFailure("Error fetching storage metrics", performQuiescentChecks, success, failureIsError);
-
-			// If running a distributed test, storage server size is an accumulation of shard estimates
-			else if (distributed && firstClient)
+			} else if (distributed) {
+				// If running a distributed test, storage server size is an accumulation of shard estimates
 				for (int j = 0; j < storageServers.size(); j++)
 					storageServerSizes[storageServers[j]] += std::max(estimatedBytes[j], (int64_t)0);
+			}
 		}
 
 		// The first client may need to skip the rest of the loop contents if it is just processing this shard to

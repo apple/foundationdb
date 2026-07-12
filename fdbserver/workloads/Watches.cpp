@@ -25,7 +25,6 @@
 #include "flow/Coroutines.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchesWorkload : TestWorkload {
 	static constexpr auto NAME = "Watches";
@@ -59,10 +58,11 @@ struct WatchesWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override {
 		// return _setup(cx, this);
 		std::vector<Future<Void>> setupActors;
-		for (int i = 0; i < nodes; i++)
+		for (int i = 0; i < nodes; i++) {
 			if (i % clientCount == clientId)
 				setupActors.push_back(
 				    watcherInit(cx, keyForIndex(nodeOrder[i]), keyForIndex(nodeOrder[i + 1]), extraPerNode));
+		}
 
 		co_await waitForAll(setupActors);
 
@@ -159,7 +159,7 @@ struct WatchesWorkload : TestWorkload {
 						//TraceEvent("WatcherWatch").detail("Watch", printable(watchKey));
 						Future<Void> watchFuture = tr->watch(makeReference<Watch>(watchKey, watchValue));
 						co_await tr->commit();
-						if (BUGGIFY) {
+						if (buggify()) {
 							// Make watch future outlive transaction
 							tr.reset();
 						}
@@ -200,8 +200,9 @@ struct WatchesWorkload : TestWorkload {
 				if (startValue.present()) {
 					if (isValue)
 						expectedValue = assignedValue;
-				} else
+				} else {
 					expectedValue = assignedValue;
+				}
 
 				if (expectedValue.present())
 					tr->set(startKey, expectedValue.get());
