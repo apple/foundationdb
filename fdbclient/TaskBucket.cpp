@@ -450,6 +450,9 @@ public:
 			}
 			co_return true;
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			err = e;
 		}
 		TraceEvent(SevWarn, "TaskBucketExecuteFailure")

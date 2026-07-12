@@ -32,6 +32,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	int numRecoveries;
 	double delayBetweenRecoveries;
 	double killAllProportion;
+	bool injectFailureAfterFirstRecovery;
 	Optional<int32_t> originalNumOfResolvers;
 	Optional<int32_t> currentNumOfResolvers;
 
@@ -40,6 +41,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		numRecoveries = getOption(options, "numRecoveries"_sr, deterministicRandom()->randomInt(1, 10));
 		delayBetweenRecoveries = getOption(options, "delayBetweenRecoveries"_sr, 0.0);
 		killAllProportion = getOption(options, "killAllProportion"_sr, 0.1);
+		injectFailureAfterFirstRecovery = getOption(options, "injectFailureAfterFirstRecovery"_sr, false);
 		ASSERT((numRecoveries > 0) && (startTime >= 0) && (delayBetweenRecoveries >= 0));
 		TraceEvent(SevInfo, "TriggerRecoveryLoopSetup")
 		    .detail("StartTime", startTime)
@@ -149,6 +151,9 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 				}
 				numRecoveriesDone++;
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedRecovery").detail("RecoveryNum", numRecoveriesDone);
+				if (injectFailureAfterFirstRecovery && numRecoveriesDone == 1) {
+					throw operation_failed();
+				}
 				if (numRecoveriesDone == numRecoveries) {
 					break;
 				}
@@ -165,10 +170,19 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		}
 	}
 
+	Future<Void> startAndCheckExpectedFailure(Database cx) {
+		ErrorOr<Void> result = co_await coro::errorOr(_start(cx));
+		ASSERT(result.isError());
+		ASSERT_EQ(result.getError().code(), error_code_operation_failed);
+
+		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
+		ASSERT_EQ(config.getDesiredResolvers(), originalNumOfResolvers.get());
+	}
+
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _start(cx);
+		return injectFailureAfterFirstRecovery ? startAndCheckExpectedFailure(cx) : _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
