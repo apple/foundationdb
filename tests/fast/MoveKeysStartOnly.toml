@@ -1,0 +1,12 @@
+[configuration]
+generateFearless = false
+disableTss = true
+
+[[knobs]]
+max_added_sources_multiplier = 0
+
+[[test]]
+testTitle = 'MoveKeysStartOnly'
+
+    [[test.workload]]
+    testName = 'MoveKeysStartOnly'

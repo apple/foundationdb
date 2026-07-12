@@ -76,14 +76,16 @@ TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/DestinationSourceTransit
 	ShardsAffectedByTeamFailure shards;
 	shards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
 
-	const UID source1(1, 0), source2(2, 0), destination1(3, 0), destination2(4, 0);
+	const UID source1(1, 0), source2(2, 0), destination1(3, 0), destination2(4, 0), redirected1(5, 0),
+	    redirected2(6, 0);
 	const ShardsAffectedByTeamFailure::Team source({ source1, source2 }, true);
 	const ShardsAffectedByTeamFailure::Team destination({ destination1, destination2 }, true);
+	const ShardsAffectedByTeamFailure::Team redirected({ redirected1, redirected2 }, true);
 	const KeyRange moveRange = KeyRangeRef("a"_sr, "c"_sr);
 
 	shards.assignRangeToTeams(allKeys, { source });
 	shards.defineShard(moveRange);
-	shards.rawMoveShard(moveRange, { source }, { destination });
+	shards.moveShard(moveRange, { destination });
 
 	auto teams = shards.getTeamsForFirstShard(moveRange);
 	ASSERT(teams.first == std::vector<ShardsAffectedByTeamFailure::Team>{ destination });
@@ -98,14 +100,29 @@ TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/DestinationSourceTransit
 	ASSERT_EQ(shards.getNumberOfShards(destination2), 1);
 	ASSERT(shards.getShardsFor(destination) == std::vector<KeyRange>{ moveRange });
 
+	shards.moveShard(moveRange, { redirected });
+
+	teams = shards.getTeamsForFirstShard(moveRange);
+	ASSERT(teams.first == std::vector<ShardsAffectedByTeamFailure::Team>{ redirected });
+	ASSERT((teams.second == std::vector<ShardsAffectedByTeamFailure::Team>{ source, destination }));
+	ASSERT((shards.getSourceServerIdsFor(moveRange.begin) ==
+	        std::vector<UID>{ source1, source2, destination1, destination2 }));
+	ASSERT_EQ(shards.getNumberOfShards(source), 2);
+	ASSERT_EQ(shards.getNumberOfShards(destination), 0);
+	ASSERT_EQ(shards.getNumberOfShards(redirected), 1);
+	ASSERT_EQ(shards.getNumberOfShards(redirected1), 1);
+	ASSERT_EQ(shards.getNumberOfShards(redirected2), 1);
+	ASSERT(shards.getShardsFor(redirected) == std::vector<KeyRange>{ moveRange });
+
 	shards.finishMove(moveRange);
 
 	teams = shards.getTeamsForFirstShard(moveRange);
-	ASSERT(teams.first == std::vector<ShardsAffectedByTeamFailure::Team>{ destination });
+	ASSERT(teams.first == std::vector<ShardsAffectedByTeamFailure::Team>{ redirected });
 	ASSERT(teams.second.empty());
-	ASSERT((shards.getSourceServerIdsFor(moveRange.begin) == std::vector<UID>{ destination1, destination2 }));
+	ASSERT((shards.getSourceServerIdsFor(moveRange.begin) == std::vector<UID>{ redirected1, redirected2 }));
 	ASSERT_EQ(shards.getNumberOfShards(source), 2);
-	ASSERT_EQ(shards.getNumberOfShards(destination), 1);
+	ASSERT_EQ(shards.getNumberOfShards(destination), 0);
+	ASSERT_EQ(shards.getNumberOfShards(redirected), 1);
 
 	return Void();
 }
