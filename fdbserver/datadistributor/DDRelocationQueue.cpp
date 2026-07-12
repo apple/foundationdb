@@ -2846,8 +2846,7 @@ struct DDQueueImpl {
 		FutureStream<RelocateData> completedRelocations;
 		PromiseStream<KeyRange> rangesComplete;
 		PromiseStream<Void> launchQueuedWorkTrigger;
-		// These handlers were a single choose loop before the coroutine conversion. Keep queue
-		// mutations serialized so inline stream callbacks cannot observe partially updated state.
+		// Serialize queue mutations so inline stream callbacks cannot observe partially updated state.
 		FlowLock queueMutationLock;
 	};
 
