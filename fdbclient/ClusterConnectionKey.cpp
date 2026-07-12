@@ -87,8 +87,9 @@ Future<bool> ClusterConnectionKey::upToDateImpl(Reference<ClusterConnectionKey> 
 		*connectionString = temp->getConnectionString();
 		co_return connectionString->toString() == self->cs.toString();
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
+		if (e.code() == error_code_actor_cancelled) {
 			throw;
+		}
 		TraceEvent(SevWarnAlways, "ClusterKeyError").error(e).detail("Key", self->connectionStringKey);
 		co_return false; // Swallow the error and report that the file is out of date
 	}
@@ -157,8 +158,9 @@ Future<bool> ClusterConnectionKey::persistImpl(Reference<ClusterConnectionKey> s
 			co_await tr.onError(err);
 		}
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
+		if (e.code() == error_code_actor_cancelled) {
 			throw;
+		}
 		TraceEvent(SevWarnAlways, "UnableToChangeConnectionKey")
 		    .error(e)
 		    .detail("ConnectionKey", self->connectionStringKey)

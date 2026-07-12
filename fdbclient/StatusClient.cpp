@@ -370,8 +370,9 @@ AsyncResult<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<IC
 		*coordinatorsFaultTolerance = (leaderServers.size() - 1) / 2 - coordinatorsUnavailable;
 		co_return statusObj;
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
+		if (e.code() == error_code_actor_cancelled) {
 			throw;
+		}
 		*quorum_reachable = false;
 		co_return Optional<StatusObject>();
 	}
@@ -593,8 +594,9 @@ AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> 
 
 			statusObj["cluster"] = statusObjCluster;
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
+			if (e.code() == error_code_actor_cancelled) {
 				throw;
+			}
 			TraceEvent(e.code() == error_code_all_alternatives_failed ? SevInfo : SevError, "ClusterStatusFetchError")
 			    .error(e);
 			// Set client.messages to an array of one message

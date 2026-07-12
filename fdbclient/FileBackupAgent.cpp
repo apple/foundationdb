@@ -157,8 +157,9 @@ Future<bool> verifyBulkDumpDatasetCompleteness(Reference<IBackupContainer> bc, s
 		}
 
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
+		if (e.code() == error_code_actor_cancelled) {
 			throw;
+		}
 		TraceEvent(SevWarn, "BulkLoadVerifyDatasetError").error(e).detail("BulkDumpJobId", bulkDumpJobId);
 		co_return false;
 	}
@@ -700,8 +701,9 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 				    .detail("BytesWritten", bytes);
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
+			if (e.code() == error_code_actor_cancelled) {
 				throw;
+			}
 			// Log but don't fail - progress updates are best-effort
 			TraceEvent(SevWarn, "BulkLoadRestoreProgressError").error(e).detail("JobId", jobId);
 		}
@@ -3771,8 +3773,9 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					co_await setBulkDumpMode(cx, originalBulkDumpMode);
 				}
 			} catch (Error& e2) {
-				if (e2.code() == error_code_actor_cancelled)
+				if (e2.code() == error_code_actor_cancelled) {
 					throw;
+				}
 				TraceEvent(SevWarn, "BulkDumpTaskRestoreModeError").error(e2);
 			}
 			throw savedError;
@@ -4336,8 +4339,9 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					co_await setBulkLoadMode(cx, originalBulkLoadMode);
 				}
 			} catch (Error& e2) {
-				if (e2.code() == error_code_actor_cancelled)
+				if (e2.code() == error_code_actor_cancelled) {
 					throw;
+				}
 				TraceEvent(SevWarn, "BulkLoadRestoreRestoreModeError").error(e2);
 			}
 			throw savedError;
