@@ -1430,8 +1430,6 @@ public:
 				state std::vector<Future<Void>> otherChanges;
 				std::vector<Promise<Void>> wakeUpTrackers;
 				for (const auto& i : self->server_and_tss_info) {
-					if (self->db->isMocked())
-						continue;
 					if (i.second.getPtr() != server &&
 					    i.second->getLastKnownInterface().address() == server->getLastKnownInterface().address()) {
 						auto& statusInfo = self->server_status.get(i.first);
@@ -3528,14 +3526,12 @@ public:
 			// they are always running.
 			self->addActor.send(self->monitorHealthyTeams());
 
-			if (!self->db->isMocked()) {
-				self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
-				self->addActor.send(self->monitorStorageServerRecruitment());
-				self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
-				self->addActor.send(self->trackExcludedServers());
-				self->addActor.send(self->waitHealthyZoneChange());
-				self->addActor.send(self->monitorPerpetualStorageWiggle());
-			}
+			self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
+			self->addActor.send(self->monitorStorageServerRecruitment());
+			self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
+			self->addActor.send(self->trackExcludedServers());
+			self->addActor.send(self->waitHealthyZoneChange());
+			self->addActor.send(self->monitorPerpetualStorageWiggle());
 			// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
 			loop choose {
@@ -4358,7 +4354,6 @@ void DDTeamCollection::fixUnderReplication() {
 }
 
 Future<Void> DDTeamCollection::trackExcludedServers() {
-	ASSERT(!db->isMocked());
 	return DDTeamCollectionImpl::trackExcludedServers(this);
 }
 
@@ -4381,7 +4376,6 @@ Future<Void> DDTeamCollection::perpetualStorageWiggler(AsyncVar<bool>& stopSigna
 }
 
 Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle() {
-	ASSERT(!db->isMocked());
 	return DDTeamCollectionImpl::monitorPerpetualStorageWiggle(this);
 }
 
@@ -4391,7 +4385,6 @@ Future<Void> DDTeamCollection::waitServerListChange(FutureStream<Void> serverRem
 }
 
 Future<Void> DDTeamCollection::waitHealthyZoneChange() {
-	ASSERT(!db->isMocked());
 	return DDTeamCollectionImpl::waitHealthyZoneChange(this);
 }
 
@@ -4440,8 +4433,6 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 }
 
 Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
-	if (db->isMocked())
-		return Never();
 	return DDTeamCollectionImpl::updateStorageMetadata(this, server);
 }
 

@@ -63,7 +63,6 @@
 #include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "flow/IConnection.h"
-#include "fdbserver/datadistributor/MockGlobalState.h"
 #include "flow/CoroUtils.h"
 
 #undef max
@@ -2220,10 +2219,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           ProtocolVersion protocolVersion) {
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
-
-	if (testConfig.testClass == MOCK_DD_TEST_CLASS) {
-		MockGlobalState::g_mockState()->initializeClusterLayout(simconfig);
-	}
 
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;

@@ -1290,7 +1290,6 @@ void DDQueue::updateLastAsSource(const std::vector<UID>& ids, double t) {
 
 // Schedules cancellation of a data move.
 void DDQueue::enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDEnabledState* ddEnabledState) {
-	ASSERT(!txnProcessor->isMocked()); // the mock implementation currently doesn't support data move
 	std::vector<Future<Void>> cleanup;
 	auto f = this->dataMoves.intersectingRanges(range);
 	for (auto it = f.begin(); it != f.end(); ++it) {

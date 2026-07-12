@@ -271,9 +271,6 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml IGNORE)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
 
-    # Mock DD Tests
-    add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml IGNORE)
-    add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml IGNORE)
     add_fdb_test(TEST_FILES rare/PerpetualWiggleStorageMigration.toml)
   else()
     add_fdb_test(TEST_FILES fast/ValidateStorage.toml IGNORE)
@@ -286,9 +283,6 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
     add_fdb_test(TEST_FILES rare/PerpetualWiggleStorageMigration.toml IGNORE)
 
-    # Mock DD Tests
-    add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml)
-    add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml)
   endif()
 
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
