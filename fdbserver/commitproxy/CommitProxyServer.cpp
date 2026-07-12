@@ -2131,6 +2131,9 @@ Future<Void> commitBatch(ProxyCommitData* pCommitData,
 	try {
 		co_await timeoutError(commit, SERVER_KNOBS->COMMIT_PROXY_LIVENESS_TIMEOUT);
 	} catch (Error& err) {
+		if (err.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid)
 		    .detail("Stage", context.stage)
 		    .detail("ErrorCode", err.code());

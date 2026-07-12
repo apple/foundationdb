@@ -460,6 +460,8 @@ public:
 		try {
 			co_await taskFunc->handleError(cx, task, err);
 		} catch (Error& handleErr) {
+			if (handleErr.code() == error_code_actor_cancelled)
+				throw;
 			TraceEvent(SevWarn, "TaskBucketExecuteFailureLogErrorFailed")
 			    .error(handleErr) // output handleError() error instead of original task error
 			    .detail("TaskUID", task->key.printable())

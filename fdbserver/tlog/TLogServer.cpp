@@ -1339,6 +1339,7 @@ Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Reference<Log
 				    .detail("Tag", tag.toString())
 				    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
 				    .detail("RecoveredAt", logData->recoveredAt)
+				    .setMaxFieldLength(495)
 				    .detail("UnpoppedTags", describe(logData->unpoppedRecoveredTags));
 				if (logData->unpoppedRecoveredTagCount == 0 &&
 				    logData->durableKnownCommittedVersion >= logData->recoveredAt &&

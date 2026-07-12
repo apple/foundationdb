@@ -87,7 +87,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 			                        ? self->originalNumOfResolvers.get() + 1
 			                        : self->originalNumOfResolvers.get();
 		}
-		StringRef configStr(format("resolvers=%d", numResolversToSet));
+		Standalone<StringRef> configStr = StringRef(format("resolvers=%d", numResolversToSet));
 		while (true) {
 			Optional<ConfigureAutoResult> conf;
 			ConfigurationResult r = co_await ManagementAPI::changeConfig(cx.getReference(), { configStr }, conf, true);
@@ -139,6 +139,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	Future<Void> _start(Database cx) {
 		co_await delay(startTime);
 		int numRecoveriesDone = 0;
+		Optional<Error> error;
 		try {
 			while (true) {
 				if (deterministicRandom()->random01() < killAllProportion) {
@@ -155,9 +156,13 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 				co_await returnIfClusterRecovered(cx);
 			}
 		} catch (Error& e) {
-			// Dummy catch here to give a chance to reset number of resolvers to its original value
+			// Reset the resolver count before propagating the original failure.
+			error = e;
 		}
 		co_await changeResolverConfig(cx, this, true);
+		if (error.present()) {
+			throw error.get();
+		}
 	}
 
 	Future<Void> start(Database const& cx) override {

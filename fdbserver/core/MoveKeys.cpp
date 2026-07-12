@@ -494,6 +494,9 @@ Future<bool> validateRangeAssignment(Database occ,
 			    .detail("Range", range)
 			    .detail("StorageServer", ssid);
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent(SevWarnAlways, "ValidateRangeAssignmentCorruptionDetectedButFailedToStopDD")
 			    .detail("DataMoveID", dataMoveId)
 			    .detail("Range", range)
