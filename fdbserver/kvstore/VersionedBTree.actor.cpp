@@ -5151,7 +5151,8 @@ public:
 	Future<Void> init() { return m_init; }
 
 	virtual ~VersionedBTree() {
-		m_latestCommit.cancel();
+		// Release the latest commit coroutine and its previousCommit chain before tearing down the tree state.
+		m_latestCommit = Future<Void>();
 		m_lazyClearActor.cancel();
 		m_init.cancel();
 	}
@@ -9759,6 +9760,46 @@ Future<Void> commitAndReportLoadProgress(VersionedBTree* btree,
 }
 
 } // namespace
+
+TEST_CASE("Lredwood/correctness/btreeCloseWithQueuedCommits") {
+	g_redwoodMetricsActor = Void();
+	g_redwoodMetrics.clear();
+
+	state std::string file = "unittest_btree-queued-commit.redwood-v1";
+	deleteFile(file);
+
+	state VersionedBTree* btree = new VersionedBTree(new DWALPager(4096,
+	                                                               SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE,
+	                                                               file,
+	                                                               FLOW_KNOBS->PAGE_CACHE_4K,
+	                                                               0,
+	                                                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
+	                                                               false),
+	                                                 file,
+	                                                 UID(),
+	                                                 {});
+	wait(btree->init());
+
+	state Version version = btree->getLastCommittedVersion();
+	btree->set(KeyValueRef("a"_sr, "first"_sr));
+	state Future<Void> firstCommit = btree->commit(++version);
+	ASSERT(!firstCommit.isReady());
+
+	btree->set(KeyValueRef("b"_sr, "second"_sr));
+	state Future<Void> secondCommit = btree->commit(++version);
+	ASSERT(!secondCommit.isReady());
+
+	// The tree owns the commit chain when it is closed; callers must not keep commit futures alive.
+	firstCommit = Future<Void>();
+	secondCommit = Future<Void>();
+	Future<Void> closedFuture = btree->onClosed();
+	btree->dispose();
+	wait(closedFuture);
+	wait(delay(0));
+	ASSERT(DWALPager::PageCacheT::Evictor::getEvictor()->empty());
+
+	return Void();
+}
 
 TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
