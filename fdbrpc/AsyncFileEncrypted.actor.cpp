@@ -50,8 +50,8 @@ public:
 		state Arena arena;
 		state int rawBlockSize = self->encryptionBlockSize + GCM_TAG_LEN;
 		state unsigned char* encrypted = new (arena) unsigned char[rawBlockSize];
-		int bytes = wait(uncancellable(
-		    holdWhile(arena, self->file->read(encrypted, rawBlockSize, int64_t(rawBlockSize) * block))));
+		int bytes = wait(
+		    uncancellable(holdWhile(arena, self->file->read(encrypted, rawBlockSize, int64_t(rawBlockSize) * block))));
 		if (bytes < GCM_TAG_LEN) {
 			throw restore_corrupted_data();
 		}
