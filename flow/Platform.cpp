@@ -142,9 +142,6 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <sys/sysctl.h>
 #include <sys/vmmeter.h>
 #include <sys/cpuset.h>
-#include <sys/resource.h>
-/* Needed for sysctl info */
-#include <sys/sysctl.h>
 #include <sys/fcntl.h>
 /* Needed for network info */
 #include <net/if.h>
@@ -161,7 +158,6 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 
 #ifdef __APPLE__
 /* Needed for cross-platform 'environ' */
-#include <sys/random.h>
 #include <crt_externs.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
@@ -1843,7 +1839,6 @@ struct OffsetTimer {
 
 #elif defined(__APPLE__)
 
-#include <mach/mach.h>
 #include <mach/mach_time.h>
 
 struct OffsetTimer {
