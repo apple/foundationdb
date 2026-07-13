@@ -4,7 +4,7 @@ import io
 import re
 import sys
 from dataclasses import dataclass
-from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, Iterator, List, Tuple
 
 from .errors import ActorCompilerError
 from .actor_compiler import ActorCompiler

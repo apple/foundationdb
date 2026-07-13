@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .errors import ActorCompilerError
