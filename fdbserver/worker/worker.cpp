@@ -1995,37 +1995,928 @@ Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionReco
 #endif
 } // namespace
 
-static auto waitForWorkerServerEvent(WorkerInterface& interf,
-                                     Future<Void> const& loggingTrigger,
-                                     ActorCollection& errorForwarders,
-                                     Future<Void> const& handleErrors) {
-	return race(interf.updateServerDBInfo.getFuture(),
-	            interf.clientInterface.reboot.getFuture(),
-	            interf.clientInterface.setFailureInjection.getFuture(),
-	            interf.clientInterface.profiler.getFuture(),
-	            interf.master.getFuture(),
-	            interf.dataDistributor.getFuture(),
-	            interf.ratekeeper.getFuture(),
-	            interf.consistencyScan.getFuture(),
-	            interf.backup.getFuture(),
-	            interf.rangePartitionedBackup.getFuture(),
-	            interf.tLog.getFuture(),
-	            interf.storage.getFuture(),
-	            interf.commitProxy.getFuture(),
-	            interf.grvProxy.getFuture(),
-	            interf.cdcProxy.getFuture(),
-	            interf.resolver.getFuture(),
-	            interf.logRouter.getFuture(),
-	            interf.coordinationPing.getFuture(),
-	            interf.setMetricsRate.getFuture(),
-	            interf.eventLogRequest.getFuture(),
-	            interf.traceBatchDumpRequest.getFuture(),
-	            interf.diskStoreRequest.getFuture(),
-	            loggingTrigger,
-	            interf.workerSnapReq.getFuture(),
-	            errorForwarders.getResult(),
-	            handleErrors);
-}
+class WorkerServerCore {
+	WorkerInterface& interf;
+	Reference<IClusterConnectionRecord> connRecord;
+	Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface;
+	LocalityData locality;
+	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<Optional<UID>>> clusterId;
+	std::string const& folder;
+	std::string const& tLogSpillFolder;
+	std::string const& coordFolder;
+	std::string const& whitelistBinPaths;
+	int64_t memoryLimit;
+	PromiseStream<ErrorInfo> errors;
+	ActorCollection& errorForwarders;
+	ActorCollection& filesClosed;
+	Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf;
+	Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf;
+	Reference<AsyncVar<Optional<ConsistencyScanInterface>>> csInterf;
+	Reference<AsyncVar<bool>> degraded;
+	Reference<AsyncVar<bool>> lowDiskTLogExclusion;
+	Reference<AsyncVar<UID>> activeSharedTLog;
+	Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck;
+	std::map<SharedLogsKey, std::vector<SharedLogsValue>>& sharedLogs;
+	WorkerCache<InitializeBackupReply>& backupWorkerCache;
+	WorkerCache<InitializeRangePartitionedBackupReply>& rangePartitionedBackupWorkerCache;
+	WorkerCache<TLogInterface>& logRouterCache;
+	std::set<std::pair<UID, KeyValueStoreType>>& runningStorages;
+	std::unordered_map<UID, StorageDiskCleaner>& storageCleaners;
+	Promise<Void>& rebootKVSPromise2;
+	Future<Void>& updateClusterIdFuture;
+	Future<Void>& loggingTrigger;
+	double& loggingDelay;
+	WorkerSnapRequest& lastSnapReq;
+	std::map<std::string, WorkerSnapRequest>& snapReqMap;
+	std::map<std::string, ErrorOr<Void>>& snapReqResultMap;
+	double& lastSnapTime;
+
+	Future<Void> serveServerDBInfoUpdates() {
+		while (true) {
+			UpdateServerDBInfoRequest req = co_await interf.updateServerDBInfo.getFuture();
+
+			auto localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo,
+			                                                           AssumeVersion(g_network->protocolVersion()));
+			localInfo.myLocality = locality;
+
+			if (localInfo.infoGeneration < dbInfo->get().infoGeneration &&
+			    localInfo.clusterInterface == dbInfo->get().clusterInterface) {
+				std::vector<Endpoint> rep = req.broadcastInfo;
+				rep.push_back(interf.updateServerDBInfo.getEndpoint());
+				req.reply.send(rep);
+			} else {
+				Optional<Endpoint> notUpdated;
+				if (!ccInterface->get().present() || localInfo.clusterInterface != ccInterface->get().get()) {
+					notUpdated = interf.updateServerDBInfo.getEndpoint();
+				} else if (localInfo.infoGeneration > dbInfo->get().infoGeneration ||
+				           dbInfo->get().clusterInterface != ccInterface->get().get()) {
+					TraceEvent("GotServerDBInfoChange")
+					    .detail("ChangeID", localInfo.id)
+					    .detail("InfoGeneration", localInfo.infoGeneration)
+					    .detail("MasterID", localInfo.master.id())
+					    .detail("RatekeeperID",
+					            localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
+					    .detail("DataDistributorID",
+					            localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
+					dbInfo->set(localInfo);
+				}
+				errorForwarders.add(
+				    success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
+
+				if (!updateClusterIdFuture.isValid() && !clusterId->get().present() &&
+				    localInfo.client.clusterId.isValid()) {
+					updateClusterIdFuture = updateClusterId(localInfo.client.clusterId, clusterId, folder);
+				}
+			}
+		}
+	}
+
+	Future<Void> handleRebootRequest(RebootRequest req) {
+		RebootRequest rebootReq = req;
+		// If suspendDuration is INT_MAX, the trace will not be logged if it was inside the next block
+		// Also a useful trace to have even if suspendDuration is 0
+		TraceEvent("RebootRequestSuspendingProcess").detail("Duration", req.waitForDuration);
+		if (req.waitForDuration) {
+			flushTraceFileVoid();
+			setProfilingEnabled(0);
+			g_network->stop();
+			threadSleep(req.waitForDuration);
+		}
+		if (rebootReq.checkData) {
+			Reference<IAsyncFile> checkFile = co_await IAsyncFileSystem::filesystem()->open(
+			    joinPath(folder, validationFilename), IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0600);
+			co_await checkFile->sync();
+		}
+
+		if (g_network->isSimulated()) {
+			TraceEvent("SimulatedReboot").detail("Deletion", rebootReq.deleteData);
+			if (rebootReq.deleteData) {
+				throw please_reboot_delete();
+			}
+			throw please_reboot();
+		} else {
+			TraceEvent("ProcessReboot").log();
+			ASSERT(!rebootReq.deleteData);
+			flushAndExit(0);
+		}
+	}
+
+	Future<Void> serveFailureInjectionRequests() {
+		while (true) {
+			SetFailureInjection req = co_await interf.clientInterface.setFailureInjection.getFuture();
+
+			if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+				if (req.diskFailure.present()) {
+					auto diskFailureInjector = DiskFailureInjector::injector();
+					diskFailureInjector->setDiskFailure(req.diskFailure.get().stallInterval,
+					                                    req.diskFailure.get().stallPeriod,
+					                                    req.diskFailure.get().throttlePeriod);
+				} else if (req.flipBits.present()) {
+					auto bitFlipper = BitFlipper::flipper();
+					bitFlipper->setBitFlipPercentage(req.flipBits.get().percentBitFlips);
+				}
+				req.reply.send(Void());
+			} else {
+				req.reply.sendError(client_invalid_operation());
+			}
+		}
+	}
+
+	Future<Void> serveProfilerRequests() {
+		while (true) {
+			ProfilerRequest req = co_await interf.clientInterface.profiler.getFuture();
+
+			ProfilerRequest profilerReq = req;
+			// There really isn't a great "filepath sanitizer" or "filepath escape" function available,
+			// thus we instead enforce a different requirement.  One can only write to a file that's
+			// beneath the working directory, and we remove the ability to do any symlink or ../..
+			// tricks by resolving all paths through `abspath` first.
+			try {
+				std::string realLogDir = abspath(SERVER_KNOBS->LOG_DIRECTORY);
+				std::string realOutPath = abspath(realLogDir + "/" + profilerReq.outputFile.toString());
+				if (realLogDir.size() < realOutPath.size() &&
+				    strncmp(realLogDir.c_str(), realOutPath.c_str(), realLogDir.size()) == 0) {
+					profilerReq.outputFile = realOutPath;
+					uncancellable(runProfiler(profilerReq));
+					profilerReq.reply.send(Void());
+				} else {
+					profilerReq.reply.sendError(client_invalid_operation());
+				}
+			} catch (Error& e) {
+				profilerReq.reply.sendError(e);
+			}
+		}
+	}
+
+	Future<Void> serveMasterRecruitment() {
+		while (true) {
+			RecruitMasterRequest req = co_await interf.master.getFuture();
+
+			LocalLineage _;
+			getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Master;
+			MasterInterface recruited;
+			recruited.locality = locality;
+			recruited.initEndpoints();
+
+			startRole(Role::MASTER, recruited.id(), interf.id());
+
+			DUMPTOKEN(recruited.waitFailure);
+			DUMPTOKEN(recruited.getCommitVersion);
+			DUMPTOKEN(recruited.getLiveCommittedVersion);
+			DUMPTOKEN(recruited.reportLiveCommittedVersion);
+			DUMPTOKEN(recruited.updateRecoveryData);
+
+			// printf("Recruited as masterServer\n");
+			Future<Void> masterProcess = masterServer(
+			    recruited, dbInfo, ccInterface, ServerCoordinators(connRecord), req.lifetime, req.forceRecovery);
+			errorForwarders.add(zombie(recruited, forwardError(errors, Role::MASTER, recruited.id(), masterProcess)));
+			req.reply.send(recruited);
+		}
+	}
+
+	Future<Void> serveDataDistributorRecruitment() {
+		while (true) {
+			InitializeDataDistributorRequest req = co_await interf.dataDistributor.getFuture();
+
+			LocalLineage _;
+			getCurrentLineage()->modify(&RoleLineage::role) = recruitment::DataDistributor;
+			DataDistributorInterface recruited(locality, req.reqId);
+			recruited.initEndpoints();
+
+			if (ddInterf->get().present()) {
+				recruited = ddInterf->get().get();
+				CODE_PROBE(true, "Recruited while already a data distributor.");
+			} else {
+				startRole(Role::DATA_DISTRIBUTOR, recruited.id(), interf.id());
+				DUMPTOKEN(recruited.waitFailure);
+
+				Future<Void> dataDistributorProcess = dataDistributor(recruited, dbInfo, folder);
+				errorForwarders.add(forwardError(
+				    errors,
+				    Role::DATA_DISTRIBUTOR,
+				    recruited.id(),
+				    setWhenDoneOrError(dataDistributorProcess, ddInterf, Optional<DataDistributorInterface>())));
+				ddInterf->set(Optional<DataDistributorInterface>(recruited));
+			}
+			TraceEvent("DataDistributorReceived", req.reqId)
+			    .detail("DataDistributorId", recruited.id())
+			    .detail("Folder", folder); // double check if this works with SS restore
+			req.reply.send(recruited);
+		}
+	}
+
+	Future<Void> serveRatekeeperRecruitment() {
+		while (true) {
+			InitializeRatekeeperRequest req = co_await interf.ratekeeper.getFuture();
+
+			LocalLineage _;
+			getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Ratekeeper;
+			RatekeeperInterface recruited(locality, req.reqId);
+			recruited.initEndpoints();
+
+			if (rkInterf->get().present()) {
+				recruited = rkInterf->get().get();
+				CODE_PROBE(true, "Recruited while already a ratekeeper.");
+			} else {
+				startRole(Role::RATEKEEPER, recruited.id(), interf.id());
+				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.getRateInfo);
+				DUMPTOKEN(recruited.haltRatekeeper);
+				DUMPTOKEN(recruited.reportCommitCostEstimation);
+
+				Future<Void> ratekeeperProcess = ratekeeper(recruited, dbInfo);
+				errorForwarders.add(
+				    forwardError(errors,
+				                 Role::RATEKEEPER,
+				                 recruited.id(),
+				                 setWhenDoneOrError(ratekeeperProcess, rkInterf, Optional<RatekeeperInterface>())));
+				rkInterf->set(Optional<RatekeeperInterface>(recruited));
+			}
+			TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
+			req.reply.send(recruited);
+		}
+	}
+
+	Future<Void> serveConsistencyScanRecruitment() {
+		while (true) {
+			InitializeConsistencyScanRequest req = co_await interf.consistencyScan.getFuture();
+
+			LocalLineage _;
+			getCurrentLineage()->modify(&RoleLineage::role) = recruitment::ConsistencyScan;
+			ConsistencyScanInterface recruited(locality, req.reqId);
+			recruited.initEndpoints();
+
+			if (csInterf->get().present()) {
+				recruited = csInterf->get().get();
+				CODE_PROBE(true, "Recovered while already a consistencyscan");
+			} else {
+				startRole(Role::CONSISTENCYSCAN, recruited.id(), interf.id());
+				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.haltConsistencyScan);
+
+				Future<Void> consistencyScanProcess = consistencyScan(recruited, dbInfo);
+				errorForwarders.add(forwardError(
+				    errors,
+				    Role::CONSISTENCYSCAN,
+				    recruited.id(),
+				    setWhenDoneOrError(consistencyScanProcess, csInterf, Optional<ConsistencyScanInterface>())));
+				csInterf->set(Optional<ConsistencyScanInterface>(recruited));
+			}
+			TraceEvent("ConsistencyScanReceived", req.reqId).detail("ConsistencyScanId", recruited.id());
+			req.reply.send(recruited);
+		}
+	}
+
+	Future<Void> serveBackupRecruitment() {
+		while (true) {
+			InitializeBackupRequest req = co_await interf.backup.getFuture();
+
+			if (!backupWorkerCache.exists(req.reqId)) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Backup;
+				BackupInterface recruited(locality);
+				recruited.initEndpoints();
+
+				startRole(Role::BACKUP, recruited.id(), interf.id());
+				DUMPTOKEN(recruited.waitFailure);
+
+				ReplyPromise<InitializeBackupReply> backupReady = req.reply;
+				backupWorkerCache.set(req.reqId, backupReady.getFuture());
+				Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
+				backupProcess = backupWorkerCache.removeOnReady(req.reqId, backupProcess);
+				errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
+				TraceEvent("BackupInitRequest", req.reqId).detail("BackupId", recruited.id());
+				InitializeBackupReply reply(recruited, req.backupEpoch);
+				backupReady.send(reply);
+			} else {
+				forwardPromise(Uncancellable{}, req.reply, backupWorkerCache.get(req.reqId));
+			}
+		}
+	}
+
+	Future<Void> serveRangePartitionedBackupRecruitment() {
+		while (true) {
+			InitializeRangePartitionedBackupRequest req = co_await interf.rangePartitionedBackup.getFuture();
+
+			if (!rangePartitionedBackupWorkerCache.exists(req.reqId)) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Backup;
+				BackupInterface recruited(locality);
+				recruited.initEndpoints();
+
+				startRole(Role::BACKUP, recruited.id(), interf.id());
+				DUMPTOKEN(recruited.waitFailure);
+
+				ReplyPromise<InitializeRangePartitionedBackupReply> backupReady = req.reply;
+				rangePartitionedBackupWorkerCache.set(req.reqId, backupReady.getFuture());
+				Future<Void> backupProcess = rangePartitionedBackupWorker(recruited, req, dbInfo);
+				backupProcess = rangePartitionedBackupWorkerCache.removeOnReady(req.reqId, backupProcess);
+				errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
+				TraceEvent("RangePartitionedBWInitRequest", req.reqId).detail("BackupId", recruited.id());
+				InitializeRangePartitionedBackupReply reply(recruited, req.backupEpoch);
+				backupReady.send(reply);
+			} else {
+				forwardPromise(Uncancellable{}, req.reply, rangePartitionedBackupWorkerCache.get(req.reqId));
+			}
+		}
+	}
+
+	Future<Void> serveTLogRecruitment() {
+		while (true) {
+			InitializeTLogRequest req = co_await interf.tLog.getFuture();
+
+			// For now, there's a one-to-one mapping of spill type to TLogVersion.
+			// With future work, a particular version of the TLog can support multiple
+			// different spilling strategies, at which point SpillType will need to be
+			// plumbed down into tLogFn.
+			if (req.logVersion < TLogVersion::MIN_RECRUITABLE) {
+				TraceEvent(SevError, "InitializeTLogInvalidLogVersion")
+				    .detail("Version", req.logVersion)
+				    .detail("MinRecruitable", TLogVersion::MIN_RECRUITABLE);
+				req.reply.sendError(internal_error());
+			}
+			LocalLineage _;
+			getCurrentLineage()->modify(&RoleLineage::role) = recruitment::TLog;
+			TLogOptions tLogOptions(req.logVersion, req.spillType);
+			TLogFn tLogFn = tLogFnForOptions(tLogOptions);
+			auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
+			while (!logData.empty() && (!logData.back().actor.isValid() || logData.back().actor.isReady())) {
+				logData.pop_back();
+			}
+			if (logData.empty()) {
+				UID logId = deterministicRandom()->randomUniqueID();
+				std::map<std::string, std::string> details;
+				details["ForMaster"] = req.recruitmentID.shortString();
+				details["StorageEngine"] = req.storeType.toString();
+
+				// FIXME: start role for every tlog instance, rather that just for the shared actor, also use a
+				// different role type for the shared actor
+				startRole(Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details);
+
+				const StringRef prefix =
+				    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
+				std::string filename =
+				    filenameFromId(req.storeType, tLogSpillFolder, prefix.toString() + tLogOptions.toPrefix(), logId);
+				IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit, false, false, dbInfo);
+				const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
+				IDiskQueue* queue = openDiskQueue(
+				    joinPath(folder, fileLogQueuePrefix.toString() + tLogOptions.toPrefix() + logId.toString() + "-"),
+				    tlogQueueExtension.toString(),
+				    logId,
+				    dqv);
+				filesClosed.add(data->onClosed());
+				filesClosed.add(queue->onClosed());
+
+				logData.push_back(SharedLogsValue());
+				Future<Void> tLogCore = tLogFn(data,
+				                               queue,
+				                               dbInfo,
+				                               locality,
+				                               logData.back().requests,
+				                               logId,
+				                               interf.id(),
+				                               false,
+				                               Promise<Void>(),
+				                               Promise<Void>(),
+				                               folder,
+				                               degraded,
+				                               lowDiskTLogExclusion,
+				                               activeSharedTLog,
+				                               enablePrimaryTxnSystemHealthCheck);
+				tLogCore = handleIOErrors(tLogCore, data, logId);
+				tLogCore = handleIOErrors(tLogCore, queue, logId);
+				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore));
+				logData.back().actor = tLogCore;
+				logData.back().uid = logId;
+			}
+			logData.back().requests.send(req);
+			activeSharedTLog->set(logData.back().uid);
+		}
+	}
+
+	Future<Void> serveStorageRecruitment() {
+		while (true) {
+			InitializeStorageRequest req = co_await interf.storage.getFuture();
+
+			TraceEvent e("StorageServerInitProgress", req.interfaceId);
+			e.detail("Step", "1.RequestReceived");
+			e.detail("ReqID", req.reqId);
+			e.detail("WorkerID", interf.id());
+			e.detail("StorageType", req.storeType.toString());
+			e.detail("SeedTag", req.seedTag.toString());
+			e.detail("IsTssPair", req.tssPairIDAndVersion.present());
+			if (req.tssPairIDAndVersion.present()) {
+				e.detail("TssPairID", req.tssPairIDAndVersion.get().first);
+			}
+			int j = 0;
+			for (const auto& runningStorage : runningStorages) {
+				e.detail("RunningStorageIDOnSameWorker" + std::to_string(j), runningStorage.first);
+				e.detail("RunningStorageEngineOnSameWorker" + std::to_string(j), runningStorage.second);
+				j++;
+			}
+			// We want to prevent double recruiting on a worker unless we try to recruit something
+			// with a different storage engine (otherwise storage migration won't work for certain
+			// configuration). Additionally we also need to allow double recruitment for seed servers.
+			// The reason for this is that a storage will only remove itself if after it was able
+			// to read the system key space. But if recovery fails right after a `configure new ...`
+			// was run it won't be able to do so.
+			if (std::all_of(runningStorages.begin(),
+			                runningStorages.end(),
+			                [&req](const auto& p) { return p.second != req.storeType; }) ||
+			    req.seedTag != invalidTag) {
+				ASSERT(req.initialClusterVersion >= 0);
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Storage;
+
+				// When a new storage server is recruited, we need to check if any other storage
+				// server has run on this worker process(a.k.a double recruitment). The previous storage
+				// server may have leftover disk files if it stopped with io_error or io_timeout. Now DD
+				// already repairs the team and it's time to start the cleanup
+				cleanupStorageDisks(dbInfo, storageCleaners, memoryLimit);
+
+				bool isTss = req.tssPairIDAndVersion.present();
+				StorageServerInterface recruited(req.interfaceId);
+				recruited.locality = locality;
+				recruited.tssPairID = isTss ? req.tssPairIDAndVersion.get().first : Optional<UID>();
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				details["StorageEngine"] = req.storeType.toString();
+				details["IsTSS"] = std::to_string(isTss);
+				Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
+				startRole(ssRole, recruited.id(), interf.id(), details);
+				TraceEvent("StorageServerInitProgress", recruited.id())
+				    .detail("ReqID", req.reqId)
+				    .detail("StorageType", req.storeType.toString())
+				    .detail("Step", "2.RoleStarted")
+				    .detail("WorkerID", interf.id());
+
+				DUMPTOKEN(recruited.getValue);
+				DUMPTOKEN(recruited.getKey);
+				DUMPTOKEN(recruited.getKeyValues);
+				DUMPTOKEN(recruited.getMappedKeyValues);
+				DUMPTOKEN(recruited.getShardState);
+				DUMPTOKEN(recruited.waitMetrics);
+				DUMPTOKEN(recruited.splitMetrics);
+				DUMPTOKEN(recruited.getReadHotRanges);
+				DUMPTOKEN(recruited.getRangeSplitPoints);
+				DUMPTOKEN(recruited.getStorageMetrics);
+				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.getQueuingMetrics);
+				DUMPTOKEN(recruited.getKeyValueStoreType);
+				DUMPTOKEN(recruited.watchValue);
+				DUMPTOKEN(recruited.getKeyValuesStream);
+				DUMPTOKEN(recruited.changeFeedStream);
+				DUMPTOKEN(recruited.changeFeedPop);
+				DUMPTOKEN(recruited.changeFeedVersionUpdate);
+
+				std::string filename =
+				    filenameFromId(req.storeType,
+				                   folder,
+				                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
+				                   recruited.id());
+				IKeyValueStore* data =
+				    openKVStore(req.storeType, filename, recruited.id(), memoryLimit, false, false, dbInfo, 0);
+				TraceEvent("StorageServerInitProgress", recruited.id())
+				    .detail("ReqID", req.reqId)
+				    .detail("StorageType", req.storeType.toString())
+				    .detail("Step", "3.KVStoreOpened")
+				    .detail("WorkerID", interf.id());
+
+				Future<Void> kvClosed =
+				    data->onClosed() ||
+				    rebootKVSPromise2.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
+				filesClosed.add(kvClosed);
+				ReplyPromise<InitializeStorageReply> storageReady = req.reply;
+				Future<ErrorOr<Void>> storeError = errorOr(data->getError());
+				Future<Void> s = storageServer(data,
+				                               recruited,
+				                               req.seedTag,
+				                               req.initialClusterVersion,
+				                               isTss ? req.tssPairIDAndVersion.get().second : 0,
+				                               storageReady,
+				                               dbInfo,
+				                               folder);
+				s = handleIOErrors(s, storeError, recruited.id(), kvClosed);
+				s = storageServerRollbackRebooter(&runningStorages,
+				                                  &storageCleaners,
+				                                  s,
+				                                  req.storeType,
+				                                  filename,
+				                                  recruited.id(),
+				                                  recruited.locality,
+				                                  isTss,
+				                                  dbInfo,
+				                                  folder,
+				                                  &filesClosed,
+				                                  memoryLimit,
+				                                  data,
+				                                  false,
+				                                  &rebootKVSPromise2);
+				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
+			} else {
+				TraceEvent("AttemptedDoubleRecruitment", interf.id()).detail("ForRole", "StorageServer");
+				errorForwarders.add(map(delay(0.5), [reply = req.reply](Void) {
+					reply.sendError(recruitment_failed());
+					return Void();
+				}));
+			}
+		}
+	}
+
+	Future<Void> serveCommitProxyRecruitment() {
+		while (true) {
+			InitializeCommitProxyRequest req = co_await interf.commitProxy.getFuture();
+
+			LocalLineage _;
+			getCurrentLineage()->modify(&RoleLineage::role) = recruitment::CommitProxy;
+			CommitProxyInterface recruited;
+			recruited.processId = locality.processId();
+			recruited.provisional = false;
+			recruited.initEndpoints();
+
+			std::map<std::string, std::string> details;
+			details["ForMaster"] = req.master.id().shortString();
+			startRole(Role::COMMIT_PROXY, recruited.id(), interf.id(), details);
+
+			DUMPTOKEN(recruited.commit);
+			DUMPTOKEN(recruited.getKeyServersLocations);
+			DUMPTOKEN(recruited.getStorageServerRejoinInfo);
+			DUMPTOKEN(recruited.waitFailure);
+			DUMPTOKEN(recruited.txnState);
+
+			errorForwarders.add(zombie(recruited,
+			                           forwardError(errors,
+			                                        Role::COMMIT_PROXY,
+			                                        recruited.id(),
+			                                        commitProxyServer(recruited, req, dbInfo, whitelistBinPaths))));
+			req.reply.send(recruited);
+		}
+	}
+
+	Future<Void> serveGrvProxyRecruitment() {
+		while (true) {
+			InitializeGrvProxyRequest req = co_await interf.grvProxy.getFuture();
+
+			LocalLineage _;
+			getCurrentLineage()->modify(&RoleLineage::role) = recruitment::GrvProxy;
+			GrvProxyInterface recruited;
+			recruited.processId = locality.processId();
+			recruited.provisional = false;
+			recruited.initEndpoints();
+
+			std::map<std::string, std::string> details;
+			details["ForMaster"] = req.master.id().shortString();
+			startRole(Role::GRV_PROXY, recruited.id(), interf.id(), details);
+
+			DUMPTOKEN(recruited.getConsistentReadVersion);
+			DUMPTOKEN(recruited.waitFailure);
+			DUMPTOKEN(recruited.getHealthMetrics);
+
+			// printf("Recruited as grvProxyServer\n");
+			errorForwarders.add(
+			    zombie(recruited,
+			           forwardError(errors, Role::GRV_PROXY, recruited.id(), grvProxyServer(recruited, req, dbInfo))));
+			req.reply.send(recruited);
+		}
+	}
+
+	Future<Void> serveCDCProxyRecruitment() {
+		while (true) {
+			InitializeCDCProxyRequest req = co_await interf.cdcProxy.getFuture();
+
+			LocalLineage _;
+			CDCProxyInterface recruited;
+			recruited.processId = locality.processId();
+			recruited.initEndpoints();
+
+			std::map<std::string, std::string> details;
+			startRole(Role::CDC_PROXY, recruited.id(), interf.id(), details);
+
+			DUMPTOKEN(recruited.consume);
+			DUMPTOKEN(recruited.registerStream);
+			DUMPTOKEN(recruited.removeStream);
+			DUMPTOKEN(recruited.ack);
+			DUMPTOKEN(recruited.waitFailure);
+			DUMPTOKEN(recruited.haltForTesting);
+			DUMPTOKEN(recruited.getBufferStatusForTesting);
+			DUMPTOKEN(recruited.setPopsPausedForTesting);
+
+			errorForwarders.add(zombie(
+			    recruited,
+			    forwardError(
+			        errors, Role::CDC_PROXY, recruited.id(), cdcProxyServer(recruited, req.recoveryCount, dbInfo))));
+			req.reply.send(recruited);
+		}
+	}
+
+	Future<Void> serveResolverRecruitment() {
+		while (true) {
+			InitializeResolverRequest req = co_await interf.resolver.getFuture();
+
+			LocalLineage _;
+			getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Resolver;
+			ResolverInterface recruited;
+			recruited.locality = locality;
+			recruited.initEndpoints();
+
+			std::map<std::string, std::string> details;
+			startRole(Role::RESOLVER, recruited.id(), interf.id(), details);
+
+			DUMPTOKEN(recruited.resolve);
+			DUMPTOKEN(recruited.metrics);
+			DUMPTOKEN(recruited.split);
+			DUMPTOKEN(recruited.waitFailure);
+
+			errorForwarders.add(zombie(
+			    recruited, forwardError(errors, Role::RESOLVER, recruited.id(), resolver(recruited, req, dbInfo))));
+			req.reply.send(recruited);
+		}
+	}
+
+	Future<Void> serveLogRouterRecruitment() {
+		while (true) {
+			InitializeLogRouterRequest req = co_await interf.logRouter.getFuture();
+
+			if (!logRouterCache.exists(req.reqId)) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::LogRouter;
+				TLogInterface recruited(locality);
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				startRole(Role::LOG_ROUTER, recruited.id(), interf.id(), details);
+
+				DUMPTOKEN(recruited.peekMessages);
+				DUMPTOKEN(recruited.peekStreamMessages);
+				DUMPTOKEN(recruited.popMessages);
+				DUMPTOKEN(recruited.commit);
+				DUMPTOKEN(recruited.lock);
+				DUMPTOKEN(recruited.getQueuingMetrics);
+				DUMPTOKEN(recruited.confirmRunning);
+				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.recoveryFinished);
+				DUMPTOKEN(recruited.disablePopRequest);
+				DUMPTOKEN(recruited.enablePopRequest);
+				DUMPTOKEN(recruited.snapRequest);
+
+				ReplyPromise<TLogInterface> logRouterReady = req.reply;
+				logRouterCache.set(req.reqId, logRouterReady.getFuture());
+				Future<Void> logRouterProcess = logRouter(recruited, req, dbInfo);
+				logRouterProcess = logRouterCache.removeOnReady(req.reqId, logRouterProcess);
+				errorForwarders.add(
+				    zombie(recruited, forwardError(errors, Role::LOG_ROUTER, recruited.id(), logRouterProcess)));
+
+				TraceEvent("LogRouterInitRequest", req.reqId).detail("LogRouterId", recruited.id());
+				if (!skipInitRspInSim(interf.id(), req.allowDropInSim)) {
+					logRouterReady.send(recruited);
+				}
+			} else {
+				forwardPromise(Uncancellable{}, req.reply, logRouterCache.get(req.reqId));
+			}
+		}
+	}
+
+	Future<Void> serveCoordinationPings() {
+		while (true) {
+			CoordinationPingMessage m = co_await interf.coordinationPing.getFuture();
+
+			TraceEvent("CoordinationPing", interf.id())
+			    .detail("CCID", m.clusterControllerId)
+			    .detail("TimeStep", m.timeStep);
+		}
+	}
+
+	Future<Void> serveMetricsLogging() {
+		while (true) {
+			auto res = co_await race(interf.setMetricsRate.getFuture(), loggingTrigger);
+			if (res.index() == 0) {
+				SetMetricsLogRateRequest req = std::get<0>(std::move(res));
+
+				TraceEvent("LoggingRateChange", interf.id())
+				    .detail("OldDelay", loggingDelay)
+				    .detail("NewLogPS", req.metricsLogsPerSecond);
+				if (req.metricsLogsPerSecond != 0) {
+					loggingDelay = 1.0 / req.metricsLogsPerSecond;
+					loggingTrigger = Void();
+				}
+			} else {
+				ASSERT(res.index() == 1);
+
+				systemMonitor();
+				loggingTrigger = delay(loggingDelay, TaskPriority::FlushTrace);
+			}
+		}
+	}
+
+	Future<Void> serveEventLogRequests() {
+		while (true) {
+			EventLogRequest req = co_await interf.eventLogRequest.getFuture();
+
+			TraceEventFields e;
+			if (req.getLastError)
+				e = latestEventCache.getLatestError();
+			else
+				e = latestEventCache.get(req.eventName.toString());
+			req.reply.send(e);
+		}
+	}
+
+	Future<Void> serveTraceBatchDumpRequests() {
+		while (true) {
+			TraceBatchDumpRequest req = co_await interf.traceBatchDumpRequest.getFuture();
+
+			g_traceBatch.dump();
+			req.reply.send(Void());
+		}
+	}
+
+	Future<Void> serveDiskStoreRequests() {
+		while (true) {
+			DiskStoreRequest req = co_await interf.diskStoreRequest.getFuture();
+
+			Standalone<VectorRef<UID>> ids;
+			// NOTE: this request is mainly for consistency checking.  The current
+			// logic below seems to be holding up OK, but if we discover bugs in this
+			// area, another approach would be to make the server here simply return
+			// everything it knows about the DiskStore, and put all the checking logic
+			// on the client side.  This makes the checking logic itself easier to test
+			// locally via test cases with defined consistency bugs.
+			for (DiskStore d : getDiskStores(folder, tLogSpillFolder)) {
+				bool included = true;
+				if (!req.includePartialStores) {
+					if (d.storeType == KeyValueStoreType::SSD_BTREE_V1) {
+						included = fileExists(d.filename + ".fdb-wal");
+					} else if (d.storeType == KeyValueStoreType::SSD_BTREE_V2) {
+						included = fileExists(d.filename + ".sqlite-wal");
+					} else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
+						included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
+					} else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
+						included =
+						    fileExists(joinPath(d.filename, "CURRENT")) && fileExists(joinPath(d.filename, "IDENTITY"));
+					} else if (d.storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+						included =
+						    fileExists(joinPath(d.filename, "CURRENT")) && fileExists(joinPath(d.filename, "IDENTITY"));
+					} else if (d.storeType == KeyValueStoreType::MEMORY) {
+						included = fileExists(d.filename + "1.fdq");
+					} else {
+						ASSERT(d.storeType == KeyValueStoreType::MEMORY_RADIXTREE);
+						included = fileExists(d.filename + "1.fdr");
+					}
+					if (d.storedComponent == DiskStore::COMPONENT::TLogData) {
+						// Changes to tlog spilling design are believed to make this check
+						// unnecessary.
+						included = false;
+					}
+				}
+				if (included) {
+					ids.push_back(ids.arena(), d.storeID);
+				}
+			}
+			req.reply.send(ids);
+		}
+	}
+
+	Future<Void> serveSnapshotRequests() {
+		while (true) {
+			WorkerSnapRequest snapReq = co_await interf.workerSnapReq.getFuture();
+
+			std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
+			if (snapReqResultMap.contains(snapReqKey)) {
+				CODE_PROBE(true, "Worker received a duplicate finished snapshot request", probe::decoration::rare);
+				auto result = snapReqResultMap[snapReqKey];
+				result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
+				TraceEvent("RetryFinishedWorkerSnapRequest")
+				    .detail("SnapUID", snapReq.snapUID.toString())
+				    .detail("Role", snapReq.role)
+				    .detail("Result", result.isError() ? result.getError().code() : success().code());
+			} else if (snapReqMap.contains(snapReqKey)) {
+				CODE_PROBE(true, "Worker received a duplicate ongoing snapshot request", probe::decoration::rare);
+				TraceEvent("RetryOngoingWorkerSnapRequest")
+				    .detail("SnapUID", snapReq.snapUID.toString())
+				    .detail("Role", snapReq.role);
+				ASSERT(snapReq.role == snapReqMap[snapReqKey].role);
+				ASSERT(snapReq.snapPayload == snapReqMap[snapReqKey].snapPayload);
+				// Discard the old request if a duplicate new request is received
+				// In theory, the old request should be discarded when we send this error since DD won't resend
+				// a request unless for a network error, where the old request is discarded before sending the
+				// duplicate request.
+				snapReqMap[snapReqKey].reply.sendError(duplicate_snapshot_request());
+				snapReqMap[snapReqKey] = snapReq;
+			} else {
+				snapReqMap[snapReqKey] = snapReq; // set map point to the request
+				if (g_network->isSimulated() && (now() - lastSnapTime) < SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP) {
+					// duplicate snapshots on the same process for the same role is not allowed
+					auto okay = lastSnapReq.snapUID != snapReq.snapUID || lastSnapReq.role != snapReq.role;
+					TraceEvent(okay ? SevInfo : SevError, "RapidSnapRequestsOnSameProcess")
+					    .detail("CurrSnapUID", snapReq.snapUID)
+					    .detail("PrevSnapUID", lastSnapReq.snapUID)
+					    .detail("CurrRole", snapReq.role)
+					    .detail("PrevRole", lastSnapReq.role)
+					    .detail("GapTime", now() - lastSnapTime);
+				}
+				auto* snapReqResultMapPtr = &snapReqResultMap;
+				errorForwarders.add(fmap(
+				    [snapReqResultMapPtr, snapReqKey](Void _) {
+					    snapReqResultMapPtr->erase(snapReqKey);
+					    return Void();
+				    },
+				    delayed(workerSnapCreate(snapReq,
+				                             snapReq.role.toString() == "coord" ? coordFolder : folder,
+				                             snapReq.role.toString() == "tlog" && folder != tLogSpillFolder
+				                                 ? Optional<std::string>(tLogSpillFolder)
+				                                 : Optional<std::string>(),
+				                             &snapReqMap,
+				                             &snapReqResultMap),
+				            SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
+				if (g_network->isSimulated()) {
+					lastSnapReq = snapReq;
+					lastSnapTime = now();
+				}
+			}
+		}
+	}
+
+public:
+	WorkerServerCore(WorkerInterface& interf,
+	                 Reference<IClusterConnectionRecord> connRecord,
+	                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+	                 LocalityData locality,
+	                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
+	                 Reference<AsyncVar<Optional<UID>>> clusterId,
+	                 std::string const& folder,
+	                 std::string const& tLogSpillFolder,
+	                 std::string const& coordFolder,
+	                 std::string const& whitelistBinPaths,
+	                 int64_t memoryLimit,
+	                 PromiseStream<ErrorInfo> errors,
+	                 ActorCollection& errorForwarders,
+	                 ActorCollection& filesClosed,
+	                 Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf,
+	                 Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf,
+	                 Reference<AsyncVar<Optional<ConsistencyScanInterface>>> csInterf,
+	                 Reference<AsyncVar<bool>> degraded,
+	                 Reference<AsyncVar<bool>> lowDiskTLogExclusion,
+	                 Reference<AsyncVar<UID>> activeSharedTLog,
+	                 Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck,
+	                 std::map<SharedLogsKey, std::vector<SharedLogsValue>>& sharedLogs,
+	                 WorkerCache<InitializeBackupReply>& backupWorkerCache,
+	                 WorkerCache<InitializeRangePartitionedBackupReply>& rangePartitionedBackupWorkerCache,
+	                 WorkerCache<TLogInterface>& logRouterCache,
+	                 std::set<std::pair<UID, KeyValueStoreType>>& runningStorages,
+	                 std::unordered_map<UID, StorageDiskCleaner>& storageCleaners,
+	                 Promise<Void>& rebootKVSPromise2,
+	                 Future<Void>& updateClusterIdFuture,
+	                 Future<Void>& loggingTrigger,
+	                 double& loggingDelay,
+	                 WorkerSnapRequest& lastSnapReq,
+	                 std::map<std::string, WorkerSnapRequest>& snapReqMap,
+	                 std::map<std::string, ErrorOr<Void>>& snapReqResultMap,
+	                 double& lastSnapTime)
+	  : interf(interf), connRecord(connRecord), ccInterface(ccInterface), locality(locality), dbInfo(dbInfo),
+	    clusterId(clusterId), folder(folder), tLogSpillFolder(tLogSpillFolder), coordFolder(coordFolder),
+	    whitelistBinPaths(whitelistBinPaths), memoryLimit(memoryLimit), errors(errors),
+	    errorForwarders(errorForwarders), filesClosed(filesClosed), ddInterf(ddInterf), rkInterf(rkInterf),
+	    csInterf(csInterf), degraded(degraded), lowDiskTLogExclusion(lowDiskTLogExclusion),
+	    activeSharedTLog(activeSharedTLog), enablePrimaryTxnSystemHealthCheck(enablePrimaryTxnSystemHealthCheck),
+	    sharedLogs(sharedLogs), backupWorkerCache(backupWorkerCache),
+	    rangePartitionedBackupWorkerCache(rangePartitionedBackupWorkerCache), logRouterCache(logRouterCache),
+	    runningStorages(runningStorages), storageCleaners(storageCleaners), rebootKVSPromise2(rebootKVSPromise2),
+	    updateClusterIdFuture(updateClusterIdFuture), loggingTrigger(loggingTrigger), loggingDelay(loggingDelay),
+	    lastSnapReq(lastSnapReq), snapReqMap(snapReqMap), snapReqResultMap(snapReqResultMap),
+	    lastSnapTime(lastSnapTime) {}
+
+	Future<Void> run(Future<Void> const& handleErrors) {
+		auto res = co_await race(serveServerDBInfoUpdates(),
+		                         interf.clientInterface.reboot.getFuture(),
+		                         serveFailureInjectionRequests(),
+		                         serveProfilerRequests(),
+		                         serveMasterRecruitment(),
+		                         serveDataDistributorRecruitment(),
+		                         serveRatekeeperRecruitment(),
+		                         serveConsistencyScanRecruitment(),
+		                         serveBackupRecruitment(),
+		                         serveRangePartitionedBackupRecruitment(),
+		                         serveTLogRecruitment(),
+		                         serveStorageRecruitment(),
+		                         serveCommitProxyRecruitment(),
+		                         serveGrvProxyRecruitment(),
+		                         serveCDCProxyRecruitment(),
+		                         serveResolverRecruitment(),
+		                         serveLogRouterRecruitment(),
+		                         serveCoordinationPings(),
+		                         serveMetricsLogging(),
+		                         serveEventLogRequests(),
+		                         serveTraceBatchDumpRequests(),
+		                         serveDiskStoreRequests(),
+		                         serveSnapshotRequests(),
+		                         errorForwarders.getResult(),
+		                         handleErrors);
+		ASSERT(res.index() == 1);
+		co_await handleRebootRequest(std::get<1>(std::move(res)));
+	}
+};
 
 Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                           Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
@@ -2387,733 +3278,42 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			    healthMonitor(ccInterface, interf, locality, dbInfo, enablePrimaryTxnSystemHealthCheck));
 		}
 
-		while (true) {
-			auto res = co_await waitForWorkerServerEvent(interf, loggingTrigger, errorForwarders, handleErrors);
-			if (res.index() == 0) {
-				UpdateServerDBInfoRequest req = std::get<0>(std::move(res));
-
-				auto localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo,
-				                                                           AssumeVersion(g_network->protocolVersion()));
-				localInfo.myLocality = locality;
-
-				if (localInfo.infoGeneration < dbInfo->get().infoGeneration &&
-				    localInfo.clusterInterface == dbInfo->get().clusterInterface) {
-					std::vector<Endpoint> rep = req.broadcastInfo;
-					rep.push_back(interf.updateServerDBInfo.getEndpoint());
-					req.reply.send(rep);
-				} else {
-					Optional<Endpoint> notUpdated;
-					if (!ccInterface->get().present() || localInfo.clusterInterface != ccInterface->get().get()) {
-						notUpdated = interf.updateServerDBInfo.getEndpoint();
-					} else if (localInfo.infoGeneration > dbInfo->get().infoGeneration ||
-					           dbInfo->get().clusterInterface != ccInterface->get().get()) {
-						TraceEvent("GotServerDBInfoChange")
-						    .detail("ChangeID", localInfo.id)
-						    .detail("InfoGeneration", localInfo.infoGeneration)
-						    .detail("MasterID", localInfo.master.id())
-						    .detail("RatekeeperID",
-						            localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
-						    .detail("DataDistributorID",
-						            localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
-						dbInfo->set(localInfo);
-					}
-					errorForwarders.add(
-					    success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
-
-					if (!updateClusterIdFuture.isValid() && !clusterId->get().present() &&
-					    localInfo.client.clusterId.isValid()) {
-						updateClusterIdFuture = updateClusterId(localInfo.client.clusterId, clusterId, folder);
-					}
-				}
-			} else if (res.index() == 1) {
-				RebootRequest req = std::get<1>(std::move(res));
-
-				RebootRequest rebootReq = req;
-				// If suspendDuration is INT_MAX, the trace will not be logged if it was inside the next block
-				// Also a useful trace to have even if suspendDuration is 0
-				TraceEvent("RebootRequestSuspendingProcess").detail("Duration", req.waitForDuration);
-				if (req.waitForDuration) {
-					flushTraceFileVoid();
-					setProfilingEnabled(0);
-					g_network->stop();
-					threadSleep(req.waitForDuration);
-				}
-				if (rebootReq.checkData) {
-					Reference<IAsyncFile> checkFile = co_await IAsyncFileSystem::filesystem()->open(
-					    joinPath(folder, validationFilename),
-					    IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
-					    0600);
-					co_await checkFile->sync();
-				}
-
-				if (g_network->isSimulated()) {
-					TraceEvent("SimulatedReboot").detail("Deletion", rebootReq.deleteData);
-					if (rebootReq.deleteData) {
-						throw please_reboot_delete();
-					}
-					throw please_reboot();
-				} else {
-					TraceEvent("ProcessReboot").log();
-					ASSERT(!rebootReq.deleteData);
-					flushAndExit(0);
-				}
-			} else if (res.index() == 2) {
-				SetFailureInjection req = std::get<2>(std::move(res));
-
-				if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
-					if (req.diskFailure.present()) {
-						auto diskFailureInjector = DiskFailureInjector::injector();
-						diskFailureInjector->setDiskFailure(req.diskFailure.get().stallInterval,
-						                                    req.diskFailure.get().stallPeriod,
-						                                    req.diskFailure.get().throttlePeriod);
-					} else if (req.flipBits.present()) {
-						auto bitFlipper = BitFlipper::flipper();
-						bitFlipper->setBitFlipPercentage(req.flipBits.get().percentBitFlips);
-					}
-					req.reply.send(Void());
-				} else {
-					req.reply.sendError(client_invalid_operation());
-				}
-			} else if (res.index() == 3) {
-				ProfilerRequest req = std::get<3>(std::move(res));
-
-				ProfilerRequest profilerReq = req;
-				// There really isn't a great "filepath sanitizer" or "filepath escape" function available,
-				// thus we instead enforce a different requirement.  One can only write to a file that's
-				// beneath the working directory, and we remove the ability to do any symlink or ../..
-				// tricks by resolving all paths through `abspath` first.
-				try {
-					std::string realLogDir = abspath(SERVER_KNOBS->LOG_DIRECTORY);
-					std::string realOutPath = abspath(realLogDir + "/" + profilerReq.outputFile.toString());
-					if (realLogDir.size() < realOutPath.size() &&
-					    strncmp(realLogDir.c_str(), realOutPath.c_str(), realLogDir.size()) == 0) {
-						profilerReq.outputFile = realOutPath;
-						uncancellable(runProfiler(profilerReq));
-						profilerReq.reply.send(Void());
-					} else {
-						profilerReq.reply.sendError(client_invalid_operation());
-					}
-				} catch (Error& e) {
-					profilerReq.reply.sendError(e);
-				}
-			} else if (res.index() == 4) {
-				RecruitMasterRequest req = std::get<4>(std::move(res));
-
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Master;
-				MasterInterface recruited;
-				recruited.locality = locality;
-				recruited.initEndpoints();
-
-				startRole(Role::MASTER, recruited.id(), interf.id());
-
-				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.getCommitVersion);
-				DUMPTOKEN(recruited.getLiveCommittedVersion);
-				DUMPTOKEN(recruited.reportLiveCommittedVersion);
-				DUMPTOKEN(recruited.updateRecoveryData);
-
-				// printf("Recruited as masterServer\n");
-				Future<Void> masterProcess = masterServer(
-				    recruited, dbInfo, ccInterface, ServerCoordinators(connRecord), req.lifetime, req.forceRecovery);
-				errorForwarders.add(
-				    zombie(recruited, forwardError(errors, Role::MASTER, recruited.id(), masterProcess)));
-				req.reply.send(recruited);
-			} else if (res.index() == 5) {
-				InitializeDataDistributorRequest req = std::get<5>(std::move(res));
-
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::DataDistributor;
-				DataDistributorInterface recruited(locality, req.reqId);
-				recruited.initEndpoints();
-
-				if (ddInterf->get().present()) {
-					recruited = ddInterf->get().get();
-					CODE_PROBE(true, "Recruited while already a data distributor.");
-				} else {
-					startRole(Role::DATA_DISTRIBUTOR, recruited.id(), interf.id());
-					DUMPTOKEN(recruited.waitFailure);
-
-					Future<Void> dataDistributorProcess = dataDistributor(recruited, dbInfo, folder);
-					errorForwarders.add(forwardError(
-					    errors,
-					    Role::DATA_DISTRIBUTOR,
-					    recruited.id(),
-					    setWhenDoneOrError(dataDistributorProcess, ddInterf, Optional<DataDistributorInterface>())));
-					ddInterf->set(Optional<DataDistributorInterface>(recruited));
-				}
-				TraceEvent("DataDistributorReceived", req.reqId)
-				    .detail("DataDistributorId", recruited.id())
-				    .detail("Folder", folder); // double check if this works with SS restore
-				req.reply.send(recruited);
-			} else if (res.index() == 6) {
-				InitializeRatekeeperRequest req = std::get<6>(std::move(res));
-
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Ratekeeper;
-				RatekeeperInterface recruited(locality, req.reqId);
-				recruited.initEndpoints();
-
-				if (rkInterf->get().present()) {
-					recruited = rkInterf->get().get();
-					CODE_PROBE(true, "Recruited while already a ratekeeper.");
-				} else {
-					startRole(Role::RATEKEEPER, recruited.id(), interf.id());
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.getRateInfo);
-					DUMPTOKEN(recruited.haltRatekeeper);
-					DUMPTOKEN(recruited.reportCommitCostEstimation);
-
-					Future<Void> ratekeeperProcess = ratekeeper(recruited, dbInfo);
-					errorForwarders.add(
-					    forwardError(errors,
-					                 Role::RATEKEEPER,
-					                 recruited.id(),
-					                 setWhenDoneOrError(ratekeeperProcess, rkInterf, Optional<RatekeeperInterface>())));
-					rkInterf->set(Optional<RatekeeperInterface>(recruited));
-				}
-				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
-				req.reply.send(recruited);
-			} else if (res.index() == 7) {
-				InitializeConsistencyScanRequest req = std::get<7>(std::move(res));
-
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::ConsistencyScan;
-				ConsistencyScanInterface recruited(locality, req.reqId);
-				recruited.initEndpoints();
-
-				if (csInterf->get().present()) {
-					recruited = csInterf->get().get();
-					CODE_PROBE(true, "Recovered while already a consistencyscan");
-				} else {
-					startRole(Role::CONSISTENCYSCAN, recruited.id(), interf.id());
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.haltConsistencyScan);
-
-					Future<Void> consistencyScanProcess = consistencyScan(recruited, dbInfo);
-					errorForwarders.add(forwardError(
-					    errors,
-					    Role::CONSISTENCYSCAN,
-					    recruited.id(),
-					    setWhenDoneOrError(consistencyScanProcess, csInterf, Optional<ConsistencyScanInterface>())));
-					csInterf->set(Optional<ConsistencyScanInterface>(recruited));
-				}
-				TraceEvent("ConsistencyScanReceived", req.reqId).detail("ConsistencyScanId", recruited.id());
-				req.reply.send(recruited);
-			} else if (res.index() == 8) {
-				InitializeBackupRequest req = std::get<8>(std::move(res));
-
-				if (!backupWorkerCache.exists(req.reqId)) {
-					LocalLineage _;
-					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Backup;
-					BackupInterface recruited(locality);
-					recruited.initEndpoints();
-
-					startRole(Role::BACKUP, recruited.id(), interf.id());
-					DUMPTOKEN(recruited.waitFailure);
-
-					ReplyPromise<InitializeBackupReply> backupReady = req.reply;
-					backupWorkerCache.set(req.reqId, backupReady.getFuture());
-					Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
-					backupProcess = backupWorkerCache.removeOnReady(req.reqId, backupProcess);
-					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
-					TraceEvent("BackupInitRequest", req.reqId).detail("BackupId", recruited.id());
-					InitializeBackupReply reply(recruited, req.backupEpoch);
-					backupReady.send(reply);
-				} else {
-					forwardPromise(Uncancellable{}, req.reply, backupWorkerCache.get(req.reqId));
-				}
-			} else if (res.index() == 9) {
-				InitializeRangePartitionedBackupRequest req = std::get<9>(std::move(res));
-
-				if (!rangePartitionedBackupWorkerCache.exists(req.reqId)) {
-					LocalLineage _;
-					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Backup;
-					BackupInterface recruited(locality);
-					recruited.initEndpoints();
-
-					startRole(Role::BACKUP, recruited.id(), interf.id());
-					DUMPTOKEN(recruited.waitFailure);
-
-					ReplyPromise<InitializeRangePartitionedBackupReply> backupReady = req.reply;
-					rangePartitionedBackupWorkerCache.set(req.reqId, backupReady.getFuture());
-					Future<Void> backupProcess = rangePartitionedBackupWorker(recruited, req, dbInfo);
-					backupProcess = rangePartitionedBackupWorkerCache.removeOnReady(req.reqId, backupProcess);
-					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
-					TraceEvent("RangePartitionedBWInitRequest", req.reqId).detail("BackupId", recruited.id());
-					InitializeRangePartitionedBackupReply reply(recruited, req.backupEpoch);
-					backupReady.send(reply);
-				} else {
-					forwardPromise(Uncancellable{}, req.reply, rangePartitionedBackupWorkerCache.get(req.reqId));
-				}
-			} else if (res.index() == 10) {
-				InitializeTLogRequest req = std::get<10>(std::move(res));
-
-				// For now, there's a one-to-one mapping of spill type to TLogVersion.
-				// With future work, a particular version of the TLog can support multiple
-				// different spilling strategies, at which point SpillType will need to be
-				// plumbed down into tLogFn.
-				if (req.logVersion < TLogVersion::MIN_RECRUITABLE) {
-					TraceEvent(SevError, "InitializeTLogInvalidLogVersion")
-					    .detail("Version", req.logVersion)
-					    .detail("MinRecruitable", TLogVersion::MIN_RECRUITABLE);
-					req.reply.sendError(internal_error());
-				}
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::TLog;
-				TLogOptions tLogOptions(req.logVersion, req.spillType);
-				TLogFn tLogFn = tLogFnForOptions(tLogOptions);
-				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
-				while (!logData.empty() && (!logData.back().actor.isValid() || logData.back().actor.isReady())) {
-					logData.pop_back();
-				}
-				if (logData.empty()) {
-					UID logId = deterministicRandom()->randomUniqueID();
-					std::map<std::string, std::string> details;
-					details["ForMaster"] = req.recruitmentID.shortString();
-					details["StorageEngine"] = req.storeType.toString();
-
-					// FIXME: start role for every tlog instance, rather that just for the shared actor, also use a
-					// different role type for the shared actor
-					startRole(Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details);
-
-					const StringRef prefix =
-					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
-					std::string filename = filenameFromId(
-					    req.storeType, tLogSpillFolder, prefix.toString() + tLogOptions.toPrefix(), logId);
-					IKeyValueStore* data =
-					    openKVStore(req.storeType, filename, logId, memoryLimit, false, false, dbInfo);
-					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
-					IDiskQueue* queue = openDiskQueue(
-					    joinPath(folder,
-					             fileLogQueuePrefix.toString() + tLogOptions.toPrefix() + logId.toString() + "-"),
-					    tlogQueueExtension.toString(),
-					    logId,
-					    dqv);
-					filesClosed.add(data->onClosed());
-					filesClosed.add(queue->onClosed());
-
-					logData.push_back(SharedLogsValue());
-					Future<Void> tLogCore = tLogFn(data,
-					                               queue,
-					                               dbInfo,
-					                               locality,
-					                               logData.back().requests,
-					                               logId,
-					                               interf.id(),
-					                               false,
-					                               Promise<Void>(),
-					                               Promise<Void>(),
-					                               folder,
-					                               degraded,
-					                               lowDiskTLogExclusion,
-					                               activeSharedTLog,
-					                               enablePrimaryTxnSystemHealthCheck);
-					tLogCore = handleIOErrors(tLogCore, data, logId);
-					tLogCore = handleIOErrors(tLogCore, queue, logId);
-					errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore));
-					logData.back().actor = tLogCore;
-					logData.back().uid = logId;
-				}
-				logData.back().requests.send(req);
-				activeSharedTLog->set(logData.back().uid);
-			} else if (res.index() == 11) {
-				InitializeStorageRequest req = std::get<11>(std::move(res));
-
-				TraceEvent e("StorageServerInitProgress", req.interfaceId);
-				e.detail("Step", "1.RequestReceived");
-				e.detail("ReqID", req.reqId);
-				e.detail("WorkerID", interf.id());
-				e.detail("StorageType", req.storeType.toString());
-				e.detail("SeedTag", req.seedTag.toString());
-				e.detail("IsTssPair", req.tssPairIDAndVersion.present());
-				if (req.tssPairIDAndVersion.present()) {
-					e.detail("TssPairID", req.tssPairIDAndVersion.get().first);
-				}
-				int j = 0;
-				for (const auto& runningStorage : runningStorages) {
-					e.detail("RunningStorageIDOnSameWorker" + std::to_string(j), runningStorage.first);
-					e.detail("RunningStorageEngineOnSameWorker" + std::to_string(j), runningStorage.second);
-					j++;
-				}
-				// We want to prevent double recruiting on a worker unless we try to recruit something
-				// with a different storage engine (otherwise storage migration won't work for certain
-				// configuration). Additionally we also need to allow double recruitment for seed servers.
-				// The reason for this is that a storage will only remove itself if after it was able
-				// to read the system key space. But if recovery fails right after a `configure new ...`
-				// was run it won't be able to do so.
-				if (std::all_of(runningStorages.begin(),
-				                runningStorages.end(),
-				                [&req](const auto& p) { return p.second != req.storeType; }) ||
-				    req.seedTag != invalidTag) {
-					ASSERT(req.initialClusterVersion >= 0);
-					LocalLineage _;
-					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Storage;
-
-					// When a new storage server is recruited, we need to check if any other storage
-					// server has run on this worker process(a.k.a double recruitment). The previous storage
-					// server may have leftover disk files if it stopped with io_error or io_timeout. Now DD
-					// already repairs the team and it's time to start the cleanup
-					cleanupStorageDisks(dbInfo, storageCleaners, memoryLimit);
-
-					bool isTss = req.tssPairIDAndVersion.present();
-					StorageServerInterface recruited(req.interfaceId);
-					recruited.locality = locality;
-					recruited.tssPairID = isTss ? req.tssPairIDAndVersion.get().first : Optional<UID>();
-					recruited.initEndpoints();
-
-					std::map<std::string, std::string> details;
-					details["StorageEngine"] = req.storeType.toString();
-					details["IsTSS"] = std::to_string(isTss);
-					Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
-					startRole(ssRole, recruited.id(), interf.id(), details);
-					TraceEvent("StorageServerInitProgress", recruited.id())
-					    .detail("ReqID", req.reqId)
-					    .detail("StorageType", req.storeType.toString())
-					    .detail("Step", "2.RoleStarted")
-					    .detail("WorkerID", interf.id());
-
-					DUMPTOKEN(recruited.getValue);
-					DUMPTOKEN(recruited.getKey);
-					DUMPTOKEN(recruited.getKeyValues);
-					DUMPTOKEN(recruited.getMappedKeyValues);
-					DUMPTOKEN(recruited.getShardState);
-					DUMPTOKEN(recruited.waitMetrics);
-					DUMPTOKEN(recruited.splitMetrics);
-					DUMPTOKEN(recruited.getReadHotRanges);
-					DUMPTOKEN(recruited.getRangeSplitPoints);
-					DUMPTOKEN(recruited.getStorageMetrics);
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.getQueuingMetrics);
-					DUMPTOKEN(recruited.getKeyValueStoreType);
-					DUMPTOKEN(recruited.watchValue);
-					DUMPTOKEN(recruited.getKeyValuesStream);
-					DUMPTOKEN(recruited.changeFeedStream);
-					DUMPTOKEN(recruited.changeFeedPop);
-					DUMPTOKEN(recruited.changeFeedVersionUpdate);
-
-					std::string filename =
-					    filenameFromId(req.storeType,
-					                   folder,
-					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
-					                   recruited.id());
-					IKeyValueStore* data =
-					    openKVStore(req.storeType, filename, recruited.id(), memoryLimit, false, false, dbInfo, 0);
-					TraceEvent("StorageServerInitProgress", recruited.id())
-					    .detail("ReqID", req.reqId)
-					    .detail("StorageType", req.storeType.toString())
-					    .detail("Step", "3.KVStoreOpened")
-					    .detail("WorkerID", interf.id());
-
-					Future<Void> kvClosed =
-					    data->onClosed() ||
-					    rebootKVSPromise2
-					        .getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
-					filesClosed.add(kvClosed);
-					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
-					Future<ErrorOr<Void>> storeError = errorOr(data->getError());
-					Future<Void> s = storageServer(data,
-					                               recruited,
-					                               req.seedTag,
-					                               req.initialClusterVersion,
-					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
-					                               storageReady,
-					                               dbInfo,
-					                               folder);
-					s = handleIOErrors(s, storeError, recruited.id(), kvClosed);
-					s = storageServerRollbackRebooter(&runningStorages,
-					                                  &storageCleaners,
-					                                  s,
-					                                  req.storeType,
-					                                  filename,
-					                                  recruited.id(),
-					                                  recruited.locality,
-					                                  isTss,
-					                                  dbInfo,
-					                                  folder,
-					                                  &filesClosed,
-					                                  memoryLimit,
-					                                  data,
-					                                  false,
-					                                  &rebootKVSPromise2);
-					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
-				} else {
-					TraceEvent("AttemptedDoubleRecruitment", interf.id()).detail("ForRole", "StorageServer");
-					errorForwarders.add(map(delay(0.5), [reply = req.reply](Void) {
-						reply.sendError(recruitment_failed());
-						return Void();
-					}));
-				}
-			} else if (res.index() == 12) {
-				InitializeCommitProxyRequest req = std::get<12>(std::move(res));
-
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::CommitProxy;
-				CommitProxyInterface recruited;
-				recruited.processId = locality.processId();
-				recruited.provisional = false;
-				recruited.initEndpoints();
-
-				std::map<std::string, std::string> details;
-				details["ForMaster"] = req.master.id().shortString();
-				startRole(Role::COMMIT_PROXY, recruited.id(), interf.id(), details);
-
-				DUMPTOKEN(recruited.commit);
-				DUMPTOKEN(recruited.getKeyServersLocations);
-				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
-				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.txnState);
-
-				errorForwarders.add(zombie(recruited,
-				                           forwardError(errors,
-				                                        Role::COMMIT_PROXY,
-				                                        recruited.id(),
-				                                        commitProxyServer(recruited, req, dbInfo, whitelistBinPaths))));
-				req.reply.send(recruited);
-			} else if (res.index() == 13) {
-				InitializeGrvProxyRequest req = std::get<13>(std::move(res));
-
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::GrvProxy;
-				GrvProxyInterface recruited;
-				recruited.processId = locality.processId();
-				recruited.provisional = false;
-				recruited.initEndpoints();
-
-				std::map<std::string, std::string> details;
-				details["ForMaster"] = req.master.id().shortString();
-				startRole(Role::GRV_PROXY, recruited.id(), interf.id(), details);
-
-				DUMPTOKEN(recruited.getConsistentReadVersion);
-				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.getHealthMetrics);
-
-				// printf("Recruited as grvProxyServer\n");
-				errorForwarders.add(zombie(
-				    recruited,
-				    forwardError(errors, Role::GRV_PROXY, recruited.id(), grvProxyServer(recruited, req, dbInfo))));
-				req.reply.send(recruited);
-			} else if (res.index() == 14) {
-				InitializeCDCProxyRequest req = std::get<14>(std::move(res));
-
-				LocalLineage _;
-				CDCProxyInterface recruited;
-				recruited.processId = locality.processId();
-				recruited.initEndpoints();
-
-				std::map<std::string, std::string> details;
-				startRole(Role::CDC_PROXY, recruited.id(), interf.id(), details);
-
-				DUMPTOKEN(recruited.consume);
-				DUMPTOKEN(recruited.registerStream);
-				DUMPTOKEN(recruited.removeStream);
-				DUMPTOKEN(recruited.ack);
-				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.haltForTesting);
-				DUMPTOKEN(recruited.getBufferStatusForTesting);
-				DUMPTOKEN(recruited.setPopsPausedForTesting);
-
-				errorForwarders.add(zombie(recruited,
-				                           forwardError(errors,
-				                                        Role::CDC_PROXY,
-				                                        recruited.id(),
-				                                        cdcProxyServer(recruited, req.recoveryCount, dbInfo))));
-				req.reply.send(recruited);
-			} else if (res.index() == 15) {
-				InitializeResolverRequest req = std::get<15>(std::move(res));
-
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Resolver;
-				ResolverInterface recruited;
-				recruited.locality = locality;
-				recruited.initEndpoints();
-
-				std::map<std::string, std::string> details;
-				startRole(Role::RESOLVER, recruited.id(), interf.id(), details);
-
-				DUMPTOKEN(recruited.resolve);
-				DUMPTOKEN(recruited.metrics);
-				DUMPTOKEN(recruited.split);
-				DUMPTOKEN(recruited.waitFailure);
-
-				errorForwarders.add(zombie(
-				    recruited, forwardError(errors, Role::RESOLVER, recruited.id(), resolver(recruited, req, dbInfo))));
-				req.reply.send(recruited);
-			} else if (res.index() == 16) {
-				InitializeLogRouterRequest req = std::get<16>(std::move(res));
-
-				if (!logRouterCache.exists(req.reqId)) {
-					LocalLineage _;
-					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::LogRouter;
-					TLogInterface recruited(locality);
-					recruited.initEndpoints();
-
-					std::map<std::string, std::string> details;
-					startRole(Role::LOG_ROUTER, recruited.id(), interf.id(), details);
-
-					DUMPTOKEN(recruited.peekMessages);
-					DUMPTOKEN(recruited.peekStreamMessages);
-					DUMPTOKEN(recruited.popMessages);
-					DUMPTOKEN(recruited.commit);
-					DUMPTOKEN(recruited.lock);
-					DUMPTOKEN(recruited.getQueuingMetrics);
-					DUMPTOKEN(recruited.confirmRunning);
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.recoveryFinished);
-					DUMPTOKEN(recruited.disablePopRequest);
-					DUMPTOKEN(recruited.enablePopRequest);
-					DUMPTOKEN(recruited.snapRequest);
-
-					ReplyPromise<TLogInterface> logRouterReady = req.reply;
-					logRouterCache.set(req.reqId, logRouterReady.getFuture());
-					Future<Void> logRouterProcess = logRouter(recruited, req, dbInfo);
-					logRouterProcess = logRouterCache.removeOnReady(req.reqId, logRouterProcess);
-					errorForwarders.add(
-					    zombie(recruited, forwardError(errors, Role::LOG_ROUTER, recruited.id(), logRouterProcess)));
-
-					TraceEvent("LogRouterInitRequest", req.reqId).detail("LogRouterId", recruited.id());
-					if (!skipInitRspInSim(interf.id(), req.allowDropInSim)) {
-						logRouterReady.send(recruited);
-					}
-				} else {
-					forwardPromise(Uncancellable{}, req.reply, logRouterCache.get(req.reqId));
-				}
-			} else if (res.index() == 17) {
-				CoordinationPingMessage m = std::get<17>(std::move(res));
-
-				TraceEvent("CoordinationPing", interf.id())
-				    .detail("CCID", m.clusterControllerId)
-				    .detail("TimeStep", m.timeStep);
-			} else if (res.index() == 18) {
-				SetMetricsLogRateRequest req = std::get<18>(std::move(res));
-
-				TraceEvent("LoggingRateChange", interf.id())
-				    .detail("OldDelay", loggingDelay)
-				    .detail("NewLogPS", req.metricsLogsPerSecond);
-				if (req.metricsLogsPerSecond != 0) {
-					loggingDelay = 1.0 / req.metricsLogsPerSecond;
-					loggingTrigger = Void();
-				}
-			} else if (res.index() == 19) {
-				EventLogRequest req = std::get<19>(std::move(res));
-
-				TraceEventFields e;
-				if (req.getLastError)
-					e = latestEventCache.getLatestError();
-				else
-					e = latestEventCache.get(req.eventName.toString());
-				req.reply.send(e);
-			} else if (res.index() == 20) {
-				TraceBatchDumpRequest req = std::get<20>(std::move(res));
-
-				g_traceBatch.dump();
-				req.reply.send(Void());
-			} else if (res.index() == 21) {
-				DiskStoreRequest req = std::get<21>(std::move(res));
-
-				Standalone<VectorRef<UID>> ids;
-				// NOTE: this request is mainly for consistency checking.  The current
-				// logic below seems to be holding up OK, but if we discover bugs in this
-				// area, another approach would be to make the server here simply return
-				// everything it knows about the DiskStore, and put all the checking logic
-				// on the client side.  This makes the checking logic itself easier to test
-				// locally via test cases with defined consistency bugs.
-				for (DiskStore d : getDiskStores(folder, tLogSpillFolder)) {
-					bool included = true;
-					if (!req.includePartialStores) {
-						if (d.storeType == KeyValueStoreType::SSD_BTREE_V1) {
-							included = fileExists(d.filename + ".fdb-wal");
-						} else if (d.storeType == KeyValueStoreType::SSD_BTREE_V2) {
-							included = fileExists(d.filename + ".sqlite-wal");
-						} else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
-							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
-						} else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
-							included = fileExists(joinPath(d.filename, "CURRENT")) &&
-							           fileExists(joinPath(d.filename, "IDENTITY"));
-						} else if (d.storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
-							included = fileExists(joinPath(d.filename, "CURRENT")) &&
-							           fileExists(joinPath(d.filename, "IDENTITY"));
-						} else if (d.storeType == KeyValueStoreType::MEMORY) {
-							included = fileExists(d.filename + "1.fdq");
-						} else {
-							ASSERT(d.storeType == KeyValueStoreType::MEMORY_RADIXTREE);
-							included = fileExists(d.filename + "1.fdr");
-						}
-						if (d.storedComponent == DiskStore::COMPONENT::TLogData) {
-							// Changes to tlog spilling design are believed to make this check
-							// unnecessary.
-							included = false;
-						}
-					}
-					if (included) {
-						ids.push_back(ids.arena(), d.storeID);
-					}
-				}
-				req.reply.send(ids);
-			} else if (res.index() == 22) {
-
-				systemMonitor();
-				loggingTrigger = delay(loggingDelay, TaskPriority::FlushTrace);
-			} else if (res.index() == 23) {
-				WorkerSnapRequest snapReq = std::get<23>(std::move(res));
-
-				std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
-				if (snapReqResultMap.contains(snapReqKey)) {
-					CODE_PROBE(true, "Worker received a duplicate finished snapshot request", probe::decoration::rare);
-					auto result = snapReqResultMap[snapReqKey];
-					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
-					TraceEvent("RetryFinishedWorkerSnapRequest")
-					    .detail("SnapUID", snapReq.snapUID.toString())
-					    .detail("Role", snapReq.role)
-					    .detail("Result", result.isError() ? result.getError().code() : success().code());
-				} else if (snapReqMap.contains(snapReqKey)) {
-					CODE_PROBE(true, "Worker received a duplicate ongoing snapshot request", probe::decoration::rare);
-					TraceEvent("RetryOngoingWorkerSnapRequest")
-					    .detail("SnapUID", snapReq.snapUID.toString())
-					    .detail("Role", snapReq.role);
-					ASSERT(snapReq.role == snapReqMap[snapReqKey].role);
-					ASSERT(snapReq.snapPayload == snapReqMap[snapReqKey].snapPayload);
-					// Discard the old request if a duplicate new request is received
-					// In theory, the old request should be discarded when we send this error since DD won't resend
-					// a request unless for a network error, where the old request is discarded before sending the
-					// duplicate request.
-					snapReqMap[snapReqKey].reply.sendError(duplicate_snapshot_request());
-					snapReqMap[snapReqKey] = snapReq;
-				} else {
-					snapReqMap[snapReqKey] = snapReq; // set map point to the request
-					if (g_network->isSimulated() && (now() - lastSnapTime) < SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP) {
-						// duplicate snapshots on the same process for the same role is not allowed
-						auto okay = lastSnapReq.snapUID != snapReq.snapUID || lastSnapReq.role != snapReq.role;
-						TraceEvent(okay ? SevInfo : SevError, "RapidSnapRequestsOnSameProcess")
-						    .detail("CurrSnapUID", snapReq.snapUID)
-						    .detail("PrevSnapUID", lastSnapReq.snapUID)
-						    .detail("CurrRole", snapReq.role)
-						    .detail("PrevRole", lastSnapReq.role)
-						    .detail("GapTime", now() - lastSnapTime);
-					}
-					auto* snapReqResultMapPtr = &snapReqResultMap;
-					errorForwarders.add(fmap(
-					    [snapReqResultMapPtr, snapReqKey](Void _) {
-						    snapReqResultMapPtr->erase(snapReqKey);
-						    return Void();
-					    },
-					    delayed(workerSnapCreate(snapReq,
-					                             snapReq.role.toString() == "coord" ? coordFolder : folder,
-					                             snapReq.role.toString() == "tlog" && folder != tLogSpillFolder
-					                                 ? Optional<std::string>(tLogSpillFolder)
-					                                 : Optional<std::string>(),
-					                             &snapReqMap,
-					                             &snapReqResultMap),
-					            SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
-					if (g_network->isSimulated()) {
-						lastSnapReq = snapReq;
-						lastSnapTime = now();
-					}
-				}
-			} else {
-				ASSERT(res.index() == 24 || res.index() == 25);
-			}
-		}
+		WorkerServerCore workerServerCore(interf,
+		                                  connRecord,
+		                                  ccInterface,
+		                                  locality,
+		                                  dbInfo,
+		                                  clusterId,
+		                                  folder,
+		                                  tLogSpillFolder,
+		                                  coordFolder,
+		                                  whitelistBinPaths,
+		                                  memoryLimit,
+		                                  errors,
+		                                  errorForwarders,
+		                                  filesClosed,
+		                                  ddInterf,
+		                                  rkInterf,
+		                                  csInterf,
+		                                  degraded,
+		                                  lowDiskTLogExclusion,
+		                                  activeSharedTLog,
+		                                  enablePrimaryTxnSystemHealthCheck,
+		                                  sharedLogs,
+		                                  backupWorkerCache,
+		                                  rangePartitionedBackupWorkerCache,
+		                                  logRouterCache,
+		                                  runningStorages,
+		                                  storageCleaners,
+		                                  rebootKVSPromise2,
+		                                  updateClusterIdFuture,
+		                                  loggingTrigger,
+		                                  loggingDelay,
+		                                  lastSnapReq,
+		                                  snapReqMap,
+		                                  snapReqResultMap,
+		                                  lastSnapTime);
+		co_await workerServerCore.run(handleErrors);
 	} catch (Error& err) {
 		e = err;
 	}
