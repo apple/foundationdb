@@ -41,7 +41,6 @@
 #include "flow/DebugTrace.h"
 #include "DDRelocationQueue.h"
 #include "flow/CoroUtils.h"
-#include "flow/genericactors.actor.h"
 #include "flow/SimpleCounter.h"
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
@@ -2846,8 +2845,6 @@ struct DDQueueImpl {
 		FutureStream<RelocateData> completedRelocations;
 		PromiseStream<KeyRange> rangesComplete;
 		PromiseStream<Void> launchQueuedWorkTrigger;
-		// Serialize queue mutations so inline stream callbacks cannot observe partially updated state.
-		FlowLock queueMutationLock;
 	};
 
 	static void validate(RunState* state) { state->self->validate(); }
@@ -2857,8 +2854,6 @@ struct DDQueueImpl {
 	static Future<Void> processGatedRelocations(RunState* state, FutureStream<RelocateShard> input) {
 		while (true) {
 			RelocateShard rs = co_await input;
-			co_await state->queueMutationLock.take(TaskPriority::DataDistributionLaunch);
-			FlowLock::Releaser lockGuard(state->queueMutationLock);
 			state->self->pendingGateRelocations--;
 			state->self->updatePipelineFull();
 			if (rs.isRestore()) {
@@ -2883,8 +2878,6 @@ struct DDQueueImpl {
 		while (true) {
 			co_await trigger;
 			co_await delay(0, TaskPriority::DataDistributionLaunch);
-			co_await state->queueMutationLock.take(TaskPriority::DataDistributionLaunch);
-			FlowLock::Releaser lockGuard(state->queueMutationLock);
 			state->self->launchQueuedWork(state->serversToLaunchFrom, state->self->ddEnabledState);
 			state->serversToLaunchFrom.clear();
 			validate(state);
@@ -2894,19 +2887,6 @@ struct DDQueueImpl {
 	static Future<Void> processFetchedSourceServers(RunState* state, FutureStream<RelocateData> input) {
 		while (true) {
 			RelocateData results = co_await input;
-			co_await state->queueMutationLock.take(TaskPriority::DataDistributionLaunch);
-			FlowLock::Releaser lockGuard(state->queueMutationLock);
-			// A source-fetch actor can finish after an overlapping relocation has already cancelled and
-			// replaced the item it was fetching for. The old serialized choose loop could not observe that
-			// completion after the replacement had been processed, but the coroutine split can.
-			if (!state->self->fetchingSourcesQueue.contains(results)) {
-				DebugRelocationTraceEvent("StaleSourceFetchResult", state->self->distributorId)
-				    .detail("KeyBegin", results.keys.begin)
-				    .detail("KeyEnd", results.keys.end)
-				    .detail("Priority", results.priority)
-				    .detail("RandomID", results.randomId);
-				continue;
-			}
 			// This stream is triggered by queueRelocation(), which is triggered by sending self->input.
 			state->self->completeSourceFetch(results);
 			validate(state);
@@ -2919,8 +2899,9 @@ struct DDQueueImpl {
 	static Future<Void> processCompletedDataTransfers(RunState* state, FutureStream<RelocateData> input) {
 		while (true) {
 			RelocateData done = co_await input;
-			co_await state->queueMutationLock.take(TaskPriority::DataDistributionLaunch);
-			FlowLock::Releaser lockGuard(state->queueMutationLock);
+			// Relocator cancellation sends this stream inline from launchQueuedWork().
+			// Yield before mutating queue state so launchQueuedWork() can finish repairing its maps.
+			co_await delay(0, TaskPriority::DataDistributionLaunch);
 			complete(done, state->self->busymap, state->self->destBusymap);
 			bool wasEmpty = state->serversToLaunchFrom.empty();
 			state->serversToLaunchFrom.insert(done.src.begin(), done.src.end());
@@ -2934,8 +2915,9 @@ struct DDQueueImpl {
 	static Future<Void> processCompletedRelocations(RunState* state) {
 		while (true) {
 			RelocateData done = co_await state->completedRelocations;
-			co_await state->queueMutationLock.take(TaskPriority::DataDistributionLaunch);
-			FlowLock::Releaser lockGuard(state->queueMutationLock);
+			// Relocator cancellation sends this stream inline from launchQueuedWork().
+			// Yield before mutating queue state so launchQueuedWork() can finish repairing its maps.
+			co_await delay(0, TaskPriority::DataDistributionLaunch);
 			state->self->processRelocationComplete(done);
 			// self->logRelocation( done, "ShardRelocatorDone" );
 			auto scheduleRangesComplete = [&](KeyRange keys) {
@@ -2967,8 +2949,6 @@ struct DDQueueImpl {
 		FutureStream<KeyRange> rangesComplete = state->rangesComplete.getFuture();
 		while (true) {
 			KeyRange done = co_await rangesComplete;
-			co_await state->queueMutationLock.take(TaskPriority::DataDistributionLaunch);
-			FlowLock::Releaser lockGuard(state->queueMutationLock);
 			validate(state);
 			if (!done.empty()) {
 				state->self->launchQueuedWork(done, state->self->ddEnabledState);
@@ -3053,8 +3033,6 @@ struct DDQueueImpl {
 		while (true) {
 			co_await next;
 			next = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
-			co_await state->queueMutationLock.take(TaskPriority::FlushTrace);
-			FlowLock::Releaser lockGuard(state->queueMutationLock);
 			traceMovingData(state->self.getPtr());
 			validate(state);
 		}
@@ -3063,8 +3041,6 @@ struct DDQueueImpl {
 	static Future<Void> answerUnhealthyRelocationCount(RunState* state, FutureStream<Promise<int>> requests) {
 		while (true) {
 			Promise<int> request = co_await requests;
-			co_await state->queueMutationLock.take();
-			FlowLock::Releaser lockGuard(state->queueMutationLock);
 			request.send(state->self->getUnhealthyRelocationCount());
 			validate(state);
 		}
@@ -3072,8 +3048,6 @@ struct DDQueueImpl {
 
 	static Future<Void> waitAndValidate(RunState* state, Future<Void> future) {
 		co_await future;
-		co_await state->queueMutationLock.take();
-		FlowLock::Releaser lockGuard(state->queueMutationLock);
 		validate(state);
 	}
 
