@@ -97,7 +97,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - Coordinator state is persisted via `KeyValueStoreMemory` backed by a `DiskQueue` (`.fdq` files) -- the same engine used by TLogs.
 
 **Role recruitment:**
-- Worker processes register with CC via `registrationClient()` ([`worker.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/worker/worker.actor.cpp)).
+- Worker processes register with CC via `registrationClient()` ([`worker.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/worker/worker.cpp)).
 - CC maintains a pool of available workers with their `ProcessClass` and `LocalityData`.
 - When the transaction system needs to be (re)constituted, CC recruits: Master/Sequencer, CommitProxies, GrvProxies, Resolvers, TLogs.
 - Recruitment considers fitness (class match), locality (datacenter placement), and excludes failed/excluded processes.

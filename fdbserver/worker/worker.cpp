@@ -1,5 +1,5 @@
 /*
- * worker.actor.cpp
+ * worker.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -61,6 +61,7 @@
 #include "fdbserver/core/BackupInterface.h"
 #include "RoleLineage.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/CoroFlow.h"
 #include "fdbserver/worker/Worker.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/ratekeeper/Ratekeeper.h"
@@ -105,7 +106,7 @@
 #include <execinfo.h>
 #endif
 #include "fdbserver/core/TesterInterface.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 #if CENABLED(0, NOT_IN_CLEAN)
 extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
@@ -118,7 +119,7 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 
 struct ErrorInfo {
 	Error error;
-	const Role& role;
+	Role role;
 	UID id;
 	ErrorInfo(Error e, const Role& role, UID id) : error(e), role(role), id(id) {}
 	template <class Ar>
@@ -165,44 +166,49 @@ Future<Void> forwardError(PromiseStream<ErrorInfo> errors, Role role, UID id, Fu
 	}
 }
 
-ACTOR Future<Void> handleIOErrors(Future<Void> actor,
-                                  Future<ErrorOr<Void>> storeError,
-                                  UID id,
-                                  Future<Void> onClosed = Void()) {
-	choose {
-		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
-			if (e.isError() && e.getError().code() == error_code_please_reboot) {
-				// no need to wait.
-			} else {
-				wait(onClosed);
-			}
-			if (e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
-				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
-			}
-			if (storeError.isReady() && storeError.isError() &&
-			    storeError.getError().code() != error_code_file_not_found) {
-				throw storeError.get().getError();
-			}
-			if (e.isError()) {
-				throw e.getError();
-			} else
-				return e.get();
+Future<Void> handleIOErrors(Future<Void> actor,
+                            Future<ErrorOr<Void>> storeError,
+                            UID id,
+                            Future<Void> onClosed = Void()) {
+	auto res = co_await race(errorOr(actor), storeError);
+	if (res.index() == 0) {
+		ErrorOr<Void> e = std::get<0>(std::move(res));
+
+		if (e.isError() && e.getError().code() == error_code_please_reboot) {
+			// no need to wait.
+		} else {
+			co_await onClosed;
 		}
-		when(ErrorOr<Void> e = wait(storeError)) {
-			TraceEvent("WorkerTerminatingByIOError", id).errorUnsuppressed(e.getError());
-			actor.cancel();
-			// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be
-			// reported SevError.
-			if (e.getError().code() == error_code_file_not_found) {
-				CODE_PROBE(true, "Worker terminated with file_not_found error");
-				return Void();
-			} else if (e.getError().code() == error_code_lock_file_failure) {
-				CODE_PROBE(true, "Unable to lock file", probe::context::net2, probe::assert::noSim);
-				throw please_reboot_kv_store();
-			}
+		if (e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
+			co_await delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY);
+		}
+		if (storeError.isReady() && storeError.isError() && storeError.getError().code() != error_code_file_not_found) {
+			throw storeError.get().getError();
+		}
+		if (e.isError()) {
 			throw e.getError();
 		}
+		e.get();
+		co_return;
 	}
+	if (res.index() != 1) {
+		UNREACHABLE();
+	}
+
+	ErrorOr<Void> e = std::get<1>(std::move(res));
+	TraceEvent("WorkerTerminatingByIOError", id).errorUnsuppressed(e.getError());
+	actor.cancel();
+	// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be reported
+	// SevError.
+	if (e.getError().code() == error_code_file_not_found) {
+		CODE_PROBE(true, "Worker terminated with file_not_found error");
+		co_return;
+	}
+	if (e.getError().code() == error_code_lock_file_failure) {
+		CODE_PROBE(true, "Unable to lock file", probe::context::net2, probe::assert::noSim);
+		throw please_reboot_kv_store();
+	}
+	throw e.getError();
 }
 
 Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void()) {
@@ -223,36 +229,51 @@ Future<Void> deregisterGrpcService(UID id) {
 	return Void();
 }
 
-ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
-	loop choose {
-		when(ErrorInfo _err = waitNext(errors)) {
-			ErrorInfo err = _err;
-			bool ok = err.error.code() == error_code_success || err.error.code() == error_code_please_reboot ||
-			          err.error.code() == error_code_actor_cancelled ||
-			          err.error.code() == error_code_coordinators_changed || // The worker server was cancelled
-			          err.error.code() == error_code_shutdown_in_progress ||
-			          err.error.code() == error_code_audit_storage_task_outdated; // Expected during DD failover
+Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
+	while (true) {
+		ErrorInfo err = co_await errors;
+		const bool ok = err.error.code() == error_code_success || err.error.code() == error_code_please_reboot ||
+		                err.error.code() == error_code_actor_cancelled ||
+		                err.error.code() == error_code_coordinators_changed || // The worker server was cancelled
+		                err.error.code() == error_code_shutdown_in_progress ||
+		                err.error.code() == error_code_audit_storage_task_outdated; // Expected during DD failover
 
-			if (!ok) {
-				err.error = checkIOTimeout(err.error); // Possibly convert error to io_timeout
-			}
+		if (!ok) {
+			err.error = checkIOTimeout(err.error); // Possibly convert error to io_timeout
+		}
 
-			endRole(err.role, err.id, "Error", ok, err.error);
-
-			state std::optional<Error> rethrow = std::nullopt;
-			if (err.error.code() == error_code_please_reboot ||
-			    (err.role == Role::SHARED_TRANSACTION_LOG &&
-			     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)) ||
-			    (SERVER_KNOBS->STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT && err.role == Role::STORAGE_SERVER &&
-			     err.error.code() == error_code_io_timeout)) {
-				rethrow = err.error;
-			}
-
-			if (rethrow != std::nullopt) {
-				throw *rethrow;
-			}
+		endRole(err.role, err.id, "Error", ok, err.error);
+		if (err.error.code() == error_code_please_reboot ||
+		    (err.role == Role::SHARED_TRANSACTION_LOG &&
+		     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)) ||
+		    (SERVER_KNOBS->STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT && err.role == Role::STORAGE_SERVER &&
+		     err.error.code() == error_code_io_timeout)) {
+			throw err.error;
 		}
 	}
+}
+
+static auto waitForWorkerRegistrationEvent(
+    Future<RegisterWorkerReply> const& registrationReply,
+    Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> const& ccInterface,
+    Reference<AsyncVar<Optional<DataDistributorInterface>> const> const& ddInterf,
+    Reference<AsyncVar<Optional<RatekeeperInterface>> const> const& rkInterf,
+    Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> const& csInterf,
+    Reference<AsyncVar<bool> const> const& degraded,
+    Reference<AsyncVar<std::set<std::string>> const> const& issues,
+    Future<Void> const& recovered,
+    Reference<AsyncVar<Optional<UID>>> const& clusterId) {
+	return race(registrationReply,
+	            delay(SERVER_KNOBS->UNKNOWN_CC_TIMEOUT),
+	            ccInterface->onChange(),
+	            ddInterf->onChange(),
+	            rkInterf->onChange(),
+	            csInterf->onChange(),
+	            degraded->onChange(),
+	            FlowTransport::transport().onIncompatibleChanged(),
+	            issues->onChange(),
+	            recovered,
+	            clusterId->onChange());
 }
 
 // Improve simulation code coverage by sometimes deferring the destruction of workerInterface (and therefore "endpoint
@@ -560,34 +581,30 @@ std::vector<DiskStore> getDiskStores(std::string dataFolder, std::string tLogSpi
 
 // Register the worker interf to cluster controller (cc) and
 // re-register the worker when key roles interface, e.g., cc, dd, ratekeeper, change.
-ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                      WorkerInterface interf,
-                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                      ProcessClass initialClass,
-                                      Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
-                                      Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
-                                      Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> csInterf,
-                                      Reference<AsyncVar<bool> const> degraded,
-                                      Reference<IClusterConnectionRecord> connRecord,
-                                      Reference<AsyncVar<std::set<std::string>> const> issues,
-                                      Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                                      Promise<Void> recoveredDiskFiles,
-                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
+Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                                WorkerInterface interf,
+                                Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                                ProcessClass initialClass,
+                                Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
+                                Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
+                                Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> csInterf,
+                                Reference<AsyncVar<bool> const> degraded,
+                                Reference<IClusterConnectionRecord> connRecord,
+                                Reference<AsyncVar<std::set<std::string>> const> issues,
+                                Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                Promise<Void> recoveredDiskFiles,
+                                Reference<AsyncVar<Optional<UID>>> clusterId) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
-	state Generation requestGeneration = 0;
-	state ProcessClass processClass = initialClass;
-	state Reference<AsyncVar<Optional<std::pair<uint16_t, StorageServerInterface>>>> scInterf(
-	    new AsyncVar<Optional<std::pair<uint16_t, StorageServerInterface>>>());
-	state Future<Void> cacheProcessFuture;
-	state Future<Void> cacheErrorsFuture;
-	state Optional<double> incorrectTime;
-	loop {
-		state ClusterConnectionString storedConnectionString;
-		state bool upToDate = true;
+	Generation requestGeneration = 0;
+	ProcessClass processClass = initialClass;
+	Optional<double> incorrectTime;
+	while (true) {
+		ClusterConnectionString storedConnectionString;
+		bool upToDate = true;
 		if (connRecord) {
-			bool upToDateResult = wait(connRecord->upToDate(storedConnectionString));
+			bool upToDateResult = co_await connRecord->upToDate(storedConnectionString);
 			upToDate = upToDateResult;
 		}
 		if (upToDate) {
@@ -634,7 +651,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			}
 		}
 
-		state bool ccInterfacePresent = ccInterface->get().present();
+		bool ccInterfacePresent = ccInterface->get().present();
 		if (ccInterfacePresent) {
 			TraceEvent("WorkerRegister")
 			    .detail("CCID", ccInterface->get().get().id())
@@ -642,50 +659,27 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			    .detail("RecoveredDiskFiles", recoveredDiskFiles.isSet())
 			    .detail("ClusterId", clusterId->get());
 		}
-		state Future<RegisterWorkerReply> registrationReply =
+		Future<RegisterWorkerReply> registrationReply =
 		    ccInterfacePresent ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
 		                       : Never();
-		state Future<Void> recovered = recoveredDiskFiles.isSet() ? Never() : recoveredDiskFiles.getFuture();
-		state double startTime = now();
-		loop choose {
-			when(RegisterWorkerReply reply = wait(registrationReply)) {
+		Future<Void> recovered = recoveredDiskFiles.isSet() ? Never() : recoveredDiskFiles.getFuture();
+		double startTime = now();
+		while (true) {
+			auto res = co_await waitForWorkerRegistrationEvent(
+			    registrationReply, ccInterface, ddInterf, rkInterf, csInterf, degraded, issues, recovered, clusterId);
+			if (res.index() == 0) {
+				RegisterWorkerReply reply = std::get<0>(std::move(res));
 				processClass = reply.processClass;
 				asyncPriorityInfo->set(reply.priorityInfo);
 				TraceEvent("WorkerRegisterReply")
 				    .detail("CCID", ccInterface->get().get().id())
 				    .detail("ProcessClass", reply.processClass.toString());
 				break;
-			}
-			when(wait(delay(SERVER_KNOBS->UNKNOWN_CC_TIMEOUT))) {
+			} else if (res.index() == 1) {
 				if (!ccInterfacePresent) {
 					TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
 				}
-			}
-			when(wait(ccInterface->onChange())) {
-				break;
-			}
-			when(wait(ddInterf->onChange())) {
-				break;
-			}
-			when(wait(rkInterf->onChange())) {
-				break;
-			}
-			when(wait(csInterf->onChange())) {
-				break;
-			}
-			when(wait(degraded->onChange())) {
-				break;
-			}
-			when(wait(FlowTransport::transport().onIncompatibleChanged())) {
-				break;
-			}
-			when(wait(issues->onChange())) {
-				break;
-			}
-			when(wait(recovered)) {
-				break;
-			}
-			when(wait(clusterId->onChange())) {
+			} else {
 				break;
 			}
 		}
@@ -1340,19 +1334,19 @@ Future<Optional<PrimaryAndRemoteAddresses>> getStorageServers(Database db,
 }
 
 // The actor that actively monitors the health of local and peer servers, and reports anomaly to the cluster controller.
-ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                 WorkerInterface interf,
-                                 LocalityData locality,
-                                 Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                 Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
-	state UpdateWorkerHealthRequest req;
-	state Optional<Database> db;
+Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                           WorkerInterface interf,
+                           LocalityData locality,
+                           Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                           Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
+	UpdateWorkerHealthRequest req;
+	Optional<Database> db;
 	if (SERVER_KNOBS->GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN ||
 	    SERVER_KNOBS->GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN) {
 		db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
-	loop {
-		state Future<Void> nextHealthCheckDelay = Never();
+	while (true) {
+		Future<Void> nextHealthCheckDelay = Never();
 		const RecoveryState& recoveryState = dbInfo->get().recoveryState;
 		const bool primaryTxnSystemHealthCheckEnabled = enablePrimaryTxnSystemHealthCheck->get();
 		const bool ccInterfacePresent = ccInterface->get().present();
@@ -1363,9 +1357,9 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 		if ((recoveryState >= RecoveryState::ACCEPTING_COMMITS || primaryTxnSystemHealthCheckEnabled) &&
 		    ccInterfacePresent) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
-			state Optional<PrimaryAndRemoteAddresses> storageServers;
+			Optional<PrimaryAndRemoteAddresses> storageServers;
 			if (db.present()) {
-				wait(store(storageServers, getStorageServers(db.get(), dbInfo)));
+				co_await store(storageServers, getStorageServers(db.get(), dbInfo));
 			}
 			req = doPeerHealthCheck(interf, locality, dbInfo, req, enablePrimaryTxnSystemHealthCheck, storageServers);
 
@@ -1390,12 +1384,10 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 				}
 			}
 		}
-		choose {
-			when(wait(nextHealthCheckDelay)) {}
-			when(wait(ccInterface->onChange())) {}
-			when(wait(dbInfo->onChange())) {}
-			when(wait(enablePrimaryTxnSystemHealthCheck->onChange())) {}
-		}
+		co_await race(nextHealthCheckDelay,
+		              ccInterface->onChange(),
+		              dbInfo->onChange(),
+		              enablePrimaryTxnSystemHealthCheck->onChange());
 	}
 }
 
@@ -2003,81 +1995,113 @@ Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionReco
 #endif
 } // namespace
 
-ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                LocalityData locality,
-                                Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                ProcessClass initialClass,
-                                std::string folder,
-                                std::string tLogSpillFolder,
-                                int64_t memoryLimit,
-                                std::string metricsConnFile,
-                                std::string metricsPrefix,
-                                int64_t memoryProfileThreshold,
-                                std::string _coordFolder,
-                                std::string whitelistBinPaths,
-                                Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                                Reference<AsyncVar<Optional<UID>>> clusterId,
-                                bool consistencyCheckUrgentMode) {
-	state PromiseStream<ErrorInfo> errors;
-	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
+static auto waitForWorkerServerEvent(WorkerInterface& interf,
+                                     Future<Void> const& loggingTrigger,
+                                     ActorCollection& errorForwarders,
+                                     Future<Void> const& handleErrors) {
+	return race(interf.updateServerDBInfo.getFuture(),
+	            interf.clientInterface.reboot.getFuture(),
+	            interf.clientInterface.setFailureInjection.getFuture(),
+	            interf.clientInterface.profiler.getFuture(),
+	            interf.master.getFuture(),
+	            interf.dataDistributor.getFuture(),
+	            interf.ratekeeper.getFuture(),
+	            interf.consistencyScan.getFuture(),
+	            interf.backup.getFuture(),
+	            interf.rangePartitionedBackup.getFuture(),
+	            interf.tLog.getFuture(),
+	            interf.storage.getFuture(),
+	            interf.commitProxy.getFuture(),
+	            interf.grvProxy.getFuture(),
+	            interf.cdcProxy.getFuture(),
+	            interf.resolver.getFuture(),
+	            interf.logRouter.getFuture(),
+	            interf.coordinationPing.getFuture(),
+	            interf.setMetricsRate.getFuture(),
+	            interf.eventLogRequest.getFuture(),
+	            interf.traceBatchDumpRequest.getFuture(),
+	            interf.diskStoreRequest.getFuture(),
+	            loggingTrigger,
+	            interf.workerSnapReq.getFuture(),
+	            errorForwarders.getResult(),
+	            handleErrors);
+}
+
+Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
+                          Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                          LocalityData locality,
+                          Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                          ProcessClass initialClass,
+                          std::string folder,
+                          std::string tLogSpillFolder,
+                          int64_t memoryLimit,
+                          std::string metricsConnFile,
+                          std::string metricsPrefix,
+                          int64_t memoryProfileThreshold,
+                          std::string _coordFolder,
+                          std::string whitelistBinPaths,
+                          Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                          Reference<AsyncVar<Optional<UID>>> clusterId,
+                          bool consistencyCheckUrgentMode) {
+	PromiseStream<ErrorInfo> errors;
+	Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
-	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
-	state Reference<AsyncVar<Optional<ConsistencyScanInterface>>> csInterf(
+	Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
+	Reference<AsyncVar<Optional<ConsistencyScanInterface>>> csInterf(
 	    new AsyncVar<Optional<ConsistencyScanInterface>>());
-	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
-	state ActorCollection errorForwarders(false);
-	state Future<Void> loggingTrigger = Void();
-	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
+	Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
+	ActorCollection errorForwarders(false);
+	Future<Void> loggingTrigger = Void();
+	double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
 	// These two promises are destroyed after the "filesClosed" below to avoid broken_promise
-	state Promise<Void> rebootKVSPromise;
-	state Promise<Void> rebootKVSPromise2;
-	state ActorCollection filesClosed(true);
-	state Promise<Void> stopping;
-	state Future<Void> metricsLogger;
-	state Future<Void> chaosMetricsActor;
-	state Reference<AsyncVar<bool>> degraded = FlowTransport::transport().getDegraded();
-	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
-	state Reference<AsyncVar<std::set<std::string>>> traceLogIssues(new AsyncVar<std::set<std::string>>());
-	state Reference<AsyncVar<std::set<std::string>>> tlogIssues(new AsyncVar<std::set<std::string>>());
-	state Reference<AsyncVar<bool>> lowDiskTLogExclusion(new AsyncVar<bool>(false));
+	Promise<Void> rebootKVSPromise;
+	Promise<Void> rebootKVSPromise2;
+	ActorCollection filesClosed(true);
+	Promise<Void> stopping;
+	Future<Void> metricsLogger;
+	Future<Void> chaosMetricsActor;
+	Reference<AsyncVar<bool>> degraded = FlowTransport::transport().getDegraded();
+	Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
+	Reference<AsyncVar<std::set<std::string>>> traceLogIssues(new AsyncVar<std::set<std::string>>());
+	Reference<AsyncVar<std::set<std::string>>> tlogIssues(new AsyncVar<std::set<std::string>>());
+	Reference<AsyncVar<bool>> lowDiskTLogExclusion(new AsyncVar<bool>(false));
 	// tLogFnForOptions() can return a function that doesn't correspond with the FDB version that the
 	// TLogVersion represents.  This can be done if the newer TLog doesn't support a requested option.
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
 	// decide if we should collapse them into the same SharedTLog instance as well.  The answer
 	// here is no, so that when running with log_version==3, all files should say V=3.
-	state std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
-	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
-	state WorkerCache<InitializeBackupReply> backupWorkerCache;
-	state WorkerCache<InitializeRangePartitionedBackupReply> rangePartitionedBackupWorkerCache;
-	state WorkerCache<TLogInterface> logRouterCache;
+	std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
+	Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
+	WorkerCache<InitializeBackupReply> backupWorkerCache;
+	WorkerCache<InitializeRangePartitionedBackupReply> rangePartitionedBackupWorkerCache;
+	WorkerCache<TLogInterface> logRouterCache;
 
-	state WorkerSnapRequest lastSnapReq;
+	WorkerSnapRequest lastSnapReq;
 	// Here the key is UID+role, as we still send duplicate requests to a process which is both storage and tlog
-	state std::map<std::string, WorkerSnapRequest> snapReqMap;
-	state std::map<std::string, ErrorOr<Void>> snapReqResultMap;
-	state double lastSnapTime = -SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP; // always successful for the first Snap Request
-	state std::string coordFolder = abspath(_coordFolder);
+	std::map<std::string, WorkerSnapRequest> snapReqMap;
+	std::map<std::string, ErrorOr<Void>> snapReqResultMap;
+	double lastSnapTime = -SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP; // always successful for the first Snap Request
+	std::string coordFolder = abspath(_coordFolder);
 
-	state WorkerInterface interf(locality);
+	WorkerInterface interf(locality);
 
-	state std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
+	std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
 	// storageCleaners manages cleanup actors after a storage server is terminated. It cleans up
 	// stale disk files in case storage server is terminated for io_timeout or io_error but the worker
 	// process is still alive. If worker process is alive, it may be recruited as a new storage server
 	// and leave the stale disk file unattended.
-	state std::unordered_map<UID, StorageDiskCleaner> storageCleaners;
+	std::unordered_map<UID, StorageDiskCleaner> storageCleaners;
 
 	interf.initEndpoints();
 
-	state Future<Void> updateClusterIdFuture;
+	Future<Void> updateClusterIdFuture;
 
 	// When set to true, the health monitor running in this worker starts monitor other transaction process in this
 	// cluster.
-	state Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck = makeReference<AsyncVar<bool>>(false);
+	Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck = makeReference<AsyncVar<bool>>(false);
 
-	wait(yield());
-	state Future<Void> grpc = registerWorkerGrpcServices(interf.id(), connRecord);
+	co_await yield();
+	Future<Void> grpc = registerWorkerGrpcServices(interf.id(), connRecord);
 
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 		TraceEvent(SevInfo, "ChaosFeaturesEnabled");
@@ -2090,7 +2114,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	if (metricsPrefix.size() > 0) {
 		if (metricsConnFile.size() > 0) {
 			try {
-				state Database db =
+				Database db =
 				    Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
 				metricsLogger = runMetrics(db, KeyRef(metricsPrefix));
 				db->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
@@ -2156,24 +2180,24 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		DUMPTOKEN(recruited.updateServerDBInfo);
 	}
 
-	state std::vector<Future<Void>> recoveries;
+	std::vector<Future<Void>> recoveries;
 
+	Error e;
 	try {
-		state std::vector<DiskStore> stores = getDiskStores(folder, tLogSpillFolder);
+		std::vector<DiskStore> stores = getDiskStores(folder, tLogSpillFolder);
 		// Recovery validation remains process-wide: the datadir sentinel covers both disk queues
 		// and tlog spill KV stores, even when the spill files live on a separate volume.
-		state bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
-		state int index = 0;
-		for (; index < stores.size(); ++index) {
-			state DiskStore s = stores[index];
+		bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
+		for (int index = 0; index < stores.size(); ++index) {
+			DiskStore s = stores[index];
 			// FIXME: Error handling
 			// META-FIXME: what does the above comment refer to?  It dates to <= 2017.
 			// Either describe the problem(s) and (perhaps) make a plan to fix them, or take out the FIXME.
 			if (s.storedComponent == DiskStore::Storage) {
-				// Opening multiple KVSs at the same time could make worker run out of memory. Add delay to allow the
-				// extra storage process to be removed.
+				// Opening multiple KVSs at the same time could make worker run out of memory. Add delay to allow
+				// the extra storage process to be removed.
 				if (index >= 2 && SERVER_KNOBS->WORKER_START_STORAGE_DELAY > 0.0) {
-					wait(delay(SERVER_KNOBS->WORKER_START_STORAGE_DELAY));
+					co_await delay(SERVER_KNOBS->WORKER_START_STORAGE_DELAY);
 				}
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Storage;
@@ -2365,8 +2389,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			    healthMonitor(ccInterface, interf, locality, dbInfo, enablePrimaryTxnSystemHealthCheck));
 		}
 
-		loop choose {
-			when(UpdateServerDBInfoRequest req = waitNext(interf.updateServerDBInfo.getFuture())) {
+		while (true) {
+			auto res = co_await waitForWorkerServerEvent(interf, loggingTrigger, errorForwarders, handleErrors);
+			if (res.index() == 0) {
+				UpdateServerDBInfoRequest req = std::get<0>(std::move(res));
+
 				auto localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo,
 				                                                           AssumeVersion(g_network->protocolVersion()));
 				localInfo.myLocality = locality;
@@ -2400,9 +2427,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						updateClusterIdFuture = updateClusterId(localInfo.client.clusterId, clusterId, folder);
 					}
 				}
-			}
-			when(RebootRequest req = waitNext(interf.clientInterface.reboot.getFuture())) {
-				state RebootRequest rebootReq = req;
+			} else if (res.index() == 1) {
+				RebootRequest req = std::get<1>(std::move(res));
+
+				RebootRequest rebootReq = req;
 				// If suspendDuration is INT_MAX, the trace will not be logged if it was inside the next block
 				// Also a useful trace to have even if suspendDuration is 0
 				TraceEvent("RebootRequestSuspendingProcess").detail("Duration", req.waitForDuration);
@@ -2413,11 +2441,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					threadSleep(req.waitForDuration);
 				}
 				if (rebootReq.checkData) {
-					Reference<IAsyncFile> checkFile =
-					    wait(IAsyncFileSystem::filesystem()->open(joinPath(folder, validationFilename),
-					                                              IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
-					                                              0600));
-					wait(checkFile->sync());
+					Reference<IAsyncFile> checkFile = co_await IAsyncFileSystem::filesystem()->open(
+					    joinPath(folder, validationFilename),
+					    IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
+					    0600);
+					co_await checkFile->sync();
 				}
 
 				if (g_network->isSimulated()) {
@@ -2431,8 +2459,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					ASSERT(!rebootReq.deleteData);
 					flushAndExit(0);
 				}
-			}
-			when(SetFailureInjection req = waitNext(interf.clientInterface.setFailureInjection.getFuture())) {
+			} else if (res.index() == 2) {
+				SetFailureInjection req = std::get<2>(std::move(res));
+
 				if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 					if (req.diskFailure.present()) {
 						auto diskFailureInjector = DiskFailureInjector::injector();
@@ -2447,9 +2476,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else {
 					req.reply.sendError(client_invalid_operation());
 				}
-			}
-			when(ProfilerRequest req = waitNext(interf.clientInterface.profiler.getFuture())) {
-				state ProfilerRequest profilerReq = req;
+			} else if (res.index() == 3) {
+				ProfilerRequest req = std::get<3>(std::move(res));
+
+				ProfilerRequest profilerReq = req;
 				// There really isn't a great "filepath sanitizer" or "filepath escape" function available,
 				// thus we instead enforce a different requirement.  One can only write to a file that's
 				// beneath the working directory, and we remove the ability to do any symlink or ../..
@@ -2468,8 +2498,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} catch (Error& e) {
 					profilerReq.reply.sendError(e);
 				}
-			}
-			when(RecruitMasterRequest req = waitNext(interf.master.getFuture())) {
+			} else if (res.index() == 4) {
+				RecruitMasterRequest req = std::get<4>(std::move(res));
+
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Master;
 				MasterInterface recruited;
@@ -2490,8 +2521,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				errorForwarders.add(
 				    zombie(recruited, forwardError(errors, Role::MASTER, recruited.id(), masterProcess)));
 				req.reply.send(recruited);
-			}
-			when(InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture())) {
+			} else if (res.index() == 5) {
+				InitializeDataDistributorRequest req = std::get<5>(std::move(res));
+
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::DataDistributor;
 				DataDistributorInterface recruited(locality, req.reqId);
@@ -2516,8 +2548,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    .detail("DataDistributorId", recruited.id())
 				    .detail("Folder", folder); // double check if this works with SS restore
 				req.reply.send(recruited);
-			}
-			when(InitializeRatekeeperRequest req = waitNext(interf.ratekeeper.getFuture())) {
+			} else if (res.index() == 6) {
+				InitializeRatekeeperRequest req = std::get<6>(std::move(res));
+
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Ratekeeper;
 				RatekeeperInterface recruited(locality, req.reqId);
@@ -2543,8 +2576,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				}
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
 				req.reply.send(recruited);
-			}
-			when(InitializeConsistencyScanRequest req = waitNext(interf.consistencyScan.getFuture())) {
+			} else if (res.index() == 7) {
+				InitializeConsistencyScanRequest req = std::get<7>(std::move(res));
+
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::ConsistencyScan;
 				ConsistencyScanInterface recruited(locality, req.reqId);
@@ -2568,8 +2602,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				}
 				TraceEvent("ConsistencyScanReceived", req.reqId).detail("ConsistencyScanId", recruited.id());
 				req.reply.send(recruited);
-			}
-			when(InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
+			} else if (res.index() == 8) {
+				InitializeBackupRequest req = std::get<8>(std::move(res));
+
 				if (!backupWorkerCache.exists(req.reqId)) {
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Backup;
@@ -2590,8 +2625,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else {
 					forwardPromise(Uncancellable{}, req.reply, backupWorkerCache.get(req.reqId));
 				}
-			}
-			when(InitializeRangePartitionedBackupRequest req = waitNext(interf.rangePartitionedBackup.getFuture())) {
+			} else if (res.index() == 9) {
+				InitializeRangePartitionedBackupRequest req = std::get<9>(std::move(res));
+
 				if (!rangePartitionedBackupWorkerCache.exists(req.reqId)) {
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Backup;
@@ -2612,8 +2648,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else {
 					forwardPromise(Uncancellable{}, req.reply, rangePartitionedBackupWorkerCache.get(req.reqId));
 				}
-			}
-			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {
+			} else if (res.index() == 10) {
+				InitializeTLogRequest req = std::get<10>(std::move(res));
+
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.
 				// With future work, a particular version of the TLog can support multiple
 				// different spilling strategies, at which point SpillType will need to be
@@ -2682,8 +2719,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				}
 				logData.back().requests.send(req);
 				activeSharedTLog->set(logData.back().uid);
-			}
-			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
+			} else if (res.index() == 11) {
+				InitializeStorageRequest req = std::get<11>(std::move(res));
+
 				TraceEvent e("StorageServerInitProgress", req.interfaceId);
 				e.detail("Step", "1.RequestReceived");
 				e.detail("ReqID", req.reqId);
@@ -2808,8 +2846,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						return Void();
 					}));
 				}
-			}
-			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
+			} else if (res.index() == 12) {
+				InitializeCommitProxyRequest req = std::get<12>(std::move(res));
+
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::CommitProxy;
 				CommitProxyInterface recruited;
@@ -2833,8 +2872,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                        recruited.id(),
 				                                        commitProxyServer(recruited, req, dbInfo, whitelistBinPaths))));
 				req.reply.send(recruited);
-			}
-			when(InitializeGrvProxyRequest req = waitNext(interf.grvProxy.getFuture())) {
+			} else if (res.index() == 13) {
+				InitializeGrvProxyRequest req = std::get<13>(std::move(res));
+
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::GrvProxy;
 				GrvProxyInterface recruited;
@@ -2855,8 +2895,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    recruited,
 				    forwardError(errors, Role::GRV_PROXY, recruited.id(), grvProxyServer(recruited, req, dbInfo))));
 				req.reply.send(recruited);
-			}
-			when(InitializeCDCProxyRequest req = waitNext(interf.cdcProxy.getFuture())) {
+			} else if (res.index() == 14) {
+				InitializeCDCProxyRequest req = std::get<14>(std::move(res));
+
 				LocalLineage _;
 				CDCProxyInterface recruited;
 				recruited.processId = locality.processId();
@@ -2880,8 +2921,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                        recruited.id(),
 				                                        cdcProxyServer(recruited, req.recoveryCount, dbInfo))));
 				req.reply.send(recruited);
-			}
-			when(InitializeResolverRequest req = waitNext(interf.resolver.getFuture())) {
+			} else if (res.index() == 15) {
+				InitializeResolverRequest req = std::get<15>(std::move(res));
+
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Resolver;
 				ResolverInterface recruited;
@@ -2899,8 +2941,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				errorForwarders.add(zombie(
 				    recruited, forwardError(errors, Role::RESOLVER, recruited.id(), resolver(recruited, req, dbInfo))));
 				req.reply.send(recruited);
-			}
-			when(InitializeLogRouterRequest req = waitNext(interf.logRouter.getFuture())) {
+			} else if (res.index() == 16) {
+				InitializeLogRouterRequest req = std::get<16>(std::move(res));
+
 				if (!logRouterCache.exists(req.reqId)) {
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::LogRouter;
@@ -2937,13 +2980,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else {
 					forwardPromise(Uncancellable{}, req.reply, logRouterCache.get(req.reqId));
 				}
-			}
-			when(CoordinationPingMessage m = waitNext(interf.coordinationPing.getFuture())) {
+			} else if (res.index() == 17) {
+				CoordinationPingMessage m = std::get<17>(std::move(res));
+
 				TraceEvent("CoordinationPing", interf.id())
 				    .detail("CCID", m.clusterControllerId)
 				    .detail("TimeStep", m.timeStep);
-			}
-			when(SetMetricsLogRateRequest req = waitNext(interf.setMetricsRate.getFuture())) {
+			} else if (res.index() == 18) {
+				SetMetricsLogRateRequest req = std::get<18>(std::move(res));
+
 				TraceEvent("LoggingRateChange", interf.id())
 				    .detail("OldDelay", loggingDelay)
 				    .detail("NewLogPS", req.metricsLogsPerSecond);
@@ -2951,20 +2996,23 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					loggingDelay = 1.0 / req.metricsLogsPerSecond;
 					loggingTrigger = Void();
 				}
-			}
-			when(EventLogRequest req = waitNext(interf.eventLogRequest.getFuture())) {
+			} else if (res.index() == 19) {
+				EventLogRequest req = std::get<19>(std::move(res));
+
 				TraceEventFields e;
 				if (req.getLastError)
 					e = latestEventCache.getLatestError();
 				else
 					e = latestEventCache.get(req.eventName.toString());
 				req.reply.send(e);
-			}
-			when(TraceBatchDumpRequest req = waitNext(interf.traceBatchDumpRequest.getFuture())) {
+			} else if (res.index() == 20) {
+				TraceBatchDumpRequest req = std::get<20>(std::move(res));
+
 				g_traceBatch.dump();
 				req.reply.send(Void());
-			}
-			when(DiskStoreRequest req = waitNext(interf.diskStoreRequest.getFuture())) {
+			} else if (res.index() == 21) {
+				DiskStoreRequest req = std::get<21>(std::move(res));
+
 				Standalone<VectorRef<UID>> ids;
 				// NOTE: this request is mainly for consistency checking.  The current
 				// logic below seems to be holding up OK, but if we discover bugs in this
@@ -3004,12 +3052,13 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					}
 				}
 				req.reply.send(ids);
-			}
-			when(wait(loggingTrigger)) {
+			} else if (res.index() == 22) {
+
 				systemMonitor();
 				loggingTrigger = delay(loggingDelay, TaskPriority::FlushTrace);
-			}
-			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
+			} else if (res.index() == 23) {
+				WorkerSnapRequest snapReq = std::get<23>(std::move(res));
+
 				std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
 				if (snapReqResultMap.contains(snapReqKey)) {
 					CODE_PROBE(true, "Worker received a duplicate finished snapshot request", probe::decoration::rare);
@@ -3027,8 +3076,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					ASSERT(snapReq.role == snapReqMap[snapReqKey].role);
 					ASSERT(snapReq.snapPayload == snapReqMap[snapReqKey].snapPayload);
 					// Discard the old request if a duplicate new request is received
-					// In theory, the old request should be discarded when we send this error since DD won't resend a
-					// request unless for a network error, where the old request is discarded before sending the
+					// In theory, the old request should be discarded when we send this error since DD won't resend
+					// a request unless for a network error, where the old request is discarded before sending the
 					// duplicate request.
 					snapReqMap[snapReqKey].reply.sendError(duplicate_snapshot_request());
 					snapReqMap[snapReqKey] = snapReq;
@@ -3063,35 +3112,36 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						lastSnapTime = now();
 					}
 				}
+			} else {
+				ASSERT(res.index() == 24 || res.index() == 25);
 			}
-			when(wait(errorForwarders.getResult())) {}
-			when(wait(handleErrors)) {}
 		}
 	} catch (Error& err) {
-		// Make sure actors are cancelled before "recovery" promises are destructed.
-		for (auto f : recoveries)
-			f.cancel();
-		state Error e = err;
-		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_actor_cancelled ||
-		          e.code() == error_code_please_reboot_delete || e.code() == error_code_local_config_changed ||
-		          e.code() == error_code_invalid_cluster_id;
-		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
-		errorForwarders.clear(false);
-		sharedLogs.clear();
-
-		if (e.code() != error_code_actor_cancelled) {
-			// actor_cancelled:
-			// We get cancelled e.g. when an entire simulation times out, but in that case
-			// we won't be restarted and don't need to wait for shutdown
-			stopping.send(Void());
-			wait(filesClosed.getResult()); // Wait for complete shutdown of KV stores
-			wait(delay(0.0)); // Unwind the callstack to make sure that IAsyncFile references are all gone
-			TraceEvent(SevInfo, "WorkerShutdownComplete", interf.id());
-		}
-
-		wait(deregisterGrpcService(interf.id()));
-		throw e;
+		e = err;
 	}
+
+	// Make sure actors are cancelled before "recovery" promises are destructed.
+	for (auto f : recoveries)
+		f.cancel();
+	const bool ok = e.code() == error_code_please_reboot || e.code() == error_code_actor_cancelled ||
+	                e.code() == error_code_please_reboot_delete || e.code() == error_code_local_config_changed ||
+	                e.code() == error_code_invalid_cluster_id;
+	endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
+	errorForwarders.clear(false);
+	sharedLogs.clear();
+
+	if (e.code() != error_code_actor_cancelled) {
+		// actor_cancelled:
+		// We get cancelled e.g. when an entire simulation times out, but in that case
+		// we won't be restarted and don't need to wait for shutdown
+		stopping.send(Void());
+		co_await filesClosed.getResult(); // Wait for complete shutdown of KV stores
+		co_await delay(0.0); // Unwind the callstack to make sure that IAsyncFile references are all gone
+		TraceEvent(SevInfo, "WorkerShutdownComplete", interf.id());
+	}
+
+	co_await deregisterGrpcService(interf.id());
+	throw e;
 }
 
 namespace {
@@ -3308,34 +3358,32 @@ static const std::string swversionTestDirName = "sw-version-test";
 TEST_CASE("/fdbserver/worker/swversion/noversionhistory") {
 	if (!platform::createDirectory("sw-version-test")) {
 		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
-		return Void();
+		co_return;
 	}
 
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+	ErrorOr<SWVersion> swversion = co_await errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness()));
 
 	if (!swversion.isError()) {
 		ASSERT(!swversion.get().isValid());
 	}
 
-	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
-
-	return Void();
+	co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true);
 }
 
 TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
 	if (!platform::createDirectory("sw-version-test")) {
 		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
-		return Void();
+		co_return;
 	}
 
-	wait(success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                 ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                 ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                 ProtocolVersion::withTSS()))));
+	co_await success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                     ProtocolVersion::withTSS())));
 
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+	ErrorOr<SWVersion> swversion = co_await errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness()));
 
 	if (!swversion.isError()) {
 		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
@@ -3343,27 +3391,23 @@ TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
 		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
 	}
 
-	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
-
-	return Void();
+	co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true);
 }
 
 TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 	if (!platform::createDirectory("sw-version-test")) {
 		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
-		return Void();
+		co_return;
 	}
 
-	{
-		wait(success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-		                                                 ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                 ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                 ProtocolVersion::withTSS()))));
-	}
+	co_await success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                     ProtocolVersion::withTSS())));
 
 	{
-		ErrorOr<SWVersion> swversion = wait(errorOr(
-		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+		ErrorOr<SWVersion> swversion = co_await errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness()));
 
 		if (!swversion.isError()) {
 			ASSERT(swversion.get().newestProtocolVersion() ==
@@ -3376,16 +3420,14 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 		}
 	}
 
-	{
-		wait(success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-		                                                 ProtocolVersion::withTSS(),
-		                                                 ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                 ProtocolVersion::withTSS()))));
-	}
+	co_await success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                     ProtocolVersion::withTSS(),
+	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                     ProtocolVersion::withTSS())));
 
 	{
-		ErrorOr<SWVersion> swversion = wait(errorOr(
-		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+		ErrorOr<SWVersion> swversion = co_await errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness()));
 
 		if (!swversion.isError()) {
 			ASSERT(swversion.get().newestProtocolVersion() ==
@@ -3395,28 +3437,23 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 		}
 	}
 
-	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
-
-	return Void();
+	co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true);
 }
 
 TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
 	if (!platform::createDirectory("sw-version-test")) {
 		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
-		return Void();
+		co_return;
 	}
 
-	{
-		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                           ProtocolVersion::withTSS())));
-		(void)f;
-	}
+	co_await errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                             ProtocolVersion::withStorageInterfaceReadiness(),
+	                                             ProtocolVersion::withStorageInterfaceReadiness(),
+	                                             ProtocolVersion::withTSS()));
 
 	{
-		ErrorOr<SWVersion> swversion = wait(errorOr(
-		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+		ErrorOr<SWVersion> swversion = co_await errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness()));
 
 		if (!swversion.isError()) {
 			ASSERT(swversion.get().newestProtocolVersion() ==
@@ -3429,32 +3466,28 @@ TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
 
 	{
 		ErrorOr<SWVersion> swversion =
-		    wait(errorOr(testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withCacheRole())));
+		    co_await errorOr(testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withCacheRole()));
 
 		ASSERT(swversion.isError() && swversion.getError().code() == error_code_incompatible_software_version);
 	}
 
-	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
-
-	return Void();
+	co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true);
 }
 
 TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 	if (!platform::createDirectory("sw-version-test")) {
 		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
-		return Void();
+		co_return;
 	}
 
-	{
-		wait(success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-		                                                 ProtocolVersion::withTSS(),
-		                                                 ProtocolVersion::withTSS(),
-		                                                 ProtocolVersion::withCacheRole()))));
-	}
+	co_await success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                     ProtocolVersion::withTSS(),
+	                                                     ProtocolVersion::withTSS(),
+	                                                     ProtocolVersion::withCacheRole())));
 
 	{
-		ErrorOr<SWVersion> swversion = wait(errorOr(
-		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+		ErrorOr<SWVersion> swversion = co_await errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness()));
 
 		if (!swversion.isError()) {
 			ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withTSS().version());
@@ -3463,16 +3496,14 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 		}
 	}
 
-	{
-		wait(success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-		                                                 ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                 ProtocolVersion::withStorageInterfaceReadiness(),
-		                                                 ProtocolVersion::withTSS()))));
-	}
+	co_await success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                     ProtocolVersion::withTSS())));
 
 	{
-		ErrorOr<SWVersion> swversion = wait(errorOr(
-		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+		ErrorOr<SWVersion> swversion = co_await errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness()));
 
 		if (!swversion.isError()) {
 			ASSERT(swversion.get().newestProtocolVersion() ==
@@ -3483,9 +3514,7 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 		}
 	}
 
-	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
-
-	return Void();
+	co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true);
 }
 
 namespace {
@@ -3504,7 +3533,7 @@ KeyValueStoreType randomStoreType() {
 
 // Test the engine can clear in-flight commits
 TEST_CASE("/fdbserver/storageengine/clearInflightCommits") {
-	state const std::string testDir = "engine-basic-test";
+	const std::string testDir = "engine-basic-test";
 	platform::eraseDirectoryRecursive(testDir);
 	platform::createDirectory(testDir);
 
@@ -3514,57 +3543,57 @@ TEST_CASE("/fdbserver/storageengine/clearInflightCommits") {
 
 	UID uid = deterministicRandom()->randomUniqueID();
 	std::string filename = filenameFromId(storeType, testDir, "", uid);
-	state IKeyValueStore* kvStore = openKVStore(storeType, filename, uid, 1 << 30);
-	wait(kvStore->init());
+	CoroThreadPool::init();
+	IKeyValueStore* kvStore = openKVStore(storeType, filename, uid, 1 << 30);
+	co_await kvStore->init();
 
 	// sharded rocksdb needs to be initialized with a shard
-	wait(kvStore->addRange(allKeys, "shard"));
+	co_await kvStore->addRange(allKeys, "shard");
 
 	// Insert keys
-	state StringRef foo = "foo"_sr;
-	state StringRef bar = "bar"_sr;
+	StringRef foo = "foo"_sr;
+	StringRef bar = "bar"_sr;
 	kvStore->set({ foo, foo });
 	kvStore->set({ keyAfter(foo), keyAfter(foo) });
 	kvStore->set({ bar, bar });
 	kvStore->set({ keyAfter(bar), keyAfter(bar) });
 
-	// Note there is no wait() here.  We want to test that the commit is still in flight
-	state Future<Void> commit1 = kvStore->commit(false);
+	// Note there is no co_await here. We want to test that the commit is still in flight.
+	Future<Void> commit1 = kvStore->commit(false);
 
 	// Clear keys, so that only keyAfter(foo) will be present
 	kvStore->clear(KeyRangeRef(bar, keyAfter(foo)));
 
 	// Wait for the commit to finish and check that the keys are gone
-	wait(commit1);
-	wait(kvStore->commit(false));
+	co_await commit1;
+	co_await kvStore->commit(false);
 
 	{
-		Optional<Value> val = wait(kvStore->readValue(bar));
+		Optional<Value> val = co_await kvStore->readValue(bar);
 		ASSERT(!val.present());
 	}
 
 	{
-		Optional<Value> val = wait(kvStore->readValue(keyAfter(bar)));
+		Optional<Value> val = co_await kvStore->readValue(keyAfter(bar));
 		ASSERT(!val.present());
 	}
 
 	{
-		Optional<Value> val = wait(kvStore->readValue(foo));
+		Optional<Value> val = co_await kvStore->readValue(foo);
 		ASSERT(!val.present());
 	}
 
 	{
-		Optional<Value> val = wait(kvStore->readValue(keyAfter(foo)));
+		Optional<Value> val = co_await kvStore->readValue(keyAfter(foo));
 		ASSERT(val.present() and val.get() == keyAfter(foo));
 	}
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
 	fmt::print("Waiting for engine to close\n");
-	wait(closed);
+	co_await closed;
 
 	platform::eraseDirectoryRecursive(testDir);
-	return Void();
 }
 } // namespace
 
@@ -3737,17 +3766,27 @@ Future<Void> monitorLeaderWithDelayedCandidacyImpl(
 	return m || deserializer(serializedInfo, outKnownLeader);
 }
 
-ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
-    Reference<IClusterConnectionRecord> connRecord,
-    Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
-    Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-    LocalityData locality,
-    Reference<AsyncVar<ServerDBInfo>> dbInfo,
-    Reference<AsyncVar<Optional<UID>>> clusterId) {
-	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connRecord, currentCC);
-	state Future<Void> timeout;
+static auto waitForDelayedCandidacyEvent(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& currentCC,
+                                         Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
+                                         Future<Void> const& timeout) {
+	return race(currentCC->onChange(),
+	            dbInfo->onChange(),
+	            currentCC->get().present() ? IFailureMonitor::failureMonitor().onStateChanged(
+	                                             currentCC->get().get().registerWorker.getEndpoint())
+	                                       : Never(),
+	            timeout.isValid() ? timeout : Never());
+}
 
-	loop {
+Future<Void> monitorLeaderWithDelayedCandidacy(Reference<IClusterConnectionRecord> connRecord,
+                                               Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
+                                               Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                                               LocalityData locality,
+                                               Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                               Reference<AsyncVar<Optional<UID>>> clusterId) {
+	Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connRecord, currentCC);
+	Future<Void> timeout;
+
+	while (true) {
 		if (currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() &&
 		    IFailureMonitor::failureMonitor()
 		        .getState(currentCC->get().get().registerWorker.getEndpoint())
@@ -3759,17 +3798,11 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 			          (deterministicRandom()->random01() * (SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS -
 			                                                SERVER_KNOBS->MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS)));
 		}
-		choose {
-			when(wait(currentCC->onChange())) {}
-			when(wait(dbInfo->onChange())) {}
-			when(wait(currentCC->get().present() ? IFailureMonitor::failureMonitor().onStateChanged(
-			                                           currentCC->get().get().registerWorker.getEndpoint())
-			                                     : Never())) {}
-			when(wait(timeout.isValid() ? timeout : Never())) {
-				monitor.cancel();
-				wait(clusterController(connRecord, currentCC, asyncPriorityInfo, locality, clusterId));
-				return Void();
-			}
+		auto res = co_await waitForDelayedCandidacyEvent(currentCC, dbInfo, timeout);
+		if (res.index() == 3) {
+			monitor.cancel();
+			co_await clusterController(connRecord, currentCC, asyncPriorityInfo, locality, clusterId);
+			co_return;
 		}
 	}
 }
@@ -3788,31 +3821,35 @@ Future<Void> serveProtocolInfo() {
 
 // Handles requests from ProcessInterface, an interface meant for direct
 // communication between the client and FDB processes.
-ACTOR Future<Void> serveProcess() {
-	state ProcessInterface process;
+Future<Void> serveProcess() {
+	ProcessInterface process;
 	process.getInterface.makeWellKnownEndpoint(WLTOKEN_PROCESS, TaskPriority::DefaultEndpoint);
-	loop {
-		choose {
-			when(GetProcessInterfaceRequest req = waitNext(process.getInterface.getFuture())) {
-				req.reply.send(process);
-			}
-			when(ActorLineageRequest req = waitNext(process.actorLineage.getFuture())) {
-				state SampleCollection sampleCollector;
-				auto samples = sampleCollector->get(req.timeStart, req.timeEnd);
+	while (true) {
+		auto res = co_await race(process.getInterface.getFuture(), process.actorLineage.getFuture());
+		if (res.index() == 0) {
+			GetProcessInterfaceRequest req = std::get<0>(std::move(res));
 
-				std::vector<SerializedSample> serializedSamples;
-				for (const auto& samplePtr : samples) {
-					auto serialized = SerializedSample{ .time = samplePtr->time, .data = {} };
-					for (const auto& [waitState, pair] : samplePtr->data) {
-						if (waitState >= req.waitStateStart && waitState <= req.waitStateEnd) {
-							serialized.data[waitState] = std::string(pair.first, pair.second);
-						}
+			req.reply.send(process);
+		} else if (res.index() == 1) {
+			ActorLineageRequest req = std::get<1>(std::move(res));
+
+			SampleCollection sampleCollector;
+			auto samples = sampleCollector->get(req.timeStart, req.timeEnd);
+
+			std::vector<SerializedSample> serializedSamples;
+			for (const auto& samplePtr : samples) {
+				auto serialized = SerializedSample{ .time = samplePtr->time, .data = {} };
+				for (const auto& [waitState, pair] : samplePtr->data) {
+					if (waitState >= req.waitStateStart && waitState <= req.waitStateEnd) {
+						serialized.data[waitState] = std::string(pair.first, pair.second);
 					}
-					serializedSamples.push_back(std::move(serialized));
 				}
-				ActorLineageReply reply{ serializedSamples };
-				req.reply.send(reply);
+				serializedSamples.push_back(std::move(serialized));
 			}
+			ActorLineageReply reply{ serializedSamples };
+			req.reply.send(reply);
+		} else {
+			UNREACHABLE();
 		}
 	}
 }
