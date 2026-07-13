@@ -2151,8 +2151,8 @@ TEST_CASE("/backup/containers/localdir/encrypted") {
 }
 
 TEST_CASE("/backup/containers/localdir/encryptedDescribeWithoutBlockSize") {
-	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
-	std::string keyFile = format("%s/test_encryption_key_describe", params.getDataDir().c_str());
+	std::string url = fmt::format("file://{}/fdb_backups/{:x}", params.getDataDir(), timer_int());
+	std::string keyFile = fmt::format("{}/test_encryption_key_describe", params.getDataDir());
 	co_await BackupContainerFileSystem::createTestEncryptionKeyFile(keyFile);
 
 	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, keyFile, 4096);
