@@ -238,6 +238,12 @@ public class AsyncStackTester {
 				inst.push("GOT_RANGE_SPLIT_POINTS".getBytes());
 			}, FDB.DEFAULT_EXECUTOR);
 		}
+		else if (op == StackOperation.GET_RANGE_SPLIT_POINTS_WITH_LIMIT) {
+			List<Object> params = inst.popParams(4).join();
+			return inst.readTr.getRangeSplitPoints((byte[])params.get(0), (byte[])params.get(1), (long)params.get(2), StackUtils.getInt(params.get(3))).thenAcceptAsync(splitPoints -> {
+				inst.push("GOT_RANGE_SPLIT_POINTS".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
+		}
 		else if(op == StackOperation.GET_RANGE) {
 			return inst.popParams(5).thenComposeAsync(params -> {
 				int limit = StackUtils.getInt(params.get(2));

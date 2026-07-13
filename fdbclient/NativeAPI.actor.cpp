@@ -5975,6 +5975,51 @@ static int getRangeSplitPointsLocationLimit(int splitPointLimit, int maxLocation
 	return splitPointLimit >= 0 && splitPointLimit < maxLocations ? splitPointLimit + 1 : maxLocations;
 }
 
+class RangeSplitPointsBuilder {
+	Standalone<VectorRef<KeyRef>> results;
+	int remaining;
+
+public:
+	RangeSplitPointsBuilder(KeyRef begin, int limit) : remaining(limit) {
+		results.push_back_deep(results.arena(), begin);
+	}
+
+	int getRemaining() const { return remaining; }
+
+	bool appendShardBoundary(KeyRef boundary) {
+		if (remaining == 0) {
+			return false;
+		}
+		results.push_back_deep(results.arena(), boundary);
+		if (remaining > 0) {
+			--remaining;
+		}
+		return true;
+	}
+
+	void appendSplitPoints(Standalone<VectorRef<KeyRef>> const& splitPoints) {
+		int splitPointCount = splitPoints.size();
+		if (remaining >= 0) {
+			splitPointCount = std::min(splitPointCount, remaining);
+		}
+		if (splitPointCount == 0) {
+			return;
+		}
+		results.append(results.arena(), splitPoints.begin(), splitPointCount);
+		results.arena().dependsOn(splitPoints.arena());
+		if (remaining > 0) {
+			remaining -= splitPointCount;
+		}
+	}
+
+	Standalone<VectorRef<KeyRef>> finish(KeyRef end) {
+		if (results.back() != end) {
+			results.push_back_deep(results.arena(), end);
+		}
+		return results;
+	}
+};
+
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
                                                                 KeyRange keys,
                                                                 int64_t chunkSize,
@@ -5993,51 +6038,46 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 			if (limit >= 0 && nLocs - 1 > limit) {
 				nLocs = limit + 1;
 			}
-			state std::vector<Future<SplitRangeReply>> fReplies(nLocs);
-			KeyRef partBegin, partEnd;
-			for (int i = 0; i < nLocs; i++) {
-				partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
-				partEnd = locations[i].range.end;
-				SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize, limit);
-				fReplies[i] = loadBalance(locations[i].locations->locations(),
-				                          &StorageServerInterface::getRangeSplitPoints,
-				                          req,
-				                          TaskPriority::DataDistribution);
-			}
-
-			wait(waitForAll(fReplies));
-			Standalone<VectorRef<KeyRef>> results;
-			int remaining = limit;
-
-			results.push_back_deep(results.arena(), keys.begin);
-			for (int i = 0; i < nLocs; i++) {
-				if (i > 0) {
-					if (remaining == 0) {
+			state Optional<RangeSplitPointsBuilder> results;
+			results = RangeSplitPointsBuilder(keys.begin, limit);
+			if (limit >= 0) {
+				state int i = 0;
+				for (; i < nLocs; i++) {
+					if (i > 0 && !results.get().appendShardBoundary(locations[i].range.begin)) {
 						break;
 					}
-					results.push_back_deep(results.arena(),
-					                       locations[i].range.begin); // Need this shard boundary
-					if (remaining > 0) {
-						--remaining;
+					if (results.get().getRemaining() == 0) {
+						break;
 					}
+					KeyRef partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
+					KeyRef partEnd = std::min(keys.end, locations[i].range.end);
+					SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize, results.get().getRemaining());
+					SplitRangeReply reply = wait(loadBalance(locations[i].locations->locations(),
+					                                         &StorageServerInterface::getRangeSplitPoints,
+					                                         req,
+					                                         TaskPriority::DataDistribution));
+					results.get().appendSplitPoints(reply.splitPoints);
 				}
-				int splitPointCount = fReplies[i].get().splitPoints.size();
-				if (remaining >= 0) {
-					splitPointCount = std::min(splitPointCount, remaining);
+			} else {
+				state std::vector<Future<SplitRangeReply>> fReplies(nLocs);
+				for (int i = 0; i < nLocs; i++) {
+					KeyRef partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
+					KeyRef partEnd = std::min(keys.end, locations[i].range.end);
+					SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize, limit);
+					fReplies[i] = loadBalance(locations[i].locations->locations(),
+					                          &StorageServerInterface::getRangeSplitPoints,
+					                          req,
+					                          TaskPriority::DataDistribution);
 				}
-				if (splitPointCount > 0) {
-					results.append(results.arena(), fReplies[i].get().splitPoints.begin(), splitPointCount);
-					results.arena().dependsOn(fReplies[i].get().splitPoints.arena());
-					if (remaining > 0) {
-						remaining -= splitPointCount;
+				wait(waitForAll(fReplies));
+				for (int i = 0; i < nLocs; i++) {
+					if (i > 0) {
+						results.get().appendShardBoundary(locations[i].range.begin);
 					}
+					results.get().appendSplitPoints(fReplies[i].get().splitPoints);
 				}
 			}
-			if (results.back() != keys.end) {
-				results.push_back_deep(results.arena(), keys.end);
-			}
-
-			return results;
+			return results.get().finish(keys.end);
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				trState->cx->invalidateCache(keys);
@@ -6065,6 +6105,60 @@ TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/locationLimit") {
 	ASSERT(getRangeSplitPointsLocationLimit(maxLocations - 1, maxLocations) == maxLocations);
 	ASSERT(getRangeSplitPointsLocationLimit(maxLocations, maxLocations) == maxLocations);
 	ASSERT(getRangeSplitPointsLocationLimit(std::numeric_limits<int>::max(), maxLocations) == maxLocations);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
+	Standalone<VectorRef<KeyRef>> firstShard;
+	firstShard.push_back_deep(firstShard.arena(), "A1"_sr);
+	firstShard.push_back_deep(firstShard.arena(), "A2"_sr);
+	Standalone<VectorRef<KeyRef>> secondShard;
+	secondShard.push_back_deep(secondShard.arena(), "B1"_sr);
+	secondShard.push_back_deep(secondShard.arena(), "B2"_sr);
+
+	RangeSplitPointsBuilder zero("A"_sr, 0);
+	zero.appendSplitPoints(firstShard);
+	ASSERT(!zero.appendShardBoundary("B"_sr));
+	Standalone<VectorRef<KeyRef>> zeroResults = zero.finish("Z"_sr);
+	ASSERT(zeroResults.size() == 2 && zeroResults[0] == "A"_sr && zeroResults[1] == "Z"_sr);
+
+	RangeSplitPointsBuilder one("A"_sr, 1);
+	one.appendSplitPoints(firstShard);
+	ASSERT(one.getRemaining() == 0);
+	ASSERT(!one.appendShardBoundary("B"_sr));
+	Standalone<VectorRef<KeyRef>> oneResults = one.finish("Z"_sr);
+	ASSERT(oneResults.size() == 3 && oneResults[1] == "A1"_sr && oneResults[2] == "Z"_sr);
+
+	RangeSplitPointsBuilder two("A"_sr, 2);
+	ASSERT(two.appendShardBoundary("B"_sr));
+	ASSERT(two.getRemaining() == 1);
+	two.appendSplitPoints(secondShard);
+	ASSERT(two.getRemaining() == 0);
+	ASSERT(!two.appendShardBoundary("C"_sr));
+	Standalone<VectorRef<KeyRef>> twoResults = two.finish("Z"_sr);
+	ASSERT(twoResults.size() == 4 && twoResults[1] == "B"_sr && twoResults[2] == "B1"_sr && twoResults[3] == "Z"_sr);
+
+	RangeSplitPointsBuilder four("A"_sr, 4);
+	four.appendSplitPoints(firstShard);
+	ASSERT(four.getRemaining() == 2);
+	ASSERT(four.appendShardBoundary("B"_sr));
+	ASSERT(four.getRemaining() == 1);
+	four.appendSplitPoints(secondShard);
+	ASSERT(four.getRemaining() == 0);
+	Standalone<VectorRef<KeyRef>> fourResults = four.finish("Z"_sr);
+	ASSERT(fourResults.size() == 6 && fourResults[1] == "A1"_sr && fourResults[2] == "A2"_sr &&
+	       fourResults[3] == "B"_sr && fourResults[4] == "B1"_sr && fourResults[5] == "Z"_sr);
+
+	RangeSplitPointsBuilder unlimited("A"_sr, -1);
+	unlimited.appendSplitPoints(firstShard);
+	ASSERT(unlimited.appendShardBoundary("B"_sr));
+	unlimited.appendSplitPoints(secondShard);
+	ASSERT(unlimited.appendShardBoundary("C"_sr));
+	Standalone<VectorRef<KeyRef>> unlimitedResults = unlimited.finish("Z"_sr);
+	ASSERT(unlimitedResults.size() == 8 && unlimitedResults[1] == "A1"_sr && unlimitedResults[2] == "A2"_sr &&
+	       unlimitedResults[3] == "B"_sr && unlimitedResults[4] == "B1"_sr && unlimitedResults[5] == "B2"_sr &&
+	       unlimitedResults[6] == "C"_sr && unlimitedResults[7] == "Z"_sr);
 
 	return Void();
 }

@@ -841,7 +841,7 @@ Transaction misc functions
 
 .. method:: Transaction.get_range_split_points(self, begin_key, end_key, chunk_size, limit=-1)
 
-    Gets a list of keys that can split the given range into (roughly) equally sized chunks based on ``chunk_size``. A non-negative ``limit`` caps the number of interior split points, including shard boundaries. Returns a :class:`FutureKeyArray`.
+    Gets a list of keys that can split the given range into (roughly) equally sized chunks based on ``chunk_size``. A non-negative ``limit`` caps the number of interior split points, including shard boundaries. Limits larger than ``2**31 - 1`` are clamped to ``2**31 - 1``. Returns a :class:`FutureKeyArray`.
     .. note:: The returned split points contain the start key and end key of the given range
 
 .. method:: Transaction.get_approximate_size()

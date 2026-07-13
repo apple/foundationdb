@@ -355,6 +355,17 @@ func (t *transaction) getRangeSplitPoints(beginKey Key, endKey Key, chunkSize in
 	}
 }
 
+func normalizeRangeSplitPointLimit(limit int) int {
+	const maxLimit = 1<<31 - 1
+	if limit < 0 {
+		return -1
+	}
+	if limit > maxLimit {
+		return maxLimit
+	}
+	return limit
+}
+
 func (t *transaction) getRangeSplitPointsWithLimit(beginKey Key, endKey Key, chunkSize int64, limit int) FutureKeyArray {
 	return &futureKeyArray{
 		future: newFuture(t, C.fdb_transaction_get_range_split_points_with_limit(
@@ -364,7 +375,7 @@ func (t *transaction) getRangeSplitPointsWithLimit(beginKey Key, endKey Key, chu
 			byteSliceToPtr(endKey),
 			C.int(len(endKey)),
 			C.int64_t(chunkSize),
-			C.int(limit),
+			C.int(normalizeRangeSplitPointLimit(limit)),
 		)),
 	}
 }
@@ -382,7 +393,7 @@ func (t Transaction) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKe
 }
 
 // GetRangeSplitPointsWithLimit returns at most limit interior split points, including shard boundaries.
-// The start and end keys of the given range are always included.
+// The start and end keys of the given range are always included. Limits larger than 2^31-1 are clamped to 2^31-1.
 func (t Transaction) GetRangeSplitPointsWithLimit(r ExactRange, chunkSize int64, limit int) FutureKeyArray {
 	beginKey, endKey := r.FDBRangeKeys()
 	return t.getRangeSplitPointsWithLimit(

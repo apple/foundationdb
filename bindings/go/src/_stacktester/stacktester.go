@@ -590,6 +590,18 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		if err != nil {
 			panic(err)
 		}
+	case op == "GET_RANGE_SPLIT_POINTS_WITH_LIMIT":
+		r := sm.popKeyRange()
+		chunkSize := sm.waitAndPop().item.(int64)
+		limit := int(sm.waitAndPop().item.(int64))
+		_, err := rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
+			_ = rtr.GetRangeSplitPointsWithLimit(r, chunkSize, limit).MustGet()
+			sm.store(idx, []byte("GOT_RANGE_SPLIT_POINTS"))
+			return nil, nil
+		})
+		if err != nil {
+			panic(err)
+		}
 	case op == "COMMIT":
 		sm.store(idx, sm.currentTransaction().Commit())
 	case op == "RESET":

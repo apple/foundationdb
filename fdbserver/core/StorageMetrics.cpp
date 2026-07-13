@@ -24,6 +24,7 @@
 #include "flow/CodeProbe.h"
 #include "flow/Hash3.h"
 #include "flow/IRandom.h"
+#include "flow/ObjectSerializer.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/CoroUtils.h"
@@ -952,6 +953,19 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/limit") {
 	ssm.getSplitPoints(req, {});
 	ASSERT(reply.isReady());
 	ASSERT(reply.get().splitPoints.size() == 1 && reply.get().splitPoints[0] == "Absolute"_sr);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/requestFlatBufferRoundTrip") {
+	SplitRangeRequest request(KeyRangeRef("A"_sr, "C"_sr), 1024, 2);
+	const Standalone<StringRef> serialized = ObjectWriter::toValue(request, Unversioned());
+	const SplitRangeRequest decoded = ObjectReader::fromStringRef<SplitRangeRequest>(serialized, Unversioned());
+
+	ASSERT(decoded.keys == request.keys);
+	ASSERT_EQ(decoded.chunkSize, request.chunkSize);
+	ASSERT_EQ(decoded.limit, request.limit);
+	ASSERT_EQ(decoded.reply.getEndpoint().token, request.reply.getEndpoint().token);
 
 	return Void();
 }
