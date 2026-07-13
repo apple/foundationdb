@@ -41,6 +41,7 @@ type ReadTransaction interface {
 	Snapshot() Snapshot
 	GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64
 	GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray
+	GetRangeSplitPointsWithLimit(r ExactRange, chunkSize int64, limit int) FutureKeyArray
 	Options() TransactionOptions
 	Cancel()
 
@@ -354,6 +355,20 @@ func (t *transaction) getRangeSplitPoints(beginKey Key, endKey Key, chunkSize in
 	}
 }
 
+func (t *transaction) getRangeSplitPointsWithLimit(beginKey Key, endKey Key, chunkSize int64, limit int) FutureKeyArray {
+	return &futureKeyArray{
+		future: newFuture(t, C.fdb_transaction_get_range_split_points_with_limit(
+			t.ptr,
+			byteSliceToPtr(beginKey),
+			C.int(len(beginKey)),
+			byteSliceToPtr(endKey),
+			C.int(len(endKey)),
+			C.int64_t(chunkSize),
+			C.int(limit),
+		)),
+	}
+}
+
 // GetRangeSplitPoints returns a list of keys that can split the given range
 // into (roughly) equally sized chunks based on chunkSize.
 // Note: the returned split points contain the start key and end key of the given range.
@@ -363,6 +378,18 @@ func (t Transaction) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKe
 		beginKey.FDBKey(),
 		endKey.FDBKey(),
 		chunkSize,
+	)
+}
+
+// GetRangeSplitPointsWithLimit returns at most limit interior split points, including shard boundaries.
+// The start and end keys of the given range are always included.
+func (t Transaction) GetRangeSplitPointsWithLimit(r ExactRange, chunkSize int64, limit int) FutureKeyArray {
+	beginKey, endKey := r.FDBRangeKeys()
+	return t.getRangeSplitPointsWithLimit(
+		beginKey.FDBKey(),
+		endKey.FDBKey(),
+		chunkSize,
+		limit,
 	)
 }
 

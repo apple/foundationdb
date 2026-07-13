@@ -1829,7 +1829,8 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 }
 
 Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPoints(const KeyRange& range,
-                                                                                     int64_t chunkSize) {
+                                                                                     int64_t chunkSize,
+                                                                                     int limit) {
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
@@ -1840,7 +1841,7 @@ Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPo
 	if (range.begin > maxKey || range.end > maxKey)
 		return key_outside_legal_range();
 
-	return waitOrError(tr.getRangeSplitPoints(range, chunkSize), resetPromise.getFuture());
+	return waitOrError(tr.getRangeSplitPoints(range, chunkSize, limit), resetPromise.getFuture());
 }
 
 void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {

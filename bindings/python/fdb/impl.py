@@ -541,17 +541,29 @@ class TransactionRead(_FDBBase):
             )
         )
 
-    def get_range_split_points(self, begin_key, end_key, chunk_size):
+    def get_range_split_points(self, begin_key, end_key, chunk_size, limit=-1):
         if begin_key is None or end_key is None or chunk_size <= 0:
             raise Exception("Invalid begin key, end key or chunk size")
+        if limit < 0:
+            return FutureKeyArray(
+                self.capi.fdb_transaction_get_range_split_points(
+                    self.tpointer,
+                    begin_key,
+                    len(begin_key),
+                    end_key,
+                    len(end_key),
+                    chunk_size,
+                )
+            )
         return FutureKeyArray(
-            self.capi.fdb_transaction_get_range_split_points(
+            self.capi.fdb_transaction_get_range_split_points_with_limit(
                 self.tpointer,
                 begin_key,
                 len(begin_key),
                 end_key,
                 len(end_key),
                 chunk_size,
+                limit,
             )
         )
 
@@ -1792,6 +1804,17 @@ def init_c_api():
         ctypes.c_int,
     ]
     _capi.fdb_transaction_get_range_split_points.restype = ctypes.c_void_p
+
+    _capi.fdb_transaction_get_range_split_points_with_limit.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_int64,
+        ctypes.c_int,
+    ]
+    _capi.fdb_transaction_get_range_split_points_with_limit.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_add_conflict_range.argtypes = [
         ctypes.c_void_p,

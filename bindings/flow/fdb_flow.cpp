@@ -140,7 +140,9 @@ public:
 	                                               FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) override;
 
 	Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) override;
-	Future<FDBStandalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) override;
+	Future<FDBStandalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range,
+	                                                             int64_t chunkSize,
+	                                                             int limit = -1) override;
 
 	void addReadConflictRange(KeyRangeRef const& keys) override;
 	void addReadConflictKey(KeyRef const& key) override;
@@ -424,17 +426,21 @@ Future<int64_t> TransactionImpl::getEstimatedRangeSizeBytes(const KeyRange& keys
 }
 
 Future<FDBStandalone<VectorRef<KeyRef>>> TransactionImpl::getRangeSplitPoints(const KeyRange& range,
-                                                                              int64_t chunkSize) {
-	return backToFuture<FDBStandalone<VectorRef<KeyRef>>>(
-	    fdb_transaction_get_range_split_points(
-	        tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize),
-	    [](Reference<CFuture> f) {
-		    FDBKey const* ks;
-		    int count;
-		    throw_on_error(fdb_future_get_key_array(f->f, &ks, &count));
+                                                                              int64_t chunkSize,
+                                                                              int limit) {
+	FDBFuture* f =
+	    limit < 0
+	        ? fdb_transaction_get_range_split_points(
+	              tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize)
+	        : fdb_transaction_get_range_split_points_with_limit(
+	              tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize, limit);
+	return backToFuture<FDBStandalone<VectorRef<KeyRef>>>(f, [](Reference<CFuture> f) {
+		FDBKey const* ks;
+		int count;
+		throw_on_error(fdb_future_get_key_array(f->f, &ks, &count));
 
-		    return FDBStandalone<VectorRef<KeyRef>>(f, VectorRef<KeyRef>((KeyRef*)ks, count));
-	    });
+		return FDBStandalone<VectorRef<KeyRef>>(f, VectorRef<KeyRef>((KeyRef*)ks, count));
+	});
 }
 
 void TransactionImpl::addReadConflictRange(KeyRangeRef const& keys) {

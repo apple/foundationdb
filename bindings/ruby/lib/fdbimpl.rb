@@ -110,6 +110,7 @@ module FDB
       attach_function :fdb_transaction_get_range, [ :pointer, :pointer, :int, :int, :int, :pointer, :int, :int, :int, :int, :int, :int, :int, :int, :int ], :pointer
       attach_function :fdb_transaction_get_estimated_range_size_bytes, [ :pointer, :pointer, :int, :pointer, :int ], :pointer
       attach_function :fdb_transaction_get_range_split_points, [ :pointer, :pointer, :int, :pointer, :int, :int64 ], :pointer
+      attach_function :fdb_transaction_get_range_split_points_with_limit, [ :pointer, :pointer, :int, :pointer, :int, :int64, :int ], :pointer
       attach_function :fdb_transaction_set, [ :pointer, :pointer, :int, :pointer, :int ], :void
       attach_function :fdb_transaction_clear, [ :pointer, :pointer, :int ], :void
       attach_function :fdb_transaction_clear_range, [ :pointer, :pointer, :int, :pointer, :int ], :void
@@ -848,13 +849,17 @@ module FDB
       Int64Future.new(FDBC.fdb_transaction_get_estimated_range_size_bytes(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize))
     end
 
-    def get_range_split_points(begin_key, end_key, chunk_size)
+    def get_range_split_points(begin_key, end_key, chunk_size, limit = -1)
       if chunk_size <=0
         raise ArgumentError, "Invalid chunk size"
       end
       bkey = FDB.key_to_bytes(begin_key)
       ekey = FDB.key_to_bytes(end_key)
-      FutureKeyArray.new(FDBC.fdb_transaction_get_range_split_points(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize, chunk_size))
+      if limit < 0
+        FutureKeyArray.new(FDBC.fdb_transaction_get_range_split_points(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize, chunk_size))
+      else
+        FutureKeyArray.new(FDBC.fdb_transaction_get_range_split_points_with_limit(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize, chunk_size, limit))
+      end
     end
 
   end

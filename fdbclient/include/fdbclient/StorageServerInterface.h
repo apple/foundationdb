@@ -779,14 +779,20 @@ struct SplitRangeRequest {
 	Arena arena;
 	KeyRangeRef keys;
 	int64_t chunkSize;
+	int limit = -1;
 	ReplyPromise<SplitRangeReply> reply;
 
 	SplitRangeRequest() = default;
-	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize) : keys(arena, keys), chunkSize(chunkSize) {}
+	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize, int limit = -1)
+	  : keys(arena, keys), chunkSize(chunkSize), limit(limit) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, chunkSize, reply, arena);
+		serializer(ar, keys, chunkSize, reply);
+		if (ar.protocolVersion().hasRangeSplitPointsLimit()) {
+			serializer(ar, limit);
+		}
+		serializer(ar, arena);
 	}
 };
 

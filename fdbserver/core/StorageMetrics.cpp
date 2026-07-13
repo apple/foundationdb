@@ -612,7 +612,7 @@ void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<KeyRef
 		range = range.withPrefix(prefix.get(), req.arena);
 	}
 
-	std::vector<KeyRef> points = getSplitPoints(range, req.chunkSize, prefix);
+	std::vector<KeyRef> points = getSplitPoints(range, req.chunkSize, prefix, req.limit);
 
 	reply.splitPoints.append_deep(reply.splitPoints.arena(), points.data(), points.size());
 	req.reply.send(reply);
@@ -620,12 +620,13 @@ void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<KeyRef
 
 std::vector<KeyRef> StorageServerMetrics::getSplitPoints(KeyRangeRef range,
                                                          int64_t chunkSize,
-                                                         Optional<KeyRef> prefixToRemove) const {
+                                                         Optional<KeyRef> prefixToRemove,
+                                                         int limit) const {
 	std::vector<KeyRef> toReturn;
 	KeyRef beginKey = range.begin;
 	IndexedSet<Key, int64_t>::const_iterator endKey =
 	    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
-	while (endKey != byteSample.sample.end()) {
+	while (endKey != byteSample.sample.end() && (limit < 0 || toReturn.size() < static_cast<size_t>(limit))) {
 		if (*endKey > range.end) {
 			break;
 		}
@@ -922,6 +923,35 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/multipleReturnedPoint
 	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 600 * sampleUnit, {});
 
 	ASSERT(t.size() == 3 && t[0] == "Absolute"_sr && t[1] == "Apple"_sr && t[2] == "Bah"_sr);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/limit") {
+
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
+
+	ssm.byteSample.sample.insert("A"_sr, 200 * sampleUnit);
+	ssm.byteSample.sample.insert("Absolute"_sr, 800 * sampleUnit);
+	ssm.byteSample.sample.insert("Apple"_sr, 1000 * sampleUnit);
+	ssm.byteSample.sample.insert("Bah"_sr, 20 * sampleUnit);
+	ssm.byteSample.sample.insert("Banana"_sr, 80 * sampleUnit);
+	ssm.byteSample.sample.insert("Bob"_sr, 200 * sampleUnit);
+	ssm.byteSample.sample.insert("But"_sr, 100 * sampleUnit);
+	ssm.byteSample.sample.insert("Cat"_sr, 300 * sampleUnit);
+
+	std::vector<KeyRef> limited = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 600 * sampleUnit, {}, 2);
+	ASSERT(limited.size() == 2 && limited[0] == "Absolute"_sr && limited[1] == "Apple"_sr);
+
+	std::vector<KeyRef> none = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 600 * sampleUnit, {}, 0);
+	ASSERT(none.empty());
+
+	SplitRangeRequest req(KeyRangeRef("A"_sr, "C"_sr), 600 * sampleUnit, 1);
+	Future<SplitRangeReply> reply = req.reply.getFuture();
+	ssm.getSplitPoints(req, {});
+	ASSERT(reply.isReady());
+	ASSERT(reply.get().splitPoints.size() == 1 && reply.get().splitPoints[0] == "Absolute"_sr);
 
 	return Void();
 }

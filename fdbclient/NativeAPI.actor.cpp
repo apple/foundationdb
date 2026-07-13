@@ -3246,7 +3246,8 @@ ACTOR Future<Void> getRangeStreamImpl(Reference<TransactionState> trState,
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
                                                                 KeyRange keys,
-                                                                int64_t chunkSize);
+                                                                int64_t chunkSize,
+                                                                int limit);
 // Streams the requested key range directly from storage servers without fragment-level parallelism.
 ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
                                   PromiseStream<RangeResult> _results,
@@ -5972,7 +5973,8 @@ Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getReadH
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
                                                                 KeyRange keys,
-                                                                int64_t chunkSize) {
+                                                                int64_t chunkSize,
+                                                                int limit) {
 	state Span span("NAPI:GetRangeSplitPoints"_loc, trState->spanContext);
 
 	loop {
@@ -5980,12 +5982,16 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 		    trState, keys, CLIENT_KNOBS->TOO_MANY, Reverse::False, &StorageServerInterface::getRangeSplitPoints));
 		try {
 			state int nLocs = locations.size();
+			int lastLoc = nLocs - 1;
+			if (limit >= 0 && nLocs - 1 > limit) {
+				nLocs = limit + 1;
+			}
 			state std::vector<Future<SplitRangeReply>> fReplies(nLocs);
 			KeyRef partBegin, partEnd;
 			for (int i = 0; i < nLocs; i++) {
 				partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
-				partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
-				SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize);
+				partEnd = (i == lastLoc) ? keys.end : locations[i].range.end;
+				SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize, limit);
 				fReplies[i] = loadBalance(locations[i].locations->locations(),
 				                          &StorageServerInterface::getRangeSplitPoints,
 				                          req,
@@ -5994,17 +6000,30 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 
 			wait(waitForAll(fReplies));
 			Standalone<VectorRef<KeyRef>> results;
+			int remaining = limit;
 
 			results.push_back_deep(results.arena(), keys.begin);
 			for (int i = 0; i < nLocs; i++) {
 				if (i > 0) {
+					if (remaining == 0) {
+						break;
+					}
 					results.push_back_deep(results.arena(),
 					                       locations[i].range.begin); // Need this shard boundary
+					if (remaining > 0) {
+						--remaining;
+					}
 				}
-				if (fReplies[i].get().splitPoints.size() > 0) {
-					results.append(
-					    results.arena(), fReplies[i].get().splitPoints.begin(), fReplies[i].get().splitPoints.size());
+				int splitPointCount = fReplies[i].get().splitPoints.size();
+				if (remaining >= 0) {
+					splitPointCount = std::min(splitPointCount, remaining);
+				}
+				if (splitPointCount > 0) {
+					results.append(results.arena(), fReplies[i].get().splitPoints.begin(), splitPointCount);
 					results.arena().dependsOn(fReplies[i].get().splitPoints.arena());
+					if (remaining > 0) {
+						remaining -= splitPointCount;
+					}
 				}
 			}
 			if (results.back() != keys.end) {
@@ -6024,8 +6043,10 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 	}
 }
 
-Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
-	return ::getRangeSplitPoints(trState, keys, chunkSize);
+Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys,
+                                                                       int64_t chunkSize,
+                                                                       int limit) {
+	return ::getRangeSplitPoints(trState, keys, chunkSize, limit);
 }
 
 Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
