@@ -673,7 +673,7 @@ void DLApi::init() {
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_transaction_get_range_split_points_with_limit",
-	                   headerVersion >= 800);
+	                   false);
 
 	loadClientFunction(&api->futureGetDouble,
 	                   lib,
