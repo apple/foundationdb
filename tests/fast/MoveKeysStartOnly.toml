@@ -9,6 +9,9 @@ max_added_sources_multiplier = 0
 
 [[test]]
 testTitle = 'MoveKeysStartOnly'
+# DD is disabled while the workload performs bounded manual moves.
+runFailureWorkloads = false
+connectionFailuresDisableDuration = 1000000
 
     [[test.workload]]
     testName = 'MoveKeysStartOnly'

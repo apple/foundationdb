@@ -24,8 +24,11 @@
 #include <vector>
 
 #include "fdbclient/ManagementAPI.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/Replication.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/tester/workloads.h"
@@ -141,12 +144,35 @@ private:
 
 		const KeyRange keys = getMoveRange(shape);
 
-		auto candidates = initialData->allServers;
-		deterministicRandom()->randomShuffle(candidates, 0, configuration.storageTeamSize);
+		Optional<Key> primaryDcId;
+		if (!configuration.regions.empty()) {
+			primaryDcId = dbInfo->get().master.locality.dcId();
+			auto activeRegion =
+			    std::find_if(configuration.regions.begin(), configuration.regions.end(), [&](const auto& region) {
+				    return primaryDcId.present() && region.dcId == primaryDcId.get();
+			    });
+			if (activeRegion == configuration.regions.end()) {
+				primaryDcId = configuration.regions.front().dcId;
+			}
+		}
+
+		LocalityMap<StorageServerInterface> candidates;
+		for (auto& [server, _] : initialData->allServers) {
+			if ((primaryDcId.present() && server.locality.dcId() != primaryDcId) ||
+			    configuration.isExcludedServer(server.getValue.getEndpoint().addresses, server.locality) ||
+			    !IFailureMonitor::failureMonitor().getState(server.waitFailure.getEndpoint()).isAvailable()) {
+				continue;
+			}
+			candidates.add(server.locality, &server);
+		}
+
+		std::vector<StorageServerInterface*> selectedServers;
+		ASSERT(candidates.selectReplicas(configuration.storagePolicy, selectedServers));
+		ASSERT_EQ(selectedServers.size(), configuration.storageTeamSize);
 		std::vector<UID> destinationTeam;
 		destinationTeam.reserve(configuration.storageTeamSize);
-		for (int i = 0; i < configuration.storageTeamSize; ++i) {
-			destinationTeam.push_back(candidates[i].first.id());
+		for (auto* server : selectedServers) {
+			destinationTeam.push_back(server->id());
 		}
 		std::sort(destinationTeam.begin(), destinationTeam.end());
 

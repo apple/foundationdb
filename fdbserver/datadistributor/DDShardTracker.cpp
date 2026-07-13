@@ -2112,3 +2112,109 @@ TEST_CASE("/DataDistributor/Tracker/CrossesCriticalSystemBoundary") {
 	ASSERT(crossesCriticalSystemBoundary(""_sr, allKeys.end));
 	return Void();
 }
+
+namespace {
+
+class TrackerTestTxnProcessor final : public DDTxnProcessor {
+public:
+	int getSplitCalls() const { return splitCalls; }
+
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const&,
+	                                                                    StorageMetrics const&,
+	                                                                    StorageMetrics const&,
+	                                                                    StorageMetrics const&,
+	                                                                    int,
+	                                                                    int) const override {
+		return Never();
+	}
+
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
+	                                                          StorageMetrics const&,
+	                                                          StorageMetrics const&,
+	                                                          Optional<int> const&) const override {
+		++splitCalls;
+		Standalone<VectorRef<KeyRef>> splitKeys;
+		splitKeys.push_back_deep(splitKeys.arena(), keys.begin);
+		splitKeys.push_back_deep(splitKeys.arena(), "m"_sr);
+		splitKeys.push_back_deep(splitKeys.arena(), keys.end);
+		return splitKeys;
+	}
+
+private:
+	mutable int splitCalls = 0;
+};
+
+} // namespace
+
+TEST_CASE("/DataDistributor/Tracker/ShardEvaluatorSplits") {
+	const KeyRange splitRange = KeyRangeRef("a"_sr, "z"_sr);
+	const KeyRange leftRange = KeyRangeRef("a"_sr, "m"_sr);
+	const KeyRange rightRange = KeyRangeRef("m"_sr, "z"_sr);
+	const int64_t maxShardBytes = 1000000;
+
+	for (const auto reason : { RelocateReason::SIZE_SPLIT, RelocateReason::WRITE_SPLIT }) {
+		StorageMetrics metrics;
+		metrics.bytes = reason == RelocateReason::SIZE_SPLIT ? maxShardBytes + 1 : maxShardBytes;
+		metrics.bytesWrittenPerKSecond =
+		    reason == RelocateReason::WRITE_SPLIT ? SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC + 1 : 0;
+		auto stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+		stats->set(ShardMetrics(metrics, now(), 1));
+
+		KeyRangeMap<ShardTrackedData> trackedShards;
+		ShardTrackedData initialShard;
+		initialShard.trackShard = Never();
+		initialShard.trackBytes = Never();
+		initialShard.stats = stats;
+		trackedShards.insert(allKeys, initialShard);
+		trackedShards.insert(splitRange, initialShard);
+		PromiseStream<RelocateShard> output;
+		FutureStream<RelocateShard> relocations = output.getFuture();
+		auto shardMapping = makeReference<ShardsAffectedByTeamFailure>();
+		shardMapping->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+		const ShardsAffectedByTeamFailure::Team source({ UID(1, 0), UID(2, 0) }, true);
+		shardMapping->assignRangeToTeams(allKeys, { source });
+		shardMapping->defineShard(splitRange);
+
+		bool trackerCancelled = false;
+		auto processor = makeReference<TrackerTestTxnProcessor>();
+		auto tracker = makeReference<DataDistributionTracker>(DataDistributionTrackerInitParams{
+		    .db = processor,
+		    .distributorId = UID(3, 0),
+		    .readyToStart = Promise<Void>(),
+		    .output = output,
+		    .shardsAffectedByTeamFailure = shardMapping,
+		    .physicalShardCollection = makeReference<PhysicalShardCollection>(),
+		    .bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(UID(3, 0)),
+		    .anyZeroHealthyTeams = makeReference<AsyncVar<bool>>(false),
+		    .shards = &trackedShards,
+		    .trackerCancelled = &trackerCancelled,
+		    .usableRegions = -1 });
+		tracker->maxShardSize->set(maxShardBytes);
+		tracker->readyToStart.send(Void());
+
+		Future<Void> evaluate =
+		    shardEvaluator(tracker.getPtr(), splitRange, stats, makeReference<HasBeenTrueFor>(stats->get()));
+		RelocateShard relocation = co_await relocations;
+		ASSERT_EQ(processor->getSplitCalls(), 1);
+		ASSERT(relocation.reason == reason);
+		ASSERT(relocation.moveReason == DataMovementReason::SPLIT_SHARD);
+		ASSERT(relocation.keys == leftRange || relocation.keys == rightRange);
+		ASSERT(relocation.getParentRange().present());
+		ASSERT(relocation.getParentRange().get() == splitRange);
+		ASSERT_EQ(trackedShards.size(), 4);
+		ASSERT_EQ(shardMapping->getNumberOfShards(), 4);
+		ASSERT(trackedShards.rangeContaining("a"_sr)->range() == leftRange);
+		ASSERT(trackedShards.rangeContaining("m"_sr)->range() == rightRange);
+		auto leftTeams = shardMapping->getTeamsForFirstShard(leftRange);
+		auto rightTeams = shardMapping->getTeamsForFirstShard(rightRange);
+		ASSERT(leftTeams.first == std::vector<ShardsAffectedByTeamFailure::Team>{ source });
+		ASSERT(leftTeams.second.empty());
+		ASSERT(rightTeams.first == std::vector<ShardsAffectedByTeamFailure::Team>{ source });
+		ASSERT(rightTeams.second.empty());
+		ASSERT_EQ(shardMapping->getNumberOfShards(source), 4);
+
+		evaluate.cancel();
+		tracker->actors.clear(false);
+		trackedShards = KeyRangeMap<ShardTrackedData>();
+	}
+}
