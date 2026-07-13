@@ -2745,8 +2745,8 @@ ACTOR static Future<Void> testExpireProgressVersions(std::string url, Optional<s
 }
 
 TEST_CASE("/backup/containers/localdir/expireProgressVersions") {
-	wait(testExpireProgressVersions(
-	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}));
+	wait(
+	    testExpireProgressVersions(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}));
 	return Void();
 }
 
