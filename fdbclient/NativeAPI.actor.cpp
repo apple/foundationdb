@@ -5971,8 +5971,13 @@ Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getReadH
 	return ::getReadHotRanges(Database(Reference<DatabaseContext>::addRef(this)), keys);
 }
 
-static int getRangeSplitPointsLocationLimit(int splitPointLimit, int maxLocations) {
-	return splitPointLimit >= 0 && splitPointLimit < maxLocations ? splitPointLimit + 1 : maxLocations;
+static int getRangeSplitPointsLocationLimit(int splitPointLimit, int maxLocations, int avoidLocationLimit) {
+	int locationLimit = splitPointLimit >= 0 && splitPointLimit < maxLocations ? splitPointLimit + 1 : maxLocations;
+	if (locationLimit == avoidLocationLimit) {
+		ASSERT(maxLocations > 1);
+		locationLimit += locationLimit < maxLocations ? 1 : -1;
+	}
+	return locationLimit;
 }
 
 class RangeSplitPointsBuilder {
@@ -5987,6 +5992,9 @@ public:
 	int getRemaining() const { return remaining; }
 
 	bool appendShardBoundary(KeyRef boundary) {
+		if (results.back() == boundary) {
+			return true;
+		}
 		if (remaining == 0) {
 			return false;
 		}
@@ -6025,31 +6033,37 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
                                                                 int64_t chunkSize,
                                                                 int limit) {
 	state Span span("NAPI:GetRangeSplitPoints"_loc, trState->spanContext);
+	state Key beginKey = keys.begin;
+	state Optional<RangeSplitPointsBuilder> results;
+	results = RangeSplitPointsBuilder(keys.begin, limit);
+	if (limit == 0) {
+		return results.get().finish(keys.end);
+	}
 
 	loop {
-		state std::vector<KeyRangeLocationInfo> locations =
-		    wait(getKeyRangeLocations(trState,
-		                              keys,
-		                              getRangeSplitPointsLocationLimit(limit, CLIENT_KNOBS->TOO_MANY),
-		                              Reverse::False,
-		                              &StorageServerInterface::getRangeSplitPoints));
+		state std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(
+		    trState,
+		    KeyRangeRef(beginKey, keys.end),
+		    getRangeSplitPointsLocationLimit(
+		        results.get().getRemaining(), CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT),
+		    Reverse::False,
+		    &StorageServerInterface::getRangeSplitPoints));
 		try {
 			state int nLocs = locations.size();
-			if (limit >= 0 && nLocs - 1 > limit) {
-				nLocs = limit + 1;
+			if (limit >= 0 && nLocs - 1 > results.get().getRemaining()) {
+				nLocs = results.get().getRemaining() + 1;
 			}
-			state Optional<RangeSplitPointsBuilder> results;
-			results = RangeSplitPointsBuilder(keys.begin, limit);
 			if (limit >= 0) {
 				state int i = 0;
 				for (; i < nLocs; i++) {
-					if (i > 0 && !results.get().appendShardBoundary(locations[i].range.begin)) {
+					if ((i > 0 || beginKey != keys.begin) &&
+					    !results.get().appendShardBoundary(locations[i].range.begin)) {
 						break;
 					}
 					if (results.get().getRemaining() == 0) {
 						break;
 					}
-					KeyRef partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
+					KeyRef partBegin = (i == 0) ? beginKey : locations[i].range.begin;
 					KeyRef partEnd = std::min(keys.end, locations[i].range.end);
 					SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize, results.get().getRemaining());
 					SplitRangeReply reply = wait(loadBalance(locations[i].locations->locations(),
@@ -6061,7 +6075,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 			} else {
 				state std::vector<Future<SplitRangeReply>> fReplies(nLocs);
 				for (int i = 0; i < nLocs; i++) {
-					KeyRef partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
+					KeyRef partBegin = (i == 0) ? beginKey : locations[i].range.begin;
 					KeyRef partEnd = std::min(keys.end, locations[i].range.end);
 					SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize, limit);
 					fReplies[i] = loadBalance(locations[i].locations->locations(),
@@ -6071,16 +6085,21 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 				}
 				wait(waitForAll(fReplies));
 				for (int i = 0; i < nLocs; i++) {
-					if (i > 0) {
+					if (i > 0 || beginKey != keys.begin) {
 						results.get().appendShardBoundary(locations[i].range.begin);
 					}
 					results.get().appendSplitPoints(fReplies[i].get().splitPoints);
 				}
 			}
-			return results.get().finish(keys.end);
+			if (results.get().getRemaining() == 0 || keys.end <= locations.back().range.end) {
+				return results.get().finish(keys.end);
+			}
+			beginKey = locations.back().range.end;
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				trState->cx->invalidateCache(keys);
+				beginKey = keys.begin;
+				results = RangeSplitPointsBuilder(keys.begin, limit);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			} else {
 				TraceEvent(SevError, "GetRangeSplitPoints").error(e);
@@ -6098,13 +6117,19 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
 
 TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/locationLimit") {
 	constexpr int maxLocations = 1000;
+	constexpr int dataDistributionLocationLimit = 100;
 
-	ASSERT(getRangeSplitPointsLocationLimit(-1, maxLocations) == maxLocations);
-	ASSERT(getRangeSplitPointsLocationLimit(0, maxLocations) == 1);
-	ASSERT(getRangeSplitPointsLocationLimit(16, maxLocations) == 17);
-	ASSERT(getRangeSplitPointsLocationLimit(maxLocations - 1, maxLocations) == maxLocations);
-	ASSERT(getRangeSplitPointsLocationLimit(maxLocations, maxLocations) == maxLocations);
-	ASSERT(getRangeSplitPointsLocationLimit(std::numeric_limits<int>::max(), maxLocations) == maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(-1, maxLocations, dataDistributionLocationLimit) == maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(0, maxLocations, dataDistributionLocationLimit) == 1);
+	ASSERT(getRangeSplitPointsLocationLimit(16, maxLocations, dataDistributionLocationLimit) == 17);
+	ASSERT(getRangeSplitPointsLocationLimit(99, maxLocations, dataDistributionLocationLimit) == 101);
+	ASSERT(getRangeSplitPointsLocationLimit(9, maxLocations, 10) == 11);
+	ASSERT(getRangeSplitPointsLocationLimit(maxLocations - 1, maxLocations, dataDistributionLocationLimit) ==
+	       maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(maxLocations, maxLocations, dataDistributionLocationLimit) == maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(
+	           std::numeric_limits<int>::max(), maxLocations, dataDistributionLocationLimit) == maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(maxLocations, maxLocations, maxLocations) == maxLocations - 1);
 
 	return Void();
 }
@@ -6116,6 +6141,8 @@ TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
 	Standalone<VectorRef<KeyRef>> secondShard;
 	secondShard.push_back_deep(secondShard.arena(), "B1"_sr);
 	secondShard.push_back_deep(secondShard.arena(), "B2"_sr);
+	Standalone<VectorRef<KeyRef>> firstShardEndingAtBoundary;
+	firstShardEndingAtBoundary.push_back_deep(firstShardEndingAtBoundary.arena(), "B"_sr);
 
 	RangeSplitPointsBuilder zero("A"_sr, 0);
 	zero.appendSplitPoints(firstShard);
@@ -6149,6 +6176,16 @@ TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
 	Standalone<VectorRef<KeyRef>> fourResults = four.finish("Z"_sr);
 	ASSERT(fourResults.size() == 6 && fourResults[1] == "A1"_sr && fourResults[2] == "A2"_sr &&
 	       fourResults[3] == "B"_sr && fourResults[4] == "B1"_sr && fourResults[5] == "Z"_sr);
+
+	RangeSplitPointsBuilder duplicateBoundary("A"_sr, 2);
+	duplicateBoundary.appendSplitPoints(firstShardEndingAtBoundary);
+	ASSERT(duplicateBoundary.getRemaining() == 1);
+	ASSERT(duplicateBoundary.appendShardBoundary("B"_sr));
+	ASSERT(duplicateBoundary.getRemaining() == 1);
+	duplicateBoundary.appendSplitPoints(secondShard);
+	Standalone<VectorRef<KeyRef>> duplicateBoundaryResults = duplicateBoundary.finish("Z"_sr);
+	ASSERT(duplicateBoundaryResults.size() == 4 && duplicateBoundaryResults[1] == "B"_sr &&
+	       duplicateBoundaryResults[2] == "B1"_sr && duplicateBoundaryResults[3] == "Z"_sr);
 
 	RangeSplitPointsBuilder unlimited("A"_sr, -1);
 	unlimited.appendSplitPoints(firstShard);

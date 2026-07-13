@@ -209,7 +209,7 @@ class ApiTest(Test):
         ]
         txn_sizes = ["GET_APPROXIMATE_SIZE"]
         storage_metrics = ["GET_ESTIMATED_RANGE_SIZE", "GET_RANGE_SPLIT_POINTS"]
-        if args.api_version >= 800:
+        if args.api_version >= 800 and args.range_split_points_with_limit_enabled:
             storage_metrics.append("GET_RANGE_SPLIT_POINTS_WITH_LIMIT")
 
         op_choices += reads

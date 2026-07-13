@@ -48,6 +48,7 @@ class Tester:
         threads_enabled=True,
         types=COMMON_TYPES,
         directory_snapshot_ops_enabled=True,
+        range_split_points_with_limit_enabled=True,
     ):
         self.name = name
         self.cmd = cmd
@@ -57,6 +58,9 @@ class Tester:
         self.threads_enabled = threads_enabled
         self.types = types
         self.directory_snapshot_ops_enabled = directory_snapshot_ops_enabled
+        self.range_split_points_with_limit_enabled = (
+            range_split_points_with_limit_enabled
+        )
 
     def supports_api_version(self, api_version):
         return (
@@ -132,5 +136,6 @@ testers = {
         730,
         MAX_API_VERSION,
         directory_snapshot_ops_enabled=False,
+        range_split_points_with_limit_enabled=False,
     ),
 }

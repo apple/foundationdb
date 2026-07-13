@@ -314,6 +314,9 @@ class TestRunner(object):
                 [not tester.directory_snapshot_ops_enabled for tester in self.testers]
             )
         )
+        self.args.range_split_points_with_limit_enabled = all(
+            [tester.range_split_points_with_limit_enabled for tester in self.testers]
+        )
 
     def print_test(self):
         test_instructions = self._generate_test()

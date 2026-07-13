@@ -628,7 +628,7 @@ std::vector<KeyRef> StorageServerMetrics::getSplitPoints(KeyRangeRef range,
 	IndexedSet<Key, int64_t>::const_iterator endKey =
 	    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
 	while (endKey != byteSample.sample.end() && (limit < 0 || toReturn.size() < static_cast<size_t>(limit))) {
-		if (*endKey > range.end) {
+		if (*endKey >= range.end) {
 			break;
 		}
 		if (*endKey == beginKey) {
@@ -960,12 +960,31 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/limit") {
 TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/requestFlatBufferRoundTrip") {
 	SplitRangeRequest request(KeyRangeRef("A"_sr, "C"_sr), 1024, 2);
 	const Standalone<StringRef> serialized = ObjectWriter::toValue(request, Unversioned());
-	const SplitRangeRequest decoded = ObjectReader::fromStringRef<SplitRangeRequest>(serialized, Unversioned());
+	const auto decoded = ObjectReader::fromStringRef<SplitRangeRequest>(serialized, Unversioned());
 
 	ASSERT(decoded.keys == request.keys);
 	ASSERT_EQ(decoded.chunkSize, request.chunkSize);
 	ASSERT_EQ(decoded.limit, request.limit);
 	ASSERT_EQ(decoded.reply.getEndpoint().token, request.reply.getEndpoint().token);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/exclusiveEnd") {
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
+
+	ssm.byteSample.sample.insert("A"_sr, 200 * sampleUnit);
+	ssm.byteSample.sample.insert("B"_sr, 800 * sampleUnit);
+
+	std::vector<KeyRef> direct = ssm.getSplitPoints(KeyRangeRef("A"_sr, "B"_sr), 600 * sampleUnit, {}, 1);
+	ASSERT(direct.empty());
+
+	SplitRangeRequest req(KeyRangeRef("A"_sr, "B"_sr), 600 * sampleUnit, 1);
+	Future<SplitRangeReply> reply = req.reply.getFuture();
+	ssm.getSplitPoints(req, {});
+	ASSERT(reply.isReady());
+	ASSERT(reply.get().splitPoints.empty());
 
 	return Void();
 }
