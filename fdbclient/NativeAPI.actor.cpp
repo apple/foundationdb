@@ -5971,6 +5971,10 @@ Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getReadH
 	return ::getReadHotRanges(Database(Reference<DatabaseContext>::addRef(this)), keys);
 }
 
+static int getRangeSplitPointsLocationLimit(int splitPointLimit, int maxLocations) {
+	return splitPointLimit >= 0 && splitPointLimit < maxLocations ? splitPointLimit + 1 : maxLocations;
+}
+
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
                                                                 KeyRange keys,
                                                                 int64_t chunkSize,
@@ -5978,11 +5982,14 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 	state Span span("NAPI:GetRangeSplitPoints"_loc, trState->spanContext);
 
 	loop {
-		state std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(
-		    trState, keys, CLIENT_KNOBS->TOO_MANY, Reverse::False, &StorageServerInterface::getRangeSplitPoints));
+		state std::vector<KeyRangeLocationInfo> locations =
+		    wait(getKeyRangeLocations(trState,
+		                              keys,
+		                              getRangeSplitPointsLocationLimit(limit, CLIENT_KNOBS->TOO_MANY),
+		                              Reverse::False,
+		                              &StorageServerInterface::getRangeSplitPoints));
 		try {
 			state int nLocs = locations.size();
-			int lastLoc = nLocs - 1;
 			if (limit >= 0 && nLocs - 1 > limit) {
 				nLocs = limit + 1;
 			}
@@ -5990,7 +5997,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 			KeyRef partBegin, partEnd;
 			for (int i = 0; i < nLocs; i++) {
 				partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
-				partEnd = (i == lastLoc) ? keys.end : locations[i].range.end;
+				partEnd = locations[i].range.end;
 				SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize, limit);
 				fReplies[i] = loadBalance(locations[i].locations->locations(),
 				                          &StorageServerInterface::getRangeSplitPoints,
@@ -6047,6 +6054,19 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
                                                                        int64_t chunkSize,
                                                                        int limit) {
 	return ::getRangeSplitPoints(trState, keys, chunkSize, limit);
+}
+
+TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/locationLimit") {
+	constexpr int maxLocations = 1000;
+
+	ASSERT(getRangeSplitPointsLocationLimit(-1, maxLocations) == maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(0, maxLocations) == 1);
+	ASSERT(getRangeSplitPointsLocationLimit(16, maxLocations) == 17);
+	ASSERT(getRangeSplitPointsLocationLimit(maxLocations - 1, maxLocations) == maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(maxLocations, maxLocations) == maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(std::numeric_limits<int>::max(), maxLocations) == maxLocations);
+
+	return Void();
 }
 
 Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
