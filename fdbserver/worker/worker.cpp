@@ -1924,7 +1924,7 @@ Future<Void> cleanupStaleStorageDisk(Reference<AsyncVar<ServerDBInfo>> dbInfo,
 			}
 
 			TraceEvent("StorageServerLivenessCheck").detail("StoreID", storeID).detail("Retry", retries);
-			Reference<CommitProxyInfo> commitProxies(new CommitProxyInfo(dbInfo->get().client.commitProxies));
+			auto commitProxies = makeReference<CommitProxyInfo>(dbInfo->get().client.commitProxies);
 			if (commitProxies->size() == 0) {
 				TraceEvent("SkipDiskCleanup").log();
 				co_return;
@@ -2044,11 +2044,9 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                           Reference<AsyncVar<Optional<UID>>> clusterId,
                           bool consistencyCheckUrgentMode) {
 	PromiseStream<ErrorInfo> errors;
-	Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
-	    new AsyncVar<Optional<DataDistributorInterface>>());
-	Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
-	Reference<AsyncVar<Optional<ConsistencyScanInterface>>> csInterf(
-	    new AsyncVar<Optional<ConsistencyScanInterface>>());
+	auto ddInterf = makeReference<AsyncVar<Optional<DataDistributorInterface>>>();
+	auto rkInterf = makeReference<AsyncVar<Optional<RatekeeperInterface>>>();
+	auto csInterf = makeReference<AsyncVar<Optional<ConsistencyScanInterface>>>();
 	Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
 	ActorCollection errorForwarders(false);
 	Future<Void> loggingTrigger = Void();
@@ -2061,17 +2059,17 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	Future<Void> metricsLogger;
 	Future<Void> chaosMetricsActor;
 	Reference<AsyncVar<bool>> degraded = FlowTransport::transport().getDegraded();
-	Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
-	Reference<AsyncVar<std::set<std::string>>> traceLogIssues(new AsyncVar<std::set<std::string>>());
-	Reference<AsyncVar<std::set<std::string>>> tlogIssues(new AsyncVar<std::set<std::string>>());
-	Reference<AsyncVar<bool>> lowDiskTLogExclusion(new AsyncVar<bool>(false));
+	auto issues = makeReference<AsyncVar<std::set<std::string>>>();
+	auto traceLogIssues = makeReference<AsyncVar<std::set<std::string>>>();
+	auto tlogIssues = makeReference<AsyncVar<std::set<std::string>>>();
+	auto lowDiskTLogExclusion = makeReference<AsyncVar<bool>>(false);
 	// tLogFnForOptions() can return a function that doesn't correspond with the FDB version that the
 	// TLogVersion represents.  This can be done if the newer TLog doesn't support a requested option.
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
 	// decide if we should collapse them into the same SharedTLog instance as well.  The answer
 	// here is no, so that when running with log_version==3, all files should say V=3.
 	std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
-	Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
+	auto activeSharedTLog = makeReference<AsyncVar<UID>>();
 	WorkerCache<InitializeBackupReply> backupWorkerCache;
 	WorkerCache<InitializeRangePartitionedBackupReply> rangePartitionedBackupWorkerCache;
 	WorkerCache<TLogInterface> logRouterCache;
@@ -3924,8 +3922,7 @@ Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		auto serverDBInfo = ServerDBInfo();
 		serverDBInfo.myLocality = localities;
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>(serverDBInfo);
-		Reference<AsyncVar<Optional<UID>>> clusterId(
-		    new AsyncVar<Optional<UID>>(readClusterId(joinPath(dataFolder, clusterIdFilename))));
+		auto clusterId = makeReference<AsyncVar<Optional<UID>>>(readClusterId(joinPath(dataFolder, clusterIdFilename)));
 		TraceEvent("MyLocality").detail("Locality", dbInfo->get().myLocality.toString());
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
