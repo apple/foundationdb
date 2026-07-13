@@ -1,4 +1,6 @@
 [configuration]
+# Manual moveKeys operations can exhaust their retry budget under buggified transaction delays.
+buggify = false
 generateFearless = false
 disableTss = true
 

@@ -39,13 +39,6 @@ public:
 	  : TestWorkload(wcx), enabled(!clientId && g_network->isSimulated()),
 	    testDuration(getOption(options, "testDuration"_sr, 50.0)) {}
 
-	Future<Void> setup(Database const& cx) override {
-		if (!enabled) {
-			return Void();
-		}
-		return setupImpl(cx);
-	}
-
 	Future<Void> start(Database const& cx) override {
 		if (!enabled) {
 			return Void();
@@ -62,21 +55,14 @@ public:
 	}
 
 private:
+	enum class MoveShape { Split, Aligned, Merge };
+
 	bool enabled;
 	double testDuration;
 	int oldDDMode = 1;
 	DDEnabledState ddEnabledState;
 	DatabaseConfiguration configuration;
 	Reference<InitialDataDistribution> initialData;
-
-	Future<Void> setupImpl(Database cx) {
-		oldDDMode = co_await setDDMode(cx, 0);
-		Reference<IDDTxnProcessor> processor = makeReference<DDTxnProcessor>(cx);
-		configuration = co_await processor->getDatabaseConfiguration();
-		ASSERT_GT(configuration.storageTeamSize, 0);
-		ASSERT_EQ(configuration.usableRegions, 1);
-		co_await readInitialDataDistribution(cx);
-	}
 
 	Future<Void> readInitialDataDistribution(Database cx) {
 		Reference<IDDTxnProcessor> processor = makeReference<DDTxnProcessor>(cx);
@@ -96,6 +82,7 @@ private:
 	}
 
 	Future<Void> startImpl(Database cx) {
+		oldDDMode = co_await setDDMode(cx, 0);
 		Error error;
 		try {
 			co_await timeoutError(startAndVerify(cx), testDuration);
@@ -113,16 +100,46 @@ private:
 	}
 
 	Future<Void> startAndVerify(Database cx) {
+		Reference<IDDTxnProcessor> processor = makeReference<DDTxnProcessor>(cx);
+		configuration = co_await processor->getDatabaseConfiguration();
+		ASSERT_GT(configuration.storageTeamSize, 0);
+		ASSERT_EQ(configuration.usableRegions, 1);
+		co_await readInitialDataDistribution(cx);
+
+		co_await moveAndVerify(cx, MoveShape::Split, false);
+		co_await moveAndVerify(cx, MoveShape::Aligned, false);
+		co_await moveAndVerify(cx, MoveShape::Merge, true);
+	}
+
+	KeyRange getMoveRange(MoveShape shape) const {
 		ASSERT_GE(initialData->shards.size(), 2);
+		const int shardCount = initialData->shards.size() - 1;
+
+		if (shape == MoveShape::Split) {
+			const Key begin = doubleToTestKey(deterministicRandom()->random01());
+			auto end = std::upper_bound(initialData->shards.begin(),
+			                            initialData->shards.end(),
+			                            begin,
+			                            [](const Key& key, const DDShardInfo& shard) { return key < shard.key; });
+			ASSERT(end != initialData->shards.end());
+			return KeyRangeRef(begin, end->key);
+		}
+
+		if (shape == MoveShape::Aligned) {
+			const int shard = deterministicRandom()->randomInt(0, shardCount);
+			return KeyRangeRef(initialData->shards[shard].key, initialData->shards[shard + 1].key);
+		}
+
+		ASSERT_GE(shardCount, 2);
+		const int begin = deterministicRandom()->randomInt(0, shardCount - 1);
+		const int end = deterministicRandom()->randomInt(begin + 2, shardCount + 1);
+		return KeyRangeRef(initialData->shards[begin].key, initialData->shards[end].key);
+	}
+
+	Future<Void> moveAndVerify(Database cx, MoveShape shape, bool finishMovement) {
 		ASSERT_GE(initialData->allServers.size(), configuration.storageTeamSize);
 
-		const Key begin = doubleToTestKey(deterministicRandom()->random01());
-		auto end = std::upper_bound(initialData->shards.begin(),
-		                            initialData->shards.end(),
-		                            begin,
-		                            [](const Key& key, const DDShardInfo& shard) { return key < shard.key; });
-		ASSERT(end != initialData->shards.end());
-		const KeyRange keys = KeyRangeRef(begin, end->key);
+		const KeyRange keys = getMoveRange(shape);
 
 		auto candidates = initialData->allServers;
 		deterministicRandom()->randomShuffle(candidates, 0, configuration.storageTeamSize);
@@ -176,35 +193,59 @@ private:
 		std::map<UID, StorageServerInterface> tssMapping;
 		while (true) {
 			try {
-				co_await rawStartMovement(cx, params, tssMapping);
+				if (finishMovement) {
+					co_await moveKeys(cx, params);
+				} else {
+					co_await rawStartMovement(cx, params, tssMapping);
+				}
 				break;
 			} catch (Error& e) {
-				if (e.code() != error_code_movekeys_conflict) {
+				if (e.code() != error_code_movekeys_conflict &&
+				    (!finishMovement || e.code() != error_code_finish_move_keys_too_many_retries)) {
 					throw;
 				}
 			}
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			params.dataMovementComplete.reset();
 			params.lock = co_await takeMoveKeysLock(cx, UID());
 		}
 		co_await readInitialDataDistribution(cx);
 
-		auto first = std::lower_bound(initialData->shards.begin(),
-		                              initialData->shards.end(),
-		                              keys.begin,
-		                              [](const DDShardInfo& shard, const Key& key) { return shard.key < key; });
-		auto last = std::lower_bound(initialData->shards.begin(),
-		                             initialData->shards.end(),
-		                             keys.end,
-		                             [](const DDShardInfo& shard, const Key& key) { return shard.key < key; });
-		ASSERT(first != initialData->shards.end() && first->key == keys.begin);
-		ASSERT(last != initialData->shards.end() && last->key == keys.end);
-		ASSERT(first != last);
-		for (auto shard = first; shard != last; ++shard) {
-			ASSERT(shard->hasDest);
-			ASSERT(shard->primaryDest == destinationTeam);
-			ASSERT(shard->remoteDest.empty());
-			ASSERT(!shard->primarySrc.empty());
+		if (!finishMovement) {
+			auto first = std::lower_bound(initialData->shards.begin(),
+			                              initialData->shards.end(),
+			                              keys.begin,
+			                              [](const DDShardInfo& shard, const Key& key) { return shard.key < key; });
+			auto last = std::lower_bound(initialData->shards.begin(),
+			                             initialData->shards.end(),
+			                             keys.end,
+			                             [](const DDShardInfo& shard, const Key& key) { return shard.key < key; });
+			ASSERT(first != initialData->shards.end() && first->key == keys.begin);
+			ASSERT(last != initialData->shards.end() && last->key == keys.end);
+			ASSERT(first != last);
 		}
+
+		bool found = false;
+		for (int shard = 0; shard < initialData->shards.size() - 1; ++shard) {
+			const KeyRangeRef shardRange(initialData->shards[shard].key, initialData->shards[shard + 1].key);
+			if (shardRange.end <= keys.begin || shardRange.begin >= keys.end) {
+				continue;
+			}
+			found = true;
+			const DDShardInfo& info = initialData->shards[shard];
+			if (finishMovement) {
+				ASSERT(!info.hasDest);
+				ASSERT(info.primarySrc == destinationTeam);
+				ASSERT(info.primaryDest.empty());
+			} else {
+				ASSERT(info.hasDest);
+				ASSERT(info.primaryDest == destinationTeam);
+				ASSERT(!info.primarySrc.empty());
+			}
+			ASSERT(info.remoteSrc.empty());
+			ASSERT(info.remoteDest.empty());
+		}
+		ASSERT(found);
 	}
 };
 
