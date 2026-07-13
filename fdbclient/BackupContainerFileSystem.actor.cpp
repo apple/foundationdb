@@ -613,6 +613,9 @@ public:
 		std::pair<bool, int> encryptionMeta = wait(readEncryptionMetadata(bc));
 		fileLevelEncryptionEnabled = encryptionMeta.first;
 		encryptionBlockSize = encryptionMeta.second;
+		if (fileLevelEncryptionEnabled) {
+			bc->setEncryptionBlockSize(encryptionBlockSize);
+		}
 
 		TraceEvent("BackupContainerDescribe2")
 		    .detail("URL", bc->getURL())
@@ -2151,6 +2154,28 @@ TEST_CASE("/backup/containers/localdir/encrypted") {
 	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
 	                         {},
 	                         format("%s/test_encryption_key", params.getDataDir().c_str())));
+	return Void();
+}
+
+TEST_CASE("/backup/containers/localdir/encryptedDescribeWithoutBlockSize") {
+	state std::string url = fmt::format("file://{}/fdb_backups/{:x}", params.getDataDir(), timer_int());
+	state std::string keyFile = fmt::format("{}/test_encryption_key_describe", params.getDataDir());
+	wait(BackupContainerFileSystem::createTestEncryptionKeyFile(keyFile));
+
+	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, keyFile, 4096);
+	wait(c->create());
+	wait(c->writeEncryptionMetadata(4096));
+	state Reference<IBackupFile> log = wait(c->writeLogFile(1, 2, 1));
+	uint8_t value = 1;
+	wait(log->append(&value, 1));
+	wait(log->finish());
+
+	c->setEncryptionBlockSize(0);
+	BackupDescription desc = wait(c->describeBackup(true));
+	ASSERT(desc.fileLevelEncryption);
+	ASSERT_EQ(desc.encryptionBlockSize, 4096);
+	ASSERT_EQ(c->getEncryptionBlockSize(), 4096);
+	wait(c->deleteContainer());
 	return Void();
 }
 
