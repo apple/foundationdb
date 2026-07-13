@@ -88,7 +88,7 @@ static void prepareLegacyXorCompatibility(const Reference<ArenaPage>& page, cons
 std::string addPrefix(std::string prefix, std::string lines) {
 	StringRef m = lines;
 	std::string s;
-	while (m.size() != 0) {
+	while (!m.empty()) {
 		StringRef line = m.eat("\n");
 		s += prefix;
 		s += ' ';
@@ -706,8 +706,9 @@ public:
 						} else {
 							allocateNewExtent = true;
 						}
-					} else
+					} else {
 						allocateNewExtent = true;
+					}
 					if (allocateNewExtent) {
 						PhysicalPageID newPID = co_await self->queue->pager->newExtentPageID(self->queue->queueID);
 						newPageID = newPID;
@@ -1254,8 +1255,9 @@ public:
 						             self->tailPageNewExtent,
 						             self->prevExtentEndPageID,
 						             self->tailWriter.pageID);
-					} else
+					} else {
 						self->newTailPage = self->pager->newPageID();
+					}
 					workPending = true;
 				} else {
 					if (self->usesExtents) {
@@ -1878,7 +1880,7 @@ public:
 		// to be destroyed so the prioritizedEvictions head/tail will become invalid.
 		self->prioritizedEvictions.clear();
 
-		typename CacheT::iterator i = self->cache.begin();
+		auto i = self->cache.begin();
 		while (i != self->cache.end()) {
 			co_await (waitForSafeEviction ? i->second.item.onEvictable() : i->second.item.cancel());
 			++i;
@@ -2092,10 +2094,10 @@ public:
 		lastCommittedHeader = header;
 	}
 
-	ACTOR static Future<Void> recover(DWALPager* self) {
+	static Future<Void> recover(DWALPager* self) {
 		ASSERT(!self->recoverFuture.isValid());
 
-		state bool exists = false;
+		bool exists = false;
 
 		if (!self->memoryOnly) {
 			int64_t flags = IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE |
@@ -2105,15 +2107,15 @@ public:
 			if (!exists) {
 				flags |= IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE;
 			}
-			wait(store(self->pageFile, IAsyncFileSystem::filesystem()->open(self->filename, flags, 0644)));
+			self->pageFile = co_await IAsyncFileSystem::filesystem()->open(self->filename, flags, 0644);
 		}
 
 		// Header page is always treated as having a page size of smallestPhysicalBlock
 		self->setPageSize(smallestPhysicalBlock);
 
-		state int64_t fileSize = 0;
+		int64_t fileSize = 0;
 		if (exists) {
-			wait(store(fileSize, self->pageFile->size()));
+			fileSize = co_await self->pageFile->size();
 		}
 
 		self->fileExtension = Void();
@@ -2132,11 +2134,11 @@ public:
 				throw storage_engine_not_initialized();
 			}
 
-			state bool recoveredBackupHeader = false;
+			bool recoveredBackupHeader = false;
 
 			// Try to read primary header
 			try {
-				wait(store(self->headerPage, self->readHeaderPage(primaryHeaderPageID)));
+				self->headerPage = co_await self->readHeaderPage(primaryHeaderPageID);
 			} catch (Error& e) {
 				debug_printf("DWALPager(%s) Primary header read failed with %s\n", self->filename.c_str(), e.what());
 
@@ -2165,7 +2167,7 @@ public:
 			if (!self->headerPage.isValid()) {
 				// Try to read backup header
 				try {
-					wait(store(self->headerPage, self->readHeaderPage(backupHeaderPageID)));
+					self->headerPage = co_await self->readHeaderPage(backupHeaderPageID);
 					recoveredBackupHeader = true;
 				} catch (Error& e) {
 					debug_printf("DWALPager(%s) Backup header read failed with %s\n", self->filename.c_str(), e.what());
@@ -2222,7 +2224,7 @@ public:
 
 			// remapQueue entries are recovered using a fast path reading extents at a time
 			// we first issue disk reads for remapQueue extents obtained from extentUsedList
-			Standalone<VectorRef<ExtentUsedListEntry>> extents = wait(self->extentUsedList.peekAll());
+			Standalone<VectorRef<ExtentUsedListEntry>> extents = co_await self->extentUsedList.peekAll();
 			debug_printf("DWALPager(%s) ExtentUsedList size: %d.\n", self->filename.c_str(), extents.size());
 			if (extents.size() > 1) {
 				QueueID remapQueueID = self->remapQueue.queueID;
@@ -2238,12 +2240,15 @@ public:
 			// And here we consume results of the disk reads and populate the remappedPages map
 			// Using a promiseStream for the peeked results ensures that we use the CPU to populate the map
 			// and the disk concurrently
-			state PromiseStream<Standalone<VectorRef<RemappedPage>>> remapStream;
-			state Future<Void> remapRecoverActor;
+			PromiseStream<Standalone<VectorRef<RemappedPage>>> remapStream;
+			Future<Void> remapRecoverActor;
 			remapRecoverActor = self->remapQueue.peekAllExt(remapStream);
 			try {
-				loop choose {
-					when(Standalone<VectorRef<RemappedPage>> remaps = waitNext(remapStream.getFuture())) {
+				while (true) {
+					auto res = co_await race(remapStream.getFuture(), remapRecoverActor);
+					if (res.index() == 0) {
+						Standalone<VectorRef<RemappedPage>> remaps = std::get<0>(std::move(res));
+
 						debug_printf("DWALPager(%s) recovery. remaps size: %d, queueEntries: %" PRId64 "\n",
 						             self->filename.c_str(),
 						             remaps.size(),
@@ -2251,9 +2256,11 @@ public:
 						for (auto& r : remaps) {
 							self->remappedPages[r.originalPageID][r.version] = r.newPageID;
 						}
-					}
-					when(wait(remapRecoverActor)) {
+					} else if (res.index() == 1) {
+
 						remapRecoverActor = Never();
+					} else {
+						UNREACHABLE();
 					}
 				}
 			} catch (Error& e) {
@@ -2267,19 +2274,19 @@ public:
 			             toString(self->remappedPages).c_str());
 
 			debug_printf("DWALPager(%s) recovery complete. destroy extent cache\n", self->filename.c_str());
-			wait(self->extentCache.clear());
+			co_await self->extentCache.clear();
 
 			// If the header was recovered from the backup at Page 1 then write and sync it to Page 0 before continuing.
 			// If this fails, the backup header is still in tact for the next recovery attempt.
 			if (recoveredBackupHeader) {
 				// Write the header to page 0
-				wait(self->writeHeaderPage(primaryHeaderPageID, self->headerPage));
+				co_await self->writeHeaderPage(primaryHeaderPageID, self->headerPage);
 
 				// Wait for all outstanding writes to complete
-				wait(waitForAll(self->operations));
+				co_await waitForAll(self->operations);
 				self->operations.clear();
 				// Sync header
-				wait(self->pageFile->sync());
+				co_await self->pageFile->sync();
 				debug_printf("DWALPager(%s) Header recovery complete.\n", self->filename.c_str());
 			}
 
@@ -2349,7 +2356,7 @@ public:
 		}
 
 		if (!self->memoryOnly) {
-			wait(store(fileSize, self->pageFile->size()));
+			fileSize = co_await self->pageFile->size();
 		}
 
 		TraceEvent e(SevInfo, "RedwoodRecoveredPager");
@@ -2367,8 +2374,6 @@ public:
 		             self->physicalPageSize,
 		             self->header.pageCount,
 		             self->filePageCount);
-
-		return Void();
 	}
 
 	void toTraceEvent(TraceEvent& e) const override {
@@ -2784,7 +2789,7 @@ public:
 	static Future<Void> freeExtent_impl(Uncancellable, DWALPager* self, LogicalPageID pageID) {
 		self->extentFreeList.pushBack(pageID);
 		Optional<ExtentUsedListEntry> freeExtent = co_await self->extentUsedList.pop();
-		// Optional<LogicalPageID> freeExtentPageID = wait(self->extentUsedList.pop());
+		// Optional<LogicalPageID> freeExtentPageID = co_await self->extentUsedList.pop();
 		if (freeExtent.present()) {
 			debug_printf("DWALPager(%s) freeExtentPageID() popped %s from used list\n",
 			             self->filename.c_str(),
@@ -3045,9 +3050,10 @@ public:
 				             v,
 				             toString(j->second).c_str());
 				pageID = j->second;
-				if (pageID == invalidLogicalPageID)
+				if (pageID == invalidLogicalPageID) {
 					debug_printf(
 					    "DWALPager(%s) remappedPagesMap: %s\n", filename.c_str(), toString(remappedPages).c_str());
+				}
 
 				ASSERT(pageID != invalidLogicalPageID);
 			}
@@ -3233,19 +3239,19 @@ public:
 	// are allowing active snapshots to temporarily delay page reuse.
 	Version effectiveOldestVersion() { return std::min(lastCommittedHeader.oldestVersion, oldestSnapshotVersion); }
 
-	ACTOR static Future<Void> removeRemapEntry(DWALPager* self, RemappedPage p, Version oldestRetainedVersion) {
+	static Future<Void> removeRemapEntry(DWALPager* self, RemappedPage p, Version oldestRetainedVersion) {
 		// Get iterator to the versioned page map entry for the original page
-		state PageToVersionedMapT::iterator iPageMapPair = self->remappedPages.find(p.originalPageID);
+		auto iPageMapPair = self->remappedPages.find(p.originalPageID);
 		// The iterator must be valid and not empty and its first page map entry must match p's version
 		ASSERT(iPageMapPair != self->remappedPages.end());
 		ASSERT(!iPageMapPair->second.empty());
-		state VersionToPageMapT::iterator iVersionPagePair = iPageMapPair->second.find(p.version);
+		auto iVersionPagePair = iPageMapPair->second.find(p.version);
 		ASSERT(iVersionPagePair != iPageMapPair->second.end());
 
 		RemappedPage::Type firstType = p.getType();
-		state RemappedPage::Type secondType;
+		RemappedPage::Type secondType;
 		bool secondAfterOldestRetainedVersion = false;
-		state bool deleteAtSameVersion = false;
+		bool deleteAtSameVersion = false;
 		if (p.newPageID == iVersionPagePair->second) {
 			auto nextEntry = iVersionPagePair;
 			++nextEntry;
@@ -3298,11 +3304,11 @@ public:
 		//   Later popped state:  D |
 		//   free original ID
 		//
-		state bool freeNewID =
+		bool freeNewID =
 		    (firstType == RemappedPage::REMAP && secondType != RemappedPage::DETACH && !deleteAtSameVersion);
-		state bool copyNewToOriginal = (firstType == RemappedPage::REMAP &&
-		                                (secondAfterOldestRetainedVersion || secondType == RemappedPage::NONE));
-		state bool freeOriginalID = (firstType == RemappedPage::FREE || firstType == RemappedPage::DETACH);
+		bool copyNewToOriginal = (firstType == RemappedPage::REMAP &&
+		                          (secondAfterOldestRetainedVersion || secondType == RemappedPage::NONE));
+		bool freeOriginalID = (firstType == RemappedPage::FREE || firstType == RemappedPage::DETACH);
 
 		debug_printf("DWALPager(%s) remapCleanup %s secondType=%c mapEntry=%s oldestRetainedVersion=%" PRId64 " \n",
 		             self->filename.c_str(),
@@ -3319,8 +3325,8 @@ public:
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
-			Reference<ArenaPage> data = wait(
-			    self->readPage(PagerEventReasons::MetaData, nonBtreeLevel, p.newPageID, ioLeafPriority, false, true));
+			Reference<ArenaPage> data = co_await self->readPage(
+			    PagerEventReasons::MetaData, nonBtreeLevel, p.newPageID, ioLeafPriority, false, true);
 
 			// Write the data to the original page so it can be read using its original pageID
 			self->updatePage(
@@ -3384,23 +3390,21 @@ public:
 			self->freeUnmappedPage(p.originalPageID, 0);
 			++g_redwoodMetrics.metric.pagerRemapFree;
 		}
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> remapCleanup(DWALPager* self) {
-		state ActorCollection tasks(true);
-		state Promise<Void> signal;
+	static Future<Void> remapCleanup(DWALPager* self) {
+		ActorCollection tasks(true);
+		Promise<Void> signal;
 		tasks.add(signal.getFuture());
 
 		self->remapCleanupStop = false;
 
 		// The oldest retained version cannot change during the cleanup run as this would allow multiple read/copy
 		// operations with the same original page ID destination to be started and they could complete out of order.
-		state Version oldestRetainedVersion = self->effectiveOldestVersion();
+		Version oldestRetainedVersion = self->effectiveOldestVersion();
 
 		// Cutoff is the version we can pop to
-		state RemappedPage cutoff(oldestRetainedVersion);
+		RemappedPage cutoff(oldestRetainedVersion);
 
 		// Maximum number of remaining remap entries to keep before obeying stop command.
 		double toleranceRatio = buggify() ? deterministicRandom()->randomInt(0, 10) / 100.0
@@ -3408,8 +3412,8 @@ public:
 		// For simplicity, we assume each entry in the remap queue corresponds to one remapped page.
 		uint64_t remapCleanupWindowEntries =
 		    static_cast<uint64_t>(self->remapCleanupWindowBytes / self->header.pageSize);
-		state uint64_t minRemapEntries = static_cast<uint64_t>(remapCleanupWindowEntries * (1.0 - toleranceRatio));
-		state uint64_t maxRemapEntries = static_cast<uint64_t>(remapCleanupWindowEntries * (1.0 + toleranceRatio));
+		uint64_t minRemapEntries = static_cast<uint64_t>(remapCleanupWindowEntries * (1.0 - toleranceRatio));
+		uint64_t maxRemapEntries = static_cast<uint64_t>(remapCleanupWindowEntries * (1.0 + toleranceRatio));
 
 		debug_printf("DWALPager(%s) remapCleanup oldestRetainedVersion=%" PRId64 " remapCleanupWindowBytes=%" PRId64
 		             " pageSize=%" PRIu32 " minRemapEntries=%" PRId64 " maxRemapEntries=%" PRId64 " items=%" PRId64
@@ -3426,8 +3430,8 @@ public:
 			self->remapDestinationsSimOnly.clear();
 		}
 
-		state int sinceYield = 0;
-		loop {
+		int sinceYield = 0;
+		while (true) {
 			// Stop if we have cleanup enough remap entries, or if the stop flag is set and the remaining remap
 			// entries are less than that allowed by the lag.
 			int64_t remainingEntries = self->remapQueue.numEntries;
@@ -3441,7 +3445,7 @@ public:
 				             maxRemapEntries);
 				break;
 			}
-			state Optional<RemappedPage> p = wait(self->remapQueue.pop(cutoff));
+			Optional<RemappedPage> p = co_await self->remapQueue.pop(cutoff);
 			debug_printf("DWALPager(%s) remapCleanup popped %s items=%" PRId64 "\n",
 			             self->filename.c_str(),
 			             ::toString(p).c_str(),
@@ -3464,7 +3468,7 @@ public:
 			// Yield to prevent slow task in case no IO waits are encountered
 			if (++sinceYield >= 100) {
 				sinceYield = 0;
-				wait(yield());
+				co_await yield();
 			}
 		}
 
@@ -3476,8 +3480,7 @@ public:
 		             self->freeList.numEntries,
 		             self->delayedFreeList.numEntries);
 		signal.send(Void());
-		wait(tasks.getResult());
-		return Void();
+		co_await tasks.getResult();
 	}
 
 	// Flush all queues so they have no operations pending.
@@ -3516,7 +3519,7 @@ public:
 		self->delayedFreeList.finishFlush();
 	}
 
-	ACTOR static Future<Void> commit_impl(DWALPager* self, Version v, Value commitRecord) {
+	static Future<Void> commit_impl(DWALPager* self, Version v, Value commitRecord) {
 		debug_printf("DWALPager(%s) commit begin %s\n", self->filename.c_str(), ::toString(v).c_str());
 
 		// Write the old commit header to the backup header so we can recover to it if the new commit
@@ -3525,9 +3528,9 @@ public:
 
 		// Trigger the remap eraser to stop and then wait for it.
 		self->remapCleanupStop = true;
-		wait(self->remapCleanupFuture);
+		co_await self->remapCleanupFuture;
 
-		wait(flushQueues(self));
+		co_await flushQueues(self);
 
 		self->header.committedVersion = v;
 		self->header.remapQueue = self->remapQueue.getState();
@@ -3538,7 +3541,7 @@ public:
 
 		// Wait for all outstanding writes to complete
 		debug_printf("DWALPager(%s) waiting for outstanding writes\n", self->filename.c_str());
-		wait(waitForAll(self->operations));
+		co_await waitForAll(self->operations);
 		self->operations.clear();
 		debug_printf("DWALPager(%s) Syncing\n", self->filename.c_str());
 
@@ -3549,7 +3552,7 @@ public:
 		// For a newly created file, we do not want the file to be seen on the filesystem until after the first Sync 2,
 		// so skip Sync 1 for uninitialized files.
 		if (!self->memoryOnly && self->fileInitialized) {
-			wait(self->pageFile->sync());
+			co_await self->pageFile->sync();
 			debug_printf("DWALPager(%s) commit version %" PRId64 " sync 1\n",
 			             self->filename.c_str(),
 			             self->header.committedVersion);
@@ -3560,12 +3563,12 @@ public:
 		self->updateHeaderPage();
 
 		// Update primary header page on disk
-		wait(self->writeHeaderPage(primaryHeaderPageID, self->headerPage));
+		co_await self->writeHeaderPage(primaryHeaderPageID, self->headerPage);
 
 		// Update the primary header page and sync again to make the new commit durable.  If this fails on a new file
 		// the file will not exist, if it fails on an existing file the file will recover to the previous commit.
 		if (!self->memoryOnly) {
-			wait(self->pageFile->sync());
+			co_await self->pageFile->sync();
 			debug_printf("DWALPager(%s) commit version %" PRId64 " sync 2\n",
 			             self->filename.c_str(),
 			             self->header.committedVersion);
@@ -3591,8 +3594,6 @@ public:
 
 		// If there are prioritized evictions queued, flush them to the regular eviction order.
 		self->pageCache.flushPrioritizedEvictions();
-
-		return Void();
 	}
 
 	Future<Void> commit(Version v, Value commitRecord) override {
@@ -4964,23 +4965,22 @@ public:
 		m_lazyClearQueue.toTraceEvent(e, "LazyClearQueue");
 	}
 
-	ACTOR static Future<int> incrementalLazyClear(VersionedBTree* self) {
+	static Future<int> incrementalLazyClear(VersionedBTree* self) {
 		ASSERT(self->m_lazyClearActor.isReady());
 		self->m_lazyClearStop = false;
 
 		// TODO: Is it contractually okay to always to read at the latest version?
-		state Reference<IPagerSnapshot> snapshot =
-		    self->m_pager->getReadSnapshot(self->m_pager->getLastCommittedVersion());
-		state int freedPages = 0;
+		Reference<IPagerSnapshot> snapshot = self->m_pager->getReadSnapshot(self->m_pager->getLastCommittedVersion());
+		int freedPages = 0;
 
-		loop {
-			state int toPop = SERVER_KNOBS->REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES;
-			state std::vector<std::pair<LazyClearQueueEntry, Future<Reference<const ArenaPage>>>> entries;
+		while (true) {
+			int toPop = SERVER_KNOBS->REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES;
+			std::vector<std::pair<LazyClearQueueEntry, Future<Reference<const ArenaPage>>>> entries;
 			entries.reserve(toPop);
 
 			// Take up to batchSize pages from front of queue
 			while (toPop > 0) {
-				Optional<LazyClearQueueEntry> q = wait(self->m_lazyClearQueue.pop());
+				Optional<LazyClearQueueEntry> q = co_await self->m_lazyClearQueue.pop();
 				debug_printf("LazyClear: popped %s\n", toString(q).c_str());
 				if (!q.present()) {
 					break;
@@ -4999,9 +4999,9 @@ public:
 				--toPop;
 			}
 
-			state int i;
+			int i{ 0 };
 			for (i = 0; i < entries.size(); ++i) {
-				Reference<const ArenaPage> p = wait(entries[i].second);
+				Reference<const ArenaPage> p = co_await entries[i].second;
 				const LazyClearQueueEntry& entry = entries[i].first;
 				const BTreePage& btPage = *(const BTreePage*)p->data();
 				ASSERT(btPage.height == entry.height);
@@ -5064,11 +5064,11 @@ public:
 		             freedPages,
 		             self->m_lazyClearQueue.name.c_str(),
 		             self->m_lazyClearQueue.numEntries);
-		return freedPages;
+		co_return freedPages;
 	}
 
-	ACTOR static Future<Void> init_impl(VersionedBTree* self) {
-		wait(self->m_pager->init());
+	static Future<Void> init_impl(VersionedBTree* self) {
+		co_await self->m_pager->init();
 		self->m_pBuffer.reset(new MutationBuffer());
 
 		self->m_blockSize = self->m_pager->getLogicalPageSize();
@@ -5083,24 +5083,24 @@ public:
 			self->m_pBoundaryVerifier->removeAfterVersion(self->getLastCommittedVersion());
 		}
 
-		state Value btreeHeader = self->m_pager->getCommitRecord();
-		if (btreeHeader.size() == 0) {
+		Value btreeHeader = self->m_pager->getCommitRecord();
+		if (btreeHeader.empty()) {
 			// Create new BTree
 			self->m_header.formatVersion = BTreeCommitHeader::FORMAT_VERSION;
 			self->m_header.encodingType = self->m_encodingType;
 			self->m_header.height = 1;
 
-			LogicalPageID id = wait(self->m_pager->newPageID());
+			LogicalPageID id = co_await self->m_pager->newPageID();
 			self->m_header.root = BTreeNodeLinkRef((LogicalPageID*)&id, 1);
 			debug_printf("new root %s\n", toString(self->m_header.root).c_str());
 
-			Reference<ArenaPage> page = wait(makeEmptyRoot(self));
+			Reference<ArenaPage> page = co_await makeEmptyRoot(self);
 
 			// Newly allocated page so logical id = physical id and it's a new empty root so no parent
 			page->setLogicalPageInfo(self->m_header.root.front(), invalidLogicalPageID);
 			self->m_pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, self->m_header.root, page);
 
-			LogicalPageID newQueuePage = wait(self->m_pager->newPageID());
+			LogicalPageID newQueuePage = co_await self->m_pager->newPageID();
 			self->m_lazyClearQueue.create(
 			    self->m_pager, newQueuePage, "LazyClearQueue", self->m_pager->newLastQueueID(), false);
 			self->m_header.lazyDeleteQueue = self->m_lazyClearQueue.getState();
@@ -5138,7 +5138,7 @@ public:
 
 		TraceEvent e(SevInfo, "RedwoodRecoveredBTree");
 		e.detail("FileName", self->m_name);
-		e.detail("OpenedExisting", btreeHeader.size() != 0);
+		e.detail("OpenedExisting", !btreeHeader.empty());
 		e.detail("LatestVersion", self->m_pager->getLastCommittedVersion());
 		self->m_lazyClearQueue.toTraceEvent(e, "LazyClearQueue");
 		e.log();
@@ -5146,14 +5146,13 @@ public:
 		debug_printf("Recovered btree at version %" PRId64 ": %s\n",
 		             self->m_pager->getLastCommittedVersion(),
 		             self->m_header.toString().c_str());
-
-		return Void();
 	}
 
 	Future<Void> init() { return m_init; }
 
 	virtual ~VersionedBTree() {
-		m_latestCommit.cancel();
+		// Release the latest commit coroutine and its previousCommit chain before tearing down the tree state.
+		m_latestCommit = Future<Void>();
 		m_lazyClearActor.cancel();
 		m_init.cancel();
 	}
@@ -5166,15 +5165,15 @@ public:
 
 	// Clear all btree data, allow pager remap to fully process its queue, and verify final
 	// page counts in pager and queues.
-	ACTOR static Future<Void> clearAllAndCheckSanity_impl(VersionedBTree* self) {
+	static Future<Void> clearAllAndCheckSanity_impl(VersionedBTree* self) {
 		// Clear and commit
 		debug_printf("Clearing tree.\n");
 		self->clear(KeyRangeRef(dbBegin.key, dbEnd.key));
-		wait(self->commit(self->getLastCommittedVersion() + 1));
+		co_await self->commit(self->getLastCommittedVersion() + 1);
 
 		// Loop commits until the the lazy delete queue is completely processed.
-		loop {
-			wait(self->commit(self->getLastCommittedVersion() + 1));
+		while (true) {
+			co_await self->commit(self->getLastCommittedVersion() + 1);
 
 			// If the lazy delete queue is completely processed then the last time the lazy delete actor
 			// was started it, after the last commit, it would exist immediately and do no work, so its
@@ -5195,7 +5194,7 @@ public:
 		ASSERT(self->m_header.root.size() == 1);
 
 		// Let pager do more commits to finish all cleanup of old pages
-		wait(self->m_pager->clearRemapQueue());
+		co_await self->m_pager->clearRemapQueue();
 
 		TraceEvent e("RedwoodDestructiveSanityCheck");
 		self->toTraceEvent(e);
@@ -5203,11 +5202,9 @@ public:
 
 		// From the pager's perspective the only pages that should be in use are the btree root and
 		// the previously mentioned lazy delete queue page.
-		int64_t userPageCount = wait(self->m_pager->getUserPageCount());
+		int64_t userPageCount = co_await self->m_pager->getUserPageCount();
 		debug_printf("clearAllAndCheckSanity: userPageCount: %" PRId64 "\n", userPageCount);
 		ASSERT(userPageCount == 2);
-
-		return Void();
 	}
 
 	Future<Void> clearAllAndCheckSanity() { return clearAllAndCheckSanity_impl(this); }
@@ -5680,7 +5677,7 @@ private:
 	                                                                  Version v,
 	                                                                  BTreeNodeLinkRef previousID,
 	                                                                  LogicalPageID parentID) {
-		ASSERT(entries.size() > 0);
+		ASSERT(!entries.empty());
 
 		Standalone<VectorRef<RedwoodRecordRef>> records;
 
@@ -5688,7 +5685,7 @@ private:
 		int prefixLen = lowerBound->getCommonPrefixLen(*upperBound);
 
 		std::vector<PageToBuild> pagesToBuild = self->splitPages(lowerBound, upperBound, prefixLen, entries, height);
-		ASSERT(pagesToBuild.size() > 0);
+		ASSERT(!pagesToBuild.empty());
 		debug_printf("splitPages returning %s\n", toString(pagesToBuild).c_str());
 
 		// Lower bound of the page being added to
@@ -5871,7 +5868,7 @@ private:
 
 	// Takes a list of records commitSubtree() on the root and builds new root pages
 	// until there is only 1 root records which is small enough to fit in the BTree commit header.
-	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> buildNewRootsIfNeeded(
+	static Future<Standalone<VectorRef<RedwoodRecordRef>>> buildNewRootsIfNeeded(
 	    VersionedBTree* self,
 	    Version version,
 	    Standalone<VectorRef<RedwoodRecordRef>> records,
@@ -5889,8 +5886,8 @@ private:
 			ASSERT(height < 0xf0);
 			self->m_header.height = ++height;
 			ASSERT(height < std::numeric_limits<int8_t>::max());
-			Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(
-			    writePages(self, &dbBegin, &dbEnd, records, height, version, BTreeNodeLinkRef(), invalidLogicalPageID));
+			Standalone<VectorRef<RedwoodRecordRef>> newRecords = co_await writePages(
+			    self, &dbBegin, &dbEnd, records, height, version, BTreeNodeLinkRef(), invalidLogicalPageID);
 			debug_printf("Wrote a new root level at version %" PRId64 " height %d size %d pages\n",
 			             version,
 			             height,
@@ -5898,7 +5895,7 @@ private:
 			records = newRecords;
 		}
 
-		return records;
+		co_return records;
 	}
 
 	ACTOR static Future<Reference<const ArenaPage>> readPage(VersionedBTree* self,
@@ -6029,7 +6026,7 @@ private:
 			              .c_str());
 		}
 
-		unsigned int height = (unsigned int)((const BTreePage*)page->data())->height;
+		auto height = (unsigned int)((const BTreePage*)page->data())->height;
 		ASSERT(height < 0xf0);
 		if (oldID.size() == 1) {
 			page->setLogicalPageInfo(oldID.front(), parentID);
@@ -7151,96 +7148,112 @@ private:
 		}
 	}
 
-	ACTOR static Future<Void> commit_impl(VersionedBTree* self, Version writeVersion, Future<Void> previousCommit) {
+	static Future<Void> commit_impl(VersionedBTree* self, Version writeVersion, Future<Void> previousCommit) {
 		// Take ownership of the current mutation buffer and make a new one
-		state CommitBatch batch;
-		batch.mutations = std::move(self->m_pBuffer);
+		struct CommitImplState {
+			CommitBatch batch;
+			BTreeNodeLink rootNodeLink;
+			InternalPageSliceUpdate all;
+			RedwoodRecordRef rootLink;
+		};
+		auto commitState = std::make_shared<CommitImplState>();
+
+		commitState->batch.mutations = std::move(self->m_pBuffer);
 		self->m_pBuffer.reset(new MutationBuffer());
-		batch.mutationCount = self->m_mutationCount;
+		commitState->batch.mutationCount = self->m_mutationCount;
 		self->m_mutationCount = 0;
 
-		batch.writeVersion = writeVersion;
-		batch.newOldestVersion = self->m_newOldestVersion;
+		commitState->batch.writeVersion = writeVersion;
+		commitState->batch.newOldestVersion = self->m_newOldestVersion;
 
 		// Wait for the latest commit to be finished.
-		wait(previousCommit);
+		co_await previousCommit;
 
 		// If the write version has not advanced then there can be no changes pending.
 		// If there are no changes, then the commit is a no-op.
 		if (writeVersion == self->m_pager->getLastCommittedVersion()) {
-			ASSERT(batch.mutationCount == 0);
-			debug_printf("%s: Empty commit at repeat version %" PRId64 "\n", self->m_name.c_str(), batch.writeVersion);
-			return Void();
+			ASSERT(commitState->batch.mutationCount == 0);
+			debug_printf("%s: Empty commit at repeat version %" PRId64 "\n",
+			             self->m_name.c_str(),
+			             commitState->batch.writeVersion);
+			co_return;
 		}
 
 		// For this commit, use the latest snapshot that was just committed.
-		batch.readVersion = self->m_pager->getLastCommittedVersion();
+		commitState->batch.readVersion = self->m_pager->getLastCommittedVersion();
 
-		self->m_pager->setOldestReadableVersion(batch.newOldestVersion);
+		self->m_pager->setOldestReadableVersion(commitState->batch.newOldestVersion);
 		debug_printf("%s: Beginning commit of version %" PRId64 ", read version %" PRId64
 		             ", new oldest version set to %" PRId64 "\n",
 		             self->m_name.c_str(),
-		             batch.writeVersion,
-		             batch.readVersion,
-		             batch.newOldestVersion);
+		             commitState->batch.writeVersion,
+		             commitState->batch.readVersion,
+		             commitState->batch.newOldestVersion);
 
-		batch.snapshot = self->m_pager->getReadSnapshot(batch.readVersion);
+		commitState->batch.snapshot = self->m_pager->getReadSnapshot(commitState->batch.readVersion);
 
-		state BTreeNodeLink rootNodeLink = self->m_header.root;
-		state InternalPageSliceUpdate all;
-		state RedwoodRecordRef rootLink = dbBegin.withPageID(rootNodeLink);
-		all.subtreeLowerBound = rootLink;
-		all.decodeLowerBound = rootLink;
-		all.subtreeUpperBound = dbEnd;
-		all.decodeUpperBound = dbEnd;
-		all.skipLen = 0;
+		commitState->rootNodeLink = self->m_header.root;
+		commitState->rootLink = dbBegin.withPageID(commitState->rootNodeLink);
+		commitState->all.subtreeLowerBound = commitState->rootLink;
+		commitState->all.decodeLowerBound = commitState->rootLink;
+		commitState->all.subtreeUpperBound = dbEnd;
+		commitState->all.decodeUpperBound = dbEnd;
+		commitState->all.skipLen = 0;
 
-		MutationBuffer::const_iterator mBegin = batch.mutations->upper_bound(all.subtreeLowerBound.key);
+		MutationBuffer::const_iterator mBegin =
+		    commitState->batch.mutations->upper_bound(commitState->all.subtreeLowerBound.key);
 		--mBegin;
-		MutationBuffer::const_iterator mEnd = batch.mutations->lower_bound(all.subtreeUpperBound.key);
+		MutationBuffer::const_iterator mEnd =
+		    commitState->batch.mutations->lower_bound(commitState->all.subtreeUpperBound.key);
 
-		wait(
-		    commitSubtree(self, &batch, rootNodeLink, invalidLogicalPageID, self->m_header.height, mBegin, mEnd, &all));
+		co_await commitSubtree(self,
+		                       &commitState->batch,
+		                       commitState->rootNodeLink,
+		                       invalidLogicalPageID,
+		                       self->m_header.height,
+		                       mBegin,
+		                       mEnd,
+		                       &commitState->all);
 
 		// If the old root was deleted, write a new empty tree root node and free the old roots
-		if (all.childrenChanged) {
-			if (all.newLinks.empty()) {
+		if (commitState->all.childrenChanged) {
+			if (commitState->all.newLinks.empty()) {
 				debug_printf("Writing new empty root.\n");
-				LogicalPageID newRootID = wait(self->m_pager->newPageID());
-				rootNodeLink = BTreeNodeLinkRef((LogicalPageID*)&newRootID, 1);
+				LogicalPageID newRootID = co_await self->m_pager->newPageID();
+				commitState->rootNodeLink = BTreeNodeLinkRef((LogicalPageID*)&newRootID, 1);
 				self->m_header.height = 1;
 
-				Reference<ArenaPage> page = wait(makeEmptyRoot(self));
+				Reference<ArenaPage> page = co_await makeEmptyRoot(self);
 				// Newly allocated page so logical id = physical id and there is no parent as this is a new root
-				page->setLogicalPageInfo(rootNodeLink.front(), invalidLogicalPageID);
-				self->m_pager->updatePage(PagerEventReasons::Commit, self->m_header.height, rootNodeLink, page);
+				page->setLogicalPageInfo(commitState->rootNodeLink.front(), invalidLogicalPageID);
+				self->m_pager->updatePage(
+				    PagerEventReasons::Commit, self->m_header.height, commitState->rootNodeLink, page);
 			} else {
-				Standalone<VectorRef<RedwoodRecordRef>> newRootRecords(all.newLinks, all.newLinks.arena());
+				Standalone<VectorRef<RedwoodRecordRef>> newRootRecords(commitState->all.newLinks,
+				                                                       commitState->all.newLinks.arena());
 				// Build new root levels if there are multiple new root records or if the root pointer is too large
-				Standalone<VectorRef<RedwoodRecordRef>> newRootPage =
-				    wait(buildNewRootsIfNeeded(self, batch.writeVersion, newRootRecords, self->m_header.height));
-				rootNodeLink = newRootPage.front().getChildPage();
+				Standalone<VectorRef<RedwoodRecordRef>> newRootPage = co_await buildNewRootsIfNeeded(
+				    self, commitState->batch.writeVersion, newRootRecords, self->m_header.height);
+				commitState->rootNodeLink = newRootPage.front().getChildPage();
 			}
 		}
 
-		debug_printf("new root %s\n", toString(rootNodeLink).c_str());
-		self->m_header.root = rootNodeLink;
+		debug_printf("new root %s\n", toString(commitState->rootNodeLink).c_str());
+		self->m_header.root = commitState->rootNodeLink;
 
 		self->m_lazyClearStop = true;
-		wait(success(self->m_lazyClearActor));
+		co_await self->m_lazyClearActor;
 		debug_printf("Lazy delete freed %u pages\n", self->m_lazyClearActor.get());
 
-		wait(self->m_lazyClearQueue.flush());
+		co_await self->m_lazyClearQueue.flush();
 		self->m_header.lazyDeleteQueue = self->m_lazyClearQueue.getState();
 
 		debug_printf("%s: Committing pager %" PRId64 "\n", self->m_name.c_str(), writeVersion);
-		wait(self->m_pager->commit(writeVersion, ObjectWriter::toValue(self->m_header, Unversioned())));
+		co_await self->m_pager->commit(writeVersion, ObjectWriter::toValue(self->m_header, Unversioned()));
 		debug_printf("%s: Committed version %" PRId64 "\n", self->m_name.c_str(), writeVersion);
 
 		++g_redwoodMetrics.metric.opCommit;
 		self->m_lazyClearActor = forwardError(incrementalLazyClear(self), self->m_errorPromise);
-
-		return Void();
 	}
 
 public:
@@ -7309,7 +7322,7 @@ public:
 			return r;
 		}
 
-		const RedwoodRecordRef get() { return path.back().cursor.get(); }
+		RedwoodRecordRef get() { return path.back().cursor.get(); }
 
 		bool inRoot() const { return path.size() == 1; }
 
@@ -7476,8 +7489,9 @@ public:
 				// Prefetch the sibling if the link is not null
 				if (c.get().value.present()) {
 					BTreeNodeLinkRef childPage = c.get().getChildPage();
-					if (childPage.size() > 0)
+					if (!childPage.empty()) {
 						preLoadPage(pager.getPtr(), childPage, ioLeafPriority);
+					}
 					recordsRead += estRecordsPerPage;
 					// Use sibling node capacity as an estimate of bytes read.
 					bytesRead += childPage.size() * this->btree->m_blockSize;
@@ -7968,10 +7982,8 @@ Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 	if (end <= start)
 		end = keyAfter(start);
 
-	std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i =
-	    written->lower_bound(std::make_pair(start.toString(), 0));
-	std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd =
-	    written->upper_bound(std::make_pair(end.toString(), initialVersion));
+	auto i = written->lower_bound(std::make_pair(start.toString(), 0));
+	auto iEnd = written->upper_bound(std::make_pair(end.toString(), initialVersion));
 	std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast;
 
 	VersionedBTree::BTreeCursor cur;
@@ -9064,7 +9076,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	IntIntPair lowerBound = { 0, 0 };
 	IntIntPair upperBound = { 1000, 1000 };
 
-	state std::function<IntIntPair()> randomPair = [&]() {
+	std::function<IntIntPair()> randomPair = [&]() {
 		// Generate a pair >= lowerBound and < upperBound
 		int k = deterministicRandom()->randomInt(lowerBound.k, upperBound.k + 1);
 		int v = deterministicRandom()->randomInt(lowerBound.v, upperBound.v);
@@ -9748,6 +9760,46 @@ Future<Void> commitAndReportLoadProgress(VersionedBTree* btree,
 }
 
 } // namespace
+
+TEST_CASE("Lredwood/correctness/btreeCloseWithQueuedCommits") {
+	g_redwoodMetricsActor = Void();
+	g_redwoodMetrics.clear();
+
+	state std::string file = "unittest_btree-queued-commit.redwood-v1";
+	deleteFile(file);
+
+	state VersionedBTree* btree = new VersionedBTree(new DWALPager(4096,
+	                                                               SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE,
+	                                                               file,
+	                                                               FLOW_KNOBS->PAGE_CACHE_4K,
+	                                                               0,
+	                                                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
+	                                                               false),
+	                                                 file,
+	                                                 UID(),
+	                                                 {});
+	wait(btree->init());
+
+	state Version version = btree->getLastCommittedVersion();
+	btree->set(KeyValueRef("a"_sr, "first"_sr));
+	state Future<Void> firstCommit = btree->commit(++version);
+	ASSERT(!firstCommit.isReady());
+
+	btree->set(KeyValueRef("b"_sr, "second"_sr));
+	state Future<Void> secondCommit = btree->commit(++version);
+	ASSERT(!secondCommit.isReady());
+
+	// The tree owns the commit chain when it is closed; callers must not keep commit futures alive.
+	firstCommit = Future<Void>();
+	secondCommit = Future<Void>();
+	Future<Void> closedFuture = btree->onClosed();
+	btree->dispose();
+	wait(closedFuture);
+	wait(delay(0));
+	ASSERT(DWALPager::PageCacheT::Evictor::getEvictor()->empty());
+
+	return Void();
+}
 
 TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
