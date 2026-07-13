@@ -47,11 +47,8 @@ target_include_directories(fdbserver_worker
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
     ${CMAKE_SOURCE_DIR}/fdbserver/include
-    ${CMAKE_BINARY_DIR}/fdbserver/include
     ${CMAKE_SOURCE_DIR}/fdbctl/include
-    ${CMAKE_BINARY_DIR}/fdbctl/include
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR})
+    ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(fdbserver_worker
   PUBLIC
     fdbctl

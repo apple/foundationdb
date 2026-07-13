@@ -19,8 +19,7 @@ target_include_directories(fdbserver_core
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
   PRIVATE
-    ${CMAKE_SOURCE_DIR}/fdbserver/include
-    ${CMAKE_BINARY_DIR}/fdbserver/include)
+    ${CMAKE_SOURCE_DIR}/fdbserver/include)
 target_link_libraries(fdbserver_core PUBLIC fdbclient)
 
 if(WITH_ROCKSDB)
