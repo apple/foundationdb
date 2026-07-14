@@ -504,12 +504,9 @@ ACTOR Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
 			}
 		} catch (Error& e) {
 			if (strcmp(workerName, "LogRouter") == 0) {
-				// the probe macro prefers constant strings, so we can't combine
-				// log router and backup worker into one macro.
 				CODE_PROBE(true, "LogRouter re-recruitment failed");
 			} else {
 				ASSERT(strcmp(workerName, "BackupWorker") == 0);
-				CODE_PROBE(true, "BackupWorker re-recruitment failed");
 			}
 			TraceEvent(SevWarnAlways, (std::string(workerName) + "MonitoringRecruitmentFailed").c_str(), self->id)
 			    .error(e)
