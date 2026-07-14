@@ -191,10 +191,6 @@ Future<Void> handleIOErrors(Future<Void> actor,
 		e.get();
 		co_return;
 	}
-	if (res.index() != 1) {
-		UNREACHABLE();
-	}
-
 	ErrorOr<Void> e = std::get<1>(std::move(res));
 	TraceEvent("WorkerTerminatingByIOError", id).errorUnsuppressed(e.getError());
 	actor.cancel();
@@ -2702,8 +2698,6 @@ class WorkerServerCore {
 					loggingTrigger = Void();
 				}
 			} else {
-				ASSERT(res.index() == 1);
-
 				systemMonitor();
 				loggingTrigger = delay(loggingDelay, TaskPriority::FlushTrace);
 			}
@@ -4028,7 +4022,7 @@ Future<Void> serveProcess() {
 			GetProcessInterfaceRequest req = std::get<0>(std::move(res));
 
 			req.reply.send(process);
-		} else if (res.index() == 1) {
+		} else {
 			ActorLineageRequest req = std::get<1>(std::move(res));
 
 			SampleCollection sampleCollector;
@@ -4046,8 +4040,6 @@ Future<Void> serveProcess() {
 			}
 			ActorLineageReply reply{ serializedSamples };
 			req.reply.send(reply);
-		} else {
-			UNREACHABLE();
 		}
 	}
 }
