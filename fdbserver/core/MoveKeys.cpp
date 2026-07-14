@@ -1733,7 +1733,7 @@ static Future<bool> reverifyKeysDestAndCommit(Transaction* tr,
 	// than silently expand the commit past the verified end.
 	ASSERT(rereadEnd <= currentKeys->end);
 	if (rereadEnd < currentKeys->end) {
-		CODE_PROBE(true, "finishMoveKeys reread keyServers boundary shorter than planning", probe::decoration::rare);
+		CODE_PROBE(true, "finishMoveKeys reread keyServers boundary shorter than planning");
 		*currentKeys = KeyRangeRef(currentKeys->begin, rereadEnd);
 		*endKey = rereadEnd;
 	}
@@ -2716,7 +2716,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 	// end.
 	ASSERT(rereadEnd <= range->end);
 	if (rereadEnd < range->end) {
-		CODE_PROBE(true, "finishMoveShards reread keyServers boundary shorter than planning", probe::decoration::rare);
+		CODE_PROBE(true, "finishMoveShards reread keyServers boundary shorter than planning");
 		*range = KeyRangeRef(range->begin, rereadEnd);
 	}
 
