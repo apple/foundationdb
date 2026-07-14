@@ -4,6 +4,24 @@
 Release Notes
 #############
 
+7.3.79
+======
+* Same as 7.3.78 release with AVX enabled.
+
+7.3.78
+======
+* Fixed stale peer connections for client facing roles (storage server, commit proxy, GRV proxy) so clients actively drain connections to dead processes instead of retrying them indefinitely. `(PR #13367) <https://github.com/apple/foundationdb/pull/13367>`_ and `(PR #13643) <https://github.com/apple/foundationdb/pull/13643>`_
+* Added an admission control pipeline for Data Distribution that caps the number of relocations DD runs simultaneously (default 1000), applied to relocations of all priorities including operator-triggered excludes, to prevent DD from being overwhelmed. `(PR #13243) <https://github.com/apple/foundationdb/pull/13243>`_ and `(PR #13402) <https://github.com/apple/foundationdb/pull/13402>`_
+* Added exponential backoff with jitter and a retry limit for transaction_too_old in finishMoveKeys, fixing a retry storm that could clog the event loop when Data Distribution is under stress at startup. `(PR #12991) <https://github.com/apple/foundationdb/pull/12991>`_ and `(PR #13154) <https://github.com/apple/foundationdb/pull/13154>`_
+* Fixed a race in removeKeysFromFailedServer where concurrently awaiting the unassign and reassign writes for an excluded server let krmSetRangeCoalescing's read-modify-write observe stale state, producing an incorrect serverKeys assignment. `(PR #13662) <https://github.com/apple/foundationdb/pull/13662>`_
+* Added a background-refreshed DNS cache for coordinator addresses so a spike in upstream DNS latency no longer risks cluster controller leadership loss or repeated recovery failures. `(PR #13066) <https://github.com/apple/foundationdb/pull/13066>`_
+* Made status json generation return partial results before the client side timeout instead of returning nothing when the underlying transactions are slow. `(PR #13068) <https://github.com/apple/foundationdb/pull/13068>`_
+* Fixed bounce_impact.can_clean_bounce incorrectly reporting false in status json even on a fully recovered cluster, which had been blocking clean bounces. `(PR #13343) <https://github.com/apple/foundationdb/pull/13343>`_
+* Enabled SNI in the TLS handshake, fixing connectivity issues with some S3-compatible blob storage backends such as GCS. `(PR #13089) <https://github.com/apple/foundationdb/pull/13089>`_
+* Fixed a crash during encrypted restores run as a different user from a directory it cannot access, and removed unneeded encryption key and cache handling from backup expire and describe. `(PR #13111) <https://github.com/apple/foundationdb/pull/13111>`_
+* Changed encrypted backup/restore to store and thread the encryption block size per backup instead of relying on a process wide knob, and removed the knob. `(PR #13126) <https://github.com/apple/foundationdb/pull/13126>`_
+* Fixed spurious read failures on small or last file blocks by clipping read-ahead cache reads to the file size, affecting some blob storage backends. `(PR #13293) <https://github.com/apple/foundationdb/pull/13293>`_
+
 7.3.77
 ======
 * Same as 7.3.76 release with AVX enabled.
