@@ -229,12 +229,15 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 	    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1)));
 	PacketWriter packetWriter(packetQueue.getWriteBuffer(data.size()), nullptr, Unversioned());
 	packetWriter.serializeBytes(data);
-	co_await externalConn->onWritable();
-	externalConn->write(packetQueue.getUnsent());
-	co_await externalConn->onReadable();
+	while (!packetQueue.empty()) {
+		co_await externalConn->onWritable();
+		packetQueue.sent(externalConn->write(packetQueue.getUnsent()));
+	}
 	std::vector<uint8_t> vec(data.size());
-	if (!vec.empty()) {
-		externalConn->read(vec.data(), vec.data() + vec.size());
+	size_t bytesRead = 0;
+	while (bytesRead < vec.size()) {
+		co_await externalConn->onReadable();
+		bytesRead += externalConn->read(vec.data() + bytesRead, vec.data() + vec.size());
 	}
 	externalConn->close();
 	StringRef echo(vec.empty() ? reinterpret_cast<const uint8_t*>("") : vec.data(), vec.size());

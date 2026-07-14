@@ -31,18 +31,23 @@
 class UnitTestRunnerConfig {
 public:
 	using SimulationInitializer = std::function<Future<Void>()>;
+	using NetworkInitializer = std::function<void()>;
 
-	explicit UnitTestRunnerConfig(std::string_view sourceSubDir, SimulationInitializer simulationInitializer = {});
+	explicit UnitTestRunnerConfig(std::string_view sourceSubDir,
+	                              SimulationInitializer simulationInitializer = {},
+	                              NetworkInitializer networkInitializer = {});
 
 	std::string_view suiteName() const;
 	std::string dataDir() const;
 	std::string traceName() const;
 	bool supportsSimulation() const;
 	Future<Void> initializeSimulation() const;
+	void initializeNetwork() const;
 
 private:
 	std::string_view sourceSubDir;
 	SimulationInitializer simulationInitializer;
+	NetworkInitializer networkInitializer;
 };
 
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config);

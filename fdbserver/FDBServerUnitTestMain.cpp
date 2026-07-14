@@ -18,8 +18,14 @@
  * limitations under the License.
  */
 
+#include "fdbrpc/FlowTransport.h"
+#include "fdbrpc/Net2FileSystem.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/Knobs.h"
+#include "flow/TLSConfig.h"
 #include "flow/UnitTestRunner.h"
 
 #ifndef FDBSERVER_UNIT_TEST_SUITE
@@ -29,10 +35,23 @@
 namespace {
 Future<Void> initializeSimulation() {
 	resetServerKnobs(Randomize::True, IsSimulated::True);
+	CoroThreadPool::init();
 	return startUnitTestSimulator();
+}
+
+void initializeNetwork() {
+	resetServerKnobs(Randomize::False, IsSimulated::False);
+	CoroThreadPool::init();
+	g_network = newNet2(TLSConfig());
+	g_network->addStopCallback(Net2FileSystem::stop);
+	Net2FileSystem::newFileSystem();
+	FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
+	const NetworkAddress address = NetworkAddress::parse("127.0.0.1:0");
+	FlowTransport::transport().bind(address, address);
 }
 } // namespace
 
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE, initializeSimulation));
+	return runUnitTests(
+	    argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE, initializeSimulation, initializeNetwork));
 }

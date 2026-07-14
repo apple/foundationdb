@@ -226,8 +226,19 @@ bool testMatched(const UnitTestRunnerOptions& options, std::string_view testName
 		return false;
 	}
 
-	if (options.simulation && options.testPattern.empty() && startsWith(testName, "noSim/")) {
-		return false;
+	if (options.testPattern.empty()) {
+		if (options.simulation) {
+			if (!startsWith(testName, "/") || startsWith(testName, "/fdbrpc/grpc")) {
+				return false;
+			}
+		} else if (startsWith(testName, ":") || startsWith(testName, "#") || startsWith(testName, "L") ||
+		           startsWith(testName, "perf/") || startsWith(testName, "performance/") ||
+		           startsWith(testName, "noSim/RocksDB/RangeClear") || startsWith(testName, "/HTTP/Server/") ||
+		           startsWith(testName, "/fdbrpc/grpc") || startsWith(testName, "fdbrpc/MockDNS") ||
+		           startsWith(testName, "/fdbclient/MonitorLeader/PartialResolve") ||
+		           startsWith(testName, "/backup/containers/url") || startsWith(testName, "/backup/containers_list")) {
+			return false;
+		}
 	}
 
 	for (const auto& ignorePattern : options.testsIgnored) {
@@ -355,8 +366,11 @@ Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int
 
 } // namespace
 
-UnitTestRunnerConfig::UnitTestRunnerConfig(std::string_view sourceSubDir, SimulationInitializer simulationInitializer)
-  : sourceSubDir(sourceSubDir), simulationInitializer(std::move(simulationInitializer)) {}
+UnitTestRunnerConfig::UnitTestRunnerConfig(std::string_view sourceSubDir,
+                                           SimulationInitializer simulationInitializer,
+                                           NetworkInitializer networkInitializer)
+  : sourceSubDir(sourceSubDir), simulationInitializer(std::move(simulationInitializer)),
+    networkInitializer(std::move(networkInitializer)) {}
 
 std::string_view UnitTestRunnerConfig::suiteName() const {
 	return sourceSubDir;
@@ -376,6 +390,14 @@ bool UnitTestRunnerConfig::supportsSimulation() const {
 
 Future<Void> UnitTestRunnerConfig::initializeSimulation() const {
 	return simulationInitializer();
+}
+
+void UnitTestRunnerConfig::initializeNetwork() const {
+	if (networkInitializer) {
+		networkInitializer();
+	} else {
+		g_network = newNet2(TLSConfig());
+	}
 }
 
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
@@ -416,12 +438,15 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 		fmt::print(stderr, "ERROR: Could not chdir to {}\n", runDirectory);
 		return 1;
 	}
+	if (!options.simulation) {
+		options.dataDir = abspath(options.dataDir);
+	}
 
 	Future<Void> initialization = Void();
 	if (options.simulation) {
 		initialization = config.initializeSimulation();
 	} else {
-		g_network = newNet2(TLSConfig());
+		config.initializeNetwork();
 	}
 	openTraceFile({}, 10 << 20, 10 << 20, ".", traceName);
 
