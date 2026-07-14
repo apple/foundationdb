@@ -253,8 +253,10 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				break;
 			} catch (Error& e) {
 				TraceEvent("DataLossRecovery").error(e).detail("Phase", "MoveRangeError");
-				if (e.code() == error_code_movekeys_conflict) {
+				if (e.code() == error_code_movekeys_conflict ||
+				    e.code() == error_code_finish_move_keys_too_many_retries) {
 					// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+					// finish_move_keys_too_many_retries is also retryable here.
 					tr.reset();
 				} else {
 					wait(tr.onError(e));

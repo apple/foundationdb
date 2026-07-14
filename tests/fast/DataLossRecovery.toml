@@ -5,6 +5,7 @@ processesPerMachine = 2
 coordinators = 3
 machineCount = 45
 asanMachineCount = 20
+minimumRegions = 1
 allowDefaultTenant = false
 
 [[test]]

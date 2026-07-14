@@ -312,7 +312,8 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 				wait(self->real->testRawFinishMovement(params, emptyTssMapping));
 				break;
 			} catch (Error& e) {
-				if (e.code() != error_code_movekeys_conflict)
+				if (e.code() != error_code_movekeys_conflict &&
+				    e.code() != error_code_finish_move_keys_too_many_retries)
 					throw;
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				// Keep trying to get the moveKeysLock
@@ -397,7 +398,8 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 				wait(self->real->moveKeys(params));
 				break;
 			} catch (Error& e) {
-				if (e.code() != error_code_movekeys_conflict)
+				if (e.code() != error_code_movekeys_conflict &&
+				    e.code() != error_code_finish_move_keys_too_many_retries)
 					throw;
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				// Keep trying to get the moveKeysLock
