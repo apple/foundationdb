@@ -2679,6 +2679,7 @@ TEST_CASE("/fdbserver/commitproxy/IdempotencyIdsExpireServer/ExpireBeforeExpecte
 	IdempotencyIdsExpireServer expireServer(expireRequests, expectedCounts, &clears);
 	Future<Void> server = expireServer.run();
 
+	// Expire requests can arrive before their expected counts; neither batch may be cleared yet.
 	expireRequests.send(ExpireIdempotencyIdRequest(version, firstBatch));
 	expireRequests.send(ExpireIdempotencyIdRequest(version, firstBatch));
 	expireRequests.send(ExpireIdempotencyIdRequest(version, secondBatch));
@@ -2686,6 +2687,7 @@ TEST_CASE("/fdbserver/commitproxy/IdempotencyIdsExpireServer/ExpireBeforeExpecte
 	ASSERT(!server.isReady());
 	ASSERT(clears.empty());
 
+	// The first batch is complete once counts arrive, while the second is still one request short.
 	expectedCounts.send(ExpectedIdempotencyIdCountForKey(version, 2, firstBatch));
 	expectedCounts.send(ExpectedIdempotencyIdCountForKey(version, 2, secondBatch));
 	co_await yield();
@@ -2698,6 +2700,7 @@ TEST_CASE("/fdbserver/commitproxy/IdempotencyIdsExpireServer/ExpireBeforeExpecte
 	ASSERT(clears[0].param1 == firstRange.begin);
 	ASSERT(clears[0].param2 == firstRange.end);
 
+	// Completing the second batch must emit its distinct clear range.
 	expireRequests.send(ExpireIdempotencyIdRequest(version, secondBatch));
 	co_await yield();
 	ASSERT(!server.isReady());

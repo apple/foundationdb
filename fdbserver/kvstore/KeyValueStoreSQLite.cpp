@@ -264,6 +264,7 @@ TEST_CASE("/fdbserver/kvstore/SQLite/PageChecksum/LegacyCRC32") {
 		page[i] = static_cast<uint8_t>((i * 37 + 11) & 0xff);
 	}
 
+	// A zero high word identifies the legacy CRC32 format on an existing SQLite page.
 	auto* checksum = reinterpret_cast<PageChecksumCodec::SumType*>(page.data() + dataSize);
 	checksum->part1 = 0;
 	checksum->part2 = crc32c_append(0xfdbeefdb, page.data(), dataSize);
@@ -275,11 +276,13 @@ TEST_CASE("/fdbserver/kvstore/SQLite/PageChecksum/LegacyCRC32") {
 
 	ASSERT(PageChecksumCodec::codec(&codec, page.data(), 2, 3) == page.data());
 
+	// Corruption must be rejected without preventing the restored legacy page from being read.
 	page[dataSize / 2] ^= 0xff;
 	ASSERT(PageChecksumCodec::codec(&codec, page.data(), 2, 3) == nullptr);
 	page[dataSize / 2] ^= 0xff;
 	ASSERT(PageChecksumCodec::codec(&codec, page.data(), 2, 3) == page.data());
 
+	// Rewriting a valid legacy page upgrades its checksum to the current xxHash3 format.
 	ASSERT(PageChecksumCodec::codec(&codec, page.data(), 2, 6) == page.data());
 	const auto xxHash3 = XXH3_64bits(page.data(), dataSize);
 	ASSERT_EQ(checksum->part1, static_cast<uint32_t>((xxHash3 >> 32) & 0x00ffffff));

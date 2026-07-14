@@ -3486,6 +3486,7 @@ TEST_CASE("/fdbserver/clustercontroller/ignoreStaleWorkerRegistration") {
 	worker.initEndpoints();
 	worker.storage.getEndpoint(TaskPriority::Worker);
 
+	// Establish the newer registration and its DB-info endpoint before delivering an older update.
 	RegisterWorkerRequest current;
 	current.wi = worker;
 	current.initialClass = ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource);
@@ -3501,6 +3502,7 @@ TEST_CASE("/fdbserver/clustercontroller/ignoreStaleWorkerRegistration") {
 	ASSERT(data.id_worker.contains(processId));
 	ASSERT(data.updateDBInfoEndpoints.contains(worker.updateServerDBInfo.getEndpoint()));
 
+	// Contradict every mutable field so accepting the stale generation would be observable.
 	RegisterWorkerRequest stale;
 	stale.wi = worker;
 	stale.initialClass = ProcessClass(ProcessClass::LogClass, ProcessClass::CommandLineSource);
