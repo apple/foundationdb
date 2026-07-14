@@ -570,11 +570,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		                                       KeySelector(firstGreaterThan(begin), begin.arena()),
 		                                       KeySelector(firstGreaterThan(end), end.arena()),
 		                                       mapper,
-		                                       100,
-		                                       100000,
-		                                       11,
+		                                       /*limit=*/100,
+		                                       /*byteLimit=*/100000,
+		                                       /*expectedBeginId=*/11,
 		                                       self,
-		                                       false);
+		                                       /*allMissing=*/false);
 		ASSERT_EQ(greaterThan.size(), 10);
 		ASSERT(!greaterThan.more);
 
@@ -583,11 +583,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		                                       KeySelector(firstGreaterOrEqual(begin) + 2, begin.arena()),
 		                                       KeySelector(firstGreaterOrEqual(end) - 2, end.arena()),
 		                                       mapper,
-		                                       100,
-		                                       100000,
-		                                       12,
+		                                       /*limit=*/100,
+		                                       /*byteLimit=*/100000,
+		                                       /*expectedBeginId=*/12,
 		                                       self,
-		                                       false);
+		                                       /*allMissing=*/false);
 		ASSERT_EQ(offsets.size(), 6);
 		ASSERT(!offsets.more);
 
@@ -595,12 +595,12 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		                                              KeySelector(firstGreaterOrEqual(begin), begin.arena()),
 		                                              KeySelector(firstGreaterOrEqual(end), end.arena()),
 		                                              mapper,
-		                                              GetRangeLimits(0, 1000));
+		                                              GetRangeLimits(/*rowLimit=*/0, /*byteLimit=*/1000));
 		co_await checkEmptyMappedRangeDoesNotConflict(cx,
 		                                              KeySelector(firstGreaterThan(end), end.arena()),
 		                                              KeySelector(firstGreaterOrEqual(begin), begin.arena()),
 		                                              mapper,
-		                                              GetRangeLimits(100, 100000));
+		                                              GetRangeLimits(/*rowLimit=*/100, /*byteLimit=*/100000));
 
 		bool specialKeyRejected = false;
 		try {
@@ -608,7 +608,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			co_await tr.getMappedRange(KeySelector(firstGreaterOrEqual(specialKeys.begin)),
 			                           KeySelector(firstGreaterOrEqual(specialKeys.end)),
 			                           mapper,
-			                           GetRangeLimits(100, 100000),
+			                           GetRangeLimits(/*rowLimit=*/100, /*byteLimit=*/100000),
 			                           Snapshot::False,
 			                           Reverse::False);
 		} catch (Error& e) {
