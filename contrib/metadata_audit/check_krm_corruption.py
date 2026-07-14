@@ -95,7 +95,6 @@ import sys
 import json
 import subprocess
 import os
-from collections import defaultdict
 
 from fdb_metadata_utils import (
     KEY_SERVERS_PREFIX, SERVER_KEYS_PREFIX, SERVER_LIST_PREFIX,

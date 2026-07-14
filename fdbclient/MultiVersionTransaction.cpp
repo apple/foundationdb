@@ -18,10 +18,6 @@
  * limitations under the License.
  */
 
-#ifdef __unixish__
-#include <fcntl.h>
-#endif
-
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"

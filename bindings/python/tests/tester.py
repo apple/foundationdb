@@ -19,7 +19,6 @@
 # limitations under the License.
 #
 
-import json
 import math
 import os
 import random
