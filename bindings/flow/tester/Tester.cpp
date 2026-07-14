@@ -683,30 +683,6 @@ struct GetRangeSplitPoints : InstructionFunc {
 const char* GetRangeSplitPoints::name = "GET_RANGE_SPLIT_POINTS";
 REGISTER_INSTRUCTION_FUNC(GetRangeSplitPoints);
 
-struct GetRangeSplitPointsWithLimit : InstructionFunc {
-	static const char* name;
-
-	static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
-		std::vector<StackItem> items = data->stack.pop(4);
-		if (items.size() != 4)
-			co_return;
-
-		Standalone<StringRef> s1 = co_await items[0].value;
-		Standalone<StringRef> beginKey = Tuple::unpack(s1).getString(0);
-		Standalone<StringRef> s2 = co_await items[1].value;
-		Standalone<StringRef> endKey = Tuple::unpack(s2).getString(0);
-		Standalone<StringRef> s3 = co_await items[2].value;
-		int64_t chunkSize = Tuple::unpack(s3).getInt(0);
-		Standalone<StringRef> s4 = co_await items[3].value;
-		int limit = Tuple::unpack(s4).getInt(0);
-
-		co_await instruction->tr->getRangeSplitPoints(KeyRangeRef(beginKey, endKey), chunkSize, limit);
-		data->stack.pushTuple("GOT_RANGE_SPLIT_POINTS"_sr);
-	}
-};
-const char* GetRangeSplitPointsWithLimit::name = "GET_RANGE_SPLIT_POINTS_WITH_LIMIT";
-REGISTER_INSTRUCTION_FUNC(GetRangeSplitPointsWithLimit);
-
 struct GetKeyFunc : InstructionFunc {
 	static const char* name;
 

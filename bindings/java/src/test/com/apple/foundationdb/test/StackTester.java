@@ -218,11 +218,6 @@ public class StackTester {
 				KeyArrayResult splitPoints = inst.readTr.getRangeSplitPoints((byte[])params.get(0), (byte[])params.get(1), (long)params.get(2)).join();
 				inst.push("GOT_RANGE_SPLIT_POINTS".getBytes());
 			}
-			else if (op == StackOperation.GET_RANGE_SPLIT_POINTS_WITH_LIMIT) {
-				List<Object> params = inst.popParams(4).join();
-				KeyArrayResult splitPoints = inst.readTr.getRangeSplitPoints((byte[])params.get(0), (byte[])params.get(1), (long)params.get(2), StackUtils.getInt(params.get(3))).join();
-				inst.push("GOT_RANGE_SPLIT_POINTS".getBytes());
-			}
 			else if(op == StackOperation.GET_RANGE) {
 				List<Object> params = inst.popParams(5).join();
 

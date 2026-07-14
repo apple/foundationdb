@@ -231,12 +231,12 @@ def test_range_split_points(db):
     end = b"\x02range-split-points-z"
     tr = db.create_transaction()
 
-    for limit in (-(2**63), -1, 0, 1, 2, 2**31, 2**63):
+    for limit in (-1, 0, 1, 2):
         split_points = tr.get_range_split_points(begin, end, 1000000, limit).wait()
         assert split_points[0] == begin
         assert split_points[-1] == end
         if limit >= 0:
-            assert len(split_points) <= min(limit, 2**31 - 1) + 2
+            assert len(split_points) <= limit + 2
 
 
 def run_unit_tests(db):

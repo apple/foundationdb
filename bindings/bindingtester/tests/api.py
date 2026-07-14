@@ -209,8 +209,6 @@ class ApiTest(Test):
         ]
         txn_sizes = ["GET_APPROXIMATE_SIZE"]
         storage_metrics = ["GET_ESTIMATED_RANGE_SIZE", "GET_RANGE_SPLIT_POINTS"]
-        if args.api_version >= 800 and args.range_split_points_with_limit_enabled:
-            storage_metrics.append("GET_RANGE_SPLIT_POINTS_WITH_LIMIT")
 
         op_choices += reads
         op_choices += mutations
@@ -655,7 +653,7 @@ class ApiTest(Test):
                 instructions.push_args(key1, key2)
                 instructions.append(op)
                 self.add_strings(1)
-            elif op in ("GET_RANGE_SPLIT_POINTS", "GET_RANGE_SPLIT_POINTS_WITH_LIMIT"):
+            elif op == "GET_RANGE_SPLIT_POINTS":
                 # Protect against inverted range and identical keys
                 key1 = self.workspace.pack(self.random.random_tuple(1))
                 key2 = self.workspace.pack(self.random.random_tuple(1))
@@ -669,10 +667,7 @@ class ApiTest(Test):
 
                 # TODO: randomize chunkSize but should not exceed 100M(shard limit)
                 chunkSize = 10000000  # 10M
-                if op == "GET_RANGE_SPLIT_POINTS_WITH_LIMIT":
-                    instructions.push_args(key1, key2, chunkSize, random.randint(0, 2))
-                else:
-                    instructions.push_args(key1, key2, chunkSize)
+                instructions.push_args(key1, key2, chunkSize)
                 instructions.append(op)
                 self.add_strings(1)
             else:

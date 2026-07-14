@@ -323,9 +323,6 @@ class Tester
         when "GET_RANGE_SPLIT_POINTS"
           inst.tr.get_range_split_points(inst.wait_and_pop, inst.wait_and_pop, inst.wait_and_pop).wait()
           inst.push("GOT_RANGE_SPLIT_POINTS")
-        when "GET_RANGE_SPLIT_POINTS_WITH_LIMIT"
-          inst.tr.get_range_split_points(inst.wait_and_pop, inst.wait_and_pop, inst.wait_and_pop, inst.wait_and_pop).wait()
-          inst.push("GOT_RANGE_SPLIT_POINTS")
         when "GET_KEY"
           selector = FDB::KeySelector.new(inst.wait_and_pop, inst.wait_and_pop, inst.wait_and_pop)
           prefix = inst.wait_and_pop

@@ -788,16 +788,7 @@ struct SplitRangeRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if constexpr (is_fb_function<Ar>) {
-			// FlatBuffer visitors must see every field in one call because each visit starts at field zero.
-			serializer(ar, keys, chunkSize, reply, limit, arena);
-		} else {
-			serializer(ar, keys, chunkSize, reply);
-			if (ar.protocolVersion().hasRangeSplitPointsLimit()) {
-				serializer(ar, limit);
-			}
-			serializer(ar, arena);
-		}
+		serializer(ar, keys, chunkSize, reply, limit, arena);
 	}
 };
 

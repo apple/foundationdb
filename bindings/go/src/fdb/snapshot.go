@@ -116,7 +116,7 @@ func (s Snapshot) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyAr
 }
 
 // GetRangeSplitPointsWithLimit returns at most limit interior split points, including shard boundaries.
-// The start and end keys of the given range are always included. Limits larger than 2^31-1 are clamped to 2^31-1.
+// The start and end keys of the given range are always included.
 func (s Snapshot) GetRangeSplitPointsWithLimit(r ExactRange, chunkSize int64, limit int) FutureKeyArray {
 	beginKey, endKey := r.FDBRangeKeys()
 	return s.getRangeSplitPointsWithLimit(

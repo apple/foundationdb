@@ -248,10 +248,6 @@ class Tester:
                     begin, end, chunkSize = inst.pop(3)
                     obj.get_range_split_points(begin, end, chunkSize).wait()
                     inst.push(b"GOT_RANGE_SPLIT_POINTS")
-                elif inst.op == "GET_RANGE_SPLIT_POINTS_WITH_LIMIT":
-                    begin, end, chunkSize, limit = inst.pop(4)
-                    obj.get_range_split_points(begin, end, chunkSize, limit).wait()
-                    inst.push(b"GOT_RANGE_SPLIT_POINTS")
                 elif inst.op == "GET_KEY":
                     key, or_equal, offset, prefix = inst.pop(4)
                     result = obj.get_key(fdb.KeySelector(key, or_equal, offset))

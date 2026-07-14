@@ -21,7 +21,6 @@ set(SRCS
   src/fdb/database.go
   src/fdb/directory/directory_subspace.go
   src/fdb/fdb_test.go
-  src/fdb/transaction_internal_test.go
   src/fdb/snapshot.go
   go.mod)
 

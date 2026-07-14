@@ -555,7 +555,6 @@ class TransactionRead(_FDBBase):
                     chunk_size,
                 )
             )
-        limit = min(limit, 2**31 - 1)
         return FutureKeyArray(
             self.capi.fdb_transaction_get_range_split_points_with_limit(
                 self.tpointer,
