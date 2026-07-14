@@ -1089,7 +1089,7 @@ public:
 			return delay(getCurrentProcess()->rebooting ? 0 : .001, taskID) || checkShutdown(this, taskID);
 		}
 		setCurrentTask(taskID);
-		return Void();
+		return readyYield;
 	}
 	bool check_yield(TaskPriority taskID) override {
 		if (yielded)
@@ -2402,6 +2402,7 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
+	Future<Void> readyYield = Void();
 	bool printSimTime;
 
 private:

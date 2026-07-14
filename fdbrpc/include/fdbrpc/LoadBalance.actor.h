@@ -422,6 +422,11 @@ Future<Void> replicaComparison(Req req,
 FDB_BOOLEAN_PARAM(AtMostOnce);
 FDB_BOOLEAN_PARAM(TriedAllOptions);
 
+inline const Future<Void>& neverSecondRequest() {
+	static const Future<Void> result = Never();
+	return result;
+}
+
 // Stores state for a request made by the load balancer
 template <class Request, class Interface, class Multi, bool P>
 struct RequestData : NonCopyable {
@@ -677,9 +682,7 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
 	state RequestData<Request, Interface, Multi, P> secondRequestData(compareReplicas);
 
 	state Optional<uint64_t> firstRequestEndpoint;
-	state Future<Void> secondDelay = Never();
-
-	state Promise<Void> requestFinished;
+	state Future<Void> secondDelay = neverSecondRequest();
 	state double startTime = now();
 
 	state TriedAllOptions triedAllOptions = TriedAllOptions::False;
@@ -784,7 +787,7 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
 				secondDelay = delay(model->secondMultiplier * nextTime + FLOW_KNOBS->BASE_SECOND_REQUEST_TIME);
 			}
 		} else {
-			secondDelay = Never();
+			secondDelay = neverSecondRequest();
 		}
 	}
 
@@ -863,11 +866,14 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
 			numAttempts = 0; // now that we've got a server back, reset the backoff
 		} else if (!stream) {
 			// Only the first location is available.
-			wait(success(firstRequestData.response));
+			ErrorOr<REPLY_TYPE(Request)> firstResponse = wait(firstRequestData.response);
+			(void)firstResponse;
 			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 				// Do consistency check, if requested.
-				wait(
-				    firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel, requiredReplicas));
+				if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
+					wait(firstRequestData.maybeDoReplicaComparison(
+					    request, model, alternatives, channel, requiredReplicas));
+				}
 
 				ASSERT(firstRequestData.response.isReady());
 				return firstRequestData.response.get().get();
@@ -894,7 +900,9 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
 			state bool secondRequestSuccessful = false;
 
 			loop choose {
-				when(wait(success(firstRequestData.response.isValid() ? firstRequestData.response : Never()))) {
+				when(ErrorOr<REPLY_TYPE(Request)> firstResponse =
+				         wait(firstRequestData.response.isValid() ? firstRequestData.response : Never())) {
+					(void)firstResponse;
 					if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 						firstRequestSuccessful = true;
 						break;
@@ -902,7 +910,8 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
 
 					firstRequestEndpoint = Optional<uint64_t>();
 				}
-				when(wait(success(secondRequestData.response))) {
+				when(ErrorOr<REPLY_TYPE(Request)> secondResponse = wait(secondRequestData.response)) {
+					(void)secondResponse;
 					if (secondRequestData.checkAndProcessResult(atMostOnce)) {
 						secondRequestSuccessful = true;
 					}
@@ -915,7 +924,10 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
 				// Do consistency check, by comparing results from storage replicas, if requested.
 				state RequestData<Request, Interface, Multi, P>* requestData =
 				    firstRequestSuccessful ? &firstRequestData : &secondRequestData;
-				wait(requestData->maybeDoReplicaComparison(request, model, alternatives, channel, requiredReplicas));
+				if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
+					wait(
+					    requestData->maybeDoReplicaComparison(request, model, alternatives, channel, requiredReplicas));
+				}
 
 				ASSERT(requestData->response.isReady());
 				return requestData->response.get().get();
@@ -945,7 +957,8 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
 
 			loop {
 				choose {
-					when(wait(success(firstRequestData.response))) {
+					when(ErrorOr<REPLY_TYPE(Request)> firstResponse = wait(firstRequestData.response)) {
+						(void)firstResponse;
 						if (model) {
 							model->secondMultiplier =
 							    std::max(model->secondMultiplier - FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_DECAY, 1.0);
@@ -956,8 +969,10 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
 
 						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 							// Do consistency check, by comparing results from storage replicas, if requested.
-							wait(firstRequestData.maybeDoReplicaComparison(
-							    request, model, alternatives, channel, requiredReplicas));
+							if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
+								wait(firstRequestData.maybeDoReplicaComparison(
+								    request, model, alternatives, channel, requiredReplicas));
+							}
 
 							ASSERT(firstRequestData.response.isReady());
 							return firstRequestData.response.get().get();
@@ -967,7 +982,7 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
 						break;
 					}
 					when(wait(secondDelay)) {
-						secondDelay = Never();
+						secondDelay = neverSecondRequest();
 						if (model && model->secondBudget >= 1.0) {
 							model->secondMultiplier += FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_GROWTH;
 							model->secondBudget -= 1.0;
@@ -988,7 +1003,7 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
 		if (nextAlt == startAlt)
 			triedAllOptions = TriedAllOptions::True;
 		resetReply(request, taskID);
-		secondDelay = Never();
+		secondDelay = neverSecondRequest();
 	}
 }
 

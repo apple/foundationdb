@@ -619,6 +619,9 @@ struct AwaitableFuture
 	[[no_unique_address]] std::conditional_t<IsStream, AwaitableFutureStore<FutureValue>, Empty> store;
 
 	AwaitableFuture(const FutureType& f, PromiseType* pt) : future(f), pt(pt) {}
+	AwaitableFuture(FutureStream<FutureValue>&& f, PromiseType* pt)
+	    requires(IsStream)
+	  : future(std::move(f)), pt(pt) {}
 
 	void fire(FutureValue const& value) override {
 		if constexpr (IsStream) {
@@ -656,7 +659,7 @@ struct AwaitableFuture
 		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
 
 		if constexpr (IsStream) {
-			auto sf = future;
+			auto sf = std::move(future);
 			sf.addCallbackAndClear(this);
 		} else {
 			StrictFuture<FutureValue> sf = future;
@@ -1043,6 +1046,11 @@ struct CoroPromiseBase : CoroReturn<T, Derived, ReturnsExplicitVoid> {
 	}
 
 	template <class U>
+	auto await_transform(FutureStream<U>&& futureStream) {
+		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ std::move(futureStream), self() };
+	}
+
+	template <class U>
 	auto await_transform(const FutureStream<U>& futureStream) {
 		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, self() };
 	}
@@ -1250,6 +1258,11 @@ struct AsyncResultPromise
 	}
 
 	template <class U>
+	auto await_transform(FutureStream<U>&& futureStream) {
+		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ std::move(futureStream), this };
+	}
+
+	template <class U>
 	auto await_transform(const FutureStream<U>& futureStream) {
 		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, this };
 	}
@@ -1357,6 +1370,11 @@ struct AsyncGeneratorPromise {
 	template <class U>
 	auto await_transform(const Future<U>& future) {
 		return coro::AwaitableFuture<promise_type, U, false, ReturnsExplicitVoid>{ future, this };
+	}
+
+	template <class U>
+	auto await_transform(FutureStream<U>&& futureStream) {
+		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ std::move(futureStream), this };
 	}
 
 	template <class U>

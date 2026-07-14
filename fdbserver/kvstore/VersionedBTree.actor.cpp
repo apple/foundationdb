@@ -56,6 +56,7 @@
 #include <map>
 #include <random>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -1900,7 +1901,7 @@ private:
 };
 
 template <class T>
-Future<T> forwardError(Future<T> f, Promise<Void> target, ExplicitVoid = {}) {
+Future<T> forwardErrorSlow(Future<T> f, Promise<Void> target, ExplicitVoid = {}) {
 	try {
 		T x = co_await f;
 		co_return x;
@@ -1910,6 +1911,57 @@ Future<T> forwardError(Future<T> f, Promise<Void> target, ExplicitVoid = {}) {
 		}
 		throw;
 	}
+}
+
+template <class T>
+Future<T> forwardError(Future<T> f, Promise<Void> target) {
+	if (!f.isReady()) {
+		return forwardErrorSlow(std::move(f), std::move(target));
+	}
+	if (f.isError()) {
+		Error error = f.getError();
+		if (error.code() != error_code_actor_cancelled && target.canBeSet()) {
+			target.sendError(error);
+		}
+	}
+	return f;
+}
+
+TEST_CASE("/fdbserver/kvstore/forwardError") {
+	{
+		Promise<Void> target;
+		Future<int> result = forwardError(Future<int>(42), target);
+		ASSERT(result.isReady() && !result.isError());
+		ASSERT_EQ(result.get(), 42);
+		ASSERT(target.canBeSet());
+	}
+	{
+		Promise<Void> target;
+		Future<Void> error = target.getFuture();
+		Future<int> result = forwardError(Future<int>(io_error()), target);
+		ASSERT(result.isError());
+		ASSERT(error.isError());
+		ASSERT_EQ(error.getError().code(), error_code_io_error);
+	}
+	{
+		Promise<int> source;
+		Promise<Void> target;
+		Future<Void> error = target.getFuture();
+		Future<int> result = forwardError(source.getFuture(), target);
+		ASSERT(!result.isReady());
+		source.sendError(io_error());
+		ASSERT(result.isError());
+		ASSERT(error.isError());
+		ASSERT_EQ(error.getError().code(), error_code_io_error);
+	}
+	{
+		Promise<int> source;
+		Promise<Void> target;
+		Future<int> result = forwardError(source.getFuture(), target);
+		result.cancel();
+		ASSERT(target.canBeSet());
+	}
+	return Void();
 }
 
 constexpr int initialVersion = invalidVersion;
@@ -1931,8 +1983,53 @@ public:
 	using VersionToPageMapT = std::map<Version, LogicalPageID>;
 	using PageToVersionedMapT = std::unordered_map<LogicalPageID, VersionToPageMapT>;
 	struct PageCacheEntry {
+		template <bool ReadOnly>
+		using PageFuture =
+		    std::conditional_t<ReadOnly, Future<Reference<const ArenaPage>>, Future<Reference<ArenaPage>>>;
+
 		Future<Reference<ArenaPage>> readFuture;
+		Future<Reference<const ArenaPage>> readOnlyFuture;
 		Future<Void> writeFuture;
+
+		static Future<Reference<const ArenaPage>> makeReadOnlyFutureSlow(Future<Reference<ArenaPage>> future) {
+			Reference<ArenaPage> page = co_await future;
+			co_return Reference<const ArenaPage>(std::move(page));
+		}
+
+		template <bool ReadOnly>
+		static PageFuture<ReadOnly> makePageFuture(Future<Reference<ArenaPage>> future) {
+			if constexpr (!ReadOnly) {
+				return future;
+			} else {
+				if (!future.isReady()) {
+					return makeReadOnlyFutureSlow(std::move(future));
+				}
+				if (future.isError()) {
+					return Future<Reference<const ArenaPage>>(future.getError());
+				}
+				return Future<Reference<const ArenaPage>>(Reference<const ArenaPage>(future.get()));
+			}
+		}
+
+		template <bool ReadOnly>
+		PageFuture<ReadOnly> getReadFuture() {
+			if constexpr (!ReadOnly) {
+				return readFuture;
+			} else {
+				if (!readFuture.isReady()) {
+					return makeReadOnlyFutureSlow(readFuture);
+				}
+				if (!readOnlyFuture.isValid()) {
+					readOnlyFuture = makePageFuture<true>(readFuture);
+				}
+				return readOnlyFuture;
+			}
+		}
+
+		void setReadFuture(Future<Reference<ArenaPage>> future) {
+			readOnlyFuture = Future<Reference<const ArenaPage>>();
+			readFuture = std::move(future);
+		}
 
 		bool initialized() const { return readFuture.isValid(); }
 
@@ -1952,6 +2049,7 @@ public:
 		// Read and write futures are safe to cancel so just cancel them and return
 		Future<Void> cancel() {
 			writeFuture.cancel();
+			readOnlyFuture.cancel();
 			readFuture.cancel();
 			return Void();
 		}
@@ -2668,7 +2766,7 @@ public:
 		}
 
 		// Always update the page contents immediately regardless of what happened above.
-		cacheEntry.readFuture = data;
+		cacheEntry.setReadFuture(data);
 	}
 
 	Future<LogicalPageID> atomicUpdatePage(PagerEventReasons reason,
@@ -2944,6 +3042,16 @@ public:
 	                                      int priority,
 	                                      bool cacheable,
 	                                      bool noHit) override {
+		return readPageImpl<false>(reason, level, pageID, priority, cacheable, noHit);
+	}
+
+	template <bool ReadOnly>
+	PageCacheEntry::PageFuture<ReadOnly> readPageImpl(PagerEventReasons reason,
+	                                                  unsigned int level,
+	                                                  PhysicalPageID pageID,
+	                                                  int priority,
+	                                                  bool cacheable,
+	                                                  bool noHit) {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		debug_printf("DWALPager(%s) op=read %s reason=%s  noHit=%d\n",
@@ -2959,11 +3067,12 @@ public:
 			if (pCacheEntry != nullptr) {
 				++g_redwoodMetrics.metric.pagerProbeHit;
 				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageID).c_str());
-				return pCacheEntry->readFuture;
+				return pCacheEntry->getReadFuture<ReadOnly>();
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageID).c_str());
-			return forwardError(readPhysicalPage(this, pageID, priority, false, reason), errorPromise);
+			return PageCacheEntry::makePageFuture<ReadOnly>(
+			    forwardError(readPhysicalPage(this, pageID, priority, false, reason), errorPromise));
 		}
 		PageCacheEntry& cacheEntry = pageCache.get(pageID, physicalPageSize, noHit);
 		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
@@ -2975,7 +3084,8 @@ public:
 		             noHit);
 		if (!cacheEntry.initialized()) {
 			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageID).c_str());
-			cacheEntry.readFuture = forwardError(readPhysicalPage(this, pageID, priority, false, reason), errorPromise);
+			cacheEntry.setReadFuture(
+			    forwardError(readPhysicalPage(this, pageID, priority, false, reason), errorPromise));
 			cacheEntry.writeFuture = Void();
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
@@ -2984,7 +3094,7 @@ public:
 			++g_redwoodMetrics.metric.pagerCacheHit;
 			eventReasons.addEventReason(PagerEvents::CacheHit, reason);
 		}
-		return cacheEntry.readFuture;
+		return cacheEntry.getReadFuture<ReadOnly>();
 	}
 
 	Future<Reference<ArenaPage>> readMultiPage(PagerEventReasons reason,
@@ -2993,6 +3103,16 @@ public:
 	                                           int priority,
 	                                           bool cacheable,
 	                                           bool noHit) override {
+		return readMultiPageImpl<false>(reason, level, pageIDs, priority, cacheable, noHit);
+	}
+
+	template <bool ReadOnly>
+	PageCacheEntry::PageFuture<ReadOnly> readMultiPageImpl(PagerEventReasons reason,
+	                                                       unsigned int level,
+	                                                       VectorRef<PhysicalPageID> pageIDs,
+	                                                       int priority,
+	                                                       bool cacheable,
+	                                                       bool noHit) {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
 		debug_printf("DWALPager(%s) op=read %s reason=%s noHit=%d\n",
@@ -3008,11 +3128,12 @@ public:
 			if (pCacheEntry != nullptr) {
 				++g_redwoodMetrics.metric.pagerProbeHit;
 				debug_printf("DWALPager(%s) op=readUncachedHit %s\n", filename.c_str(), toString(pageIDs).c_str());
-				return pCacheEntry->readFuture;
+				return pCacheEntry->getReadFuture<ReadOnly>();
 			}
 			++g_redwoodMetrics.metric.pagerProbeMiss;
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageIDs).c_str());
-			return forwardError(readPhysicalMultiPage(this, pageIDs, priority, reason), errorPromise);
+			return PageCacheEntry::makePageFuture<ReadOnly>(
+			    forwardError(readPhysicalMultiPage(this, pageIDs, priority, reason), errorPromise));
 		}
 
 		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size() * physicalPageSize, noHit);
@@ -3025,7 +3146,8 @@ public:
 		             noHit);
 		if (!cacheEntry.initialized()) {
 			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageIDs).c_str());
-			cacheEntry.readFuture = forwardError(readPhysicalMultiPage(this, pageIDs, priority, reason), errorPromise);
+			cacheEntry.setReadFuture(
+			    forwardError(readPhysicalMultiPage(this, pageIDs, priority, reason), errorPromise));
 			cacheEntry.writeFuture = Void();
 
 			++g_redwoodMetrics.metric.pagerCacheMiss;
@@ -3034,7 +3156,7 @@ public:
 			++g_redwoodMetrics.metric.pagerCacheHit;
 			eventReasons.addEventReason(PagerEvents::CacheHit, reason);
 		}
-		return cacheEntry.readFuture;
+		return cacheEntry.getReadFuture<ReadOnly>();
 	}
 
 	PhysicalPageID getPhysicalPageID(LogicalPageID pageID, Version v) {
@@ -3067,15 +3189,24 @@ public:
 		return (PhysicalPageID)pageID;
 	}
 
-	Future<Reference<ArenaPage>> readPageAtVersion(PagerEventReasons reason,
-	                                               unsigned int level,
-	                                               LogicalPageID logicalID,
-	                                               int priority,
-	                                               Version v,
-	                                               bool cacheable,
-	                                               bool noHit) {
+	Future<Reference<const ArenaPage>> readPageAtVersion(PagerEventReasons reason,
+	                                                     unsigned int level,
+	                                                     LogicalPageID logicalID,
+	                                                     int priority,
+	                                                     Version v,
+	                                                     bool cacheable,
+	                                                     bool noHit) {
 		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
-		return readPage(reason, level, physicalID, priority, cacheable, noHit);
+		return readPageImpl<true>(reason, level, physicalID, priority, cacheable, noHit);
+	}
+
+	Future<Reference<const ArenaPage>> readMultiPageAtSnapshot(PagerEventReasons reason,
+	                                                           unsigned int level,
+	                                                           VectorRef<PhysicalPageID> pageIDs,
+	                                                           int priority,
+	                                                           bool cacheable,
+	                                                           bool noHit) {
+		return readMultiPageImpl<true>(reason, level, pageIDs, priority, cacheable, noHit);
 	}
 
 	void releaseExtentReadLock() override { concurrentExtentReads->release(); }
@@ -3194,8 +3325,8 @@ public:
 		PageCacheEntry& cacheEntry = extentCache.get(pageID, 1);
 		if (!cacheEntry.initialized()) {
 			cacheEntry.writeFuture = Void();
-			cacheEntry.readFuture =
-			    forwardError(readPhysicalExtent(this, (PhysicalPageID)pageID, readSize), errorPromise);
+			cacheEntry.setReadFuture(
+			    forwardError(readPhysicalExtent(this, (PhysicalPageID)pageID, readSize), errorPromise));
 			debug_printf("DWALPager(%s) Set the cacheEntry readFuture for page: %s\n",
 			             filename.c_str(),
 			             toString(pageID).c_str());
@@ -3938,9 +4069,7 @@ public:
 	                                                   bool cacheable,
 	                                                   bool noHit) override {
 
-		Reference<ArenaPage> page =
-		    co_await pager->readPageAtVersion(reason, level, pageID, priority, version, cacheable, noHit);
-		co_return Reference<const ArenaPage>(std::move(page));
+		return pager->readPageAtVersion(reason, level, pageID, priority, version, cacheable, noHit);
 	}
 
 	Future<Reference<const ArenaPage>> getMultiPhysicalPage(PagerEventReasons reason,
@@ -3950,8 +4079,7 @@ public:
 	                                                        bool cacheable,
 	                                                        bool noHit) override {
 
-		Reference<ArenaPage> page = co_await pager->readMultiPage(reason, level, pageIDs, priority, cacheable, noHit);
-		co_return Reference<const ArenaPage>(std::move(page));
+		return pager->readMultiPageAtSnapshot(reason, level, pageIDs, priority, cacheable, noHit);
 	}
 
 	Key getMetaKey() const override { return metaKey; }
@@ -5898,38 +6026,54 @@ private:
 		co_return records;
 	}
 
-	ACTOR static Future<Reference<const ArenaPage>> readPage(VersionedBTree* self,
-	                                                         PagerEventReasons reason,
-	                                                         unsigned int level,
-	                                                         IPagerSnapshot* snapshot,
-	                                                         BTreeNodeLinkRef id,
-	                                                         int priority,
-	                                                         bool forLazyClear,
-	                                                         bool cacheable) {
+	static void recordPageRead(const Reference<const ArenaPage>& page, int pageReadExt) {
+		const BTreePage* btPage = (const BTreePage*)page->data();
+		auto& metrics = g_redwoodMetrics.level(btPage->height).metrics;
+		metrics.pageRead += 1;
+		metrics.pageReadExt += pageReadExt;
+	}
+
+	static Future<Reference<const ArenaPage>> finishReadPage(Future<Reference<const ArenaPage>> pageFuture,
+	                                                         BTreeNodeLink id,
+	                                                         Version snapshotVersion) {
+		Reference<const ArenaPage> page = co_await pageFuture;
+		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshotVersion);
+		recordPageRead(page, id.size() - 1);
+		co_return page;
+	}
+
+	static Future<Reference<const ArenaPage>> readPage(VersionedBTree* self,
+	                                                   PagerEventReasons reason,
+	                                                   unsigned int level,
+	                                                   IPagerSnapshot* snapshot,
+	                                                   BTreeNodeLinkRef id,
+	                                                   int priority,
+	                                                   bool forLazyClear,
+	                                                   bool cacheable) {
 
 		debug_printf("readPage() op=read%s %s @%" PRId64 "\n",
 		             forLazyClear ? "ForDeferredClear" : "",
 		             toString(id).c_str(),
 		             snapshot->getVersion());
 
-		state Reference<const ArenaPage> page;
+		Future<Reference<const ArenaPage>> pageFuture;
 		if (id.size() == 1) {
-			Reference<const ArenaPage> p =
-			    wait(snapshot->getPhysicalPage(reason, level, id.front(), priority, cacheable, false));
-			page = std::move(p);
+			pageFuture = snapshot->getPhysicalPage(reason, level, id.front(), priority, cacheable, false);
 		} else {
 			ASSERT(!id.empty());
-			Reference<const ArenaPage> p =
-			    wait(snapshot->getMultiPhysicalPage(reason, level, id, priority, cacheable, false));
-			page = std::move(p);
+			pageFuture = snapshot->getMultiPhysicalPage(reason, level, id, priority, cacheable, false);
 		}
-		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
-		const BTreePage* btPage = (const BTreePage*)page->data();
-		auto& metrics = g_redwoodMetrics.level(btPage->height).metrics;
-		metrics.pageRead += 1;
-		metrics.pageReadExt += (id.size() - 1);
 
-		return std::move(page);
+		if (pageFuture.isReady()) {
+			if (!pageFuture.isError()) {
+				debug_printf(
+				    "readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
+				recordPageRead(pageFuture.get(), id.size() - 1);
+			}
+			return pageFuture;
+		}
+
+		return finishReadPage(std::move(pageFuture), id, snapshot->getVersion());
 	}
 
 	// Get cursor into a BTree node, creating decode cache from boundaries if needed
@@ -7331,43 +7475,78 @@ public:
 		PathEntry& back() { return path.back(); }
 		void popPath() { path.pop_back(); }
 
-		Future<Void> pushPage(const BTreePage::BinaryTree::Cursor& link) {
-			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
-			BTreePage::BinaryTree::Cursor linkCopy = link;
-			Reference<const ArenaPage> p =
-			    co_await readPage(btree,
-			                      reason,
-			                      path.back().btPage()->height - 1,
-			                      pager.getPtr(),
-			                      linkCopy.get().getChildPage(),
-			                      ioMaxPriority,
-			                      false,
-			                      !options.present() || options.get().cacheResult || path.back().btPage()->height != 2);
-			BTreePage::BinaryTree::Cursor cursor = btree->getCursor(p.getPtr(), linkCopy);
+		void appendChildPage(const BTreePage::BinaryTree::Cursor& link, Reference<const ArenaPage> page) {
+			BTreePage::BinaryTree::Cursor cursor = btree->getCursor(page.getPtr(), link);
 #if REDWOOD_DEBUG
-			path.push_back({ p, cursor, linkCopy.get().getChildPage() });
+			path.push_back({ std::move(page), cursor, link.get().getChildPage() });
 #else
-			path.push_back({ p, cursor });
+			path.push_back({ std::move(page), cursor });
 #endif
 
 			if (btree->m_pBoundaryVerifier != nullptr) {
-				ASSERT(btree->m_pBoundaryVerifier->verify(linkCopy.get().getChildPage().front(),
+				ASSERT(btree->m_pBoundaryVerifier->verify(link.get().getChildPage().front(),
 				                                          pager->getVersion(),
-				                                          linkCopy.get().key,
-				                                          linkCopy.next().getOrUpperBound().key,
+				                                          link.get().key,
+				                                          link.next().getOrUpperBound().key,
 				                                          cursor));
 			}
 		}
 
+		Future<Void> pushChildPageSlow(Future<Reference<const ArenaPage>> pageFuture,
+		                               BTreePage::BinaryTree::Cursor link) {
+			Reference<const ArenaPage> page = co_await pageFuture;
+			appendChildPage(link, std::move(page));
+		}
+
+		Future<Void> pushPage(const BTreePage::BinaryTree::Cursor& link) {
+			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
+			BTreePage::BinaryTree::Cursor linkCopy = link;
+			Future<Reference<const ArenaPage>> pageFuture =
+			    readPage(btree,
+			             reason,
+			             path.back().btPage()->height - 1,
+			             pager.getPtr(),
+			             linkCopy.get().getChildPage(),
+			             ioMaxPriority,
+			             false,
+			             !options.present() || options.get().cacheResult || path.back().btPage()->height != 2);
+			if (!pageFuture.isReady()) {
+				return pushChildPageSlow(std::move(pageFuture), std::move(linkCopy));
+			}
+			if (pageFuture.isError()) {
+				return pageFuture.getError();
+			}
+			appendChildPage(linkCopy, pageFuture.get());
+			return Void();
+		}
+
+		void appendRootPage(Reference<const ArenaPage> page, BTreeNodeLinkRef id) {
+#if REDWOOD_DEBUG
+			auto cursor = btree->getCursor(page.getPtr(), dbBegin, dbEnd);
+			path.push_back({ std::move(page), cursor, id });
+#else
+			auto cursor = btree->getCursor(page.getPtr(), dbBegin, dbEnd);
+			path.push_back({ std::move(page), cursor });
+#endif
+		}
+
+		Future<Void> pushRootPageSlow(Future<Reference<const ArenaPage>> pageFuture, BTreeNodeLink id) {
+			Reference<const ArenaPage> page = co_await pageFuture;
+			appendRootPage(std::move(page), id);
+		}
+
 		Future<Void> pushPage(BTreeNodeLinkRef id) {
 			debug_printf("pushPage(root=%s)\n", ::toString(id).c_str());
-			Reference<const ArenaPage> p = co_await readPage(
-			    btree, reason, btree->m_header.height, pager.getPtr(), id, ioMaxPriority, false, true);
-#if REDWOOD_DEBUG
-			path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd), id });
-#else
-			path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd) });
-#endif
+			Future<Reference<const ArenaPage>> pageFuture =
+			    readPage(btree, reason, btree->m_header.height, pager.getPtr(), id, ioMaxPriority, false, true);
+			if (!pageFuture.isReady()) {
+				return pushRootPageSlow(std::move(pageFuture), id);
+			}
+			if (pageFuture.isError()) {
+				return pageFuture.getError();
+			}
+			appendRootPage(pageFuture.get(), id);
+			return Void();
 		}
 
 		// Initialize or reinitialize cursor
@@ -7378,8 +7557,8 @@ public:
 		                  BTreeNodeLink root) {
 			btree = btree_in;
 			reason = reason_in;
-			options = options_in;
-			pager = pager_in;
+			options = std::move(options_in);
+			pager = std::move(pager_in);
 			path.clear();
 			path.reserve(6);
 			valid = false;
@@ -7441,6 +7620,45 @@ public:
 		}
 
 		Future<Void> seekGTE(RedwoodRecordRef query) { return seekGTE_impl(this, query); }
+
+		Future<Void> seekExactKeySlow(Key key, Future<Void> pageFuture) {
+			co_await pageFuture;
+			co_await seekExactKeyFromCurrent(key);
+		}
+
+		Future<Void> seekExactKeyFromCurrent(KeyRef key) {
+			RedwoodRecordRef query(key);
+			RedwoodRecordRef internalPageQuery = query.withMaxPageID();
+
+			while (true) {
+				auto& entry = path.back();
+				if (entry.btPage()->isLeaf()) {
+					valid = entry.cursor.seekGreaterThanOrEqual(query) && entry.cursor.get().key == query.key;
+					return Void();
+				}
+
+				if (!entry.cursor.seekLessThan(internalPageQuery) || !entry.cursor.get().value.present()) {
+					valid = false;
+					return Void();
+				}
+
+				Future<Void> pageFuture = pushPage(entry.cursor);
+				if (!pageFuture.isReady()) {
+					return seekExactKeySlow(Key(key), std::move(pageFuture));
+				}
+				if (pageFuture.isError()) {
+					return pageFuture.getError();
+				}
+			}
+		}
+
+		Future<Void> seekExactKey(KeyRef key) {
+			if (path.empty()) {
+				return Void();
+			}
+			path.resize(1);
+			return seekExactKeyFromCurrent(key);
+		}
 
 		// Start fetching sibling nodes in the forward or backward direction, stopping after recordLimit or byteLimit
 		void prefetch(KeyRef rangeEnd, bool directionForward, int recordLimit, int byteLimit) {
@@ -7591,7 +7809,7 @@ public:
 			root = *snapshot->extra.getPtr<BTreeNodeLink>();
 		}
 
-		return cursor->init(this, reason, options, snapshot, root);
+		return cursor->init(this, reason, std::move(options), std::move(snapshot), root);
 	}
 };
 
@@ -7875,8 +8093,8 @@ public:
 		    &cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead, options);
 
 		++g_redwoodMetrics.metric.opGet;
-		co_await cur.seekGTE(key);
-		if (cur.isValid() && cur.get().key == key) {
+		co_await cur.seekExactKey(key);
+		if (cur.isValid()) {
 			// Return a Value whose arena depends on the source page arena
 			Value v;
 			v.arena().dependsOn(cur.back().page->getArena());
@@ -9761,6 +9979,83 @@ Future<Void> commitAndReportLoadProgress(VersionedBTree* btree,
 
 } // namespace
 
+static Future<Reference<ArenaPage>> neverCompletingPageRead(Reference<ArenaPage> page) {
+	co_await Future<Void>(Never());
+	co_return page;
+}
+
+TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
+	Future<Reference<const ArenaPage>> survivingRead;
+	{
+		DWALPager::PageCacheEntry entry;
+		Reference<ArenaPage> firstPage = makeReference<ArenaPage>(4096, 4096);
+		ArenaPage* firstPagePtr = firstPage.getPtr();
+		entry.setReadFuture(firstPage);
+
+		Future<Reference<const ArenaPage>> firstRead = entry.getReadFuture<true>();
+		ASSERT(firstRead.isReady() && !firstRead.isError());
+		ASSERT(firstRead.get().getPtr() == firstPagePtr);
+		ASSERT(firstRead == entry.getReadFuture<true>());
+		ASSERT(entry.getReadFuture<false>().get().getPtr() == firstPagePtr);
+
+		Reference<ArenaPage> updatedPage = makeReference<ArenaPage>(4096, 4096);
+		ArenaPage* updatedPagePtr = updatedPage.getPtr();
+		entry.setReadFuture(updatedPage);
+		Future<Reference<const ArenaPage>> updatedRead = entry.getReadFuture<true>();
+		ASSERT(updatedRead != firstRead);
+		ASSERT(updatedRead.isReady() && updatedRead.get().getPtr() == updatedPagePtr);
+		ASSERT(firstRead.get().getPtr() == firstPagePtr);
+
+		Promise<Reference<ArenaPage>> pendingPromise;
+		entry.setReadFuture(pendingPromise.getFuture());
+		Future<Reference<const ArenaPage>> pendingRead = entry.getReadFuture<true>();
+		Future<Reference<const ArenaPage>> secondPendingRead = entry.getReadFuture<true>();
+		ASSERT(!pendingRead.isReady());
+		ASSERT(!secondPendingRead.isReady());
+		ASSERT(pendingRead != secondPendingRead);
+		Reference<ArenaPage> pendingPage = makeReference<ArenaPage>(4096, 4096);
+		ArenaPage* pendingPagePtr = pendingPage.getPtr();
+		pendingPromise.send(pendingPage);
+		ASSERT(pendingRead.isReady() && !pendingRead.isError());
+		ASSERT(secondPendingRead.isReady() && !secondPendingRead.isError());
+		ASSERT(pendingRead.get().getPtr() == pendingPagePtr);
+		ASSERT(secondPendingRead.get().getPtr() == pendingPagePtr);
+		Future<Reference<const ArenaPage>> cachedRead = entry.getReadFuture<true>();
+		ASSERT(cachedRead.isReady() && !cachedRead.isError());
+		ASSERT(cachedRead.get().getPtr() == pendingPagePtr);
+		ASSERT(cachedRead == entry.getReadFuture<true>());
+
+		Promise<Reference<ArenaPage>> errorPromise;
+		entry.setReadFuture(errorPromise.getFuture());
+		Future<Reference<const ArenaPage>> pendingError = entry.getReadFuture<true>();
+		ASSERT(!pendingError.isReady());
+		errorPromise.sendError(io_error());
+		ASSERT(pendingError.isReady() && pendingError.isError());
+		ASSERT(pendingError.getError().code() == error_code_io_error);
+
+		entry.setReadFuture(io_error());
+		Future<Reference<const ArenaPage>> readyError = entry.getReadFuture<true>();
+		ASSERT(readyError.isReady() && readyError.isError());
+		ASSERT(readyError.getError().code() == error_code_io_error);
+		ASSERT(readyError == entry.getReadFuture<true>());
+
+		entry.setReadFuture(neverCompletingPageRead(makeReference<ArenaPage>(4096, 4096)));
+		Future<Reference<const ArenaPage>> cancelledRead = entry.getReadFuture<true>();
+		ASSERT(!cancelledRead.isReady());
+		entry.cancel();
+		ASSERT(cancelledRead.isReady() && cancelledRead.isError());
+		ASSERT(cancelledRead.getError().code() == error_code_actor_cancelled);
+
+		entry.setReadFuture(updatedPage);
+		survivingRead = entry.getReadFuture<true>();
+		updatedPage.clear();
+	}
+	ASSERT(survivingRead.isReady() && !survivingRead.isError());
+	ASSERT(survivingRead.get().getPtr() != nullptr);
+
+	return Void();
+}
+
 TEST_CASE("Lredwood/correctness/btreeCloseWithQueuedCommits") {
 	g_redwoodMetricsActor = Void();
 	g_redwoodMetrics.clear();
@@ -9797,6 +10092,161 @@ TEST_CASE("Lredwood/correctness/btreeCloseWithQueuedCommits") {
 	wait(closedFuture);
 	wait(delay(0));
 	ASSERT(DWALPager::PageCacheT::Evictor::getEvictor()->empty());
+
+	return Void();
+}
+
+Future<Void> checkExactKey(VersionedBTree* btree, std::string key, Optional<std::string> expectedValue) {
+	VersionedBTree::BTreeCursor cursor;
+	co_await btree->initBTreeCursor(&cursor, btree->getLastCommittedVersion(), PagerEventReasons::PointRead);
+	co_await cursor.seekExactKey(StringRef(key));
+	ASSERT_EQ(cursor.isValid(), expectedValue.present());
+	if (expectedValue.present()) {
+		ASSERT_EQ(cursor.get().key, StringRef(key));
+		ASSERT(cursor.get().value.present());
+		ASSERT_EQ(cursor.get().value.get(), StringRef(expectedValue.get()));
+		ASSERT(!cursor.inRoot());
+	}
+	co_return;
+}
+
+Future<Void> checkExactKVStoreKey(IKeyValueStore* kvStore, std::string key, Optional<std::string> expectedValue) {
+	Optional<Value> value = co_await kvStore->readValue(StringRef(key));
+	ASSERT_EQ(value.present(), expectedValue.present());
+	if (expectedValue.present()) {
+		ASSERT_EQ(value.get(), StringRef(expectedValue.get()));
+	}
+	co_return;
+}
+
+TEST_CASE("Lredwood/correctness/seekExactKey") {
+	g_redwoodMetricsActor = Void();
+	g_redwoodMetrics.clear();
+
+	state std::string file = "unittest_btree-seek-exact.redwood-v1";
+	deleteFile(file);
+
+	state VersionedBTree* btree = new VersionedBTree(new DWALPager(250,
+	                                                               SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE,
+	                                                               file,
+	                                                               FLOW_KNOBS->PAGE_CACHE_4K,
+	                                                               0,
+	                                                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
+	                                                               false),
+	                                                 file,
+	                                                 UID(),
+	                                                 {});
+	wait(btree->init());
+
+	for (int i = 0; i < 80; ++i) {
+		std::string key = format("key-%04d-%s", i * 2, std::string(64, 'k').c_str());
+		std::string value = i == 30 ? std::string() : format("value-%04d-%s", i, std::string(64, 'v').c_str());
+		btree->set(KeyValueRef(StringRef(key), StringRef(value)));
+	}
+	state Version version = btree->getLastCommittedVersion();
+	wait(btree->commit(++version));
+
+	state int checkIndex = 0;
+	for (; checkIndex < 80; ++checkIndex) {
+		wait(checkExactKey(btree,
+		                   format("key-%04d-%s", checkIndex * 2, std::string(64, 'k').c_str()),
+		                   checkIndex == 30 ? std::string()
+		                                    : format("value-%04d-%s", checkIndex, std::string(64, 'v').c_str())));
+		wait(checkExactKey(
+		    btree, format("key-%04d-%s", checkIndex * 2 + 1, std::string(64, 'k').c_str()), Optional<std::string>()));
+	}
+	wait(checkExactKey(btree, "before-all-keys", Optional<std::string>()));
+	wait(checkExactKey(btree, "z-after-all-keys", Optional<std::string>()));
+
+	state Key clearedKey = StringRef(format("key-%04d-%s", 80, std::string(64, 'k').c_str()));
+	btree->clear(singleKeyRange(clearedKey));
+	wait(btree->commit(++version));
+	wait(checkExactKey(btree, clearedKey.toString(), Optional<std::string>()));
+
+	state Future<Void> closed = btree->onClosed();
+	btree->dispose();
+	wait(closed);
+	wait(delay(0));
+	ASSERT(DWALPager::PageCacheT::Evictor::getEvictor()->empty());
+
+	state std::string kvFile = "unittest_kvstore-seek-exact.redwood-v1";
+	deleteFile(kvFile);
+	state IKeyValueStore* kvStore = keyValueStoreRedwoodV1(kvFile, UID(), {}, 65536);
+	wait(kvStore->init());
+	for (int i = 0; i < 160; ++i) {
+		std::string key = format("present-%04d-%s", i * 2, std::string(64, 'k').c_str());
+		std::string value = i == 30 ? std::string() : format("value-%04d-%s", i, std::string(512, 'v').c_str());
+		kvStore->set(KeyValueRef(StringRef(key), StringRef(value)));
+	}
+	state Key largeKey = "zz-large-value"_sr;
+	state Value largeValue = StringRef(std::string(32768, 'v'));
+	kvStore->set(KeyValueRef(largeKey, largeValue));
+	wait(kvStore->commit());
+
+	state int kvIndex = 0;
+	for (; kvIndex < 160; ++kvIndex) {
+		wait(checkExactKVStoreKey(kvStore,
+		                          format("present-%04d-%s", kvIndex * 2, std::string(64, 'k').c_str()),
+		                          kvIndex == 30 ? std::string()
+		                                        : format("value-%04d-%s", kvIndex, std::string(512, 'v').c_str())));
+		wait(checkExactKVStoreKey(kvStore,
+		                          format("present-%04d-%s", kvIndex * 2 + 1, std::string(64, 'k').c_str()),
+		                          Optional<std::string>()));
+	}
+	wait(checkExactKVStoreKey(kvStore, "before-all-keys", Optional<std::string>()));
+	wait(checkExactKVStoreKey(kvStore, "z-after-all-keys", Optional<std::string>()));
+	wait(checkExactKVStoreKey(kvStore, largeKey.toString(), largeValue.toString()));
+
+	state Key clearBegin = StringRef(format("present-%04d-%s", 80, std::string(64, 'k').c_str()));
+	state Key clearEnd = StringRef(format("present-%04d-%s", 240, std::string(64, 'k').c_str()));
+	kvStore->clear(KeyRangeRef(clearBegin, clearEnd));
+	wait(kvStore->commit());
+	state int clearedIndex = 40;
+	for (; clearedIndex < 120; ++clearedIndex) {
+		wait(checkExactKVStoreKey(kvStore,
+		                          format("present-%04d-%s", clearedIndex * 2, std::string(64, 'k').c_str()),
+		                          Optional<std::string>()));
+	}
+	wait(checkExactKVStoreKey(kvStore,
+	                          format("present-%04d-%s", 78, std::string(64, 'k').c_str()),
+	                          format("value-%04d-%s", 39, std::string(512, 'v').c_str())));
+	wait(checkExactKVStoreKey(kvStore,
+	                          format("present-%04d-%s", 240, std::string(64, 'k').c_str()),
+	                          format("value-%04d-%s", 120, std::string(512, 'v').c_str())));
+
+	kvStore->set(KeyValueRef(clearBegin, "reinserted"_sr));
+	wait(kvStore->commit());
+	wait(checkExactKVStoreKey(kvStore, clearBegin.toString(), std::string("reinserted")));
+
+	state Key retainedKey = StringRef(format("present-%04d-%s", 20, std::string(64, 'k').c_str()));
+	state Key retainedTailKey = StringRef(format("present-%04d-%s", 300, std::string(64, 'k').c_str()));
+	state Key emptyKey = StringRef(format("present-%04d-%s", 60, std::string(64, 'k').c_str()));
+	state Optional<Value> retainedValue = wait(kvStore->readValue(retainedKey));
+	state Optional<Value> retainedTailValue = wait(kvStore->readValue(retainedTailKey));
+	state Optional<Value> emptyValue = wait(kvStore->readValue(emptyKey));
+	ASSERT_EQ(retainedValue, Optional<Value>(StringRef(format("value-%04d-%s", 10, std::string(512, 'v').c_str()))));
+	ASSERT_EQ(retainedTailValue,
+	          Optional<Value>(StringRef(format("value-%04d-%s", 150, std::string(512, 'v').c_str()))));
+	ASSERT_EQ(emptyValue, Optional<Value>(""_sr));
+
+	state Future<Void> kvClosed = kvStore->onClosed();
+	kvStore->close();
+	wait(kvClosed);
+	ASSERT_EQ(retainedValue, Optional<Value>(StringRef(format("value-%04d-%s", 10, std::string(512, 'v').c_str()))));
+	ASSERT_EQ(retainedTailValue,
+	          Optional<Value>(StringRef(format("value-%04d-%s", 150, std::string(512, 'v').c_str()))));
+	ASSERT_EQ(emptyValue, Optional<Value>(""_sr));
+
+	kvStore = keyValueStoreRedwoodV1(kvFile, UID(), {}, 65536);
+	wait(kvStore->init());
+	state unsigned int cacheHitsBefore = g_redwoodMetrics.metric.pagerCacheHit;
+	wait(checkExactKVStoreKey(kvStore, largeKey.toString(), largeValue.toString()));
+	wait(checkExactKVStoreKey(kvStore, largeKey.toString(), largeValue.toString()));
+	ASSERT(g_redwoodMetrics.metric.pagerCacheHit > cacheHitsBefore);
+
+	state Future<Void> reopenedClosed = kvStore->onClosed();
+	kvStore->dispose();
+	wait(reopenedClosed);
 
 	return Void();
 }

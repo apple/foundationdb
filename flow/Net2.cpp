@@ -271,6 +271,7 @@ public:
 	std::atomic<bool> started;
 
 	uint64_t numYields;
+	Future<Void> readyYield = Void();
 
 	NetworkMetrics::PriorityStats* lastPriorityStats;
 
@@ -1953,7 +1954,7 @@ Future<class Void> Net2::yield(TaskPriority taskID) {
 		return delay(0, taskID);
 	}
 	g_network->setCurrentTask(taskID);
-	return Void();
+	return readyYield;
 }
 
 // TODO: can we wrap our swift task and insert it in here?

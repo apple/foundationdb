@@ -22,6 +22,8 @@
 #define FDBCLIENT_STORAGESERVERINTERFACE_H
 #pragma once
 
+#include <utility>
+
 #include "fdbclient/Audit.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/FDBTypes.h"
@@ -204,7 +206,7 @@ struct GetValueReply : public LoadBalancedReply {
 	bool cached;
 
 	GetValueReply() : cached(false) {}
-	GetValueReply(Optional<Value> value, bool cached) : value(value), cached(cached) {}
+	GetValueReply(Optional<Value> value, bool cached) : value(std::move(value)), cached(cached) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -233,8 +235,8 @@ struct GetValueRequest : TimedRequest {
 	                Optional<TagSet> tags,
 	                Optional<ReadOptions> options,
 	                VersionVector latestCommitVersions)
-	  : spanContext(spanContext), key(key), version(ver), tags(tags), options(options),
-	    ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(std::move(spanContext)), key(key), version(ver), tags(std::move(tags)), options(std::move(options)),
+	    ssLatestCommitVersions(std::move(latestCommitVersions)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -496,8 +498,8 @@ struct GetKeyRequest : TimedRequest {
 	              Optional<TagSet> tags,
 	              Optional<ReadOptions> options,
 	              VersionVector latestCommitVersions)
-	  : spanContext(spanContext), sel(sel), version(version), tags(tags), options(options),
-	    ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(std::move(spanContext)), sel(sel), version(version), tags(std::move(tags)),
+	    options(std::move(options)), ssLatestCommitVersions(std::move(latestCommitVersions)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
