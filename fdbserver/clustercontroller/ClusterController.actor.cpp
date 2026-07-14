@@ -310,6 +310,7 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 		throw recruitment_failed();
 	}
 	if (workers.size() < tagIds.size()) {
+		CODE_PROBE(true, "Recruit partial replacement log routers");
 		TraceEvent(SevWarn, "PartialWorkersForLogRouters", cluster->id)
 		    .detail("Required", tagIds.size())
 		    .detail("Available", workers.size())
