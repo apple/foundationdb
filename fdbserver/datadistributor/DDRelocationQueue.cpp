@@ -2231,8 +2231,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							}
 							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 								CODE_PROBE(true,
-								           "Cancel shard-encoded data move after destination team becomes unhealthy",
-								           probe::decoration::rare);
+								           "Cancel shard-encoded data move after destination team becomes unhealthy");
 								TraceEvent(SevWarnAlways, "RelocateShardDestinationTeamUnhealthy", distributorId)
 								    .detail("DataMoveID", rd.dataMoveId)
 								    .detail("Range", rd.keys)

@@ -47,7 +47,7 @@ bool validNativeCdcTagCount(int tagCount) {
 
 void validateNativeCdcEnabled(bool enabled) {
 	if (!enabled) {
-		CODE_PROBE(true, "Native CDC registration rejected while feature disabled", probe::decoration::rare);
+		CODE_PROBE(true, "Native CDC registration rejected while feature disabled");
 		throw client_invalid_operation();
 	}
 }
@@ -791,7 +791,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 				if (!retryNativeCdcProxyRequest(error)) {
 					throw;
 				}
-				CODE_PROBE(true, "Native CDC consume retries after proxy request failure", probe::decoration::rare);
+				CODE_PROBE(true, "Native CDC consume retries after proxy request failure");
 			}
 			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
 		}

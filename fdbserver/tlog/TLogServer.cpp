@@ -2386,7 +2386,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	}
 
 	if (replyVersionTooLarge) {
-		CODE_PROBE(true, "TLog rejects an oversized Native CDC version", probe::decoration::rare);
+		CODE_PROBE(true, "TLog rejects an oversized Native CDC version");
 		TraceEvent(SevWarn, "TLogPeekVersionExceedsByteLimit", logData->logId)
 		    .detail("Tag", reqTag)
 		    .detail("ReqBegin", reqBegin)
