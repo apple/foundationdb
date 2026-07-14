@@ -3894,29 +3894,34 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			}
 		}
 
-		// Request the PartitionMap before reading the backup's start version, so the PartitionMap is more likely
-		// to be committed first. backupPartitionListKey absent = no PartitionMap exists yet on this cluster.
-		while (true) {
-			Error err;
-			try {
-				tr->reset();
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		// Wait for backupPartitionListKey to appear before reading the backup's start version. Not strictly
+		// required for restore correctness (restore uses snapshotBeginVersion, which is set later in _finish
+		// via initNewSnapshot; by then workers are up via backupStartedKey/allWorkerStarted coordination, so
+		// snapshotBeginVersion >= PartitionMap version). But this keeps Params.beginVersion in backupStartedKey
+		// honest about when workers actually start capturing mutations.
+		if (mutationLogType.get().present() && mutationLogType.get().get() == MutationLogType::RANGE_PARTITIONED_LOG) {
+			while (true) {
+				Error err;
+				Future<Void> watchFuture;
+				try {
+					tr->reset();
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				Future<Optional<MutationLogType>> mlt = config.mutationLogType().get(tr);
-				Future<Optional<Value>> partitionList = tr->get(backupPartitionListKey);
-				co_await (success(mlt) && success(partitionList));
+					Optional<Value> partitionList = co_await tr->get(backupPartitionListKey);
+					if (partitionList.present()) {
+						break;
+					}
 
-				if (mlt.get().present() && mlt.get().get() == MutationLogType::RANGE_PARTITIONED_LOG &&
-				    !partitionList.get().present()) {
 					tr->set(backupPartitionRequiredKey, backupPartitionRequiredValue(1));
+					watchFuture = tr->watch(backupPartitionListKey);
 					co_await tr->commit();
+					co_await watchFuture;
+				} catch (Error& e) {
+					err = e;
 				}
-				break;
-			} catch (Error& e) {
-				err = e;
+				co_await tr->onError(err);
 			}
-			co_await tr->onError(err);
 		}
 
 		// Get a start version to pass as backup's start version in UID of backup in backupStartedKey after backup

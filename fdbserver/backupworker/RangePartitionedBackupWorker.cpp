@@ -129,7 +129,7 @@ struct RangePartitionedBackupData {
 		// StartFullBackupTaskFunc::_execute is blocked on (in FileBackupAgent.cpp), letting BackupAgent proceed with
 		// the snapshot. See StartFullBackupTaskFunc::_execute for the full handshake (why both keys are needed,
 		// watch-loss recovery, idempotency on retry).
-		static Future<Void> _updateStartedWorkers(PerBackupInfo* info, BackupRangePartitionedData* self, UID uid) {
+		static Future<Void> _updateStartedWorkers(PerBackupInfo* info, RangePartitionedBackupData* self, UID uid) {
 			BackupConfig config(uid);
 			Future<Void> watchFuture;
 			bool updated = false;
