@@ -1396,7 +1396,11 @@ Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabled
 
 void requeueCancelledRelocation(DDQueue* self, RelocateData const& rd, bool doBulkLoading) {
 	if (!doBulkLoading) {
-		self->output.send(RelocateShard(rd.keys, rd.priority, rd.reason, rd.randomId));
+		RelocateShard retry(rd.keys, rd.priority, rd.reason, rd.randomId);
+		if (Optional<KeyRange> parentRange = rd.getParentRange(); parentRange.present()) {
+			retry.setParentRange(parentRange.get());
+		}
+		self->output.send(retry);
 	}
 }
 
@@ -3247,6 +3251,19 @@ TEST_CASE("/DataDistribution/DDQueue/RequeueCancelledRelocation") {
 	ASSERT(retry.dataMoveId == anonymousShardId);
 	ASSERT(!retry.isRestore());
 	ASSERT(!retry.cancelled);
+	ASSERT(!retry.getParentRange().present());
+
+	KeyRange parent = KeyRangeRef("parentBegin"_sr, "parentEnd"_sr);
+	RelocateShard split(keys, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT, traceId);
+	split.setParentRange(parent);
+	RelocateData splitRd(split);
+
+	requeueCancelledRelocation(&self, splitRd, false);
+	ASSERT(retries.isReady());
+	RelocateShard splitRetry = retries.pop();
+	ASSERT(splitRetry.reason == RelocateReason::SIZE_SPLIT);
+	ASSERT(splitRetry.getParentRange().present());
+	ASSERT(splitRetry.getParentRange().get() == parent);
 
 	requeueCancelledRelocation(&self, rd, true);
 	ASSERT(!retries.isReady());
