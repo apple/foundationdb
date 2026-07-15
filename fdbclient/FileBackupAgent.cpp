@@ -6956,8 +6956,7 @@ public:
 				if (uidRange == targetRange) {
 					destUidValue = it.value;
 					found = true;
-					CODE_PROBE(targetRange == getDefaultBackupSharedRange(),
-					           "Backup mutation sharing with default backup");
+					CODE_PROBE(isDefaultBackup(normalizedRanges), "Backup mutation sharing with default backup");
 					break;
 				}
 			}

@@ -1129,8 +1129,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return true;
 		}
 
-		CODE_PROBE(self->performQuiescentChecks, "Checking for single singletons");
-
 		std::vector<ISimulator::ProcessInfo*> allProcesses = g_simulator->getAllProcesses();
 
 		bool success = true;
