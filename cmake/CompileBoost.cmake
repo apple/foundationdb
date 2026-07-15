@@ -1,5 +1,14 @@
-function(compile_boost)
+## Boost
 
+# iostreams can include support for different compression libraries,
+# but this boost build disables them all except for basic zlib.
+# If FLOW_USE_ZSTD enabled then "flow" subdir will build and link
+# the boost iostream zstd implementation, it is not built here.
+
+# To use a separate boost build for fdb, do not build with bzip2/lzma/zstd
+# enabled, or add appropriate link flags via cmake options.
+
+function(compile_boost)
   # Initialize function incoming parameters
   set(options)
   set(oneValueArgs TARGET)
@@ -21,12 +30,6 @@ function(compile_boost)
     set(BOOST_TOOLSET "clang")
   elseif(CLANG)
     set(BOOST_TOOLSET "clang")
-    if(APPLE)
-      # this is to fix a weird macOS issue -- by default
-      # cmake would otherwise pass a compiler that can't
-      # compile boost
-      set(BOOST_CXX_COMPILER "/usr/bin/clang++")
-    endif()
   else()
     set(BOOST_TOOLSET "gcc")
   endif()
@@ -34,7 +37,7 @@ function(compile_boost)
 
   # Configure b2 command
   set(B2_COMMAND "./b2")
-  set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++17 -w)
+  set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++17 --no-warnings)
   set(BOOST_LINK_FLAGS "")
   if(APPLE OR ICX OR USE_LIBCXX)
     list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
@@ -67,11 +70,11 @@ function(compile_boost)
     URL                "https://archives.boost.io/release/1.78.0/source/boost_1_78_0.tar.bz2"
     URL_HASH           SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
     CONFIGURE_COMMAND  ${BOOTSTRAP_COMMAND}
-                       ${BOOTSTRAP_ARGS}
                        --with-libraries=${BOOTSTRAP_LIBRARIES}
                        --with-toolset=${BOOST_TOOLSET}
     BUILD_COMMAND      ${B2_COMMAND}
                        link=static
+                       -s NO_BZIP2=1 -s NO_LZMA=1 -s NO_ZSTD=1
                        ${COMPILE_BOOST_BUILD_ARGS}
                        --prefix=${BOOST_INSTALL_DIR}
                        ${USER_CONFIG_FLAG} install
@@ -157,19 +160,8 @@ endif()
 find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams serialization system CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
-# The precompiled boost silently broke in CI.  While investigating, I considered extending
-# the old check with something like this, so that it would fail loudly if it found a bad
-# pre-existing boost.  It turns out the error messages we get from CMake explain what is
-# wrong with Boost.  Rather than reimplementing that, I just deleted this logic.  This
-# approach is simpler, has better ergonomics and should be easier to maintain.  If the build
-# is picking up your locally installed or partial version of boost, and you don't want
+# If the build is picking up your locally installed or partial version of boost, and you don't want
 # to / cannot fix it, pass in -DFORCE_BOOST_BUILD=on as a workaround.
-#
-#    if(Boost_FOUND AND Boost_filesystem_FOUND AND Boost_context_FOUND AND Boost_iostreams_FOUND AND Boost_system_FOUND AND Boost_serialization_FOUND AND NOT FORCE_BOOST_BUILD)
-#      ...
-#    elseif(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
-#      message(FATAL_ERROR "Unacceptable precompiled boost found")
-#
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
   message(STATUS "Found Boost: ${Boost_DIR}")
   add_library(boost_target INTERFACE)
