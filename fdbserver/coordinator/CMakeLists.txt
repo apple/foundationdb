@@ -15,6 +15,5 @@ target_include_directories(fdbserver_coordinator
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR})
+    ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(fdbserver_coordinator PRIVATE fdbserver_core fdbserver_kvstore)

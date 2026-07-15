@@ -80,12 +80,10 @@ target_link_libraries(fdbrpc PUBLIC flow libb64 md5 PRIVATE rapidjson)
 if (WITH_GRPC)
   generate_grpc_protobuf(fdbrpc.file_transfer protos/file_transfer.proto)
 
-  target_link_libraries(fdbrpc PUBLIC proto_fdbrpc_test)
   target_include_directories(fdbrpc PUBLIC ${Protobuf_INCLUDE_DIRS} ${gRPC_INCLUDE_DIRS})
   target_link_libraries(fdbrpc PUBLIC gRPC::grpc++)
   target_link_libraries(fdbrpc PUBLIC proto_fdbrpc_test proto_fdbrpc_file_transfer)
 
-  target_link_libraries(fdbrpc_sampling PUBLIC proto_fdbrpc_test)
   target_include_directories(fdbrpc_sampling PUBLIC ${Protobuf_INCLUDE_DIRS} ${gRPC_INCLUDE_DIRS})
   target_link_libraries(fdbrpc_sampling PUBLIC gRPC::grpc++)
   target_link_libraries(fdbrpc_sampling PUBLIC proto_fdbrpc_test proto_fdbrpc_file_transfer)

@@ -731,7 +731,6 @@ def parse_test_config_from_traces(temp_path: Path) -> Dict[str, str]:
     Returns dict with TestFile, RandomSeed, BuggifyEnabled, FaultInjectionEnabled if found.
     """
     import json
-    import glob
 
     config_data = {}
 

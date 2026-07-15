@@ -18,15 +18,11 @@
 # limitations under the License.
 #
 
-import random
-import struct
-
 import fdb
 import fdb.tuple
 
 from bindingtester import FDB_API_VERSION
-from bindingtester import util
-from bindingtester.tests import Test, Instruction, InstructionSet, ResultSpecification
+from bindingtester.tests import Test, InstructionSet, ResultSpecification
 from bindingtester.tests import test_util
 
 fdb.api_version(FDB_API_VERSION)
