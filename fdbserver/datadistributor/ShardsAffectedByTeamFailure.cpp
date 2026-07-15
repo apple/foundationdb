@@ -166,25 +166,6 @@ void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> 
 	check();
 }
 
-void ShardsAffectedByTeamFailure::rawMoveShard(KeyRangeRef keys,
-                                               const std::vector<Team>& srcTeams,
-                                               const std::vector<Team>& destinationTeams) {
-	auto it = shard_teams.rangeContaining(keys.begin);
-	std::vector<std::pair<std::pair<std::vector<Team>, std::vector<Team>>, KeyRange>> modifiedShards;
-	ASSERT(it->range() == keys);
-
-	// erase the many teams that were associated with this one shard
-	for (auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
-		erase(*t, it->range());
-	}
-	it.value() = std::make_pair(destinationTeams, srcTeams);
-	for (auto& team : destinationTeams) {
-		insert(team, keys);
-	}
-
-	check();
-}
-
 void ShardsAffectedByTeamFailure::finishMove(KeyRangeRef keys) {
 	auto ranges = shard_teams.containedRanges(keys);
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {

@@ -21,11 +21,14 @@
 #ifndef FOUNDATIONDB_DDTXNPROCESSOR_H
 #define FOUNDATIONDB_DDTXNPROCESSOR_H
 
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/ProcessClass.h"
+#include "fdbclient/ProcessData.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
+#include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
 #include "flow/FastRef.h"
-#include "fdbserver/datadistributor/MockGlobalState.h"
 
 FDB_BOOLEAN_PARAM(SkipDDModeCheck);
 
@@ -37,11 +40,7 @@ struct ServerWorkerInfos {
 	Optional<Version> readVersion; // the read version of the txn reading server lists
 };
 
-/* Testability Contract:
- * a. The DataDistributor has to use this interface to interact with data-plane (aka. run transaction / use Database),
- * because the testability benefits from a mock implementation; b. Other control-plane roles should consider providing
- * its own TxnProcessor interface to provide testability, for example, Ratekeeper.
- * */
+// The DataDistributor uses this interface to interact with the data plane and run database transactions.
 class IDDTxnProcessor : public ReferenceCounted<IDDTxnProcessor> {
 public:
 	struct SourceServers {
@@ -58,7 +57,6 @@ public:
 	};
 
 	virtual Database context() const = 0;
-	virtual bool isMocked() const = 0;
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
@@ -160,7 +158,6 @@ public:
 	explicit DDTxnProcessor(Database cx) : cx(cx) {}
 
 	Database context() const override { return cx; };
-	bool isMocked() const override { return false; };
 
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
 
@@ -236,98 +233,6 @@ public:
 	    const UID& serverID,
 	    const Version& addedVersion,
 	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const override;
-
-protected:
-	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
-
-	Future<Void> rawFinishMovement(const MoveKeysParams& params,
-	                               const std::map<UID, StorageServerInterface>& tssMapping);
-};
-
-struct DDMockTxnProcessorImpl;
-// A mock transaction implementation for test usage.
-// Contract: every function involving mock transaction should return immediately to mimic the ACI property of real
-// transaction.
-class DDMockTxnProcessor : public IDDTxnProcessor {
-	friend struct DDMockTxnProcessorImpl;
-
-protected:
-	std::shared_ptr<MockGlobalState> mgs;
-
-	std::vector<DDShardInfo> getDDShardInfos() const;
-
-public:
-	explicit DDMockTxnProcessor(std::shared_ptr<MockGlobalState> mgs = nullptr) : mgs(std::move(mgs)) {};
-
-	Future<ServerWorkerInfos> getServerListAndProcessClasses() override;
-
-	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(const UID& distributorId,
-	                                                                      const MoveKeysLock& moveKeysLock,
-	                                                                      const std::vector<Optional<Key>>& remoteDcIds,
-	                                                                      const DDEnabledState* ddEnabledState,
-	                                                                      SkipDDModeCheck skipDDModeCheck) override;
-
-	Future<Void> removeKeysFromFailedServer(const UID& serverID,
-	                                        const std::vector<UID>& teamForDroppedRange,
-	                                        const MoveKeysLock& lock,
-	                                        const DDEnabledState* ddEnabledState) const override;
-
-	Future<Void> removeStorageServer(const UID& serverID,
-	                                 const Optional<UID>& tssPairID,
-	                                 const MoveKeysLock& lock,
-	                                 const DDEnabledState* ddEnabledState) const override;
-
-	// test only
-	void setupMockGlobalState(Reference<InitialDataDistribution> initData);
-
-	Future<Void> moveKeys(const MoveKeysParams& params) override;
-
-	Database context() const override { UNREACHABLE(); };
-
-	bool isMocked() const override { return true; };
-
-	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
-	                                                                    StorageMetrics const& min,
-	                                                                    StorageMetrics const& max,
-	                                                                    StorageMetrics const& permittedError,
-	                                                                    int shardLimit,
-	                                                                    int expectedShardCount) const override;
-
-	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
-	                                                          StorageMetrics const& limit,
-	                                                          StorageMetrics const& estimated,
-	                                                          Optional<int> const& minSplitBytes = {}) const override;
-
-	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys) const override {
-		UNREACHABLE();
-	}
-
-	Future<HealthMetrics> getHealthMetrics(bool detailed = false) const override;
-
-	Future<std::vector<ProcessData>> getWorkers() const override;
-
-	Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const override {
-		return Never();
-	}
-
-	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
-
-	Future<DatabaseConfiguration> getDatabaseConfiguration() const override;
-
-	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
-
-	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override { return Optional<Value>(); }
-
-	Future<Void> waitForAllDataRemoved(
-	    const UID& serverID,
-	    const Version& addedVersion,
-	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const override;
-
-protected:
-	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
-
-	Future<Void> rawFinishMovement(const MoveKeysParams& params,
-	                               const std::map<UID, StorageServerInterface>& tssMapping);
 };
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H

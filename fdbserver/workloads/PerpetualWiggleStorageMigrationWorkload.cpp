@@ -18,12 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbserver/datadistributor/DDSharedContext.h"
-#include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/core/MoveKeys.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbclient/VersionedMap.h"
