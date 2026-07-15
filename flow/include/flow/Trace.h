@@ -180,11 +180,7 @@ inline void save(Archive& ar, const TraceEventFields& value) {
 
 class TraceBatch {
 public:
-	void addEvent(const char* name,
-	              uint64_t id,
-	              const char* location,
-	              UID traceID = UID(),
-	              uint64_t spanID = 0);
+	void addEvent(const char* name, uint64_t id, const char* location, UID traceID = UID(), uint64_t spanID = 0);
 	void addAttach(const char* name, uint64_t id, uint64_t to, UID traceID = UID(), uint64_t spanID = 0);
 	void addBuggify(int activated, int line, std::string file);
 	void dump();
@@ -234,9 +230,7 @@ struct SpecialTraceMetricType
 #define TRACE_METRIC_TYPE(from, to)                                                                                    \
 	template <>                                                                                                        \
 	struct SpecialTraceMetricType<from> : std::true_type {                                                             \
-		static to getValue(from v) {                                                                                   \
-			return v;                                                                                                  \
-		}                                                                                                              \
+		static to getValue(from v) { return v; }                                                                       \
 	}
 
 TRACE_METRIC_TYPE(double, double);
