@@ -3941,7 +3941,9 @@ Future<Void> rawStartMovement(Database occ,
                               const MoveKeysParams& params,
                               std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		if (!params.ranges.present()) {
+		// A relocation launched before the knob changed can still carry the old-path sentinel.
+		// Never persist it as a shard-encoded data move; restart DD with the new configuration.
+		if (!params.ranges.present() || params.dataMoveId == anonymousShardId) {
 			throw dd_config_changed();
 		}
 		ASSERT(params.ranges.present());
