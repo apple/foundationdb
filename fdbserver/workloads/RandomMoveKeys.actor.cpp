@@ -254,7 +254,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 					}
 				}
 			} catch (Error& e) {
-				if (e.code() != error_code_movekeys_conflict && e.code() != error_code_finish_move_keys_too_many_retries && e.code() != error_code_operation_failed)
+				if (e.code() != error_code_movekeys_conflict && e.code() != error_code_operation_failed)
 					throw;
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				// Keep trying to get the moveKeysLock
