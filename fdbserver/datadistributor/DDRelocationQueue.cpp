@@ -1394,6 +1394,12 @@ Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabled
 	}
 }
 
+void requeueCancelledRelocation(DDQueue* self, RelocateData const& rd, bool doBulkLoading) {
+	if (!doBulkLoading) {
+		self->output.send(RelocateShard(rd.keys, rd.priority, rd.reason, rd.randomId));
+	}
+}
+
 static std::string destServersString(std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> const& bestTeams) {
 	std::stringstream ss;
 
@@ -2438,6 +2444,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 
 	if (err.code() == error_code_data_move_dest_team_not_found) {
 		co_await cancelDataMove(self, rd.keys, ddEnabledState);
+		requeueCancelledRelocation(self, rd, doBulkLoading);
 		TraceEvent(SevWarnAlways, "RelocateShardCancelDataMoveTeamNotFound")
 		    .detail("Src", describe(rd.src))
 		    .detail("DataMoveMetaData", rd.dataMove != nullptr ? rd.dataMove->meta.toString() : "Empty");
@@ -3218,4 +3225,30 @@ TEST_CASE("/DataDistribution/DDQueue/BatchDrainRelocationComplete") {
 	ASSERT(self.activeRelocations == 0);
 
 	std::cout << "BatchDrainRelocationComplete: drained " << drained << " of " << N << " completions\n";
+}
+
+TEST_CASE("/DataDistribution/DDQueue/RequeueCancelledRelocation") {
+	DDQueue self;
+	FutureStream<RelocateShard> retries = self.output.getFuture();
+	KeyRange keys = KeyRangeRef("begin"_sr, "end"_sr);
+	UID traceId(1, 2);
+	RelocateData rd(
+	    RelocateShard(keys, DataMovementReason::TEAM_CONTAINS_UNDESIRED_SERVER, RelocateReason::OTHER, traceId));
+	rd.dataMoveId = UID(3, 4);
+
+	requeueCancelledRelocation(&self, rd, false);
+	ASSERT(retries.isReady());
+	RelocateShard retry = retries.pop();
+	ASSERT(retry.keys == keys);
+	ASSERT(retry.priority == rd.priority);
+	ASSERT(retry.reason == rd.reason);
+	ASSERT(retry.moveReason == DataMovementReason::TEAM_CONTAINS_UNDESIRED_SERVER);
+	ASSERT(retry.traceId == traceId);
+	ASSERT(retry.dataMoveId == anonymousShardId);
+	ASSERT(!retry.isRestore());
+	ASSERT(!retry.cancelled);
+
+	requeueCancelledRelocation(&self, rd, true);
+	ASSERT(!retries.isReady());
+	return Void();
 }
