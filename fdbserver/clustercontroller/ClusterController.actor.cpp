@@ -328,12 +328,20 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	std::vector<WorkerDetails> workers =
 	    cluster->getWorkersForRoleInDatacenter(targetDcId, recruitment::LogRouter, tagIds.size(), db->config, id_used);
 
-	if (workers.size() < tagIds.size()) {
+	if (workers.empty()) {
 		TraceEvent(SevWarn, "NotEnoughWorkersForLogRouters", cluster->id)
 		    .detail("Required", tagIds.size())
 		    .detail("Available", workers.size())
 		    .detail("TargetDcId", targetDcId);
 		throw recruitment_failed();
+	}
+	if (workers.size() < tagIds.size()) {
+		CODE_PROBE(true, "Recruit partial replacement log routers");
+		TraceEvent(SevWarn, "PartialWorkersForLogRouters", cluster->id)
+		    .detail("Required", tagIds.size())
+		    .detail("Available", workers.size())
+		    .detail("TargetDcId", targetDcId);
+		tagIds.resize(workers.size());
 	}
 
 	// Replacement log routers will determine their own start version by querying
@@ -504,12 +512,9 @@ ACTOR Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
 			}
 		} catch (Error& e) {
 			if (strcmp(workerName, "LogRouter") == 0) {
-				// the probe macro prefers constant strings, so we can't combine
-				// log router and backup worker into one macro.
 				CODE_PROBE(true, "LogRouter re-recruitment failed");
 			} else {
 				ASSERT(strcmp(workerName, "BackupWorker") == 0);
-				CODE_PROBE(true, "BackupWorker re-recruitment failed");
 			}
 			TraceEvent(SevWarnAlways, (std::string(workerName) + "MonitoringRecruitmentFailed").c_str(), self->id)
 			    .error(e)
