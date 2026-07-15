@@ -172,7 +172,7 @@ Future<Void> handleIOErrors(Future<Void> actor,
                             Future<Void> onClosed = Void()) {
 	auto res = co_await race(errorOr(actor), storeError);
 	if (res.index() == 0) {
-		ErrorOr<Void> e = std::get<0>(std::move(res));
+		ErrorOr<Void> e = std::get<0>(res);
 
 		if (e.isError() && e.getError().code() == error_code_please_reboot) {
 			// no need to wait.
@@ -191,7 +191,7 @@ Future<Void> handleIOErrors(Future<Void> actor,
 		e.get();
 		co_return;
 	}
-	ErrorOr<Void> e = std::get<1>(std::move(res));
+	ErrorOr<Void> e = std::get<1>(res);
 	TraceEvent("WorkerTerminatingByIOError", id).errorUnsuppressed(e.getError());
 	actor.cancel();
 	// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be reported
@@ -378,9 +378,9 @@ struct TLogOptions {
 
 	static ErrorOr<TLogOptions> FromStringRef(StringRef s) {
 		TLogOptions options;
-		for (StringRef key = s.eat("_"), value = s.eat("_"); s.size() != 0 || key.size();
+		for (StringRef key = s.eat("_"), value = s.eat("_"); !s.empty() || !key.empty();
 		     key = s.eat("_"), value = s.eat("_")) {
-			if (key.size() != 0 && value.size() == 0)
+			if (!key.empty() && value.empty())
 				return default_error_or();
 
 			if (key == "V"_sr) {
@@ -664,7 +664,7 @@ Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFul
 			auto res = co_await waitForWorkerRegistrationEvent(
 			    registrationReply, ccInterface, ddInterf, rkInterf, csInterf, degraded, issues, recovered, clusterId);
 			if (res.index() == 0) {
-				RegisterWorkerReply reply = std::get<0>(std::move(res));
+				RegisterWorkerReply reply = std::get<0>(res);
 				processClass = reply.processClass;
 				asyncPriorityInfo->set(reply.priorityInfo);
 				TraceEvent("WorkerRegisterReply")
@@ -1822,7 +1822,7 @@ Future<Void> chaosMetricsLogger() {
 	if (!res)
 		co_return;
 
-	ChaosMetrics* chaosMetrics = static_cast<ChaosMetrics*>(res);
+	auto* chaosMetrics = static_cast<ChaosMetrics*>(res);
 	chaosMetrics->clear();
 
 	while (true) {
@@ -2688,7 +2688,7 @@ class WorkerServerCore {
 		while (true) {
 			auto res = co_await race(interf.setMetricsRate.getFuture(), loggingTrigger);
 			if (res.index() == 0) {
-				SetMetricsLogRateRequest req = std::get<0>(std::move(res));
+				SetMetricsLogRateRequest req = std::get<0>(res);
 
 				TraceEvent("LoggingRateChange", interf.id())
 				    .detail("OldDelay", loggingDelay)
@@ -2737,7 +2737,7 @@ class WorkerServerCore {
 			// everything it knows about the DiskStore, and put all the checking logic
 			// on the client side.  This makes the checking logic itself easier to test
 			// locally via test cases with defined consistency bugs.
-			for (DiskStore d : getDiskStores(folder, tLogSpillFolder)) {
+			for (const DiskStore& d : getDiskStores(folder, tLogSpillFolder)) {
 				bool included = true;
 				if (!req.includePartialStores) {
 					if (d.storeType == KeyValueStoreType::SSD_BTREE_V1) {
@@ -2908,7 +2908,7 @@ public:
 		                         errorForwarders.getResult(),
 		                         handleErrors);
 		ASSERT(res.index() == 1);
-		co_await handleRebootRequest(std::get<1>(std::move(res)));
+		co_await handleRebootRequest(std::get<1>(res));
 	}
 };
 
@@ -2994,8 +2994,8 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	folder = abspath(folder);
 	tLogSpillFolder = abspath(tLogSpillFolder);
 
-	if (metricsPrefix.size() > 0) {
-		if (metricsConnFile.size() > 0) {
+	if (!metricsPrefix.empty()) {
+		if (!metricsConnFile.empty()) {
 			try {
 				Database db =
 				    Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
@@ -3005,7 +3005,7 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
 			}
 		} else {
-			auto lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff' ? LockAware::True : LockAware::False;
+			auto lockAware = !metricsPrefix.empty() && metricsPrefix[0] == '\xff' ? LockAware::True : LockAware::False;
 			auto database = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware);
 			metricsLogger = runMetrics(database, KeyRef(metricsPrefix));
 			database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
@@ -3376,12 +3376,13 @@ Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInterface>
 }
 
 ClusterControllerPriorityInfo getCCPriorityInfo(std::string filePath, ProcessClass processClass) {
-	if (!fileExists(filePath))
+	if (!fileExists(filePath)) {
 		return ClusterControllerPriorityInfo(
 		    recruitment::machineClassFitness(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource),
 		                                     recruitment::ClusterController),
 		    false,
 		    ClusterControllerPriorityInfo::FitnessUnknown);
+	}
 	std::string contents(readFileBytes(filePath, 1000));
 	BinaryReader br(StringRef(contents), IncludeVersion());
 	ClusterControllerPriorityInfo priorityInfo(
@@ -3919,7 +3920,7 @@ Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGeneration(
 				request.knownLeader = leader.get().get().changeID;
 
 				ClusterControllerPriorityInfo info = leader.get().get().getPriorityInfo();
-				if (leader.get().get().serializedInfo.size() && !info.isExcluded &&
+				if (!leader.get().get().serializedInfo.empty() && !info.isExcluded &&
 				    (info.dcFitness == ClusterControllerPriorityInfo::FitnessPrimary ||
 				     info.dcFitness == ClusterControllerPriorityInfo::FitnessPreferred ||
 				     info.dcFitness == ClusterControllerPriorityInfo::FitnessUnknown)) {
@@ -4093,7 +4094,7 @@ Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		// Endpoints should be registered first before any process trying to connect to it.
 		// So coordinationServer actor should be the first one executed before any other.
-		if (coordFolder.size()) {
+		if (!coordFolder.empty()) {
 			actors.push_back(coordinationServer(coordFolder, connRecord));
 		}
 
