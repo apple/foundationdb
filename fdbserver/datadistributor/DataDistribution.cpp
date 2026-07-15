@@ -3594,6 +3594,9 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 				}
 				co_await waitForAll(enablePops);
 			} catch (Error& error) {
+				if (error.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				TraceEvent(SevDebug, "IgnoreEnableTLogPopFailure").log();
 			}
 		}
@@ -3980,6 +3983,9 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			    .detail("RetryCount", audit->retryCount)
 			    .detail("AuditState", audit->coreState.toString());
 		} catch (Error& err) {
+			if (err.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent(SevWarn, "DDAuditStorageCoreErrorWhenSetAuditFailed", self->ddId)
 			    .errorUnsuppressed(err)
 			    .detail("Context", audit->getDDAuditContext())
@@ -4552,6 +4558,9 @@ Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
 					co_return;
 				}
 			} catch (Error& err) {
+				if (err.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				// retry
 			}
 		}

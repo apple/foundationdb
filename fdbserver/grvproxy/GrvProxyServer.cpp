@@ -291,6 +291,9 @@ Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 			co_await tr->onError(err);
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		// Catch non-retryable errors (and do nothing).
 		TraceEvent(SevWarnAlways, "GlobalConfigMigrationError").error(e);
 	}
