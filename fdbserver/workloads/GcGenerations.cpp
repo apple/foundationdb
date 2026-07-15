@@ -162,7 +162,6 @@ struct GcGenerationsWorkload : TestWorkload {
 
 	Future<Void> generateMultipleTxnGenerations(GcGenerationsWorkload* self, Database cx) {
 		co_await self->clogRemoteDc(self, cx);
-		int generationCount = 0;
 		int successfulReboots = 0;
 		while (successfulReboots < 6) {
 			// Re-enable connection failures each iteration to keep the partition active.
@@ -176,7 +175,6 @@ struct GcGenerationsWorkload : TestWorkload {
 			    .detail("Iteration", successfulReboots)
 			    .detail("RecoveryState", self->dbInfo->get().recoveryState);
 			co_await self->dbAvailable(self, /*rebootRemoteDcMaster=*/true);
-			generationCount = self->dbInfo->get().logSystemConfig.oldTLogs.size();
 
 			// Only reboot the master if it's in the primary DC. If it's in the clogged
 			// remote DC, recovery will stall because the master can't communicate with
@@ -188,21 +186,24 @@ struct GcGenerationsWorkload : TestWorkload {
 				continue;
 			}
 
+			const LogEpoch previousEpoch = self->dbInfo->get().logSystemConfig.epoch;
+			const int previousGenerationCount = self->dbInfo->get().logSystemConfig.oldTLogs.size();
 			auto masterAddr = self->dbInfo->get().master.address();
 			TraceEvent("RebootingPrimaryDcMaster").detail("Iteration", successfulReboots).detail("Master", masterAddr);
 			g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr), ISimulator::KillType::Reboot);
 
 			// Wait for recovery to create a new generation.
-			while (self->dbInfo->get().logSystemConfig.oldTLogs.size() == generationCount ||
+			while (self->dbInfo->get().logSystemConfig.epoch <= previousEpoch ||
 			       self->dbInfo->get().recoveryState < RecoveryState::RECOVERY_TRANSACTION) {
 				co_await self->dbInfo->onChange();
 			}
 			TraceEvent("CurrentGenerations")
 			    .detail("Iteration", successfulReboots)
-			    .detail("PrevCount", generationCount)
-			    .detail("New", self->dbInfo->get().logSystemConfig.oldTLogs.size());
-			ASSERT(self->dbInfo->get().logSystemConfig.oldTLogs.size() > generationCount);
-			generationCount = self->dbInfo->get().logSystemConfig.oldTLogs.size();
+			    .detail("PreviousEpoch", previousEpoch)
+			    .detail("NewEpoch", self->dbInfo->get().logSystemConfig.epoch)
+			    .detail("PreviousCount", previousGenerationCount)
+			    .detail("NewCount", self->dbInfo->get().logSystemConfig.oldTLogs.size());
+			ASSERT(self->dbInfo->get().logSystemConfig.epoch > previousEpoch);
 			++successfulReboots;
 		}
 		TraceEvent("AfterMultipleRecovery")
