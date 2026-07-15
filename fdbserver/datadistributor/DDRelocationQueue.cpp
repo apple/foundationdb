@@ -3081,9 +3081,19 @@ struct DDQueueImpl {
 	}
 
 	static Future<Void> waitAndValidate(RunState* state, Future<Void> future) {
-		co_await future;
+		Error error;
+		try {
+			co_await future;
+		} catch (Error& e) {
+			error = e;
+		}
+		// A relocator can signal an error inline while launchQueuedWork() is repairing its maps. Keep DD alive
+		// until that mutation finishes before propagating the error and tearing the queue down.
 		co_await state->queueMutationLock.take();
 		FlowLock::Releaser lockGuard(state->queueMutationLock);
+		if (error.isValid()) {
+			throw error;
+		}
 		validate(state);
 	}
 
@@ -3268,4 +3278,28 @@ TEST_CASE("/DataDistribution/DDQueue/RequeueCancelledRelocation") {
 	requeueCancelledRelocation(&self, rd, true);
 	ASSERT(!retries.isReady());
 	return Void();
+}
+
+TEST_CASE("/DataDistribution/DDQueue/SerializeRelocatorError") {
+	Reference<DDQueue> self = makeReference<DDQueue>();
+	DDQueueImpl::RunState state(self);
+	Promise<Void> error;
+	Future<Void> propagated;
+
+	{
+		co_await state.queueMutationLock.take();
+		FlowLock::Releaser lockGuard(state.queueMutationLock);
+		propagated = DDQueueImpl::waitAndValidate(&state, error.getFuture());
+		error.sendError(movekeys_conflict());
+		ASSERT(!propagated.isReady());
+	}
+
+	Error observed;
+	try {
+		co_await propagated;
+	} catch (Error& e) {
+		observed = e;
+	}
+	ASSERT(observed.code() == error_code_movekeys_conflict);
+	co_return;
 }
