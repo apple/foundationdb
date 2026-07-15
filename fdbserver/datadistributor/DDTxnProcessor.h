@@ -27,7 +27,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
-#include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
+#include "ShardsAffectedByTeamFailure.h"
 #include "flow/FastRef.h"
 
 FDB_BOOLEAN_PARAM(SkipDDModeCheck);

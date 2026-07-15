@@ -21,16 +21,18 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
+#include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
-#include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/DeterministicRandom.h"
 
@@ -59,21 +61,64 @@ public:
 
 private:
 	enum class MoveShape { Split, Aligned, Merge };
+	struct ShardInfo {
+		Key key;
+		std::vector<UID> source;
+		std::vector<UID> destination;
+	};
+	struct DataDistributionSnapshot {
+		std::vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
+		std::vector<ShardInfo> shards;
+	};
 
 	bool enabled;
 	double testDuration;
 	int oldDDMode = 1;
 	DDEnabledState ddEnabledState;
 	DatabaseConfiguration configuration;
-	Reference<InitialDataDistribution> initialData;
+	DataDistributionSnapshot initialData;
+
+	Future<Void> readDataDistributionSnapshot(Database cx, MoveKeysLock lock) {
+		Transaction tr(cx);
+		while (true) {
+			Error error;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				co_await checkMoveKeysLockReadOnly(&tr, lock, &ddEnabledState);
+
+				DataDistributionSnapshot snapshot;
+				snapshot.allServers = co_await NativeAPI::getServerListAndProcessClasses(&tr);
+				RangeResult serverTags = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!serverTags.more && serverTags.size() < CLIENT_KNOBS->TOO_MANY);
+				RangeResult keyServers = co_await krmGetRanges(
+				    &tr, keyServersPrefix, allKeys, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!keyServers.empty() && !keyServers.more);
+
+				for (int i = 0; i < keyServers.size() - 1; ++i) {
+					std::vector<UID> source;
+					std::vector<UID> destination;
+					UID sourceId, destinationId;
+					decodeKeyServersValue(
+					    serverTags, keyServers[i].value, source, destination, sourceId, destinationId);
+					snapshot.shards.push_back({ keyServers[i].key, std::move(source), std::move(destination) });
+				}
+				snapshot.shards.push_back({ allKeys.end, {}, {} });
+				initialData = std::move(snapshot);
+				co_return;
+			} catch (Error& e) {
+				error = e;
+			}
+			co_await tr.onError(error);
+		}
+	}
 
 	Future<Void> readInitialDataDistribution(Database cx) {
-		Reference<IDDTxnProcessor> processor = makeReference<DDTxnProcessor>(cx);
 		while (true) {
 			MoveKeysLock lock = co_await readMoveKeysLock(cx);
 			try {
-				initialData = co_await processor->getInitialDataDistribution(
-				    UID(), lock, {}, &ddEnabledState, SkipDDModeCheck::True);
+				co_await readDataDistributionSnapshot(cx, lock);
 				co_return;
 			} catch (Error& e) {
 				if (e.code() != error_code_movekeys_conflict) {
@@ -103,8 +148,7 @@ private:
 	}
 
 	Future<Void> startAndVerify(Database cx) {
-		Reference<IDDTxnProcessor> processor = makeReference<DDTxnProcessor>(cx);
-		configuration = co_await processor->getDatabaseConfiguration();
+		configuration = co_await getDatabaseConfiguration(cx);
 		ASSERT_GT(configuration.storageTeamSize, 0);
 		ASSERT_EQ(configuration.usableRegions, 1);
 		co_await readInitialDataDistribution(cx);
@@ -115,32 +159,32 @@ private:
 	}
 
 	KeyRange getMoveRange(MoveShape shape) const {
-		ASSERT_GE(initialData->shards.size(), 2);
-		const int shardCount = initialData->shards.size() - 1;
+		ASSERT_GE(initialData.shards.size(), 2);
+		const int shardCount = initialData.shards.size() - 1;
 
 		if (shape == MoveShape::Split) {
 			const Key begin = doubleToTestKey(deterministicRandom()->random01());
-			auto end = std::upper_bound(initialData->shards.begin(),
-			                            initialData->shards.end(),
+			auto end = std::upper_bound(initialData.shards.begin(),
+			                            initialData.shards.end(),
 			                            begin,
-			                            [](const Key& key, const DDShardInfo& shard) { return key < shard.key; });
-			ASSERT(end != initialData->shards.end());
+			                            [](const Key& key, const ShardInfo& shard) { return key < shard.key; });
+			ASSERT(end != initialData.shards.end());
 			return KeyRangeRef(begin, end->key);
 		}
 
 		if (shape == MoveShape::Aligned) {
 			const int shard = deterministicRandom()->randomInt(0, shardCount);
-			return KeyRangeRef(initialData->shards[shard].key, initialData->shards[shard + 1].key);
+			return KeyRangeRef(initialData.shards[shard].key, initialData.shards[shard + 1].key);
 		}
 
 		ASSERT_GE(shardCount, 2);
 		const int begin = deterministicRandom()->randomInt(0, shardCount - 1);
 		const int end = deterministicRandom()->randomInt(begin + 2, shardCount + 1);
-		return KeyRangeRef(initialData->shards[begin].key, initialData->shards[end].key);
+		return KeyRangeRef(initialData.shards[begin].key, initialData.shards[end].key);
 	}
 
 	Future<Void> moveAndVerify(Database cx, MoveShape shape, bool finishMovement) {
-		ASSERT_GE(initialData->allServers.size(), configuration.storageTeamSize);
+		ASSERT_GE(initialData.allServers.size(), configuration.storageTeamSize);
 
 		const KeyRange keys = getMoveRange(shape);
 
@@ -157,7 +201,7 @@ private:
 		}
 
 		LocalityMap<StorageServerInterface> candidates;
-		for (auto& [server, _] : initialData->allServers) {
+		for (auto& [server, _] : initialData.allServers) {
 			if ((primaryDcId.present() && server.locality.dcId() != primaryDcId) ||
 			    configuration.isExcludedServer(server.getValue.getEndpoint().addresses, server.locality) ||
 			    !IFailureMonitor::failureMonitor().getState(server.waitFailure.getEndpoint()).isAvailable()) {
@@ -238,38 +282,34 @@ private:
 		co_await readInitialDataDistribution(cx);
 
 		if (!finishMovement) {
-			auto first = std::lower_bound(initialData->shards.begin(),
-			                              initialData->shards.end(),
+			auto first = std::lower_bound(initialData.shards.begin(),
+			                              initialData.shards.end(),
 			                              keys.begin,
-			                              [](const DDShardInfo& shard, const Key& key) { return shard.key < key; });
-			auto last = std::lower_bound(initialData->shards.begin(),
-			                             initialData->shards.end(),
+			                              [](const ShardInfo& shard, const Key& key) { return shard.key < key; });
+			auto last = std::lower_bound(initialData.shards.begin(),
+			                             initialData.shards.end(),
 			                             keys.end,
-			                             [](const DDShardInfo& shard, const Key& key) { return shard.key < key; });
-			ASSERT(first != initialData->shards.end() && first->key == keys.begin);
-			ASSERT(last != initialData->shards.end() && last->key == keys.end);
+			                             [](const ShardInfo& shard, const Key& key) { return shard.key < key; });
+			ASSERT(first != initialData.shards.end() && first->key == keys.begin);
+			ASSERT(last != initialData.shards.end() && last->key == keys.end);
 			ASSERT(first != last);
 		}
 
 		bool found = false;
-		for (int shard = 0; shard < initialData->shards.size() - 1; ++shard) {
-			const KeyRangeRef shardRange(initialData->shards[shard].key, initialData->shards[shard + 1].key);
+		for (int shard = 0; shard < initialData.shards.size() - 1; ++shard) {
+			const KeyRangeRef shardRange(initialData.shards[shard].key, initialData.shards[shard + 1].key);
 			if (shardRange.end <= keys.begin || shardRange.begin >= keys.end) {
 				continue;
 			}
 			found = true;
-			const DDShardInfo& info = initialData->shards[shard];
+			const ShardInfo& info = initialData.shards[shard];
 			if (finishMovement) {
-				ASSERT(!info.hasDest);
-				ASSERT(info.primarySrc == destinationTeam);
-				ASSERT(info.primaryDest.empty());
+				ASSERT(info.destination.empty());
+				ASSERT(info.source == destinationTeam);
 			} else {
-				ASSERT(info.hasDest);
-				ASSERT(info.primaryDest == destinationTeam);
-				ASSERT(!info.primarySrc.empty());
+				ASSERT(info.destination == destinationTeam);
+				ASSERT(!info.source.empty());
 			}
-			ASSERT(info.remoteSrc.empty());
-			ASSERT(info.remoteDest.empty());
 		}
 		ASSERT(found);
 	}

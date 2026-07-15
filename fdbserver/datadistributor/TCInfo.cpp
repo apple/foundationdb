@@ -20,7 +20,7 @@
 
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ProcessClassRecruitment.h"
-#include "fdbserver/datadistributor/DDTeamCollection.h"
+#include "DDTeamCollection.h"
 #include "TCInfo.h"
 #include "flow/CoroUtils.h"
 

@@ -24,7 +24,7 @@
 #include <utility>
 #include <vector>
 
-#include "fdbserver/datadistributor/DataDistributionTeam.h"
+#include "DataDistributionTeam.h"
 #include "flow/ActorCollection.h"
 #include "flow/Buggify.h"
 #include "flow/FastRef.h"
@@ -32,12 +32,12 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
+#include "DataDistribution.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/datadistributor/DDTxnProcessor.h"
+#include "DDTxnProcessor.h"
 #include "flow/DebugTrace.h"
 #include "DDRelocationQueue.h"
 #include "flow/CoroUtils.h"
