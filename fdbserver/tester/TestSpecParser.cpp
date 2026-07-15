@@ -73,6 +73,8 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	{ "disableTss", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } },
 	{ "disableHostname",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
+	{ "forceHostname",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedForceHostname", ""); } },
 	// TODO(gglass): remove this when it's no longer used.  For now it's a useful signal in a toml file
 	// for tests against functionality that might not actually be tenant related and hence need to keep.
 	{ "allowDefaultTenant",

@@ -1,0 +1,10 @@
+[configuration]
+buggify = false
+coordinators = 3
+forceHostname = true
+
+[[test]]
+testTitle = 'StatusHostnameCoordinatorOutage'
+
+    [[test.workload]]
+    testName = 'StatusHostnameCoordinatorOutage'

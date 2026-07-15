@@ -3001,6 +3001,45 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 		std::vector<Optional<std::pair<WorkerEvents, std::set<std::string>>>> workerEventsVec =
 		    co_await getAllAsync(std::move(workerEventFetchers));
 
+		// Materialize a basic process snapshot before any unrelated status fetch can fail or exhaust the overall
+		// deadline. Role-specific fetches below replace this snapshot with an enriched version when they complete.
+		WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
+		WorkerEvents pMetrics = workerEventsVec[1].present() ? workerEventsVec[1].get().first : WorkerEvents();
+		WorkerEvents networkMetrics = workerEventsVec[2].present() ? workerEventsVec[2].get().first : WorkerEvents();
+		WorkerEvents latestError = workerEventsVec[3].present() ? workerEventsVec[3].get().first : WorkerEvents();
+		WorkerEvents traceFileOpenErrors =
+		    workerEventsVec[4].present() ? workerEventsVec[4].get().first : WorkerEvents();
+		WorkerEvents programStarts = workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
+
+		std::map<std::string, std::vector<JsonBuilderObject>> processIssues = getProcessIssuesAsMessages(workerIssues);
+		std::vector<StorageServerStatusInfo> storageServers;
+		std::vector<std::pair<TLogInterface, EventMap>> tLogs;
+		std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
+		std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
+		std::vector<NetworkAddress> coordinatorAddresses;
+		Optional<DatabaseConfiguration> configuration;
+		Optional<LoadConfigurationResult> loadResult;
+
+		statusObj["processes"] = co_await processStatusFetcher(db,
+		                                                       workers,
+		                                                       pMetrics,
+		                                                       mMetrics,
+		                                                       networkMetrics,
+		                                                       latestError,
+		                                                       traceFileOpenErrors,
+		                                                       programStarts,
+		                                                       processIssues,
+		                                                       storageServers,
+		                                                       tLogs,
+		                                                       commitProxies,
+		                                                       grvProxies,
+		                                                       coordinators,
+		                                                       coordinatorAddresses,
+		                                                       cx,
+		                                                       configuration,
+		                                                       Optional<Key>(),
+		                                                       &status_incomplete_reasons);
+
 		// Create a unique set of all workers who were unreachable for 1 or more of the event requests above.
 		// Since each event request is independent and to all workers, workers can have responded to some
 		// event requests but still end up in the unreachable set.
@@ -3070,25 +3109,9 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 		statusObj["idempotency_ids"] = idmpKeyStatus;
 		statusObj["version_epoch"] = versionEpochStatus;
 
-		// machine metrics
-		WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
-		// process metrics
-		WorkerEvents pMetrics = workerEventsVec[1].present() ? workerEventsVec[1].get().first : WorkerEvents();
-		WorkerEvents networkMetrics = workerEventsVec[2].present() ? workerEventsVec[2].get().first : WorkerEvents();
-		WorkerEvents latestError = workerEventsVec[3].present() ? workerEventsVec[3].get().first : WorkerEvents();
-		WorkerEvents traceFileOpenErrors =
-		    workerEventsVec[4].present() ? workerEventsVec[4].get().first : WorkerEvents();
-		WorkerEvents programStarts = workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
-
 		if (db->get().recoveryCount > 0) {
 			statusObj["generation"] = db->get().recoveryCount;
 		}
-
-		std::map<std::string, std::vector<JsonBuilderObject>> processIssues = getProcessIssuesAsMessages(workerIssues);
-		std::vector<StorageServerStatusInfo> storageServers;
-		std::vector<std::pair<TLogInterface, EventMap>> tLogs;
-		std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
-		std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 
 		JsonBuilderObject qos;
 		JsonBuilderObject dataOverlay;
@@ -3096,8 +3119,6 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 		JsonBuilderObject storageWiggler;
 		std::unordered_set<UID> wiggleServers;
 
-		Optional<DatabaseConfiguration> configuration;
-		Optional<LoadConfigurationResult> loadResult;
 		std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 
 		if (statusCode != RecoveryStatus::configuration_missing) {
@@ -3129,7 +3150,6 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);
 
-		std::vector<NetworkAddress> coordinatorAddresses;
 		if (configuration.present()) {
 			// Do the latency probe by itself to avoid interference from other status activities
 			bool isAvailable = true;
@@ -3215,13 +3235,50 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 				statusObj["active_primary_dc"] = primaryDCFO.get().get();
 			}
 
+			JsonBuilderObject configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
+
+			// configArr could be empty
+			if (!configObj.empty()) {
+				statusObj["configuration"] = configObj;
+			}
+
+			// Commit completed independent sections before coordinator resolution or role-detail fetches can fail.
+			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and
+			// adds to the dataOverlay object.
+			if (!workerStatuses[1].empty())
+				statusObj["workload"] = workerStatuses[1];
+
+			statusObj["layers"] = workerStatuses[2];
+			if (!qos.empty())
+				statusObj["qos"] = qos;
+
+			JsonBuilderObject& clusterDataSection = workerStatuses[0];
+			clusterDataSection.addContents(dataOverlay);
+
+			if (!clusterDataSection.empty())
+				statusObj["data"] = clusterDataSection;
+
+			if (!workerStatuses[3].empty()) {
+				statusObj["database_lock_state"] = workerStatuses[3];
+			}
+
+			if (!workerStatuses[4].empty()) {
+				statusObj.addContents(workerStatuses[4]);
+			}
+
 			ErrorOr<std::vector<NetworkAddress>> addresses =
 			    co_await errorOr(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
 			if (addresses.present()) {
 				coordinatorAddresses = std::move(addresses.get());
+				if (coordinatorAddresses.size() < coordinators.ccr->getConnectionString().getNumberOfCoordinators()) {
+					messages.push_back(JsonString::makeMessage("fetch_coordinator_addresses",
+					                                           "Some coordinator addresses could not be resolved"));
+					status_incomplete_reasons.insert("Unable to resolve all coordinator addresses.");
+				}
 			} else {
 				messages.push_back(
 				    JsonString::makeMessage("fetch_coordinator_addresses", "Fetching coordinator addresses timed out"));
+				status_incomplete_reasons.insert("Unable to resolve coordinator addresses before the timeout.");
 			}
 
 			int logFaultTolerance = 100;
@@ -3240,44 +3297,6 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 			                                logFaultTolerance,
 			                                fullyReplicatedRegions,
 			                                loadResult.present() && loadResult.get().healthyZone.present());
-
-			JsonBuilderObject configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
-
-			// configArr could be empty
-			if (!configObj.empty()) {
-				statusObj["configuration"] = configObj;
-			}
-
-			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and
-			// adds to the dataOverlay object
-			if (!workerStatuses[1].empty())
-				statusObj["workload"] = workerStatuses[1];
-
-			statusObj["layers"] = workerStatuses[2];
-			// Add qos section if it was populated
-			if (!qos.empty())
-				statusObj["qos"] = qos;
-
-			// Merge dataOverlay into data
-			JsonBuilderObject& clusterDataSection = workerStatuses[0];
-
-			// TODO:  This probably is no longer possible as there is no ability to merge json objects with an
-			// output-only model
-			clusterDataSection.addContents(dataOverlay);
-
-			// If data section not empty, add it to statusObj
-			if (!clusterDataSection.empty())
-				statusObj["data"] = clusterDataSection;
-
-			// Insert database_lock_state section
-			if (!workerStatuses[3].empty()) {
-				statusObj["database_lock_state"] = workerStatuses[3];
-			}
-
-			// Insert cluster summary statistics
-			if (!workerStatuses[4].empty()) {
-				statusObj.addContents(workerStatuses[4]);
-			}
 
 			// Need storage servers now for processStatusFetcher() below.
 			ErrorOr<std::vector<StorageServerStatusInfo>> _storageServers = co_await storageServerFuture;

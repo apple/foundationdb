@@ -23,6 +23,7 @@
 #include "fdbserver/tester/workloads.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
+#include "flow/IConnection.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/StatusSchema.h"
 
@@ -221,6 +222,93 @@ struct StatusWorkload : TestWorkload {
 };
 
 WorkloadFactory<StatusWorkload> StatusWorkloadFactory;
+
+struct StatusHostnameCoordinatorOutageWorkload : TestWorkload {
+	static constexpr auto NAME = "StatusHostnameCoordinatorOutage";
+
+	bool passed = false;
+
+	explicit StatusHostnameCoordinatorOutageWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+
+	Future<Void> setup(Database const& cx) override { return Void(); }
+
+	Future<Void> start(Database const& cx) override {
+		if (clientId != 0) {
+			co_return;
+		}
+
+		bool baselineStatusComplete = false;
+		for (int attempt = 0; attempt < 10 && !baselineStatusComplete; ++attempt) {
+			StatusObject baselineResult = co_await StatusClient::statusFetcher(cx);
+			StatusObjectReader baselineStatus(baselineResult);
+			StatusObjectReader baselineCluster;
+			baselineStatusComplete = baselineStatus.get("cluster", baselineCluster) &&
+			                         baselineCluster.has("processes") && !baselineCluster.last().get_obj().empty() &&
+			                         baselineCluster.has("data") && baselineCluster.has("layers");
+			if (!baselineStatusComplete) {
+				co_await delay(1.0);
+			}
+		}
+		ASSERT(baselineStatusComplete);
+
+		ClusterConnectionString connectionString = cx->connectionRecord->get()->getConnectionString();
+		ASSERT_EQ(connectionString.hostnames.size(), 3);
+
+		Hostname unavailableCoordinator = connectionString.hostnames.front();
+		Optional<NetworkAddress> unavailableAddress = co_await unavailableCoordinator.resolve();
+		ASSERT(unavailableAddress.present());
+
+		INetworkConnections::net()->removeMockTCPEndpoint(unavailableCoordinator.host, unavailableCoordinator.service);
+		INetworkConnections::net()->removeCachedDNS(unavailableCoordinator.host, unavailableCoordinator.service);
+
+		StatusObject result;
+		try {
+			result = co_await StatusClient::statusFetcher(cx);
+		} catch (Error&) {
+			INetworkConnections::net()->addMockTCPEndpoint(
+			    unavailableCoordinator.host, unavailableCoordinator.service, { unavailableAddress.get() });
+			throw;
+		}
+
+		INetworkConnections::net()->addMockTCPEndpoint(
+		    unavailableCoordinator.host, unavailableCoordinator.service, { unavailableAddress.get() });
+
+		StatusObjectReader status(result);
+		StatusObjectReader cluster;
+		ASSERT(status.get("cluster", cluster));
+		ASSERT(cluster.has("processes"));
+		ASSERT(!cluster.last().get_obj().empty());
+		ASSERT(cluster.has("machines"));
+		ASSERT(cluster.has("data"));
+		ASSERT(cluster.has("layers"));
+		ASSERT(findMessagesByName(cluster, { "fetch_coordinator_addresses" }));
+
+		bool foundCoordinatorReason = false;
+		for (const auto& message : cluster.at("messages").get_array()) {
+			const auto& messageObject = message.get_obj();
+			if (messageObject.contains("name") && messageObject.at("name").get_str() == "status_incomplete" &&
+			    messageObject.contains("reasons")) {
+				for (const auto& reason : messageObject.at("reasons").get_array()) {
+					const auto& reasonObject = reason.get_obj();
+					foundCoordinatorReason =
+					    foundCoordinatorReason ||
+					    (reasonObject.contains("description") &&
+					     reasonObject.at("description").get_str() == "Unable to resolve all coordinator addresses.");
+				}
+			}
+		}
+		ASSERT(foundCoordinatorReason);
+
+		passed = true;
+		co_return;
+	}
+
+	Future<bool> check(Database const& cx) override { return clientId != 0 || passed; }
+
+	void getMetrics(std::vector<PerfMetric>& m) override {}
+};
+
+WorkloadFactory<StatusHostnameCoordinatorOutageWorkload> StatusHostnameCoordinatorOutageWorkloadFactory;
 
 TEST_CASE("/fdbserver/status/schema/basic") {
 	json_spirit::mValue schema =

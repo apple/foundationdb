@@ -455,6 +455,8 @@ public:
 	bool disableTss = false;
 	// 7.1 cannot be downgraded to 7.0 and below after enabling hostname, so disable hostname for 7.0 downgrade tests
 	bool disableHostname = false;
+	// Force hostname coordinators for tests that specifically exercise DNS failure handling.
+	bool forceHostname = false;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	// TOML tests may use either the canonical string names or legacy integer values. Restart tests
 	// parsed by older binaries must keep using legacy integers for compatibility.
@@ -524,6 +526,7 @@ public:
 		    .add("maxTLogVersion", &maxTLogVersion)
 		    .add("disableTss", &disableTss)
 		    .add("disableHostname", &disableHostname)
+		    .add("forceHostname", &forceHostname)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("singleRegion", &singleRegion)
 		    .add("generateFearless", &generateFearless)
@@ -2300,7 +2303,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	CODE_PROBE(!useIPv6, "Use IPv4");
 
 	// Use hostname 25% of the time, unless it is disabled
-	bool useHostname = !testConfig.disableHostname && deterministicRandom()->random01() < 0.25;
+	bool useHostname =
+	    !testConfig.disableHostname && (testConfig.forceHostname || deterministicRandom()->random01() < 0.25);
 	CODE_PROBE(useHostname, "Use hostname");
 	CODE_PROBE(!useHostname, "Use IP address");
 	NetworkAddressFromHostname fromHostname =
