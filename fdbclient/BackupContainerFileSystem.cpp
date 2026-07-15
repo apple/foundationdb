@@ -38,6 +38,19 @@
 
 class BackupContainerFileSystemImpl {
 public:
+	// A snapshot manifest is normally a few hundred MB. Warn as it grows and error before it gets dangerously
+	// large, so we see the problem in the logs with time to act before a manifest actually becomes too large
+	// to handle.
+	static void traceManifestSize(const std::string& fileName, int64_t bytes) {
+		if (bytes >= 750 * 1024 * 1024) {
+			TraceEvent(SevError, "BackupSnapshotManifestTooLarge").detail("FileName", fileName).detail("Bytes", bytes);
+		} else if (bytes >= 500 * 1024 * 1024) {
+			TraceEvent(SevWarnAlways, "BackupSnapshotManifestLarge")
+			    .detail("FileName", fileName)
+			    .detail("Bytes", bytes);
+		}
+	}
+
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of
 	// megabytes.
 	static Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
@@ -55,8 +68,9 @@ public:
 		// return them.
 		Reference<IAsyncFile> f = co_await bc->readFile(snapshot.fileName);
 		int64_t size = co_await f->size();
-		// Read the file into a std::string in chunks. std::string can hold more than 2 GB (StringRef cannot, its length
-		// is an int), and chunking keeps each read() within its int length.
+		traceManifestSize(snapshot.fileName, size);
+		// A manifest is normally a few hundred MB. Read it into a std::string in chunks; std::string and the
+		// chunked reads guard against an unexpectedly large manifest overflowing the int length that read() takes.
 		// TODO (optimization): the whole manifest is loaded into memory before parsing. Explore if a streaming JSON
 		// parser would avoid this.
 		std::string buf;
@@ -290,6 +304,7 @@ public:
 
 		Reference<IBackupFile> f = co_await bc->writeFile(fileName);
 
+		traceManifestSize(fileName, docString.size());
 		co_await f->append(docString.data(), docString.size());
 
 		co_await f->finish();

@@ -45,9 +45,6 @@ Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<Stri
 	co_await file->append(s.begin(), s.size());
 }
 
-// Writes data in chunks of at most BACKUP_MANIFEST_CHUNK_SIZE bytes. Each chunk fits in an int, so the
-// backend's appendImpl() can safely pass it to IAsyncFile::write() (which takes an int length) without
-// overflowing, even when the total write is larger than INT_MAX.
 Future<Void> append(Reference<IBackupFile> file, const void* data, size_t len) {
 	const char* ptr = static_cast<const char*>(data);
 	size_t chunkLimit = static_cast<size_t>(CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE);
