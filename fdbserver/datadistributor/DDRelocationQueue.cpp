@@ -86,16 +86,15 @@ RelocateData::RelocateData(RelocateShard const& rs)
                                               : (isBoundaryPriority(rs.priority) ? rs.priority : -1)),
     healthPriority(rs.retryIntent.present() ? rs.retryIntent.get().healthPriority
                                             : (isHealthPriority(rs.priority) ? rs.priority : -1)),
-    reason(rs.reason), dmReason(rs.moveReason),
-    startTime(now()), randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
-    dataMoveId(rs.dataMoveId), workFactor(0),
-    wantsNewServers(rs.retryIntent.present()
-                        ? rs.retryIntent.get().wantsNewServers
-                        : (isDataMovementForMountainChopper(rs.moveReason) ||
-                           isDataMovementForValleyFiller(rs.moveReason) ||
-                           rs.moveReason == DataMovementReason::SPLIT_SHARD ||
-                           rs.moveReason == DataMovementReason::TEAM_REDUNDANT ||
-                           rs.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE)),
+    reason(rs.reason), dmReason(rs.moveReason), startTime(now()),
+    randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId),
+    workFactor(0),
+    wantsNewServers(rs.retryIntent.present() ? rs.retryIntent.get().wantsNewServers
+                                             : (isDataMovementForMountainChopper(rs.moveReason) ||
+                                                isDataMovementForValleyFiller(rs.moveReason) ||
+                                                rs.moveReason == DataMovementReason::SPLIT_SHARD ||
+                                                rs.moveReason == DataMovementReason::TEAM_REDUNDANT ||
+                                                rs.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE)),
     cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove) {
 	if (dataMove != nullptr) {
 		this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
@@ -138,8 +137,8 @@ Optional<KeyRange> RelocateData::getParentRange() const {
 static RelocateShard makeDestinationFailureRetry(RelocateData const& rd, UID retryTraceId) {
 	RelocateShard retry(rd.keys, rd.dmReason, rd.reason, retryTraceId);
 	retry.priority = rd.priority;
-	retry.retryIntent = RelocateShard::RetryRelocationIntent{
-		rd.boundaryPriority, rd.healthPriority, rd.wantsNewServers };
+	retry.retryIntent =
+	    RelocateShard::RetryRelocationIntent{ rd.boundaryPriority, rd.healthPriority, rd.wantsNewServers };
 	if (rd.getParentRange().present()) {
 		retry.setParentRange(rd.getParentRange().get());
 	}
@@ -148,6 +147,11 @@ static RelocateShard makeDestinationFailureRetry(RelocateData const& rd, UID ret
 
 static bool shouldRetryDestinationTeamFailure(bool doBulkLoading, RelocateData const& rd) {
 	return !doBulkLoading && !rd.isRestore();
+}
+
+static bool shouldYieldDestinationFailureRetry(RelocateData const& retry, RelocateData const& queued) {
+	bool isSplit = retry.reason == RelocateReason::SIZE_SPLIT || retry.reason == RelocateReason::WRITE_SPLIT;
+	return isSplit && retry.keys != queued.keys && retry.keys.contains(queued.keys);
 }
 
 class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
@@ -829,7 +833,31 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 	//TraceEvent("QueueRelocationBegin").detail("Begin", rd.keys.begin).detail("End", rd.keys.end);
 
 	// remove all items from both queues that are fully contained in the new relocation (i.e. will be overwritten)
+	bool destinationFailureRetry = rs.retryIntent.present();
 	RelocateData rd(rs);
+	if (destinationFailureRetry) {
+		auto ranges = queueMap.intersectingRanges(rd.keys);
+		for (auto r = ranges.begin(); r != ranges.end(); ++r) {
+			RelocateData const& queued = r->value();
+			if (!shouldYieldDestinationFailureRetry(rd, queued)) {
+				continue;
+			}
+
+			bool active = fetchingSourcesQueue.contains(queued);
+			if (!active && !queued.src.empty()) {
+				auto sourceQueue = queue.find(queued.src.front());
+				active = sourceQueue != queue.end() && sourceQueue->second.contains(queued);
+			}
+			if (active) {
+				TraceEvent(SevInfo, "DestinationFailureRetryYieldedToQueuedSplit", distributorId)
+				    .detail("RetryRange", rd.keys)
+				    .detail("RetryTraceID", rd.randomId)
+				    .detail("QueuedRange", queued.keys)
+				    .detail("QueuedTraceID", queued.randomId);
+				return;
+			}
+		}
+	}
 	bool hasHealthPriority = RelocateData::isHealthPriority(rd.priority);
 	bool hasBoundaryPriority = RelocateData::isBoundaryPriority(rd.priority);
 
@@ -2262,8 +2290,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 									rd.bulkLoadTask.get().completeAck.send(
 									    BulkLoadAck(/*unretryableError=*/true, rd.priority));
 								}
-								retryAfterDestinationTeamFailure =
-								    shouldRetryDestinationTeamFailure(doBulkLoading, rd);
+								retryAfterDestinationTeamFailure = shouldRetryDestinationTeamFailure(doBulkLoading, rd);
 								throw data_move_dest_team_not_found();
 							}
 						}
@@ -3297,6 +3324,13 @@ TEST_CASE("/DataDistribution/DDQueue/RetryDestinationTeamFailure") {
 	ASSERT(!retry.bulkLoadTask.present());
 	ASSERT(shouldRetryDestinationTeamFailure(false, rd));
 	ASSERT(!shouldRetryDestinationTeamFailure(true, rd));
+	RelocateData nested(
+	    RelocateShard(KeyRangeRef("a"_sr, "aa"_sr), DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT));
+	ASSERT(shouldYieldDestinationFailureRetry(retry, nested));
+	ASSERT(!shouldYieldDestinationFailureRetry(retry, retry));
+	RelocateData unrelated(
+	    RelocateShard(KeyRangeRef("c"_sr, "d"_sr), DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT));
+	ASSERT(!shouldYieldDestinationFailureRetry(retry, unrelated));
 	RelocateData restore = rd;
 	restore.dataMove = std::make_shared<DataMove>();
 	ASSERT(!shouldRetryDestinationTeamFailure(false, restore));
