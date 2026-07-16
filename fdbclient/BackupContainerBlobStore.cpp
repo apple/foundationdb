@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/AsyncFileBlobStore.h"
+#include "AsyncFileBlobStore.h"
 #include "BackupContainerBlobStore.h"
 #include "fdbclient/IBlobStore.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
