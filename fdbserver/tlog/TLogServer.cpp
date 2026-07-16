@@ -1339,6 +1339,7 @@ Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Reference<Log
 				    .detail("Tag", tag.toString())
 				    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
 				    .detail("RecoveredAt", logData->recoveredAt)
+				    .setMaxFieldLength(495)
 				    .detail("UnpoppedTags", describe(logData->unpoppedRecoveredTags));
 				if (logData->unpoppedRecoveredTagCount == 0 &&
 				    logData->durableKnownCommittedVersion >= logData->recoveredAt &&
@@ -2386,7 +2387,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	}
 
 	if (replyVersionTooLarge) {
-		CODE_PROBE(true, "TLog rejects an oversized Native CDC version", probe::decoration::rare);
+		CODE_PROBE(true, "TLog rejects an oversized Native CDC version");
 		TraceEvent(SevWarn, "TLogPeekVersionExceedsByteLimit", logData->logId)
 		    .detail("Tag", reqTag)
 		    .detail("ReqBegin", reqBegin)
@@ -3275,7 +3276,7 @@ static void throwLowDiskTLogRecoveryFailed(TLogData* self,
 	    .detail("QueueDiskBytesTotal", queueBytes.total)
 	    .detail("Version", ver)
 	    .detail("Action", "FailRecoveryAndRecruitNewTLogs");
-	CODE_PROBE(true, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO");
+	CODE_PROBE(true, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
 	throw recruitment_failed();
 }
 
@@ -3307,7 +3308,7 @@ static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> log
 			return;
 		}
 	}
-	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
+	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
 	// Outside speedUpSimulation, fail recovery and temporarily exclude this worker from TLog recruitment until disk
 	// space recovers.
 	throwLowDiskTLogRecoveryFailed(self, logData, ver, minAvailableSpaceRatio, kvStoreBytes, queueBytes);

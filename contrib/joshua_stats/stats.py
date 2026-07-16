@@ -1,7 +1,6 @@
 import xml.etree.ElementTree as ET
 import numpy as np
 import matplotlib.pyplot as plt
-import io
 import sys
 
 FONT_SIZE = 16

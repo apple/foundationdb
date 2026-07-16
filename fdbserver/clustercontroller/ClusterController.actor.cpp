@@ -328,12 +328,20 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	std::vector<WorkerDetails> workers =
 	    cluster->getWorkersForRoleInDatacenter(targetDcId, recruitment::LogRouter, tagIds.size(), db->config, id_used);
 
-	if (workers.size() < tagIds.size()) {
+	if (workers.empty()) {
 		TraceEvent(SevWarn, "NotEnoughWorkersForLogRouters", cluster->id)
 		    .detail("Required", tagIds.size())
 		    .detail("Available", workers.size())
 		    .detail("TargetDcId", targetDcId);
 		throw recruitment_failed();
+	}
+	if (workers.size() < tagIds.size()) {
+		CODE_PROBE(true, "Recruit partial replacement log routers");
+		TraceEvent(SevWarn, "PartialWorkersForLogRouters", cluster->id)
+		    .detail("Required", tagIds.size())
+		    .detail("Available", workers.size())
+		    .detail("TargetDcId", targetDcId);
+		tagIds.resize(workers.size());
 	}
 
 	// Replacement log routers will determine their own start version by querying
@@ -504,12 +512,9 @@ ACTOR Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
 			}
 		} catch (Error& e) {
 			if (strcmp(workerName, "LogRouter") == 0) {
-				// the probe macro prefers constant strings, so we can't combine
-				// log router and backup worker into one macro.
 				CODE_PROBE(true, "LogRouter re-recruitment failed");
 			} else {
 				ASSERT(strcmp(workerName, "BackupWorker") == 0);
-				CODE_PROBE(true, "BackupWorker re-recruitment failed");
 			}
 			TraceEvent(SevWarnAlways, (std::string(workerName) + "MonitoringRecruitmentFailed").c_str(), self->id)
 			    .error(e)
@@ -671,8 +676,7 @@ Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
 			// replacement endpoint is being published.
 			co_await reassignNativeCdcStreams(self->db.db, failedProxy.id(), replacement.id());
 			CODE_PROBE(replacementIndex + 1 < failedIndexes.size(),
-			           "CDC proxy replacement is published before recruiting another failed proxy",
-			           probe::decoration::rare);
+			           "CDC proxy replacement is published before recruiting another failed proxy");
 		}
 	}
 }
@@ -2237,7 +2241,7 @@ Future<Void> monitorCDCProxyAssignmentsPass(ClusterControllerData* self) {
 						tr.clear(cdcProxyKeyFor(streamId, proxyId));
 						tr.set(cdcProxyKeyFor(streamId, resolvedProxyId), Value());
 						repairedAssignment = true;
-						CODE_PROBE(true, "CDC stream assignment is repaired after owner loss", probe::decoration::rare);
+						CODE_PROBE(true, "CDC stream assignment is repaired after owner loss");
 						TraceEvent("CDCProxyAssignmentRepaired")
 						    .detail("StreamId", streamId)
 						    .detail("OldCDCProxyID", proxyId)
@@ -2277,8 +2281,7 @@ Future<Void> monitorCDCProxyAssignmentsPass(ClusterControllerData* self) {
 			    .detail("ClientAssignmentCount", db->clientInfo->get().streamToCDCProxyId.size());
 
 			if (!streamToCDCProxyId.empty() && availableProxies.empty()) {
-				CODE_PROBE(
-				    true, "CDC assignments wait while no proxy endpoints are published", probe::decoration::rare);
+				CODE_PROBE(true, "CDC assignments wait while no proxy endpoints are published");
 				co_await tr.commit();
 				co_await (endpointChangeFuture || assignmentChangeFuture);
 				co_return;
@@ -3474,6 +3477,59 @@ void addProcessesToSameDC(ClusterControllerData& self, const std::vector<Network
 		const bool added = self.addr_locality.insert({ process, locality }).second;
 		ASSERT(added);
 	}
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ignoreStaleWorkerRegistration") {
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	LocalityData workerLocality;
+	workerLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "registered-worker" }));
+	WorkerInterface worker(workerLocality);
+	worker.initEndpoints();
+	worker.storage.getEndpoint(TaskPriority::Worker);
+
+	// Establish the newer registration and its DB-info endpoint before delivering an older update.
+	RegisterWorkerRequest current;
+	current.wi = worker;
+	current.initialClass = ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource);
+	current.processClass = current.initialClass;
+	current.generation = 2;
+	current.degraded = false;
+	current.recoveredDiskFiles = true;
+	current.issues.push_back_deep(current.issues.arena(), "current-issue"_sr);
+	registerWorker(current, &data);
+
+	const auto processId = worker.locality.processId();
+	ASSERT(processId.present());
+	ASSERT(data.id_worker.contains(processId));
+	ASSERT(data.updateDBInfoEndpoints.contains(worker.updateServerDBInfo.getEndpoint()));
+
+	// Contradict every mutable field so accepting the stale generation would be observable.
+	RegisterWorkerRequest stale;
+	stale.wi = worker;
+	stale.initialClass = ProcessClass(ProcessClass::LogClass, ProcessClass::CommandLineSource);
+	stale.processClass = stale.initialClass;
+	stale.generation = 1;
+	stale.degraded = true;
+	stale.recoveredDiskFiles = false;
+	stale.issues.push_back_deep(stale.issues.arena(), "stale-issue"_sr);
+	registerWorker(stale, &data);
+
+	auto& registered = data.id_worker[processId];
+	ASSERT_EQ(registered.gen, current.generation);
+	ASSERT(registered.details.interf.id() == worker.id());
+	ASSERT(registered.initialClass == current.initialClass);
+	ASSERT(registered.details.processClass == current.processClass);
+	ASSERT(!registered.details.degraded);
+	ASSERT(registered.details.recoveredDiskFiles);
+	ASSERT_EQ(registered.issues.size(), 1);
+	ASSERT(registered.issues[0] == "current-issue"_sr);
+	ASSERT(data.updateDBInfoEndpoints.contains(worker.updateServerDBInfo.getEndpoint()));
+	ASSERT(!data.removedDBInfoEndpoints.contains(worker.updateServerDBInfo.getEndpoint()));
+	return Void();
 }
 
 // Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth`

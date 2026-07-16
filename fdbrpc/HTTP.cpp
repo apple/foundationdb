@@ -321,7 +321,10 @@ Future<Void> read_http_response_headers(Reference<IConnection> conn, Headers* he
 			*pos += valueStart;
 		} else {
 			// Malformed header line (at least according to this simple parsing)
-			TraceEvent(SevError, "HTTPReadHeadersMalformed").detail("Buffer", *buf).detail("Pos", *pos);
+			TraceEvent(SevError, "HTTPReadHeadersMalformed")
+			    .setMaxFieldLength(495)
+			    .detail("Buffer", *buf)
+			    .detail("Pos", *pos);
 			throw http_bad_response();
 		}
 
@@ -334,7 +337,10 @@ Future<Void> read_http_response_headers(Reference<IConnection> conn, Headers* he
 			*pos += len;
 		} else {
 			// Malformed header line (at least according to this simple parsing)
-			TraceEvent(SevError, "HTTPReadHeadersMalformed").detail("Buffer", *buf).detail("Pos", *pos);
+			TraceEvent(SevError, "HTTPReadHeadersMalformed")
+			    .setMaxFieldLength(495)
+			    .detail("Buffer", *buf)
+			    .detail("Pos", *pos);
 			throw http_bad_response();
 		}
 
@@ -516,7 +522,11 @@ Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Reference<ICo
 	}
 
 	if (ss && !ss.eof()) {
-		TraceEvent(SevWarn, "HTTPRequestExtraData").detail("Buffer", buf).detail("Pos", pos).detail("LineLen", lineLen);
+		TraceEvent(SevWarn, "HTTPRequestExtraData")
+		    .setMaxFieldLength(495)
+		    .detail("Buffer", buf)
+		    .detail("Pos", pos)
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 

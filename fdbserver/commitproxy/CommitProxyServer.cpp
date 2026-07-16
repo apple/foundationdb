@@ -65,6 +65,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/network.h"
 
 using WriteMutationRefVar = std::variant<MutationRef, VectorRef<MutationRef>>;
@@ -2193,6 +2194,9 @@ Future<Void> commitBatch(ProxyCommitData* pCommitData,
 	try {
 		co_await timeoutError(commit, SERVER_KNOBS->COMMIT_PROXY_LIVENESS_TIMEOUT);
 	} catch (Error& err) {
+		if (err.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid)
 		    .detail("Stage", context.stage)
 		    .detail("ErrorCode", err.code());
@@ -2729,6 +2733,50 @@ public:
 
 	Future<Void> run() { co_await race(receiveExpireRequests(), receiveExpectedCounts(), purgeOldEntries()); }
 };
+
+TEST_CASE("/fdbserver/commitproxy/IdempotencyIdsExpireServer/ExpireBeforeExpectedCount") {
+	constexpr Version version = 100;
+	constexpr uint8_t firstBatch = 1;
+	constexpr uint8_t secondBatch = 2;
+	PublicRequestStream<ExpireIdempotencyIdRequest> expireRequests;
+	PromiseStream<ExpectedIdempotencyIdCountForKey> expectedCounts;
+	Standalone<VectorRef<MutationRef>> clears;
+	IdempotencyIdsExpireServer expireServer(expireRequests, expectedCounts, &clears);
+	Future<Void> server = expireServer.run();
+
+	// Expire requests can arrive before their expected counts; neither batch may be cleared yet.
+	expireRequests.send(ExpireIdempotencyIdRequest(version, firstBatch));
+	expireRequests.send(ExpireIdempotencyIdRequest(version, firstBatch));
+	expireRequests.send(ExpireIdempotencyIdRequest(version, secondBatch));
+	co_await yield();
+	ASSERT(!server.isReady());
+	ASSERT(clears.empty());
+
+	// The first batch is complete once counts arrive, while the second is still one request short.
+	expectedCounts.send(ExpectedIdempotencyIdCountForKey(version, 2, firstBatch));
+	expectedCounts.send(ExpectedIdempotencyIdCountForKey(version, 2, secondBatch));
+	co_await yield();
+	ASSERT(!server.isReady());
+	ASSERT_EQ(clears.size(), 1);
+
+	Arena expectedArena;
+	auto firstRange = makeIdempotencySingleKeyRange(expectedArena, version, firstBatch);
+	ASSERT_EQ(clears[0].type, MutationRef::ClearRange);
+	ASSERT(clears[0].param1 == firstRange.begin);
+	ASSERT(clears[0].param2 == firstRange.end);
+
+	// Completing the second batch must emit its distinct clear range.
+	expireRequests.send(ExpireIdempotencyIdRequest(version, secondBatch));
+	co_await yield();
+	ASSERT(!server.isReady());
+	ASSERT_EQ(clears.size(), 2);
+
+	auto secondRange = makeIdempotencySingleKeyRange(expectedArena, version, secondBatch);
+	ASSERT_EQ(clears[1].type, MutationRef::ClearRange);
+	ASSERT(clears[1].param1 == secondRange.begin);
+	ASSERT(clears[1].param2 == secondRange.end);
+	server.cancel();
+}
 
 struct TransactionStateResolveContext {
 	// Maximum sequence for txnStateRequest, this is defined when the request last flag is set.

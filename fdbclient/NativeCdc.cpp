@@ -47,7 +47,7 @@ bool validNativeCdcTagCount(int tagCount) {
 
 void validateNativeCdcEnabled(bool enabled) {
 	if (!enabled) {
-		CODE_PROBE(true, "Native CDC registration rejected while feature disabled", probe::decoration::rare);
+		CODE_PROBE(true, "Native CDC registration rejected while feature disabled");
 		throw client_invalid_operation();
 	}
 }
@@ -111,23 +111,13 @@ Future<Optional<UID>> getNativeCdcProxyAssignment(Transaction* tr, CDCStreamId s
 }
 
 Future<Tag> getNativeCdcCurrentTag(Transaction* tr, CDCStreamId streamId) {
-	Optional<Tag> currentTag;
-	const KeyRange historyRange = cdcTagHistoryRangeFor(streamId);
-	Key begin = historyRange.begin;
-	while (begin < historyRange.end) {
-		RangeResult history = co_await tr->getRange(KeyRangeRef(begin, historyRange.end), CLIENT_KNOBS->TOO_MANY);
-		for (const auto& assignment : history) {
-			currentTag = decodeCDCTagHistoryKey(assignment.key).tag;
-		}
-		if (!history.more) {
-			break;
-		}
-		begin = keyAfter(history.back().key);
-	}
-	if (!currentTag.present()) {
+	// Tag-history keys sort by their big-endian assignment version, so the final
+	// key in this stream's prefix range contains its current tag.
+	RangeResult history = co_await tr->getRange(cdcTagHistoryRangeFor(streamId), 1, Snapshot::False, Reverse::True);
+	if (history.empty()) {
 		throw client_invalid_operation();
 	}
-	co_return currentTag.get();
+	co_return decodeCDCTagHistoryKey(history.front().key).tag;
 }
 
 // TODO: Persist current per-tag ownership so registration does not reconstruct it by scanning all active streams.
@@ -791,7 +781,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 				if (!retryNativeCdcProxyRequest(error)) {
 					throw;
 				}
-				CODE_PROBE(true, "Native CDC consume retries after proxy request failure", probe::decoration::rare);
+				CODE_PROBE(true, "Native CDC consume retries after proxy request failure");
 			}
 			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
 		}

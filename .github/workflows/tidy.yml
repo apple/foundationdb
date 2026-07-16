@@ -62,7 +62,7 @@ jobs:
         # clang-tidy is roughly as slow as compiling per-file, so check only touched files
         shell: bash
         run: |
-          CHANGED=$(git diff --name-only origin/${{github.event.pull_request.base.ref}}...)
+          CHANGED=$(git diff --name-only --diff-filter=d origin/${{github.event.pull_request.base.ref}}...)
           printf "Files changed:\n%s\n" "$CHANGED"
           echo
           PASSED=true
@@ -73,6 +73,9 @@ jobs:
             fi
             if [[ $FILE == *.actor.* ]]; then
               continue  # actor syntax is not plain c++
+            fi
+            if [[ $FILE == flow/include/flow/CoroutinesImpl.h ]]; then
+              continue  # internal implementation header, included only from Coroutines.h
             fi
             # Keep vendored external dependencies as upstream snapshots.
             case "$FILE" in
