@@ -23,10 +23,18 @@
 """Documentation for this API can be found at
 https://apple.github.io/foundationdb/api-python.html"""
 
+from __future__ import annotations
+
+from typing import Generator, Iterator, Union
+
 from fdb import impl as _impl
 
 
-def _get_boundary_keys(db_or_tr, begin, end):
+def _get_boundary_keys(
+    db_or_tr: Union[_impl.Database, _impl.Transaction],
+    begin: bytes,
+    end: bytes,
+) -> Generator[bytes, None, None]:
     if isinstance(db_or_tr, _impl.Transaction):
         tr = db_or_tr.db.create_transaction()
         # This does not guarantee transactionality because of the exception handling below,
@@ -58,20 +66,28 @@ def _get_boundary_keys(db_or_tr, begin, end):
                 tr.on_error(e).wait()
 
 
-def get_boundary_keys(db_or_tr, begin, end):
+def get_boundary_keys(
+    db_or_tr: Union[_impl.Database, _impl.Transaction],
+    begin: bytes,
+    end: bytes,
+) -> Iterator[bytes]:
     begin = _impl.keyToBytes(begin)
     end = _impl.keyToBytes(end)
 
     gen = _get_boundary_keys(db_or_tr, begin, end)
     try:
         next(gen)
-    except StopIteration:  # if _get_boundary_keys() never yields a value, e.g. begin > end
+    except (
+        StopIteration
+    ):  # if _get_boundary_keys() never yields a value, e.g. begin > end
         return (x for x in list())
     return gen
 
 
 @_impl.transactional
-def get_addresses_for_key(tr, key):
+def get_addresses_for_key(
+    tr: Union[_impl.Transaction, _impl.TransactionRead], key: bytes
+) -> _impl.FutureStringArray:
     keyBytes = _impl.keyToBytes(key)
     return _impl.FutureStringArray(
         tr.capi.fdb_transaction_get_addresses_for_key(
