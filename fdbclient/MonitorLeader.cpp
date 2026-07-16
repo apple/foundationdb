@@ -29,6 +29,8 @@
 #include "flow/IConnection.h"
 #include "flow/CoroUtils.h"
 
+#include <compare>
+
 namespace {
 
 std::string trim(std::string const& connectionString) {
@@ -544,6 +546,8 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 		UID maskedChangeID;
 		UID changeID;
 		int nomineeIndex;
+
+		std::strong_ordering operator<=>(MaskedNominee const&) const = default;
 	};
 
 	std::vector<MaskedNominee> maskedNominees;
@@ -560,12 +564,7 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 	if (maskedNominees.empty())
 		return Optional<std::pair<LeaderInfo, bool>>();
 
-	std::sort(maskedNominees.begin(), maskedNominees.end(), [](const MaskedNominee& l, const MaskedNominee& r) {
-		if (l.maskedChangeID != r.maskedChangeID) {
-			return l.maskedChangeID < r.maskedChangeID;
-		}
-		return l.changeID < r.changeID;
-	});
+	std::sort(maskedNominees.begin(), maskedNominees.end());
 
 	int bestCount = 1;
 	int bestIdx = 0;
