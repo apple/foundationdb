@@ -88,7 +88,6 @@
 #include "flow/ChaosMetrics.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "flow/ApiVersion.h"
 #include "fdbctl/ControlService.h"
 
 #ifdef __linux__
@@ -96,7 +95,6 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
 #endif
 #if defined(__linux__) || defined(__FreeBSD__)
 #ifdef USE_GPERFTOOLS

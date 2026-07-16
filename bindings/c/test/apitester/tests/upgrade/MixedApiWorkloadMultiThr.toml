@@ -1,8 +1,8 @@
 # Mixed workload for the C API upgrade/wiggle tests (fdb_c_wiggle_only,
 # fdb_c_upgrade_from_prev*, fdb_c_wiggle_and_upgrade, fdb_c_upgrade_to_future_version).
 #
-# minTxTimeoutMs/maxTxTimeoutMs give every transactional workload a timeout
-# backstop (which also enables restartOnTimeout in the executor). Without it, a
+# minTxTimeoutMs/maxTxTimeoutMs give timeout-safe workloads a timeout backstop
+# (which also enables restartOnTimeout in the executor). Without it, a
 # request whose reply never arrives across a wiggle/upgrade (coordinator change +
 # storage re-recruitment can leave an in-flight request targeting a stale endpoint
 # token, which FlowTransport drops silently and never errors) leaves the
@@ -12,6 +12,11 @@
 # workload recovers. The range is kept well under the 30s progress-check window so
 # the retry completes in time, and above normal op latency so healthy ops are
 # unaffected.
+#
+# ApiCorrectness is intentionally omitted: a timed-out write can still commit
+# while its local correctness oracle remains unchanged, causing false
+# randomGetKeyOp and range mismatches on subsequent reads. Correctness without
+# transaction timeouts is covered by the dedicated CApiCorrectness tests.
 
 [[test]]
 title = 'Mixed Workload for Upgrade Tests with a Multi-Threaded Client'
@@ -26,19 +31,6 @@ minClientThreads = 2
 maxClientThreads = 8
 minClients = 2
 maxClients = 8
-
-    [[test.workload]]
-    name = 'ApiCorrectness'
-    minKeyLength = 1
-    maxKeyLength = 64
-    minValueLength = 1
-    maxValueLength = 1000
-    maxKeysPerTransaction = 50
-    initialSize = 100
-    runUntilStop = true
-    readExistingKeysRatio = 0.9
-    minTxTimeoutMs = 2000
-    maxTxTimeoutMs = 10000
 
     [[test.workload]]
     name = 'CancelTransaction'

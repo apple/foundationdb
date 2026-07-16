@@ -193,6 +193,27 @@ struct SaidHelloTaskFunc : TaskFuncBase {
 StringRef SaidHelloTaskFunc::name = "SaidHello"_sr;
 REGISTER_TASKFUNC(SaidHelloTaskFunc);
 
+struct CancelledTaskFunc : TaskFuncBase {
+	static StringRef name;
+	static constexpr uint32_t version = 1;
+
+	StringRef getName() const override { return name; }
+	Future<Void> execute(Database cx,
+	                     Reference<TaskBucket> tb,
+	                     Reference<FutureBucket> fb,
+	                     Reference<Task> task) override {
+		return actor_cancelled();
+	}
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr,
+	                    Reference<TaskBucket> tb,
+	                    Reference<FutureBucket> fb,
+	                    Reference<Task> task) override {
+		return Void();
+	}
+};
+StringRef CancelledTaskFunc::name = "TaskBucketCorrectnessCancelled"_sr;
+REGISTER_TASKFUNC(CancelledTaskFunc);
+
 // A workload which test the correctness of TaskBucket
 struct TaskBucketCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "TaskBucketCorrectness";
@@ -243,6 +264,12 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 			if (clientId == 0) {
 				TraceEvent("TaskBucketCorrectness").detail("ClearingDb", "...");
 				co_await taskBucket->clear(cx);
+
+				Reference<Task> cancelledTask =
+				    makeReference<Task>(CancelledTaskFunc::name, CancelledTaskFunc::version, StringRef(), 0);
+				Future<bool> cancelledResult = taskBucket->doTask(cx, futureBucket, cancelledTask);
+				ASSERT(cancelledResult.isReady() && cancelledResult.isError());
+				ASSERT_EQ(cancelledResult.getError().code(), error_code_actor_cancelled);
 
 				TraceEvent("TaskBucketCorrectness").detail("AddingTasks", "...");
 				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {

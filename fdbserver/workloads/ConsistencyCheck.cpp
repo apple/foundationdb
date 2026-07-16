@@ -35,7 +35,6 @@
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/core/StorageMetrics.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/TSSMappingUtil.h"
 #include "flow/DeterministicRandom.h"
@@ -1128,8 +1127,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		if (!g_network->isSimulated()) {
 			return true;
 		}
-
-		CODE_PROBE(self->performQuiescentChecks, "Checking for single singletons");
 
 		std::vector<ISimulator::ProcessInfo*> allProcesses = g_simulator->getAllProcesses();
 
