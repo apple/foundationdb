@@ -3088,7 +3088,11 @@ struct DDQueueImpl {
 			error = e;
 		}
 		// A relocator can signal an error inline while launchQueuedWork() is repairing its maps. Keep DD alive
-		// until that mutation finishes before propagating the error and tearing the queue down.
+		// until that mutation finishes before propagating the error and tearing the queue down. Preserve the
+		// immediate error path when no mutation is active, since taking an available FlowLock still yields.
+		if (error.isValid() && state->queueMutationLock.available() > 0) {
+			throw error;
+		}
 		co_await state->queueMutationLock.take();
 		FlowLock::Releaser lockGuard(state->queueMutationLock);
 		if (error.isValid()) {
@@ -3301,5 +3305,12 @@ TEST_CASE("/DataDistribution/DDQueue/SerializeRelocatorError") {
 		observed = e;
 	}
 	ASSERT(observed.code() == error_code_movekeys_conflict);
+
+	Promise<Void> immediateError;
+	Future<Void> immediate = DDQueueImpl::waitAndValidate(&state, immediateError.getFuture());
+	immediateError.sendError(movekeys_conflict());
+	ASSERT(immediate.isReady());
+	ASSERT(immediate.isError());
+	ASSERT(immediate.getError().code() == error_code_movekeys_conflict);
 	co_return;
 }
