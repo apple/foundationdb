@@ -2392,7 +2392,7 @@ Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
 		if (res.index() == 0) {
 			changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
 			onChange = self->changingDcIds.onChange();
-		} else if (res.index() == 1) {
+		} else {
 			changeDelay = Never();
 			onChange = self->changingDcIds.onChange();
 
@@ -2437,8 +2437,6 @@ Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
 					}
 				}
 			}
-		} else {
-			UNREACHABLE();
 		}
 	}
 }
