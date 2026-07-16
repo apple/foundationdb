@@ -123,6 +123,10 @@ Future<Void> BackupDescription::resolveVersionTimes(Database cx) {
 		versionTimeMap[minRestorableVersion.get()];
 	if (maxRestorableVersion.present())
 		versionTimeMap[maxRestorableVersion.get()];
+	if (expiredEndVersion.present())
+		versionTimeMap[expiredEndVersion.get()];
+	if (unreliableEndVersion.present())
+		versionTimeMap[unreliableEndVersion.get()];
 
 	return runRYWTransaction(cx,
 	                         [=](Reference<ReadYourWritesTransaction> tr) { return fetchTimes(tr, &versionTimeMap); });
