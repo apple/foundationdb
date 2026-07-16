@@ -25,10 +25,10 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/RYWIterator.h"
 #include "flow/FastRef.h"
 #include "flow/WipedString.h"
 #include <list>
+#include <memory>
 
 // SOMEDAY: Optimize getKey to avoid using getRange
 
@@ -145,7 +145,7 @@ public:
 	[[nodiscard]] Future<Void> onError(Error const& e);
 
 	// These are to permit use as state variables in actors:
-	ReadYourWritesTransaction() : cache(&arena), writes(&arena) {}
+	ReadYourWritesTransaction();
 	void operator=(ReadYourWritesTransaction&& r) noexcept;
 	explicit(false) ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept;
 
@@ -217,11 +217,11 @@ public:
 
 private:
 	friend class RYWImpl;
+	struct RYWState;
 
 	Arena arena;
 	Transaction tr;
-	SnapshotCache cache;
-	WriteMap writes;
+	std::unique_ptr<RYWState> rywState;
 	CoalescedKeyRefRangeMap<bool> readConflicts;
 	Map<Key, std::vector<Reference<Watch>>> watchMap; // Keys that are being watched in this transaction
 	Promise<Void> resetPromise;
@@ -246,10 +246,6 @@ private:
 	Optional<std::string> specialKeySpaceErrorMsg;
 
 	void resetTimeout();
-	void updateConflictMap(KeyRef const& key, WriteMap::iterator& it); // pre: it.segmentContains(key)
-	void updateConflictMap(
-	    KeyRangeRef const& keys,
-	    WriteMap::iterator& it); // pre: it.segmentContains(keys.begin), keys are already inside this->arena
 	void writeRangeToNativeTransaction(KeyRangeRef const& keys);
 
 	void resetRyow(); // doesn't reset the encapsulated transaction, or creation time/retry state
