@@ -38,8 +38,8 @@
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
 #include "DDSharedContext.h"
-#include "fdbserver/datadistributor/DDTeamCollection.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
+#include "DDTeamCollection.h"
+#include "DataDistribution.h"
 #include "DDRelocationQueue.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
@@ -318,7 +318,15 @@ Future<Void> StorageWiggler::startWiggle() {
 }
 
 Future<Void> StorageWiggler::finishWiggle() {
-	metrics.last_wiggle_finish = StorageMetadataType::currentTime();
+	updateFinishWiggleMetrics(StorageMetadataType::currentTime());
+	return runRYWTransaction(
+	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		    return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+	    });
+}
+
+void StorageWiggler::updateFinishWiggleMetrics(double finishTime) {
+	metrics.last_wiggle_finish = finishTime;
 	metrics.finished_wiggle += 1;
 	auto duration = metrics.last_wiggle_finish - metrics.last_wiggle_start;
 	metrics.smoothed_wiggle_duration.setTotal((double)duration);
@@ -329,10 +337,6 @@ Future<Void> StorageWiggler::finishWiggle() {
 		duration = metrics.last_round_finish - metrics.last_round_start;
 		metrics.smoothed_round_duration.setTotal((double)duration);
 	}
-	return runRYWTransaction(
-	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
-	    });
 }
 
 Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
@@ -5482,6 +5486,31 @@ TEST_CASE("/DataDistribution/StorageWiggler/Order") {
 		ASSERT(id == correctOrder[i]);
 	}
 	ASSERT(!wiggler.getNextServerId().present());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/StorageWiggler/FinishUpdatesMetrics") {
+	for (bool finishRound : { false, true }) {
+		StorageWiggler wiggler(nullptr);
+		wiggler.metrics.last_wiggle_start = 100;
+		wiggler.metrics.last_round_start = 80;
+		wiggler.metrics.last_round_finish = 70;
+		wiggler.metrics.finished_wiggle = 2;
+		wiggler.metrics.finished_round = 1;
+		wiggler.metrics.smoothed_wiggle_duration.reset(11);
+		wiggler.metrics.smoothed_round_duration.reset(17);
+		if (!finishRound) {
+			wiggler.addServer(UID(1, 0), StorageMetadataType(79, KeyValueStoreType::SSD_BTREE_V2));
+		}
+
+		wiggler.updateFinishWiggleMetrics(130);
+		ASSERT_EQ(wiggler.metrics.last_wiggle_finish, 130);
+		ASSERT_EQ(wiggler.metrics.finished_wiggle, 3);
+		ASSERT_EQ(wiggler.metrics.smoothed_wiggle_duration.getTotal(), 30);
+		ASSERT_EQ(wiggler.metrics.last_round_finish, finishRound ? 130 : 70);
+		ASSERT_EQ(wiggler.metrics.finished_round, finishRound ? 2 : 1);
+		ASSERT_EQ(wiggler.metrics.smoothed_round_duration.getTotal(), finishRound ? 50 : 17);
+	}
 	return Void();
 }
 

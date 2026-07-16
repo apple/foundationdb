@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
+#include "ShardsAffectedByTeamFailure.h"
 #include "flow/UnitTest.h"
 
 void forceLinkShardsAffectedByTeamFailureTests() {}

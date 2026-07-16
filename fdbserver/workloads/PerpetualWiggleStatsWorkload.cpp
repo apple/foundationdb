@@ -18,15 +18,13 @@
  * limitations under the License.
  */
 
-#include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbserver/datadistributor/DDTxnProcessor.h"
-#include "fdbserver/core/MoveKeys.h"
-#include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/tester/workloads.h"
-#include "fdbclient/VersionedMap.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunRYWTransaction.h"
+#include "fdbclient/StorageWiggleMetrics.h"
+#include "fdbserver/core/MoveKeys.h"
+#include "fdbserver/tester/workloads.h"
 
 // just compare the int part and smoothed duration is enough for the test.
 bool storageWiggleStatsEqual(StorageWiggleMetrics const& a, StorageWiggleMetrics const& b) {
@@ -54,84 +52,6 @@ Future<bool> IssueConfigurationChange(Database cx, std::string config, bool forc
 	co_return true;
 }
 } // namespace
-
-// a wrapper for test protected method
-struct DDTeamCollectionTester : public DDTeamCollection {
-	ActorCollection actors;
-	void resetStorageWiggleState() {
-		wigglingId.reset();
-		storageWiggler = makeReference<StorageWiggler>(this);
-	}
-	Future<Void> testRestoreAndResetStats(StorageWiggleMetrics metrics) {
-		std::cout << "testRestoreAndResetStats ...\n";
-		co_await storageWiggler->restoreStats();
-		ASSERT(storageWiggleStatsEqual(storageWiggler->metrics, metrics));
-		// disable PW
-		{
-			bool success = co_await IssueConfigurationChange(
-			    dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip());
-			if (!success)
-				co_return;
-		}
-
-		// restore from FDB
-		metrics.reset();
-		co_await storageWiggler->restoreStats();
-		ASSERT(storageWiggleStatsEqual(storageWiggler->metrics, metrics));
-	}
-
-	Future<Void> switchPerpetualWiggleWhenDDIsDead(StorageWiggleMetrics metrics) {
-		std::cout << "switchPerpetualWiggleWhenDDIsDead ...\n";
-		co_await storageWiggler->restoreStats();
-		ASSERT(storageWiggleStatsEqual(storageWiggler->metrics, metrics));
-		// disable PW
-		{
-			bool success = co_await IssueConfigurationChange(
-			    dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip());
-			if (!success)
-				co_return;
-		}
-		// enable PW
-		{
-			bool success = co_await IssueConfigurationChange(
-			    dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip());
-			if (!success)
-				co_return;
-		}
-		// restart
-		co_await storageWiggler->restoreStats();
-		metrics.reset();
-		ASSERT(storageWiggleStatsEqual(storageWiggler->metrics, metrics));
-	}
-
-	// reset stats shouldn't be overwritten when PW is disabled
-	Future<Void> finishWiggleAfterPWDisabled(StorageWiggleMetrics metrics) {
-		std::cout << "finishWiggleAfterPWDisabled ...\n";
-		co_await storageWiggler->restoreStats();
-		ASSERT(storageWiggleStatsEqual(storageWiggler->metrics, metrics));
-		// disable PW
-		{
-			bool success = co_await IssueConfigurationChange(
-			    dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip());
-			if (!success)
-				co_return;
-		}
-		co_await storageWiggler->finishWiggle();
-
-		// restart perpetual wiggle
-		{
-			bool success = co_await IssueConfigurationChange(
-			    dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip());
-			if (!success)
-				co_return;
-		}
-		co_await storageWiggler->restoreStats();
-		metrics.reset();
-		ASSERT(storageWiggleStatsEqual(storageWiggler->metrics, metrics));
-	}
-
-	explicit DDTeamCollectionTester(DDTeamCollectionInitParams const& params) : DDTeamCollection(params) {}
-};
 
 StorageWiggleMetrics getRandomWiggleMetrics() {
 	StorageWiggleMetrics res;
@@ -170,6 +90,59 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		});
 	}
 
+	Future<StorageWiggleMetrics> readStorageWiggleMetrics(Database cx) {
+		StorageWiggleData wiggleData;
+		co_return co_await wiggleData.storageWiggleMetrics(PrimaryRegion(true))
+		    .getD(cx.getReference(), Snapshot::False, StorageWiggleMetrics());
+	}
+
+	Future<Void> updateStorageWiggleMetrics(Database cx, StorageWiggleMetrics metrics) {
+		co_await runRYWTransaction(cx, [metrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			StorageWiggleData wiggleData;
+			return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(true));
+		});
+	}
+
+	Future<Void> testRestoreAndResetStats(Database cx, StorageWiggleMetrics metrics) {
+		ASSERT(storageWiggleStatsEqual(co_await readStorageWiggleMetrics(cx), metrics));
+		if (!co_await IssueConfigurationChange(cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())) {
+			co_return;
+		}
+
+		metrics.reset();
+		ASSERT(storageWiggleStatsEqual(co_await readStorageWiggleMetrics(cx), metrics));
+	}
+
+	Future<Void> switchPerpetualWiggleWhenDDIsDead(Database cx, StorageWiggleMetrics metrics) {
+		ASSERT(storageWiggleStatsEqual(co_await readStorageWiggleMetrics(cx), metrics));
+		if (!co_await IssueConfigurationChange(cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())) {
+			co_return;
+		}
+		if (!co_await IssueConfigurationChange(cx, "perpetual_storage_wiggle=1", deterministicRandom()->coinflip())) {
+			co_return;
+		}
+
+		metrics.reset();
+		ASSERT(storageWiggleStatsEqual(co_await readStorageWiggleMetrics(cx), metrics));
+	}
+
+	Future<Void> finishWiggleAfterPWDisabled(Database cx, StorageWiggleMetrics metrics) {
+		ASSERT(storageWiggleStatsEqual(co_await readStorageWiggleMetrics(cx), metrics));
+		if (!co_await IssueConfigurationChange(cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())) {
+			co_return;
+		}
+
+		++metrics.finished_wiggle;
+		++metrics.finished_round;
+		co_await updateStorageWiggleMetrics(cx, metrics);
+
+		if (!co_await IssueConfigurationChange(cx, "perpetual_storage_wiggle=1", deterministicRandom()->coinflip())) {
+			co_return;
+		}
+		metrics.reset();
+		ASSERT(storageWiggleStatsEqual(co_await readStorageWiggleMetrics(cx), metrics));
+	}
+
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			return _setup(cx); // force to disable DD
@@ -187,41 +160,14 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; };
 
 	Future<Void> _start(Database cx) {
-		Reference<IDDTxnProcessor> db = makeReference<DDTxnProcessor>(cx);
-		DatabaseConfiguration conf;
-		DDTeamCollectionTester tester({ db,
-		                                UID(8, 6),
-		                                MoveKeysLock(),
-		                                PromiseStream<RelocateShard>(),
-		                                makeReference<ShardsAffectedByTeamFailure>(),
-		                                conf,
-		                                {},
-		                                {},
-		                                Future<Void>(Void()),
-		                                makeReference<AsyncVar<bool>>(true),
-		                                IsPrimary::True,
-		                                makeReference<AsyncVar<bool>>(false),
-		                                makeReference<AsyncVar<bool>>(false),
-		                                PromiseStream<GetMetricsRequest>(),
-		                                Promise<UID>(),
-		                                PromiseStream<Promise<int>>(),
-		                                PromiseStream<Promise<int64_t>>(),
-		                                PromiseStream<RebalanceStorageQueueRequest>(),
-		                                makeReference<BulkLoadTaskCollection>(UID(8, 6)) });
-		tester.configuration.storageTeamSize = 3;
-		tester.configuration.perpetualStorageWiggleSpeed = 1;
+		co_await prepareTestEnv(cx);
+		co_await testRestoreAndResetStats(cx, lastMetrics);
 
 		co_await prepareTestEnv(cx);
-		tester.resetStorageWiggleState();
-		co_await tester.testRestoreAndResetStats(lastMetrics);
+		co_await switchPerpetualWiggleWhenDDIsDead(cx, lastMetrics);
 
 		co_await prepareTestEnv(cx);
-		tester.resetStorageWiggleState();
-		co_await tester.switchPerpetualWiggleWhenDDIsDead(lastMetrics);
-
-		co_await prepareTestEnv(cx);
-		tester.resetStorageWiggleState();
-		co_await tester.finishWiggleAfterPWDisabled(lastMetrics);
+		co_await finishWiggleAfterPWDisabled(cx, lastMetrics);
 
 		co_await setDDMode(cx, 1);
 	}

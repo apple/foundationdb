@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbserver/datadistributor/DDTxnProcessor.h"
+#include "DDTxnProcessor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
+#include "DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/TxnCounters.h"
 #include "flow/CoroUtils.h"
