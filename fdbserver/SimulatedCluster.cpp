@@ -60,10 +60,8 @@
 #include "flow/TypeTraits.h"
 #include "flow/FaultInjection.h"
 #include "flow/CodeProbeUtils.h"
-#include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "flow/IConnection.h"
-#include "fdbserver/datadistributor/MockGlobalState.h"
 #include "flow/CoroUtils.h"
 
 #undef max
@@ -76,6 +74,28 @@ using namespace std::literals;
 
 namespace {
 
+class BasicTestConfig {
+public:
+	int minimumReplication = 0;
+	int logAntiQuorum = -1;
+	// Set true to simplify simulation configs for easier debugging.
+	bool simpleConfig = false;
+	// Set true to force a single-region config.
+	bool singleRegion = false;
+	Optional<int> desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, machineCount, coordinators;
+	Optional<SimulationStorageEngine> storageEngineType;
+	// ASAN uses more memory, so tests can lower machineCount specifically for ASAN builds.
+	Optional<int> asanMachineCount;
+};
+
+struct BasicSimulationConfig {
+	int datacenters;
+	int replication_type;
+	int machine_count; // Total, not per DC.
+	int processes_per_machine;
+
+	DatabaseConfiguration db;
+};
 constexpr bool hasRocksDB =
 #ifdef WITH_ROCKSDB
     true
@@ -2220,10 +2240,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           ProtocolVersion protocolVersion) {
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
-
-	if (testConfig.testClass == MOCK_DD_TEST_CLASS) {
-		MockGlobalState::g_mockState()->initializeClusterLayout(simconfig);
-	}
 
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;

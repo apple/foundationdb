@@ -538,6 +538,18 @@ bool serverHasKey(ValueRef storedValue) {
 	return assigned;
 }
 
+// See declaration in SystemData.h.
+bool isServerKeysUnassigned(const ValueRef& value) {
+	// Empty values are KRM boundary sentinels. serverKeysFalse ("not
+	// assigned") is written by both flavors on the drop-side of a move.
+	return value.empty() || value == serverKeysFalse;
+}
+
+// See declaration in SystemData.h.
+bool isServerKeysOldFormatAssigned(const ValueRef& value) {
+	return value == serverKeysTrue || value == serverKeysTrueEmptyRange;
+}
+
 Value serverKeysValue(const UID& id) {
 	if (!id.isValid()) {
 		return serverKeysFalse;
@@ -1934,6 +1946,12 @@ TEST_CASE("/SystemData/NativeCDC") {
 	ASSERT_EQ(decodedTagHistory.version, minVersion);
 	ASSERT_EQ(decodedTagHistory.tag, tag);
 	ASSERT(cdcTagHistoryRangeFor(streamId).contains(tagHistoryKey));
+	// Current-tag lookup reads this range in reverse, so version ordering must
+	// remain lexicographic even across a byte boundary.
+	const Key earlierTagHistoryKey = cdcTagHistoryKeyFor(streamId, 255, Tag(tagLocalityCDC, 9));
+	const Key laterTagHistoryKey = cdcTagHistoryKeyFor(streamId, 256, Tag(tagLocalityCDC, 0));
+	ASSERT(earlierTagHistoryKey < laterTagHistoryKey);
+	ASSERT(cdcTagHistoryRangeFor(streamId).contains(laterTagHistoryKey));
 
 	const Value serializedTagHistory = ObjectWriter::toValue(decodedTagHistory, Unversioned());
 	const auto deserializedTagHistory =

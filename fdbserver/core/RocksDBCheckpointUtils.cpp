@@ -1154,6 +1154,9 @@ Future<Void> fetchCheckpointRange(Database cx,
 				}
 			}
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			Error err = e;
 			if (totalBytes > 0) {
 				status = writer->Finish();
