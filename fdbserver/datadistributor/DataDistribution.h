@@ -31,9 +31,9 @@
 #include "fdbserver/core/ShardMetrics.h"
 #include "fdbserver/core/ShardSizing.h"
 #include "fdbclient/RunRYWTransaction.h"
-#include "fdbserver/datadistributor/DDTxnProcessor.h"
-#include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
-#include "fdbserver/datadistributor/DataDistributionTeam.h"
+#include "DDTxnProcessor.h"
+#include "ShardsAffectedByTeamFailure.h"
+#include "DataDistributionTeam.h"
 #include "fdbclient/StorageWiggleMetrics.h"
 #include "fdbclient/DataDistributionConfig.h"
 #include <boost/heap/policies.hpp>
@@ -807,6 +807,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	// called when start wiggling a SS
 	Future<Void> startWiggle();
 	Future<Void> finishWiggle();
+	void updateFinishWiggleMetrics(double finishTime);
 	bool shouldStartNewRound() const { return metrics.last_round_finish >= metrics.last_round_start; }
 	bool shouldFinishRound() const {
 		if (wiggle_pq.empty())

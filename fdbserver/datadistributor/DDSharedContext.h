@@ -21,9 +21,9 @@
 #define FOUNDATIONDB_DDSHAREDCONTEXT_H
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/MoveKeys.h"
-#include "fdbserver/datadistributor/DDShardTracker.h"
-#include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
-#include "fdbserver/datadistributor/DDTeamCollection.h"
+#include "DDShardTracker.h"
+#include "ShardsAffectedByTeamFailure.h"
+#include "DDTeamCollection.h"
 
 class DDQueue;
 

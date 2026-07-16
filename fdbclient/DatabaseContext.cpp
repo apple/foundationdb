@@ -224,6 +224,7 @@ void DatabaseContext::getLatestCommitVersion(const StorageServerInterface& ssi,
 	if (readVersion > ssVersionVectorCache.getMaxVersion()) {
 		TraceEvent(SevError, "ReadVersionExceedsVersionVectorMax")
 		    .detail("ReadVersion", readVersion)
+		    .setMaxFieldLength(495)
 		    .detail("VersionVector", ssVersionVectorCache.toString());
 		if (g_network->isSimulated()) {
 			ASSERT(false);
@@ -265,6 +266,7 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 		} else {
 			TraceEvent(SevError, "GetLatestCommitVersions")
 			    .detail("ReadVersion", info->readVersion())
+			    .setMaxFieldLength(495)
 			    .detail("VersionVector", ssVersionVectorCache.toString());
 			ASSERT(false);
 		}

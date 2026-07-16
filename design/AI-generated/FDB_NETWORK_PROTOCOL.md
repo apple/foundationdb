@@ -2314,7 +2314,7 @@ Taskbucket workflows that run as normal transactions within the cluster.
 
 **Source:** `fdbserver/commitproxy/CommitProxyServer.actor.cpp`,
 `fdbserver/clustercontroller/ClusterRecovery.cpp`,
-`fdbserver/storageserver/storageserver.actor.cpp`,
+`fdbserver/storageserver/storageserver.cpp`,
 `fdbserver/sequencer/masterserver.cpp`
 
 ### F.1 Transaction Commit Path
