@@ -23,7 +23,7 @@
 #include "flow/FastRef.h"
 #undef ERROR
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/ActorFuzz.h"
+#include "ActorFuzz.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/ThreadHelper.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
