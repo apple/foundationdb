@@ -11,8 +11,4 @@ target_include_directories(
           "${CMAKE_CURRENT_SOURCE_DIR}/.."
           "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-if(FLOW_USE_ZSTD)
-  target_include_directories(flow_bench PRIVATE ${ZSTD_LIB_INCLUDE_DIR})
-endif()
-
 target_link_libraries(flow_bench PRIVATE Threads::Threads fdb_google_benchmark flow)

@@ -36,7 +36,6 @@ void forceLinkVersionVectorTests();
 void forceLinkRESTClientTests();
 void forceLinkRESTUtilsTests();
 void forceLinkCompressedIntTests();
-void forceLinkCompressionUtilsTest();
 void forceLinkAtomicTests();
 void forceLinkIdempotencyIdTests();
 void forceLinkActorCollectionTests();
@@ -117,7 +116,6 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkRESTClientTests();
 		forceLinkRESTUtilsTests();
 		forceLinkCompressedIntTests();
-		forceLinkCompressionUtilsTest();
 		forceLinkAtomicTests();
 		forceLinkIdempotencyIdTests();
 		forceLinkActorCollectionTests();
