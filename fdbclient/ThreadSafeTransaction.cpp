@@ -247,13 +247,14 @@ ThreadFuture<int64_t> ThreadSafeTransaction::getEstimatedRangeSizeBytes(const Ke
 }
 
 ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplitPoints(const KeyRangeRef& range,
-                                                                                       int64_t chunkSize) {
+                                                                                       int64_t chunkSize,
+                                                                                       int limit) {
 	KeyRange r = range;
 
 	ReadYourWritesTransaction* tr = this->tr;
-	return onMainThread([tr, r, chunkSize]() -> Future<Standalone<VectorRef<KeyRef>>> {
+	return onMainThread([tr, r, chunkSize, limit]() -> Future<Standalone<VectorRef<KeyRef>>> {
 		tr->checkDeferredError();
-		return tr->getRangeSplitPoints(r, chunkSize);
+		return tr->getRangeSplitPoints(r, chunkSize, limit);
 	});
 }
 
