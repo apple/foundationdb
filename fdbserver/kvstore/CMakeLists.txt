@@ -15,8 +15,7 @@ target_include_directories(fdbserver_kvstore
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/contrib/sqlite
-    ${CMAKE_SOURCE_DIR}/fdbserver/include
-    ${CMAKE_BINARY_DIR}/fdbserver/include)
+    ${CMAKE_SOURCE_DIR}/fdbserver/include)
 target_link_libraries(fdbserver_kvstore PUBLIC fdbserver_core sqlite)
 
 if(WITH_ROCKSDB)

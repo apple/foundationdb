@@ -53,7 +53,7 @@
 #include "flow/CoroUtils.h"
 
 #include "flow/TLSConfig.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "SimpleOpt/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"

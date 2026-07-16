@@ -61,7 +61,6 @@ struct BulkDumping : TestWorkload {
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		out.insert({ "RandomMoveKeys",
 		             "DataLossRecovery",
-		             "IDDTxnProcessorApiCorrectness",
 		             "PerpetualWiggleStatsWorkload",
 		             "PhysicalShardMove",
 		             "StorageCorruption",

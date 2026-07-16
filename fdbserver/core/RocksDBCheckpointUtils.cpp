@@ -39,7 +39,7 @@
 #include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/IThreadPool.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 
@@ -782,6 +782,7 @@ bool RocksDBSstFileWriter::finish() {
 
 class RocksDBSstFileReader : public IRocksDBSstFileReader {
 public:
+	// NOLINTNEXTLINE(modernize-use-equals-default)
 	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())) {};
 
 	RocksDBSstFileReader(const KeyRange& rangeBoundary, size_t rowLimit, size_t byteLimit)
@@ -1153,6 +1154,9 @@ Future<Void> fetchCheckpointRange(Database cx,
 				}
 			}
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			Error err = e;
 			if (totalBytes > 0) {
 				status = writer->Finish();

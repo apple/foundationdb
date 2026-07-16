@@ -30,7 +30,7 @@
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 
 namespace {
 
