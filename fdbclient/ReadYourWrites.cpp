@@ -144,7 +144,7 @@ public:
 			    co_await getRangeValue(ryw, read.key, firstGreaterOrEqual(ryw->getMaxReadKey()), GetRangeLimits(1), it);
 			if (result.readToBegin)
 				co_return allKeys.begin;
-			if (result.readThroughEnd || !result.size())
+			if (result.readThroughEnd || result.empty())
 				co_return ryw->getMaxReadKey();
 			co_return result[0].key;
 		} else {
@@ -153,7 +153,7 @@ public:
 			    co_await getRangeValueBack(ryw, firstGreaterOrEqual(allKeys.begin), read.key, GetRangeLimits(1), it);
 			if (result.readThroughEnd)
 				co_return ryw->getMaxReadKey();
-			if (result.readToBegin || !result.size())
+			if (result.readToBegin || result.empty())
 				co_return allKeys.begin;
 			co_return result[0].key;
 		}
@@ -201,7 +201,7 @@ public:
 		RangeResult v = co_await ryw->tr.getRange(
 		    read.begin, read.end, read.limits, snapshot, backwards ? Reverse::True : Reverse::False);
 		KeyRef maxKey = ryw->getMaxReadKey();
-		if (v.size() > 0) {
+		if (!v.empty()) {
 			if (!backwards && v[v.size() - 1].key >= maxKey) {
 				RangeResult _v = v;
 				int i = _v.size() - 2;
@@ -229,14 +229,15 @@ public:
 
 	static void addConflictRange(ReadYourWritesTransaction* ryw, GetKeyReq read, WriteMap::iterator& it, Key result) {
 		KeyRangeRef readRange;
-		if (read.key.offset <= 0)
+		if (read.key.offset <= 0) {
 			readRange = KeyRangeRef(KeyRef(ryw->arena, result),
 			                        read.key.orEqual ? keyAfter(read.key.getKey(), ryw->arena)
 			                                         : KeyRef(ryw->arena, read.key.getKey()));
-		else
+		} else {
 			readRange = KeyRangeRef(read.key.orEqual ? keyAfter(read.key.getKey(), ryw->arena)
 			                                         : KeyRef(ryw->arena, read.key.getKey()),
 			                        keyAfter(result, ryw->arena));
+		}
 
 		it.skip(readRange.begin);
 		ryw->updateConflictMap(readRange, it);
@@ -476,7 +477,7 @@ public:
 		if (data.readThroughEnd)
 			endKey = allKeys.end;
 
-		if (data.size()) {
+		if (!data.empty()) {
 			beginKey = std::min(beginKey, data[0].key);
 			if (data.readThrough.present()) {
 				endKey = std::max<ExtStringRef>(endKey, data.readThrough.get());
@@ -511,8 +512,9 @@ public:
 					return singleEmpty;
 				}
 				singleEmpty++;
-			} else
+			} else {
 				b = e;
+			}
 			++it;
 			e = it.endKey();
 		}
@@ -541,8 +543,9 @@ public:
 				singleEmpty++;
 				if (singleEmpty >= maxClears)
 					return maxClears;
-			} else
+			} else {
 				b = e;
+			}
 			++it;
 			e = it.endKey();
 		}
@@ -633,7 +636,7 @@ public:
 			    .detail("Unknown", it.is_unknown_range())
 			    .detail("Requests", requestCount);*/
 
-			if (!result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
+			if (result.empty() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
 				co_return RangeResultRef(false, false);
 			}
 
@@ -645,7 +648,7 @@ public:
 			    (begin.offset >= 1 && begin.getKey() >= ryw->getMaxReadKey())) {
 				if (end.isFirstGreaterOrEqual())
 					break;
-				if (!result.size())
+				if (result.empty())
 					break;
 				Key resolvedEnd = co_await read(
 				    ryw,
@@ -673,7 +676,7 @@ public:
 				break;
 
 			if (it.is_unknown_range()) {
-				if (limits.hasByteLimit() && limits.hasSatisfiedMinRows() && result.size() &&
+				if (limits.hasByteLimit() && limits.hasSatisfiedMinRows() && !result.empty() &&
 				    itemsPastEnd >= 1 - end.offset) {
 					result.more = true;
 					break;
@@ -775,8 +778,9 @@ public:
 				if (count)
 					result.append(result.arena(), start, count);
 				++it;
-			} else
+			} else {
 				++it;
+			}
 		}
 
 		result.more = result.more || limits.isReached();
@@ -805,7 +809,7 @@ public:
 		if (data.readThroughEnd)
 			endKey = allKeys.end;
 
-		if (data.size()) {
+		if (!data.empty()) {
 			if (data.readThrough.present()) {
 				beginKey = std::min(data.readThrough.get(), beginKey);
 			} else {
@@ -840,8 +844,9 @@ public:
 					return singleEmpty;
 				}
 				singleEmpty++;
-			} else
+			} else {
 				e = b;
+			}
 			--it;
 			b = it.beginKey();
 		}
@@ -868,8 +873,9 @@ public:
 				singleEmpty++;
 				if (singleEmpty >= maxClears)
 					return maxClears;
-			} else
+			} else {
 				e = b;
+			}
 			--it;
 			b = it.beginKey();
 		}
@@ -937,7 +943,7 @@ public:
 			    .detail("Kv", it.is_kv())
 			    .detail("Requests", requestCount);*/
 
-			if (!result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
+			if (result.empty() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
 				co_return RangeResultRef(false, false);
 			}
 
@@ -949,7 +955,7 @@ public:
 			    (end.offset <= 1 && end.getKey() == allKeys.begin)) {
 				if (begin.isFirstGreaterOrEqual())
 					break;
-				if (!result.size())
+				if (result.empty())
 					break;
 				Key resolvedBegin = co_await read(
 				    ryw,
@@ -980,7 +986,7 @@ public:
 			}
 
 			if (it.is_unknown_range()) {
-				if (limits.hasByteLimit() && result.size() && itemsPastBegin >= begin.offset - 1) {
+				if (limits.hasByteLimit() && !result.empty() && itemsPastBegin >= begin.offset - 1) {
 					result.more = true;
 					break;
 				}
@@ -1227,7 +1233,7 @@ public:
 			auto itCopy = it;
 			++it;
 
-			ASSERT(itCopy->value.size());
+			ASSERT(!itCopy->value.empty());
 			CODE_PROBE(itCopy->value.size() > 1, "Multiple watches on the same key triggered by RYOW");
 
 			for (int i = 0; i < itCopy->value.size(); i++) {
@@ -1248,7 +1254,7 @@ public:
 				}
 			}
 
-			if (itCopy->value.size() == 0)
+			if (itCopy->value.empty())
 				ryw->watchMap.erase(itCopy);
 		}
 	}
@@ -1342,11 +1348,12 @@ public:
 				ryw->nativeReadRanges = ryw->tr.readConflictRanges();
 				ryw->nativeWriteRanges = ryw->tr.writeConflictRanges();
 				for (const auto& f : ryw->tr.getExtraReadConflictRanges()) {
-					if (f.isReady() && f.get().first < f.get().second)
+					if (f.isReady() && f.get().first < f.get().second) {
 						ryw->nativeReadRanges.push_back(
 						    ryw->nativeReadRanges.arena(),
 						    KeyRangeRef(f.get().first, f.get().second)
 						        .withPrefix(readConflictRangeKeysRange.begin, ryw->nativeReadRanges.arena()));
+					}
 				}
 
 				if (ryw->resetPromise.isSet())
@@ -1481,7 +1488,7 @@ public:
 	}
 
 	static Future<Void> onError(ReadYourWritesTransaction* ryw, Error e) {
-		if (ryw->debugTraces.size() > 0 || ryw->debugMessages.size() > 0) {
+		if (!ryw->debugTraces.empty() || !ryw->debugMessages.empty()) {
 			// printDebugMessages returns a future but will not block if called with an empty second argument
 			ASSERT(printDebugMessages(ryw, {}, e).isReady());
 		}
@@ -2044,10 +2051,11 @@ RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRange
 		for (const auto& range : nativeReadRanges)
 			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 		for (const auto& f : tr.getExtraReadConflictRanges()) {
-			if (f.isReady() && f.get().first < f.get().second)
+			if (f.isReady() && f.get().first < f.get().second) {
 				readConflicts.insert(KeyRangeRef(f.get().first, f.get().second)
 				                         .withPrefix(readConflictRangeKeysRange.begin, result.arena()),
 				                     "1"_sr);
+			}
 		}
 		auto beginIter = readConflicts.rangeContaining(kr.begin);
 		if (beginIter->begin() != kr.begin)
@@ -2074,11 +2082,12 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 		if (it.beginKey() > allKeys.begin)
 			--it;
 		for (; it.beginKey() < strippedWriteRangePrefix.end; ++it) {
-			if (it.is_conflict_range())
+			if (it.is_conflict_range()) {
 				writeConflicts.insert(
 				    KeyRangeRef(it.beginKey().toArena(result.arena()), it.endKey().toArena(result.arena()))
 				        .withPrefix(writeConflictRangeKeysRange.begin, result.arena()),
 				    "1"_sr);
+			}
 		}
 	} else {
 		for (const auto& range : tr.writeConflictRanges())
@@ -2410,7 +2419,7 @@ Future<Void> ReadYourWritesTransaction::commit() {
 		result = RYWImpl::commit(this);
 	}
 
-	return debugMessages.size() > 0 || debugTraces.size() > 0 ? RYWImpl::printDebugMessages(this, result) : result;
+	return !debugMessages.empty() || !debugTraces.empty() ? RYWImpl::printDebugMessages(this, result) : result;
 }
 
 Future<Standalone<StringRef>> ReadYourWritesTransaction::getVersionstamp() {
@@ -2533,7 +2542,7 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcep
 	reading = std::move(r.reading);
 	resetPromise = std::move(r.resetPromise);
 	r.resetPromise = Promise<Void>();
-	deferredError = std::move(r.deferredError);
+	deferredError = r.deferredError;
 	retries = r.retries;
 	approximateSize = r.approximateSize;
 	timeoutActor = r.timeoutActor;
@@ -2554,11 +2563,10 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcep
 }
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept
-  : deferredError(std::move(r.deferredError)), arena(std::move(r.arena)), cache(std::move(r.cache)),
-    writes(std::move(r.writes)), resetPromise(std::move(r.resetPromise)), reading(std::move(r.reading)),
-    retries(r.retries), approximateSize(r.approximateSize), timeoutActor(std::move(r.timeoutActor)),
-    creationTime(r.creationTime), commitStarted(r.commitStarted), transactionDebugInfo(r.transactionDebugInfo),
-    options(r.options) {
+  : deferredError(r.deferredError), arena(std::move(r.arena)), cache(std::move(r.cache)), writes(std::move(r.writes)),
+    resetPromise(std::move(r.resetPromise)), reading(std::move(r.reading)), retries(r.retries),
+    approximateSize(r.approximateSize), timeoutActor(std::move(r.timeoutActor)), creationTime(r.creationTime),
+    commitStarted(r.commitStarted), transactionDebugInfo(r.transactionDebugInfo), options(r.options) {
 	cache.arena = &arena;
 	writes.arena = &arena;
 	tr = std::move(r.tr);
@@ -2637,7 +2645,7 @@ void ReadYourWritesTransaction::cancel() {
 }
 
 void ReadYourWritesTransaction::reset() {
-	if (debugTraces.size() > 0 || debugMessages.size() > 0) {
+	if (!debugTraces.empty() || !debugMessages.empty()) {
 		// printDebugMessages returns a future but will not block if called with an empty second argument
 		ASSERT(RYWImpl::printDebugMessages(this, {}).isReady());
 	}
@@ -2676,7 +2684,7 @@ ReadYourWritesTransaction::~ReadYourWritesTransaction() {
 	if (!resetPromise.isSet())
 		resetPromise.sendError(transaction_cancelled());
 
-	if (debugTraces.size() || debugMessages.size()) {
+	if (!debugTraces.empty() || !debugMessages.empty()) {
 		// printDebugMessages returns a future but will not block if called with an empty second argument
 		[[maybe_unused]] Future<Void> f = RYWImpl::printDebugMessages(this, {});
 	}
@@ -2700,14 +2708,15 @@ void ReadYourWritesTransaction::debugLogRetries(Optional<Error> error) {
 			if (!transactionDebugInfo->transactionName.empty())
 				transactionNameStr =
 				    format(" in transaction '%s'", printable(StringRef(transactionDebugInfo->transactionName)).c_str());
-			if (!g_network->isSimulated()) // Fuzz workload turns this on, but we do not want stderr output in
-			                               // simulation
+			if (!g_network->isSimulated()) { // Fuzz workload turns this on, but we do not want stderr output in
+				                             // simulation
 				fprintf(stderr,
 				        "fdb WARNING: long transaction (%.2fs elapsed%s, %d retries, %s)\n",
 				        elapsed,
 				        transactionNameStr.c_str(),
 				        retries,
 				        committed ? "committed" : error.get().what());
+			}
 			{
 				TraceEvent trace = TraceEvent("LongTransaction");
 				if (error.present())
