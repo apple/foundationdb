@@ -2608,6 +2608,22 @@ Future<Void> expireBackupData(const char* name,
 		} else {
 			fmt::print("All data before version {} has been deleted.\n", endVersion);
 		}
+
+		if (progress.requestedEndVersion != invalidVersion && progress.actualEndVersion != invalidVersion &&
+		    progress.actualEndVersion != progress.requestedEndVersion) {
+			if (progress.actualEndVersion < progress.requestedEndVersion) {
+				fmt::print("NOTE: The requested expiration point (version {0}) fell in the middle of a log "
+				           "file, so it was moved back to version {1} to avoid splitting the file. "
+				           "Data is only guaranteed deleted up to version {1}.\n",
+				           progress.requestedEndVersion,
+				           progress.actualEndVersion);
+			} else {
+				fmt::print("NOTE: Data was already expired up to version {0}, which is at or after the "
+				           "requested version {1}. No additional data was deleted.\n",
+				           progress.actualEndVersion,
+				           progress.requestedEndVersion);
+			}
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;

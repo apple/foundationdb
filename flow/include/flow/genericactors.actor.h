@@ -40,7 +40,6 @@
 #include <list>
 #include <optional>
 #include <type_traits>
-#include <utility>
 
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"

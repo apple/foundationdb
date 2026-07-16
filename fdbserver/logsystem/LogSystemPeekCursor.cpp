@@ -1077,9 +1077,7 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 	}
 	// Live CDC consumers wait for future mutations; finite recovery and tag-history reads must reach their end.
 	const bool tailingCDC = tag.locality == tagLocalityCDC && end == std::numeric_limits<Version>::max();
-	CODE_PROBE(tag.locality == tagLocalityCDC && !tailingCDC,
-	           "CDC finite-range peek returns without blocking",
-	           probe::decoration::rare);
+	CODE_PROBE(tag.locality == tagLocalityCDC && !tailingCDC, "CDC finite-range peek returns without blocking");
 	serverCursors.resize(logSets.size());
 	int maxServers = 0;
 	for (int i = 0; i < logSets.size(); i++) {
@@ -1529,8 +1527,7 @@ Version ReplayMultiCursor::getMinKnownCommittedVersion() const {
 	// gate delivery on committed progress.
 	const Version completedGenerationCommittedVersion = epochEnds.back().version - 1;
 	CODE_PROBE(cursorCommittedVersion < completedGenerationCommittedVersion,
-	           "Replay cursor advances the committed frontier through a completed generation",
-	           probe::decoration::rare);
+	           "Replay cursor advances the committed frontier through a completed generation");
 	return std::max(cursorCommittedVersion, completedGenerationCommittedVersion);
 }
 

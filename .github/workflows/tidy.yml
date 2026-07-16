@@ -62,7 +62,7 @@ jobs:
         # clang-tidy is roughly as slow as compiling per-file, so check only touched files
         shell: bash
         run: |
-          CHANGED=$(git diff --name-only origin/${{github.event.pull_request.base.ref}}...)
+          CHANGED=$(git diff --name-only --diff-filter=d origin/${{github.event.pull_request.base.ref}}...)
           printf "Files changed:\n%s\n" "$CHANGED"
           echo
           PASSED=true
@@ -74,6 +74,9 @@ jobs:
             if [[ $FILE == *.actor.* ]]; then
               continue  # actor syntax is not plain c++
             fi
+            if [[ $FILE == flow/include/flow/CoroutinesImpl.h ]]; then
+              continue  # internal implementation header, included only from Coroutines.h
+            fi
             # Keep vendored external dependencies as upstream snapshots.
             case "$FILE" in
               fdbclient/include/fdbclient/ConvertUTF.h|fdbclient/include/fdbclient/SimpleIni.h|fdbclient/include/fdbclient/json_spirit/*)
@@ -83,6 +86,17 @@ jobs:
                 continue
                 ;;
               flow/include/flow/sse2neon.h|flow/include/flow/xxhash.h)
+                continue
+                ;;
+            esac
+            # These inputs are not parseable as standalone clang-tidy translation units in this workflow:
+            # the RocksDB compile commands refer to headers that are not built here, and the Flow headers depend
+            # on include order from their real consumers.
+            case "$FILE" in
+              fdbserver/core/RocksDBCheckpointUtils.cpp|fdbserver/kvstore/KeyValueStoreRocksDB.cpp|fdbserver/kvstore/KeyValueStoreShardedRocksDB.cpp)
+                continue
+                ;;
+              flow/include/flow/Coroutines.h|flow/include/flow/CoroutinesImpl.h|flow/include/flow/FlowThread.h)
                 continue
                 ;;
             esac

@@ -26,7 +26,7 @@
 #include "flow/Error.h"
 #include "flow/flow.h"
 #include "flow/network.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"

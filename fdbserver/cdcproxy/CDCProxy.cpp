@@ -596,7 +596,7 @@ void CDCProxy::markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, 
 		if (!rawPeekFailureBlocksStream(nextReadVersion, begin)) {
 			continue;
 		}
-		CODE_PROBE(true, "CDC proxy rejects a raw peek larger than its reservation", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy rejects a raw peek larger than its reservation");
 		TraceEvent(SevWarn, "CDCProxyRawPeekExceedsBufferLimit", id)
 		    .detail("Tag", tag->tag)
 		    .detail("StreamId", streamId)
@@ -1035,7 +1035,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 	const int64_t preferredBufferedBatch = limits.get().preferredBufferedBytes;
 	const int64_t passReservation = limits.get().reservationBytes;
 	if (bufferLock.available() < passReservation) {
-		CODE_PROBE(true, "CDC proxy applies shared buffer backpressure", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy applies shared buffer backpressure");
 		peekCapacityContended.trigger();
 	}
 	auto capacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, passReservation),
@@ -1088,9 +1088,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 
 	const Version peekThroughVersion = cursor->hasMessage() ? cursor->version().version : cursor->version().version - 1;
 	const Version throughVersion = committedPeekThrough(peekThroughVersion, cursor->getMinKnownCommittedVersion());
-	CODE_PROBE(throughVersion < peekThroughVersion,
-	           "CDC proxy waits for peeked mutations to become committed",
-	           probe::decoration::rare);
+	CODE_PROBE(throughVersion < peekThroughVersion, "CDC proxy waits for peeked mutations to become committed");
 	if (throughVersion < begin) {
 		co_return CDCBufferTagPassResult::WAIT_FOR_COMMIT;
 	}
@@ -1292,14 +1290,14 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		co_return;
 	}
 	while (!logSystem->get()) {
-		CODE_PROBE(true, "CDC proxy defers pops until a log system is available", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy defers pops until a log system is available");
 		co_await logSystem->onChange();
 	}
 	Reference<LogSystemConsumer> currentLogSystem = logSystem->get();
 	const LogSystemConfig popLogSystemConfig = lastLogSystemConfig;
 	const uint64_t popLogSystemRecoveryCount = lastLogSystemRecoveryCount;
 	if (!hasCompleteLogSystemConfig(popLogSystemConfig)) {
-		CODE_PROBE(true, "CDC proxy defers pops until every expected log set is published", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy defers pops until every expected log set is published");
 		co_return;
 	}
 	if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
@@ -1319,7 +1317,7 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		co_return;
 	}
 	if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
-		CODE_PROBE(true, "CDC proxy retries pops after log system topology changes", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy retries pops after log system topology changes");
 		requestAcknowledgedDataPop();
 		co_return;
 	}
@@ -1330,7 +1328,7 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		    stream->second->minVersion >= minVersion) {
 			continue;
 		}
-		CODE_PROBE(true, "CDC proxy scan reconciles a durable stream acknowledgement", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy scan reconciles a durable stream acknowledgement");
 		reconcileStreamMinVersion(stream->second, minVersion);
 	}
 	const std::unordered_map<Tag, Version>& safePopVersions = popState.safePopVersions;
@@ -1390,7 +1388,7 @@ Future<Void> CDCProxy::monitorAcknowledgedDataPops() {
 			co_await delay(SERVER_KNOBS->CDC_PROXY_POP_MIN_INTERVAL);
 		}
 		popAcknowledgedDataRequests.consume();
-		CODE_PROBE(periodicScan, "CDC proxy periodically scans durable acknowledgement state", probe::decoration::rare);
+		CODE_PROBE(periodicScan, "CDC proxy periodically scans durable acknowledgement state");
 		++popAttempts;
 		// Acknowledgements only make a completed snapshot more conservative, so they are coalesced for a later pass
 		// instead of canceling this one. A log-system config change can add targeted log sets, so it invalidates
@@ -1476,7 +1474,7 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 		if (stream->activeConsumes > 0) {
 			// A stream has one durable acknowledgement frontier, so concurrent logical consumers cannot be
 			// isolated. Reject overlapping server requests rather than duplicating an entire reply arena.
-			CODE_PROBE(true, "CDC proxy rejects concurrent consumers for one stream", probe::decoration::rare);
+			CODE_PROBE(true, "CDC proxy rejects concurrent consumers for one stream");
 			throw client_invalid_operation();
 		}
 		++stream->activeConsumes;
@@ -1485,9 +1483,7 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 			--stream->activeConsumes;
 		});
 		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, request.cursor.streamId, id, true);
-		CODE_PROBE(stream->minVersion < metadata.minVersion,
-		           "Native CDC consume reconciles a durable acknowledgement",
-		           probe::decoration::rare);
+		CODE_PROBE(stream->minVersion < metadata.minVersion, "Native CDC consume reconciles a durable acknowledgement");
 		reconcileStreamMinVersion(stream, metadata.minVersion);
 		if (request.cursor.lastConsumedVersion > stream->bufferedThrough) {
 			// A cursor is trusted only when this owner has delivered through it or when it is covered by the durable
@@ -1768,7 +1764,7 @@ Future<Void> CDCProxy::monitorDBInfo(CDCProxyInterface proxy, uint64_t recoveryC
 	while (true) {
 		co_await dbInfo->onChange();
 		if (dbInfo->get().recoveryCount < recoveryCount) {
-			CODE_PROBE(true, "CDC proxy ignores ServerDBInfo from an older recovery", probe::decoration::rare);
+			CODE_PROBE(true, "CDC proxy ignores ServerDBInfo from an older recovery");
 			continue;
 		}
 		const bool isPublished =

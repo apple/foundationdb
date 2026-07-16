@@ -1381,6 +1381,9 @@ static Future<Void> doProbe(Future<double> probe,
 			                            format("Unable to %s after %d seconds.", description, timeoutSeconds).c_str()));
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		if (isAvailable != nullptr) {
 			*isAvailable = false;
 		}
@@ -2716,6 +2719,9 @@ AsyncResult<JsonBuilderObject> layerStatusFetcher(Database cx,
 							json.absorb(doc.get_obj());
 							co_await yield();
 						} catch (Error& e) {
+							if (e.code() == error_code_actor_cancelled) {
+								throw;
+							}
 							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", docs[j].key);
 						}
 					}

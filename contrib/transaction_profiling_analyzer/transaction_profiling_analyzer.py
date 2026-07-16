@@ -37,10 +37,8 @@ import json
 from json import JSONEncoder
 import logging
 import struct
-from bisect import bisect_left
 from bisect import bisect_right
 import time
-import datetime
 
 PROTOCOL_VERSION_5_2 = 0x0FDB00A552000001
 PROTOCOL_VERSION_6_0 = 0x0FDB00A570010001

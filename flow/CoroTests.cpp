@@ -351,6 +351,98 @@ TEST_CASE("/flow/coro/cancel2") {
 	return Void();
 }
 
+namespace {
+
+// Tracks destruction of locals stored in a detached coroutine frame.
+struct DetachedCoroutineLifetime {
+	explicit DetachedCoroutineLifetime(int* destructions) : destructions(destructions) {}
+	~DetachedCoroutineLifetime() { ++*destructions; }
+
+	int* destructions;
+};
+
+coro::DetachedCoroutine detachedWait(Future<Void> signal, int* completions, int* destructions) {
+	DetachedCoroutineLifetime lifetime(destructions);
+	co_await signal;
+	++*completions;
+}
+
+coro::DetachedCoroutine detachedWaitTwice(Future<Void> first,
+                                          Future<Void> second,
+                                          int* completions,
+                                          int* destructions) {
+	DetachedCoroutineLifetime lifetime(destructions);
+	co_await first;
+	co_await second;
+	++*completions;
+}
+
+coro::DetachedCoroutine detachedThrow(Future<Void> signal, int* destructions) {
+	DetachedCoroutineLifetime lifetime(destructions);
+	co_await signal;
+	throw operation_failed();
+}
+
+} // namespace
+
+TEST_CASE("/flow/coro/detached/completion") {
+	int completions = 0;
+	int destructions = 0;
+
+	Promise<Void> signal;
+	detachedWait(signal.getFuture(), &completions, &destructions);
+	ASSERT_EQ(completions, 0);
+	ASSERT_EQ(destructions, 0);
+	ASSERT(signal.getFutureReferenceCount() > 0);
+
+	signal.send(Void());
+	ASSERT_EQ(completions, 1);
+	ASSERT_EQ(destructions, 1);
+	ASSERT_EQ(signal.getFutureReferenceCount(), 0);
+
+	Future<Void> ready = Void();
+	detachedWait(ready, &completions, &destructions);
+	ASSERT_EQ(completions, 2);
+	ASSERT_EQ(destructions, 2);
+
+	return Void();
+}
+
+TEST_CASE("/flow/coro/detached/multipleAwaits") {
+	int completions = 0;
+	int destructions = 0;
+	Promise<Void> first;
+	Promise<Void> second;
+
+	detachedWaitTwice(first.getFuture(), second.getFuture(), &completions, &destructions);
+	first.send(Void());
+	ASSERT_EQ(completions, 0);
+	ASSERT_EQ(destructions, 0);
+
+	second.send(Void());
+	ASSERT_EQ(completions, 1);
+	ASSERT_EQ(destructions, 1);
+
+	return Void();
+}
+
+TEST_CASE("/flow/coro/detached/errors") {
+	int completions = 0;
+	int destructions = 0;
+	Promise<Void> failedSignal;
+	detachedWait(failedSignal.getFuture(), &completions, &destructions);
+	failedSignal.sendError(operation_failed());
+	ASSERT_EQ(completions, 0);
+	ASSERT_EQ(destructions, 1);
+
+	Promise<Void> bodySignal;
+	detachedThrow(bodySignal.getFuture(), &destructions);
+	bodySignal.send(Void());
+	ASSERT_EQ(destructions, 2);
+
+	return Void();
+}
+
 TEST_CASE("/flow/coro/errorOr/ReadyValue") {
 	ErrorOr<int> result = co_await coro::errorOr(Future<int>(42));
 	ASSERT(result.present());

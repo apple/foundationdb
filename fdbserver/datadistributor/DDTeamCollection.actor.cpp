@@ -25,8 +25,8 @@
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ProcessClassRecruitment.h"
-#include "fdbserver/datadistributor/DDTeamCollection.h"
-#include "fdbserver/datadistributor/DataDistributionTeam.h"
+#include "DDTeamCollection.h"
+#include "DataDistributionTeam.h"
 #include "TCInfo.h"
 #include "ExclusionTracker.h"
 #include "flow/IRandom.h"
@@ -1430,8 +1430,6 @@ public:
 				state std::vector<Future<Void>> otherChanges;
 				std::vector<Promise<Void>> wakeUpTrackers;
 				for (const auto& i : self->server_and_tss_info) {
-					if (self->db->isMocked())
-						continue;
 					if (i.second.getPtr() != server &&
 					    i.second->getLastKnownInterface().address() == server->getLastKnownInterface().address()) {
 						auto& statusInfo = self->server_status.get(i.first);
@@ -2743,6 +2741,7 @@ public:
 	                                      Reference<TSSPairState> tssState) {
 		// SOMEDAY: Cluster controller waits for availability, retry quickly if a server's Locality changes
 		self->recruitingStream.set(self->recruitingStream.get() + 1);
+		bool countedAsRecruiting = true;
 
 		const NetworkAddress& netAddr = candidateWorker.worker.stableAddress();
 		AddressExclusion workerAddr(netAddr.ip, netAddr.port);
@@ -2845,6 +2844,16 @@ public:
 					tssState->markComplete();
 					throw newServer.getError();
 				}
+				// A recruitment_failed reply is definitive that this request will not later deliver a successful
+				// reply, so do not report the cooldown as active recruitment. Unlike request_maybe_delivered,
+				// it is safe to release the ID: if startup reached serverList before failing, waitServerListChange
+				// must be able to discover that entry while the worker locality remains excluded during the retry
+				// delay.
+				if (newServer.isError(error_code_recruitment_failed)) {
+					self->recruitingIds.erase(interfaceId);
+					self->recruitingStream.set(self->recruitingStream.get() - 1);
+					countedAsRecruiting = false;
+				}
 				co_await delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution);
 			}
 
@@ -2943,7 +2952,9 @@ public:
 			CODE_PROBE(true, "SS with pair TSS recruitment failed for some reason");
 		}
 
-		self->recruitingStream.set(self->recruitingStream.get() - 1);
+		if (countedAsRecruiting) {
+			self->recruitingStream.set(self->recruitingStream.get() - 1);
+		}
 		self->restartRecruiting.trigger();
 	}
 
@@ -3528,14 +3539,12 @@ public:
 			// they are always running.
 			self->addActor.send(self->monitorHealthyTeams());
 
-			if (!self->db->isMocked()) {
-				self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
-				self->addActor.send(self->monitorStorageServerRecruitment());
-				self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
-				self->addActor.send(self->trackExcludedServers());
-				self->addActor.send(self->waitHealthyZoneChange());
-				self->addActor.send(self->monitorPerpetualStorageWiggle());
-			}
+			self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
+			self->addActor.send(self->monitorStorageServerRecruitment());
+			self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
+			self->addActor.send(self->trackExcludedServers());
+			self->addActor.send(self->waitHealthyZoneChange());
+			self->addActor.send(self->monitorPerpetualStorageWiggle());
 			// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
 			loop choose {
@@ -4358,7 +4367,6 @@ void DDTeamCollection::fixUnderReplication() {
 }
 
 Future<Void> DDTeamCollection::trackExcludedServers() {
-	ASSERT(!db->isMocked());
 	return DDTeamCollectionImpl::trackExcludedServers(this);
 }
 
@@ -4381,7 +4389,6 @@ Future<Void> DDTeamCollection::perpetualStorageWiggler(AsyncVar<bool>& stopSigna
 }
 
 Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle() {
-	ASSERT(!db->isMocked());
 	return DDTeamCollectionImpl::monitorPerpetualStorageWiggle(this);
 }
 
@@ -4391,7 +4398,6 @@ Future<Void> DDTeamCollection::waitServerListChange(FutureStream<Void> serverRem
 }
 
 Future<Void> DDTeamCollection::waitHealthyZoneChange() {
-	ASSERT(!db->isMocked());
 	return DDTeamCollectionImpl::waitHealthyZoneChange(this);
 }
 
@@ -4440,8 +4446,6 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 }
 
 Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
-	if (db->isMocked())
-		return Never();
 	return DDTeamCollectionImpl::updateStorageMetadata(this, server);
 }
 
@@ -7090,6 +7094,36 @@ public:
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 		ASSERT(expectedServers == selectedServers);
 	}
+
+	static Future<Void> InitializeStorage_RecruitmentFailedCooldownReleasesId() {
+		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 0);
+
+		RecruitStorageReply candidate;
+		const NetworkAddress workerAddress(IPAddress(0x01010101), 4500);
+		candidate.worker.tLog = RequestStream<InitializeTLogRequest>(Endpoint({ workerAddress }, UID(1, 2)));
+		candidate.worker.storage = RequestStream<InitializeStorageRequest>();
+
+		DDEnabledState ddEnabledState;
+		Future<Void> recruitment =
+		    collection->initializeStorage(candidate, ddEnabledState, false, makeReference<TSSPairState>());
+		InitializeStorageRequest request = co_await candidate.worker.storage.getFuture();
+
+		ASSERT(collection->recruitingStream.get() == 1);
+		ASSERT(collection->recruitingIds.contains(request.interfaceId));
+		ASSERT(collection->recruitingLocalities.contains(workerAddress));
+
+		Future<Void> countChanged = collection->recruitingStream.onChange();
+		request.reply.sendError(recruitment_failed());
+		co_await countChanged;
+
+		ASSERT(!recruitment.isReady());
+		ASSERT(collection->recruitingStream.get() == 0);
+		ASSERT(!collection->recruitingIds.contains(request.interfaceId));
+		ASSERT(collection->recruitingLocalities.contains(workerAddress));
+
+		recruitment.cancel();
+		co_await delay(0);
+	}
 };
 
 TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
@@ -7246,5 +7280,10 @@ TEST_CASE("/DataDistribution/GetTeam/PreferWithinShardRange") {
 		return Void();
 	}
 	wait(DDTeamCollectionUnitTest::GetTeam_PreferShardsWithinLimit());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Recruitment/RecruitmentFailedCooldownReleasesId") {
+	wait(DDTeamCollectionUnitTest::InitializeStorage_RecruitmentFailedCooldownReleasesId());
 	return Void();
 }

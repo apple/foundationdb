@@ -37,7 +37,7 @@
 #include "flow/CoroUtils.h"
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 
 #define KEYBACKEDTYPES_DEBUG 0
 #if KEYBACKEDTYPES_DEBUG || !defined(NO_INTELLISENSE)
