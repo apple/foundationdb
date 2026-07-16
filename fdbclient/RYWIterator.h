@@ -61,10 +61,10 @@ public:
 
 	void bypassUnreadableProtection() { bypassUnreadable = true; }
 
-	virtual WriteMap::iterator& extractWriteMapIterator();
 	// Really this should return an iterator by value, but for performance it's convenient to actually grab the internal
 	// one.  Consider copying the return value if performance isn't critical. If you modify the returned iterator, it
 	// invalidates this iterator until the next call to skip()
+	virtual WriteMap::iterator& extractWriteMapIterator();
 
 	void dbg();
 
