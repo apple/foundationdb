@@ -75,7 +75,7 @@ Before ingesting SST files for a task, the storage server clears the target
 shard range and waits for the clear to durably commit. This ensures that
 stale data is not retained when the new SST files are ingested over an
 existing range. The clear-then-ingest sequence is performed per shard inside
-the SS (see ``storageserver.actor.cpp``):
+the SS (see ``storageserver.cpp``):
 
 1. ``getKeyValueStore()->clear(keys)`` — clear the target range
 2. Wait on ``durableVersion`` so the clear is committed before ingest

@@ -31,7 +31,6 @@
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbserver/core/QuietDatabase.h"
-#include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "flow/IRandom.h"
 
 static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 storage_migration_type=aggressive",

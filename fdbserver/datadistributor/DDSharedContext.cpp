@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/datadistributor/DDSharedContext.h"
+#include "DDSharedContext.h"
 
 #include "DDRelocationQueue.h"
 
