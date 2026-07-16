@@ -21,6 +21,7 @@
 #include "flow/UnitTest.h"
 #include "flow/IAsyncFile.h"
 #include "flow/FlowThread.h"
+#include "flow/PriorityMultiLock.h"
 #include "flow/Trace.h"
 #include "flow/TLSConfig.h"
 
@@ -43,6 +44,78 @@
 void forceLinkCoroTests() {}
 
 using namespace std::literals::string_literals;
+
+Future<Void> holdPriorityMultiLock(Reference<PriorityMultiLock> pml, Future<Void> signal) {
+	Optional<PriorityMultiLock::Releaser> lock = pml->tryLock();
+	ASSERT(lock.present());
+	co_await signal;
+}
+
+TEST_CASE("/flow/coro/PriorityMultiLock/tryLock") {
+	auto pml = makeReference<PriorityMultiLock>(1, std::vector<int>{ 1, 1 });
+	Optional<PriorityMultiLock::Releaser> first = pml->tryLock(0);
+	ASSERT(first.present());
+	ASSERT_EQ(pml->getRunnersCount(), 1);
+	ASSERT_EQ(pml->getWaitersCount(), 0);
+
+	Optional<PriorityMultiLock::Releaser> unavailable = pml->tryLock(1);
+	ASSERT(!unavailable.present());
+	ASSERT_EQ(pml->getRunnersCount(), 1);
+	ASSERT_EQ(pml->getWaitersCount(), 0);
+
+	Future<PriorityMultiLock::Lock> waiter = pml->lock(1);
+	ASSERT(!waiter.isReady());
+	ASSERT_EQ(pml->getWaitersCount(), 1);
+	ASSERT(!pml->tryLock(1).present());
+	ASSERT_EQ(pml->getWaitersCount(), 1);
+	first.get().release();
+	PriorityMultiLock::Lock second = co_await waiter;
+	ASSERT_EQ(pml->getRunnersCount(1), 1);
+	ASSERT_EQ(pml->getWaitersCount(), 0);
+	second.release();
+	ASSERT_EQ(pml->getRunnersCount(), 0);
+
+	auto movePml = makeReference<PriorityMultiLock>(2, std::vector<int>{ 1 });
+	Optional<PriorityMultiLock::Releaser> movedFrom = movePml->tryLock();
+	PriorityMultiLock::Releaser moved = std::move(movedFrom.get());
+	ASSERT(!movedFrom.get().isLocked());
+	ASSERT(moved.isLocked());
+	Optional<PriorityMultiLock::Releaser> replaced = movePml->tryLock();
+	ASSERT_EQ(movePml->getRunnersCount(), 2);
+	moved.release();
+	PriorityMultiLock::Releaser replacement = std::move(replaced.get());
+	ASSERT(!replaced.get().isLocked());
+	ASSERT_EQ(movePml->getRunnersCount(), 1);
+	replacement.release();
+	ASSERT_EQ(movePml->getRunnersCount(), 0);
+
+	auto cancelPml = makeReference<PriorityMultiLock>(1, std::vector<int>{ 1 });
+	Promise<Void> never;
+	Future<Void> holder = holdPriorityMultiLock(cancelPml, never.getFuture());
+	Future<PriorityMultiLock::Lock> cancelWaiter = cancelPml->lock();
+	ASSERT(!cancelWaiter.isReady());
+	holder.cancel();
+	PriorityMultiLock::Lock afterCancel = co_await cancelWaiter;
+	ASSERT_EQ(cancelPml->getRunnersCount(), 1);
+	afterCancel.release();
+	ASSERT_EQ(cancelPml->getRunnersCount(), 0);
+
+	auto haltedPml = makeReference<PriorityMultiLock>(1, std::vector<int>{ 1 });
+	Optional<PriorityMultiLock::Releaser> halted = haltedPml->tryLock();
+	haltedPml->halt();
+	ASSERT(!haltedPml->tryLock().present());
+	halted.reset();
+	ASSERT_EQ(haltedPml->getRunnersCount(), 0);
+
+	pml->kill();
+	try {
+		pml->tryLock();
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_broken_promise);
+	}
+	co_return;
+}
 
 TEST_CASE("/flow/coro/buggifiedDelay") {
 	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
@@ -162,6 +235,16 @@ Future<Void> chooseTwoActor(Future<Void> f, Future<Void> g) {
 
 Future<int> consumeOneActor(FutureStream<int> in) {
 	int i = co_await in;
+	co_return i;
+}
+
+Future<int> consumeTemporaryStream(PromiseStream<int>* in) {
+	int i = co_await in->getFuture();
+	co_return i;
+}
+
+Future<int> consumeReferencedStream(FutureStream<int>* in) {
+	int i = co_await *in;
 	co_return i;
 }
 
@@ -1435,6 +1518,65 @@ TEST_CASE("/flow/coro/PromiseStream/move2") {
 	ASSERT(tracker.moved);
 	ASSERT(!movedTracker.moved);
 	ASSERT(movedTracker.copied == 0);
+}
+
+TEST_CASE("/flow/coro/FutureStream/rvalueAwait") {
+	{
+		PromiseStream<int> stream;
+		stream.send(41);
+		Future<int> result = consumeTemporaryStream(&stream);
+		ASSERT(result.isReady() && !result.isError() && result.get() == 41);
+		ASSERT(stream.isEmpty());
+	}
+
+	{
+		PromiseStream<int> stream;
+		Future<int> result = consumeTemporaryStream(&stream);
+		ASSERT(!result.isReady());
+		ASSERT_EQ(stream.getFutureReferenceCount(), 1);
+		stream.send(42);
+		ASSERT(result.isReady() && !result.isError() && result.get() == 42);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+	}
+
+	{
+		PromiseStream<int> stream;
+		stream.sendError(operation_failed());
+		Future<int> result = consumeTemporaryStream(&stream);
+		ASSERT(result.isReady() && result.isError() && result.getError().code() == error_code_operation_failed);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+	}
+
+	{
+		PromiseStream<int> stream;
+		Future<int> result = consumeTemporaryStream(&stream);
+		stream.sendError(operation_failed());
+		ASSERT(result.isReady() && result.isError() && result.getError().code() == error_code_operation_failed);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+	}
+
+	{
+		PromiseStream<int> stream;
+		Future<int> result = consumeTemporaryStream(&stream);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 1);
+		result.cancel();
+		ASSERT(result.isReady() && result.isError() && result.getError().code() == error_code_actor_cancelled);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+	}
+
+	{
+		PromiseStream<int> stream;
+		FutureStream<int> input = stream.getFuture();
+		Future<int> result = consumeReferencedStream(&input);
+		ASSERT(!result.isReady());
+		ASSERT_EQ(stream.getFutureReferenceCount(), 2);
+		input = FutureStream<int>();
+		ASSERT_EQ(stream.getFutureReferenceCount(), 1);
+		stream.send(43);
+		ASSERT(result.isReady() && !result.isError() && result.get() == 43);
+		ASSERT_EQ(stream.getFutureReferenceCount(), 0);
+	}
+	return Void();
 }
 
 TEST_CASE("/flow/coro/AsyncResult/move") {

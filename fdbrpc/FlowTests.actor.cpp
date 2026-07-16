@@ -379,6 +379,27 @@ struct Int {
 		serializer(ar, value);
 	}
 };
+
+template <class T>
+SAV<T>* replyPromiseState(ReplyPromise<T>& promise) {
+	auto* state = promise.extractRawPointer();
+	promise = ReplyPromise<T>(state);
+	return state;
+}
+
+struct ReplyPromiseReuseRequest {
+	constexpr static FileIdentifier file_identifier = 1449982;
+	ReplyPromise<Int> reply;
+	SAV<Int>* defaultState;
+
+	ReplyPromiseReuseRequest() : defaultState(replyPromiseState(reply)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
 } // namespace flow_tests_details
 
 TEST_CASE("/flow/flow/nonserializable futures") {
@@ -447,6 +468,94 @@ TEST_CASE("/flow/flow/networked futures") {
 		ASSERT(remoteInt.getEndpoint() == locInt.getEndpoint());
 	}
 
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state on deserialize") {
+	using flow_tests_details::Int;
+	const Endpoint remote({ NetworkAddress(IPAddress(0x01010101), 1) }, UID(1, 2));
+
+	{
+		ReplyPromise<Int> promise;
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) == original);
+		ASSERT(promise.getEndpoint() == remote);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(17));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 17);
+	}
+
+	{
+		ReplyPromise<Int> promise;
+		Future<Int> oldReply = promise.getFuture();
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		ASSERT(oldReply.isReady() && oldReply.isError() && oldReply.getError().code() == error_code_broken_promise);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(23));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 23);
+	}
+
+	{
+		ReplyPromise<Int> promise;
+		Endpoint local = promise.getEndpoint();
+		ASSERT(local.isValid());
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		ASSERT(promise.getEndpoint() == remote);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(31));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 31);
+	}
+
+	{
+		ReplyPromise<Int> promise(
+		    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(41));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 41);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state binary deserialize") {
+	using flow_tests_details::ReplyPromiseReuseRequest;
+	ReplyPromiseReuseRequest request;
+	ProtocolVersion version = currentProtocolVersion();
+	version.removeObjectSerializerFlag();
+	BinaryWriter writer(IncludeVersion(version));
+	writer << request;
+
+	BinaryReader reader(writer.toValue(), IncludeVersion(version));
+	ReplyPromiseReuseRequest received;
+	reader >> received;
+	ASSERT(flow_tests_details::replyPromiseState(received.reply) == received.defaultState);
+	ASSERT(received.reply.getEndpoint().token == request.reply.getEndpoint().token);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state exact reply") {
+	state RequestStream<flow_tests_details::ReplyPromiseReuseRequest> local;
+	state FutureStream<flow_tests_details::ReplyPromiseReuseRequest> incoming = local.getFuture();
+	state flow_tests_details::ReplyPromiseReuseRequest request;
+	state Future<flow_tests_details::Int> reply = request.reply.getFuture();
+	{
+		RequestStream<flow_tests_details::ReplyPromiseReuseRequest> remote(local.getEndpoint());
+		remote.send(request);
+	}
+
+	state flow_tests_details::ReplyPromiseReuseRequest received = waitNext(incoming);
+	ASSERT(flow_tests_details::replyPromiseState(received.reply) == received.defaultState);
+	received.reply.send(flow_tests_details::Int(59));
+	flow_tests_details::Int value = wait(reply);
+	ASSERT(value.value == 59);
 	return Void();
 }
 

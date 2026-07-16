@@ -1638,7 +1638,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					                     trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr,
 					                     trState->options.enableReplicaConsistencyCheck,
 					                     trState->options.requiredReplicas))) {
-						reply = _reply;
+						reply = std::move(_reply);
 					}
 				}
 				++trState->cx->transactionPhysicalReadsCompleted;
@@ -1671,7 +1671,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 
 			trState->cx->transactionBytesRead += reply.value.present() ? reply.value.get().size() : 0;
 			++trState->cx->transactionKeysRead;
-			return reply.value;
+			return std::move(reply.value);
 		} catch (Error& e) {
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
@@ -1760,7 +1760,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k) {
 					                     trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr,
 					                     trState->options.enableReplicaConsistencyCheck,
 					                     trState->options.requiredReplicas))) {
-						reply = _reply;
+						reply = std::move(_reply);
 					}
 				}
 				++trState->cx->transactionPhysicalReadsCompleted;

@@ -363,6 +363,7 @@ ITracer::~ITracer() = default;
 
 Span& Span::operator=(Span&& o) {
 	if (begin > 0.0 && context.isSampled()) {
+		ensureAddressAttribute();
 		end = g_network->now();
 		g_tracer->trace(*this);
 	}
@@ -391,6 +392,7 @@ Span& Span::operator=(Span&& o) {
 
 Span::~Span() {
 	if (begin > 0.0 && context.isSampled()) {
+		ensureAddressAttribute();
 		end = g_network->now();
 		g_tracer->trace(*this);
 	}
@@ -479,6 +481,47 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	ASSERT(span2.attributes[1] == KeyValueRef("a"_sr, "1"_sr));
 	ASSERT(span2.attributes[2] == KeyValueRef("b"_sr, "2"_sr));
 	ASSERT(span2.attributes[3] == KeyValueRef("c"_sr, "3"_sr));
+	return Void();
+};
+
+TEST_CASE("/flow/Tracing/MoveConstructionPreservesAttributes") {
+	Span source("span_move_attrs"_loc,
+	            SpanContext(deterministicRandom()->randomUniqueID(),
+	                        deterministicRandom()->randomUInt64(),
+	                        TraceFlags::sampled));
+	source.addAttribute("operation"_sr, "getValue"_sr);
+	ASSERT_EQ(source.attributes.size(), 2);
+
+	Span moved(std::move(source));
+	ASSERT_EQ(source.attributes.size(), 0);
+	ASSERT_EQ(moved.attributes.size(), 2);
+	ASSERT_EQ(moved.attributes[0].key, "address"_sr);
+	ASSERT_EQ(moved.attributes[1], KeyValueRef("operation"_sr, "getValue"_sr));
+	return Void();
+};
+
+TEST_CASE("/flow/Tracing/UnsampledSpanSkipsAddress") {
+	Span span("unsampled_span"_loc, SpanContext(UID(1, 2), 3, TraceFlags::unsampled));
+	ASSERT(!span.context.isSampled());
+	ASSERT(span.attributes.empty());
+
+	span.setParent(SpanContext(UID(4, 5), 6, TraceFlags::sampled));
+	ASSERT(span.context.isSampled());
+	ASSERT_EQ(span.attributes.size(), 1);
+	ASSERT_EQ(span.attributes[0].key, "address"_sr);
+
+	span.setParent(SpanContext(UID(7, 8), 9, TraceFlags::unsampled));
+	span.setParent(SpanContext(UID(10, 11), 12, TraceFlags::sampled));
+	ASSERT_EQ(span.attributes.size(), 1);
+
+	Span linked("linked_span"_loc);
+	ASSERT(linked.attributes.empty());
+	linked.addAttribute("operation"_sr, "getValue"_sr);
+	linked.addLink(SpanContext(UID(13, 14), 15, TraceFlags::sampled));
+	ASSERT(linked.context.isSampled());
+	ASSERT_EQ(linked.attributes.size(), 2);
+	ASSERT_EQ(linked.attributes[0], KeyValueRef("operation"_sr, "getValue"_sr));
+	ASSERT_EQ(linked.attributes[1].key, "address"_sr);
 	return Void();
 };
 

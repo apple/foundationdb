@@ -49,6 +49,7 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/ScopeExit.h"
 #include "flow/WatchFile.h"
 #include "flow/IConnection.h"
 #define XXH_INLINE_ALL
@@ -65,7 +66,7 @@ namespace {
 
 NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
 bool g_currentDeliverPeerAddressTrusted = false;
-Future<Void> g_currentDeliveryPeerDisconnect;
+const Future<Void>* g_currentDeliveryPeerDisconnect = nullptr;
 
 } // namespace
 
@@ -617,7 +618,7 @@ static Future<Void> connectionReader(TransportData* transport,
 
 static void sendLocal(TransportData* self, ISerializeSource const& what, const Endpoint& destination);
 static ReliablePacket* sendPacket(TransportData* self,
-                                  Reference<Peer> peer,
+                                  const Reference<Peer>& peer,
                                   ISerializeSource const& what,
                                   const Endpoint& destination,
                                   bool reliable);
@@ -1169,51 +1170,35 @@ static bool checkCompatible(const PeerCompatibilityPolicy& policy, ProtocolVersi
 	}
 }
 
-// This actor looks up the task associated with an endpoint
-// and sends the message to it. The actual deserialization will
+// Looks up the task associated with an endpoint and sends the message to it. The actual deserialization will
 // be done by that task (see NetworkMessageReceiver).
-static Future<Void> deliver(Uncancellable,
-                            TransportData* self,
-                            Endpoint destination,
-                            TaskPriority priority,
-                            ArenaReader reader,
-                            NetworkAddress peerAddress,
-                            bool isTrustedPeer,
-                            InReadSocket inReadSocket,
-                            Future<Void> disconnect) {
-	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
-	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
-	// with a higher priority. ReplyPromiseStream needs to guarantee that messages are received in the order they were
-	// sent, so we are using orderedDelay.
-	// NOTE: don't skip delay(0) when it's local deliver since it could cause out of order object deconstruction.
-	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
-		co_await orderedDelay(0, priority);
-	} else {
-		g_network->setCurrentTask(priority);
-	}
-
+static void deliverNow(TransportData* self,
+                       const Endpoint& destination,
+                       ArenaReader reader,
+                       const NetworkAddress& peerAddress,
+                       bool isTrustedPeer,
+                       const Future<Void>& disconnect) {
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver && (isTrustedPeer || receiver->isPublic())) {
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
-			co_return;
+			return;
 		}
 		try {
 			ASSERT(g_currentDeliveryPeerAddress == NetworkAddressList());
 			ASSERT(!g_currentDeliverPeerAddressTrusted);
 			g_currentDeliveryPeerAddress = destination.addresses;
 			g_currentDeliverPeerAddressTrusted = isTrustedPeer;
-			g_currentDeliveryPeerDisconnect = disconnect;
+			g_currentDeliveryPeerDisconnect = &disconnect;
+			auto clearDeliveryContext = ScopeExit([]() {
+				g_currentDeliveryPeerAddress = NetworkAddressList();
+				g_currentDeliverPeerAddressTrusted = false;
+				g_currentDeliveryPeerDisconnect = nullptr;
+			});
 			StringRef data = reader.arenaReadAll();
 			ASSERT(data.size() > 8);
-			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
+			ArenaObjectReader objReader(std::move(reader.arena()), data, AssumeVersion(reader.protocolVersion()));
 			receiver->receive(objReader);
-			g_currentDeliveryPeerAddress = NetworkAddressList();
-			g_currentDeliverPeerAddressTrusted = false;
-			g_currentDeliveryPeerDisconnect = Future<Void>();
 		} catch (Error& e) {
-			g_currentDeliveryPeerAddress = NetworkAddressList();
-			g_currentDeliverPeerAddressTrusted = false;
-			g_currentDeliveryPeerDisconnect = Future<Void>();
 			TraceEvent(SevError, "ReceiverError")
 			    .error(e)
 			    .detail("Token", destination.token.toString())
@@ -1257,6 +1242,40 @@ static Future<Void> deliver(Uncancellable,
 	}
 }
 
+static coro::DetachedCoroutine deliverAfterDelay(TransportData* self,
+                                                 Endpoint destination,
+                                                 TaskPriority priority,
+                                                 ArenaReader reader,
+                                                 NetworkAddress peerAddress,
+                                                 bool isTrustedPeer,
+                                                 Future<Void> disconnect) {
+	co_await orderedDelay(0, priority);
+	deliverNow(self, destination, std::move(reader), peerAddress, isTrustedPeer, std::move(disconnect));
+}
+
+static void deliver(TransportData* self,
+                    Endpoint destination,
+                    TaskPriority priority,
+                    ArenaReader reader,
+                    NetworkAddress peerAddress,
+                    bool isTrustedPeer,
+                    InReadSocket inReadSocket,
+                    const Future<Void>& disconnect) {
+	// Preserve ordering and the asynchronous local/lower-priority delivery boundary. Incoming reads at or above
+	// ReadSocket can be delivered synchronously without allocating a coroutine frame.
+	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
+		deliverAfterDelay(self, destination, priority, std::move(reader), peerAddress, isTrustedPeer, disconnect);
+		return;
+	}
+
+	g_network->setCurrentTask(priority);
+	try {
+		deliverNow(self, destination, std::move(reader), peerAddress, isTrustedPeer, disconnect);
+	} catch (...) {
+		// The previous fire-and-forget coroutine stored delivery errors in a result Future that all callers discarded.
+	}
+}
+
 static void scanPackets(TransportData* transport,
                         uint8_t*& unprocessed_begin, // FIXME: why isn't this called `start`?
                         const uint8_t* e, // FIXME: why isn't this called `end`?
@@ -1264,7 +1283,7 @@ static void scanPackets(TransportData* transport,
                         NetworkAddress const& peerAddress,
                         bool isTrustedPeer,
                         ProtocolVersion peerProtocolVersion,
-                        Future<Void> disconnect,
+                        Future<Void> const& disconnect,
                         IsStableConnection isStableConnection) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
@@ -1389,12 +1408,10 @@ static void scanPackets(TransportData* transport,
 		// we ignore packets to unknown endpoints if they're not going to a stream anyways, so we can just
 		// return here. The main place where this seems to happen is if a ReplyPromise is not waited on
 		// long enough.
-		// It would be slightly more elegant/readable to put this if-block into the deliver actor, but if
-		// we have many messages to UnknownEndpoint we want to optimize earlier. As deliver is an actor it
-		// will allocate some state on the heap and this prevents it from doing that.
+		// It would be slightly more elegant/readable to put this if-block into deliver, but if we have many messages
+		// to UnknownEndpoint we want to optimize earlier and avoid scheduling unnecessary delivery work.
 		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) != 0) {
-			deliver(Uncancellable(),
-			        transport,
+			deliver(transport,
 			        Endpoint({ peerAddress }, token),
 			        priority,
 			        std::move(reader),
@@ -1446,6 +1463,7 @@ static Future<Void> connectionReader(TransportData* transport,
 	bool incompatiblePeerCounted = false;
 	NetworkAddress peerAddress;
 	ProtocolVersion peerProtocolVersion;
+	Future<Void> disconnect;
 	bool trusted = transport->allowList(conn->getPeerAddress().ip) && conn->hasTrustedPeer();
 	peerAddress = conn->getPeerAddress();
 
@@ -1603,6 +1621,7 @@ static Future<Void> connectionReader(TransportData* transport,
 							co_await delay(0); // Check for cancellation
 						}
 						peer->protocolVersion->set(peerProtocolVersion);
+						disconnect = peer->disconnect.getFuture();
 					}
 				}
 
@@ -1615,7 +1634,7 @@ static Future<Void> connectionReader(TransportData* transport,
 						            peerAddress,
 						            trusted,
 						            peerProtocolVersion,
-						            peer->disconnect.getFuture(),
+						            disconnect,
 						            IsStableConnection(g_network->isSimulated() && conn->isStableConnection()));
 					} else {
 						unprocessed_begin = unprocessed_end;
@@ -1885,7 +1904,7 @@ Endpoint FlowTransport::loadedEndpoint(const UID& token) {
 }
 
 Future<Void> FlowTransport::loadedDisconnect() {
-	return g_currentDeliveryPeerDisconnect;
+	return g_currentDeliveryPeerDisconnect != nullptr ? *g_currentDeliveryPeerDisconnect : Future<Void>();
 }
 
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
@@ -1961,8 +1980,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	ASSERT(!copy.empty());
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) != 0) {
-		deliver(Uncancellable(),
-		        self,
+		deliver(self,
 		        destination,
 		        priority,
 		        ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion())),
@@ -1974,7 +1992,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 }
 
 static ReliablePacket* sendPacket(TransportData* self,
-                                  Reference<Peer> peer,
+                                  const Reference<Peer>& peer,
                                   ISerializeSource const& what,
                                   const Endpoint& destination,
                                   bool reliable) {

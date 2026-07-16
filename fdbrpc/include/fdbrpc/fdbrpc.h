@@ -86,6 +86,7 @@ public:
 	}
 
 	void setPeerCompatibilityPolicy(const PeerCompatibilityPolicy& policy) { peerCompatibilityPolicy_ = policy; }
+	bool hasPeerCompatibilityPolicy() const { return peerCompatibilityPolicy_.present(); }
 
 	PeerCompatibilityPolicy peerCompatibilityPolicy() const override {
 		return peerCompatibilityPolicy_.orDefault(NetworkMessageReceiver::peerCompatibilityPolicy());
@@ -120,7 +121,7 @@ struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 		if (message.isError()) {
 			SAV<T>::sendErrorAndDelPromiseRef(message.getError());
 		} else {
-			SAV<T>::sendAndDelPromiseRef(message.get().asUnderlyingType());
+			SAV<T>::sendAndDelPromiseRef(std::move(message.get().asUnderlyingType()));
 		}
 	}
 
@@ -134,18 +135,16 @@ public:
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
-    // Swift can't call method that takes in a universal references (U&&),
-    // so provide a callable `send` method that copies the value.
-    void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) {
-        sav->send(valueCopy);
-    }
+	// Swift can't call method that takes in a universal references (U&&),
+	// so provide a callable `send` method that copies the value.
+	void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) { sav->send(valueCopy); }
 	template <class E>
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
 	}
 
 	void send(Never) { sendError(never_reply()); }
-  // SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
+	// SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
 	void sendNever() const { send(Never()); }
 
 	Future<T> getFuture() const {
@@ -168,6 +167,18 @@ public:
 	explicit ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
 	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint) const {
 		return sav->getEndpoint(taskID);
+	}
+	void loadRemoteEndpoint(const Endpoint& endpoint) {
+		// Request deserialization first creates an unused local reply state. Reuse it when it has no observers,
+		// aliases, endpoint, or compatibility policy; all other states retain the original replacement semantics.
+		if (sav != nullptr && sav->canBeSet() && sav->getFutureReferenceCount() == 0 &&
+		    sav->getPromiseReferenceCount() == 1 && !sav->isLocalEndpoint() && !sav->isRemoteEndpoint() &&
+		    !sav->hasPeerCompatibilityPolicy()) {
+			sav->setRemoteEndpoint(endpoint, false);
+		} else {
+			*this = ReplyPromise<T>(endpoint);
+		}
+		networkSender(Uncancellable(), getFuture(), &sav->getRawEndpoint());
 	}
 
 	void operator=(const ReplyPromise& rhs) {
@@ -214,8 +225,7 @@ void load(Ar& ar, ReplyPromise<T>& value) {
 	UID token;
 	ar >> token;
 	Endpoint endpoint = FlowTransport::transport().loadedEndpoint(token);
-	value = ReplyPromise<T>(endpoint);
-	networkSender(Uncancellable(), value.getFuture(), endpoint);
+	value.loadRemoteEndpoint(endpoint);
 }
 
 template <class T>
@@ -226,8 +236,7 @@ struct serializable_traits<ReplyPromise<T>> : std::true_type {
 			UID token;
 			serializer(ar, token);
 			auto endpoint = FlowTransport::transport().loadedEndpoint(token);
-			p = ReplyPromise<T>(endpoint);
-			networkSender(Uncancellable(), p.getFuture(), endpoint);
+			p.loadRemoteEndpoint(endpoint);
 		} else {
 			const auto& ep = p.getEndpoint().token;
 			serializer(ar, ep);
@@ -476,7 +485,7 @@ public:
 			value.sequence = queue->acknowledgements.sequence++;
 			queue->acknowledgements.bytesSent += value.expectedSize();
 			FlowTransport::transport().sendUnreliable(
-			    SerializeSource<ErrorOr<EnsureTable<T>>>(value), getEndpoint(), false);
+			    SerializeSource<ErrorOr<NetworkSenderTableT<T>>>(value), getEndpoint(), false);
 		} else {
 			queue->send(std::forward<U>(value));
 		}
@@ -755,7 +764,7 @@ public:
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value) const {
 		// Ensure the same request isn't used multiple times
-		ASSERT(!getReplyPromise(value).getFuture().isReady());
+		ASSERT(!getReplyPromise(value).isSet());
 		if (queue->isRemoteEndpoint()) {
 			return sendCanceler(getReplyPromise(value),
 			                    FlowTransport::transport().sendReliable(SerializeSource<T>(value), getEndpoint()),
@@ -800,7 +809,7 @@ public:
 			Reference<Peer> peer =
 			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
 			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(taskID), p, peer);
+			return waitValueOrSignal(p.getFuture(), std::move(disc), getEndpoint(taskID), p, std::move(peer));
 		}
 		send(value);
 		auto& p = getReplyPromise(value);
@@ -821,7 +830,7 @@ public:
 			Reference<Peer> peer =
 			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(), p, peer);
+			return waitValueOrSignal(p.getFuture(), std::move(disc), getEndpoint(), p, std::move(peer));
 		} else {
 			send(value);
 			auto& p = getReplyPromise(value);

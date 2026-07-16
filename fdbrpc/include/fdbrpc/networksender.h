@@ -25,21 +25,37 @@
 #include "fdbrpc/FlowTransport.h"
 #include "flow/flow.h"
 
+template <class T>
+struct NetworkSenderTable {
+	using type = EnsureTableRef<T>;
+};
+
+template <class T>
+struct NetworkSenderTable<CachedSerialization<T>> {
+	using type = EnsureTable<CachedSerialization<T>>;
+};
+
+template <class T>
+using NetworkSenderTableT = typename NetworkSenderTable<T>::type;
+
 // Used by FlowTransport to serialize the response to a ReplyPromise across the network.
 template <class T>
-Future<Void> networkSender(Uncancellable, Future<T> input, Endpoint endpoint, ExplicitVoid = {}) {
+coro::DetachedCoroutine networkSender(Uncancellable, Future<T> input, const Endpoint* endpoint) {
 	try {
-		T value = co_await input;
-		FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), endpoint, false);
+		co_await input;
+		const T& value = input.get();
+		FlowTransport::transport().sendUnreliable(
+		    SerializeSource<ErrorOr<NetworkSenderTableT<T>>>(value), *endpoint, false);
 	} catch (Error& err) {
 		// if (err.code() == error_code_broken_promise) return;
 		if (err.code() == error_code_never_reply) {
-			co_return Void();
+			co_return;
 		}
 		ASSERT(err.code() != error_code_actor_cancelled);
-		FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(err), endpoint, false);
+		FlowTransport::transport().sendUnreliable(
+		    SerializeSource<ErrorOr<NetworkSenderTableT<T>>>(err), *endpoint, false);
 	}
-	co_return Void();
+	co_return;
 }
 
 #endif
