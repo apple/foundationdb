@@ -1356,8 +1356,30 @@ Future<Void> retireRecoveredLog(TLogData* self, Reference<LogData> logData) {
 	ASSERT(logData->persistentDataVersion == logData->version.get());
 	ASSERT(logData->persistentDataDurableVersion == logData->version.get());
 
-	// Keep the spilled messages available for a subsequent recovery. Once they are durable, only the shared queue
-	// needs to advance so later generations can make progress.
+	const Version popTo = logData->version.get() + 1;
+	for (int tagLocality = 0; tagLocality < logData->tag_data.size(); ++tagLocality) {
+		for (int tagId = 0; tagId < logData->tag_data[tagLocality].size(); ++tagId) {
+			Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
+			if (tagData && tagData->popped < popTo) {
+				tagData->popped = popTo;
+				tagData->poppedRecently = true;
+				co_await tagData->eraseMessagesBefore(popTo, self, logData, TaskPriority::UpdateStorage);
+			}
+		}
+	}
+	for (const auto& locality : logData->tag_data) {
+		for (const auto& tagData : locality) {
+			if (tagData) {
+				updatePersistentPopped(self, logData, tagData);
+			}
+		}
+	}
+	double tLogMaxCreateDuration = SERVER_KNOBS->TLOG_MAX_CREATE_DURATION;
+	if (g_network->isSimulated() && logData->logSpillType == TLogSpillType::VALUE) {
+		tLogMaxCreateDuration *= 2;
+	}
+	co_await ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration, "TLogRetireCommit");
+
 	logData->retired = true;
 	advanceRetiredLogQueues(self);
 }

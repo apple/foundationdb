@@ -2418,6 +2418,22 @@ public:
 		std::vector<WorkerDetails> backup_workers;
 		std::set<NetworkAddress> backup_addresses;
 
+		if (dbi.recoveryState == RecoveryState::FULLY_RECOVERED) {
+			for (const auto& oldLog : dbi.logSystemConfig.oldTLogs) {
+				for (const auto& logSet : oldLog.tLogs) {
+					for (const auto& tlog : logSet.tLogs) {
+						if (tlog.present() &&
+						    db.config.isExcludedServer(tlog.interf().addresses(), tlog.interf().filteredLocality)) {
+							TraceEvent("BetterMasterExists", id)
+							    .detail("Reason", "OldTLogExcluded")
+							    .detail("ProcessID", tlog.interf().filteredLocality.processId());
+							return true;
+						}
+					}
+				}
+			}
+		}
+
 		for (auto& logSet : dbi.logSystemConfig.tLogs) {
 			for (auto& it : logSet.tLogs) {
 				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
