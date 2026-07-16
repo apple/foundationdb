@@ -21,6 +21,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSet.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logrouter/LogRouter.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
