@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <utility>
 
 #include "fdbclient/DatabaseContext.h"
@@ -2422,11 +2423,20 @@ public:
 			for (const auto& oldLog : dbi.logSystemConfig.oldTLogs) {
 				for (const auto& logSet : oldLog.tLogs) {
 					for (const auto& tlog : logSet.tLogs) {
-						if (tlog.present() &&
-						    db.config.isExcludedServer(tlog.interf().addresses(), tlog.interf().filteredLocality)) {
+						if (!tlog.present()) {
+							continue;
+						}
+
+						auto tlogWorker = std::find_if(id_worker.begin(), id_worker.end(), [&tlog](const auto& worker) {
+							return worker.second.details.interf.address() == tlog.interf().address();
+						});
+						const auto& locality = tlogWorker == id_worker.end()
+						                           ? tlog.interf().filteredLocality
+						                           : tlogWorker->second.details.interf.locality;
+						if (db.config.isExcludedServer(tlog.interf().addresses(), locality)) {
 							TraceEvent("BetterMasterExists", id)
 							    .detail("Reason", "OldTLogExcluded")
-							    .detail("ProcessID", tlog.interf().filteredLocality.processId());
+							    .detail("ProcessID", locality.processId());
 							return true;
 						}
 					}
