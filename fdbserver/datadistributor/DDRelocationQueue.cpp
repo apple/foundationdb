@@ -2441,8 +2441,10 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 		    .detail("Src", describe(rd.src))
 		    .detail("DataMoveMetaData", rd.dataMove != nullptr ? rd.dataMove->meta.toString() : "Empty");
 	} else if (err.code() != error_code_actor_cancelled && err.code() != error_code_data_move_cancelled) {
+		co_await delay(0, TaskPriority::DataDistributionLaunch); // Unwind launchQueuedWork before DD teardown.
 		if (errorOut.canBeSet()) {
 			errorOut.sendError(err);
+			co_await delay(0); // Check for cancellation, since sendError can tear down DD state inline.
 		}
 	}
 	throw err;
