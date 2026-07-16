@@ -357,8 +357,8 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 		//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes).detail("MinSplitBytes", minSplitBytes);
 
 		while (true) {
-			if (remaining.bytes < 2 * minSplitBytes && (!SERVER_KNOBS->ENABLE_WRITE_BASED_SHARD_SPLIT ||
-			                                            remaining.bytesWrittenPerKSecond < minSplitWriteTraffic))
+			if (remaining.bytes < 2LL * minSplitBytes && (!SERVER_KNOBS->ENABLE_WRITE_BASED_SHARD_SPLIT ||
+			                                              remaining.bytesWrittenPerKSecond < minSplitWriteTraffic))
 				break;
 			KeyRef key = req.keys.end;
 			bool hasUsed = used.bytes != 0 || used.bytesWrittenPerKSecond != 0 || used.iosPerKSecond != 0;

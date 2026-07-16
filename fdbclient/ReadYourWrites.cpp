@@ -2188,7 +2188,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 	}
 
 	approximateSize += k.expectedSize() + v.expectedSize() + sizeof(MutationRef) +
-	                   (addWriteConflict ? sizeof(KeyRangeRef) + 2 * key.expectedSize() + 1 : 0);
+	                   (addWriteConflict ? sizeof(KeyRangeRef) + 2ULL * key.expectedSize() + 1 : 0);
 	if (options.readYourWritesDisabled) {
 		return tr.atomicOp(k, v, (MutationRef::Type)operationType, addWriteConflict);
 	}
@@ -2236,7 +2236,7 @@ void ReadYourWritesTransaction::set(const KeyRef& key, const ValueRef& value) {
 		throw key_outside_legal_range();
 
 	approximateSize += key.expectedSize() + value.expectedSize() + sizeof(MutationRef) +
-	                   (addWriteConflict ? sizeof(KeyRangeRef) + 2 * key.expectedSize() + 1 : 0);
+	                   (addWriteConflict ? sizeof(KeyRangeRef) + 2ULL * key.expectedSize() + 1 : 0);
 	if (options.readYourWritesDisabled) {
 		return tr.set(key, value, addWriteConflict);
 	}
