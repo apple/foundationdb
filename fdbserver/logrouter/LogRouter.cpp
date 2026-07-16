@@ -409,7 +409,7 @@ Future<Reference<IReplayPeekCursor>> LogRouterData::getPeekCursorData(Reference<
 			          }
 			          logSystemChanged = logSystem->onChange();
 		          })
-		    .When(result ? delay(SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME) : Never(),
+		    .When(result && !result->isExhausted() ? delay(SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME) : Never(),
 		          [&](const Void&) {
 			          // Peek has become stuck for a while, trying switching between primary DC and satellite
 			          CODE_PROBE(true, "Detect log router slow peeks");
@@ -506,6 +506,8 @@ Future<Void> LogRouterData::pullAsyncData() {
 			}
 
 			TagsAndMessage tagAndMsg;
+			// Keep the complete serialized source message here. The tags below only index this message inside the
+			// log router; a remote TLog reparses getMessageWithTags() and indexes the original tags, including CDC.
 			tagAndMsg.message = r->getMessageWithTags();
 			tags.clear();
 			logSet.getPushLocations(r->getTags(), tags, 0);

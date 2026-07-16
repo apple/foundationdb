@@ -1252,7 +1252,7 @@ Future<bool> getKeyServers(
 	while (begin < end) {
 		Reference<CommitProxyInfo> commitProxyInfo = co_await cx->getCommitProxiesFuture(UseProvisionalProxies::False);
 		keyServerLocationFutures.clear();
-		for (int i = 0; i < commitProxyInfo->size(); i++)
+		for (int i = 0; i < commitProxyInfo->size(); i++) {
 			keyServerLocationFutures.push_back(
 			    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
 			        .getReplyUnlessFailedFor(
@@ -1260,6 +1260,7 @@ Future<bool> getKeyServers(
 			                span.context, begin, end, limitKeyServers, false, latestVersion, Arena()),
 			            2,
 			            0));
+		}
 
 		bool keyServersInsertedForThisIteration = false;
 
@@ -1720,11 +1721,12 @@ Future<Void> checkDataConsistency(Database cx,
 				for (int s = 0; s < serverListValues.size(); s++) {
 					if (serverListValues[s].present())
 						storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
-					else if (performQuiescentChecks)
+					else if (performQuiescentChecks) {
 						testFailure("/FF/serverList changing in a quiescent database",
 						            performQuiescentChecks,
 						            success,
 						            failureIsError);
+					}
 				}
 
 				break;
@@ -1759,13 +1761,13 @@ Future<Void> checkDataConsistency(Database cx,
 
 		if (firstClient) {
 			// If there was an error retrieving shard estimated size
-			if (performQuiescentChecks && estimatedBytes.empty())
+			if (performQuiescentChecks && estimatedBytes.empty()) {
 				testFailure("Error fetching storage metrics", performQuiescentChecks, success, failureIsError);
-
-			// If running a distributed test, storage server size is an accumulation of shard estimates
-			else if (distributed && firstClient)
+			} else if (distributed) {
+				// If running a distributed test, storage server size is an accumulation of shard estimates
 				for (int j = 0; j < storageServers.size(); j++)
 					storageServerSizes[storageServers[j]] += std::max(estimatedBytes[j], (int64_t)0);
+			}
 		}
 
 		// The first client may need to skip the rest of the loop contents if it is just processing this shard to

@@ -79,7 +79,7 @@ struct QueueData {
 	    futureVersionBackoff(FLOW_KNOBS->FUTURE_VERSION_INITIAL_BACKOFF), increaseBackoffTime(0) {}
 };
 
-typedef double TimeEstimate;
+using TimeEstimate = double;
 
 class QueueModel {
 public:

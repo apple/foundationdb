@@ -450,6 +450,9 @@ public:
 			}
 			co_return true;
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			err = e;
 		}
 		TraceEvent(SevWarn, "TaskBucketExecuteFailure")
@@ -460,6 +463,9 @@ public:
 		try {
 			co_await taskFunc->handleError(cx, task, err);
 		} catch (Error& handleErr) {
+			if (handleErr.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent(SevWarn, "TaskBucketExecuteFailureLogErrorFailed")
 			    .error(handleErr) // output handleError() error instead of original task error
 			    .detail("TaskUID", task->key.printable())
@@ -522,8 +528,9 @@ public:
 				if (done) {
 					getBatchSize = 1;
 					break;
-				} else
+				} else {
 					getBatchSize = std::min<unsigned int>(getBatchSize * 2, maxConcurrentTasks);
+				}
 			}
 			++taskBucket->dispatchSlotChecksComplete;
 

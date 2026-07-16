@@ -1,0 +1,115 @@
+name: clang-tidy
+# Not *required* to pass, because:
+#  * directly checks header files, some do not include what they need
+#  * bindings/c/foundationdb/fdb_c.h requires FDB_API_VERSION be defined first
+#  * crashes on at least one cpp file (flow/flat_buffers.cpp)
+# ... but > 95% of source files should pass.
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  clang-tidy:
+    runs-on: ubuntu-24.04
+    container:
+      image: foundationdb/build:rockylinux9-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          # by default PR virtual "merge" commit is checked-out
+          ref: ${{ github.event.pull_request.head.sha }}
+          # get history of all branches so we can find merge-base
+          fetch-depth: 0
+
+      - name: Configure build
+        run: |
+          # git somehow worried that this repo was checked-out by a different user
+          git config --global --add safe.directory /__w/foundationdb/foundationdb
+
+          mkdir -v build_output
+          cd       build_output
+
+          # CXXFLAGS to work-around "fdb_c_options.g.h not found" by clang-tidy
+          CC=clang CXX=clang++ USE_LD=LLD USE_LIBCXX=1 \
+            CXXFLAGS=-I${PWD}/fdbclient/include/fdbclient \
+            cmake -S .. -G Ninja -D BUILD_AWS_BACKUP=ON -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+          ninja -v                      \
+            processed_compile_commands  \
+            fdboptions                  \
+            ProtocolVersion
+
+          # all flow actors, for generated headers
+          ACTORS=$(
+            ninja -t targets all | grep -v /build_output/ | grep '_actors:' | cut -d: -f1
+          )
+          ninja -v $ACTORS
+
+          # all protobuf headers
+          PB_HEADERS=$(
+            ninja -t targets all | grep -v /build_output/ | grep '\.pb\.h:' | cut -d: -f1
+          )
+          ninja -v $PB_HEADERS
+
+      - name: clang-tidy
+        # clang-tidy is roughly as slow as compiling per-file, so check only touched files
+        shell: bash
+        run: |
+          CHANGED=$(git diff --name-only --diff-filter=d origin/${{github.event.pull_request.base.ref}}...)
+          printf "Files changed:\n%s\n" "$CHANGED"
+          echo
+          PASSED=true
+
+          while read FILE; do
+            if [[ $FILE == contrib/* ]]; then
+              continue  # skip contrib sources
+            fi
+            if [[ $FILE == *.actor.* ]]; then
+              continue  # actor syntax is not plain c++
+            fi
+            # Keep vendored external dependencies as upstream snapshots.
+            case "$FILE" in
+              fdbclient/include/fdbclient/ConvertUTF.h|fdbclient/include/fdbclient/SimpleIni.h|fdbclient/include/fdbclient/json_spirit/*)
+                continue
+                ;;
+              fdbclient/sha1/*|fdbrpc/libcoroutine/*|fdbrpc/libeio/*)
+                continue
+                ;;
+              flow/include/flow/sse2neon.h|flow/include/flow/xxhash.h)
+                continue
+                ;;
+            esac
+            # These inputs are not parseable as standalone clang-tidy translation units in this workflow:
+            # the RocksDB compile commands refer to headers that are not built here, and the Flow headers depend
+            # on include order from their real consumers.
+            case "$FILE" in
+              fdbserver/core/RocksDBCheckpointUtils.cpp|fdbserver/kvstore/KeyValueStoreRocksDB.cpp|fdbserver/kvstore/KeyValueStoreShardedRocksDB.cpp)
+                continue
+                ;;
+              flow/include/flow/Coroutines.h|flow/include/flow/CoroutinesImpl.h|flow/include/flow/FlowThread.h)
+                continue
+                ;;
+            esac
+            # only c++ source files
+            if [[ $FILE =~ \.[ch](pp)?$ ]] ; then
+              echo "Checking $FILE ..."
+              if ! clang-tidy -p build_output --warnings-as-errors='*' "$FILE"; then
+                PASSED=false
+              fi
+              echo
+            fi
+          done <<<"$CHANGED"
+
+          if ! $PASSED; then
+            echo "FAILED !!"
+            echo "This check is not required to pass, because a few files in this repo are "
+            echo "problematic, but please fix all warnings/errors that are practical to fix."
+            exit 1
+          fi

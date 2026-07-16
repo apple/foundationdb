@@ -32,6 +32,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	int numRecoveries;
 	double delayBetweenRecoveries;
 	double killAllProportion;
+	bool injectFailureAfterFirstRecovery;
 	Optional<int32_t> originalNumOfResolvers;
 	Optional<int32_t> currentNumOfResolvers;
 
@@ -40,6 +41,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		numRecoveries = getOption(options, "numRecoveries"_sr, deterministicRandom()->randomInt(1, 10));
 		delayBetweenRecoveries = getOption(options, "delayBetweenRecoveries"_sr, 0.0);
 		killAllProportion = getOption(options, "killAllProportion"_sr, 0.1);
+		injectFailureAfterFirstRecovery = getOption(options, "injectFailureAfterFirstRecovery"_sr, false);
 		ASSERT((numRecoveries > 0) && (startTime >= 0) && (delayBetweenRecoveries >= 0));
 		TraceEvent(SevInfo, "TriggerRecoveryLoopSetup")
 		    .detail("StartTime", startTime)
@@ -87,7 +89,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 			                        ? self->originalNumOfResolvers.get() + 1
 			                        : self->originalNumOfResolvers.get();
 		}
-		StringRef configStr(format("resolvers=%d", numResolversToSet));
+		Standalone<StringRef> configStr = StringRef(format("resolvers=%d", numResolversToSet));
 		while (true) {
 			Optional<ConfigureAutoResult> conf;
 			ConfigurationResult r = co_await ManagementAPI::changeConfig(cx.getReference(), { configStr }, conf, true);
@@ -120,11 +122,12 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 					address_interface[ip_port] = it.value;
 				}
 				for (const auto& it : address_interface) {
-					if (cx->apiVersionAtLeast(700))
+					if (cx->apiVersionAtLeast(700)) {
 						BinaryReader::fromStringRef<ClientWorkerInterface>(it.second, IncludeVersion())
 						    .reboot.send(RebootRequest());
-					else
+					} else {
 						tr.set("\xff\xff/reboot_worker"_sr, it.second);
+					}
 				}
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedKillAll").log();
 				co_return;
@@ -138,6 +141,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	Future<Void> _start(Database cx) {
 		co_await delay(startTime);
 		int numRecoveriesDone = 0;
+		Optional<Error> error;
 		try {
 			while (true) {
 				if (deterministicRandom()->random01() < killAllProportion) {
@@ -147,6 +151,9 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 				}
 				numRecoveriesDone++;
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedRecovery").detail("RecoveryNum", numRecoveriesDone);
+				if (injectFailureAfterFirstRecovery && numRecoveriesDone == 1) {
+					throw operation_failed();
+				}
 				if (numRecoveriesDone == numRecoveries) {
 					break;
 				}
@@ -154,15 +161,28 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 				co_await returnIfClusterRecovered(cx);
 			}
 		} catch (Error& e) {
-			// Dummy catch here to give a chance to reset number of resolvers to its original value
+			// Reset the resolver count before propagating the original failure.
+			error = e;
 		}
 		co_await changeResolverConfig(cx, this, true);
+		if (error.present()) {
+			throw error.get();
+		}
+	}
+
+	Future<Void> startAndCheckExpectedFailure(Database cx) {
+		ErrorOr<Void> result = co_await coro::errorOr(_start(cx));
+		ASSERT(result.isError());
+		ASSERT_EQ(result.getError().code(), error_code_operation_failed);
+
+		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
+		ASSERT_EQ(config.getDesiredResolvers(), originalNumOfResolvers.get());
 	}
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _start(cx);
+		return injectFailureAfterFirstRecovery ? startAndCheckExpectedFailure(cx) : _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

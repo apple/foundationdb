@@ -702,6 +702,8 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
+	{ OPT_RESTORE_CLUSTERFILE_DEST, "-C", SO_REQ_SEP },
+	{ OPT_RESTORE_CLUSTERFILE_DEST, "--cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_CLUSTERFILE_DEST, "--dest-cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_CLUSTERFILE_ORIG, "--orig-cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_TIMESTAMP, "--timestamp", SO_REQ_SEP },
@@ -1191,7 +1193,7 @@ static void printRestoreUsage(bool devhelp) {
 	printf(" ACTION OPTIONS:\n");
 	// printf("  FOLDERS        Paths to folders containing the backup files.\n");
 	printf("  Options for all commands:\n\n");
-	printf("  --dest-cluster-file CONNFILE\n");
+	printf("  -C, --cluster-file, --dest-cluster-file CONNFILE\n");
 	printf("                 The cluster file to restore data into.\n");
 	printf("  -t, --tagname TAGNAME\n");
 	printf("                 The restore tag to act on.  Default is 'default'\n");
@@ -2598,22 +2600,40 @@ Future<Void> expireBackupData(const char* name,
 		int spaces = lastProgress.size() - p.size();
 		printf("\r%s%s\n", p.c_str(), (spaces > 0 ? std::string(spaces, ' ').c_str() : ""));
 
-		if (endVersion < 0)
+		if (endVersion < 0) {
 			fmt::print("All data before {0} versions ({1}"
 			           " days) prior to latest backup log has been deleted.\n",
 			           -endVersion,
 			           -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
-		else
+		} else {
 			fmt::print("All data before version {} has been deleted.\n", endVersion);
+		}
+
+		if (progress.requestedEndVersion != invalidVersion && progress.actualEndVersion != invalidVersion &&
+		    progress.actualEndVersion != progress.requestedEndVersion) {
+			if (progress.actualEndVersion < progress.requestedEndVersion) {
+				fmt::print("NOTE: The requested expiration point (version {0}) fell in the middle of a log "
+				           "file, so it was moved back to version {1} to avoid splitting the file. "
+				           "Data is only guaranteed deleted up to version {1}.\n",
+				           progress.requestedEndVersion,
+				           progress.actualEndVersion);
+			} else {
+				fmt::print("NOTE: Data was already expired up to version {0}, which is at or after the "
+				           "requested version {1}. No additional data was deleted.\n",
+				           progress.actualEndVersion,
+				           progress.requestedEndVersion);
+			}
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
-		if (e.code() == error_code_backup_cannot_expire)
+		if (e.code() == error_code_backup_cannot_expire) {
 			fprintf(stderr,
 			        "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum restorability.  Use "
 			        "--force to delete data anyway.\n");
-		else
+		} else {
 			fprintf(stderr, "ERROR: %s\n", e.what());
+		}
 		throw;
 	}
 }

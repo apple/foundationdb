@@ -27,7 +27,10 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/Hash3.h"
+#include "flow/UnitTest.h"
 #include "flow/xxhash.h"
+
+#include <array>
 
 // for unprintable
 #include "fdbclient/NativeAPI.actor.h"
@@ -222,12 +225,13 @@ struct PageChecksumCodec {
 		} else {
 			// For Page Numbers other than 1, reserve size must be the size of the checksum.
 			if (self->reserveSize != sizeof(SumType)) {
-				if (!self->silent)
+				if (!self->silent) {
 					TraceEvent(SevWarnAlways, "SQLitePageChecksumFailureBadReserveSize")
 					    .detail("CodecPageSize", self->pageSize)
 					    .detail("CodecReserveSize", self->reserveSize)
 					    .detail("Filename", self->filename)
 					    .detail("PageNumber", pageNumber);
+				}
 
 				return nullptr;
 			}
@@ -250,6 +254,42 @@ struct PageChecksumCodec {
 		delete self;
 	}
 };
+
+TEST_CASE("/fdbserver/kvstore/SQLite/PageChecksum/LegacyCRC32") {
+	constexpr int pageSize = 4096;
+	constexpr int checksumSize = sizeof(PageChecksumCodec::SumType);
+	constexpr int dataSize = pageSize - checksumSize;
+	alignas(PageChecksumCodec::SumType) std::array<uint8_t, pageSize> page{};
+	for (int i = 0; i < dataSize; ++i) {
+		page[i] = static_cast<uint8_t>((i * 37 + 11) & 0xff);
+	}
+
+	// A zero high word identifies the legacy CRC32 format on an existing SQLite page.
+	auto* checksum = reinterpret_cast<PageChecksumCodec::SumType*>(page.data() + dataSize);
+	checksum->part1 = 0;
+	checksum->part2 = crc32c_append(0xfdbeefdb, page.data(), dataSize);
+
+	PageChecksumCodec codec("legacy-crc32-page.sqlite");
+	codec.pageSize = pageSize;
+	codec.reserveSize = checksumSize;
+	codec.silent = true;
+
+	ASSERT(PageChecksumCodec::codec(&codec, page.data(), 2, 3) == page.data());
+
+	// Corruption must be rejected without preventing the restored legacy page from being read.
+	page[dataSize / 2] ^= 0xff;
+	ASSERT(PageChecksumCodec::codec(&codec, page.data(), 2, 3) == nullptr);
+	page[dataSize / 2] ^= 0xff;
+	ASSERT(PageChecksumCodec::codec(&codec, page.data(), 2, 3) == page.data());
+
+	// Rewriting a valid legacy page upgrades its checksum to the current xxHash3 format.
+	ASSERT(PageChecksumCodec::codec(&codec, page.data(), 2, 6) == page.data());
+	const auto xxHash3 = XXH3_64bits(page.data(), dataSize);
+	ASSERT_EQ(checksum->part1, static_cast<uint32_t>((xxHash3 >> 32) & 0x00ffffff));
+	ASSERT_EQ(checksum->part2, static_cast<uint32_t>(xxHash3 & 0xffffffff));
+	ASSERT(PageChecksumCodec::codec(&codec, page.data(), 2, 3) == page.data());
+	return Void();
+}
 
 struct SQLiteDB : NonCopyable {
 	std::string filename;
@@ -352,8 +392,9 @@ struct SQLiteDB : NonCopyable {
 				// printf("#");
 				// threadSleep(.010);
 				sqlite3_sleep(10);
-			} else
+			} else {
 				checkError("checkpoint", rc);
+			}
 		}
 		// printf("Checkpoint (%0.1f ms): %d frames in log, %d checkpointed\n", (timer()-t)*1000, logSize,
 		// checkpointCount);
@@ -389,10 +430,11 @@ struct SQLiteDB : NonCopyable {
 					}
 
 					// If the line length found is not zero then print a trace event
-					if (*lineStart != '\0')
+					if (*lineStart != '\0') {
 						TraceEvent(SevError, "BTreeIntegrityCheck")
 						    .detail("Filename", filename)
 						    .detail("ErrorDetail", lineStart);
+					}
 					lineStart = lineEnd;
 				}
 			}
@@ -1048,8 +1090,9 @@ struct RawCursor {
 					else
 						cur.valid = false;
 				}
-			} else
+			} else {
 				kv = Optional<KeyValueRef>();
+			}
 		}
 
 		// advance cursor, parse and return key if valid
@@ -1477,12 +1520,13 @@ void SQLiteDB::open(bool writable) {
 			    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE |
 			        IAsyncFile::OPEN_LOCK,
 			    0600));
-			if (page_checksums)
+			if (page_checksums) {
 				waitFor(
 				    dbFile.get()->write(template_fdb_with_page_checksums, sizeof(template_fdb_with_page_checksums), 0));
-			else
+			} else {
 				waitFor(dbFile.get()->write(
 				    template_fdb_without_page_checksums, sizeof(template_fdb_without_page_checksums), 0));
+			}
 			waitFor(dbFile.get()->sync()); // renames filename.part to filename, fsyncs data and directory
 			TraceEvent("CreatedDBFile").detail("Filename", apath);
 		}
@@ -1698,18 +1742,20 @@ private:
 		};
 		void action(ReadValueAction& rv) {
 			// double t = timer();
-			if (rv.debugID.present())
+			if (rv.debugID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
 				                      rv.debugID.get().first(),
 				                      "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
+			}
 
 			rv.result.send(getCursor()->get().get(rv.key));
 			++counter;
 
-			if (rv.debugID.present())
+			if (rv.debugID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
 				                      rv.debugID.get().first(),
 				                      "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+			}
 			// t = timer()-t;
 			// if (t >= 1.0) TraceEvent("ReadValueActionSlow",dbgid).detail("Elapsed", t);
 		}
@@ -1726,18 +1772,20 @@ private:
 		};
 		void action(ReadValuePrefixAction& rv) {
 			// double t = timer();
-			if (rv.debugID.present())
+			if (rv.debugID.present()) {
 				g_traceBatch.addEvent("GetValuePrefixDebug",
 				                      rv.debugID.get().first(),
 				                      "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
+			}
 
 			rv.result.send(getCursor()->get().getPrefix(rv.key, rv.maxLength));
 			++counter;
 
-			if (rv.debugID.present())
+			if (rv.debugID.present()) {
 				g_traceBatch.addEvent("GetValuePrefixDebug",
 				                      rv.debugID.get().first(),
 				                      "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+			}
 			// t = timer()-t;
 			// if (t >= 1.0) TraceEvent("ReadValuePrefixActionSlow",dbgid).detail("Elapsed", t);
 		}
@@ -1891,11 +1939,12 @@ private:
 			cursor = new Cursor(conn, true);
 			checkFreePages();
 			++writesComplete;
-			if (t3 - a.issuedTime > 10.0 * deterministicRandom()->random01())
+			if (t3 - a.issuedTime > 10.0 * deterministicRandom()->random01()) {
 				TraceEvent("KVCommit10sSample", dbgid)
 				    .detail("Queued", t1 - a.issuedTime)
 				    .detail("Commit", t2 - t1)
 				    .detail("Checkpoint", t3 - t2);
+			}
 
 			diskBytesUsed = waitForAndGet(conn.dbFile->size()) + waitForAndGet(conn.walFile->size());
 

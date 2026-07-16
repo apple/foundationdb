@@ -53,7 +53,7 @@
 #include "flow/CoroUtils.h"
 
 #include "flow/TLSConfig.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "SimpleOpt/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
@@ -110,6 +110,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DATABASE, "-d", SO_REQ_SEP },
 	                                  { OPT_TRACE, "--log", SO_NONE },
 	                                  { OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
+	                                  { OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	                                  { OPT_LOGGROUP, "--log-group", SO_REQ_SEP },
 	                                  { OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
 	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
@@ -372,8 +373,9 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 				ret.push_back(std::move(buf));
 				offset = i = line.find_first_not_of(' ', i + 1);
 				forcetoken = false;
-			} else
+			} else {
 				i++;
+			}
 			break;
 		case '"':
 			quoted = !quoted;
@@ -389,8 +391,9 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 					buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
 				offset = i = line.find_first_not_of(" \n\t\r", i);
 				forcetoken = false;
-			} else
+			} else {
 				i++;
+			}
 			break;
 		case '\\':
 			if (i + 2 > line.length()) {
@@ -480,7 +483,8 @@ static void printProgramUsage(const char* name) {
 	       "                 then `%s'.\n",
 	       platform::getDefaultClusterFilePath().c_str());
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-	       "  --log-dir PATH Specifies the output directory for trace files. If\n"
+	       "  --log-dir PATH, --logdir PATH\n"
+	       "                 Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n"
 	       "  --log-group LOG_GROUP\n"
@@ -623,8 +627,9 @@ void printHelp(StringRef command) {
 			printAtCol(i->second.long_desc.c_str(), 80);
 		}
 		printf("\n");
-	} else
+	} else {
 		printf("I don't know anything about `%s'\n", formatStringRef(command).c_str());
+	}
 }
 
 int printStatusFromJSON(std::string const& jsonFileName) {
@@ -1254,7 +1259,7 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 					if (tokens.size() == 1) {
 						printHelpOverview();
 					} else if (tokens.size() == 2) {
-						if (tokencmp(tokens[1], "escaping"))
+						if (tokencmp(tokens[1], "escaping")) {
 							printf("\n"
 							       "When parsing commands, fdbcli considers a space to delimit individual tokens.\n"
 							       "To include a space in a single token, you may either enclose the token in\n"
@@ -1274,17 +1279,19 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 							       "\n"
 							       "All keys and values are displayed by the fdbcli with non-printable characters\n"
 							       "and spaces encoded as two-digit hex bytes.\n\n");
-						else if (tokencmp(tokens[1], "options")) {
+						} else if (tokencmp(tokens[1], "options")) {
 							printf("\n"
 							       "The following options are available to be set using the `option' command:\n"
 							       "\n");
 							options->printHelpString();
-						} else if (tokencmp(tokens[1], "help"))
+						} else if (tokencmp(tokens[1], "help")) {
 							printHelpOverview();
-						else
+						} else {
 							printHelp(tokens[1]);
-					} else
+						}
+					} else {
 						printf("Usage: help [topic]\n");
+					}
 					continue;
 				}
 
@@ -1624,6 +1631,14 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "rangelock")) {
+					bool _result = co_await makeInterruptable(rangeLockCommandActor(localDb, tokens));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
 					bool _result = co_await makeInterruptable(forceRecoveryWithDataLossCommandActor(db, tokens));
 					if (!_result)
@@ -1844,8 +1859,9 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 								printf("\nCurrently enabled options:\n\n");
 								options->print();
 								printf("\n");
-							} else
+							} else {
 								fprintf(stderr, "There are no options enabled\n");
+							}
 
 							continue;
 						}
@@ -2080,6 +2096,9 @@ int main(int argc, char** argv) {
 	CLIOptions opt(argc, argv);
 	if (opt.exit_code != -1)
 		return opt.exit_code;
+
+	// fdbcli connects to one cluster, so multiple client threads per version have no effect.
+	MultiVersionApi::api->ignoreEnvironmentVariableNetworkOption(FDBNetworkOptions::CLIENT_THREADS_PER_VERSION);
 
 	if (opt.trace) {
 		if (opt.traceDir.empty())

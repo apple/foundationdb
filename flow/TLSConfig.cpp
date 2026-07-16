@@ -457,7 +457,7 @@ static std::string de4514(std::string const& input, int start, int& out_end) {
 				}
 
 				try {
-					output += hexValue(input[p + 1]) * 16 + hexValue(input[p + 2]);
+					output.push_back(static_cast<char>(hexValue(input[p + 1]) * 16 + hexValue(input[p + 2])));
 					p += 3;
 					space_count = 0;
 					continue;

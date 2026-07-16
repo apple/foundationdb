@@ -45,10 +45,27 @@ Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<Stri
 	co_await file->append(s.begin(), s.size());
 }
 
+// Writes data in chunks of at most BACKUP_MANIFEST_WRITE_CHUNK_SIZE bytes. This is necessary because
+// IBackupFile::append() takes an int length, so passing a size_t larger than INT_MAX would silently
+// truncate to a negative value and corrupt the write.
+Future<Void> appendChunked(Reference<IBackupFile> file, const void* data, size_t len) {
+	const char* ptr = static_cast<const char*>(data);
+	for (size_t offset = 0; offset < len;) {
+		int chunkSize = static_cast<int>(
+		    std::min(len - offset, static_cast<size_t>(CLIENT_KNOBS->BACKUP_MANIFEST_WRITE_CHUNK_SIZE)));
+		co_await file->append(ptr + offset, chunkSize);
+		offset += chunkSize;
+	}
+}
+
 } // namespace IBackupFile_impl
 
 Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
 	return IBackupFile_impl::appendStringRefWithLen(Reference<IBackupFile>::addRef(this), s);
+}
+
+Future<Void> IBackupFile::append(const void* data, size_t len) {
+	return IBackupFile_impl::appendChunked(Reference<IBackupFile>::addRef(this), data, len);
 }
 
 bool isBlobstoreUrl(const std::string& url) {
@@ -110,6 +127,10 @@ Future<Void> BackupDescription::resolveVersionTimes(Database cx) {
 		versionTimeMap[minRestorableVersion.get()];
 	if (maxRestorableVersion.present())
 		versionTimeMap[maxRestorableVersion.get()];
+	if (expiredEndVersion.present())
+		versionTimeMap[expiredEndVersion.get()];
+	if (unreliableEndVersion.present())
+		versionTimeMap[unreliableEndVersion.get()];
 
 	return runRYWTransaction(cx,
 	                         [=](Reference<ReadYourWritesTransaction> tr) { return fetchTimes(tr, &versionTimeMap); });

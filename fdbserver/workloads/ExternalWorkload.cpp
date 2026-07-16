@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/Platform.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "foundationdb/CppWorkload.h"

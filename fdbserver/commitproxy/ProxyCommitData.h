@@ -54,17 +54,31 @@ struct Descriptor<SingleKeyMutationDescriptor>
 class LogSystemDiskQueueAdapter;
 
 struct ProxyStats {
+	enum class CommitBatchFlushReason {
+		BYTE_LIMIT,
+		COUNT_LIMIT,
+		TIMEOUT,
+		FIRST_IN_BATCH,
+		TRANSACTION_SIZE_LIMIT,
+	};
+
 	CounterCollection cc;
 	Counter txnCommitIn, txnCommitVersionAssigned, txnCommitResolving, txnCommitResolved, txnCommitOut,
 	    txnCommitOutSuccess, txnCommitErrors;
 	Counter txnConflicts;
 	Counter txnRejectedForQueuedTooLong;
 	Counter commitBatchIn, commitBatchOut;
+	Counter commitBatchFlushByteLimit, commitBatchFlushCountLimit, commitBatchFlushTimeout,
+	    commitBatchFlushFirstInBatch, commitBatchFlushTransactionSizeLimit;
 	Counter mutationBytes;
 	Counter mutations;
 	Counter conflictRanges;
 	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
 	Counter txnExpensiveClearCostEstCount;
+	// rejectMutationsForReadLockOnRange takes the fast path (no locks held -> early return)
+	// vs the slow path (per-mutation lock check). Observable in production via ProxyMetrics
+	// to confirm the no-locks-active optimization fires when expected.
+	Counter rangeLockFastPath, rangeLockSlowPath;
 	Version lastCommitVersionAssigned;
 
 	LatencySample commitLatencySample;
@@ -90,6 +104,7 @@ struct ProxyStats {
 	Reference<Histogram> processingMutationDist;
 	Reference<Histogram> tlogLoggingDist;
 	Reference<Histogram> replyCommitDist;
+	Reference<Histogram> transactionSizeDist;
 
 	// These metrics are only logged as part of `ProxyDetailedMetrics`. Since
 	// the detailed proxy metrics combine data from different sources, we can't
@@ -115,6 +130,26 @@ struct ProxyStats {
 		return r;
 	}
 
+	void recordCommitBatchFlush(CommitBatchFlushReason reason) {
+		switch (reason) {
+		case CommitBatchFlushReason::BYTE_LIMIT:
+			++commitBatchFlushByteLimit;
+			break;
+		case CommitBatchFlushReason::COUNT_LIMIT:
+			++commitBatchFlushCountLimit;
+			break;
+		case CommitBatchFlushReason::TIMEOUT:
+			++commitBatchFlushTimeout;
+			break;
+		case CommitBatchFlushReason::FIRST_IN_BATCH:
+			++commitBatchFlushFirstInBatch;
+			break;
+		case CommitBatchFlushReason::TRANSACTION_SIZE_LIMIT:
+			++commitBatchFlushTransactionSizeLimit;
+			break;
+		}
+	}
+
 	explicit ProxyStats(UID id,
 	                    NotifiedVersion* pVersion,
 	                    NotifiedVersion* pCommittedVersion,
@@ -124,11 +159,17 @@ struct ProxyStats {
 	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
 	    txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc),
 	    txnConflicts("TxnConflicts", cc), txnRejectedForQueuedTooLong("TxnRejectedForQueuedTooLong", cc),
-	    commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc),
-	    mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
+	    commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc),
+	    commitBatchFlushByteLimit("CommitBatchFlushByteLimit", cc),
+	    commitBatchFlushCountLimit("CommitBatchFlushCountLimit", cc),
+	    commitBatchFlushTimeout("CommitBatchFlushTimeout", cc),
+	    commitBatchFlushFirstInBatch("CommitBatchFlushFirstInBatch", cc),
+	    commitBatchFlushTransactionSizeLimit("CommitBatchFlushTransactionSizeLimit", cc),
+	    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
 	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
 	    keyServerLocationErrors("KeyServerLocationErrors", cc),
-	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), lastCommitVersionAssigned(0),
+	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), rangeLockFastPath("RangeLockFastPath", cc),
+	    rangeLockSlowPath("RangeLockSlowPath", cc), lastCommitVersionAssigned(0),
 	    commitLatencySample("CommitLatencyMetrics",
 	                        id,
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -157,7 +198,8 @@ struct ProxyStats {
 	    processingMutationDist(
 	        Histogram::getHistogram("CommitProxy"_sr, "ProcessingMutation"_sr, Histogram::Unit::milliseconds)),
 	    tlogLoggingDist(Histogram::getHistogram("CommitProxy"_sr, "TlogLogging"_sr, Histogram::Unit::milliseconds)),
-	    replyCommitDist(Histogram::getHistogram("CommitProxy"_sr, "ReplyCommit"_sr, Histogram::Unit::milliseconds)) {
+	    replyCommitDist(Histogram::getHistogram("CommitProxy"_sr, "ReplyCommit"_sr, Histogram::Unit::milliseconds)),
+	    transactionSizeDist(Histogram::getHistogram("CommitProxy"_sr, "TransactionSize"_sr, Histogram::Unit::bytes)) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return pVersion->get(); });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
@@ -175,7 +217,7 @@ struct ExpectedIdempotencyIdCountForKey {
 	int16_t idempotencyIdCount = 0;
 	uint8_t batchIndexHighByte = 0;
 
-	ExpectedIdempotencyIdCountForKey() {}
+	ExpectedIdempotencyIdCountForKey() = default;
 	ExpectedIdempotencyIdCountForKey(Version commitVersion, int16_t idempotencyIdCount, uint8_t batchIndexHighByte)
 	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
 };
@@ -199,6 +241,7 @@ struct ProxyCommitData {
 	Promise<Void> validState; // Set once txnStateStore and version are valid
 	double lastVersionTime;
 	KeyRangeMap<std::set<Key>> vecBackupKeys;
+	CDCRoutingTable cdcRouting;
 	uint64_t commitVersionRequestNumber;
 	uint64_t mostRecentProcessedRequestNumber;
 	KeyRangeMap<Deque<std::pair<Version, int>>> keyResolvers;
@@ -261,7 +304,7 @@ struct ProxyCommitData {
 	// signify they must be repopulated. We do not repopulate them immediately to avoid a slow task.
 	const std::vector<Tag>& tagsForKey(StringRef key) {
 		auto& tags = keyInfo[key].tags;
-		if (!tags.size()) {
+		if (tags.empty()) {
 			auto& r = keyInfo.rangeContaining(key).value();
 			r.populateTags();
 			return r.tags;
@@ -342,21 +385,30 @@ struct RangeLock : ApplyMetadataRangeLock {
 public:
 	explicit RangeLock(ProxyCommitData* const pProxyCommitData) : pProxyCommitData(pProxyCommitData) {
 		coreMap.insert(allKeys, RangeLockStateSet());
+		// anyExclusiveLockHeld_ stays false: the initial all-keys entry is empty.
 	}
 
 	~RangeLock() override = default;
 
 	bool pendingRequest() const override { return currentRangeLockStartKey.present(); }
 
+	// Cheap query for the commit hot path. True when at least one
+	// ExclusiveReadLock is currently held over a sub-range. When this is
+	// false, rejectMutationsForReadLockOnRange skips its per-mutation loop.
+	bool anyExclusiveLockHeld() const { return anyExclusiveLockHeld_; }
+
 	void initKeyPoint(const Key& key, const Value& value) {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
-		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Init").detail("Key", key);
 		if (!value.empty()) {
-			coreMap.rawInsert(key, decodeRangeLockStateSet(value));
+			RangeLockStateSet decoded = decodeRangeLockStateSet(value);
+			coreMap.rawInsert(key, decoded);
+			if (decoded.isLockedFor(RangeLockType::ExclusiveReadLock)) {
+				// Recovery init is monotonic-up: it only adds state.
+				anyExclusiveLockHeld_ = true;
+			}
 		} else {
 			coreMap.rawInsert(key, RangeLockStateSet());
 		}
-		return;
 	}
 
 	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) override {
@@ -373,13 +425,13 @@ public:
 		ASSERT(currentRangeLockStartKey.get().first < endKey);
 		KeyRange lockRange = Standalone(KeyRangeRef(currentRangeLockStartKey.get().first, endKey));
 		RangeLockStateSet lockSetState = currentRangeLockStartKey.get().second;
-		/* TraceEvent(SevDebug, "RangeLockRangeOps")
-		    .detail("Ops", "Update")
-		    .detail("Range", lockRange)
-		    .detail("Status", lockSetState.toString()); */
 		coreMap.insert(lockRange, lockSetState);
 		coreMap.coalesce(allKeys);
 		currentRangeLockStartKey.reset();
+		// This path can transition locked -> unlocked when an empty
+		// RangeLockStateSet is inserted over a previously locked range, so we
+		// must rescan after coalesce to keep anyExclusiveLockHeld_ accurate.
+		recomputeAnyExclusiveLockHeld();
 		return;
 	}
 
@@ -390,30 +442,38 @@ public:
 		}
 		for (auto lockRange : coreMap.intersectingRanges(range)) {
 			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ExclusiveReadLock)) {
-				/*TraceEvent(SevDebug, "RangeLockRangeOps")
-				    .detail("Ops", "Check")
-				    .detail("Range", range)
-				    .detail("Status", "Reject");*/
 				return true;
 			}
 		}
-		/*TraceEvent(SevDebug, "RangeLockRangeOps")
-		    .detail("Ops", "Check")
-		    .detail("Range", range)
-		    .detail("Status", "Accept");*/
 		return false;
 	}
 
 private:
+	// Full rescan; only called on lock add/remove (rare, per-bulkload-job),
+	// not per-commit. Cost = O(coreMap entries), bounded by active lock count.
+	void recomputeAnyExclusiveLockHeld() {
+		for (auto it : coreMap.ranges()) {
+			if (it.value().isValid() && it.value().isLockedFor(RangeLockType::ExclusiveReadLock)) {
+				anyExclusiveLockHeld_ = true;
+				return;
+			}
+		}
+		anyExclusiveLockHeld_ = false;
+	}
+
 	Optional<std::pair<Key, RangeLockStateSet>> currentRangeLockStartKey;
 	KeyRangeMap<RangeLockStateSet> coreMap;
 	ProxyCommitData* const pProxyCommitData;
+	// Per-proxy cached summary of coreMap. Each proxy derives this from the
+	// same txnStateStore content, so all proxies converge to the same value.
+	bool anyExclusiveLockHeld_ = false;
 };
 
 inline ApplyMetadataProxyContext ProxyCommitData::getApplyMetadataProxyContext() {
 	return { .dbgid = dbgid,
 		     .txnStateStore = txnStateStore,
 		     .vecBackupKeys = &vecBackupKeys,
+		     .cdcRouting = &cdcRouting,
 		     .keyInfo = &keyInfo,
 		     .uid_applyMutationsData = firstProxy ? &uid_applyMutationsData : nullptr,
 		     .commit = commit,

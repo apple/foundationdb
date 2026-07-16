@@ -137,9 +137,11 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 		dev_t fileDeviceId = getDeviceId(filename);
 		if (std::find(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end(), fileDeviceId) ==
 		    this->fileSystemDeviceIds.end()) {
-			TraceEvent(SevError, "DeviceIdMismatched")
-			    .detail("AllowedFileSystemDeviceCount", this->fileSystemDeviceIds.size())
-			    .detail("FileDeviceId", fileDeviceId);
+			TraceEvent te(SevError, "DeviceIdMismatched");
+			te.detail("FileDeviceId", fileDeviceId);
+			for (size_t i = 0; i < this->fileSystemDeviceIds.size(); ++i) {
+				te.detail(format("AllowedFileSystemDeviceId%zu", i).c_str(), this->fileSystemDeviceIds[i]);
+			}
 			throw io_error();
 		}
 	}
@@ -162,15 +164,18 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 		f = AsyncFileKAIO::open(filename, flags, mode, nullptr);
 	else
 #endif
+	{
 		f = Net2AsyncFile::open(
 		    filename,
 		    flags,
 		    mode,
 		    static_cast<boost::asio::io_service*>((void*)g_network->global(INetwork::enASIOService)));
-	if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
+	}
+	if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0) {
 		f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> {
 			return makeReference<AsyncFileWriteChecker>(r);
 		});
+	}
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
 		f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> { return makeReference<AsyncFileChaos>(r); });
 	return f;
@@ -234,6 +239,10 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, const std::vector<std::string>&
 				              format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
 			}
 		}
+
+		std::sort(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end());
+		this->fileSystemDeviceIds.erase(std::unique(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end()),
+		                                this->fileSystemDeviceIds.end());
 	}
 #endif
 }

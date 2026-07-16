@@ -34,6 +34,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -47,9 +48,11 @@
 #include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "MetricLogger.actor.h"
+#include "MetricLogger.h"
 #include "fdbserver/backupworker/BackupWorker.h"
+#include "fdbserver/backupworker/RangePartitionedBackupWorker.h"
 #include "fdbserver/clustercontroller/ClusterController.h"
+#include "fdbserver/cdcproxy/CDCProxy.h"
 #include "fdbserver/commitproxy/CommitProxyServer.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
@@ -76,7 +79,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
@@ -85,7 +88,6 @@
 #include "flow/ChaosMetrics.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "flow/ApiVersion.h"
 #include "fdbctl/ControlService.h"
 
 #ifdef __linux__
@@ -93,7 +95,6 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
 #endif
 #if defined(__linux__) || defined(__FreeBSD__)
 #ifdef USE_GPERFTOOLS
@@ -1250,7 +1251,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		// part of the transaction sub system.
 		// Note that we don't need to calculate recovered peer in this case since all the recently closed peers are
 		// considered permanently closed peers.
-		for (const auto& address : FlowTransport::transport().healthMonitor()->getRecentClosedPeers()) {
+		for (const auto& address : FlowTransport::transport().getRecentClosedPeers()) {
 			if (allPeers.find(address) != allPeers.end()) {
 				// We have checked this peer in the above for loop.
 				continue;
@@ -2048,6 +2049,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
+	state WorkerCache<InitializeRangePartitionedBackupReply> rangePartitionedBackupWorkerCache;
 	state WorkerCache<TLogInterface> logRouterCache;
 
 	state WorkerSnapRequest lastSnapReq;
@@ -2142,6 +2144,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		DUMPTOKEN(recruited.master);
 		DUMPTOKEN(recruited.commitProxy);
 		DUMPTOKEN(recruited.grvProxy);
+		DUMPTOKEN(recruited.cdcProxy);
 		DUMPTOKEN(recruited.resolver);
 		DUMPTOKEN(recruited.storage);
 		DUMPTOKEN(recruited.debugPing);
@@ -2157,6 +2160,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 	try {
 		state std::vector<DiskStore> stores = getDiskStores(folder, tLogSpillFolder);
+		// Recovery validation remains process-wide: the datadir sentinel covers both disk queues
+		// and tlog spill KV stores, even when the spill files live on a separate volume.
 		state bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
 		state int index = 0;
 		for (; index < stores.size(); ++index) {
@@ -2171,7 +2176,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					wait(delay(SERVER_KNOBS->WORKER_START_STORAGE_DELAY));
 				}
 				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Storage;
 
 				IKeyValueStore* kv = openKVStore(s.storeType,
 				                                 s.filename,
@@ -2251,7 +2256,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::TLog;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::TLog;
 				std::string logQueueBasename;
 				const std::string filename = basename(s.filename);
 				if (StringRef(filename).startsWith(fileLogDataPrefix)) {
@@ -2466,7 +2471,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(RecruitMasterRequest req = waitNext(interf.master.getFuture())) {
 				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Master;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Master;
 				MasterInterface recruited;
 				recruited.locality = locality;
 				recruited.initEndpoints();
@@ -2488,7 +2493,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture())) {
 				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::DataDistributor;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::DataDistributor;
 				DataDistributorInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
@@ -2514,7 +2519,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(InitializeRatekeeperRequest req = waitNext(interf.ratekeeper.getFuture())) {
 				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Ratekeeper;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Ratekeeper;
 				RatekeeperInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
@@ -2541,7 +2546,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(InitializeConsistencyScanRequest req = waitNext(interf.consistencyScan.getFuture())) {
 				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::ConsistencyScan;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::ConsistencyScan;
 				ConsistencyScanInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
@@ -2567,7 +2572,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
 				if (!backupWorkerCache.exists(req.reqId)) {
 					LocalLineage _;
-					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Backup;
+					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Backup;
 					BackupInterface recruited(locality);
 					recruited.initEndpoints();
 
@@ -2586,6 +2591,28 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					forwardPromise(Uncancellable{}, req.reply, backupWorkerCache.get(req.reqId));
 				}
 			}
+			when(InitializeRangePartitionedBackupRequest req = waitNext(interf.rangePartitionedBackup.getFuture())) {
+				if (!rangePartitionedBackupWorkerCache.exists(req.reqId)) {
+					LocalLineage _;
+					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Backup;
+					BackupInterface recruited(locality);
+					recruited.initEndpoints();
+
+					startRole(Role::BACKUP, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
+
+					ReplyPromise<InitializeRangePartitionedBackupReply> backupReady = req.reply;
+					rangePartitionedBackupWorkerCache.set(req.reqId, backupReady.getFuture());
+					Future<Void> backupProcess = rangePartitionedBackupWorker(recruited, req, dbInfo);
+					backupProcess = rangePartitionedBackupWorkerCache.removeOnReady(req.reqId, backupProcess);
+					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
+					TraceEvent("RangePartitionedBWInitRequest", req.reqId).detail("BackupId", recruited.id());
+					InitializeRangePartitionedBackupReply reply(recruited, req.backupEpoch);
+					backupReady.send(reply);
+				} else {
+					forwardPromise(Uncancellable{}, req.reply, rangePartitionedBackupWorkerCache.get(req.reqId));
+				}
+			}
 			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.
 				// With future work, a particular version of the TLog can support multiple
@@ -2598,7 +2625,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					req.reply.sendError(internal_error());
 				}
 				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::TLog;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::TLog;
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				TLogFn tLogFn = tLogFnForOptions(tLogOptions);
 				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
@@ -2685,7 +2712,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    req.seedTag != invalidTag) {
 					ASSERT(req.initialClusterVersion >= 0);
 					LocalLineage _;
-					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
+					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Storage;
 
 					// When a new storage server is recruited, we need to check if any other storage
 					// server has run on this worker process(a.k.a double recruitment). The previous storage
@@ -2784,7 +2811,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
 				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::CommitProxy;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::CommitProxy;
 				CommitProxyInterface recruited;
 				recruited.processId = locality.processId();
 				recruited.provisional = false;
@@ -2809,7 +2836,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(InitializeGrvProxyRequest req = waitNext(interf.grvProxy.getFuture())) {
 				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::GrvProxy;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::GrvProxy;
 				GrvProxyInterface recruited;
 				recruited.processId = locality.processId();
 				recruited.provisional = false;
@@ -2829,9 +2856,34 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    forwardError(errors, Role::GRV_PROXY, recruited.id(), grvProxyServer(recruited, req, dbInfo))));
 				req.reply.send(recruited);
 			}
+			when(InitializeCDCProxyRequest req = waitNext(interf.cdcProxy.getFuture())) {
+				LocalLineage _;
+				CDCProxyInterface recruited;
+				recruited.processId = locality.processId();
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				startRole(Role::CDC_PROXY, recruited.id(), interf.id(), details);
+
+				DUMPTOKEN(recruited.consume);
+				DUMPTOKEN(recruited.registerStream);
+				DUMPTOKEN(recruited.removeStream);
+				DUMPTOKEN(recruited.ack);
+				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.haltForTesting);
+				DUMPTOKEN(recruited.getBufferStatusForTesting);
+				DUMPTOKEN(recruited.setPopsPausedForTesting);
+
+				errorForwarders.add(zombie(recruited,
+				                           forwardError(errors,
+				                                        Role::CDC_PROXY,
+				                                        recruited.id(),
+				                                        cdcProxyServer(recruited, req.recoveryCount, dbInfo))));
+				req.reply.send(recruited);
+			}
 			when(InitializeResolverRequest req = waitNext(interf.resolver.getFuture())) {
 				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Resolver;
+				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Resolver;
 				ResolverInterface recruited;
 				recruited.locality = locality;
 				recruited.initEndpoints();
@@ -2851,7 +2903,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(InitializeLogRouterRequest req = waitNext(interf.logRouter.getFuture())) {
 				if (!logRouterCache.exists(req.reqId)) {
 					LocalLineage _;
-					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::LogRouter;
+					getCurrentLineage()->modify(&RoleLineage::role) = recruitment::LogRouter;
 					TLogInterface recruited(locality);
 					recruited.initEndpoints();
 
@@ -3083,24 +3135,27 @@ Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInterface>
 
 ClusterControllerPriorityInfo getCCPriorityInfo(std::string filePath, ProcessClass processClass) {
 	if (!fileExists(filePath))
-		return ClusterControllerPriorityInfo(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource)
-		                                         .machineClassFitness(ProcessClass::ClusterController),
-		                                     false,
-		                                     ClusterControllerPriorityInfo::FitnessUnknown);
+		return ClusterControllerPriorityInfo(
+		    recruitment::machineClassFitness(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource),
+		                                     recruitment::ClusterController),
+		    false,
+		    ClusterControllerPriorityInfo::FitnessUnknown);
 	std::string contents(readFileBytes(filePath, 1000));
 	BinaryReader br(StringRef(contents), IncludeVersion());
 	ClusterControllerPriorityInfo priorityInfo(
-	    ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown);
+	    recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown);
 	br >> priorityInfo;
 	if (!br.empty()) {
 		if (g_network->isSimulated()) {
 			ASSERT(false);
 		} else {
 			TraceEvent(SevWarnAlways, "FitnessFileCorrupted").detail("filePath", filePath);
-			return ClusterControllerPriorityInfo(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource)
-			                                         .machineClassFitness(ProcessClass::ClusterController),
-			                                     false,
-			                                     ClusterControllerPriorityInfo::FitnessUnknown);
+			return ClusterControllerPriorityInfo(
+			    recruitment::machineClassFitness(
+			        ProcessClass(processClass.classType(), ProcessClass::CommandLineSource),
+			        recruitment::ClusterController),
+			    false,
+			    ClusterControllerPriorityInfo::FitnessUnknown);
 		}
 	}
 	return priorityInfo;
@@ -3788,7 +3843,7 @@ Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                   bool consistencyCheckUrgentMode) {
 	std::vector<Future<Void>> actors;
 	// setupStackSignal();
-	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
+	getCurrentLineage()->modify(&RoleLineage::role) = recruitment::Worker;
 
 	actors.push_back(serveProtocolInfo());
 	actors.push_back(serveProcess());
@@ -3838,9 +3893,11 @@ Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
-		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
+		if (recruitment::machineClassFitness(processClass, recruitment::ClusterController) ==
+		    recruitment::NeverAssign) {
 			actors.push_back(reportErrors(monitorLeader(connRecord, cc), "ClusterController"));
-		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
+		} else if (recruitment::machineClassFitness(processClass, recruitment::ClusterController) ==
+		               recruitment::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
 			actors.push_back(reportErrors(
 			    monitorLeaderWithDelayedCandidacy(connRecord, cc, asyncPriorityInfo, localities, dbInfo, clusterId),

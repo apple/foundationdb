@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
+#include "ShardsAffectedByTeamFailure.h"
 
 std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) const {
 	std::vector<KeyRange> r;
@@ -161,25 +161,6 @@ void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> 
 			insert(t, modifiedShards[i].second);
 		}
 		shard_teams.insert(modifiedShards[i].second, modifiedShards[i].first);
-	}
-
-	check();
-}
-
-void ShardsAffectedByTeamFailure::rawMoveShard(KeyRangeRef keys,
-                                               const std::vector<Team>& srcTeams,
-                                               const std::vector<Team>& destinationTeams) {
-	auto it = shard_teams.rangeContaining(keys.begin);
-	std::vector<std::pair<std::pair<std::vector<Team>, std::vector<Team>>, KeyRange>> modifiedShards;
-	ASSERT(it->range() == keys);
-
-	// erase the many teams that were associated with this one shard
-	for (auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
-		erase(*t, it->range());
-	}
-	it.value() = std::make_pair(destinationTeams, srcTeams);
-	for (auto& team : destinationTeams) {
-		insert(team, keys);
 	}
 
 	check();

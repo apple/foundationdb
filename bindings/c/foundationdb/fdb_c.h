@@ -70,6 +70,8 @@
 extern "C" {
 #endif
 
+/* Keep typedef syntax in this public C header. */
+
 DLLEXPORT const char* fdb_get_error(fdb_error_t code);
 
 DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_error_t code);

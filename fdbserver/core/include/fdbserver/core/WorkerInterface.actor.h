@@ -28,11 +28,14 @@
 #include "fdbserver/core/BackupInterface.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/MasterInterface.h"
+#include "fdbclient/CDCProxyInterface.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbclient/ConsistencyScanInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
+#include "fdbclient/ProcessClass.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/FDBTypes.h"
@@ -50,6 +53,7 @@ struct WorkerInterface {
 	RequestStream<struct RecruitMasterRequest> master;
 	RequestStream<struct InitializeCommitProxyRequest> commitProxy;
 	RequestStream<struct InitializeGrvProxyRequest> grvProxy;
+	RequestStream<struct InitializeCDCProxyRequest> cdcProxy;
 	RequestStream<struct InitializeDataDistributorRequest> dataDistributor;
 	RequestStream<struct InitializeRatekeeperRequest> ratekeeper;
 	RequestStream<struct InitializeConsistencyScanRequest> consistencyScan;
@@ -57,6 +61,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
+	RequestStream<struct InitializeRangePartitionedBackupRequest> rangePartitionedBackup;
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -87,6 +92,7 @@ struct WorkerInterface {
 		master.getEndpoint(TaskPriority::Worker);
 		commitProxy.getEndpoint(TaskPriority::Worker);
 		grvProxy.getEndpoint(TaskPriority::Worker);
+		cdcProxy.getEndpoint(TaskPriority::Worker);
 		resolver.getEndpoint(TaskPriority::Worker);
 		logRouter.getEndpoint(TaskPriority::Worker);
 		debugPing.getEndpoint(TaskPriority::Worker);
@@ -97,31 +103,67 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           clientInterface,
-		           locality,
-		           tLog,
-		           master,
-		           commitProxy,
-		           grvProxy,
-		           dataDistributor,
-		           ratekeeper,
-		           consistencyScan,
-		           resolver,
-		           storage,
-		           logRouter,
-		           debugPing,
-		           coordinationPing,
-		           waitFailure,
-		           setMetricsRate,
-		           eventLogRequest,
-		           traceBatchDumpRequest,
-		           testerInterface,
-		           diskStoreRequest,
-		           execReq,
-		           workerSnapReq,
-		           backup,
-		           updateServerDBInfo);
+		if constexpr (is_fb_function<Ar>) {
+			// FlatBuffer visitors must see every field in one call because each visit starts at field zero.
+			serializer(ar,
+			           clientInterface,
+			           locality,
+			           tLog,
+			           master,
+			           commitProxy,
+			           grvProxy,
+			           dataDistributor,
+			           ratekeeper,
+			           consistencyScan,
+			           resolver,
+			           storage,
+			           logRouter,
+			           debugPing,
+			           coordinationPing,
+			           waitFailure,
+			           setMetricsRate,
+			           eventLogRequest,
+			           traceBatchDumpRequest,
+			           testerInterface,
+			           diskStoreRequest,
+			           execReq,
+			           workerSnapReq,
+			           backup,
+			           updateServerDBInfo,
+			           rangePartitionedBackup,
+			           cdcProxy);
+		} else {
+			ASSERT(ar.protocolVersion().isValid());
+			serializer(ar,
+			           clientInterface,
+			           locality,
+			           tLog,
+			           master,
+			           commitProxy,
+			           grvProxy,
+			           dataDistributor,
+			           ratekeeper,
+			           consistencyScan,
+			           resolver,
+			           storage,
+			           logRouter,
+			           debugPing,
+			           coordinationPing,
+			           waitFailure,
+			           setMetricsRate,
+			           eventLogRequest,
+			           traceBatchDumpRequest,
+			           testerInterface,
+			           diskStoreRequest,
+			           execReq,
+			           workerSnapReq,
+			           backup,
+			           updateServerDBInfo,
+			           rangePartitionedBackup);
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, cdcProxy);
+			}
+		}
 	}
 };
 
@@ -221,8 +263,7 @@ struct RegisterWorkerReply {
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
 
-	RegisterWorkerReply()
-	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
+	RegisterWorkerReply() : priorityInfo(recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo)
 	  : processClass(processClass), priorityInfo(priorityInfo) {}
 
@@ -239,6 +280,7 @@ struct RegisterMasterRequest {
 	LogSystemConfig logSystemConfig;
 	std::vector<CommitProxyInterface> commitProxies;
 	std::vector<GrvProxyInterface> grvProxies;
+	std::vector<CDCProxyInterface> cdcProxies;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
@@ -251,22 +293,41 @@ struct RegisterMasterRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if constexpr (!is_fb_function<Ar>) {
+		if constexpr (is_fb_function<Ar>) {
+			// FlatBuffer visitors must see every field in one call because each visit starts at field zero.
+			serializer(ar,
+			           id,
+			           mi,
+			           logSystemConfig,
+			           commitProxies,
+			           grvProxies,
+			           resolvers,
+			           recoveryCount,
+			           registrationCount,
+			           configuration,
+			           priorCommittedLogServers,
+			           recoveryState,
+			           recoveryStalled,
+			           cdcProxies);
+		} else {
 			ASSERT(ar.protocolVersion().isValid());
+			serializer(ar,
+			           id,
+			           mi,
+			           logSystemConfig,
+			           commitProxies,
+			           grvProxies,
+			           resolvers,
+			           recoveryCount,
+			           registrationCount,
+			           configuration,
+			           priorCommittedLogServers,
+			           recoveryState,
+			           recoveryStalled);
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, cdcProxies);
+			}
 		}
-		serializer(ar,
-		           id,
-		           mi,
-		           logSystemConfig,
-		           commitProxies,
-		           grvProxies,
-		           resolvers,
-		           recoveryCount,
-		           registrationCount,
-		           configuration,
-		           priorCommittedLogServers,
-		           recoveryState,
-		           recoveryStalled);
 	}
 };
 
@@ -400,7 +461,7 @@ struct RegisterWorkerRequest {
 	Optional<UID> clusterId;
 
 	RegisterWorkerRequest()
-	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
+	  : priorityInfo(recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
 	RegisterWorkerRequest(WorkerInterface wi,
 	                      ProcessClass initialClass,
 	                      ProcessClass processClass,
@@ -644,6 +705,20 @@ struct InitializeBackupReply {
 	}
 };
 
+struct InitializeRangePartitionedBackupReply {
+	constexpr static FileIdentifier file_identifier = 1986264;
+	struct BackupInterface interf;
+	LogEpoch backupEpoch;
+
+	InitializeRangePartitionedBackupReply() = default;
+	InitializeRangePartitionedBackupReply(BackupInterface bi, LogEpoch e) : interf(bi), backupEpoch(e) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, interf, backupEpoch);
+	}
+};
+
 struct InitializeBackupRequest {
 	constexpr static FileIdentifier file_identifier = 1245415;
 	UID reqId;
@@ -658,6 +733,26 @@ struct InitializeBackupRequest {
 
 	InitializeBackupRequest() = default;
 	explicit InitializeBackupRequest(UID id) : reqId(id) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, recruitedEpoch, backupEpoch, tag, totalTags, startVersion, endVersion, reply);
+	}
+};
+
+struct InitializeRangePartitionedBackupRequest {
+	constexpr static FileIdentifier file_identifier = 1986263;
+	UID reqId;
+	LogEpoch recruitedEpoch;
+	LogEpoch backupEpoch;
+	Tag tag;
+	int totalTags;
+	Version startVersion;
+	Optional<Version> endVersion;
+	ReplyPromise<struct InitializeRangePartitionedBackupReply> reply;
+
+	InitializeRangePartitionedBackupRequest() = default;
+	explicit InitializeRangePartitionedBackupRequest(UID id) : reqId(id) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -730,6 +825,21 @@ struct InitializeGrvProxyRequest {
 // Instantiated in worker.actor.cpp
 extern template class RequestStream<InitializeGrvProxyRequest, false>;
 extern template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
+
+struct InitializeCDCProxyRequest {
+	constexpr static FileIdentifier file_identifier = 416762;
+	uint64_t recoveryCount;
+	ReplyPromise<CDCProxyInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, recoveryCount, reply);
+	}
+};
+
+// Instantiated in WorkerSupport.cpp
+extern template class RequestStream<InitializeCDCProxyRequest, false>;
+extern template struct NetNotifiedQueue<InitializeCDCProxyRequest, false>;
 
 struct InitializeDataDistributorRequest {
 	constexpr static FileIdentifier file_identifier = 8858952;
@@ -970,6 +1080,7 @@ struct Role {
 	static const Role SHARED_TRANSACTION_LOG;
 	static const Role COMMIT_PROXY;
 	static const Role GRV_PROXY;
+	static const Role CDC_PROXY;
 	static const Role MASTER;
 	static const Role RESOLVER;
 	static const Role CLUSTER_CONTROLLER;
@@ -986,37 +1097,37 @@ struct Role {
 	std::string abbreviation;
 	bool includeInTraceRoles;
 
-	static const Role& get(ProcessClass::ClusterRole role) {
+	static const Role& get(recruitment::ClusterRole role) {
 		switch (role) {
-		case ProcessClass::Storage:
+		case recruitment::Storage:
 			return STORAGE_SERVER;
-		case ProcessClass::TLog:
+		case recruitment::TLog:
 			return TRANSACTION_LOG;
-		case ProcessClass::CommitProxy:
+		case recruitment::CommitProxy:
 			return COMMIT_PROXY;
-		case ProcessClass::GrvProxy:
+		case recruitment::GrvProxy:
 			return GRV_PROXY;
-		case ProcessClass::Master:
+		case recruitment::Master:
 			return MASTER;
-		case ProcessClass::Resolver:
+		case recruitment::Resolver:
 			return RESOLVER;
-		case ProcessClass::LogRouter:
+		case recruitment::LogRouter:
 			return LOG_ROUTER;
-		case ProcessClass::ClusterController:
+		case recruitment::ClusterController:
 			return CLUSTER_CONTROLLER;
-		case ProcessClass::DataDistributor:
+		case recruitment::DataDistributor:
 			return DATA_DISTRIBUTOR;
-		case ProcessClass::Ratekeeper:
+		case recruitment::Ratekeeper:
 			return RATEKEEPER;
-		case ProcessClass::Backup:
+		case recruitment::Backup:
 			return BACKUP;
-		case ProcessClass::EncryptKeyProxy:
+		case recruitment::EncryptKeyProxy:
 			return ENCRYPT_KEY_PROXY;
-		case ProcessClass::ConsistencyScan:
+		case recruitment::ConsistencyScan:
 			return CONSISTENCYSCAN;
-		case ProcessClass::Worker:
+		case recruitment::Worker:
 			return WORKER;
-		case ProcessClass::NoRole:
+		case recruitment::NoRole:
 		default:
 			ASSERT(false);
 			throw internal_error();

@@ -181,18 +181,17 @@ void StorageServerMetrics::notify(const Key& key, StorageMetrics& metrics) {
 	if (g_network->isSimulated()) {
 		CODE_PROBE(metrics.bytesWrittenPerKSecond != 0, "ShardNotifyMetrics bytes");
 		CODE_PROBE(metrics.iosPerKSecond != 0, "ShardNotifyMetrics ios");
-		CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead");
-		CODE_PROBE(metrics.opsReadPerKSecond != 0, "ShardNotifyMetrics opsRead");
 	}
 
 	double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 
 	StorageMetrics notifyMetrics;
 
-	if (metrics.bytesWrittenPerKSecond)
+	if (metrics.bytesWrittenPerKSecond) {
 		notifyMetrics.bytesWrittenPerKSecond =
 		    bytesWriteSample.addAndExpire(key, metrics.bytesWrittenPerKSecond, expire) *
 		    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	}
 	if (metrics.iosPerKSecond)
 		notifyMetrics.iosPerKSecond = iopsSample.addAndExpire(key, metrics.iosPerKSecond, expire) *
 		                              SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;

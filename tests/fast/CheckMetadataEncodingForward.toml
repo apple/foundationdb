@@ -1,0 +1,24 @@
+[[knobs]]
+shard_encode_location_metadata = true
+
+[[test]]
+testTitle = 'CheckMetadataEncodingForward'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'CheckMetadataEncoding'
+    # Assert the same FORWARD COMPLETE terminal condition that fdbcli's
+    # `audit_storage metadata_encoding` reports. Without the counting
+    # fix in CheckMetadataEncoding.cpp / CheckMetadataEncodingCommand.cpp,
+    # KRM range-boundary sentinels (empty keyServers values) and
+    # serverKeysFalse markers are miscounted as old-format entries, so
+    # this assertion fails on any fresh SHARD_ENCODE=true cluster.
+    requireForwardComplete = true

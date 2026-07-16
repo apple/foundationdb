@@ -24,6 +24,7 @@
 #pragma once
 
 #include <map>
+#include <source_location>
 #include <unordered_map>
 
 #include "flow/DeterministicRandom.h"
@@ -88,24 +89,16 @@ __GENERATE_BUGGIFY_VARIABLES(CLIENT, Client, client)
 
 #undef __GENERATE_BUGGIFY_VARIABLES
 
-/* Disabled due to <source_location> not available on clang-14 on macOS 13. Use macro for a bit longer.
 inline bool buggify(double probability = P_GENERAL_BUGGIFIED_SECTION_FIRES,
                     const std::source_location location = std::source_location::current()) {
-    return isGeneralBuggifyEnabled() && getGeneralSBVar(location.file_name(), static_cast<int>(location.line())) &&
-           deterministicRandom()->random01() < probability;
+	return isGeneralBuggifyEnabled() && getGeneralSBVar(location.file_name(), static_cast<int>(location.line())) &&
+	       deterministicRandom()->random01() < probability;
 }
-*/
-
-inline bool _buggify(const char* file, const int line, double probability = P_GENERAL_BUGGIFIED_SECTION_FIRES) {
-	return isGeneralBuggifyEnabled() && getGeneralSBVar(file, line) && deterministicRandom()->random01() < probability;
-}
-// buggify() macro defined at the end to avoid affecting swift namespace
 
 #define EXPENSIVE_VALIDATION (isGeneralBuggifyEnabled() && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
 #define CLIENT_BUGGIFY_WITH_PROB(x)                                                                                    \
 	(isClientBuggifyEnabled() && getClientSBVar(__FILE__, __LINE__) && deterministicRandom()->random01() < (x))
-
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_CLIENT_BUGGIFIED_SECTION_FIRES)
 
 namespace SwiftBridging {
@@ -114,7 +107,7 @@ inline std::map<std::pair<std::string, int>, bool> SwiftGeneralSBVar;
 
 inline bool getGeneralSBVar(const char* file, const int line) {
 	const auto paired = std::make_pair(std::string(file), line);
-	if (SwiftGeneralSBVar.count(paired)) [[likely]] {
+	if (SwiftGeneralSBVar.contains(paired)) [[likely]] {
 		return SwiftGeneralSBVar[paired];
 	}
 
@@ -136,8 +129,5 @@ inline bool buggify(const char* _Nonnull filename, int line) {
 }
 
 } // namespace SwiftBridging
-
-// TODO: go back to buggify() function using <source_location>, above
-#define buggify(...) _buggify(__FILE__, __LINE__ __VA_OPT__(, ) __VA_ARGS__)
 
 #endif // FLOW_BUGGIFY_H

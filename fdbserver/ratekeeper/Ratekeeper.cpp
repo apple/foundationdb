@@ -309,6 +309,9 @@ Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const
 				}
 			}
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent(SevWarn, "CannotMonitorHotShardForSS").detail("SS", ssi);
 			continue;
 		}
@@ -544,6 +547,9 @@ Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<Se
 		req.reply.send(Void());
 		TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
 	} catch (Error& err) {
+		if (err.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		TraceEvent("RatekeeperDied", rkInterf.id()).errorUnsuppressed(err);
 	}
 }

@@ -36,7 +36,7 @@ void DatabaseConfiguration::resetInternal() {
 	// does NOT reset rawConfiguration
 	initialized = false;
 	commitProxyCount = grvProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor =
-	    storageTeamSize = desiredLogRouterCount = desiredRangeBackupWorkerCount = -1;
+	    storageTeamSize = desiredLogRouterCount = desiredRangePartitionedBackupWorkerCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
 	tLogDataStoreType = storageServerStoreType = testingStorageServerStoreType = KeyValueStoreType::END;
 	perpetualStoreType = KeyValueStoreType::NONE;
@@ -52,7 +52,7 @@ void DatabaseConfiguration::resetInternal() {
 	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
 	backupWorkerEnabled = false;
-	rangeBackupWorkerEnabled = false;
+	rangePartitionedBackupWorkerEnabled = false;
 	perpetualStorageWiggleSpeed = 0;
 	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
@@ -421,9 +421,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	}
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
-	result["range_backup_worker_enabled"] = (int32_t)rangeBackupWorkerEnabled;
-	if (desiredRangeBackupWorkerCount != -1 || isOverridden("range_backup_worker_count")) {
-		result["range_backup_worker_count"] = desiredRangeBackupWorkerCount;
+	result["range_partitioned_backup_worker_enabled"] = (int32_t)rangePartitionedBackupWorkerEnabled;
+	if (desiredRangePartitionedBackupWorkerCount != -1 || isOverridden("range_partitioned_backup_workers")) {
+		result["range_partitioned_backup_workers"] = desiredRangePartitionedBackupWorkerCount;
 	}
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	result["perpetual_storage_wiggle_locality"] = perpetualStorageWiggleLocality;
@@ -695,11 +695,11 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == "backup_worker_enabled"_sr) {
 		parse((&type), value);
 		backupWorkerEnabled = (type != 0);
-	} else if (ck == "range_backup_worker_enabled"_sr) {
+	} else if (ck == "range_partitioned_backup_worker_enabled"_sr) {
 		parse((&type), value);
-		rangeBackupWorkerEnabled = (type != 0);
-	} else if (ck == "range_backup_worker_count"_sr) {
-		parse(&desiredRangeBackupWorkerCount, value);
+		rangePartitionedBackupWorkerEnabled = (type != 0);
+	} else if (ck == "range_partitioned_backup_workers"_sr) {
+		parse(&desiredRangePartitionedBackupWorkerCount, value);
 	} else if (ck == "usable_regions"_sr) {
 		parse(&usableRegions, value);
 	} else if (ck == "repopulate_anti_quorum"_sr) {

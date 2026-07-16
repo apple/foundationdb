@@ -35,7 +35,7 @@
 #include <string_view>
 #include <iomanip>
 #include "flow/IThreadPool.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/FastRef.h"
 #include "EventTypes.h"
 #include "flow/TDMetric.h"

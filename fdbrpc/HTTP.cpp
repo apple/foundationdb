@@ -56,13 +56,14 @@ std::string urlEncode(const std::string& s) {
 	std::string o;
 	o.reserve(s.size() * 3);
 	char buf[32];
-	for (auto c : s)
+	for (auto c : s) {
 		if (std::isalnum(c) || c == '?' || c == '/' || c == '-' || c == '_' || c == '.' || c == ',' || c == ':')
 			o.append(&c, 1);
 		else {
 			snprintf(buf, sizeof(buf), "%%%.02X", c);
 			o.append(buf);
 		}
+	}
 	return o;
 }
 
@@ -320,7 +321,10 @@ Future<Void> read_http_response_headers(Reference<IConnection> conn, Headers* he
 			*pos += valueStart;
 		} else {
 			// Malformed header line (at least according to this simple parsing)
-			TraceEvent(SevError, "HTTPReadHeadersMalformed").detail("Buffer", *buf).detail("Pos", *pos);
+			TraceEvent(SevError, "HTTPReadHeadersMalformed")
+			    .setMaxFieldLength(495)
+			    .detail("Buffer", *buf)
+			    .detail("Pos", *pos);
 			throw http_bad_response();
 		}
 
@@ -333,7 +337,10 @@ Future<Void> read_http_response_headers(Reference<IConnection> conn, Headers* he
 			*pos += len;
 		} else {
 			// Malformed header line (at least according to this simple parsing)
-			TraceEvent(SevError, "HTTPReadHeadersMalformed").detail("Buffer", *buf).detail("Pos", *pos);
+			TraceEvent(SevError, "HTTPReadHeadersMalformed")
+			    .setMaxFieldLength(495)
+			    .detail("Buffer", *buf)
+			    .detail("Pos", *pos);
 			throw http_bad_response();
 		}
 
@@ -515,7 +522,11 @@ Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Reference<ICo
 	}
 
 	if (ss && !ss.eof()) {
-		TraceEvent(SevWarn, "HTTPRequestExtraData").detail("Buffer", buf).detail("Pos", pos).detail("LineLen", lineLen);
+		TraceEvent(SevWarn, "HTTPRequestExtraData")
+		    .setMaxFieldLength(495)
+		    .detail("Buffer", buf)
+		    .detail("Pos", pos)
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
@@ -626,12 +637,13 @@ Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnection> 
 		// Prepend headers to content packet buffer chain
 		request->data.content->prependWriteBuffer(pFirst, pLast);
 
-		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1) {
 			fmt::print("[{}] HTTP starting {} {} ContentLen:{}\n",
 			           conn->getDebugID().toString(),
 			           request->verb,
 			           request->resource,
 			           request->data.contentLen);
+		}
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			for (auto h : request->data.headers)
 				fmt::print("Request Header: {}: {}\n", h.first, h.second);

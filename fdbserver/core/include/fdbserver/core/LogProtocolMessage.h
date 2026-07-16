@@ -51,7 +51,7 @@ struct LogProtocolMessage {
 	// the serialization of this message is a type code which is reserved in the MutationRef::Type enum and will thus
 	// never be the first byte of a MutationRef message.
 
-	LogProtocolMessage() {}
+	LogProtocolMessage() = default;
 
 	std::string toString() const { return format("code: %d", MutationRef::Reserved_For_LogProtocolMessage); }
 

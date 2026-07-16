@@ -26,14 +26,14 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tracing.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 
 struct VersionVector;
 
 // An interface that represents a transaction created by a client
 class ITransaction {
 public:
-	virtual ~ITransaction() {}
+	virtual ~ITransaction() = default;
 
 	virtual void cancel() = 0;
 	virtual void setVersion(Version v) = 0;
@@ -125,7 +125,7 @@ public:
 // An interface that represents a connection to a cluster made by a client
 class IDatabase {
 public:
-	virtual ~IDatabase() {}
+	virtual ~IDatabase() = default;
 
 	virtual Reference<ITransaction> createTransaction() = 0;
 	virtual void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
@@ -169,7 +169,7 @@ public:
 // operations use ThreadFutures and implementations should be thread safe.
 class IClientApi {
 public:
-	virtual ~IClientApi() {}
+	virtual ~IClientApi() = default;
 
 	virtual void selectApiVersion(int apiVersion) = 0;
 	virtual const char* getClientVersion() = 0;

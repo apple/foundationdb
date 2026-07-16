@@ -12,7 +12,7 @@ struct VersionedMutation {
 		version = toCopy.version;
 		subsequence = toCopy.subsequence;
 	}
-	VersionedMutation() {}
+	VersionedMutation() = default;
 };
 
 class PartitionedLogIterator : public ReferenceCounted<PartitionedLogIterator> {

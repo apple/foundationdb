@@ -57,13 +57,11 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/coordinator/CoordinationServer.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/kvstore/KVFileUtils.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/tester.h"
@@ -360,10 +358,11 @@ UID getSharedMemoryMachineId() {
 			} catch (boost::interprocess::interprocess_exception& ex) {
 				// Retry in case the shared memory was deleted in between the call to open_or_create and open_read_only
 				// Don't keep trying forever in case this is caused by some other problem
-				if (++numTries == 10)
+				if (++numTries == 10) {
 					criticalError(FDB_EXIT_ERROR,
 					              "SharedMemoryError",
 					              format("Could not open shared memory - %s", ex.what()).c_str());
+				}
 			}
 		}
 	}
@@ -2253,6 +2252,7 @@ int main(int argc, char* argv[]) {
 			// mocks3 folder is used by MockS3 persistence for post-test analysis
 
 			for (const auto& dir : directories) {
+				// Simulation may create one tlog spill sibling for each process data directory.
 				StringRef tLogSpillFolderSuffix = "-tlog-spill"_sr;
 				bool isTLogSpillFolder =
 				    dir.size() == 32 + tLogSpillFolderSuffix.size() && StringRef(dir).endsWith(tLogSpillFolderSuffix);

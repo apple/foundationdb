@@ -38,6 +38,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/tester/tester.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/worker/Worker.h"
 #include "fdbclient/ClusterInterface.h"
@@ -59,10 +60,8 @@
 #include "flow/TypeTraits.h"
 #include "flow/FaultInjection.h"
 #include "flow/CodeProbeUtils.h"
-#include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "flow/IConnection.h"
-#include "fdbserver/datadistributor/MockGlobalState.h"
 #include "flow/CoroUtils.h"
 
 #undef max
@@ -75,6 +74,28 @@ using namespace std::literals;
 
 namespace {
 
+class BasicTestConfig {
+public:
+	int minimumReplication = 0;
+	int logAntiQuorum = -1;
+	// Set true to simplify simulation configs for easier debugging.
+	bool simpleConfig = false;
+	// Set true to force a single-region config.
+	bool singleRegion = false;
+	Optional<int> desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, machineCount, coordinators;
+	Optional<SimulationStorageEngine> storageEngineType;
+	// ASAN uses more memory, so tests can lower machineCount specifically for ASAN builds.
+	Optional<int> asanMachineCount;
+};
+
+struct BasicSimulationConfig {
+	int datacenters;
+	int replication_type;
+	int machine_count; // Total, not per DC.
+	int processes_per_machine;
+
+	DatabaseConfiguration db;
+};
 constexpr bool hasRocksDB =
 #ifdef WITH_ROCKSDB
     true
@@ -737,7 +758,7 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 		                                                           sslEnabled,
 		                                                           listenPerProcess,
 		                                                           localities,
-		                                                           processClass,
+		                                                           makeFDBSimulatorProcessMetadata(processClass),
 		                                                           dataFolder->c_str(),
 		                                                           coordFolder->c_str(),
 		                                                           protocolVersion,
@@ -747,8 +768,12 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 		    TaskPriority::DefaultYield); // Now switch execution to the process on which we will run
 		Future<ISimulator::KillType> onShutdown = process->onShutdown();
 		// Older binaries used in restart tests do not recognize separate tlog spill folders.
+		// Choose from the data folder basename so the split is stable across reboots of
+		// this simulated process; a new random choice could hide the prior spill folder.
+		const std::string dataFolderName = basename(*dataFolder);
 		bool useSeparateTLogSpillFolder = !fdbSimulationPolicyState().willRestart &&
-		                                  !fdbSimulationPolicyState().restarted && dataFolder->back() % 2 == 0;
+		                                  !fdbSimulationPolicyState().restarted && !dataFolderName.empty() &&
+		                                  static_cast<unsigned char>(dataFolderName.front()) % 2 == 0;
 		std::string tLogSpillFolder = useSeparateTLogSpillFolder ? *dataFolder + "-tlog-spill" : *dataFolder;
 
 		try {
@@ -835,11 +860,12 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 				// If in simulation, if we make it here with an error other than io_timeout but enASIOTimedOut is set
 				// then somewhere an io_timeout was converted to a different error.
 				if (g_network->isSimulated() && e.code() != error_code_io_timeout &&
-				    (bool)g_network->global(INetwork::enASIOTimedOut))
+				    (bool)g_network->global(INetwork::enASIOTimedOut)) {
 					TraceEvent(SevError, "IOTimeoutErrorSuppressed")
 					    .detail("ErrorCode", e.code())
 					    .detail("RandomId", randomId)
 					    .backtrace();
+				}
 
 				if (e.code() == error_code_io_timeout && !onShutdown.isReady()) {
 					onShutdown = ISimulator::KillType::RebootProcess;
@@ -1005,11 +1031,12 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				if (i == 0) {
 					std::string coordinationFolder =
 					    ini.GetValue(printable(localities.machineId()).c_str(), "coordinationFolder", "");
-					if (coordinationFolder.empty())
+					if (coordinationFolder.empty()) {
 						coordinationFolder = ini.GetValue(
 						    printable(localities.machineId()).c_str(),
 						    format("c%d", i * listenPerProcess).c_str(),
 						    joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString()).c_str());
+					}
 					coordFolders.push_back(coordinationFolder);
 				} else {
 					coordFolders.push_back(
@@ -1186,8 +1213,9 @@ Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					TraceEvent("MachineFilesOpen", randomId)
 					    .detail("PAddr", toIPVectorString(ips))
 					    .detail("OpenFiles", openFiles);
-				} else
+				} else {
 					break;
+				}
 
 				if (shutdownDelayCount++ >= 50) { // Worker doesn't shut down instantly on reboot
 					TraceEvent(SevError, "SimulatedFDBDFilesCheck", randomId)
@@ -1979,8 +2007,8 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 		if (deterministicRandom()->random01() < 0.25)
 			db.desiredLogRouterCount = deterministicRandom()->randomInt(1, 7);
 
-		if (db.rangeBackupWorkerEnabled && deterministicRandom()->random01() < 0.5)
-			db.desiredRangeBackupWorkerCount = deterministicRandom()->randomInt(1, 7);
+		if (db.rangePartitionedBackupWorkerEnabled && deterministicRandom()->random01() < 0.5)
+			db.desiredRangePartitionedBackupWorkerCount = deterministicRandom()->randomInt(1, 7);
 
 		if (testConfig.remoteDesiredTLogCount.present()) {
 			db.remoteDesiredTLogCount = testConfig.remoteDesiredTLogCount.get();
@@ -2212,10 +2240,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           ProtocolVersion protocolVersion) {
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
-
-	if (testConfig.testClass == MOCK_DD_TEST_CLASS) {
-		MockGlobalState::g_mockState()->initializeClusterLayout(simconfig);
-	}
 
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
@@ -2513,16 +2537,17 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			// Choose a machine class
 			ProcessClass processClass = ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource);
 			if (assignClasses) {
-				if (assignedMachines < 4)
+				if (assignedMachines < 4) {
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 2),
 					                            ProcessClass::CommandLineSource); // Unset or Storage
-				else if (assignedMachines == 4 && simconfig.db.regions.empty())
+				} else if (assignedMachines == 4 && simconfig.db.regions.empty()) {
 					processClass = ProcessClass(
 					    processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())],
 					    ProcessClass::CommandLineSource); // Unset or Stateless
-				else
+				} else {
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
+				}
 
 				if (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass) {
 					possible_ss++;
@@ -2772,21 +2797,21 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 	}
 
 	// TODO (IPv6) Use IPv6?
-	auto testSystem =
-	    g_simulator->newProcess("TestSystem",
-	                            IPAddress(0x01010101),
-	                            1,
-	                            false,
-	                            1,
-	                            LocalityData(Optional<Standalone<StringRef>>(),
-	                                         Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
-	                                         Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
-	                                         Optional<Standalone<StringRef>>()),
-	                            ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
-	                            "",
-	                            "",
-	                            currentProtocolVersion(),
-	                            false);
+	auto testSystem = g_simulator->newProcess(
+	    "TestSystem",
+	    IPAddress(0x01010101),
+	    1,
+	    false,
+	    1,
+	    LocalityData(Optional<Standalone<StringRef>>(),
+	                 Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                 Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                 Optional<Standalone<StringRef>>()),
+	    makeFDBSimulatorProcessMetadata(ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource)),
+	    "",
+	    "",
+	    currentProtocolVersion(),
+	    false);
 	testSystem->excludeFromRestarts = true;
 	co_await g_simulator->onProcess(testSystem, TaskPriority::DefaultYield);
 	Sim2FileSystem::newFileSystem();

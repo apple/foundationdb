@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/HealthMonitor.h"
+#include "HealthMonitor.h"
 
 void HealthMonitor::reportPeerClosed(const NetworkAddress& peerAddress) {
 	purgeOutdatedHistory();

@@ -21,13 +21,11 @@
 import random
 import uuid
 import unicodedata
-import ctypes
 import math
 
 import fdb
 import fdb.tuple
 
-from bindingtester import util
 from bindingtester import FDB_API_VERSION
 from bindingtester.known_testers import COMMON_TYPES
 

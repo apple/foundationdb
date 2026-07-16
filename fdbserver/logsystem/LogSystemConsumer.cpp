@@ -1,6 +1,19 @@
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 
+#include <algorithm>
 #include <utility>
+
+#include "flow/genericactors.actor.h"
+
+namespace {
+bool shouldPopFromLogSet(Reference<LogSet> const& logSet, Tag tag, int8_t popLocality) {
+	// CDC tags are replicated to each TLog set. Once a version is acknowledged, every copy can be discarded;
+	// leaving remote copies unpopped can retain old log generations across failover.
+	return logSet->locality == tagLocalitySpecial || logSet->locality == tag.locality ||
+	       tag.locality == tagLocalityCDC ||
+	       (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == logSet->isLocal));
+}
+} // namespace
 
 Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
                                                         Version begin,
@@ -20,7 +33,7 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
 		}
 		if (log->isLocal && !log->logServers.empty() &&
 		    (log->locality == tagLocalitySpecial || log->locality == tag.locality || tag.locality == tagLocalityTxs ||
-		     tag.locality == tagLocalityLogRouter)) {
+		     tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityCDC)) {
 			lastBegin = std::max(lastBegin, log->startVersion);
 			localSets.push_back(log);
 			if (log->locality != tagLocalitySatellite) {
@@ -95,7 +108,8 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
 				}
 				if (log->isLocal && !log->logServers.empty() &&
 				    (log->locality == tagLocalitySpecial || log->locality == tag.locality ||
-				     tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter)) {
+				     tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter ||
+				     tag.locality == tagLocalityCDC)) {
 					thisBegin = std::max(thisBegin, log->startVersion);
 					localOldSets.push_back(log);
 					if (log->locality != tagLocalitySatellite) {
@@ -142,7 +156,7 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekAll(UID dbgid,
 			}
 		}
 
-		return makeReference<ReplayMultiCursor>(cursors, epochEnds);
+		return makeReference<ReplayMultiCursor>(cursors, epochEnds, tag.locality != tagLocalityCDC);
 	}
 }
 
@@ -523,7 +537,7 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekLocal(UID dbgid,
 			}
 		}
 
-		return makeReference<ReplayMultiCursor>(cursors, epochEnds);
+		return makeReference<ReplayMultiCursor>(cursors, epochEnds, tag.locality != tagLocalityCDC);
 	}
 }
 
@@ -608,19 +622,25 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekSingle(UID dbgid,
                                                            Tag tag,
                                                            std::vector<std::pair<Version, Tag>> history) {
 	auto& ls = *logSystem;
+	auto peekTag = [&](Tag readTag, Version readBegin, Version readEnd) -> Reference<IReplayPeekCursor> {
+		if (readTag.locality == tagLocalityCDC) {
+			return peekAll(dbgid, readBegin, readEnd, readTag, false);
+		}
+		return peekLocal(dbgid, readTag, readBegin, readEnd, false);
+	};
 	while (!history.empty() && begin >= history.back().first) {
 		history.pop_back();
 	}
 
 	if (history.empty()) {
 		TraceEvent("TLogPeekSingleNoHistory", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
-		return peekLocal(dbgid, tag, begin, ls.getPeekEnd(), false);
+		return peekTag(tag, begin, ls.getPeekEnd());
 	} else {
 		std::vector<Reference<IReplayPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
 
 		TraceEvent("TLogPeekSingleAddingLocal", dbgid).detail("Tag", tag.toString()).detail("Begin", history[0].first);
-		cursors.push_back(peekLocal(dbgid, tag, history[0].first, ls.getPeekEnd(), false));
+		cursors.push_back(peekTag(tag, history[0].first, ls.getPeekEnd()));
 
 		for (int i = 0; i < history.size(); i++) {
 			TraceEvent("TLogPeekSingleAddingOld", dbgid)
@@ -628,15 +648,13 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekSingle(UID dbgid,
 			    .detail("HistoryTag", history[i].second.toString())
 			    .detail("Begin", i + 1 == history.size() ? begin : std::max(history[i + 1].first, begin))
 			    .detail("End", history[i].first);
-			cursors.push_back(peekLocal(dbgid,
-			                            history[i].second,
-			                            i + 1 == history.size() ? begin : std::max(history[i + 1].first, begin),
-			                            history[i].first,
-			                            false));
+			cursors.push_back(peekTag(history[i].second,
+			                          i + 1 == history.size() ? begin : std::max(history[i + 1].first, begin),
+			                          history[i].first));
 			epochEnds.emplace_back(history[i].first);
 		}
 
-		return makeReference<ReplayMultiCursor>(cursors, epochEnds);
+		return makeReference<ReplayMultiCursor>(cursors, epochEnds, tag.locality != tagLocalityCDC);
 	}
 }
 
@@ -795,8 +813,11 @@ Reference<IReplayPeekCursor> LogSystemConsumer::peekLogRouter(
 		}
 		firstOld = false;
 	}
+	// No current or historical log set can serve this router at the requested begin version.
+	// Represent that state as an already-exhausted cursor so callers can wait for the
+	// log system to change instead of repeatedly treating the placeholder like a stuck peek.
 	return makeReference<ServerPeekCursor>(
-	    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, end.get(), false, false);
+	    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, begin, false, false);
 }
 
 void LogSystemConsumer::popLogRouter(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) {
@@ -805,7 +826,11 @@ void LogSystemConsumer::popLogRouter(Version upTo, Tag tag, Version durableKnown
 		return;
 
 	Version lastGenerationStartVersion = LogSystem::getMaxLocalStartVersion(ls.tLogs);
-	if (upTo >= lastGenerationStartVersion) {
+	// Pop boundaries are exclusive. At a generation handoff, the remote TLog can durably reach
+	// startVersion - 1 while the current log router still needs that pop to advance flow control.
+	// Forward exactly that predecessor without making earlier generations eligible.
+	if (upTo >= lastGenerationStartVersion ||
+	    (lastGenerationStartVersion > 0 && upTo == lastGenerationStartVersion - 1)) {
 		for (auto& t : ls.tLogs) {
 			if (t->locality == popLocality) {
 				for (auto& log : t->logRouters) {
@@ -815,13 +840,11 @@ void LogSystemConsumer::popLogRouter(Version upTo, Tag tag, Version durableKnown
 						    std::make_pair(upTo, durableKnownCommittedVersion);
 					}
 					if (prev == 0) {
-						ls.popActors.add(
-						    LogSystem::popFromLog(&ls,
-						                          log,
-						                          tag,
-						                          /*delayBeforePop=*/0.0,
-						                          /*popLogRouter=*/true)); // Fast pop time because log routers can only
-						                                                   // hold 5 seconds of data.
+						ls.popActors.add(ls.popFromLog(log,
+						                               tag,
+						                               /*delayBeforePop=*/0.0,
+						                               /*popLogRouter=*/true)); // Fast pop time because log routers can
+						                                                        // only hold 5 seconds of data.
 					}
 				}
 			}
@@ -848,8 +871,8 @@ void LogSystemConsumer::popLogRouter(Version upTo, Tag tag, Version durableKnown
 								    std::make_pair(upTo, durableKnownCommittedVersion);
 							}
 							if (prev == 0) {
-								ls.popActors.add(LogSystem::popFromLog(
-								    &ls, log, tag, /*delayBeforePop=*/0.0, /*popLogRouter=*/true));
+								ls.popActors.add(
+								    ls.popFromLog(log, tag, /*delayBeforePop=*/0.0, /*popLogRouter=*/true));
 							}
 						}
 					}
@@ -877,8 +900,7 @@ void LogSystemConsumer::pop(Version upTo, Tag tag, Version durableKnownCommitted
 		return;
 	}
 	for (auto& t : ls.tLogs) {
-		if (t->locality == tagLocalitySpecial || t->locality == tag.locality ||
-		    (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == t->isLocal))) {
+		if (shouldPopFromLogSet(t, tag, popLocality)) {
 			for (auto& log : t->logServers) {
 				Version prev = ls.outstandingPops[std::make_pair(log->get().id(), tag)].first;
 				if (prev < upTo) {
@@ -888,21 +910,48 @@ void LogSystemConsumer::pop(Version upTo, Tag tag, Version durableKnownCommitted
 				}
 				if (prev == 0) {
 					// pop tag from log upto version defined in ls.outstandingPops[].first
-					ls.popActors.add(
-					    LogSystem::popFromLog(&ls, log, tag, SERVER_KNOBS->POP_FROM_LOG_DELAY, /*popLogRouter=*/false));
+					ls.popActors.add(ls.popFromLog(log, tag, SERVER_KNOBS->POP_FROM_LOG_DELAY, /*popLogRouter=*/false));
 				}
 			}
 		}
 	}
 }
 
+Future<Void> LogSystemConsumer::waitForPopped(Version upTo, Tag tag, int8_t popLocality) {
+	while (true) {
+		std::vector<Future<Version>> poppedFutures;
+		for (auto& t : logSystem->tLogs) {
+			if (shouldPopFromLogSet(t, tag, popLocality)) {
+				for (auto& log : t->logServers) {
+					poppedFutures.push_back(LogSystem::getPoppedFromTLog(log, tag));
+				}
+			}
+		}
+		if (poppedFutures.empty()) {
+			co_return;
+		}
+
+		std::vector<Version> poppedVersions = co_await getAll(poppedFutures);
+		if (std::all_of(poppedVersions.begin(), poppedVersions.end(), [upTo](Version poppedVersion) {
+			    return poppedVersion >= upTo;
+		    })) {
+			co_return;
+		}
+		co_await delay(0.01, TaskPriority::TLogPop);
+	}
+}
+
 Future<Version> LogSystemConsumer::getTxsPoppedVersion() {
 	auto& ls = *logSystem;
-	return LogSystem::getPoppedTxs(&ls);
+	return ls.getPoppedTxs();
 }
 
 Version LogSystemConsumer::getEnd() const {
 	return logSystem->getEnd();
+}
+
+Version LogSystemConsumer::getPeekEnd() const {
+	return logSystem->getPeekEnd();
 }
 
 Tag LogSystemConsumer::getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const {

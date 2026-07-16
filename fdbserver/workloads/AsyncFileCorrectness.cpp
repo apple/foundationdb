@@ -218,8 +218,9 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 			}
 
 			// If it is a write, clear the write locks
-			else if (info.operation == WRITE)
+			else if (info.operation == WRITE) {
 				memset(&self->fileLock[info.offset], 0, info.length * sizeof(uint32_t));
+			}
 
 			// Only generate new operations if we don't have a postponed operation in queue
 			if (postponedOperations.empty()) {
@@ -227,11 +228,12 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 				OperationInfo newOperation = self->generateOperation(info.index);
 
 				// If we need to flush existing operations, postpone this operation
-				if (newOperation.flushOperations)
+				if (newOperation.flushOperations) {
 					postponedOperations.push_back(newOperation);
-				// Otherwise, add it to our operations queue
-				else
+					// Otherwise, add it to our operations queue
+				} else {
 					self->operations[info.index] = self->processOperation(self, newOperation);
+				}
 			}
 
 			// If there is a postponed operation, clear the queue so that we can run it
@@ -322,17 +324,18 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 					info.length = std::min(info.length, std::max(targetFileSize, fileSize) - info.offset);
 					memset(&fileLock[info.offset], 0xFF, info.length * sizeof(uint32_t));
 				}
-			} else if (info.operation == REOPEN)
+			} else if (info.operation == REOPEN) {
 				info.flushOperations = true;
-			else if (info.operation == TRUNCATE) {
+			} else if (info.operation == TRUNCATE) {
 				info.flushOperations = true;
 
 				// Choose a random length to truncate to
-				if (unbufferedIO)
+				if (unbufferedIO) {
 					info.offset =
 					    (int64_t)(deterministicRandom()->random01() * (2 * targetFileSize) / _PAGE_SIZE) * _PAGE_SIZE;
-				else
+				} else {
 					info.offset = (int64_t)(deterministicRandom()->random01() * (2 * targetFileSize));
+				}
 			}
 
 		} while (!allowFlushingOperations && info.flushOperations);

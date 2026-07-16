@@ -220,17 +220,17 @@ struct ThreadSafetyWorkload : TestWorkload {
 				int operation = info->random.randomInt(0, 6);
 
 				try {
-					if (operation == 0)
+					if (operation == 0) {
 						tr->set(getRandomKey(info->random),
 						        StringRef(std::string(info->random.randomInt(0, 100), 'x')));
-					else if (operation == 1)
+					} else if (operation == 1) {
 						tr->get(getRandomKey(info->random)).getBlocking();
-					else if (operation == 2)
+					} else if (operation == 2) {
 						tr->getKey(KeySelectorRef(getRandomKey(info->random),
 						                          info->random.randomInt(0, 2) == 1,
 						                          info->random.randomInt(-10, 11)))
 						    .getBlocking();
-					else if (operation == 3) {
+					} else if (operation == 3) {
 						Key key1 = getRandomKey(info->random);
 						Key key2 = getRandomKey(info->random);
 						GetRangeLimits limits(info->random.randomInt(1, 1000), info->random.randomInt(1, 1e6));
@@ -239,9 +239,9 @@ struct ThreadSafetyWorkload : TestWorkload {
 						             info->random.randomInt(0, 2) != 0,
 						             info->random.randomInt(0, 2) != 0)
 						    .getBlocking();
-					} else if (operation == 4)
+					} else if (operation == 4) {
 						tr->clear(getRandomKey(info->random));
-					else if (operation == 5) {
+					} else if (operation == 5) {
 						Key key1 = getRandomKey(info->random);
 						Key key2 = getRandomKey(info->random);
 						tr->clear(KeyRangeRef(std::min(key1, key2), std::max(key1, key2)));

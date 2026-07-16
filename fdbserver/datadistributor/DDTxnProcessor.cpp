@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbserver/datadistributor/DDTxnProcessor.h"
+#include "DDTxnProcessor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
+#include "DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/TxnCounters.h"
 #include "flow/CoroUtils.h"
@@ -300,6 +300,90 @@ class DDTxnProcessorImpl {
 		co_return Optional<Key>();
 	}
 
+	// When SHARD_ENCODE_LOCATION_METADATA is false on DD init, do a bounded
+	// rewrite to start the rollback. Two phases, both bounded:
+	//
+	// Phase 1: Clear all DataMoveMetaData (single transaction; the dataMoves
+	// keyspace is small, this is always one commit).
+	//
+	// Phase 2: Rewrite up to 1000 keyServers entries at the head of the
+	// prefix from new (UID-based) to old (tag-based) format. Returns true
+	// if either phase committed; the caller restarts the outer init loop
+	// and calls back in. The Phase-2 cap means clusters with more than
+	// 1000 shard-encoded keyServers entries are NOT fully rewritten by
+	// this function — by design. Bulk rewrite happens through normal
+	// shard movement / storage wiggle once the knob is false (see the
+	// "Migration for downgrade" section of
+	// design/shard-encode-location-metadata.md); this function just
+	// clears dataMoves and rewrites the small remnant at the head so DD
+	// init has a tidy starting point.
+	//
+	// Calling this when nothing needs rewriting (knob has been false the
+	// whole time, or rollback already complete) is safe and
+	// write-cost-free: the reads find no shard-encoded entries, no
+	// commits happen, returns false. Cost is three system-key reads on
+	// every DD init when knob is false.
+	//
+	// serverKeys entries are left in place — they drain naturally as DD
+	// moves shards using the old path.
+	static Future<bool> rewriteShardEncodedMetadata(Transaction& tr, UID distributorId) {
+		TraceEvent(SevInfo, "DDInitShardEncodeOff", distributorId)
+		    .detail("KnobValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+		// Phase 1: Clear all DataMoveMetaData
+		RangeResult dmsCheck = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
+		ASSERT(!dmsCheck.more && dmsCheck.size() < CLIENT_KNOBS->TOO_MANY);
+		if (!dmsCheck.empty()) {
+			TraceEvent(SevWarnAlways, "DDInitCancellingShardEncodedMoves", distributorId)
+			    .detail("Count", dmsCheck.size());
+			tr.clear(dataMoveKeys);
+			co_await tr.commit();
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			co_return true;
+		}
+
+		// Phase 2: Rewrite shard-encoded keyServers entries to old format.
+		// Reads 1000 entries per iteration. Caller loops (co_return true triggers
+		// re-entry) until no shard-encoded entries remain. Previously-rewritten
+		// entries won't match hasShardEncodeLocationMetaData() on re-read.
+		RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+		bool rewroteAny = false;
+		RangeResult ksEntries = co_await tr.getRange(KeyRangeRef(keyServersPrefix, keyServersEnd), 1000);
+		for (const auto& kv : ksEntries) {
+			if (kv.value.empty())
+				continue;
+			BinaryReader rd(kv.value, IncludeVersion());
+			if (rd.protocolVersion().hasShardEncodeLocationMetaData()) {
+				std::vector<UID> src, dest;
+				UID srcId, destId;
+				decodeKeyServersValue(UIDtoTagMap, kv.value, src, dest, srcId, destId);
+				Value oldValue = keyServersValue(UIDtoTagMap, src, dest);
+				tr.set(kv.key, oldValue);
+				rewroteAny = true;
+			}
+		}
+
+		if (rewroteAny) {
+			TraceEvent(SevInfo, "DDInitRewritingShardEncodedMetadata", distributorId)
+			    .detail("KeyServersEntries", ksEntries.size());
+			co_await tr.commit();
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			co_return true;
+		}
+
+		co_return false;
+	}
+
 	// Read keyservers, return unique set of teams
 	static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Database cx,
 	                                                                             UID distributorId,
@@ -389,6 +473,13 @@ class DDTxnProcessorImpl {
 						server_dc[ssi.id()] = ssi.locality.dcId();
 					} else {
 						tss_servers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
+					}
+				}
+
+				// If SHARD_ENCODE is off, rewrite any shard-encoded metadata to old format.
+				if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					if (co_await rewriteShardEncodedMetadata(tr, distributorId)) {
+						continue; // Committed a rewrite — re-read from the top
 					}
 				}
 
@@ -883,392 +974,7 @@ Future<std::vector<ProcessData>> DDTxnProcessor::getWorkers() const {
 	return ::getWorkers(cx);
 }
 
-Future<Void> DDTxnProcessor::rawStartMovement(const MoveKeysParams& params,
-                                              std::map<UID, StorageServerInterface>& tssMapping) {
-	return ::rawStartMovement(cx, params, tssMapping);
-}
-
-Future<Void> DDTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
-                                               const std::map<UID, StorageServerInterface>& tssMapping) {
-	return ::rawFinishMovement(cx, params, tssMapping);
-}
-
-struct DDMockTxnProcessorImpl {
-	// return when all status become FETCHED
-	static Future<Void> checkFetchingState(DDMockTxnProcessor* self, std::vector<UID> ids, KeyRangeRef range) {
-		TraceInterval interval("MockCheckFetchingState");
-		TraceEvent(SevDebug, interval.begin()).detail("Range", range);
-		while (true) {
-			co_await delayJittered(1.0, TaskPriority::FetchKeys);
-			bool done = true;
-			for (auto& id : ids) {
-				auto& server = self->mgs->allServers.at(id);
-				if (!server->allShardStatusIn(range, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED })) {
-					done = false;
-					break;
-				}
-			}
-			if (done) {
-				break;
-			}
-		}
-		TraceEvent(SevDebug, interval.end()).log();
-	}
-
-	static Future<Void> rawCheckFetchingState(DDMockTxnProcessor* self, const MoveKeysParams& params) {
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-			ASSERT(params.ranges.present());
-			// TODO: make startMoveShards work with multiple ranges.
-			ASSERT(params.ranges.get().size() == 1);
-			return checkFetchingState(self, params.destinationTeam, params.ranges.get().at(0));
-		}
-		ASSERT(params.keys.present());
-		return checkFetchingState(self, params.destinationTeam, params.keys.get());
-	}
-
-	static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
-		std::map<UID, StorageServerInterface> tssMapping;
-		// Because SFBTF::Team requires the ID is ordered
-		std::sort(params.destinationTeam.begin(), params.destinationTeam.end());
-		std::sort(params.healthyDestinations.begin(), params.healthyDestinations.end());
-
-		co_await self->rawStartMovement(params, tssMapping);
-		ASSERT(tssMapping.empty());
-
-		co_await rawCheckFetchingState(self, params);
-
-		co_await self->rawFinishMovement(params, tssMapping);
-		if (!params.dataMovementComplete.isSet())
-			params.dataMovementComplete.send(Void());
-	}
-};
-
-Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
-	ServerWorkerInfos res;
-	for (auto& [_, mss] : mgs->allServers) {
-		res.servers.emplace_back(mss->ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
-	}
-	// FIXME(xwang): possible generate version from time?
-	res.readVersion = 0;
-	return res;
-}
-
-std::pair<std::set<std::vector<UID>>, std::set<std::vector<UID>>> getAllTeamsInRegion(
-    const std::vector<DDShardInfo>& shards) {
-	std::set<std::vector<UID>> primary, remote;
-	for (auto& info : shards) {
-		if (!info.primarySrc.empty())
-			primary.emplace(info.primarySrc);
-		if (!info.primaryDest.empty())
-			primary.emplace(info.primaryDest);
-		if (!info.remoteSrc.empty())
-			remote.emplace(info.remoteSrc);
-		if (!info.remoteDest.empty())
-			remote.emplace(info.remoteDest);
-	}
-	return { primary, remote };
-}
-
-inline void transformTeamsToServerIds(std::vector<ShardsAffectedByTeamFailure::Team>& teams,
-                                      std::vector<UID>& primaryIds,
-                                      std::vector<UID>& remoteIds) {
-	std::set<UID> primary, remote;
-	for (auto& team : teams) {
-		team.primary ? primary.insert(team.servers.begin(), team.servers.end())
-		             : remote.insert(team.servers.begin(), team.servers.end());
-	}
-	primaryIds = std::vector<UID>(primary.begin(), primary.end());
-	remoteIds = std::vector<UID>(remote.begin(), remote.end());
-}
-
-// reconstruct DDShardInfos from shardMapping
-std::vector<DDShardInfo> DDMockTxnProcessor::getDDShardInfos() const {
-	std::vector<DDShardInfo> res;
-	res.reserve(mgs->shardMapping->getNumberOfShards());
-	auto allRange = mgs->shardMapping->getAllRanges();
-	ASSERT(allRange.end().begin() == allKeys.end);
-	for (auto it = allRange.begin(); it != allRange.end(); ++it) {
-		// FIXME: now just use anonymousShardId
-		KeyRangeRef curRange = it->range();
-		DDShardInfo info(curRange.begin);
-
-		auto teams = mgs->shardMapping->getTeamsForFirstShard(curRange);
-		if (!teams.first.empty() && !teams.second.empty()) {
-			CODE_PROBE(true, "Mock InitialDataDistribution In-Flight shard");
-			info.hasDest = true;
-			info.destId = anonymousShardId;
-			info.srcId = anonymousShardId;
-			transformTeamsToServerIds(teams.second, info.primarySrc, info.remoteSrc);
-			transformTeamsToServerIds(teams.first, info.primaryDest, info.remoteDest);
-		} else if (!teams.first.empty()) {
-			CODE_PROBE(true, "Mock InitialDataDistribution Static shard");
-			info.srcId = anonymousShardId;
-			transformTeamsToServerIds(teams.first, info.primarySrc, info.remoteSrc);
-		} else {
-			ASSERT(false);
-		}
-
-		res.push_back(std::move(info));
-	}
-	res.emplace_back(allKeys.end);
-
-	return res;
-}
-
-Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDistribution(
-    const UID& distributorId,
-    const MoveKeysLock& moveKeysLock,
-    const std::vector<Optional<Key>>& remoteDcIds,
-    const DDEnabledState* ddEnabledState,
-    SkipDDModeCheck skipDDModeCheck) {
-
-	// FIXME: now we just ignore ddEnabledState and moveKeysLock, will fix it in the future
-	auto res = makeReference<InitialDataDistribution>();
-	res->mode = 1;
-	res->allServers = getServerListAndProcessClasses().get().servers;
-	res->shards = getDDShardInfos();
-	std::tie(res->primaryTeams, res->remoteTeams) = getAllTeamsInRegion(res->shards);
-	return res;
-}
-
-Future<Void> DDMockTxnProcessor::removeKeysFromFailedServer(const UID& serverID,
-                                                            const std::vector<UID>& teamForDroppedRange,
-                                                            const MoveKeysLock& lock,
-                                                            const DDEnabledState* ddEnabledState) const {
-
-	// This function only takes effect when user exclude failed IP:PORT in the fdbcli. In the first version , the mock
-	// class won’t support this.
-	UNREACHABLE();
-}
-
-Future<Void> DDMockTxnProcessor::removeStorageServer(const UID& serverID,
-                                                     const Optional<UID>& tssPairID,
-                                                     const MoveKeysLock& lock,
-                                                     const DDEnabledState* ddEnabledState) const {
-	ASSERT(mgs->allShardsRemovedFromServer(serverID));
-	mgs->allServers.erase(serverID);
-	return Void();
-}
-
-void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution> initData) {
-	for (auto& [ssi, pInfo] : initData->allServers) {
-		mgs->addStorageServer(ssi);
-	}
-	mgs->shardMapping->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceNoCheck);
-
-	for (int i = 0; i < initData->shards.size() - 1; ++i) {
-		// insert to keyServers
-		auto& shardInfo = initData->shards[i];
-		ASSERT(shardInfo.remoteSrc.empty() && shardInfo.remoteDest.empty());
-
-		uint64_t shardBytes =
-		    deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
-		KeyRangeRef keys(shardInfo.key, initData->shards[i + 1].key);
-		mgs->shardMapping->assignRangeToTeams(keys, { { shardInfo.primarySrc, true } });
-		if (shardInfo.hasDest) {
-			mgs->shardMapping->moveShard(keys, { { shardInfo.primaryDest, true } });
-		}
-		// insert to serverKeys
-		for (auto& id : shardInfo.primarySrc) {
-			mgs->allServers.at(id)->serverKeys.insert(keys, { MockShardStatus::COMPLETED, shardBytes });
-		}
-		for (auto& id : shardInfo.primaryDest) {
-			mgs->allServers.at(id)->serverKeys.insert(keys, { MockShardStatus::INFLIGHT, shardBytes });
-		}
-	}
-
-	mgs->shardMapping->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::Normal);
-}
-
-Future<Void> DDMockTxnProcessor::moveKeys(const MoveKeysParams& params) {
-	// Not support location metadata yet
-	ASSERT(!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	return DDMockTxnProcessorImpl::moveKeys(this, params);
-}
-
-// FIXME: finish implementation
-Future<HealthMetrics> DDMockTxnProcessor::getHealthMetrics(bool detailed) const {
-	return Future<HealthMetrics>();
-}
-
-Future<Standalone<VectorRef<KeyRef>>> DDMockTxnProcessor::splitStorageMetrics(
-    const KeyRange& keys,
-    const StorageMetrics& limit,
-    const StorageMetrics& estimated,
-    const Optional<int>& minSplitBytes) const {
-	return mgs->splitStorageMetrics(keys, limit, estimated, minSplitBytes);
-}
-
-Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorageMetrics(
-    const KeyRange& keys,
-    const StorageMetrics& min,
-    const StorageMetrics& max,
-    const StorageMetrics& permittedError,
-    int shardLimit,
-    int expectedShardCount) const {
-	return mgs->waitStorageMetrics(keys, min, max, permittedError, shardLimit, expectedShardCount);
-}
-
-// FIXME: finish implementation
-Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
-	return Future<std::vector<ProcessData>>();
-}
-
-Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
-                              MoveKeysParams params,
-                              std::map<UID, StorageServerInterface> tssMapping) {
-	TraceInterval interval("RelocateShard_MockStartMoveKeys");
-	KeyRange keys;
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		ASSERT(params.ranges.present());
-		// TODO: make startMoveShards work with multiple ranges.
-		ASSERT(params.ranges.get().size() == 1);
-		keys = params.ranges.get().at(0);
-	} else {
-		ASSERT(params.keys.present());
-		keys = params.keys.get();
-	}
-	TraceEvent(SevDebug, interval.begin()).detail("Keys", keys);
-	co_await params.startMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch);
-	FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
-
-	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
-	destTeams.emplace_back(params.destinationTeam, true);
-	// invariant: the splitting and merge operation won't happen at the same moveKeys action. For example, if [a,c) [c,
-	// e) exists, the params.keys won't be [b, d).
-	auto intersectRanges = mgs->shardMapping->intersectingRanges(keys);
-	// 1. splitting or just move a range. The new boundary need to be defined in startMovement
-	if (intersectRanges.begin().range().contains(keys)) {
-		mgs->shardMapping->defineShard(keys);
-	}
-	// 2. merge ops will coalesce the boundary in finishMovement;
-	intersectRanges = mgs->shardMapping->intersectingRanges(keys);
-	fmt::print("Keys: {}; intersect: {} {}\n",
-	           keys.toString(),
-	           intersectRanges.begin().begin(),
-	           intersectRanges.end().begin());
-	// NOTE: What if there is a split follow up by a merge?
-	// ASSERT(keys.begin == intersectRanges.begin().begin());
-	// ASSERT(keys.end == intersectRanges.end().begin());
-
-	int totalRangeSize = 0;
-	for (auto it = intersectRanges.begin(); it != intersectRanges.end(); ++it) {
-		auto teamPair = mgs->shardMapping->getTeamsFor(it->begin());
-		auto& srcTeams = teamPair.second.empty() ? teamPair.first : teamPair.second;
-		totalRangeSize += mgs->getRangeSize(it->range());
-		mgs->shardMapping->rawMoveShard(it->range(), srcTeams, destTeams);
-	}
-
-	for (auto& id : params.destinationTeam) {
-		auto& server = mgs->allServers.at(id);
-		server->setShardStatus(keys, MockShardStatus::INFLIGHT);
-		server->signalFetchKeys(keys, totalRangeSize);
-	}
-	TraceEvent(SevDebug, interval.end());
-}
-
-Future<Void> DDMockTxnProcessor::rawStartMovement(const MoveKeysParams& params,
-                                                  std::map<UID, StorageServerInterface>& tssMapping) {
-	return ::rawStartMovement(mgs, params, tssMapping);
-}
-
-Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
-                               MoveKeysParams params,
-                               std::map<UID, StorageServerInterface> tssMapping) {
-	TraceInterval interval("RelocateShard_MockFinishMoveKeys");
-	KeyRange keys;
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		ASSERT(params.ranges.present());
-		// TODO: make startMoveShards work with multiple ranges.
-		ASSERT(params.ranges.get().size() == 1);
-		keys = params.ranges.get().at(0);
-	} else {
-		ASSERT(params.keys.present());
-		keys = params.keys.get();
-	}
-
-	TraceEvent(SevDebug, interval.begin()).detail("Keys", keys);
-
-	co_await params.finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch);
-	FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
-
-	// get source and dest teams
-	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(keys);
-
-	ASSERT_EQ(destTeams.size(), 1); // Will the multi-region or dynamic replica make destTeam.size() > 1?
-	if (destTeams.front() != ShardsAffectedByTeamFailure::Team{ params.destinationTeam, true }) {
-		TraceEvent(SevError, "MockRawFinishMovementError")
-		    .detail("Reason", "InconsistentDestinations")
-		    .detail("ShardMappingDest", describe(destTeams.front().servers))
-		    .detail("ParamDest", describe(params.destinationTeam));
-		ASSERT(false); // This shouldn't happen because the overlapped key range movement won't be executed in parallel
-	}
-
-	for (auto& id : params.destinationTeam) {
-		auto server = mgs->allServers.at(id);
-		server->setShardStatus(keys, MockShardStatus::COMPLETED);
-		server->coalesceCompletedRange(keys);
-	}
-
-	// remove destination servers from source servers
-	ASSERT_EQ(srcTeams.size(), 1);
-	for (auto& id : srcTeams.front().servers) {
-		// the only caller moveKeys will always make sure the UID are sorted
-		if (!std::binary_search(params.destinationTeam.begin(), params.destinationTeam.end(), id)) {
-			mgs->allServers.at(id)->removeShard(keys);
-		}
-	}
-	mgs->shardMapping->finishMove(keys);
-	mgs->shardMapping->defineShard(keys); // coalesce for merge
-	TraceEvent(SevDebug, interval.end());
-}
-
-Future<Void> DDMockTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
-                                                   const std::map<UID, StorageServerInterface>& tssMapping) {
-	return ::rawFinishMovement(mgs, params, tssMapping);
-}
-
 Future<Optional<HealthMetrics::StorageStats>> DDTxnProcessor::getStorageStats(const UID& id,
                                                                               double maxStaleness) const {
 	return cx->getStorageStats(id, maxStaleness);
-}
-
-Future<Optional<HealthMetrics::StorageStats>> DDMockTxnProcessor::getStorageStats(const UID& id,
-                                                                                  double maxStaleness) const {
-	auto it = mgs->allServers.find(id);
-	if (it == mgs->allServers.end()) {
-		return Optional<HealthMetrics::StorageStats>();
-	}
-	return Optional<HealthMetrics::StorageStats>(it->second->getStorageStats());
-}
-
-Future<DatabaseConfiguration> DDMockTxnProcessor::getDatabaseConfiguration() const {
-	return mgs->configuration;
-}
-
-Future<IDDTxnProcessor::SourceServers> DDMockTxnProcessor::getSourceServersForRange(const KeyRangeRef keys) {
-	std::set<UID> servers;
-	std::vector<UID> completeSources;
-	auto ranges = mgs->shardMapping->intersectingRanges(keys);
-	int count = 0;
-	for (auto it = ranges.begin(); it != ranges.end(); ++it, ++count) {
-		auto sources = mgs->shardMapping->getSourceServerIdsFor(it->begin());
-		ASSERT(!sources.empty());
-		updateServersAndCompleteSources(servers, completeSources, count, sources);
-	}
-	ASSERT(!servers.empty());
-	return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
-}
-
-Future<Void> DDMockTxnProcessor::waitForAllDataRemoved(
-    const UID& serverID,
-    const Version& addedVersion,
-    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const {
-	return checkUntil(
-	    SERVER_KNOBS->ALL_DATA_REMOVED_DELAY,
-	    [&, this]() -> bool {
-		    return mgs->allShardsRemovedFromServer(serverID) &&
-		           shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0;
-	    },
-	    TaskPriority::DataDistribution);
 }

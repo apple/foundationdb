@@ -66,12 +66,13 @@ struct SlowTaskWorkload : TestWorkload {
 
 	static void do_slow_exception_thing(int64_t* exc_count) {
 		// Has to be a non-actor function so that actual exception unwinding occurs
-		for (int j = 0; j < 1000; j++)
+		for (int j = 0; j < 1000; j++) {
 			try {
 				throw success();
 			} catch (Error&) {
 				++*exc_count;
 			}
+		}
 	}
 };
 

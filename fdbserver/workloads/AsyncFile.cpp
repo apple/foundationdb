@@ -86,8 +86,9 @@ AsyncFileBuffer::AsyncFileBuffer(size_t size, bool aligned) {
 		if (posix_memalign((void**)&buffer, AsyncFileWorkload::_PAGE_SIZE, size) != 0)
 			buffer = nullptr;
 #endif
-	} else
+	} else {
 		buffer = (unsigned char*)malloc(size);
+	}
 
 	if (buffer == nullptr) {
 		TraceEvent(SevError, "TestFailure").detail("Reason", "Insufficient memory");
