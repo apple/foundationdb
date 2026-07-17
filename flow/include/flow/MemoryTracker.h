@@ -53,16 +53,7 @@
 // MEMORY_TRACKING_FRAMES knob controls the runtime depth (1..MEMORY_TRACKER_MAX_FRAMES).
 constexpr int MEMORY_TRACKER_MAX_FRAMES = 10;
 
-// When sampling is disabled (MEMORY_TRACKING_SAMPLE_INVERSE <= 0) the
-// alloc slow path re-parks the per-thread counter at this value
-// rather than at INT_MAX.  A parked thread therefore re-enters the
-// (lock-free, knob-reading) slow path once every ~this-many
-// allocations, so an off->on knob change is observed within a bounded
-// window.  The cost while disabled is one slow-path visit (a handful
-// of int reads, no lock) per this many allocations -- negligible.
-constexpr int MEMORY_TRACKER_DISABLED_RESEED = 1 << 16;
-
-// Per-site aggregate. Public so unit tests can introspect via memTrackerForEachSite.
+// Per-site aggregate, exposed for tests via memTrackerForEachSite.
 //
 // Two families of numbers are kept per site:
 //   * Est* — the estimated *population* usage, i.e. what the site is really
@@ -76,14 +67,12 @@ constexpr int MEMORY_TRACKER_DISABLED_RESEED = 1 << 16;
 struct MemoryTrackerCallSite {
 	uint64_t fingerprint;
 
-	// Estimated population usage (sampling correction already applied).
 	int64_t estLiveBytes;
 	int64_t estLiveCount;
 	int64_t estPeakBytes;
 	int64_t estCumulativeBytes;
 	int64_t estCumulativeAllocs;
 
-	// Raw sampled counters (no correction — one increment per observed sample).
 	int64_t liveBytes;
 	int64_t liveCount;
 	int64_t peakBytes;
@@ -95,28 +84,24 @@ struct MemoryTrackerCallSite {
 	uint8_t exemplarFrameCount;
 };
 
-// Described above
 extern thread_local bool gInMemTracker;
 extern thread_local int gMemTrackerCounter;
 extern thread_local std::size_t gForceSampleBytes;
 
-// Global "is the tracker enabled" flag, kept in its own cache line. Written
-// only when the enabled state actually changes (i.e. rarely -- on the first
-// slow-path visit after a MEMORY_TRACKING_SAMPLE_INVERSE knob change), so it
-// stays in MESI shared state across cores and every core's read is
-// likely cached. The free hot path reads it (relaxed) before touching
-// the lock: when disabled, a free is one read + one branch. This is what makes
-// the "off switch" genuinely free-of-cost on the free path (a free has no
-// per-thread sampling counter to gate on, unlike an alloc).
+// Global "is the tracker enabled" flag, kept in its own cache line. Published
+// once, from the first slow-path visit, and thereafter constant: the sample-
+// inverse knob is read at startup only (dynamic enable/disable is a
+// Non-requirement -- see design/memory-tracker.md). The flag stays in MESI
+// shared state across cores, so the free hot path's relaxed read is cached:
+// when disabled, a free is one read + one branch, no lock. This is the
+// free-path off switch (a free has no per-thread sampling counter to gate on,
+// unlike an alloc).
 //
 // Relaxed ordering is sufficient: a free of a sampled pointer is always
 // preceded (via the pointer handoff that let the freeing thread learn the
 // pointer at all) by the sampling alloc that inserted it, and that alloc set
 // this flag true before inserting -- so the happens-before edge guarantees the
-// freeing thread observes the flag as true. A stale read during a runtime
-// off->on/on->off toggle can at worst take/skip one unnecessary lock or orphan
-// one in-flight live entry, which is within the documented runtime-toggle
-// limitations (see MEMORY_TRACKING_LIVE_TRACKING in Knobs.h).
+// freeing thread observes the flag as true.
 struct alignas(64) MemTrackerEnabledFlag {
 	std::atomic<bool> value{ false };
 	char pad[64 - sizeof(std::atomic<bool>)];
@@ -139,12 +124,9 @@ public:
 	MemTrackerSuppress& operator=(const MemTrackerSuppress&) = delete;
 };
 
-// Out-of-line slow paths.
 void memTrackerSampleAlloc(void* p, std::size_t n);
 void memTrackerSampleFree(void* p);
 
-// Header-inlined hot path. Cost on the un-sampled path: one TLS load +
-// one decrement + one branch.
 inline void memTrackerOnAlloc(void* p, std::size_t n) {
 	if (gInMemTracker || !p) {
 		return;
@@ -152,9 +134,8 @@ inline void memTrackerOnAlloc(void* p, std::size_t n) {
 	if (--gMemTrackerCounter > 0 && n < gForceSampleBytes) {
 		return;
 	}
-	gInMemTracker = true;
+	MemTrackerSuppress _suppress;
 	memTrackerSampleAlloc(p, n);
-	gInMemTracker = false;
 }
 
 inline void memTrackerOnFree(void* p) {
@@ -166,9 +147,8 @@ inline void memTrackerOnFree(void* p) {
 	if (!g_memTrackerEnabled.value.load(std::memory_order_relaxed)) {
 		return;
 	}
-	gInMemTracker = true;
+	MemTrackerSuppress _suppress;
 	memTrackerSampleFree(p);
-	gInMemTracker = false;
 }
 
 // Periodic dump — emits one TraceEvent("MemoryTrackerSite") per site whose

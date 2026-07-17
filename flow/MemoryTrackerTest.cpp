@@ -31,11 +31,14 @@
 #include "flow/FastAlloc.h"
 #include "flow/Knobs.h"
 #include "flow/MemoryTracker.h"
+#include "flow/Platform.h"
 #include "flow/UnitTest.h"
 
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
+#include <new>
 #include <vector>
 
 // Force this TU to link. The TEST_CASE macro registers via a static
@@ -54,8 +57,9 @@ constexpr uintptr_t SENTINEL_FUNC_SIZE = 4096;
 // Defeat clang -O3 heap elision (P0593): if the allocated pointer doesn't
 // escape, the compiler is free to drop the new/delete pair entirely, which
 // then never reaches our operator-new override and the test sees zero samples.
+void* volatile gEscapeSink;
 inline void escape(void* p) {
-	asm volatile("" : : "r"(p) : "memory");
+	gEscapeSink = p;
 }
 
 bool frameInside(void* frame, void* sentinel) {
@@ -64,7 +68,7 @@ bool frameInside(void* frame, void* sentinel) {
 	return f >= s && f < s + SENTINEL_FUNC_SIZE;
 }
 
-__attribute__((noinline)) void* triggerOperatorNewSentinel(int n, int k) {
+force_noinline void* triggerOperatorNewSentinel(int n, int k) {
 	for (int i = 0; i < n; i++) {
 		auto* p = new int[k];
 		p[0] = i;
@@ -74,7 +78,7 @@ __attribute__((noinline)) void* triggerOperatorNewSentinel(int n, int k) {
 	return reinterpret_cast<void*>(&triggerOperatorNewSentinel);
 }
 
-__attribute__((noinline)) void* triggerFastAllocSentinel(int n) {
+force_noinline void* triggerFastAllocSentinel(int n) {
 	for (int i = 0; i < n; i++) {
 		void* p = FastAllocator<32>::allocate();
 		escape(p);
@@ -83,7 +87,7 @@ __attribute__((noinline)) void* triggerFastAllocSentinel(int n) {
 	return reinterpret_cast<void*>(&triggerFastAllocSentinel);
 }
 
-__attribute__((noinline)) void* triggerArenaSentinel(int n) {
+force_noinline void* triggerArenaSentinel(int n) {
 	// Force ArenaBlock::create by allocating large enough chunks to exceed
 	// the small-block threshold.
 	for (int i = 0; i < n; i++) {
@@ -102,7 +106,7 @@ __attribute__((noinline)) void* triggerArenaSentinel(int n) {
 
 // Allocate n arenas (each holding one >256-byte block, exercising the
 // allocateAndMaybeKeepalive / new uint8_t[] path).
-__attribute__((noinline)) void* allocateArenaMediumSentinel(int n, std::vector<Arena>& arenas) {
+force_noinline void* allocateArenaMediumSentinel(int n, std::vector<Arena>& arenas) {
 	for (int i = 0; i < n; i++) {
 		arenas.emplace_back();
 		auto* p = new (arenas.back()) uint8_t[600];
@@ -113,7 +117,7 @@ __attribute__((noinline)) void* allocateArenaMediumSentinel(int n, std::vector<A
 
 // Allocate n arenas (each holding one huge block, exercising the
 // reqSize >= LARGE path of ArenaBlock::create).
-__attribute__((noinline)) void* allocateArenaHugeSentinel(int n, std::vector<Arena>& arenas) {
+force_noinline void* allocateArenaHugeSentinel(int n, std::vector<Arena>& arenas) {
 	for (int i = 0; i < n; i++) {
 		arenas.emplace_back();
 		auto* p = new (arenas.back()) uint8_t[100000];
@@ -123,7 +127,7 @@ __attribute__((noinline)) void* allocateArenaHugeSentinel(int n, std::vector<Are
 }
 
 // Allocate n arenas (each holding one small block via FastAllocator<128|256>).
-__attribute__((noinline)) void* allocateArenaSmallSentinel(int n, std::vector<Arena>& arenas) {
+force_noinline void* allocateArenaSmallSentinel(int n, std::vector<Arena>& arenas) {
 	for (int i = 0; i < n; i++) {
 		arenas.emplace_back();
 		auto* p = new (arenas.back()) uint8_t[64];
@@ -134,7 +138,7 @@ __attribute__((noinline)) void* allocateArenaSmallSentinel(int n, std::vector<Ar
 
 // Allocate n FastAllocator<32> blocks; pointers retained so the test can
 // release them later.
-__attribute__((noinline)) void* allocateFastAlloc32Sentinel(int n, std::vector<void*>& ptrs) {
+force_noinline void* allocateFastAlloc32Sentinel(int n, std::vector<void*>& ptrs) {
 	for (int i = 0; i < n; i++) {
 		void* p = FastAllocator<32>::allocate();
 		escape(p);
@@ -143,7 +147,7 @@ __attribute__((noinline)) void* allocateFastAlloc32Sentinel(int n, std::vector<v
 	return reinterpret_cast<void*>(&allocateFastAlloc32Sentinel);
 }
 
-__attribute__((noinline)) void releaseFastAlloc32(std::vector<void*>& ptrs) {
+force_noinline void releaseFastAlloc32(std::vector<void*>& ptrs) {
 	for (void* p : ptrs) {
 		FastAllocator<32>::release(p);
 	}
@@ -317,53 +321,66 @@ TEST_CASE("/flow/MemoryTracker/offSwitch") {
 	return Void();
 }
 
-TEST_CASE("/flow/MemoryTracker/enableAfterOff") {
-	// Regression test for the startup/off->on activation path. A thread that
-	// first hits the slow path while sampling is off must NOT be parked
-	// permanently: after the knob flips on, sampling has to resume without any
-	// call to memTrackerResetForTest() (which the other tests use and which
-	// would mask this bug).
-	auto* k = const_cast<FlowKnobs*>(FLOW_KNOBS);
-	int prev = k->MEMORY_TRACKING_SAMPLE_INVERSE;
+TEST_CASE("/flow/MemoryTracker/operatorNewHonorsNewHandler") {
+	// The global operator new override (fdbserver/GlobalNewDelete.cpp) must run
+	// the std::new_handler retry loop so an allocation failure reaches FDB's OOM
+	// path instead of throwing straight past it. (Where the override isn't linked,
+	// the standard library's operator new provides the same contract, so this
+	// still passes.)
+	static bool handlerRan;
+	handlerRan = false;
+	std::new_handler prev = std::set_new_handler([]() {
+		handlerRan = true;
+		throw std::bad_alloc(); // break the retry loop
+	});
 
-	// Start from a clean, disabled state.
-	k->MEMORY_TRACKING_SAMPLE_INVERSE = 0;
+	bool caught = false;
+	try {
+		// volatile so the compiler can't fold the size and warn (-Walloc-size); malloc
+		// reliably fails for SIZE_MAX, driving the handler loop.
+		volatile std::size_t huge = std::numeric_limits<std::size_t>::max();
+		void* p = ::operator new(huge);
+		escape(p);
+	} catch (const std::bad_alloc&) {
+		caught = true;
+	}
+	std::set_new_handler(prev);
+
+	ASSERT(handlerRan);
+	ASSERT(caught);
+	return Void();
+}
+
+TEST_CASE("/flow/MemoryTracker/samplingRate") {
+	// The reseed gap is uniform on [1, 2N-1] (mean N), so at inverse N the sampled
+	// fraction should be ~1/N. Wide bounds keep it non-flaky across RNG state.
+	constexpr int N = 10;
+	constexpr int ALLOCS = 200000;
+	KnobOverride ko(N);
 	memTrackerResetForTest();
 
-	// One allocation drives the slow path, which parks the counter at
-	// MEMORY_TRACKER_DISABLED_RESEED and publishes enabled=false.
-	{
-		auto* warm = new int[4];
-		escape(warm);
-		delete[] warm;
-	}
-	ASSERT(!g_memTrackerEnabled.value.load(std::memory_order_relaxed));
-
-	// Flip sampling on WITHOUT resetting tracker state. The parked counter must
-	// drain within MEMORY_TRACKER_DISABLED_RESEED allocations and re-read the
-	// knob, at which point sampling resumes and a site is recorded.
-	k->MEMORY_TRACKING_SAMPLE_INVERSE = 1;
-
-	int siteCount = 0;
-	for (int i = 0; i < MEMORY_TRACKER_DISABLED_RESEED + 16; i++) {
+	std::vector<int*> ptrs;
+	ptrs.reserve(ALLOCS);
+	for (int i = 0; i < ALLOCS; i++) {
 		auto* p = new int[4];
-		p[0] = i;
 		escape(p);
-		delete[] p;
-		if ((i & 0x3ff) == 0) {
-			siteCount = 0;
-			memTrackerForEachSite([&](const MemoryTrackerCallSite&) { siteCount++; });
-			if (siteCount > 0) {
-				break;
-			}
-		}
+		ptrs.push_back(p);
 	}
-	siteCount = 0;
-	memTrackerForEachSite([&](const MemoryTrackerCallSite&) { siteCount++; });
-	ASSERT(siteCount > 0);
-	ASSERT(g_memTrackerEnabled.value.load(std::memory_order_relaxed));
 
-	k->MEMORY_TRACKING_SAMPLE_INVERSE = prev;
+	int64_t sampled = 0;
+	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
+		if (s.forceSampledCount == 0) {
+			sampled += s.cumulativeAllocs;
+		}
+	});
+
+	for (auto* p : ptrs) {
+		delete[] p;
+	}
+	ptrs.clear();
+
+	double frac = double(sampled) / ALLOCS;
+	ASSERT(frac > 0.06 && frac < 0.15); // expect ~0.1
 	memTrackerResetForTest();
 	return Void();
 }
@@ -536,7 +553,6 @@ TEST_CASE("/flow/MemoryTracker/arenaSmallAccounting") {
 	ASSERT_EQ(pre.sitesWithSentinelFrames, 1);
 	ASSERT_EQ(pre.cumAllocsSentinel, N);
 	ASSERT_EQ(pre.liveCountSentinel, N);
-	// liveBytes == cumulativeBytes since nothing freed yet.
 	ASSERT_EQ(pre.liveBytesSentinel, pre.cumBytesSentinel);
 	// Global totals are intentionally not asserted: at inverse=1 a foreign-thread
 	// allocation in the window would break a strict global equality (flaky at
@@ -591,7 +607,6 @@ TEST_CASE("/flow/MemoryTracker/arenaHugeAccounting") {
 #ifndef __linux__
 	return Void(); // see /coverage for rationale
 #endif
-	// Again ensure arena allocations aren't counted twice.
 	KnobOverride ko;
 	constexpr int N = 10;
 

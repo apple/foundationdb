@@ -67,7 +67,6 @@ void operator delete(void* ptr) throw() {
 	free(ptr);
 }
 
-// scalar, nothrow new and it matching delete
 void* operator new(std::size_t size, const std::nothrow_t&) throw() {
 	void* p = malloc(size);
 	recordAllocation(p, size);
@@ -78,7 +77,6 @@ void operator delete(void* ptr, const std::nothrow_t&) throw() {
 	free(ptr);
 }
 
-// array throwing new and matching delete[]
 void* operator new[](std::size_t size) {
 	void* p = malloc(size);
 	if (!p) {
@@ -92,7 +90,6 @@ void operator delete[](void* ptr) throw() {
 	free(ptr);
 }
 
-// array, nothrow new and matching delete[]
 void* operator new[](std::size_t size, const std::nothrow_t&) throw() {
 	void* p = malloc(size);
 	recordAllocation(p, size);
@@ -106,12 +103,49 @@ void operator delete[](void* ptr, const std::nothrow_t&) throw() {
 #else // sampled memory tracker, see design/memory-tracker.md
 
 #include "flow/MemoryTracker.h"
+#include "flow/Platform.h" // aligned_alloc / aligned_free (portable across MSVC/POSIX)
+
+namespace {
+
+// Retry through the installed std::new_handler on failure, as the default
+// operator new does. fdbserver installs platform::outOfMemory, so an allocation
+// failure (including the tracker's own map growth) reaches FDB's OOM diagnostics
+// and FDB_EXIT_NO_MEM rather than throwing straight past them.
+void* mallocWithNewHandler(std::size_t n) {
+	void* p;
+	while (!(p = std::malloc(n))) {
+		std::new_handler h = std::get_new_handler();
+		if (!h) {
+			throw std::bad_alloc();
+		}
+		h();
+	}
+	return p;
+}
+
+// Same handler loop for over-aligned allocations. C11 aligned_alloc requires the
+// size to be a multiple of the alignment, so round up (harmless over-allocation)
+// to accept arbitrary operator-new sizes.
+void* alignedAllocWithNewHandler(std::size_t alignment, std::size_t n) {
+	std::size_t rounded = (n + alignment - 1) & ~(alignment - 1);
+	if (rounded < n) {
+		throw std::bad_alloc(); // round-up overflowed; the request can't be satisfied
+	}
+	void* p;
+	while (!(p = aligned_alloc(alignment, rounded))) {
+		std::new_handler h = std::get_new_handler();
+		if (!h) {
+			throw std::bad_alloc();
+		}
+		h();
+	}
+	return p;
+}
+
+} // namespace
 
 void* operator new(std::size_t n) {
-	void* p = std::malloc(n);
-	if (!p) {
-		throw std::bad_alloc();
-	}
+	void* p = mallocWithNewHandler(n);
 	memTrackerOnAlloc(p, n);
 	return p;
 }
@@ -125,10 +159,7 @@ void operator delete(void* p, std::size_t) noexcept {
 }
 
 void* operator new[](std::size_t n) {
-	void* p = std::malloc(n);
-	if (!p) {
-		throw std::bad_alloc();
-	}
+	void* p = mallocWithNewHandler(n);
 	memTrackerOnAlloc(p, n);
 	return p;
 }
@@ -142,9 +173,13 @@ void operator delete[](void* p, std::size_t) noexcept {
 }
 
 void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
-	void* p = std::malloc(n);
-	memTrackerOnAlloc(p, n);
-	return p;
+	try {
+		void* p = mallocWithNewHandler(n);
+		memTrackerOnAlloc(p, n);
+		return p;
+	} catch (...) {
+		return nullptr;
+	}
 }
 void operator delete(void* p, const std::nothrow_t&) noexcept {
 	memTrackerOnFree(p);
@@ -152,48 +187,47 @@ void operator delete(void* p, const std::nothrow_t&) noexcept {
 }
 
 void* operator new[](std::size_t n, const std::nothrow_t&) noexcept {
-	void* p = std::malloc(n);
-	memTrackerOnAlloc(p, n);
-	return p;
+	try {
+		void* p = mallocWithNewHandler(n);
+		memTrackerOnAlloc(p, n);
+		return p;
+	} catch (...) {
+		return nullptr;
+	}
 }
 void operator delete[](void* p, const std::nothrow_t&) noexcept {
 	memTrackerOnFree(p);
 	std::free(p);
 }
 
-// C++17 over-aligned new/delete.
+// C++17 over-aligned new/delete. aligned_alloc/aligned_free (flow/Platform.h)
+// keep the alloc and free sides paired on MSVC (_aligned_malloc/_aligned_free).
 void* operator new(std::size_t n, std::align_val_t a) {
-	void* p = nullptr;
-	if (posix_memalign(&p, static_cast<std::size_t>(a), n) != 0) {
-		throw std::bad_alloc();
-	}
+	void* p = alignedAllocWithNewHandler(static_cast<std::size_t>(a), n);
 	memTrackerOnAlloc(p, n);
 	return p;
 }
 void operator delete(void* p, std::align_val_t) noexcept {
 	memTrackerOnFree(p);
-	std::free(p);
+	aligned_free(p);
 }
 void operator delete(void* p, std::size_t, std::align_val_t) noexcept {
 	memTrackerOnFree(p);
-	std::free(p);
+	aligned_free(p);
 }
 
 void* operator new[](std::size_t n, std::align_val_t a) {
-	void* p = nullptr;
-	if (posix_memalign(&p, static_cast<std::size_t>(a), n) != 0) {
-		throw std::bad_alloc();
-	}
+	void* p = alignedAllocWithNewHandler(static_cast<std::size_t>(a), n);
 	memTrackerOnAlloc(p, n);
 	return p;
 }
 void operator delete[](void* p, std::align_val_t) noexcept {
 	memTrackerOnFree(p);
-	std::free(p);
+	aligned_free(p);
 }
 void operator delete[](void* p, std::size_t, std::align_val_t) noexcept {
 	memTrackerOnFree(p);
-	std::free(p);
+	aligned_free(p);
 }
 
 #endif // ALLOC_INSTRUMENTATION

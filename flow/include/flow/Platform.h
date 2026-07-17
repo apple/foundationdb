@@ -95,6 +95,15 @@
 #error Missing force inline
 #endif
 
+// Suppress inlining of a function. Only applied under GCC/Clang, where it is
+// tested; a no-op elsewhere (including MSVC, which we cannot compile-test). The
+// attribute is only an optimization hint, so an empty fallback is safe.
+#if defined(__GNUG__)
+#define force_noinline __attribute__((noinline))
+#else
+#define force_noinline
+#endif
+
 /*
  * Visual Studio (.NET 2003 and beyond) has an __assume compiler
  * intrinsic to hint to the compiler that a given condition is true

@@ -87,8 +87,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MEMORY_USAGE_CHECK_INTERVAL,                         1.0 );
 
 	// Per-call-site sampled memory tracker. See design/memory-tracker.md.
-	// Initial rollout: prod default off (=0). Simulation defaults to 1-in-2 sampling so the path is exercised.
-	init( MEMORY_TRACKING_SAMPLE_INVERSE,                        0 ); if( isSimulated ) MEMORY_TRACKING_SAMPLE_INVERSE = 2;
+	// Initial rollout: prod default off (=0). Simulation defaults to 1-in-10 sampling so the path is exercised.
+	init( MEMORY_TRACKING_SAMPLE_INVERSE,                        0 ); if( isSimulated ) MEMORY_TRACKING_SAMPLE_INVERSE = 10;
 	init( MEMORY_TRACKING_FORCE_SAMPLE_BYTES,               100000 );
 	init( MEMORY_TRACKING_LIVE_TRACKING,                      true );
 	init( MEMORY_TRACKING_REPORT_INTERVAL,                   600.0 ); if( isSimulated ) MEMORY_TRACKING_REPORT_INTERVAL = 30.0;
