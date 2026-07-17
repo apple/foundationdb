@@ -32,6 +32,10 @@
 #error "FDBSERVER_UNIT_TEST_SUITE must be defined"
 #endif
 
+#ifndef FDBSERVER_UNIT_TEST_NORMAL_IGNORE
+#define FDBSERVER_UNIT_TEST_NORMAL_IGNORE
+#endif
+
 namespace {
 Future<Void> initializeSimulation() {
 	resetServerKnobs(Randomize::True, IsSimulated::True);
@@ -53,5 +57,8 @@ void initializeNetwork() {
 
 int main(int argc, char** argv) {
 	return runUnitTests(
-	    argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE, initializeSimulation, initializeNetwork));
+	    argc,
+	    argv,
+	    UnitTestRunnerConfig(
+	        FDBSERVER_UNIT_TEST_SUITE, initializeSimulation, initializeNetwork, { FDBSERVER_UNIT_TEST_NORMAL_IGNORE }));
 }

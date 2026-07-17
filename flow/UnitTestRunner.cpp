@@ -221,23 +221,25 @@ bool pathComponentMatches(std::string_view path, std::string_view component) {
 	return false;
 }
 
-bool testMatched(const UnitTestRunnerOptions& options, std::string_view testName) {
+bool testMatched(const UnitTestRunnerOptions& options, const UnitTestRunnerConfig& config, std::string_view testName) {
 	if (!startsWith(testName, options.testPattern)) {
 		return false;
 	}
 
 	if (options.testPattern.empty()) {
 		if (options.simulation) {
-			if (!startsWith(testName, "/") || startsWith(testName, "/fdbrpc/grpc")) {
+			if (!startsWith(testName, "/")) {
 				return false;
 			}
 		} else if (startsWith(testName, ":") || startsWith(testName, "#") || startsWith(testName, "L") ||
-		           startsWith(testName, "perf/") || startsWith(testName, "performance/") ||
-		           startsWith(testName, "noSim/RocksDB/RangeClear") || startsWith(testName, "/HTTP/Server/") ||
-		           startsWith(testName, "/fdbrpc/grpc") || startsWith(testName, "fdbrpc/MockDNS") ||
-		           startsWith(testName, "/fdbclient/MonitorLeader/PartialResolve") ||
-		           startsWith(testName, "/backup/containers/url") || startsWith(testName, "/backup/containers_list")) {
+		           startsWith(testName, "perf/") || startsWith(testName, "performance/")) {
 			return false;
+		}
+
+		for (const auto& ignorePattern : config.defaultTestsIgnored(options.simulation)) {
+			if (startsWith(testName, ignorePattern)) {
+				return false;
+			}
 		}
 	}
 
@@ -256,7 +258,7 @@ std::vector<UnitTest*> collectTests(const UnitTestRunnerOptions& options, const 
 		if (!pathComponentMatches(test->file, config.suiteName())) {
 			continue;
 		}
-		if (testMatched(options, test->name)) {
+		if (testMatched(options, config, test->name)) {
 			tests.push_back(test);
 		}
 	}
@@ -368,9 +370,12 @@ Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int
 
 UnitTestRunnerConfig::UnitTestRunnerConfig(std::string_view sourceSubDir,
                                            SimulationInitializer simulationInitializer,
-                                           NetworkInitializer networkInitializer)
+                                           NetworkInitializer networkInitializer,
+                                           std::vector<std::string> normalTestsIgnored,
+                                           std::vector<std::string> simulationTestsIgnored)
   : sourceSubDir(sourceSubDir), simulationInitializer(std::move(simulationInitializer)),
-    networkInitializer(std::move(networkInitializer)) {}
+    networkInitializer(std::move(networkInitializer)), normalTestsIgnored(std::move(normalTestsIgnored)),
+    simulationTestsIgnored(std::move(simulationTestsIgnored)) {}
 
 std::string_view UnitTestRunnerConfig::suiteName() const {
 	return sourceSubDir;
@@ -398,6 +403,10 @@ void UnitTestRunnerConfig::initializeNetwork() const {
 	} else {
 		g_network = newNet2(TLSConfig());
 	}
+}
+
+const std::vector<std::string>& UnitTestRunnerConfig::defaultTestsIgnored(bool simulation) const {
+	return simulation ? simulationTestsIgnored : normalTestsIgnored;
 }
 
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {

@@ -45,5 +45,12 @@ void initializeNetwork() {
 } // namespace
 
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig("fdbclient", initializeSimulation, initializeNetwork));
+	return runUnitTests(
+	    argc,
+	    argv,
+	    UnitTestRunnerConfig(
+	        "fdbclient",
+	        initializeSimulation,
+	        initializeNetwork,
+	        { "/fdbclient/MonitorLeader/PartialResolve", "/backup/containers/url", "/backup/containers_list" }));
 }
