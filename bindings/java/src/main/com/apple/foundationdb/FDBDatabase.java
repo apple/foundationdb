@@ -102,8 +102,8 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 					});
 				}, e);
 		}, e)
-		.thenApply(o -> returnValue.get())
-		.whenComplete((v, t) -> trRef.get().close());
+		.whenComplete((v, t) -> trRef.get().close())
+		.thenApply(o -> returnValue.get());
 	}
 
 	@Override
