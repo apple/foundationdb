@@ -106,21 +106,22 @@ struct WatchesWorkload : TestWorkload {
 		return result;
 	}
 
+	static Future<Void> watcherInitTransaction(Transaction* tr, Key watchKey, int* extraLoc, int extraNodes) {
+		for (int i = 0; i < 1000 && *extraLoc + i < extraNodes; i++) {
+			Key extraKey = KeyRef(watchKey.toString() + format("%d", *extraLoc + i));
+			Value extraValue = ValueRef(std::string(100, '.'));
+			tr->set(extraKey, extraValue);
+		}
+		co_await tr->commit();
+		*extraLoc += 1000;
+		CODE_PROBE(true, "Watches workload initial setup");
+	}
+
 	Future<Void> watcherInit(Database cx, Key watchKey, Key setKey, int extraNodes) {
 		int extraLoc = 0;
 		while (extraLoc < extraNodes) {
-			co_await cx.run([&](Transaction* tr) -> Future<Void> {
-				for (int i = 0; i < 1000 && extraLoc + i < extraNodes; i++) {
-					Key extraKey = KeyRef(watchKey.toString() + format("%d", extraLoc + i));
-					Value extraValue = ValueRef(std::string(100, '.'));
-					tr->set(extraKey, extraValue);
-					// TraceEvent("WatcherInitialSetupExtra").detail("Key", extraKey).detail("Value", extraValue);
-				}
-				co_await tr->commit();
-				extraLoc += 1000;
-				CODE_PROBE(true, "Watches workload initial setup");
-				// TraceEvent("WatcherInitialSetup").detail("Watch", watchKey).detail("Ver", tr->getCommittedVersion());
-			});
+			co_await cx.run(
+			    [&](Transaction* tr) { return watcherInitTransaction(tr, watchKey, &extraLoc, extraNodes); });
 		}
 	}
 
@@ -178,6 +179,63 @@ struct WatchesWorkload : TestWorkload {
 		}
 	}
 
+	static Future<Void> setWatchValue(Transaction* tr,
+	                                  Key startKey,
+	                                  Value assignedValue,
+	                                  bool isValue,
+	                                  Optional<Value>* startValue,
+	                                  Optional<Value>* expectedValue,
+	                                  bool* firstAttempt) {
+		co_await tr->getReadVersion();
+		Optional<Value> observedStartValue = co_await tr->get(startKey);
+		if (*firstAttempt) {
+			*startValue = observedStartValue;
+			*firstAttempt = false;
+		}
+		*expectedValue = Optional<Value>();
+		if (startValue->present()) {
+			if (isValue)
+				*expectedValue = assignedValue;
+		} else {
+			*expectedValue = assignedValue;
+		}
+
+		if (expectedValue->present())
+			tr->set(startKey, expectedValue->get());
+		else
+			tr->clear(startKey);
+
+		co_await tr->commit();
+		CODE_PROBE(expectedValue->present(), "watches workload set a key");
+		CODE_PROBE(!expectedValue->present(), "watches workload clear a key");
+	}
+
+	static Future<Void> waitForWatchValue(Transaction* tr,
+	                                      Key endKey,
+	                                      Optional<Value> startValue,
+	                                      Optional<Value> expectedValue,
+	                                      bool* firstAttempt,
+	                                      bool* finished) {
+		Optional<Value> endValue = co_await tr->get(endKey);
+		if (endValue == expectedValue) {
+			*finished = true;
+			co_return;
+		}
+		if (!*firstAttempt || endValue != startValue) {
+			TraceEvent(SevError, "WatcherError")
+			    .detail("FirstAttempt", *firstAttempt)
+			    .detail("StartValue", printable(startValue))
+			    .detail("EndValue", printable(endValue))
+			    .detail("ExpectedValue", printable(expectedValue))
+			    .detail("EndVersion", tr->getReadVersion().get());
+		}
+		Future<Void> watchFuture = tr->watch(makeReference<Watch>(endKey, startValue));
+		co_await tr->commit();
+		co_await watchFuture;
+		CODE_PROBE(true, "watcher workload watch fired");
+		*firstAttempt = false;
+	}
+
 	Future<Void> watchesWorker(Database cx, WatchesWorkload* self) {
 		Key startKey = self->keyForIndex(self->nodeOrder[0]);
 		Key endKey = self->keyForIndex(self->nodeOrder[self->nodes]);
@@ -189,55 +247,16 @@ struct WatchesWorkload : TestWorkload {
 			bool isValue = deterministicRandom()->random01() > 0.5;
 			Value assignedValue = Value(deterministicRandom()->randomUniqueID().toString());
 			bool firstAttempt = true;
-			co_await cx.run([&](Transaction* tr) -> Future<Void> {
-				co_await tr->getReadVersion();
-				Optional<Value> _startValue = co_await tr->get(startKey);
-				if (firstAttempt) {
-					startValue = _startValue;
-					firstAttempt = false;
-				}
-				expectedValue = Optional<Value>();
-				if (startValue.present()) {
-					if (isValue)
-						expectedValue = assignedValue;
-				} else {
-					expectedValue = assignedValue;
-				}
-
-				if (expectedValue.present())
-					tr->set(startKey, expectedValue.get());
-				else
-					tr->clear(startKey);
-
-				co_await tr->commit();
-				CODE_PROBE(expectedValue.present(), "watches workload set a key");
-				CODE_PROBE(!expectedValue.present(), "watches workload clear a key");
-				co_return;
+			co_await cx.run([&](Transaction* tr) {
+				return setWatchValue(tr, startKey, assignedValue, isValue, &startValue, &expectedValue, &firstAttempt);
 			});
 
 			chainStartTime = now();
 			firstAttempt = true;
 			bool finished = false;
 			while (!finished) {
-				co_await cx.run([&](Transaction* tr2) -> Future<Void> {
-					Optional<Value> endValue = co_await tr2->get(endKey);
-					if (endValue == expectedValue) {
-						finished = true;
-						co_return;
-					}
-					if (!firstAttempt || endValue != startValue) {
-						TraceEvent(SevError, "WatcherError")
-						    .detail("FirstAttempt", firstAttempt)
-						    .detail("StartValue", printable(startValue))
-						    .detail("EndValue", printable(endValue))
-						    .detail("ExpectedValue", printable(expectedValue))
-						    .detail("EndVersion", tr2->getReadVersion().get());
-					}
-					Future<Void> watchFuture = tr2->watch(makeReference<Watch>(endKey, startValue));
-					co_await tr2->commit();
-					co_await watchFuture;
-					CODE_PROBE(true, "watcher workload watch fired");
-					firstAttempt = false;
+				co_await cx.run([&](Transaction* tr) {
+					return waitForWatchValue(tr, endKey, startValue, expectedValue, &firstAttempt, &finished);
 				});
 			}
 			self->cycleLatencies.addSample(now() - chainStartTime);

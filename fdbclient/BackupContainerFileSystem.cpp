@@ -1619,7 +1619,8 @@ Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beg
 	std::string firstPath =
 	    BackupContainerFileSystemImpl::cleanFolderString(BackupContainerFileSystemImpl::logVersionFolderString(
 	        std::max<Version>(0,
-	                          beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE),
+	                          beginVersion - static_cast<Version>(CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES) *
+	                                             CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE),
 	        mutationLogType));
 	std::string lastPath = BackupContainerFileSystemImpl::cleanFolderString(
 	    BackupContainerFileSystemImpl::logVersionFolderString(targetVersion, mutationLogType));

@@ -78,7 +78,7 @@ struct DiskDurabilityTest : TestWorkload {
 		    IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNBUFFERED |
 		        IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_LOCK,
 		    0600);
-		std::vector<uint8_t> pagedata(4096 * 128);
+		std::vector<uint8_t> pagedata(size_t{ 4096 } * 128);
 		uint8_t* page = (uint8_t*)((intptr_t(&pagedata[0]) | intptr_t(4095)) + 1);
 
 		int64_t size = co_await file->size();
@@ -162,7 +162,7 @@ struct DiskDurabilityTest : TestWorkload {
 			std::vector<Future<Void>> fresults;
 
 			for (int i = 0; i < targetPages.size(); i++) {
-				uint8_t* p = page + 4096 * i;
+				uint8_t* p = page + size_t{ 4096 } * i;
 				encodePage(p, targetValues[i]);
 				fresults.push_back(file->write(p, 4096, targetPages[i] * 4096));
 			}

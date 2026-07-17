@@ -3076,7 +3076,8 @@ struct DDQueueImpl {
 			error = e;
 		}
 		// A relocator can signal an error inline while launchQueuedWork() is repairing its maps. Keep DD alive
-		// until that mutation finishes before propagating the error and tearing the queue down.
+		// until that mutation finishes before propagating the error and tearing the queue down. Preserve the
+		// immediate error path when no mutation is active, since taking an available FlowLock still yields.
 		if (error.isValid() && state->queueMutationLock.available() > 0) {
 			throw error;
 		}
