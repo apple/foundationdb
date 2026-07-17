@@ -530,16 +530,6 @@ void LogSystem::purgeOldRecoveredGenerationsCoreState(DBCoreState& newState) {
 	}
 }
 
-void LogSystem::purgeOldRecoveredGenerationsInMemory(const DBCoreState& newState) {
-	auto generations = newState.oldTLogData.size();
-	if (generations < oldLogData.size()) {
-		TraceEvent("PurgeOldTLogGenerationsInMemory", dbgid)
-		    .detail("OldGenerations", oldLogData.size())
-		    .detail("NewGenerations", generations);
-		oldLogData.resize(generations);
-	}
-}
-
 void LogSystem::toCoreState(DBCoreState& newState) const {
 	if (recoveryComplete.isValid() && recoveryComplete.isError())
 		throw recoveryComplete.getError();
@@ -1137,10 +1127,12 @@ LogSystemConfig LogSystem::getLogSystemConfig() const {
 		}
 	}
 
-	if (!recoveryCompleteWrittenToCoreState.get()) {
-		for (const auto& oldData : oldLogData) {
-			logSystemConfig.oldTLogs.push_back(toOldTLogConf(oldData));
-		}
+	// ServerDBInfo uses oldTLogs to keep old-generation TLog roles from displacing
+	// themselves while this cluster controller is alive. Durable state/logsKey can
+	// drop recovered old generations earlier, but these roles may still be needed
+	// if this recovery has to run again.
+	for (const auto& oldData : oldLogData) {
+		logSystemConfig.oldTLogs.push_back(toOldTLogConf(oldData));
 	}
 	return logSystemConfig;
 }

@@ -1378,7 +1378,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 
 	if (req.recoveryState == RecoveryState::FULLY_RECOVERED) {
 		self->db.unfinishedRecoveries = 0;
-		ASSERT(!req.logSystemConfig.oldTLogs.size());
 	}
 
 	db->masterRegistrationCount = req.registrationCount;
@@ -3529,6 +3528,48 @@ TEST_CASE("/fdbserver/clustercontroller/ignoreStaleWorkerRegistration") {
 	ASSERT(registered.issues[0] == "current-issue"_sr);
 	ASSERT(data.updateDBInfoEndpoints.contains(worker.updateServerDBInfo.getEndpoint()));
 	ASSERT(!data.removedDBInfoEndpoints.contains(worker.updateServerDBInfo.getEndpoint()));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/recoverForExcludedOldTLogLocality") {
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+
+	LocalityData masterLocality;
+	masterLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "master" }));
+	data.id_worker[masterLocality.processId()];
+
+	const NetworkAddress oldTLogAddress(IPAddress(0x02020202), 1);
+	LocalityData workerLocality;
+	workerLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "old-tlog" }));
+	workerLocality.set("instance_id"_sr, Standalone<StringRef>(std::string{ "log-4296" }));
+	WorkerInterface worker(workerLocality);
+	worker.tLog = RequestStream<InitializeTLogRequest>(Endpoint({ oldTLogAddress }, UID(1, 2)));
+	data.id_worker[workerLocality.processId()].details.interf = worker;
+
+	LocalityData filteredLocality;
+	filteredLocality.set(LocalityData::keyZoneId, Standalone<StringRef>(std::string{ "zone" }));
+	TLogInterface oldTLog(filteredLocality);
+	oldTLog.peekMessages = RequestStream<TLogPeekRequest>(Endpoint({ oldTLogAddress }, UID(3, 4)));
+
+	data.db.config.set(StringRef(encodeExcludedLocalityKey("locality_instance_id:log-4296")), StringRef());
+	ASSERT(data.db.config.isExcludedServer(worker.addresses(), worker.locality));
+	ASSERT(!data.db.config.isExcludedServer(oldTLog.addresses(), oldTLog.filteredLocality));
+
+	TLogSet oldTLogSet;
+	oldTLogSet.tLogs.push_back(OptionalInterface(oldTLog));
+	OldTLogConf oldTLogConf;
+	oldTLogConf.tLogs.push_back(oldTLogSet);
+	ServerDBInfo dbInfo;
+	dbInfo.master.locality = masterLocality;
+	dbInfo.logSystemConfig.oldTLogs.push_back(oldTLogConf);
+	dbInfo.recoveryState = RecoveryState::FULLY_RECOVERED;
+	data.db.serverInfo->set(dbInfo);
+
+	ASSERT(data.betterMasterExists());
 	return Void();
 }
 
