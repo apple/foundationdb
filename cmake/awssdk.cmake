@@ -3,7 +3,18 @@ project(awssdk-download NONE)
 # Compile the sdk with clang and libc++, since otherwise we get libc++ vs libstdc++ link errors when compiling fdb with clang
 set(AWSSDK_COMPILER_FLAGS "")
 if(APPLE OR USE_LIBCXX)
-  set(AWSSDK_COMPILER_FLAGS "-stdlib=libc++ -nostdlib++")
+  set(AWSSDK_COMPILER_FLAGS "-stdlib=libc++ -nostdlib++ -Wno-deprecated")
+endif()
+
+if(APPLE)
+  file(REAL_PATH ${OPENSSL_SSL_LIBRARY} OPENSSL_LIBRARY_REAL_PATH)
+  get_filename_component(OPENSSL_LIB_DIR ${OPENSSL_LIBRARY_REAL_PATH} DIRECTORY)
+  set(AWSSDK_OPENSSL_LDFLAGS "-L${OPENSSL_LIB_DIR}")
+  message(STATUS "AWSSDK OpenSSL LDFLAGS: ${AWSSDK_OPENSSL_LDFLAGS}")
+  set(AWSSDK_BYO_CRYPTO "OFF") # not allowed on macOS, must use SecureTransport
+elseif(UNIX)
+  set(AWSSDK_OPENSSL_LDFLAGS "") # normal link path works
+  set(AWSSDK_BYO_CRYPTO "ON")
 endif()
 
 include(ExternalProject)
@@ -16,20 +27,32 @@ ExternalProject_Add(awssdk_project
   # it seems advice.detachedHead breaks something which causes aws sdk to always be rebuilt.
   # This option forces to cmake to build the aws sdk only once and never attempt to update it
   UPDATE_DISCONNECTED ON
-  CMAKE_ARGS -DBUILD_SHARED_LIBS=OFF        # SDK builds shared libs by default, we want static libs
+  PATCH_COMMAND
+    find . -name CMakeLists.txt -exec
+    sed -i.bak -E -e "s/cmake_minimum_required ?\\( ?VERSION 3\\.[0-4](\\.[0-9])?\\)/cmake_minimum_required(VERSION 3.5)/"
+    "{}" "$<SEMICOLON>"          # not easy to put semicolon in cmake list item
+  COMMAND
+    sed -i.bak -E -e "s/ CMAKE_ARGS/ CMAKE_ARGS -DCMAKE_POLICY_VERSION_MINIMUM=3.5/" android-build/CMakeLists.txt
+  COMMAND
+    find . -name AwsSharedLibSetup.cmake -exec  # does not use CMAKE_INSTALL_LIBDIR if APPLE
+    sed -i.bak -E -e "s/set\\(LIBRARY_DIRECTORY lib\\)/set(LIBRARY_DIRECTORY lib64)/"
+    "{}" "$<SEMICOLON>"          # not easy to put semicolon in cmake list item
+  CMAKE_ARGS
+  -DBUILD_SHARED_LIBS=OFF        # SDK builds shared libs by default, we want static libs
   -DENABLE_TESTING=OFF
   -DBUILD_ONLY=core              # git repo contains SDK for every AWS product, we only want the core auth libraries
   -DSIMPLE_INSTALL=ON
   -DCMAKE_INSTALL_PREFIX=install # need to specify an install prefix so it doesn't install in /usr/lib - FIXME: use absolute path
-  -DBYO_CRYPTO=ON                # we have our own crypto libraries that conflict if we let aws sdk build and link its own
+  -DCMAKE_INSTALL_LIBDIR=lib64   # sometimes inconsistent lib vs lib64
+  -DBYO_CRYPTO=${AWSSDK_BYO_CRYPTO} # we have our own crypto libraries that conflict if we let aws sdk build and link its own
   -DBUILD_CURL=ON
-  -DBUILD_ZLIB=ON
-
+  -DOPENSSL_LINKER_FLAGS=${AWSSDK_OPENSSL_LDFLAGS}
   -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
   -DCMAKE_CXX_FLAGS=${AWSSDK_COMPILER_FLAGS}
   TEST_COMMAND ""
   # the sdk build produces a ton of artifacts, with their own dependency tree, so there is a very specific dependency order they must be linked in
-  BUILD_BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-cpp-sdk-core.a"
+  BUILD_BYPRODUCTS
+  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-cpp-sdk-core.a"
   "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-crt-cpp.a"
   "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-s3.a"
   "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-auth.a"
@@ -43,7 +66,6 @@ ExternalProject_Add(awssdk_project
   "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-cal.a"
   "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-common.a"
   "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/external-install/curl/lib/libcurl.a"
-  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/external-install/zlib/lib/libz.a"
   )
 
 add_library(awssdk_core STATIC IMPORTED)
@@ -103,11 +125,30 @@ add_library(curl STATIC IMPORTED)
 add_dependencies(curl awssdk_project)
 set_property(TARGET curl PROPERTY IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/external-install/curl/lib/libcurl.a")
 
-add_library(zlib STATIC IMPORTED)
-add_dependencies(zlib awssdk_project)
-set_property(TARGET zlib PROPERTY IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/external-install/zlib/lib/libz.a")
-
 # link them all together in one interface target
 add_library(awssdk_target INTERFACE)
 target_include_directories(awssdk_target SYSTEM INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/include)
-target_link_libraries(awssdk_target INTERFACE awssdk_core awssdk_crt awssdk_c_s3 awssdk_c_auth awssdk_c_eventstream awssdk_c_http awssdk_c_mqtt awssdk_c_sdkutils awssdk_c_io awssdk_checksums awssdk_c_compression awssdk_c_cal awssdk_c_common curl zlib)
+target_link_libraries(awssdk_target
+                      INTERFACE
+                        awssdk_core
+                        awssdk_crt
+                        awssdk_c_s3
+                        awssdk_c_auth
+                        awssdk_c_eventstream
+                        awssdk_c_http
+                        awssdk_c_mqtt
+                        awssdk_c_sdkutils
+                        awssdk_c_io
+                        awssdk_checksums
+                        awssdk_c_compression
+                        awssdk_c_cal
+                        awssdk_c_common
+                        curl
+                        ssl
+                        z
+                     )
+if(APPLE)
+  find_library(SECURITY_FRAMEWORK Security)
+  target_link_libraries(awssdk_target INTERFACE ${SECURITY_FRAMEWORK})
+  #target_link_libraries(awssdk_target INTERFACE "$<LINK_LIBRARY:FRAMEWORK,Security>")
+endif()
