@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Minimize Outdated Comments
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             // Example header: ### Result of foundationdb-pr-clang on Linux RHEL 9
