@@ -176,8 +176,6 @@ struct CDCProxyBufferStatus {
 	bool popsPaused = false;
 	int64_t popSnapshotsPaused = 0;
 	bool popsPausedAfterSnapshot = false;
-	int64_t popIncompleteLogSystemPauses = 0;
-	bool popsPausedAfterIncompleteLogSystem = false;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -195,9 +193,7 @@ struct CDCProxyBufferStatus {
 		           popCancellations,
 		           popsPaused,
 		           popSnapshotsPaused,
-		           popsPausedAfterSnapshot,
-		           popIncompleteLogSystemPauses,
-		           popsPausedAfterIncompleteLogSystem);
+		           popsPausedAfterSnapshot);
 	}
 };
 
@@ -217,20 +213,17 @@ struct SetCDCProxyPopsPausedRequest {
 	constexpr static FileIdentifier file_identifier = 1463231;
 	bool paused = false;
 	bool afterSnapshot = false;
-	bool afterIncompleteLogSystem = false;
 	ReplyPromise<Void> reply;
 
 	SetCDCProxyPopsPausedRequest() = default;
-	explicit SetCDCProxyPopsPausedRequest(bool paused,
-	                                      bool afterSnapshot = false,
-	                                      bool afterIncompleteLogSystem = false)
-	  : paused(paused), afterSnapshot(afterSnapshot), afterIncompleteLogSystem(afterIncompleteLogSystem) {}
+	explicit SetCDCProxyPopsPausedRequest(bool paused, bool afterSnapshot = false)
+	  : paused(paused), afterSnapshot(afterSnapshot) {}
 
 	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, paused, afterSnapshot, afterIncompleteLogSystem, reply);
+		serializer(ar, paused, afterSnapshot, reply);
 	}
 };
 

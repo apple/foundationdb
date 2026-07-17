@@ -63,7 +63,7 @@ void ExecCmdValueString::setCmdValueString(StringRef pCmdValueString) {
 }
 
 StringRef ExecCmdValueString::getCmdValueString() const {
-	return cmdValueString.toString();
+	return cmdValueString;
 }
 
 StringRef ExecCmdValueString::getBinaryPath() const {

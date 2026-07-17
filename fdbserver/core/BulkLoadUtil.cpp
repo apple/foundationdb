@@ -575,7 +575,7 @@ Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 		throw file_too_large();
 	}
 
-	int64_t chunkSize = 64 * 1024; // 64KB chunks
+	int64_t chunkSize = 64LL * 1024; // 64KB chunks
 	std::string buffer;
 	int64_t offset = 0;
 	std::string leftover;

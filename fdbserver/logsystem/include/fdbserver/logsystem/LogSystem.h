@@ -370,9 +370,8 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	bool remoteStorageRecovered() const;
 
-	// Checks older TLog generations and remove no longer needed generations from the log system.
+	// Removes no-longer-needed older TLog generations from the outgoing core state.
 	void purgeOldRecoveredGenerationsCoreState(DBCoreState&);
-	void purgeOldRecoveredGenerationsInMemory(const DBCoreState&);
 
 	Future<Void> onCoreStateChanged() const;
 

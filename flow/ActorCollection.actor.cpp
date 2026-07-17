@@ -24,11 +24,68 @@
 #include <boost/intrusive/list.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct Runner : public boost::intrusive::list_base_hook<>, FastAllocated<Runner>, NonCopyable {
-	Future<Void> handler;
+class Runner final : public boost::intrusive::list_base_hook<>,
+                     public Callback<Void>,
+                     public FastAllocated<Runner>,
+                     NonCopyable {
+public:
+	Runner(PromiseStream<Runner*> complete, PromiseStream<Error> errors)
+	  : complete(std::move(complete)), errors(std::move(errors)) {}
+
+	~Runner() { detach(); }
+
+	void start(Future<Void> task) {
+		if (!task.isReady()) {
+			registered = true;
+			task.addCallbackAndClear(this);
+			return;
+		}
+		if (task.isError()) {
+			error(task.getError());
+		} else {
+			fire(Void());
+		}
+	}
+
+	void fire(Void const&) override {
+#ifdef ENABLE_SAMPLING
+		LineageReference callbackLineage = lineage;
+		LineageScope scope(&callbackLineage);
+#endif
+		auto output = complete;
+		detach();
+		output.send(this);
+	}
+
+	void error(Error e) override {
+#ifdef ENABLE_SAMPLING
+		LineageReference callbackLineage = lineage;
+		LineageScope scope(&callbackLineage);
+#endif
+		auto output = errors;
+		detach();
+		if (e.code() != error_code_actor_cancelled) {
+			output.send(e);
+		}
+	}
+
+private:
+	void detach() {
+		if (registered) {
+			registered = false;
+			Callback<Void>::remove();
+		}
+	}
+
+	PromiseStream<Runner*> complete;
+	PromiseStream<Error> errors;
+	bool registered = false;
+#ifdef ENABLE_SAMPLING
+	LineageReference lineage = *currentLineage;
+#endif
 };
 
-// An intrusive list of Runners, which are FastAllocated.  Each runner holds a handler future
+// An intrusive list of Runners, which are FastAllocated.
 using RunnerList = boost::intrusive::list<Runner, boost::intrusive::constant_time_size<false>>;
 
 // The runners list in the ActorCollection must be destroyed when the actor is destructed rather
@@ -43,21 +100,6 @@ struct RunnerListDestroyer : NonCopyable {
 	RunnerList* list;
 };
 
-ACTOR Future<Void> runnerHandler(PromiseStream<RunnerList::iterator> output,
-                                 PromiseStream<Error> errors,
-                                 Future<Void> task,
-                                 RunnerList::iterator runner) {
-	try {
-		wait(task);
-		output.send(runner);
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-		errors.send(e);
-	}
-	return Void();
-}
-
 ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
                                    int* pCount,
                                    double* lastChangeTime,
@@ -66,7 +108,7 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
                                    bool returnWhenEmptied) {
 	state RunnerList runners;
 	state RunnerListDestroyer runnersDestroyer(&runners);
-	state PromiseStream<RunnerList::iterator> complete;
+	state PromiseStream<Runner*> complete;
 	state PromiseStream<Error> errors;
 	state int count = 0;
 	if (!pCount)
@@ -74,12 +116,9 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 
 	loop choose {
 		when(Future<Void> f = waitNext(addActor)) {
-			// Insert new Runner at the end of the instrusive list and get an iterator to it
-			auto i = runners.insert(runners.end(), *new Runner());
-
-			// Start the handler for completions or errors from f, sending runner to complete stream
-			Future<Void> handler = runnerHandler(complete, errors, f, i);
-			i->handler = handler;
+			auto runner = new Runner(complete, errors);
+			runners.insert(runners.end(), *runner);
+			runner->start(std::move(f));
 
 			++*pCount;
 			if (*pCount == 1 && lastChangeTime && idleTime && allTime) {
@@ -89,7 +128,7 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 				*lastChangeTime = currentTime;
 			}
 		}
-		when(RunnerList::iterator i = waitNext(complete.getFuture())) {
+		when(Runner* runner = waitNext(complete.getFuture())) {
 			if (!--*pCount) {
 				if (lastChangeTime && idleTime && allTime) {
 					double currentTime = now();
@@ -99,8 +138,8 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 				if (returnWhenEmptied)
 					return Void();
 			}
-			// If we didn't return then the entire list wasn't destroyed so erase/destroy i
-			runners.erase_and_dispose(i, [](Runner* r) { delete r; });
+			// If we didn't return then the entire list wasn't destroyed so erase/destroy runner
+			runners.erase_and_dispose(runners.iterator_to(*runner), [](Runner* r) { delete r; });
 		}
 		when(Error e = waitNext(errors.getFuture())) {
 			throw e;
@@ -163,6 +202,53 @@ TEST_CASE("/flow/actorCollection/testCancel") {
 
 Future<Void> failedActor() {
 	return operation_failed();
+}
+
+TEST_CASE("/flow/actorCollection/testReady") {
+	state ActorCollection actorCollection(true);
+	actorCollection.add(Void());
+	wait(actorCollection.getResult());
+	return Void();
+}
+
+TEST_CASE("/flow/actorCollection/testReadyWhilePending") {
+	state ActorCollection actorCollection(true);
+	state Promise<Void> pending;
+	actorCollection.add(pending.getFuture());
+	actorCollection.add(Void());
+	wait(delay(0));
+	ASSERT(!actorCollection.getResult().isReady());
+	pending.send(Void());
+	wait(actorCollection.getResult());
+	return Void();
+}
+
+TEST_CASE("/flow/actorCollection/testReadyError") {
+	state ActorCollection actorCollection(false);
+	actorCollection.add(failedActor());
+	try {
+		wait(actorCollection.getResult());
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_operation_failed);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/actorCollection/testPendingErrorCancels") {
+	state ActorCollection actorCollection(false);
+	state Promise<Void> pending;
+	actorCollection.add(failIfNotCancelled());
+	actorCollection.add(pending.getFuture());
+	pending.sendError(operation_failed());
+	try {
+		wait(actorCollection.getResult());
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_operation_failed);
+	}
+	wait(delay(0));
+	return Void();
 }
 
 // test contract that even if the actor collection has stopped and new actors are added to the promise stream, they are

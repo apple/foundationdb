@@ -238,7 +238,12 @@ Error message module
 
 Each module written to validates the transaction before committing, and this
 validation failing is indicated by a ``special_keys_api_failure`` error.
-More detailed information about why this validation failed can be accessed through the ``\xff\xff/error_message`` key, whose value is a json document with the following schema.
+More detailed information about why this validation failed can be accessed through the ``\xff\xff/error_message`` key.
+
+It must be accessed within the same transaction that the ``special_keys_api_failure`` error is encountered.
+See a Golang implementation of this in the Operator here https://github.com/FoundationDB/fdb-kubernetes-operator/pull/2517
+
+The value of the key is a json document with the following schema:
 
 ========================== ======== ===============
 **Field**                  **Type** **Description**
