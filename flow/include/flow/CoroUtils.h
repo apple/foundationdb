@@ -348,14 +348,21 @@ struct RaceImplActor final : Actor<Result>,
 
 	template <std::size_t Idx, class T>
 	void finish(T&& value) {
+		Result result(std::in_place_index<Idx>, std::forward<T>(value));
 		this->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
-		this->SAV<Result>::sendAndDelPromiseRef(Result(std::in_place_index<Idx>, std::forward<T>(value)));
+		{
+			auto futuresToRelease = std::move(futures);
+		}
+		this->SAV<Result>::sendAndDelPromiseRef(std::move(result));
 	}
 
 	void fail(Error e) {
 		this->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
+		{
+			auto futuresToRelease = std::move(futures);
+		}
 		this->SAV<Result>::sendErrorAndDelPromiseRef(e);
 	}
 
@@ -364,6 +371,9 @@ struct RaceImplActor final : Actor<Result>,
 		this->actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
 		if (actorWaitStateIsWaiting(waitState)) {
 			RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
+			{
+				auto futuresToRelease = std::move(futures);
+			}
 			this->SAV<Result>::sendErrorAndDelPromiseRef(actor_cancelled());
 		}
 	}

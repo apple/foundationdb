@@ -342,6 +342,65 @@ TEST_CASE("/flow/genericactors/NotifiedCancellation") {
 	version.set(10);
 	ASSERT(!chosenWaitFired);
 
+	version = NotifiedInt(0);
+	state bool brokenWaitFired = false;
+	state Future<int64_t> cancelledBroken =
+	    brokenPromiseToNever(notifiedWaitForForwardTest(&version, &brokenWaitFired));
+	cancelledBroken.cancel();
+	ASSERT(cancelledBroken.isError() && cancelledBroken.getError().code() == error_code_actor_cancelled);
+	version.set(10);
+	ASSERT(!brokenWaitFired);
+
+	version = NotifiedInt(0);
+	state bool timedWaitFired = false;
+	state Future<Optional<int64_t>> cancelledTimeout =
+	    timeout(notifiedWaitForForwardTest(&version, &timedWaitFired), 60.0);
+	cancelledTimeout.cancel();
+	ASSERT(cancelledTimeout.isError() && cancelledTimeout.getError().code() == error_code_actor_cancelled);
+	version.set(10);
+	ASSERT(!timedWaitFired);
+
+	version = NotifiedInt(0);
+	state bool expiredWaitFired = false;
+	state Future<Optional<int64_t>> expiredTimeout =
+	    timeout(notifiedWaitForForwardTest(&version, &expiredWaitFired), 0.0);
+	Optional<int64_t> timeoutResult = wait(expiredTimeout);
+	ASSERT(!timeoutResult.present());
+	version.set(10);
+	ASSERT(!expiredWaitFired);
+
+	version = NotifiedInt(0);
+	state bool timedErrorWaitFired = false;
+	state Future<int64_t> cancelledTimeoutError =
+	    timeoutError(notifiedWaitForForwardTest(&version, &timedErrorWaitFired), 60.0);
+	cancelledTimeoutError.cancel();
+	ASSERT(cancelledTimeoutError.isError() && cancelledTimeoutError.getError().code() == error_code_actor_cancelled);
+	version.set(10);
+	ASSERT(!timedErrorWaitFired);
+
+	version = NotifiedInt(0);
+	state bool expiredErrorWaitFired = false;
+	state Future<int64_t> expiredTimeoutError =
+	    timeoutError(notifiedWaitForForwardTest(&version, &expiredErrorWaitFired), 0.0);
+	try {
+		int64_t unused = wait(expiredTimeoutError);
+		(void)unused;
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_timed_out);
+	}
+	version.set(10);
+	ASSERT(!expiredErrorWaitFired);
+
+	version = NotifiedInt(0);
+	state bool errorWaitFired = false;
+	state Future<int64_t> cancelledWaitOrError =
+	    waitOrError(notifiedWaitForForwardTest(&version, &errorWaitFired), Future<Void>(Never()));
+	cancelledWaitOrError.cancel();
+	ASSERT(cancelledWaitOrError.isError() && cancelledWaitOrError.getError().code() == error_code_actor_cancelled);
+	version.set(10);
+	ASSERT(!errorWaitFired);
+
 	state Promise<int64_t> forwardedInput;
 	state Promise<int64_t> reentrantReply;
 	state Future<int64_t> reentrantForward = forward(forwardedInput.getFuture(), reentrantReply);

@@ -234,7 +234,7 @@ Future<Optional<T>> timeout(Future<T> what,
                             TaskPriority taskID = TaskPriority::DefaultDelay,
                             ExplicitVoid = {}) {
 	Future<Void> end = delay(time, taskID);
-	auto res = co_await race(what, end);
+	auto res = co_await race(std::move(what), std::move(end));
 	if (res.index() == 0) {
 		co_return std::get<0>(std::move(res));
 	}
@@ -247,7 +247,7 @@ Future<T> timeoutError(Future<T> what,
                        TaskPriority taskID = TaskPriority::DefaultDelay,
                        ExplicitVoid = {}) {
 	Future<Void> end = delay(time, taskID);
-	auto res = co_await race(what, end);
+	auto res = co_await race(std::move(what), std::move(end));
 	if (res.index() == 0) {
 		co_return std::get<0>(std::move(res));
 	}
@@ -1807,6 +1807,12 @@ Future<T> brokenPromiseToNever(Future<T> in, ExplicitVoid = {}) {
 	} catch (Error& e) {
 		err = e;
 	}
+	if (err.code() == error_code_actor_cancelled) {
+		// A cancelled output can retain this coroutine frame. Drop the pending input so its producer cannot outlive the
+		// cancelled wrapper.
+		Future<T> dropIn(std::move(in));
+		throw err;
+	}
 	if (err.code() != error_code_broken_promise)
 		throw err;
 	co_await Future<Void>(Never()); // never return
@@ -1860,7 +1866,7 @@ Future<Void> tagAndForwardError(PromiseStream<T>* pOutput,
 
 template <class T>
 Future<T> waitOrError(Future<T> f, Future<Void> errorSignal, ExplicitVoid = {}) {
-	auto res = co_await race(f, errorSignal);
+	auto res = co_await race(std::move(f), std::move(errorSignal));
 	if (res.index() == 0) {
 		co_return std::get<0>(std::move(res));
 	}
@@ -1870,7 +1876,7 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal, ExplicitVoid = {}) 
 
 template <class T>
 Future<T> waitOrError(FutureStream<T> f, Future<Void> errorSignal, ExplicitVoid = {}) {
-	auto res = co_await race(f, errorSignal);
+	auto res = co_await race(std::move(f), std::move(errorSignal));
 	if (res.index() == 0) {
 		co_return std::get<0>(std::move(res));
 	}
