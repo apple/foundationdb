@@ -3,8 +3,6 @@ dd_max_shards_on_large_teams = 0
 
 [configuration]
 storageEngineExcludeTypes=[3,5]
-tenantModes=['disabled']
-encryptModes=['disabled']
 
 [[test]]
 testTitle = 'SubmitBackup'
