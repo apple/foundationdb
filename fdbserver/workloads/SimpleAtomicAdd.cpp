@@ -108,7 +108,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 
 	Future<bool> _check(Database cx) {
 		ReadYourWritesTransaction tr(cx);
-		uint64_t expectedValue = addValue * iterations;
+		uint64_t expectedValue = static_cast<uint64_t>(addValue) * iterations;
 		if (initialize) {
 			expectedValue += initialValue;
 		}

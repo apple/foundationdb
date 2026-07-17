@@ -249,8 +249,7 @@ Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromCo
 		co_return;
 	}
 	CODE_PROBE(!CLIENT_KNOBS->ENABLE_NATIVE_CDC && hasDurableCdcState,
-	           "Recovery recruits CDC proxies to drain disabled durable state",
-	           probe::decoration::rare);
+	           "Recovery recruits CDC proxies to drain disabled durable state");
 	auto& cdcProxies = self->controllerData->db.cdcProxies;
 	const size_t reusedCount = cdcProxies.size();
 	if (reusedCount > 0) {
@@ -291,8 +290,7 @@ Future<Void> ensureCDCProxies(Reference<ClusterRecoveryData> self, RecruitFromCo
 	    .detail("Count", newRecruits.size())
 	    .detail("ReusedCount", reusedCount)
 	    .detail("TotalCount", targetCount);
-	CODE_PROBE(
-	    reusedCount > 0, "Recovery expands retained CDC proxies to match GRV proxy count", probe::decoration::rare);
+	CODE_PROBE(reusedCount > 0, "Recovery expands retained CDC proxies to match GRV proxy count");
 	cdcProxies.insert(cdcProxies.end(), newRecruits.begin(), newRecruits.end());
 	self->registrationTrigger.trigger();
 }
@@ -542,8 +540,8 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		            configuration.expectedLogSets(!self->primaryDcId.empty() ? self->primaryDcId[0] : Optional<Key>()))
 		    .detail("RecoveryCount", newState.recoveryCount);
 		co_await self->cstate.write(newState, finalUpdate);
-		// Purge in memory state after durability to avoid race conditions.
-		self->logSystem->purgeOldRecoveredGenerationsInMemory(newState);
+		// Keep oldLogData in memory even after the coordinated state drops old generations. ServerDBInfo uses
+		// it to keep old-generation TLogs serving in case this master has to run recovery again.
 		if (self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
 		}

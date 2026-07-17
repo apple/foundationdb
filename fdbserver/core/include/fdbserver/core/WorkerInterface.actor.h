@@ -776,7 +776,7 @@ struct RecruitMasterRequest {
 	}
 };
 
-// Instantiated in worker.actor.cpp
+// Instantiated in worker.cpp
 extern template class RequestStream<RecruitMasterRequest, false>;
 extern template struct NetNotifiedQueue<RecruitMasterRequest, false>;
 
@@ -805,7 +805,7 @@ struct InitializeCommitProxyRequest {
 	}
 };
 
-// Instantiated in worker.actor.cpp
+// Instantiated in worker.cpp
 extern template class RequestStream<InitializeCommitProxyRequest, false>;
 extern template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
 
@@ -822,7 +822,7 @@ struct InitializeGrvProxyRequest {
 	}
 };
 
-// Instantiated in worker.actor.cpp
+// Instantiated in worker.cpp
 extern template class RequestStream<InitializeGrvProxyRequest, false>;
 extern template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
 

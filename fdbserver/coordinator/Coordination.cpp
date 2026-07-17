@@ -713,7 +713,7 @@ class LeaderServer {
 				info.forward = forward.get().serializedInfo;
 				req.reply.send(CachedSerialization<ClientDBInfo>(info));
 			} else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
 				    getClusterDescriptor(req.clusterKey).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
@@ -736,7 +736,7 @@ class LeaderServer {
 			if (forward.present()) {
 				req.reply.send(forward.get());
 			} else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "ElectionResultRequest")
@@ -759,7 +759,7 @@ class LeaderServer {
 			if (forward.present())
 				req.reply.send(forward.get());
 			else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "GetLeaderRequest")
@@ -781,7 +781,7 @@ class LeaderServer {
 			if (forward.present())
 				req.reply.send(forward.get());
 			else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "CandidacyRequest")
@@ -802,7 +802,7 @@ class LeaderServer {
 			if (forward.present())
 				req.reply.send(LeaderHeartbeatReply{ false });
 			else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "LeaderHeartbeatRequest")
@@ -823,7 +823,7 @@ class LeaderServer {
 			if (forward.present()) {
 				req.reply.send(Void());
 			} else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "ForwardRequest")

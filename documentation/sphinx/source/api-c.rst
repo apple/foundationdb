@@ -613,6 +613,12 @@ Applications must provide error handling and an appropriate retry loop around th
 
    |future-return0| the list of split points. |future-return1| call :func:`fdb_future_get_key_array()` to extract the array, |future-return2|
 
+.. function:: FDBFuture* fdb_transaction_get_range_split_points_with_limit( FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunk_size, int limit)
+
+   Returns at most ``limit`` interior split points, including shard boundaries. The start and end keys of the given range are always included. A negative ``limit`` preserves the unlimited behavior of :func:`fdb_transaction_get_range_split_points`.
+
+   |future-return0| the list of split points. |future-return1| call :func:`fdb_future_get_key_array()` to extract the array, |future-return2|
+
 .. function:: FDBFuture* fdb_transaction_get_key(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, fdb_bool_t or_equal, int offset, fdb_bool_t snapshot)
 
    Resolves a :ref:`key selector <key-selectors>` against the keys in the database snapshot represented by ``transaction``.

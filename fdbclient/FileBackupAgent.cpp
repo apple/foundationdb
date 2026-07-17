@@ -157,6 +157,9 @@ Future<bool> verifyBulkDumpDatasetCompleteness(Reference<IBackupContainer> bc, s
 		}
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		TraceEvent(SevWarn, "BulkLoadVerifyDatasetError").error(e).detail("BulkDumpJobId", bulkDumpJobId);
 		co_return false;
 	}
@@ -698,6 +701,9 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 				    .detail("BytesWritten", bytes);
 			}
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			// Log but don't fail - progress updates are best-effort
 			TraceEvent(SevWarn, "BulkLoadRestoreProgressError").error(e).detail("JobId", jobId);
 		}
@@ -1081,7 +1087,7 @@ PartitionedLogIteratorSimple::PartitionedLogIteratorSimple(Reference<IBackupCont
                                                            std::vector<RestoreConfig::RestoreFile> _files,
                                                            std::vector<Version> _endVersions)
   : bc(_bc), tag(_tag), endVersions(_endVersions), files(std::move(_files)), bufferOffset(0) {
-	bufferCapacity = BATCH_READ_BLOCK_COUNT * BLOCK_SIZE;
+	bufferCapacity = static_cast<size_t>(BATCH_READ_BLOCK_COUNT) * BLOCK_SIZE;
 	buffer = std::shared_ptr<char[]>(new char[bufferCapacity]());
 	fileOffset = 0;
 	fileIndex = 0;
@@ -3168,9 +3174,10 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 			co_return;
 		}
 
-		Version endVersion = std::max<Version>(tr->getReadVersion().get() + 1,
-		                                       beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES - 1) *
-		                                                          CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
+		Version endVersion =
+		    std::max<Version>(tr->getReadVersion().get() + 1,
+		                      beginVersion + static_cast<Version>(CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES - 1) *
+		                                         CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 
 		TraceEvent("FileBackupLogDispatch")
 		    .suppressFor(60)
@@ -3767,6 +3774,9 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					co_await setBulkDumpMode(cx, originalBulkDumpMode);
 				}
 			} catch (Error& e2) {
+				if (e2.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				TraceEvent(SevWarn, "BulkDumpTaskRestoreModeError").error(e2);
 			}
 			throw savedError;
@@ -4330,6 +4340,9 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					co_await setBulkLoadMode(cx, originalBulkLoadMode);
 				}
 			} catch (Error& e2) {
+				if (e2.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				TraceEvent(SevWarn, "BulkLoadRestoreRestoreModeError").error(e2);
 			}
 			throw savedError;
@@ -6956,8 +6969,7 @@ public:
 				if (uidRange == targetRange) {
 					destUidValue = it.value;
 					found = true;
-					CODE_PROBE(targetRange == getDefaultBackupSharedRange(),
-					           "Backup mutation sharing with default backup");
+					CODE_PROBE(isDefaultBackup(normalizedRanges), "Backup mutation sharing with default backup");
 					break;
 				}
 			}

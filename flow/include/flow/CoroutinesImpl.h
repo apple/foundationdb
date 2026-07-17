@@ -45,6 +45,13 @@ struct AwaitCancelHandler {
 	virtual void cancelWait() = 0;
 };
 
+// Pass this as the first argument to a coroutine to record the exact frame
+// size that its promise allocator receives. The argument is consumed during
+// frame allocation, before the coroutine body begins.
+struct FrameSizeRecorder {
+	size_t* frameSize;
+};
+
 template <class F>
 struct FutureReturnType;
 
@@ -996,7 +1003,16 @@ struct CoroPromiseBase : CoroReturn<T, Derived, ReturnsExplicitVoid> {
 	}
 
 	static void* operator new(size_t s) { return allocateFast(int(s)); }
+	template <class... Args>
+	static void* operator new(size_t s, FrameSizeRecorder recorder, Args&&...) {
+		*recorder.frameSize = s;
+		return allocateFast(int(s));
+	}
 	static void operator delete(void* p, size_t s) { freeFast(int(s), p); }
+	template <class... Args>
+	static void operator delete(void* p, size_t s, FrameSizeRecorder, Args&&...) {
+		freeFast(int(s), p);
+	}
 
 	template <class U>
 	void setReturnValue(U&& value) {

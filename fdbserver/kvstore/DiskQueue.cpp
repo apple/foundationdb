@@ -172,9 +172,10 @@ public:
 	    readingPage(-1), writingPos(-1), fileExtensionBytes(SERVER_KNOBS->DISK_QUEUE_FILE_EXTENSION_BYTES),
 	    fileShrinkBytes(SERVER_KNOBS->DISK_QUEUE_FILE_SHRINK_BYTES) {
 		if (buggify())
-			fileExtensionBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
+			fileExtensionBytes =
+			    static_cast<int64_t>(_PAGE_SIZE) * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
 		if (buggify())
-			fileShrinkBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
+			fileShrinkBytes = static_cast<int64_t>(_PAGE_SIZE) * deterministicRandom()->randomSkewedUInt32(1, 10 << 10);
 		files[0].dbgFilename = filename(0);
 		files[1].dbgFilename = filename(1);
 		// We issue reads into firstPages, so it needs to be 4k aligned.

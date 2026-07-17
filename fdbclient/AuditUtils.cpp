@@ -111,7 +111,10 @@ Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId) 
 			    .detail("AuditKey", auditKey(auditType, auditId));
 			co_await tr.onError(err);
 		}
-	} catch (Error&) {
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		throw cancel_audit_storage_failed();
 	}
 }
@@ -257,6 +260,9 @@ Future<Void> clearAuditMetadataForType(Database cx,
 			co_await tr.onError(err);
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		TraceEvent(SevInfo, "AuditUtilClearAuditMetadataForTypeError")
 		    .detail("AuditType", auditType)
 		    .errorUnsuppressed(e);

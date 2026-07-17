@@ -97,7 +97,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - Coordinator state is persisted via `KeyValueStoreMemory` backed by a `DiskQueue` (`.fdq` files) -- the same engine used by TLogs.
 
 **Role recruitment:**
-- Worker processes register with CC via `registrationClient()` ([`worker.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/worker/worker.actor.cpp)).
+- Worker processes register with CC via `registrationClient()` ([`worker.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/worker/worker.cpp)).
 - CC maintains a pool of available workers with their `ProcessClass` and `LocalityData`.
 - When the transaction system needs to be (re)constituted, CC recruits: Master/Sequencer, CommitProxies, GrvProxies, Resolvers, TLogs.
 - Recruitment considers fitness (class match), locality (datacenter placement), and excludes failed/excluded processes.
@@ -188,7 +188,7 @@ Phase 4: REPLY                      CommitProxy
 
 **What it is:** The read path and durable key-value store. Storage servers serve client reads and maintain the materialized state of their assigned key ranges (shards).
 
-**Storage Server** ([`storageserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/storageserver/storageserver.actor.cpp)):
+**Storage Server** ([`storageserver.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/storageserver/storageserver.cpp)):
 - Each SS owns a set of key ranges (shards) and a version.
 - **Update loop**: continuously peeks its tag from the log system, deserializes mutations, applies them to the local KVStore, and advances its durable version.
 - **Read serving**: handles `GetKeyValuesRequest`, `GetKeyRequest`, `GetValueRequest`. Checks that the requested version is available (between oldest readable version and current version), that the shard is owned, and reads from the KVStore.
@@ -202,7 +202,7 @@ Phase 4: REPLY                      CommitProxy
 
 **Key dynamic behavior:** The storage server is *pull-based*. It pulls from the log system at its own pace. If a storage server falls behind, it catches up by reading more from TLogs. If it falls too far behind, it may be removed from its team and re-replicated. Reads at a given version are served from a snapshot — the SS maintains enough history to serve reads at any version between its oldest and current.
 
-**Principal files:** [`storageserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/storageserver/storageserver.actor.cpp), [`KeyValueStoreRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp), [`KeyValueStoreShardedRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp), [`KeyValueStoreSQLite.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreSQLite.cpp), [`KeyValueStoreMemory.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.cpp), [`IKeyValueStore.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/include/fdbserver/kvstore/IKeyValueStore.h), [`StorageMetrics.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/StorageMetrics.cpp)
+**Principal files:** [`storageserver.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/storageserver/storageserver.cpp), [`KeyValueStoreRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp), [`KeyValueStoreShardedRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp), [`KeyValueStoreSQLite.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreSQLite.cpp), [`KeyValueStoreMemory.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.cpp), [`IKeyValueStore.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/include/fdbserver/kvstore/IKeyValueStore.h), [`StorageMetrics.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/StorageMetrics.cpp)
 
 ---
 
