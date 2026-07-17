@@ -1,3 +1,6 @@
+[configuration]
+buggify = false
+
 [[knobs]]
 # Keep GRV ratekeeper capacity low enough that the warmup burst creates
 # queueing without throttling cluster setup.
