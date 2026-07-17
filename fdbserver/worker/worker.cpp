@@ -2882,8 +2882,8 @@ public:
 	    lastSnapTime(lastSnapTime) {}
 
 	Future<Void> run(Future<Void> const& handleErrors) {
-		auto res = co_await race(serveServerDBInfoUpdates(),
-		                         interf.clientInterface.reboot.getFuture(),
+		auto res = co_await race(interf.clientInterface.reboot.getFuture(),
+		                         serveServerDBInfoUpdates(),
 		                         serveFailureInjectionRequests(),
 		                         serveProfilerRequests(),
 		                         serveMasterRecruitment(),
@@ -2907,8 +2907,8 @@ public:
 		                         serveSnapshotRequests(),
 		                         errorForwarders.getResult(),
 		                         handleErrors);
-		ASSERT(res.index() == 1);
-		co_await handleRebootRequest(std::get<1>(res));
+		ASSERT(res.index() == 0);
+		co_await handleRebootRequest(std::get<0>(res));
 	}
 };
 
