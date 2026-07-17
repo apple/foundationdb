@@ -136,7 +136,7 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 
 			self->writeFutures.clear();
 
-			self->bytesWritten += self->writeSize * self->numParallelWrites;
+			self->bytesWritten += static_cast<int64_t>(self->writeSize) * self->numParallelWrites;
 		}
 	}
 
