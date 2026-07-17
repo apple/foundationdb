@@ -159,7 +159,7 @@ struct PageChecksumCodec {
 			if (g_network->isSimulated()) {
 				// Calculate file offsets for the read/write operation space
 				// Operation starts at a 1-based pageNumber and is of size pageLen
-				int64_t fileOffsetStart = (pageNumber - 1) * pageLen;
+				int64_t fileOffsetStart = static_cast<int64_t>(pageNumber - 1) * pageLen;
 				// End refers to the offset after the operation, not the last byte.
 				int64_t fileOffsetEnd = fileOffsetStart + pageLen;
 

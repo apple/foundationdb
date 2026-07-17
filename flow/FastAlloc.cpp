@@ -635,17 +635,20 @@ void FastAllocator<Size>::getMagazine() {
 #endif
 	// NOTE: rely on lower level metrics in allocate() (and whatever it calls)
 	// for accounting the allocations it does.
-	block = (void**)::allocate(magazine_size * Size, /*allowLargePages*/ false, includeGuardPages);
+	block = (void**)::allocate(static_cast<size_t>(magazine_size) * Size, /*allowLargePages*/ false, includeGuardPages);
 #endif
 
 	// void** block = new void*[ magazine_size * PSize ];
 	for (int i = 0; i < magazine_size - 1; i++) {
-		block[i * PSize + 1] = block[i * PSize] = &block[(i + 1) * PSize];
-		check(&block[i * PSize], false);
+		const size_t offset = static_cast<size_t>(i) * PSize;
+		const size_t nextOffset = static_cast<size_t>(i + 1) * PSize;
+		block[offset + 1] = block[offset] = &block[nextOffset];
+		check(&block[offset], false);
 	}
 
-	block[(magazine_size - 1) * PSize + 1] = block[(magazine_size - 1) * PSize] = nullptr;
-	check(&block[(magazine_size - 1) * PSize], false);
+	const size_t lastOffset = static_cast<size_t>(magazine_size - 1) * PSize;
+	block[lastOffset + 1] = block[lastOffset] = nullptr;
+	check(&block[lastOffset], false);
 	thr.freelist = block;
 	thr.count = magazine_size;
 }
@@ -714,7 +717,7 @@ TEST_CASE("/jemalloc/4k_aligned_usable_size") {
 		// Check that we can allocate 4k aligned up to 16k with no internal
 		// fragmentation
 		for (int i = 1; i < 4; ++i) {
-			ptr = aligned_alloc(4096, i * 4096);
+			ptr = aligned_alloc(4096, static_cast<size_t>(i) * 4096);
 			ASSERT_EQ(malloc_usable_size(ptr), i * 4096);
 			aligned_free(ptr);
 			ptr = nullptr;
