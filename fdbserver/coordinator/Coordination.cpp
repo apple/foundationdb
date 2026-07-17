@@ -23,7 +23,7 @@
 #include "fdbserver/coordinator/CoordinationServer.h"
 #include "fdbserver/core/Knobs.h"
 #include "OnDemandStore.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"

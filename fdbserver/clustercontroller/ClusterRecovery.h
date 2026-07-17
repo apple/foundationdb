@@ -35,7 +35,7 @@
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/CoroUtils.h"
 #include "flow/Error.h"
 #include "flow/SystemMonitor.h"

@@ -36,7 +36,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ProcessClassRecruitment.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"

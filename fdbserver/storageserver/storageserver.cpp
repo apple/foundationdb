@@ -96,7 +96,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
 #include "fdbserver/storageserver/StorageServer.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "StorageServerUtils.h"
 #include "flow/CoroUtils.h"
 #include "flow/TDMetric.h"
