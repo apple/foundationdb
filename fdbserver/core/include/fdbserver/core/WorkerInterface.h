@@ -78,7 +78,7 @@ struct WorkerInterface {
 	NetworkAddressList addresses() const { return tLog.getEndpoint().addresses; }
 	Optional<NetworkAddress> grpcAddress() const { return clientInterface.grpcAddress; }
 
-	WorkerInterface() {}
+	WorkerInterface() = default;
 	explicit(false) WorkerInterface(const LocalityData& locality) : locality(locality) {}
 
 	void initEndpoints() {
@@ -366,7 +366,7 @@ struct RecruitFromConfigurationRequest {
 	int maxOldLogRouters;
 	ReplyPromise<RecruitFromConfigurationReply> reply;
 
-	RecruitFromConfigurationRequest() {}
+	RecruitFromConfigurationRequest() = default;
 	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration,
 	                                         bool recruitSeedServers,
 	                                         int maxOldLogRouters)
@@ -399,7 +399,7 @@ struct RecruitRemoteFromConfigurationRequest {
 	Optional<UID> dbgId;
 	ReplyPromise<RecruitRemoteFromConfigurationReply> reply;
 
-	RecruitRemoteFromConfigurationRequest() {}
+	RecruitRemoteFromConfigurationRequest() = default;
 	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration,
 	                                      Optional<Key> const& dcId,
 	                                      int logRouterCount,
@@ -545,7 +545,7 @@ struct TLogRejoinRequest {
 	TLogInterface myInterface;
 	ReplyPromise<TLogRejoinReply> reply;
 
-	TLogRejoinRequest() {}
+	TLogRejoinRequest() = default;
 	explicit TLogRejoinRequest(const TLogInterface& interf) : myInterface(interf) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -586,7 +586,7 @@ struct GetEncryptionAtRestModeRequest {
 	UID tlogId;
 	ReplyPromise<GetEncryptionAtRestModeResponse> reply;
 
-	GetEncryptionAtRestModeRequest() {}
+	GetEncryptionAtRestModeRequest() = default;
 	explicit(false) GetEncryptionAtRestModeRequest(UID tId) : tlogId(tId) {}
 
 	template <class Ar>
@@ -841,7 +841,7 @@ struct InitializeDataDistributorRequest {
 	UID reqId;
 	ReplyPromise<DataDistributorInterface> reply;
 
-	InitializeDataDistributorRequest() {}
+	InitializeDataDistributorRequest() = default;
 	explicit InitializeDataDistributorRequest(UID uid) : reqId(uid) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -854,7 +854,7 @@ struct InitializeRatekeeperRequest {
 	UID reqId;
 	ReplyPromise<RatekeeperInterface> reply;
 
-	InitializeRatekeeperRequest() {}
+	InitializeRatekeeperRequest() = default;
 	explicit InitializeRatekeeperRequest(UID uid) : reqId(uid) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -867,7 +867,7 @@ struct InitializeConsistencyScanRequest {
 	UID reqId;
 	ReplyPromise<ConsistencyScanInterface> reply;
 
-	InitializeConsistencyScanRequest() {}
+	InitializeConsistencyScanRequest() = default;
 	explicit InitializeConsistencyScanRequest(UID uid) : reqId(uid) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1039,7 +1039,7 @@ struct DebugEntryRef {
 	StringRef context;
 	Version version;
 	MutationRef mutation;
-	DebugEntryRef() {}
+	DebugEntryRef() = default;
 	DebugEntryRef(const char* c, Version v, MutationRef const& m)
 	  : time(now()), address(g_network->getLocalAddress()), context((const uint8_t*)c, strlen(c)), version(v),
 	    mutation(m) {}
