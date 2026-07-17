@@ -352,7 +352,7 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 Result getExpectedResult(ChainLength serverChainLen, ChainLength clientChainLen) {
 	auto expect = Result::ERROR;
 	if (serverChainLen > 0) {
-		if (clientChainLen == NO_TLS || clientChainLen < 0) {
+		if (clientChainLen < 0) {
 			expect = Result::TIMEOUT;
 		} else if (clientChainLen > 0) {
 			expect = Result::TRUSTED;

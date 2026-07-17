@@ -363,7 +363,7 @@ UID LogSystem::getDebugID() const {
 void LogSystem::addPseudoLocality(int8_t locality) {
 	ASSERT(locality < 0);
 	pseudoLocalities.insert(locality);
-	for (uint16_t i = 0; i < logRouterTags; i++) {
+	for (int i = 0; i < logRouterTags; i++) {
 		pseudoLocalityPopVersion[Tag(locality, i)] = 0;
 	}
 }
@@ -527,16 +527,6 @@ void LogSystem::purgeOldRecoveredGenerationsCoreState(DBCoreState& newState) {
 			newState.oldTLogData.resize(i);
 			break;
 		}
-	}
-}
-
-void LogSystem::purgeOldRecoveredGenerationsInMemory(const DBCoreState& newState) {
-	auto generations = newState.oldTLogData.size();
-	if (generations < oldLogData.size()) {
-		TraceEvent("PurgeOldTLogGenerationsInMemory", dbgid)
-		    .detail("OldGenerations", oldLogData.size())
-		    .detail("NewGenerations", generations);
-		oldLogData.resize(generations);
 	}
 }
 
@@ -1137,10 +1127,12 @@ LogSystemConfig LogSystem::getLogSystemConfig() const {
 		}
 	}
 
-	if (!recoveryCompleteWrittenToCoreState.get()) {
-		for (const auto& oldData : oldLogData) {
-			logSystemConfig.oldTLogs.push_back(toOldTLogConf(oldData));
-		}
+	// ServerDBInfo uses oldTLogs to keep old-generation TLog roles from displacing
+	// themselves while this cluster controller is alive. Durable state/logsKey can
+	// drop recovered old generations earlier, but these roles may still be needed
+	// if this recovery has to run again.
+	for (const auto& oldData : oldLogData) {
+		logSystemConfig.oldTLogs.push_back(toOldTLogConf(oldData));
 	}
 	return logSystemConfig;
 }
@@ -1597,7 +1589,7 @@ void getTLogLocIds(const std::vector<Reference<LogSet>>& tLogs,
 		if (!it->isLocal) {
 			continue;
 		}
-		for (uint16_t i = 0; i < it->logServers.size(); i++) {
+		for (size_t i = 0; i < it->logServers.size(); i++) {
 			if (it->logServers[i]->get().present()) {
 				interfLocMap[it->logServers[i]->get().interf().id()] = location;
 			}

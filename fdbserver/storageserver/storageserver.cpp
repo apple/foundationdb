@@ -3496,7 +3496,8 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 			if (req.taskID.present() && req.taskID.get() == TaskPriority::FetchKeys) {
 				data->counters.kvFetchServed += r.data.size();
-				data->counters.kvFetchBytesServed += (totalByteSize + (8 - (int)sizeof(KeyValueRef)) * r.data.size());
+				data->counters.kvFetchBytesServed +=
+				    totalByteSize + (8LL - static_cast<int64_t>(sizeof(KeyValueRef))) * r.data.size();
 			}
 
 			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
