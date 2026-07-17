@@ -228,7 +228,7 @@ static void traceKeyValuesSummary(TraceEvent& event,
 // convert a StringRef to Hex string
 static std::string hexStringRef(const StringRef& s) {
 	std::string result;
-	result.reserve(s.size() * 2);
+	result.reserve(static_cast<size_t>(s.size()) * 2);
 	for (int i = 0; i < s.size(); i++) {
 		result.append(format("%02x", s[i]));
 	}
