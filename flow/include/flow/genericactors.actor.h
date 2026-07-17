@@ -48,6 +48,9 @@ using RaceResult = std::variant<FutureReturnTypeT<std::decay_t<Futures>>...>;
 template <class... Futures>
 [[nodiscard]] auto race(Futures&&... futures) -> Future<coro::RaceResult<std::decay_t<Futures>...>>;
 
+template <class T>
+Future<T> timeoutChoose(Future<T> what, Future<Void> end, T timedoutValue);
+
 #ifdef _MSC_VER
 #pragma warning(disable : 4355) // 'this' : used in base member initializer list
 #endif
@@ -217,11 +220,7 @@ Future<T> timeout(Future<T> what,
                   TaskPriority taskID = TaskPriority::DefaultDelay,
                   ExplicitVoid = {}) {
 	Future<Void> end = delay(time, taskID);
-	auto res = co_await race(what, end);
-	if (res.index() == 0) {
-		co_return std::get<0>(std::move(res));
-	}
-	co_return timedoutValue;
+	co_return co_await timeoutChoose(std::move(what), std::move(end), std::move(timedoutValue));
 }
 
 template <class T>
@@ -1462,10 +1461,10 @@ Future<Void> waitForAny(std::vector<Future<T>> const& results) {
 	return quorum(results, 1);
 }
 
-Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> const& futures,
-                         int const& faultTolerance,
-                         Error const& e,
-                         double const& waitMultiplierForSlowFutures = 1.0);
+Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
+                         int faultTolerance,
+                         Error e,
+                         double waitMultiplierForSlowFutures = 1.0);
 
 Future<bool> shortCircuitAny(std::vector<Future<bool>> const& f);
 
@@ -2463,7 +2462,12 @@ Future<T> forward(Future<T> from, Promise<T> to, ExplicitVoid = {}) {
 		to.send(res);
 		co_return res;
 	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled) {
+		if (e.code() == error_code_actor_cancelled) {
+			// A cancelled output Future can keep this frame alive. Release both edges now so cancellation cannot retain
+			// the forwarded input (and any state it owns) or its reply callbacks.
+			Promise<T> dropTo(std::move(to));
+			Future<T> dropFrom(std::move(from));
+		} else {
 			to.sendError(e);
 		}
 		throw e;
@@ -2472,11 +2476,20 @@ Future<T> forward(Future<T> from, Promise<T> to, ExplicitVoid = {}) {
 
 // Monad
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsubobject-linkage"
+#endif
+
 template <class Fun, class T>
 Future<decltype(std::declval<Fun>()(std::declval<T>()))> fmap(Fun fun, Future<T> f, ExplicitVoid = {}) {
 	T val = co_await f;
 	co_return fun(val);
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 /*
  * IAsyncListener is similar to AsyncVar, but it decouples the input and output, so the translation unit
