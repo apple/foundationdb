@@ -2476,6 +2476,24 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 	if (!signalledTransferComplete)
 		dataTransferComplete.send(rd);
 
+	if (err.code() == error_code_data_move_dest_team_not_found && rd.isRestore()) {
+		std::vector<ShardsAffectedByTeamFailure::Team> destinationTeams = { ShardsAffectedByTeamFailure::Team(
+			rd.dataMove->primaryDest, true) };
+		std::vector<ShardsAffectedByTeamFailure::Team> sourceTeams = { ShardsAffectedByTeamFailure::Team(
+			rd.dataMove->primarySrc, true) };
+		if (!rd.dataMove->remoteDest.empty()) {
+			destinationTeams.emplace_back(rd.dataMove->remoteDest, false);
+		}
+		if (!rd.dataMove->remoteSrc.empty()) {
+			sourceTeams.emplace_back(rd.dataMove->remoteSrc, false);
+		}
+		auto restoredRanges = self->shardsAffectedByTeamFailure->cancelMove(rd.keys, destinationTeams, sourceTeams);
+		TraceEvent(SevWarnAlways, "RelocateShardRestoreDataMoveSources", self->distributorId)
+		    .detail("Range", rd.keys)
+		    .detail("DataMoveID", rd.dataMoveId)
+		    .detail("RestoredRanges", restoredRanges.size());
+	}
+
 	if (err.code() == error_code_data_move_dest_team_not_found && retryAfterDestinationTeamFailure) {
 		// randomId participates in RelocateData's queue ordering, so a new attempt needs a new identity.
 		RelocateShard retry = makeDestinationFailureRetry(rd, deterministicRandom()->randomUniqueID());
