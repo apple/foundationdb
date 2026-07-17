@@ -430,6 +430,7 @@ public:
 	FlowLock auditStorageLocationMetadataLaunchingLock;
 	FlowLock auditStorageSsShardLaunchingLock;
 	FlowLock auditStorageRestoreLaunchingLock;
+	FlowLock auditStorageRangeDigestLaunchingLock;
 	Promise<Void> auditStorageInitialized;
 	bool auditStorageInitStarted;
 
@@ -3693,7 +3694,8 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			// Check audit persist progress to double check if any range omitted to be check
 			if (audit->coreState.getType() == AuditType::ValidateHA ||
 			    audit->coreState.getType() == AuditType::ValidateReplica ||
-			    audit->coreState.getType() == AuditType::ValidateRestore) {
+			    audit->coreState.getType() == AuditType::ValidateRestore ||
+			    audit->coreState.getType() == AuditType::RangeDigest) {
 				bool allFinish = co_await checkAuditProgressCompleteByRange(self->txnProcessor->context(),
 				                                                            audit->coreState.getType(),
 				                                                            audit->coreState.id,
@@ -3727,6 +3729,36 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 					    .detail("AuditType", auditType);
 					throw retry();
 				}
+			}
+			if (!audit->foundError && audit->coreState.getType() == AuditType::RangeDigest) {
+				// Combine the per-range digests into the cluster root and store it in the top-level
+				// audit record, which makes the root durable and readable via `get_audit_status`. This
+				// must happen while the phase is still Running: the per-range progress metadata is
+				// cleared once Complete is persisted, and the retry below re-enters runAuditStorage(),
+				// which requires Running.
+				RangeDigestSummary summary = co_await getRangeDigestSummary(
+				    self->txnProcessor->context(), audit->coreState.id, audit->coreState.range);
+				// Coverage guard: a fingerprint must never be reported over a partially-covered
+				// keyspace. If the persisted per-range digests do not tile the whole audit range (e.g. a
+				// shard was skipped because its team was briefly unavailable under data movement), retry
+				// rather than publish a root that silently omits keys.
+				if (!summary.complete) {
+					TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+					    .detail("Reason", "RangeDigestIncompleteCoverage")
+					    .detail("AuditID", auditID)
+					    .detail("IncompleteRange", summary.incompleteRange)
+					    .detail("RetryCount", audit->retryCount)
+					    .detail("AuditType", auditType);
+					throw retry();
+				}
+				audit->coreState.digest = summary.root.bytes();
+				audit->coreState.kvCount = summary.kvCount;
+				audit->coreState.byteCount = summary.byteCount;
+				TraceEvent(SevInfo, "DDAuditStorageRangeDigestRoot", self->ddId)
+				    .detail("AuditID", audit->coreState.id)
+				    .detail("Root", summary.root.toHex())
+				    .detail("KVCount", summary.kvCount)
+				    .detail("Bytes", summary.byteCount);
 			}
 			if (!audit->foundError) {
 				audit->coreState.setPhase(AuditPhase::Complete);
@@ -3870,7 +3902,7 @@ void runAuditStorage(Reference<DataDistributor> self,
 	if (auditState.getType() != AuditType::ValidateHA && auditState.getType() != AuditType::ValidateReplica &&
 	    auditState.getType() != AuditType::ValidateLocationMetadata &&
 	    auditState.getType() != AuditType::ValidateStorageServerShard &&
-	    auditState.getType() != AuditType::ValidateRestore) {
+	    auditState.getType() != AuditType::ValidateRestore && auditState.getType() != AuditType::RangeDigest) {
 		throw not_implemented();
 	}
 	TraceEvent(SevDebug, "DDRunAuditStorage", self->ddId)
@@ -3971,8 +4003,10 @@ Future<UID> launchAudit(Reference<DataDistributor> self,
 			// ValidateRestore is excluded because the current simulation test for restore validation
 			// is a simple end-to-end test that expects the audit to complete without DD restart.
 			// Future work could add more comprehensive fault injection testing for ValidateRestore.
+			// RangeDigest is excluded for the same reason: its test asserts the audit reached Complete,
+			// which a coin-flip restart per launch would turn into an unconditional skip.
 			if (g_network->isSimulated() && auditType != AuditType::ValidateRestore &&
-			    deterministicRandom()->coinflip()) {
+			    auditType != AuditType::RangeDigest && deterministicRandom()->coinflip()) {
 				TraceEvent(SevInfo, "DDAuditStorageLaunchFaultInjection", self->ddId)
 				    .detail("AuditID", auditID_)
 				    .detail("AuditType", auditType);
@@ -4025,6 +4059,9 @@ Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAuditReq
 	} else if (req.getType() == AuditType::ValidateRestore) {
 		co_await self->auditStorageRestoreLaunchingLock.take(TaskPriority::DefaultYield);
 		holder = FlowLock::Releaser(self->auditStorageRestoreLaunchingLock);
+	} else if (req.getType() == AuditType::RangeDigest) {
+		co_await self->auditStorageRangeDigestLaunchingLock.take(TaskPriority::DefaultYield);
+		holder = FlowLock::Releaser(self->auditStorageRangeDigestLaunchingLock);
 	} else {
 		req.reply.sendError(not_implemented());
 		co_return;
@@ -4111,6 +4148,9 @@ Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest r
 	} else if (req.getType() == AuditType::ValidateRestore) {
 		co_await self->auditStorageRestoreLaunchingLock.take(TaskPriority::DefaultYield);
 		holder = FlowLock::Releaser(self->auditStorageRestoreLaunchingLock);
+	} else if (req.getType() == AuditType::RangeDigest) {
+		co_await self->auditStorageRangeDigestLaunchingLock.take(TaskPriority::DefaultYield);
+		holder = FlowLock::Releaser(self->auditStorageRangeDigestLaunchingLock);
 	} else {
 		req.reply.sendError(not_implemented());
 		co_return;
@@ -4185,6 +4225,8 @@ void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAud
 	} else if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
 		audit->actors.add(dispatchAuditStorageServerShard(self, audit));
 	} else if (audit->coreState.getType() == AuditType::ValidateRestore) {
+		audit->actors.add(dispatchAuditStorage(self, audit));
+	} else if (audit->coreState.getType() == AuditType::RangeDigest) {
 		audit->actors.add(dispatchAuditStorage(self, audit));
 	} else {
 		UNREACHABLE();
@@ -4419,7 +4461,7 @@ Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::shared_p
 	const AuditType auditType = audit->coreState.getType();
 	const KeyRange range = audit->coreState.range;
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	       auditType == AuditType::ValidateRestore);
+	       auditType == AuditType::ValidateRestore || auditType == AuditType::RangeDigest);
 	TraceEvent(SevInfo, "DDDispatchAuditStorageBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("Range", range)
@@ -4532,7 +4574,7 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
                                   KeyRange rangeToSchedule) {
 	const AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	       auditType == AuditType::ValidateRestore);
+	       auditType == AuditType::ValidateRestore || auditType == AuditType::RangeDigest);
 	TraceEvent(SevInfo, "DDScheduleAuditOnRangeBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditRange", audit->coreState.range)
@@ -4719,6 +4761,36 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 								taskRangeBegin = taskRange.end;
 								continue;
 							}
+						} else if (auditType == AuditType::RangeDigest) {
+							// Each shard is hashed exactly once by a single owning server; the SS reads
+							// only its local copy, so no comparison peers are needed (targetServers stays
+							// empty). Any replica holds identical content, so pick one from the primary DC.
+							if (rangeLocations[rangeLocationIndex].servers.empty()) {
+								TraceEvent(SevInfo, "DDScheduleAuditOnRangeSkipped", self->ddId)
+								    .detail("Reason", "No servers found for shard")
+								    .detail("AuditID", audit->coreState.id)
+								    .detail("AuditRange", audit->coreState.range)
+								    .detail("TaskRange", taskRange)
+								    .detail("AuditType", auditType);
+								++numSkippedShards;
+								taskRangeBegin = taskRange.end;
+								continue;
+							}
+							auto it = rangeLocations[rangeLocationIndex].servers.begin();
+							if (it->second.empty()) {
+								TraceEvent(SevInfo, "DDScheduleAuditOnRangeSkipped", self->ddId)
+								    .detail("Reason", "Primary DC server list empty")
+								    .detail("AuditID", audit->coreState.id)
+								    .detail("AuditRange", audit->coreState.range)
+								    .detail("TaskRange", taskRange)
+								    .detail("AuditType", auditType);
+								++numSkippedShards;
+								taskRangeBegin = taskRange.end;
+								continue;
+							}
+							const int idx = deterministicRandom()->randomInt(0, it->second.size());
+							targetServer = it->second[idx];
+							storageServersToCheck.push_back(it->second[idx]);
 						} else {
 							UNREACHABLE();
 						}
@@ -4831,7 +4903,7 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 Future<Void> skipAuditOnRange(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit, KeyRange rangeToSkip) {
 	AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	       auditType == AuditType::ValidateRestore);
+	       auditType == AuditType::ValidateRestore || auditType == AuditType::RangeDigest);
 	try {
 		audit->overallIssuedDoAuditCount++;
 		AuditStorageState res(audit->coreState.id, rangeToSkip, auditType);
@@ -4893,7 +4965,8 @@ Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
                                     AuditStorageRequest req) {
 	AuditType auditType = req.getType();
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	       auditType == AuditType::ValidateStorageServerShard || auditType == AuditType::ValidateRestore);
+	       auditType == AuditType::ValidateStorageServerShard || auditType == AuditType::ValidateRestore ||
+	       auditType == AuditType::RangeDigest);
 	TraceEvent(SevInfo, "DDDoAuditOnStorageServerBegin", self->ddId)
 	    .detail("AuditID", req.id)
 	    .detail("Range", req.range)
