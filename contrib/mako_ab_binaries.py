@@ -50,9 +50,11 @@ import re
 import shutil
 import subprocess
 
-from mako_ab_memtracker import parse_run, line_ds, PCTS
+from mako_ab_memtracker import parse_run, line_ds, PCTS, clobber_ramdisk
 
-BENCH_DEFAULT = "/root/src/fdb5/foundationdb/contrib/mako_storage_bench.sh"
+# Found next to this script rather than hard-coded to one workspace.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+BENCH_DEFAULT = os.path.join(_HERE, "mako_storage_bench.sh")
 
 # A = baseline blue, B = warm orange.
 COLOR = {"a": "#4477CC", "b": "#EE7733"}
@@ -63,8 +65,10 @@ def rocksdb_tmpfs_knobs(engine):
     binaries need direct I/O off to run rocksdb on /mnt/ram. redwood needs
     nothing."""
     if engine == "rocksdb":
-        return ["--knob_rocksdb_use_direct_reads=0",
-                "--knob_rocksdb_use_direct_io_flush_compaction=0"]
+        return [
+            "--knob_rocksdb_use_direct_reads=0",
+            "--knob_rocksdb_use_direct_io_flush_compaction=0",
+        ]
     return []
 
 
@@ -88,8 +92,9 @@ def source_version(build):
     to prove A and B are genuinely different builds, and to record provenance."""
     fdbserver = os.path.join(build, "bin", "fdbserver")
     try:
-        out = subprocess.run([fdbserver, "--version"], capture_output=True,
-                             text=True, timeout=60).stdout
+        out = subprocess.run(
+            [fdbserver, "--version"], capture_output=True, text=True, timeout=60
+        ).stdout
     except (OSError, subprocess.SubprocessError):
         return None
     m = re.search(r"source version (\w+)", out)
@@ -97,19 +102,6 @@ def source_version(build):
 
 
 # --------------------------------------------------------------------------
-
-def clobber_ramdisk(ram_mount):
-    """Clear all scratch under the tmpfs so every run starts with an empty
-    ramdisk. /mnt/ram is only ~24 GB and fills fast across runs. We do this at
-    startup rather than at teardown for two reasons: a killed run can't be
-    trusted to have cleaned up after itself, and leaving the last run's data in
-    place until the next run means it's still there to inspect when something
-    fails."""
-    if not os.path.isdir(ram_mount):
-        return
-    for name in os.listdir(ram_mount):
-        subprocess.run(["rm", "-rf", os.path.join(ram_mount, name)], check=False)
-    print(f"clobbered ramdisk contents under {ram_mount}", flush=True)
 
 
 def _harvest(rundir, dst):
@@ -128,10 +120,11 @@ def collect(bench, build_a, build_b, engines, warmup, seconds, rows, ramdir, out
     for engine in engines:
         data[engine] = {}
         for armkey, build, knobs in (("a", build_a, []), ("b", build_b, b_knobs)):
-            rundir = run_arm(bench, build, engine, armkey, knobs,
-                             warmup, seconds, rows, ramdir)
+            rundir = run_arm(
+                bench, build, engine, armkey, knobs, warmup, seconds, rows, ramdir
+            )
             dst = os.path.join(outdir, armkey, engine)
-            _harvest(rundir, dst)                 # save results to /root for persistence + debugging
+            _harvest(rundir, dst)  # save results to /root for persistence + debugging
             metrics = parse_run(dst)
             print(f"    -> overallTPS={metrics['overallTPS']}", flush=True)
             data[engine][armkey] = metrics
@@ -165,32 +158,40 @@ def generate_html(data, outpath, meta, warmup, seconds, rows):
             f"<tr><td>{eng}</td><td>{fmt(ta)}</td><td>{fmt(tb)}</td>"
             f"<td class='delta'>{dfmt(d)}</td>"
             f"<td>{fmt(p99a,' µs')}</td><td>{fmt(p99b,' µs')}</td>"
-            f"<td class='delta'>{dfmt(dp)}</td></tr>")
+            f"<td class='delta'>{dfmt(dp)}</td></tr>"
+        )
 
     tps_a = [data[e].get("a", {}).get("overallTPS") or 0 for e in engines]
     tps_b = [data[e].get("b", {}).get("overallTPS") or 0 for e in engines]
-    tps_datasets = json.dumps([
-        {"label": la, "data": tps_a, "backgroundColor": COLOR["a"]},
-        {"label": lb, "data": tps_b, "backgroundColor": COLOR["b"]},
-    ])
+    tps_datasets = json.dumps(
+        [
+            {"label": la, "data": tps_a, "backgroundColor": COLOR["a"]},
+            {"label": lb, "data": tps_b, "backgroundColor": COLOR["b"]},
+        ]
+    )
 
     blocks = []
     for i, eng in enumerate(engines):
         a = data[eng].get("a", {})
         b = data[eng].get("b", {})
-        ps_datasets = json.dumps([
-            line_ds(f"{eng} {la}", a.get("persec", []), COLOR["a"]),
-            line_ds(f"{eng} {lb}", b.get("persec", []), COLOR["b"], dashed=True),
-        ])
+        ps_datasets = json.dumps(
+            [
+                line_ds(f"{eng} {la}", a.get("persec", []), COLOR["a"]),
+                line_ds(f"{eng} {lb}", b.get("persec", []), COLOR["b"], dashed=True),
+            ]
+        )
         lat_labels = json.dumps([s for _, s in PCTS])
         lat_a = [a.get("latency", {}).get(s) for _, s in PCTS]
         lat_b = [b.get("latency", {}).get(s) for _, s in PCTS]
-        lat_datasets = json.dumps([
-            {"label": la, "data": lat_a, "backgroundColor": COLOR["a"]},
-            {"label": lb, "data": lat_b, "backgroundColor": COLOR["b"]},
-        ])
-        n = max(len(a.get('persec', [])), len(b.get('persec', [])), 1)
-        blocks.append(f"""
+        lat_datasets = json.dumps(
+            [
+                {"label": la, "data": lat_a, "backgroundColor": COLOR["a"]},
+                {"label": lb, "data": lat_b, "backgroundColor": COLOR["b"]},
+            ]
+        )
+        n = max(len(a.get("persec", [])), len(b.get("persec", [])), 1)
+        blocks.append(
+            f"""
   <h2>{eng}</h2>
   <div class="chart-box"><canvas id="ps{i}"></canvas></div>
   <div class="chart-box"><canvas id="lat{i}"></canvas></div>
@@ -210,13 +211,16 @@ def generate_html(data, outpath, meta, warmup, seconds, rows):
         scales: {{ y: {{ beginAtZero:true, title:{{display:true,text:'transaction latency (µs)'}} }} }},
         plugins: {{ title:{{display:true,text:'{eng}: transaction latency percentiles'}} }} }}
     }});
-  </script>""")
+  </script>"""
+        )
 
-    same = (meta["ver_a"] and meta["ver_a"] == meta["ver_b"])
+    same = meta["ver_a"] and meta["ver_a"] == meta["ver_b"]
     guard = ""
     if same:
-        guard = ("<p class='warn'><b>WARNING:</b> both builds report the same source "
-                 "version — A and B may be the same binary; results are not meaningful.</p>")
+        guard = (
+            "<p class='warn'><b>WARNING:</b> both builds report the same source "
+            "version — A and B may be the same binary; results are not meaningful.</p>"
+        )
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -276,9 +280,15 @@ def generate_html(data, outpath, meta, warmup, seconds, rows):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Vanilla-main vs PR-tracking-off A/B via mako_storage_bench.sh")
-    ap.add_argument("--build-a", default="/root/build_output4", help="vanilla main build (arm A)")
-    ap.add_argument("--build-b", default="/root/build_output5", help="this-PR build (arm B)")
+    ap = argparse.ArgumentParser(
+        description="Vanilla-main vs PR-tracking-off A/B via mako_storage_bench.sh"
+    )
+    ap.add_argument(
+        "--build-a", default="/root/build_output4", help="vanilla main build (arm A)"
+    )
+    ap.add_argument(
+        "--build-b", default="/root/build_output5", help="this-PR build (arm B)"
+    )
     ap.add_argument("--label-a", default="main (no tracker)")
     ap.add_argument("--label-b", default="PR, tracking off")
     ap.add_argument("--bench", default=BENCH_DEFAULT)
@@ -286,23 +296,39 @@ def main():
     ap.add_argument("--warmup", type=int, default=60)
     ap.add_argument("--seconds", type=int, default=240)
     ap.add_argument("--rows", type=int, default=100000)
-    ap.add_argument("--ramdir", default="/mnt/ram/binab",
-                    help="tmpfs scratch for SS/cluster data (only SS data lives on /mnt/ram)")
-    ap.add_argument("--ram-mount", default="/mnt/ram",
-                    help="tmpfs mount clobbered clean at startup")
-    ap.add_argument("--outdir", default="/root/binab_results",
-                    help="persistent results dir on /root (~1 TB); harvested off tmpfs per arm")
-    ap.add_argument("--report", default="/root/src/mako_binab.html",
-                    help="HTML output path (syncs to ~/src on the Mac)")
-    ap.add_argument("--drift-note", default="A and B may build from slightly different main "
-                    "revisions; the delta bundles the PR's off-state cost with any main drift.")
+    ap.add_argument(
+        "--ramdir",
+        default="/mnt/ram/binab",
+        help="tmpfs scratch for SS/cluster data (only SS data lives on /mnt/ram)",
+    )
+    ap.add_argument(
+        "--ram-mount", default="/mnt/ram", help="tmpfs mount clobbered clean at startup"
+    )
+    ap.add_argument(
+        "--outdir",
+        default="/root/binab_results",
+        help="persistent results dir on /root (~1 TB); harvested off tmpfs per arm",
+    )
+    ap.add_argument(
+        "--report",
+        default="/root/src/mako_binab.html",
+        help="HTML output path (syncs to ~/src on the Mac)",
+    )
+    ap.add_argument(
+        "--drift-note",
+        default="A and B may build from slightly different main "
+        "revisions; the delta bundles the PR's off-state cost with any main drift.",
+    )
     ap.add_argument("--report-only", action="store_true")
     args = ap.parse_args()
 
     meta = {
-        "label_a": args.label_a, "label_b": args.label_b,
-        "build_a": args.build_a, "build_b": args.build_b,
-        "ver_a": source_version(args.build_a), "ver_b": source_version(args.build_b),
+        "label_a": args.label_a,
+        "label_b": args.label_b,
+        "build_a": args.build_a,
+        "build_b": args.build_b,
+        "ver_a": source_version(args.build_a),
+        "ver_b": source_version(args.build_b),
         "drift_note": args.drift_note,
     }
     print(f"A: {args.build_a} source={meta['ver_a']}")
@@ -311,14 +337,25 @@ def main():
     if args.report_only:
         data = {}
         for eng in args.engines:
-            data[eng] = {"a": parse_run(os.path.join(args.outdir, "a", eng)),
-                         "b": parse_run(os.path.join(args.outdir, "b", eng))}
+            data[eng] = {
+                "a": parse_run(os.path.join(args.outdir, "a", eng)),
+                "b": parse_run(os.path.join(args.outdir, "b", eng)),
+            }
     else:
-        clobber_ramdisk(args.ram_mount)          # clean slate up front; no end-of-run cleanup
+        clobber_ramdisk(args.ram_mount)  # clean slate up front; no end-of-run cleanup
         os.makedirs(args.ramdir, exist_ok=True)
         os.makedirs(args.outdir, exist_ok=True)
-        data = collect(args.bench, args.build_a, args.build_b, args.engines,
-                       args.warmup, args.seconds, args.rows, args.ramdir, args.outdir)
+        data = collect(
+            args.bench,
+            args.build_a,
+            args.build_b,
+            args.engines,
+            args.warmup,
+            args.seconds,
+            args.rows,
+            args.ramdir,
+            args.outdir,
+        )
 
     generate_html(data, args.report, meta, args.warmup, args.seconds, args.rows)
     print(f"\nReport written: {args.report}")

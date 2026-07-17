@@ -51,14 +51,44 @@ import statistics
 import subprocess
 import sys
 
-BENCH_DEFAULT = "/root/src/fdb5/foundationdb/contrib/mako_storage_bench.sh"
-BUILD_DEFAULT = "/root/build_output5"
+# The /root and /mnt/ram defaults below are dev-pod defaults; override via flags
+# (or FDB_BUILD) elsewhere. BENCH is found next to this script rather than hard-coded.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+BENCH_DEFAULT = os.path.join(_HERE, "mako_storage_bench.sh")
+BUILD_DEFAULT = os.environ.get("FDB_BUILD", "/root/build_output5")
 
 # OFF = baseline blue, ON = warm orange.
 COLOR = {"off": "#4477CC", "on": "#EE7733"}
 ARMS = [("off", 0), ("on", 100)]  # (label, sample_inverse)
-PCTS = [("medianLatency", "p50"), ("p95Latency", "p95"),
-        ("p99Latency", "p99"), ("p99.9Latency", "p99.9")]
+PCTS = [
+    ("medianLatency", "p50"),
+    ("p95Latency", "p95"),
+    ("p99Latency", "p99"),
+    ("p99.9Latency", "p99.9"),
+]
+
+
+def _assert_safe_scratch_mount(mount):
+    """Refuse to recursively delete anything that isn't clearly a dedicated tmpfs
+    scratch mount. Guards against a typo or a stray --ram-mount (e.g. /mnt, /, or
+    $HOME) wiping unrelated data before the run even starts."""
+    real = os.path.realpath(mount)
+    denylist = {"/", "/mnt", "/tmp", "/root", "/home", os.path.expanduser("~")}
+    if real in denylist or real.count("/") < 2:
+        raise SystemExit(
+            f"refusing to clobber unsafe scratch path: {mount!r} -> {real!r}"
+        )
+    if not os.path.ismount(real):
+        raise SystemExit(
+            f"refusing to clobber {real!r}: not a mountpoint (expected a tmpfs mount)"
+        )
+    fstype = subprocess.run(
+        ["stat", "-f", "-c", "%T", real], capture_output=True, text=True
+    ).stdout.strip()
+    if fstype != "tmpfs":
+        raise SystemExit(
+            f"refusing to clobber {real!r}: filesystem is {fstype!r}, not tmpfs"
+        )
 
 
 def clobber_ramdisk(ram_mount):
@@ -69,6 +99,7 @@ def clobber_ramdisk(ram_mount):
     to inspect when something fails."""
     if not os.path.isdir(ram_mount):
         return
+    _assert_safe_scratch_mount(ram_mount)
     for name in os.listdir(ram_mount):
         subprocess.run(["rm", "-rf", os.path.join(ram_mount, name)], check=False)
     print(f"clobbered ramdisk contents under {ram_mount}", flush=True)
@@ -91,7 +122,6 @@ def load_metrics(dst):
         return {"overallTPS": None, "persec": [], "latency": {}, "ok": False}
 
 
-
 def run_arm(bench, build, engine, arm, inverse, warmup, seconds, rows, outbase):
     """Run one (engine, arm) via mako_storage_bench.sh; return its output dir."""
     workdir = os.path.join(outbase, arm)
@@ -100,15 +130,19 @@ def run_arm(bench, build, engine, arm, inverse, warmup, seconds, rows, outbase):
     env["WARMUP_SECONDS"] = str(warmup)
     env["SECONDS_RUN"] = str(seconds)
     env["ROWS"] = str(rows)
-    knobs = [f"--knob_memory_tracking_sample_inverse={inverse}",
-             "--knob_memory_tracking_report_interval=30"]
+    knobs = [
+        f"--knob_memory_tracking_sample_inverse={inverse}",
+        "--knob_memory_tracking_report_interval=30",
+    ]
     if engine == "rocksdb":
         # RocksDB opens its DB with O_DIRECT by default; tmpfs (/mnt/ram, where
         # this harness runs its data dir) does not support direct I/O, so the
         # storage engine fails to Open and the cluster never configures. Turn
         # direct I/O off via RocksDB's existing knobs (no new knobs added).
-        knobs += ["--knob_rocksdb_use_direct_reads=0",
-                  "--knob_rocksdb_use_direct_io_flush_compaction=0"]
+        knobs += [
+            "--knob_rocksdb_use_direct_reads=0",
+            "--knob_rocksdb_use_direct_io_flush_compaction=0",
+        ]
     env["KNOBS"] = " ".join(knobs)
     print(f"\n=== {engine} / {arm} (sample_inverse={inverse}) ===", flush=True)
     print(f"    WORKDIR={workdir}  KNOBS={env['KNOBS']}", flush=True)
@@ -169,9 +203,16 @@ def alloc_rate_from_trace(rundir):
                     mm = re.search(r'Machine="([^"]+)"', line)
                     rm = re.search(r'Roles="([^"]*)"', line)
                     if t is not None and ea is not None:
-                        rows.append((mm.group(1) if mm else "?",
-                                     rm.group(1) if rm else "", t, ea,
-                                     eb or 0, se or 0))
+                        rows.append(
+                            (
+                                mm.group(1) if mm else "?",
+                                rm.group(1) if rm else "",
+                                t,
+                                ea,
+                                eb or 0,
+                                se or 0,
+                            )
+                        )
             except OSError:
                 pass
     if not rows:
@@ -199,9 +240,11 @@ def alloc_rate_from_trace(rundir):
         ar, br, sr = ar[1:], br[1:], sr[1:]
     if not ar:
         return None
-    return {"alloc_per_sec": statistics.median(ar),
-            "mb_per_sec": statistics.median(br) / 1e6,
-            "samples_per_sec": statistics.median(sr)}
+    return {
+        "alloc_per_sec": statistics.median(ar),
+        "mb_per_sec": statistics.median(br) / 1e6,
+        "samples_per_sec": statistics.median(sr),
+    }
 
 
 def parse_run(rundir):
@@ -226,7 +269,7 @@ def parse_run(rundir):
         mt = os.path.join(rundir, "mako-run.txt")
         if os.path.exists(mt):
             for line in open(mt, errors="ignore"):
-                m = re.search(r'Overall TPS:\s*([\d.]+)', line)
+                m = re.search(r"Overall TPS:\s*([\d.]+)", line)
                 if m:
                     out["overallTPS"] = float(m.group(1))
                     out["ok"] = True
@@ -239,16 +282,19 @@ def collect(bench, build, engines, warmup, seconds, rows, ramdir, outdir):
     for engine in engines:
         data[engine] = {}
         for arm, inverse in ARMS:
-            rundir = run_arm(bench, build, engine, arm, inverse,
-                             warmup, seconds, rows, ramdir)
-            metrics = parse_run(rundir)                 # reads mako.json + alloc-rate off tmpfs
-            observed = verify_sample_inverse(rundir)    # reads the trace off tmpfs
+            rundir = run_arm(
+                bench, build, engine, arm, inverse, warmup, seconds, rows, ramdir
+            )
+            metrics = parse_run(rundir)  # reads mako.json + alloc-rate off tmpfs
+            observed = verify_sample_inverse(rundir)  # reads the trace off tmpfs
             metrics["verified_inverse"] = observed
             metrics["expected_inverse"] = inverse
             ok = "OK" if observed == inverse else f"MISMATCH (saw {observed})"
-            print(f"    -> overallTPS={metrics['overallTPS']} "
-                  f"knob-verify SampleInverse={observed} expected={inverse} [{ok}]",
-                  flush=True)
+            print(
+                f"    -> overallTPS={metrics['overallTPS']} "
+                f"knob-verify SampleInverse={observed} expected={inverse} [{ok}]",
+                flush=True,
+            )
             save_metrics(os.path.join(outdir, arm, engine), metrics)  # persist to /root
             data[engine][arm] = metrics
     return data
@@ -258,10 +304,18 @@ def collect(bench, build, engines, warmup, seconds, rows, ramdir, outdir):
 # HTML / chart.js generation
 # --------------------------------------------------------------------------
 
+
 def line_ds(label, series, color, dashed=False):
-    d = {"label": label, "data": series, "borderColor": color,
-         "backgroundColor": color, "pointRadius": 0, "borderWidth": 2,
-         "tension": 0.2, "fill": False}
+    d = {
+        "label": label,
+        "data": series,
+        "borderColor": color,
+        "backgroundColor": color,
+        "pointRadius": 0,
+        "borderWidth": 2,
+        "tension": 0.2,
+        "fill": False,
+    }
     if dashed:
         d["borderDash"] = [6, 3]
     return d
@@ -295,35 +349,51 @@ def generate_html(data, outpath, warmup, seconds, rows):
             f"<td class='delta'>{dfmt(dtps)}</td>"
             f"<td>{fmt(p99_off,' µs')}</td><td>{fmt(p99_on,' µs')}</td>"
             f"<td class='delta'>{dfmt(dp99)}</td>"
-            f"<td>off={off.get('verified_inverse')} / on={on.get('verified_inverse')}</td></tr>")
+            f"<td>off={off.get('verified_inverse')} / on={on.get('verified_inverse')}</td></tr>"
+        )
 
     # ---- Per-engine charts ----
     tps_labels = engines
     tps_off = [data[e].get("off", {}).get("overallTPS") or 0 for e in engines]
     tps_on = [data[e].get("on", {}).get("overallTPS") or 0 for e in engines]
-    tps_datasets = json.dumps([
-        {"label": "off (inverse=0)", "data": tps_off, "backgroundColor": COLOR["off"]},
-        {"label": "on (inverse=100)", "data": tps_on, "backgroundColor": COLOR["on"]},
-    ])
+    tps_datasets = json.dumps(
+        [
+            {
+                "label": "off (inverse=0)",
+                "data": tps_off,
+                "backgroundColor": COLOR["off"],
+            },
+            {
+                "label": "on (inverse=100)",
+                "data": tps_on,
+                "backgroundColor": COLOR["on"],
+            },
+        ]
+    )
 
     blocks = []
     for i, eng in enumerate(engines):
         off = data[eng].get("off", {})
         on = data[eng].get("on", {})
         # per-second time series
-        ps_datasets = json.dumps([
-            line_ds(f"{eng} off", off.get("persec", []), COLOR["off"]),
-            line_ds(f"{eng} on", on.get("persec", []), COLOR["on"], dashed=True),
-        ])
+        ps_datasets = json.dumps(
+            [
+                line_ds(f"{eng} off", off.get("persec", []), COLOR["off"]),
+                line_ds(f"{eng} on", on.get("persec", []), COLOR["on"], dashed=True),
+            ]
+        )
         # latency percentiles
         lat_labels = json.dumps([s for _, s in PCTS])
         lat_off = [off.get("latency", {}).get(s) for _, s in PCTS]
         lat_on = [on.get("latency", {}).get(s) for _, s in PCTS]
-        lat_datasets = json.dumps([
-            {"label": "off", "data": lat_off, "backgroundColor": COLOR["off"]},
-            {"label": "on", "data": lat_on, "backgroundColor": COLOR["on"]},
-        ])
-        blocks.append(f"""
+        lat_datasets = json.dumps(
+            [
+                {"label": "off", "data": lat_off, "backgroundColor": COLOR["off"]},
+                {"label": "on", "data": lat_on, "backgroundColor": COLOR["on"]},
+            ]
+        )
+        blocks.append(
+            f"""
   <h2>{eng}</h2>
   <div class="chart-box"><canvas id="ps{i}"></canvas></div>
   <div class="chart-box"><canvas id="lat{i}"></canvas></div>
@@ -344,7 +414,8 @@ def generate_html(data, outpath, warmup, seconds, rows):
         scales: {{ y: {{ beginAtZero:true, title:{{display:true,text:'transaction latency (µs)'}} }} }},
         plugins: {{ title:{{display:true,text:'{eng}: transaction latency percentiles (off vs on)'}} }} }}
     }});
-  </script>""")
+  </script>"""
+        )
 
     rate_bits = []
     for eng in engines:
@@ -352,14 +423,21 @@ def generate_html(data, outpath, warmup, seconds, rows):
         if r:
             rate_bits.append(
                 f"{eng} &approx; {r['alloc_per_sec'] / 1e6:.2f} M allocs/s "
-                f"({r['mb_per_sec']:.0f} MB/s, {r['samples_per_sec'] / 1e3:.0f}K samples/s)")
-    rate_note = ("<p class='sub'><b>Observed storage-process allocation rate (on arm)</b>, "
-                 "from the tracker's own <code>MemoryTrackerSummary</code> "
-                 "(&Delta;EstCumulativeAllocs / report interval): " + "; ".join(rate_bits) +
-                 ". This is the rate the per-free global-lock cost scales with &mdash; far above "
-                 "a single-threaded microbenchmark's assumed 100K/s, which (with cross-thread lock "
-                 "contention) is why the end-to-end overhead here exceeds the &mu;bench estimate.</p>"
-                 ) if rate_bits else ""
+                f"({r['mb_per_sec']:.0f} MB/s, {r['samples_per_sec'] / 1e3:.0f}K samples/s)"
+            )
+    rate_note = (
+        (
+            "<p class='sub'><b>Observed storage-process allocation rate (on arm)</b>, "
+            "from the tracker's own <code>MemoryTrackerSummary</code> "
+            "(&Delta;EstCumulativeAllocs / report interval): "
+            + "; ".join(rate_bits)
+            + ". This is the rate the per-free global-lock cost scales with &mdash; far above "
+            "a single-threaded microbenchmark's assumed 100K/s, which (with cross-thread lock "
+            "contention) is why the end-to-end overhead here exceeds the &mu;bench estimate.</p>"
+        )
+        if rate_bits
+        else ""
+    )
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -416,24 +494,39 @@ def generate_html(data, outpath, warmup, seconds, rows):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Memory-tracker off/on A/B via mako_storage_bench.sh")
+    ap = argparse.ArgumentParser(
+        description="Memory-tracker off/on A/B via mako_storage_bench.sh"
+    )
     ap.add_argument("--build", default=BUILD_DEFAULT)
     ap.add_argument("--bench", default=BENCH_DEFAULT)
     ap.add_argument("--engines", nargs="+", default=["redwood", "rocksdb"])
     ap.add_argument("--warmup", type=int, default=60)
     ap.add_argument("--seconds", type=int, default=240)
     ap.add_argument("--rows", type=int, default=100000)
-    ap.add_argument("--ramdir", default="/mnt/ram/memtracker_ab",
-                    help="tmpfs scratch for SS/cluster data (only SS data lives on /mnt/ram)")
-    ap.add_argument("--ram-mount", default="/mnt/ram",
-                    help="tmpfs mount clobbered clean at startup")
-    ap.add_argument("--outdir", default="/root/memtracker_ab_results",
-                    help="persistent results dir on /root (~1 TB); per-arm metrics saved here")
-    ap.add_argument("--report", default=None,
-                    help="HTML output path (default: /root/src/mako_memtracker_ab.html, "
-                         "which syncs to ~/src on the Mac)")
-    ap.add_argument("--report-only", action="store_true",
-                    help="Skip running; regenerate HTML from an existing --outdir")
+    ap.add_argument(
+        "--ramdir",
+        default="/mnt/ram/memtracker_ab",
+        help="tmpfs scratch for SS/cluster data (only SS data lives on /mnt/ram)",
+    )
+    ap.add_argument(
+        "--ram-mount", default="/mnt/ram", help="tmpfs mount clobbered clean at startup"
+    )
+    ap.add_argument(
+        "--outdir",
+        default="/root/memtracker_ab_results",
+        help="persistent results dir on /root (~1 TB); per-arm metrics saved here",
+    )
+    ap.add_argument(
+        "--report",
+        default=None,
+        help="HTML output path (default: /root/src/mako_memtracker_ab.html, "
+        "which syncs to ~/src on the Mac)",
+    )
+    ap.add_argument(
+        "--report-only",
+        action="store_true",
+        help="Skip running; regenerate HTML from an existing --outdir",
+    )
     args = ap.parse_args()
 
     # Default the report into the okteto sync root (~/src <-> /root/src) so it
@@ -447,11 +540,19 @@ def main():
             for arm, inverse in ARMS:
                 data[eng][arm] = load_metrics(os.path.join(args.outdir, arm, eng))
     else:
-        clobber_ramdisk(args.ram_mount)          # clean slate up front; no end-of-run cleanup
+        clobber_ramdisk(args.ram_mount)  # clean slate up front; no end-of-run cleanup
         os.makedirs(args.ramdir, exist_ok=True)
         os.makedirs(args.outdir, exist_ok=True)
-        data = collect(args.bench, args.build, args.engines,
-                       args.warmup, args.seconds, args.rows, args.ramdir, args.outdir)
+        data = collect(
+            args.bench,
+            args.build,
+            args.engines,
+            args.warmup,
+            args.seconds,
+            args.rows,
+            args.ramdir,
+            args.outdir,
+        )
 
     generate_html(data, report, args.warmup, args.seconds, args.rows)
     print(f"\nReport written: {report}")

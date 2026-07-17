@@ -4,13 +4,13 @@
 
 Make it easier to debug memory leaks and generally to understand the
 principal consumers of memory in FDB.  Specifically: add a sampled,
-always-compiled, runtime-knob-controlled memory attribution mechanism
+always-compiled, knob-controlled memory attribution mechanism
 that captures a small return-address backtrace at a configurable
 fraction of allocations, aggregates byte and call counts per call
 site, and periodically emits the aggregates as TraceEvents for offline
 `addr2line` symbolization. The mechanism must be lightweight enough to
 leave on by default in production (~1% sampling) and at higher rates
-(~50%) in simulation, where it must remain deterministic. (That ≤1%
+(~10%) in simulation, where it must remain deterministic. (That ≤1%
 overhead is the *target* that gates leaving it on; the v1 single-lock
 implementation does not yet meet it at high allocation rates, so it ships
 **off** by default pending a lock-sharding follow-up — see Performance and
@@ -75,7 +75,7 @@ R1. **Un-sampled hot path.** A non-sampled allocation incurs only one
 
 R2. **Default-on in production and simulation (post-rollout
     steady state).** Steady-state production default is 1% sampling
-    (one in 100 allocations); simulation runs at 50% (one in two) so
+    (one in 100 allocations); simulation runs at 10% (one in ten) so
     the tracker is exercised under fault injection. The Rollout
     section describes a phased landing where the production default
     starts at 0 and is flipped to the steady-state value after
@@ -117,11 +117,11 @@ R8. **Strip-aware.** Reports work against stripped production binaries
     when separate debug info (the `.debug` sidecar this repo's release
     build already produces) is available to the offline tooling.
 
-R9. **Off-switch.** Setting the sample-inverse knob to 0 disables
-     sampling at runtime. The alloc hot path remains a TLS load, decrement,
-     and branch; the free hot path remains a cached atomic-flag read and a
-     branch. No aggregation work, and in particular no lock acquisition,
-     happens on either path when disabled.
+R9. **Off-switch.** With the sample-inverse knob set to 0 (the shipping
+     default) the tracker is inert: the alloc hot path is a TLS load, decrement,
+     and branch; the free hot path is a cached atomic-flag read and a branch. No
+     aggregation work, and in particular no lock acquisition, happens on either
+     path. The knob is read at startup — see Non-requirements.
 
 R10. **Reentrancy safety.** No allocation made by the tracker itself
      (table grows, dump scratch space) re-enters the tracking path. A
@@ -136,6 +136,14 @@ R11. **Side-thread coverage.** Allocations from any thread are
      machinery — see "Side-thread safety" for the empirical repro
      (joshua-found `IThreadPool` segfaults) that exposed the
      original walker's crash mode.
+
+## Non-requirements
+
+**Dynamic runtime enable/disable is not supported.** The sampling knobs are read
+at startup; to turn the tracker on or off, or change its sample rate, edit the
+config and restart the process. Toggling `MEMORY_TRACKING_SAMPLE_INVERSE` on a
+running process is not a use case we support — trying to make live allocations
+reconcile across an on↔off transition adds complexity for no benefit.
 
 ## Design Overview
 
@@ -194,17 +202,15 @@ extern std::atomic<bool> g_memTrackerEnabled;
 inline void memTrackerOnAlloc(void* p, size_t n) {
     if (gInMemTracker || !p) return;
     if (--gMemTrackerCounter > 0 && n < gForceSampleBytes) return;  // un-sampled fast path
-    gInMemTracker = true;
+    MemTrackerSuppress guard;               // sets gInMemTracker; restores on scope exit
     memTrackerSampleAlloc(p, n);            // out-of-line; reseeds counter, publishes g_memTrackerEnabled
-    gInMemTracker = false;
 }
 
 inline void memTrackerOnFree(void* p) {
     if (gInMemTracker || !p) return;
     if (!g_memTrackerEnabled.load(relaxed)) return;  // disabled: no lock, no table probe
-    gInMemTracker = true;
+    MemTrackerSuppress guard;
     memTrackerSampleFree(p);                // no-op if p not tracked
-    gInMemTracker = false;
 }
 ```
 
@@ -213,21 +219,15 @@ debit a live entry — so it cannot be gated the way an alloc is. Gating it on
 the enabled flag instead keeps the disabled free path lock-free: without this
 gate, every hooked `delete`/`FastAllocator::release`/`ArenaBlock` teardown
 would acquire the global spinlock even with sampling off, defeating the
-off-switch. The flag is written only when the enabled state actually changes
-(published from `memTrackerSampleAlloc`, the one place that re-reads the knob),
-so its cache line stays shared across cores and the hot-path read is cheap.
-Runtime toggling has the same in-flight caveat as `MEMORY_TRACKING_LIVE_TRACKING`:
-disabling while entries are live orphans them in the table rather than debiting
-them on free.  Note that in practice we don't expect this knob to
-flip; fdbserver process restarts are more typical when knobs change.
+off-switch. The flag is published once from `memTrackerSampleAlloc` (the one
+place that reads the knob), so its cache line stays shared across cores and the
+hot-path read is cheap.
 
-The counter is reseeded on every sample to a small uniform random
-integer with mean `INV`, so the sampling rate averages 1-in-`INV`
-without aliasing to fixed allocation patterns. When `INV == 0`
-(off-switch) the reseed re-parks the counter at a bounded value rather than
-effectively infinity, so a parked thread re-enters the lock-free slow path —
-which re-reads the knob and can observe an off→on change — within a bounded
-number of allocations. The bail-out does no aggregation work and takes no lock.
+The counter is reseeded on every sample to a uniform random integer on
+`[1, 2·INV−1]`, whose mean is exactly `INV`, so the sampling rate averages
+1-in-`INV` without aliasing to fixed allocation patterns. When `INV == 0` the
+thread parks its counter and stays on the fast path; the knob is read at startup
+only (see Non-requirements), so it never needs to re-observe a change.
 
 The counter's initial value (per-thread) is chosen so the first
 allocation a thread sees is always sampled, which guarantees that
@@ -260,7 +260,7 @@ population rates.
 
 ### Stack capture
 
-Capture is a hand-rolled frame-pointer walk (`captureStackFP`): starting from
+Capture is a hand-rolled frame-pointer walk (`captureFramesFP`): starting from
 `__builtin_frame_address(0)`, follow the saved-FP links, recording the saved
 return address at each frame, up to `MEMORY_TRACKING_FRAMES` deep. The caller
 (`memTrackerSampleAlloc`) strips the topmost 1–2 tracker frames so the captured
@@ -327,7 +327,7 @@ missed:
    unmapped memory and segfaults. **This is not hypothetical — we
    hit it directly.** Joshua reproduced it with three RandomUnitTests
    seeds (3288611985, 3731245491, 2219741568): every run segfaulted
-   inside `captureStackFP` when an `IThreadPool` worker exited and
+   inside `captureFramesFP` when an `IThreadPool` worker exited and
    its `FastAllocator<N>::ThreadData` destructor allocated a vector
    grow during slab return. Symbolizing the crash showed the walker
    had stepped from `~ThreadData` into glibc's TLS-destructor
@@ -390,7 +390,7 @@ flipped on (see Alternatives).
 
 #### Aggregation table
 
-Open-addressing hash keyed by `uint64_t` fingerprint. Each entry holds, for one
+A `std::unordered_map` keyed by `uint64_t` fingerprint. Each entry holds, for one
 call site: the **estimated** population usage (live / peak / cumulative bytes
 and counts, sampling-correction already applied at sample time so consumers read
 them directly), the **raw** sampled counters alongside them (one increment per
@@ -411,11 +411,14 @@ maintained.
 
 #### Global `operator new` / `delete`
 
-`fdbserver/GlobalNewDelete.cpp` defines the ~12 standard global overloads
+`fdbserver/GlobalNewDelete.cpp` defines the ~14 standard global overloads
 — `new`, `new[]`, `delete`, `delete[]`, sized variants, `nothrow_t`
 variants, and the C++17 `std::align_val_t` overloads. Each calls
-`std::malloc` / `std::free` (or `posix_memalign` for the aligned
-variants) and then `memTrackerOnAlloc`/`OnFree`.
+`std::malloc` / `std::free` (or the portable `aligned_alloc` / `aligned_free`
+for the aligned variants) and then `memTrackerOnAlloc`/`OnFree`. The throwing
+overloads retry through the installed `std::new_handler` on failure, exactly as
+the default `operator new` does, so an allocation failure still reaches FDB's
+`platform::outOfMemory` handler (`FDB_EXIT_NO_MEM`) instead of throwing past it.
 
 These overloads live in a translation unit compiled directly into the
 `fdbserver` executable — not in the `flow` static library — for two
@@ -515,16 +518,15 @@ block by its inverse inclusion probability at sample time: a randomly
 sampled block (1-in-`INV`) is weighted `INV`, a force-sampled block
 (captured with certainty) is weighted 1. `EstLiveBytes = Σ size×weight`
 over that site's live blocks, and likewise for cumulative and peak. The
-weight is stored per live block, so a free debits the estimate by
-exactly what its alloc credited even if `INV` changed in between.
+weight is stored per live block, so a free debits the estimate by exactly what
+its alloc credited (force-sampled blocks carry weight 1, randomly-sampled blocks
+weight `INV`).
 Weighting at sample time (rather than scaling raw totals at report time)
 also makes `EstPeakBytes` well-defined as the running max of
 `EstLiveBytes`. The raw counters remain in the event for auditing the
 estimate and gauging confidence (a site with few `SampledAllocs` is
 noisy); the `MemoryTrackerSummary` event carries an `EstimateBasis`
-caveat string. (`INV` is used as the weight rather than the exact mean
-reseed gap `INV + 0.5`; the ~`0.5/INV` bias is negligible at the
-production `INV` of 100.)
+caveat string.
 
 **Degraded mode.** When `MEMORY_TRACKING_LIVE_TRACKING` is `false`,
 the live-block side table is not populated, so `onFree` is a no-op and
@@ -552,9 +554,10 @@ releases the lock, then ranks and filters by the estimated bytes and emits:
 
 The exact detail keys live in the `TraceEvent` call sites in
 `flow/MemoryTracker.cpp`; a comment there points back to this section. The raw
-running totals are maintained as globals under the same spinlock on every
-sample; the `Est*` totals are their sampling-corrected counterparts, accumulated
-with the per-block weight so consumers read them without post-hoc scaling.
+running totals are maintained as globals under the same spinlock (cumulative on
+every sample; live/peak totals only when live-tracking is on); the `Est*` totals
+are their sampling-corrected counterparts, accumulated with the per-block weight
+so consumers read them without post-hoc scaling.
 
 ### Knobs (FlowKnobs, since clients use Arena/new too)
 
@@ -563,14 +566,14 @@ and intent, not exact literals.
 
 | Knob | Meaning / intent |
 |---|---|
-| `MEMORY_TRACKING_SAMPLE_INVERSE` | 0 = off, N = sample 1-in-N. Ships off in prod during rollout; ~1% (N=100) is the steady-state target; simulation runs at 1-in-2 to exercise the path. |
+| `MEMORY_TRACKING_SAMPLE_INVERSE` | 0 = off, N = sample 1-in-N. Ships off in prod during rollout; ~1% (N=100) is the steady-state target; simulation runs at 1-in-10 to exercise the path. |
 | `MEMORY_TRACKING_FORCE_SAMPLE_BYTES` | Always sample allocations at or above this size (~100 KB); `-1` disables force-sampling. |
 | `MEMORY_TRACKING_LIVE_TRACKING` | On by default. When off, skip the live-block table and report cumulative-only stats. |
 | `MEMORY_TRACKING_REPORT_INTERVAL` | Seconds between dumps (~10 min in prod, ~30 s in sim); 0 disables reporting. |
 | `MEMORY_TRACKING_REPORT_BYTES_THRESHOLD` | Report sites whose estimated bytes exceed this (prod ≈ 1% of an ~8 GB target RSS; lowered in sim so events actually fire). |
 | `MEMORY_TRACKING_FRAMES` | Captured stack depth (1–10). |
 
-Simulation uses a fixed 1-in-2 sample rate; the every-allocation path
+Simulation uses a fixed 1-in-10 sample rate; the every-allocation path
 (`inverse==1`) and the sampled/weighted path (`inverse=N>1`) are both
 pinned deterministically by unit tests (`MemoryTrackerTest.cpp`), so no
 buggify of the rate is needed.
@@ -783,9 +786,11 @@ Rejected because:
   returns to 0 while `cumulativeAllocs` does not decrement.
 - **`offSwitch`** — with sample inverse 0, no sites are recorded and the
   `g_memTrackerEnabled` flag is false (so frees skip the lock).
-- **`enableAfterOff`** — flips inverse 0 → 1 *without* resetting tracker
-  state; confirms sampling resumes within the bounded re-park window. This
-  is the regression test for the startup / off→on activation path.
+- **`operatorNewHonorsNewHandler`** — a failing `::operator new` invokes the
+  installed `std::new_handler`, so allocation failure reaches FDB's OOM path
+  (item 1) rather than throwing past it.
+- **`samplingRate`** — at inverse N the observed sampled fraction is ~1-in-N,
+  checking the `[1, 2N-1]` reseed's mean.
 - **`freeOfUntrackedPtrIsNoop`** — `memTrackerOnFree` on a never-sampled
   pointer (and on `nullptr`) records nothing.
 - **`estimateScaling`** — with a fixed inverse N and no force-sampled
@@ -948,8 +953,8 @@ one set of global operators is defined. No removal is planned.
 ### Rollback
 
 Setting `MEMORY_TRACKING_SAMPLE_INVERSE=0` and
-`MEMORY_TRACKING_REPORT_INTERVAL=0` at runtime fully disables the
-tracker without a binary rebuild. The hot-path cost reduces to the TLS
+`MEMORY_TRACKING_REPORT_INTERVAL=0` in the config and restarting fully disables
+the tracker without a binary rebuild. The hot-path cost reduces to the TLS
 load + branch (`gInMemTracker` check) and is observably zero on
 benchmarks.
 

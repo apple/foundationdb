@@ -30,13 +30,17 @@
 #include "flow/flow.h"
 
 #include <algorithm>
+#include <climits>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <new>
-#include <pthread.h>
 #include <unordered_map>
 #include <vector>
+
+#ifdef __linux__
+#include <pthread.h>
+#endif
 
 // Thread-local sampling state.
 // gMemTrackerCounter starts at 1 so the first allocation per thread is
@@ -58,7 +62,7 @@ thread_local uint32_t gMemTrackerSeed = 0x9E3779B9u;
 
 namespace {
 
-// FNV-1a 64-bit. Produces a 64-bit fingerprint over the captured frame array.
+// FNV-1a 64-bit over the captured frame array.
 uint64_t fnv64(const void* data, std::size_t len) {
 	uint64_t h = 0xcbf29ce484222325ULL;
 	const auto* p = static_cast<const std::uint8_t*>(data);
@@ -220,7 +224,6 @@ void ensureMaps() {
 } // namespace
 
 void memTrackerSampleAlloc(void* p, std::size_t n) {
-	// Refresh thread-local cache from knobs every time we hit the slow path.
 	int inverse = 0;
 	int frames = 6;
 	bool liveTracking = true;
@@ -243,22 +246,18 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 	}
 
 	// Publish the enabled state for the free hot path's gate. Store only on an
-	// actual transition so the flag's cache line stays in MESI shared state
-	// (see MemTrackerEnabledFlag in the header). This is the single point that
-	// observes off->on / on->off knob changes and propagates them.
+	// actual change so the flag's cache line stays in MESI shared state (see
+	// MemTrackerEnabledFlag in the header). Published once, since the sample knob
+	// is read at startup only and not changed at runtime.
 	bool enabled = (inverse > 0);
 	if (g_memTrackerEnabled.value.load(std::memory_order_relaxed) != enabled) {
 		g_memTrackerEnabled.value.store(enabled, std::memory_order_relaxed);
 	}
 
 	if (inverse <= 0) {
-		// Sampling is off. Re-park the counter at a bounded value so
-		// this thread re-reads the knob within
-		// MEMORY_TRACKER_DISABLED_RESEED allocations and can pick up
-		// an off->on change. Also restore gForceSampleBytes so large
-		// allocations stay on the fast path while disabled instead of
-		// repeatedly bouncing into this bail-out.
-		gMemTrackerCounter = MEMORY_TRACKER_DISABLED_RESEED;
+		// Off. The knob is startup-only, so park the counter effectively forever
+		// (INT_MAX) and stop force-sampling; this thread stays on the fast path.
+		gMemTrackerCounter = INT_MAX;
 		gForceSampleBytes = static_cast<std::size_t>(-1);
 		return;
 	}
@@ -269,9 +268,11 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 		// time and cause us to miss every other allocation.
 		gMemTrackerCounter = 1;
 	} else if (gMemTrackerCounter <= 0) {
-		// The random countdown actually expired: draw a fresh gap.
+		// The random countdown actually expired: draw a fresh gap uniformly from
+		// [1, 2*inverse-1], whose mean is exactly `inverse` — so the 1-in-inverse
+		// sampling rate is unbiased and the integer `weight` below is exact.
 		std::uint32_t r = xorshift32(gMemTrackerSeed);
-		gMemTrackerCounter = 1 + static_cast<int>(r % static_cast<std::uint32_t>(2 * inverse));
+		gMemTrackerCounter = 1 + static_cast<int>(r % static_cast<std::uint32_t>(2 * inverse - 1));
 	}
 
 	bool isForceSampled = (n >= gForceSampleBytes);
@@ -279,10 +280,9 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 	// Weight = inverse inclusion probability of this sample, i.e. how many
 	// allocations in the population it stands in for. A randomly-sampled block
 	// (1-in-inverse) represents ~inverse allocations; a force-sampled block was
-	// captured with certainty and represents only itself. (The random reseed is
-	// uniform on [1, 2*inverse], so the true mean gap is inverse + 0.5; we use
-	// the integer inverse, a ~0.5/inverse underestimate — negligible at the
-	// intended production inverse of 100, and the raw counters remain for auditing.)
+	// captured with certainty and represents only itself. The reseed draws
+	// uniformly from [1, 2*inverse-1] (mean exactly `inverse`), so this integer
+	// weight matches the true mean sampling gap with no bias.
 	std::int64_t weight = (isForceSampled || inverse <= 1) ? 1 : inverse;
 
 	// Capture frames; skip the topmost two (this function and captureFramesFP
@@ -309,8 +309,6 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 
 	auto& site = (*g_aggMap)[fp];
 	if (site.fingerprint == 0 && site.cumulativeAllocs == 0) {
-		// First insertion — initialize the exemplar frames. We use these for
-		// the offline addr2line command in the dump.
 		site.fingerprint = fp;
 		site.exemplarFrameCount = static_cast<std::uint8_t>(kept);
 		for (int i = 0; i < kept; i++) {
@@ -381,7 +379,7 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 void memTrackerSampleFree(void* p) {
 	bool liveTracking = FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_LIVE_TRACKING : true;
 	if (!liveTracking) {
-		return; // we never recorded the alloc, nothing to undo
+		return;
 	}
 
 	ThreadSpinLockHolder lk(g_mtLock);
@@ -390,7 +388,7 @@ void memTrackerSampleFree(void* p) {
 	}
 	auto it = g_liveMap->find(reinterpret_cast<std::uintptr_t>(p));
 	if (it == g_liveMap->end()) {
-		return; // un-tracked pointer, no-op
+		return;
 	}
 
 	LiveEntry e = it->second;
@@ -434,7 +432,7 @@ void memTrackerForEachSite(std::function<void(const MemoryTrackerCallSite&)> cb)
 }
 
 void memTrackerResetForTest() {
-	gInMemTracker = true;
+	MemTrackerSuppress _suppress;
 	{
 		ThreadSpinLockHolder lk(g_mtLock);
 		if (g_aggMap) {
@@ -454,20 +452,18 @@ void memTrackerResetForTest() {
 		g_estCumulativeAllocsTotal = 0;
 	}
 	// Force the next allocation on this thread to take the slow path so it
-	// re-reads the (possibly just-changed) sample-inverse knob. Without this,
-	// a prior off-switch run that stored MEMORY_TRACKER_DISABLED_RESEED into the
-	// counter would keep the fast path skipping samples until it drained.
+	// re-reads the (possibly just-changed) sample-inverse knob. Without this, a
+	// prior disabled run that parked the counter would keep the fast path
+	// skipping samples until it drained.
 	gMemTrackerCounter = 1;
 	gForceSampleBytes = static_cast<std::size_t>(-1);
 	// Clear the enabled flag; the next slow-path visit republishes it from the
 	// current knob value.
 	g_memTrackerEnabled.value.store(false, std::memory_order_relaxed);
-	gInMemTracker = false;
 }
 
-// This is the periodic log emitter.
 void memTrackerDump(int64_t bytesThreshold) {
-	gInMemTracker = true;
+	MemTrackerSuppress _suppress;
 
 	std::vector<MemoryTrackerCallSite> sites;
 	int aggSize = 0;
@@ -561,14 +557,11 @@ void memTrackerDump(int64_t bytesThreshold) {
 		}
 		TraceEvent("MemoryTrackerSite")
 		    .detail("Fingerprint", format("%016llx", static_cast<unsigned long long>(s.fingerprint)))
-		    // Estimated population usage — already sampling-corrected; consume directly.
 		    .detail("EstLiveBytes", s.estLiveBytes)
 		    .detail("EstLiveCount", s.estLiveCount)
 		    .detail("EstPeakBytes", s.estPeakBytes)
 		    .detail("EstCumulativeBytes", s.estCumulativeBytes)
 		    .detail("EstCumulativeAllocs", s.estCumulativeAllocs)
-		    // Raw sampled counters — uninterpreted observations, for auditing the
-		    // estimate and judging its confidence (few samples ⇒ noisy estimate).
 		    .detail("LiveBytes", s.liveBytes)
 		    .detail("LiveCount", s.liveCount)
 		    .detail("PeakBytes", s.peakBytes)
@@ -581,12 +574,10 @@ void memTrackerDump(int64_t bytesThreshold) {
 	TraceEvent("MemoryTrackerSummary")
 	    .detail("SitesTracked", aggSize)
 	    .detail("SitesReported", static_cast<int>(qualifying.size()))
-	    // Estimated population totals (sampling-corrected).
 	    .detail("EstLiveBytesTotal", estLiveBytesTotalSnap)
 	    .detail("EstLiveBlocksTotal", estLiveBlocksTotalSnap)
 	    .detail("EstCumulativeBytes", estCumBytesSnap)
 	    .detail("EstCumulativeAllocs", estCumAllocsSnap)
-	    // Raw sampled totals.
 	    .detail("LiveBlocks", liveSize)
 	    .detail("LiveBytesTotal", liveBytesTotalSnap)
 	    .detail("LiveBlocksTotal", liveBlocksTotalSnap)
@@ -601,8 +592,6 @@ void memTrackerDump(int64_t bytesThreshold) {
 	    // scaled by SampleInverse; force-sampled blocks (>= ForceSampleBytes) count once.
 	    // Accuracy improves with SamplesEmitted; a site with few samples is noisy.
 	    .detail("EstimateBasis", "Est*=sampled*SampleInverse; force-sampled weight 1; statistical estimate");
-
-	gInMemTracker = false;
 }
 
 // The global operator new / operator delete replacements that route through
