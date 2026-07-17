@@ -146,7 +146,7 @@ std::string StringRef::toHexString(int limit) const {
 		}
 		rv = substr(0, limit).toHexString() + format("...[%d]", length);
 	} else {
-		rv.reserve(length * 7);
+		rv.reserve(static_cast<size_t>(length) * 7);
 		for (int i = 0; i < length; i++) {
 			uint8_t b = (*this)[i];
 			if (isalnum(b))
@@ -163,7 +163,7 @@ std::string StringRef::toHexString(int limit) const {
 
 std::string StringRef::toFullHexStringPlain() const {
 	std::string s;
-	s.reserve(length * 7);
+	s.reserve(static_cast<size_t>(length) * 7);
 	for (int i = 0; i < length; i++) {
 		uint8_t b = (*this)[i];
 		s.append(format("%02x ", b));
