@@ -246,9 +246,9 @@ Optional<uint64_t> parseDuration(std::string const& str, std::string const& defa
 	} else if (!unit.compare("m")) {
 		ret *= 60;
 	} else if (!unit.compare("h")) {
-		ret *= 60 * 60;
+		ret *= 60ULL * 60;
 	} else if (!unit.compare("d")) {
-		ret *= 24 * 60 * 60;
+		ret *= 24ULL * 60 * 60;
 	} else {
 		return Optional<uint64_t>();
 	}

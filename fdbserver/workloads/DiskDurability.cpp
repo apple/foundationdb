@@ -85,7 +85,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	explicit DiskDurabilityWorkload(WorkloadContext const& wcx) : AsyncFileWorkload(wcx) {
 		writers = getOption(options, "writers"_sr, 1);
 		filePages = getOption(options, "filePages"_sr, 1000000);
-		fileSize = filePages * _PAGE_SIZE;
+		fileSize = static_cast<int64_t>(filePages) * _PAGE_SIZE;
 		unbufferedIO = true;
 		uncachedIO = true;
 		fillRandom = false;

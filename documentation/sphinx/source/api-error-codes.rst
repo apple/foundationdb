@@ -158,7 +158,7 @@ FoundationDB may return the following error codes from API functions. If you nee
 | special_keys_cross_module_write               | 2116| Special key space clear crosses modules                                        |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | special_keys_api_failure                      | 2117| Api call through special keys failed. For more information, read the           |
-|                                               |     | ``0xff0xff/error_message`` key                                                 |
+|                                               |     | ``0xff0xff/error_message`` key within the same transaction.                    |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | api_version_unset                             | 2200| API version is not set                                                         |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+

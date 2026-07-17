@@ -1244,7 +1244,7 @@ public:
 
 			auto rateLimiter =
 			    rocksdb::NewGenericRateLimiter(SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,
-			                                   100 * 1000, // refill_period_us
+			                                   100LL * 1000, // refill_period_us
 			                                   10, // fairness
 			                                   mode,
 			                                   SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE);
