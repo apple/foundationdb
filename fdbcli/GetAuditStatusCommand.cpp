@@ -137,7 +137,8 @@ Future<AuditPhase> getAuditProgressByServer(Database cx,
 
 Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
 	if (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	    auditType == AuditType::ValidateLocationMetadata || auditType == AuditType::ValidateRestore) {
+	    auditType == AuditType::ValidateLocationMetadata || auditType == AuditType::ValidateRestore ||
+	    auditType == AuditType::RangeDigest) {
 		co_await getAuditProgressByRange(cx, auditType, auditId, auditRange);
 	} else if (auditType == AuditType::ValidateStorageServerShard) {
 		std::vector<Future<Void>> fs;
@@ -193,6 +194,8 @@ Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> toke
 		type = AuditType::ValidateRestore;
 	} else if (tokencmp(tokens[1], "metadata_encoding")) {
 		type = AuditType::ValidateMetadataEncoding;
+	} else if (tokencmp(tokens[1], "range_digest")) {
+		type = AuditType::RangeDigest;
 	} else {
 		printUsage(tokens[0]);
 		co_return false;
@@ -218,6 +221,26 @@ Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> toke
 		} else {
 			fmt::println("Already complete");
 		}
+	} else if (tokencmp(tokens[2], "root")) {
+		// The combined RangeDigest cluster root is stored in the top-level audit record when the
+		// audit completes (per-range progress is cleared at that point).
+		if (tokens.size() != 4 || type != AuditType::RangeDigest) {
+			printUsage(tokens[0]);
+			co_return false;
+		}
+		const UID id = UID::fromString(tokens[3].toString());
+		AuditStorageState res = co_await getAuditState(cx, type, id);
+		if (res.getPhase() != AuditPhase::Complete) {
+			fmt::println("RangeDigest audit {} is not complete (phase {}); root is only final when complete.",
+			             id.toString(),
+			             static_cast<int>(res.getPhase()));
+			co_return true;
+		}
+		RangeDigest root = RangeDigest::fromBytes(res.digest);
+		fmt::println("RangeDigest root : {}", root.toHex());
+		fmt::println("KV count         : {}", res.kvCount);
+		fmt::println("Bytes            : {}", res.byteCount);
+		fmt::println("Audit range      : {}", res.range.toString());
 	} else if (tokencmp(tokens[2], "recent")) {
 		int count = CLIENT_KNOBS->TOO_MANY;
 		if (tokens.size() == 4) {
@@ -251,17 +274,19 @@ Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> toke
 
 CommandFactory getAuditStatusFactory(
     "get_audit_status",
-    CommandHelp(
-        "get_audit_status [ha|replica|locationmetadata|ssshard|validate_restore] [id|recent|phase|progress] [ARGs]",
-        "Retrieve audit storage status",
-        "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
-        "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
-        "To fetch status of audits in a specific phase: `get_audit_status [Type] phase "
-        "[running|complete|failed|error] count'\n"
-        "To fetch audit progress via ID: `get_audit_status [Type] progress [ID]'\n"
-        "Supported types include: 'ha', `replica`, `locationmetadata`, `ssshard`, `validate_restore`. \n"
-        "If specified, `Count' is how many rows to audit.\n"
-        "If not specified, check all rows in audit.\n"
-        "Phase can be `Invalid=0', `Running=1', `Complete=2', `Error=3', or `Failed=4'.\n"
-        "See also `audit_storage' command."));
+    CommandHelp("get_audit_status [ha|replica|locationmetadata|ssshard|validate_restore|range_digest] "
+                "[id|recent|phase|progress|root] [ARGs]",
+                "Retrieve audit storage status",
+                "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
+                "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
+                "To fetch status of audits in a specific phase: `get_audit_status [Type] phase "
+                "[running|complete|failed|error] count'\n"
+                "To fetch audit progress via ID: `get_audit_status [Type] progress [ID]'\n"
+                "To fetch the combined RangeDigest cluster root: `get_audit_status range_digest root [ID]'\n"
+                "Supported types include: 'ha', `replica`, `locationmetadata`, `ssshard`, `validate_restore`, "
+                "`range_digest`. \n"
+                "If specified, `Count' is how many rows to audit.\n"
+                "If not specified, check all rows in audit.\n"
+                "Phase can be `Invalid=0', `Running=1', `Complete=2', `Error=3', or `Failed=4'.\n"
+                "See also `audit_storage' command."));
 } // namespace fdb_cli

@@ -26,6 +26,7 @@
 #include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/RangeDigest.h"
 #include "fdbrpc/fdbrpc.h"
 
 struct MoveKeyLockInfo {
@@ -86,6 +87,20 @@ AuditPhase stringToAuditPhase(std::string auditPhaseStr);
 
 // Check whether all sub-ranges of auditRange have completed range-based audit progress.
 Future<bool> checkAuditProgressCompleteByRange(Database cx, AuditType auditType, UID auditId, KeyRange auditRange);
+
+// Combined result of a RangeDigest audit over a key range.
+struct RangeDigestSummary {
+	RangeDigest root; // sum (mod 2^256) of all persisted per-range digests
+	int64_t kvCount = 0;
+	int64_t byteCount = 0;
+	bool complete = true; // false if some sub-range has no persisted digest yet
+	KeyRange incompleteRange; // first sub-range lacking a digest, when !complete
+};
+
+// Read the persisted per-range RangeDigest progress for `auditId` over `range` and combine it
+// into a single cluster root (plus kv/byte totals). Because the combine is additive, this is
+// independent of how the ranges were partitioned across storage servers.
+Future<RangeDigestSummary> getRangeDigestSummary(Database cx, UID auditId, KeyRange range);
 
 // Check whether a specific server's audit progress is complete for the given range.
 Future<bool> checkAuditProgressCompleteByServer(Database cx,
