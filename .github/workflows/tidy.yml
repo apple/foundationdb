@@ -44,7 +44,9 @@ jobs:
           ninja -v                      \
             processed_compile_commands  \
             fdboptions                  \
-            ProtocolVersion
+            ProtocolVersion             \
+            fdb_c_generated             \
+            fdb-java
 
           # all flow actors, for generated headers
           ACTORS=$(
@@ -91,8 +93,11 @@ jobs:
             esac
             # These inputs are not parseable as standalone clang-tidy translation units in this workflow:
             # the RocksDB compile commands refer to headers that are not built here, and the Flow headers depend
-            # on include order from their real consumers.
+            # on include order from their real consumers. The C API header is intentionally valid C, not C++.
             case "$FILE" in
+              bindings/c/foundationdb/fdb_c.h)
+                continue
+                ;;
               fdbserver/core/RocksDBCheckpointUtils.cpp|fdbserver/kvstore/KeyValueStoreRocksDB.cpp|fdbserver/kvstore/KeyValueStoreShardedRocksDB.cpp)
                 continue
                 ;;
