@@ -48,7 +48,7 @@ TEST_CASE("/flow/coro/buggifiedDelay") {
 	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
 		co_return;
 	}
-	loop {
+	while (true) {
 		double x = deterministicRandom()->random01();
 		int last = 0;
 		Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
@@ -168,7 +168,7 @@ Future<int> consumeOneActor(FutureStream<int> in) {
 Future<int> sumActor(FutureStream<int> in) {
 	int total = 0;
 	try {
-		loop {
+		while (true) {
 			int i = co_await in;
 			total += i;
 		}
@@ -2394,7 +2394,7 @@ AsyncGenerator<StringRef> lineGenerator(size_t minLen,
 	size_t remainingLine = 0;
 	bool firstBlock = true;
 	bool startedLine = false;
-	loop {
+	while (true) {
 		Arena arena;
 		auto block = new (arena) uint8_t[blockSize];
 		size_t offset = 0;
@@ -2550,7 +2550,7 @@ Future<Void> testSimpleCoro() {
 
 Generator<unsigned> fibonacci() {
 	unsigned curr = 1, next = 1;
-	loop {
+	while (true) {
 		co_yield curr;
 		curr = std::exchange(next, next + curr);
 	}

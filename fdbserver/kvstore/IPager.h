@@ -478,7 +478,9 @@ public:
 		// Explicitly check payload definedness to make the source of valgrind errors more clear.
 		// Without this check, calculating a checksum on a payload with undefined bytes does not
 		// cause a valgrind error but the resulting checksum is undefined which causes errors later.
+#if VALGRIND
 		ASSERT(VALGRIND_CHECK_MEM_IS_DEFINED(pPayload, payloadSize) == 0);
+#endif
 
 		if (page->encodingType == EncodingType::XXHash64) {
 			XXHashEncoder::encode(page->getEncodingHeader(), pPayload, payloadSize, pageID);

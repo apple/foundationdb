@@ -3221,7 +3221,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 // from hitting asserts due to knob/path mismatch).
 Future<Void> monitorShardEncodeKnob(UID ddId) {
 	bool initial = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
-	loop {
+	while (true) {
 		co_await delay(5.0);
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA != initial) {
 			TraceEvent(SevInfo, "DDShardEncodeKnobChanged", ddId)
