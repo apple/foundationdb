@@ -332,6 +332,16 @@ TEST_CASE("/flow/genericactors/NotifiedCancellation") {
 	version.set(10);
 	ASSERT(!forwardedWaitFired);
 
+	version = NotifiedInt(0);
+	state bool chosenWaitFired = false;
+	state Promise<int64_t> otherChoice;
+	state Future<int64_t> cancelledChoice =
+	    chooseActor(notifiedWaitForForwardTest(&version, &chosenWaitFired), otherChoice.getFuture());
+	cancelledChoice.cancel();
+	ASSERT(cancelledChoice.isError() && cancelledChoice.getError().code() == error_code_actor_cancelled);
+	version.set(10);
+	ASSERT(!chosenWaitFired);
+
 	state Promise<int64_t> forwardedInput;
 	state Promise<int64_t> reentrantReply;
 	state Future<int64_t> reentrantForward = forward(forwardedInput.getFuture(), reentrantReply);

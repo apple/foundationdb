@@ -40,6 +40,11 @@
 #include "flow/Util.h"
 #include "flow/IndexedSet.h"
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsubobject-linkage"
+#endif
+
 namespace coro {
 template <class... Futures>
 using RaceResult = std::variant<FutureReturnTypeT<std::decay_t<Futures>>...>;
@@ -1684,7 +1689,7 @@ Future<Void> orYield(Future<Void> f);
 
 template <class T>
 Future<T> chooseActor(Future<T> lhs, Future<T> rhs, ExplicitVoid = {}) {
-	auto res = co_await race(lhs, rhs);
+	auto res = co_await race(std::move(lhs), std::move(rhs));
 	if (res.index() == 0) {
 		co_return std::get<0>(std::move(res));
 	}
@@ -2476,20 +2481,11 @@ Future<T> forward(Future<T> from, Promise<T> to, ExplicitVoid = {}) {
 
 // Monad
 
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsubobject-linkage"
-#endif
-
 template <class Fun, class T>
 Future<decltype(std::declval<Fun>()(std::declval<T>()))> fmap(Fun fun, Future<T> f, ExplicitVoid = {}) {
 	T val = co_await f;
 	co_return fun(val);
 }
-
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
 
 /*
  * IAsyncListener is similar to AsyncVar, but it decouples the input and output, so the translation unit
@@ -2632,3 +2628,7 @@ private:
 
 template <class T>
 std::unordered_map<NetworkAddress, Reference<T>> FlowSingleton<T>::instanceMap;
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
