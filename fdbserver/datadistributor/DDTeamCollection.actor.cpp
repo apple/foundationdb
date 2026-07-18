@@ -1099,6 +1099,10 @@ public:
 				if (!self->initialFailureReactionDelay.isReady()) {
 					change.push_back(self->initialFailureReactionDelay);
 				}
+				if (!badTeam) {
+					// SS failure suppression changes effective team health without changing server status.
+					change.push_back(self->healthyZone.onChange());
+				}
 				change.push_back(self->zeroHealthyTeams->onChange());
 
 				bool healthy = !badTeam && !anyUndesired && serversLeft == team->size();
@@ -7124,6 +7128,32 @@ public:
 		recruitment.cancel();
 		co_await delay(0);
 	}
+
+	static Future<Void> TeamTracker_RechecksHealthyZone() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		auto collection = testTeamCollection(3, policy, 3);
+		const UID failedServer(1, 0);
+
+		collection->healthyZone.set(ignoreSSFailuresZoneString);
+		collection->server_status.set(
+		    failedServer,
+		    ServerStatus(IsFailed::True,
+		                 IsUndesired::False,
+		                 IsWiggling::False,
+		                 collection->server_info[failedServer]->getLastKnownInterface().locality));
+		collection->addTeam(std::set<UID>({ failedServer, UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		co_await delay(0.1);
+
+		ASSERT_EQ(collection->teams.size(), 1);
+		ASSERT(collection->teams.front()->isHealthy());
+		ASSERT_EQ(collection->teams.front()->getPriority(), SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
+
+		collection->healthyZone.set(Optional<Key>());
+		co_await delay(0.1);
+
+		ASSERT(!collection->teams.front()->isHealthy());
+		ASSERT_EQ(collection->teams.front()->getPriority(), SERVER_KNOBS->PRIORITY_TEAM_2_LEFT);
+	}
 };
 
 TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
@@ -7285,5 +7315,10 @@ TEST_CASE("/DataDistribution/GetTeam/PreferWithinShardRange") {
 
 TEST_CASE("/DataDistribution/Recruitment/RecruitmentFailedCooldownReleasesId") {
 	wait(DDTeamCollectionUnitTest::InitializeStorage_RecruitmentFailedCooldownReleasesId());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/TeamTracker/RechecksHealthyZone") {
+	wait(DDTeamCollectionUnitTest::TeamTracker_RechecksHealthyZone());
 	return Void();
 }
