@@ -64,14 +64,15 @@ R0. **Cheap enough to leave on in production by default.** Total CPU
     detailed design, not here, and the ceiling is not to be relaxed to
     accommodate an implementation.
 
-R1. **Un-sampled hot path.** A non-sampled allocation incurs only one
-    thread-local load, one decrement, and one branch. A non-sampled free
-    (which has no per-thread counter to gate on) incurs one relaxed read of
-    a global enabled flag and one branch. That flag is written only on an
-    enabled-state change, so it stays in MESI shared state and the read is a
-    cached, uncontended atomic load (~12-15 cycles for an L2 cache hit) —
-    never a contended or uncached atomic. No syscalls, no library calls, no
-    locks on either path.
+R1. **Un-sampled hot path.** When sampling is disabled, an allocation incurs
+    only one thread-local load (a per-thread "off" flag) and one branch; when
+    sampling is enabled, an un-sampled allocation additionally does one
+    thread-local decrement and branch. A non-sampled free (which has no
+    per-thread counter to gate on) incurs one relaxed read of a global enabled
+    flag and one branch. That flag is written only on an enabled-state change,
+    so it stays in MESI shared state and the read is a cached, uncontended
+    atomic load (~12-15 cycles for an L2 cache hit) — never a contended or
+    uncached atomic. No syscalls, no library calls, no locks on either path.
 
 R2. **Default-on in production and simulation (post-rollout
     steady state).** Steady-state production default is 1% sampling
@@ -194,16 +195,18 @@ Hooks:
 extern thread_local bool gInMemTracker;
 extern thread_local int  gMemTrackerCounter;
 extern thread_local size_t gForceSampleBytes;  // refreshed periodically from FlowKnobs
+extern thread_local bool gMemTrackerOff;        // set once per thread when sampling is off
 
 // Written only on an enabled-state change (rare), so it stays MESI-shared and
 // reads are cached/uncontended. Lives on its own cache line.
 extern std::atomic<bool> g_memTrackerEnabled;
 
 inline void memTrackerOnAlloc(void* p, size_t n) {
+    if (gMemTrackerOff) return;             // disabled fast path: one TLS load + branch
     if (gInMemTracker || !p) return;
-    if (--gMemTrackerCounter > 0 && n < gForceSampleBytes) return;  // un-sampled fast path
+    if (--gMemTrackerCounter > 0 && n < gForceSampleBytes) return;  // enabled, un-sampled
     MemTrackerSuppress guard;               // sets gInMemTracker; restores on scope exit
-    memTrackerSampleAlloc(p, n);            // out-of-line; reseeds counter, publishes g_memTrackerEnabled
+    memTrackerSampleAlloc(p, n);            // out-of-line; reseeds counter, sets gMemTrackerOff if off
 }
 
 inline void memTrackerOnFree(void* p) {
@@ -213,6 +216,13 @@ inline void memTrackerOnFree(void* p) {
     memTrackerSampleFree(p);                // no-op if p not tracked
 }
 ```
+
+The alloc gate is a *per-thread* flag, not the global `g_memTrackerEnabled`: the
+counter bootstraps sampling per thread (the first allocation reaches the slow
+path, which reads the knob), so a single global gate set by an early main-thread
+allocation before `FLOW_KNOBS` is ready would wrongly disable worker threads that
+bootstrap later. Once a thread's slow path sees sampling off it sets
+`gMemTrackerOff`, collapsing its disabled cost to one TLS load.
 
 A free has no per-thread sampling counter — every free is a candidate to
 debit a live entry — so it cannot be gated the way an alloc is. Gating it on
