@@ -32,6 +32,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"
 #include "flow/NetworkAddress.h"
+#include "flow/ScopeExit.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
@@ -44,6 +45,8 @@ struct GcGenerationsWorkload : TestWorkload {
 	bool enabled;
 	double testDuration;
 	double startDelay;
+	bool completed = false;
+	bool forceCloggedDcMasterRetry;
 	std::vector<std::pair<IPAddress, IPAddress>> cloggedPairs;
 	Optional<Standalone<StringRef>> cloggedDcId;
 
@@ -51,6 +54,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		enabled = !clientId; // only do this on the "first" client
 		testDuration = getOption(options, "testDuration"_sr, 1000.0);
 		startDelay = getOption(options, "startDelay"_sr, 30.0);
+		forceCloggedDcMasterRetry = getOption(options, "forceCloggedDcMasterRetry"_sr, false);
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
@@ -65,7 +69,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		else
 			return Void();
 	}
-	Future<bool> check(Database const& cx) override { return true; }
+	Future<bool> check(Database const& cx) override { return !g_network->isSimulated() || !enabled || completed; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	// Ensure simulator state is cleaned up even if the workload is cancelled by timeout.
@@ -189,12 +193,15 @@ struct GcGenerationsWorkload : TestWorkload {
 			// Only reboot the master if it's in the active DC. If it's in the clogged
 			// DC, recovery will stall because the master can't communicate with active
 			// DC processes. Force a new master election before retrying.
-			if (self->isMasterInCloggedDc(self)) {
+			const bool forcedRetry = self->forceCloggedDcMasterRetry;
+			self->forceCloggedDcMasterRetry = false;
+			if (forcedRetry || self->isMasterInCloggedDc(self)) {
 				auto masterAddr = self->dbInfo->get().master.address();
 				auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
 				TraceEvent("RetryingRemoteDcMaster")
 				    .detail("Iteration", successfulReboots)
-				    .detail("MasterAddr", masterAddr);
+				    .detail("MasterAddr", masterAddr)
+				    .detail("Forced", forcedRetry);
 				if (masterProc) {
 					g_simulator->rebootProcess(masterProc, ISimulator::KillType::Reboot);
 				}
@@ -238,6 +245,11 @@ struct GcGenerationsWorkload : TestWorkload {
 		TraceEvent("GcGenerations").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 
 		// Block TLog recovery while creating generations to test generation accumulation during recovery
+		ScopeExit cleanup([self]() {
+			self->unclogAll();
+			disableConnectionFailures("GcGenerations");
+			fdbSimulationPolicyState().disableTLogRecoveryFinish = false;
+		});
 		fdbSimulationPolicyState().disableTLogRecoveryFinish = true;
 
 		co_await self->generateMultipleTxnGenerations(self, cx);
@@ -276,6 +288,7 @@ struct GcGenerationsWorkload : TestWorkload {
 			co_await self->dbInfo->onChange();
 		}
 
+		self->completed = true;
 		TraceEvent("GcGenerationsWorkloadFinish").log();
 	}
 };
