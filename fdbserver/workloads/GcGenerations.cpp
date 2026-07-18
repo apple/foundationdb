@@ -45,6 +45,7 @@ struct GcGenerationsWorkload : TestWorkload {
 	double testDuration;
 	double startDelay;
 	std::vector<std::pair<IPAddress, IPAddress>> cloggedPairs;
+	Optional<Standalone<StringRef>> cloggedDcId;
 
 	explicit GcGenerationsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
@@ -85,6 +86,7 @@ struct GcGenerationsWorkload : TestWorkload {
 			g_simulator->unclogPair(pair.first, pair.second);
 		}
 		cloggedPairs.clear();
+		cloggedDcId.reset();
 	}
 
 	Future<Void> clogRemoteDc(GcGenerationsWorkload* self, Database cx) {
@@ -104,12 +106,20 @@ struct GcGenerationsWorkload : TestWorkload {
 			return false;
 		};
 
+		auto& simPolicy = fdbSimulationPolicyState();
+		Optional<Standalone<StringRef>> inactiveDcId = simPolicy.remoteDcId;
+		// A region failover can make the configured remote DC the active primary. Always partition the inactive DC.
+		if (self->dbInfo->get().master.locality.dcId() == inactiveDcId) {
+			inactiveDcId = simPolicy.primaryDcId;
+		}
+		self->cloggedDcId = inactiveDcId;
+
 		std::vector<IPAddress> ips; // all non-remote process IPs
 		std::vector<IPAddress> remoteIps; // all remote process IPs
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->locality.dcId().present() &&
-			    process->locality.dcId() == fdbSimulationPolicyState().remoteDcId && !isCoordinator(coordinators, ip)) {
+			if (process->locality.dcId().present() && process->locality.dcId() == inactiveDcId &&
+			    !isCoordinator(coordinators, ip)) {
 				remoteIps.push_back(ip);
 			} else {
 				ips.push_back(ip);
@@ -128,28 +138,28 @@ struct GcGenerationsWorkload : TestWorkload {
 		}
 
 		TraceEvent("PartitionRemoteDc")
-		    .detail("RemoteDc", fdbSimulationPolicyState().remoteDcId)
+		    .detail("RemoteDc", inactiveDcId)
 		    .detail("CloggedRemoteProcess", describe(remoteIps));
 	}
 
-	bool isMasterInRemoteDc(GcGenerationsWorkload* self) {
+	bool isMasterInCloggedDc(GcGenerationsWorkload* self) {
 		auto masterAddr = self->dbInfo->get().master.address();
 		auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
 		return !masterProc || !masterProc->locality.dcId().present() ||
-		       masterProc->locality.dcId() == fdbSimulationPolicyState().remoteDcId;
+		       masterProc->locality.dcId() == self->cloggedDcId;
 	}
 
-	// Wait for the DB to reach ACCEPTING_COMMITS. If rebootRemoteDcMaster is true and
-	// the master is in the remote DC, reboot it to force the CC to elect a primary DC
-	// master. This is required when the remote DC is clogged (otherwise recovery can
-	// never complete), but must be disabled once the remote DC is unclogged — otherwise
-	// every CC re-election that lands in the remote DC triggers another reboot, producing
+	// Wait for the DB to reach ACCEPTING_COMMITS. If rebootCloggedDcMaster is true and
+	// the master is in the clogged DC, reboot it to force the CC to elect an active DC
+	// master. This is required when the inactive DC is clogged (otherwise recovery can
+	// never complete), but must be disabled once that DC is unclogged — otherwise
+	// every CC re-election that lands there triggers another reboot, producing
 	// a tight loop that prevents recovery from ever reaching ACCEPTING_COMMITS.
-	Future<Void> dbAvailable(GcGenerationsWorkload* self, bool rebootRemoteDcMaster) {
+	Future<Void> dbAvailable(GcGenerationsWorkload* self, bool rebootCloggedDcMaster) {
 		while (self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 			co_await self->dbInfo->onChange();
-			if (rebootRemoteDcMaster && self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS &&
-			    self->isMasterInRemoteDc(self)) {
+			if (rebootCloggedDcMaster && self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS &&
+			    self->isMasterInCloggedDc(self)) {
 				auto masterAddr = self->dbInfo->get().master.address();
 				auto* masterProc = g_simulator->getProcessByAddress(masterAddr);
 				TraceEvent("DbAvailableRebootRemoteMaster").detail("MasterAddr", masterAddr);
@@ -174,12 +184,12 @@ struct GcGenerationsWorkload : TestWorkload {
 			TraceEvent("WaitingForDbAvailable")
 			    .detail("Iteration", successfulReboots)
 			    .detail("RecoveryState", self->dbInfo->get().recoveryState);
-			co_await self->dbAvailable(self, /*rebootRemoteDcMaster=*/true);
+			co_await self->dbAvailable(self, /*rebootCloggedDcMaster=*/true);
 
-			// Only reboot the master if it's in the primary DC. If it's in the clogged
-			// remote DC, recovery will stall because the master can't communicate with
-			// primary DC processes. Loop back and try again.
-			if (self->isMasterInRemoteDc(self)) {
+			// Only reboot the master if it's in the active DC. If it's in the clogged
+			// DC, recovery will stall because the master can't communicate with active
+			// DC processes. Loop back and try again.
+			if (self->isMasterInCloggedDc(self)) {
 				TraceEvent("RetryingRemoteDcMaster")
 				    .detail("Iteration", successfulReboots)
 				    .detail("MasterAddr", self->dbInfo->get().master.address());
@@ -244,13 +254,13 @@ struct GcGenerationsWorkload : TestWorkload {
 		// Note: the remote DC is unclogged now, so any master (including remote DC)
 		// can coordinate recovery. No need for the primary-DC-only guard here.
 		while (self->dbInfo->get().logSystemConfig.oldTLogs.size() > 1) {
-			co_await self->dbAvailable(self, /*rebootRemoteDcMaster=*/false);
+			co_await self->dbAvailable(self, /*rebootCloggedDcMaster=*/false);
 			auto masterAddr = self->dbInfo->get().master.address();
 			TraceEvent("RebootMasterForGC").detail("Master", masterAddr);
 			g_simulator->rebootProcess(g_simulator->getProcessByAddress(masterAddr), ISimulator::KillType::Reboot);
 			// Give this recovery cycle time to GC before retrying.
 			co_await delay(60);
-			co_await self->dbAvailable(self, /*rebootRemoteDcMaster=*/false);
+			co_await self->dbAvailable(self, /*rebootCloggedDcMaster=*/false);
 			TraceEvent("GcGenerationsWaitingForReduction")
 			    .detail("OldTLogs", self->dbInfo->get().logSystemConfig.oldTLogs.size())
 			    .detail("RecoveryState", self->dbInfo->get().recoveryState);
