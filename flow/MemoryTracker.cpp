@@ -41,6 +41,8 @@
 #include <pthread.h>
 #endif
 
+#if FDB_MEMORY_TRACKER
+
 // Thread-local sampling state.
 // gMemTrackerCounter starts at 1 so the first allocation per thread is
 // sampled (and the slow path then reseeds from the knob).
@@ -599,3 +601,5 @@ void memTrackerDump(int64_t bytesThreshold) {
 // the interposition is confined to the fdbserver executable and never ships in
 // libfdb_c / client bindings. This TU provides only the tracker machinery those
 // overrides (and the FastAllocator / ArenaBlock hooks) call into.
+
+#endif // FDB_MEMORY_TRACKER

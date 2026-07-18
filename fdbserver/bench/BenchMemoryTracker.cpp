@@ -42,6 +42,8 @@
 
 #include "benchmark/benchmark.h"
 
+#include "flow/Arena.h"
+#include "flow/FastAlloc.h"
 #include "flow/Knobs.h"
 #include "flow/MemoryTracker.h"
 
@@ -115,3 +117,51 @@ static void bench_memtracker_hooks(benchmark::State& state) {
 BENCHMARK(bench_memtracker_malloc_free);
 BENCHMARK(bench_memtracker_operator_new)->Arg(0)->Arg(100)->Arg(1);
 BENCHMARK(bench_memtracker_hooks)->Arg(0)->Arg(100)->Arg(1);
+
+// --- Per-path unweighted overhead (for the FDB_MEMORY_TRACKER compile gate) ---
+// Plain allocation loops with no knob manipulation: in a default build
+// (FDB_MEMORY_TRACKER=1) they run with the tracker present but sampling off; in a
+// FDB_MEMORY_TRACKER=0 build the tracker code is absent. Diffing the two builds
+// gives each path's always-compiled off-state cost per op, unweighted by how
+// often the path is actually taken at runtime.
+
+// operator new[]/delete[] at size Arg(0): exercises GlobalNewDelete.cpp (our
+// override when FDB_MEMORY_TRACKER, else libc++'s operator new).
+static void bench_path_operator_new(benchmark::State& state) {
+	size_t n = state.range(0);
+	for (auto _ : state) {
+		char* p = new char[n];
+		benchmark::DoNotOptimize(p);
+		delete[] p;
+	}
+	state.SetItemsProcessed(state.iterations());
+}
+
+// FastAllocator<Size> allocate/release: exercises the flow/FastAlloc.cpp hook.
+template <int Size>
+static void bench_path_fastalloc(benchmark::State& state) {
+	for (auto _ : state) {
+		void* p = FastAllocator<Size>::allocate();
+		benchmark::DoNotOptimize(p);
+		FastAllocator<Size>::release(p);
+	}
+	state.SetItemsProcessed(state.iterations());
+}
+
+// Arena block create/destroy: exercises the flow/Arena.cpp hook. Arg(0) is the
+// user allocation size, which selects the block class (medium vs huge).
+static void bench_path_arena(benchmark::State& state) {
+	int n = state.range(0);
+	for (auto _ : state) {
+		Arena a;
+		uint8_t* p = new (a) uint8_t[n];
+		benchmark::DoNotOptimize(p);
+	}
+	state.SetItemsProcessed(state.iterations());
+}
+
+BENCHMARK(bench_path_operator_new)->Arg(64)->Arg(96)->Arg(256)->Arg(100000);
+BENCHMARK_TEMPLATE(bench_path_fastalloc, 64);
+BENCHMARK_TEMPLATE(bench_path_fastalloc, 96);
+BENCHMARK_TEMPLATE(bench_path_fastalloc, 256);
+BENCHMARK(bench_path_arena)->Arg(600)->Arg(100000);

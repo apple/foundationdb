@@ -48,6 +48,8 @@
 #include <cstdlib>
 #include <new>
 
+#include "flow/MemoryTracker.h" // for FDB_MEMORY_TRACKER (default on)
+
 // TODO: the old ALLOC_INSTRUMENTATION doesn't seem to be usable at
 // scale. Consider deleting it.
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
@@ -104,6 +106,8 @@ void operator delete[](void* ptr, const std::nothrow_t&) throw() {
 
 #include "flow/MemoryTracker.h"
 #include "flow/Platform.h" // aligned_alloc / aligned_free (portable across MSVC/POSIX)
+
+#if FDB_MEMORY_TRACKER
 
 namespace {
 
@@ -229,5 +233,8 @@ void operator delete[](void* p, std::size_t, std::align_val_t) noexcept {
 	memTrackerOnFree(p);
 	aligned_free(p);
 }
+
+#else // !FDB_MEMORY_TRACKER — no global operator new/delete override; libc++'s is used.
+#endif // FDB_MEMORY_TRACKER
 
 #endif // ALLOC_INSTRUMENTATION

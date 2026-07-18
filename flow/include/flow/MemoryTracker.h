@@ -49,6 +49,16 @@
 #include <cstdint>
 #include <functional>
 
+// FDB_MEMORY_TRACKER gates the whole feature at compile time; on (1) by default.
+// Build with -DFDB_MEMORY_TRACKER=0 (cmake -DFDB_MEMORY_TRACKER=OFF) to compile it
+// out entirely: the hooks become no-ops and the global operator new/delete override
+// (fdbserver/GlobalNewDelete.cpp) is not defined, so libc++'s allocator is used.
+#ifndef FDB_MEMORY_TRACKER
+#define FDB_MEMORY_TRACKER 1
+#endif
+
+#if FDB_MEMORY_TRACKER
+
 // Maximum number of stack frames the tracker can capture per sample.
 // MEMORY_TRACKING_FRAMES knob controls the runtime depth (1..MEMORY_TRACKER_MAX_FRAMES).
 constexpr int MEMORY_TRACKER_MAX_FRAMES = 10;
@@ -175,5 +185,21 @@ void memTrackerForEachSite(std::function<void(const MemoryTrackerCallSite&)> cb)
 
 // Reset all state. Tests only — not safe for production use.
 void memTrackerResetForTest();
+
+#else // !FDB_MEMORY_TRACKER — compiled out: hooks are no-ops, no operator new override.
+
+inline void memTrackerOnAlloc(void*, std::size_t) {}
+inline void memTrackerOnFree(void*) {}
+inline void memTrackerDump(int64_t) {}
+inline void memTrackerResetForTest() {}
+class MemTrackerSuppress {
+public:
+	MemTrackerSuppress() {}
+	~MemTrackerSuppress() {}
+	MemTrackerSuppress(const MemTrackerSuppress&) = delete;
+	MemTrackerSuppress& operator=(const MemTrackerSuppress&) = delete;
+};
+
+#endif // FDB_MEMORY_TRACKER
 
 #endif // FLOW_MEMORY_TRACKER_H

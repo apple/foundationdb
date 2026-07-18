@@ -11,10 +11,10 @@ site, and periodically emits the aggregates as TraceEvents for offline
 `addr2line` symbolization. The mechanism must be lightweight enough to
 leave on by default in production (~1% sampling) and at higher rates
 (~10%) in simulation, where it must remain deterministic. (That ≤1%
-overhead is the *target* that gates leaving it on; the v1 single-lock
-implementation does not yet meet it at high allocation rates, so it ships
-**off** by default pending a lock-sharding follow-up — see Performance and
-Rollout.)
+overhead is a *target*, not a proven bound: the v1 single-lock implementation is
+over it at high allocation rates and the always-compiled off-state cost is not
+confidently measured, so the feature ships sampling-**off** by default and can be
+compiled out entirely via `FDB_MEMORY_TRACKER=OFF` — see Performance and Rollout.)
 
 ## Background
 
@@ -57,12 +57,16 @@ in place:
 
 ## Requirements
 
-R0. **Cheap enough to leave on in production by default.** Total CPU
-    overhead from the tracker at the production default sampling rate must
-    stay under 1% end-to-end on realistic workloads. This is a ceiling the
-    design must meet; the measured/estimated overhead is reported in the
-    detailed design, not here, and the ceiling is not to be relaxed to
-    accommodate an implementation.
+R0. **Aim to be cheap enough to leave compiled in by default.** The *target* is
+    ≤1% end-to-end CPU overhead at the production sampling rate on realistic
+    workloads. We do **not** yet have confident measurement that this holds: the
+    µbench and mako A/B put the always-compiled *off-state* cost in the
+    low-single-digit-percent / measurement-noise range, and the enabled
+    single-lock v1 is over the target at high allocation rates. Because the ≤1%
+    figure is a goal rather than a proven guarantee, the feature is (a) shipped
+    sampling-**off** by default, and (b) gated by a compile-time switch
+    (`FDB_MEMORY_TRACKER`, default on — see "Compile-time gate") so a deployment
+    that wants zero always-compiled footprint can exclude the code entirely.
 
 R1. **Un-sampled hot path.** When sampling is disabled, an allocation incurs
     only one thread-local load (a per-thread "off" flag) and one branch; when
@@ -973,3 +977,13 @@ they cause issues with a third-party library that has its own global
 new override), removing them is a matter of deleting
 `fdbserver/GlobalNewDelete.cpp`'s tracker branch while keeping the
 FastAlloc and Arena tracking that lives in `flow`.
+
+### Compile-time gate
+
+`FDB_MEMORY_TRACKER` (CMake `option(... ON)`; default on) removes the feature at
+build time. `cmake -DFDB_MEMORY_TRACKER=OFF` (or `-DFDB_MEMORY_TRACKER=0` on the
+compiler line) makes the hooks no-ops via header shims and drops the global
+`operator new`/`delete` override entirely (libc++'s allocator is used, which still
+honors the installed `new_handler`). This is the escape hatch for anyone who wants
+zero always-compiled footprint, and it is how the microbenchmark measures the
+present-but-disabled vs absent cost of each allocation path.
