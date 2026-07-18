@@ -453,10 +453,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT(std::find(originalProxies.begin(), originalProxies.end(), original) != originalProxies.end());
 		Future<Void> publications = waitForIndependentProxyPublications(cx, originalProxies);
 
-		std::vector<Future<Void>> halts;
+		std::vector<Future<ErrorOr<Void>>> halts;
 		halts.reserve(originalProxies.size());
 		for (const auto& proxy : originalProxies) {
-			halts.push_back(proxy.haltForTesting.getReply(HaltCDCProxyRequest()));
+			halts.push_back(proxy.haltForTesting.tryGetReply(HaltCDCProxyRequest()));
 		}
 		co_await timeoutError(waitForAll(halts), operationTimeout);
 		co_await timeoutError(publications, operationTimeout);
