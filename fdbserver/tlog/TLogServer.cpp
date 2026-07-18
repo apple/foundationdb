@@ -3904,6 +3904,10 @@ Future<Void> restorePersistentState(TLogData* self,
 				logData->createTagData(
 				    tag, popped, NothingPersistent::False, PoppedRecently::False, UnpoppedRecovered::False);
 				logData->getTagData(tag)->persistentPopped = popped;
+				// Reference-spilled data can still pin disk queue entries before the restored durable version.
+				if (logData->shouldSpillByReference(tag)) {
+					logData->queuePoppedVersion = std::min(logData->queuePoppedVersion, popped);
+				}
 			}
 		}
 	}
