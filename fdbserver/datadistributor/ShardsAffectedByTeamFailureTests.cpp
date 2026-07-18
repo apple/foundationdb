@@ -128,3 +128,39 @@ TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/DestinationSourceTransit
 
 	return Void();
 }
+
+TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/RetryMergedShardAfterPartialMoves") {
+	ShardsAffectedByTeamFailure shards;
+	shards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+
+	const UID failed(1, 0), leftServer(2, 0), rightServer(3, 0), healthy1(4, 0), healthy2(5, 0);
+	const ShardsAffectedByTeamFailure::Team left({ failed, leftServer }, true);
+	const ShardsAffectedByTeamFailure::Team right({ failed, rightServer }, true);
+	const ShardsAffectedByTeamFailure::Team healthy({ healthy1, healthy2 }, true);
+	const KeyRange mergedRange = KeyRangeRef("a"_sr, "c"_sr);
+	const KeyRange leftRange = KeyRangeRef("a"_sr, "b"_sr);
+	const KeyRange rightRange = KeyRangeRef("b"_sr, "c"_sr);
+
+	shards.assignRangeToTeams(leftRange, { left });
+	shards.assignRangeToTeams(rightRange, { right });
+	shards.defineShard(mergedRange);
+
+	shards.moveShard(leftRange, { healthy });
+	shards.finishMove(leftRange);
+	shards.moveShard(rightRange, { healthy });
+	shards.finishMove(rightRange);
+
+	ASSERT_EQ(shards.getNumberOfShards(failed), 2);
+	ASSERT(shards.getShardsFor(left) == std::vector<KeyRange>{ mergedRange });
+	ASSERT(shards.getShardsFor(right) == std::vector<KeyRange>{ mergedRange });
+
+	shards.moveShard(mergedRange, { healthy });
+	shards.finishMove(mergedRange);
+
+	ASSERT_EQ(shards.getNumberOfShards(failed), 0);
+	ASSERT_EQ(shards.getNumberOfShards(left), 0);
+	ASSERT_EQ(shards.getNumberOfShards(right), 0);
+	ASSERT(shards.getShardsFor(healthy) == std::vector<KeyRange>{ mergedRange });
+
+	return Void();
+}

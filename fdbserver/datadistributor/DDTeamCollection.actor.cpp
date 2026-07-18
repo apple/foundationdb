@@ -1105,8 +1105,16 @@ public:
 				team->setHealthy(healthy); // Unhealthy teams won't be chosen by bestTeam
 				bool optimal = team->isOptimal() && healthy;
 				bool containsFailed = self->teamContainsFailedServer(team);
+				bool retryUnhealthyShards = serversLeft < team->size() &&
+				                            self->shardsAffectedByTeamFailure->hasShards(
+				                                ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
+				if (retryUnhealthyShards) {
+					// Partial moves can leave a merged shard associated with this team without another health change.
+					change.push_back(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow));
+				}
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
-				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
+				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed ||
+				                            retryUnhealthyShards);
 
 				TraceEvent(SevVerbose, "TeamHealthChangeDetected", self->distributorId)
 				    .detail("Team", team->getDesc())
