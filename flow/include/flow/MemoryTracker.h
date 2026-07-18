@@ -22,11 +22,11 @@
 //
 // See design/memory-tracker.md for the full design.
 //
-// Hot path: memTrackerOnAlloc is header-inlined, one TLS load + one decrement
-// + one branch on the un-sampled fast path. memTrackerOnFree is header-inlined,
-// one relaxed read of a cache-line-isolated enabled flag + one branch when the
-// feature is disabled (the common production default) -- no lock, no table
-// probe.
+// Hot path: memTrackerOnAlloc is header-inlined; when the feature is disabled
+// (the common production default) it short-circuits on a single per-thread TLS
+// load + branch. memTrackerOnFree is header-inlined, one relaxed read of a
+// cache-line-isolated enabled flag + one branch when disabled -- no lock, no
+// table probe.
 //
 // Sampled path delegates to memTrackerSampleAlloc / memTrackerSampleFree,
 // which take a private spinlock, capture a frame-pointer-walk backtrace, and
@@ -87,6 +87,13 @@ struct MemoryTrackerCallSite {
 extern thread_local bool gInMemTracker;
 extern thread_local int gMemTrackerCounter;
 extern thread_local std::size_t gForceSampleBytes;
+// Set true (per thread) once this thread's slow path observes sampling is off,
+// so the alloc hot path then short-circuits on a single TLS load instead of
+// decrementing the counter and reading gForceSampleBytes every call. Per-thread
+// (not global) so an early main-thread allocation before FLOW_KNOBS is ready
+// can't disable sampling on worker threads that bootstrap later. Cleared by
+// memTrackerResetForTest.
+extern thread_local bool gMemTrackerOff;
 
 // Global "is the tracker enabled" flag, kept in its own cache line. Published
 // once, from the first slow-path visit, and thereafter constant: the sample-
@@ -128,6 +135,9 @@ void memTrackerSampleAlloc(void* p, std::size_t n);
 void memTrackerSampleFree(void* p);
 
 inline void memTrackerOnAlloc(void* p, std::size_t n) {
+	if (gMemTrackerOff) [[likely]] {
+		return;
+	}
 	if (gInMemTracker || !p) {
 		return;
 	}

@@ -30,7 +30,6 @@
 #include "flow/flow.h"
 
 #include <algorithm>
-#include <climits>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -50,6 +49,9 @@
 thread_local bool gInMemTracker = false;
 thread_local int gMemTrackerCounter = 1;
 thread_local std::size_t gForceSampleBytes = static_cast<std::size_t>(-1);
+// Starts false so the first allocation on each thread reaches the slow path to
+// read the knob; set true there if sampling is off (see memTrackerSampleAlloc).
+thread_local bool gMemTrackerOff = false;
 
 // Definition of the cache-line-isolated enabled flag declared in the header.
 MemTrackerEnabledFlag g_memTrackerEnabled;
@@ -255,10 +257,9 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 	}
 
 	if (inverse <= 0) {
-		// Off. The knob is startup-only, so park the counter effectively forever
-		// (INT_MAX) and stop force-sampling; this thread stays on the fast path.
-		gMemTrackerCounter = INT_MAX;
-		gForceSampleBytes = static_cast<std::size_t>(-1);
+		// Off (knob is startup-only). Flag this thread so the alloc hot path
+		// short-circuits on one TLS load, without touching the counter again.
+		gMemTrackerOff = true;
 		return;
 	}
 	if (inverse == 1) {
@@ -452,9 +453,8 @@ void memTrackerResetForTest() {
 		g_estCumulativeAllocsTotal = 0;
 	}
 	// Force the next allocation on this thread to take the slow path so it
-	// re-reads the (possibly just-changed) sample-inverse knob. Without this, a
-	// prior disabled run that parked the counter would keep the fast path
-	// skipping samples until it drained.
+	// re-reads the (possibly just-changed) sample-inverse knob.
+	gMemTrackerOff = false;
 	gMemTrackerCounter = 1;
 	gForceSampleBytes = static_cast<std::size_t>(-1);
 	// Clear the enabled flag; the next slow-path visit republishes it from the
