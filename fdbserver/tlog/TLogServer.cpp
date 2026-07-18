@@ -3871,6 +3871,7 @@ Future<Void> restorePersistentState(TLogData* self,
 		Version ver = BinaryReader::fromStringRef<Version>(fVers.get()[idx].value, Unversioned());
 		logData->persistentDataVersion = ver;
 		logData->persistentDataDurableVersion = ver;
+		logData->queuePoppedVersion = ver;
 		logData->version.set(ver);
 		logData->recoveryCount =
 		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
@@ -4154,6 +4155,7 @@ Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, LocalityData l
 			logData->persistentDataVersion = logData->unrecoveredBefore - 1;
 			logData->persistentDataDurableVersion = logData->unrecoveredBefore - 1;
 			logData->queueCommittedVersion.set(logData->unrecoveredBefore - 1);
+			logData->queuePoppedVersion = logData->unrecoveredBefore - 1;
 			logData->version.set(logData->unrecoveredBefore - 1);
 
 			logData->unpoppedRecoveredTagCount = req.allTags.size();
