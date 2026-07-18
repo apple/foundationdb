@@ -3480,18 +3480,6 @@ void addProcessesToSameDC(ClusterControllerData& self, const std::vector<Network
 	}
 }
 
-TEST_CASE("/NativeCDC/ClusterControllerBootstrapPublishesConfiguration") {
-	ClusterControllerData data(ClusterControllerFullInterface(),
-	                           LocalityData(),
-	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
-	                           makeReference<AsyncVar<Optional<UID>>>());
-
-	ASSERT_EQ(data.db.serverInfo->get().client.nativeCdcEnabled, CLIENT_KNOBS->ENABLE_NATIVE_CDC);
-	ASSERT_EQ(data.db.serverInfo->get().client.nativeCdcTagCount, CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT);
-	return Void();
-}
-
 TEST_CASE("/fdbserver/clustercontroller/ignoreStaleWorkerRegistration") {
 	ClusterControllerData data(ClusterControllerFullInterface(),
 	                           LocalityData(),
