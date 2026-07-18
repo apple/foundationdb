@@ -1543,9 +1543,6 @@ All follow the pattern: fields describing the role configuration + `ReplyPromise
 ### NetworkTestRequest
 `Key key`, `uint32_t replySize`, `reply` → **NetworkTestReply** {`Value value`}.
 
-### NetworkTestStreamingRequest
-`reply` (stream) → **NetworkTestStreamingReply** {`Optional<UID> acknowledgeToken`, `uint16_t sequence`, `int index`}.
-
 ---
 
 ## 15. Client Worker / Debug / Process Protocols

@@ -410,68 +410,6 @@ Future<Void> metricsReport() {
 	}
 }
 
-void testSerializationSpeed() {
-	double tstart;
-	double build = 0, serialize = 0, deserialize = 0, copy = 0, deallocate = 0;
-	double bytes = 0;
-	double testBegin = timer();
-	for (int a = 0; a < 10000; a++) {
-		{
-			tstart = timer();
-
-			Arena batchArena;
-			VectorRef<CommitTransactionRef> batch;
-			batch.resize(batchArena, 1000);
-			for (int t = 0; t < batch.size(); t++) {
-				CommitTransactionRef& tr = batch[t];
-				tr.read_snapshot = 0;
-				for (int i = 0; i < 2; i++)
-					tr.mutations.push_back_deep(batchArena,
-					                            MutationRef(MutationRef::SetValue, "KeyABCDE"_sr, "SomeValu"_sr));
-				tr.mutations.push_back_deep(batchArena,
-				                            MutationRef(MutationRef::ClearRange, "BeginKey"_sr, "EndKeyAB"_sr));
-			}
-
-			build += timer() - tstart;
-
-			tstart = timer();
-
-			BinaryWriter wr(IncludeVersion());
-			wr << batch;
-
-			bytes += wr.getLength();
-
-			serialize += timer() - tstart;
-
-			for (int i = 0; i < 1; i++) {
-				tstart = timer();
-				Arena arena;
-				StringRef data(arena, StringRef((const uint8_t*)wr.getData(), wr.getLength()));
-				copy += timer() - tstart;
-
-				tstart = timer();
-				ArenaReader rd(arena, data, IncludeVersion());
-				VectorRef<CommitTransactionRef> batch2;
-				rd >> arena >> batch2;
-
-				deserialize += timer() - tstart;
-			}
-
-			tstart = timer();
-		}
-		deallocate += timer() - tstart;
-	}
-	double elapsed = (timer() - testBegin);
-	printf("Test speed: %0.1f MB/sec (%0.0f/sec)\n", bytes / 1e6 / elapsed, 1000000 / elapsed);
-	printf("  Build: %0.1f MB/sec\n", bytes / 1e6 / build);
-	printf("  Serialize: %0.1f MB/sec\n", bytes / 1e6 / serialize);
-	printf("  Copy: %0.1f MB/sec\n", bytes / 1e6 / copy);
-	printf("  Deserialize: %0.1f MB/sec\n", bytes / 1e6 / deserialize);
-	printf("  Deallocate: %0.1f MB/sec\n", bytes / 1e6 / deallocate);
-	printf("  Bytes: %0.1f MB\n", bytes / 1e6);
-	printf("\n");
-}
-
 void memoryTest();
 void skipListTest();
 

@@ -1365,10 +1365,6 @@ public:
 	}
 };
 
-int nextPowerOf2(uint32_t x) {
-	return 1 << (32 - clz(x - 1));
-}
-
 struct RedwoodMetrics {
 	constexpr static unsigned int btreeLevels = 5;
 	static int maxRecordCount;
