@@ -47,6 +47,8 @@
 // fdbserver/workloads/UnitTests.cpp calls this function to keep the TU.
 void forceLinkMemoryTrackerTests() {}
 
+#if FDB_MEMORY_TRACKER
+
 namespace {
 
 // A sentinel is an out-of-line function that performs exactly one kind of
@@ -635,3 +637,5 @@ TEST_CASE("/flow/MemoryTracker/arenaHugeAccounting") {
 	ASSERT_EQ(post.cumAllocsSentinel, N);
 	return Void();
 }
+
+#endif // FDB_MEMORY_TRACKER
