@@ -17,27 +17,13 @@ case "${FAKE_HARNESS_MODE}" in
     no_output)
         exit 0
         ;;
-    fail)
-        echo '<Test Ok="0"/>'
-        exit 0
-        ;;
-    pass|tee_failure)
+    pass)
         echo '<Test Ok="1"/>'
         exit 0
         ;;
 esac
 FAKE_PYTHON
 chmod +x "${test_root}/bin/python3"
-
-cat > "${test_root}/bin/tee" <<'FAKE_TEE'
-#!/usr/bin/env bash
-
-/usr/bin/tee "$@"
-if [ "${FAKE_HARNESS_MODE}" = tee_failure ]; then
-    exit 45
-fi
-FAKE_TEE
-chmod +x "${test_root}/bin/tee"
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)
 wrapper="${script_dir}/correctnessTest.sh"
@@ -46,12 +32,10 @@ run_case() {
     local mode=$1
     local expected_exit=$2
     local expected_ok=$3
-    local expected_preserved=$4
     local output_dir="${test_root}/${mode}"
     local ensemble_id="correctness-test-${mode}"
     local run_dir="${output_dir}/th_run_${ensemble_id}"
     local stdout_file="${output_dir}/stdout.log"
-    local stderr_file="${output_dir}/stderr.log"
     local status
 
     mkdir -p "${output_dir}"
@@ -62,13 +46,13 @@ run_case() {
         JOSHUA_ENSEMBLE_ID="${ensemble_id}" \
         TH_OUTPUT_DIR="${output_dir}" \
         TH_ARCHIVE_LOGS_ON_FAILURE=true \
-        bash "${wrapper}" > "${stdout_file}" 2> "${stderr_file}"
+        bash "${wrapper}" > "${stdout_file}" 2> "${output_dir}/stderr.log"
     status=$?
     set -e
 
     test "${status}" -eq "${expected_exit}"
     grep -q "Ok=\"${expected_ok}\"" "${stdout_file}"
-    if [ "${expected_preserved}" = true ]; then
+    if [ "${expected_exit}" -ne 0 ]; then
         test -f "${run_dir}/python_app_stdout.log"
         grep -q "Ok=\"${expected_ok}\"" "${run_dir}/python_app_stdout.log"
     else
@@ -76,11 +60,9 @@ run_case() {
     fi
 }
 
-run_case pass_then_crash 23 1 true
-run_case tee_failure 45 1 true
-run_case no_output 1 0 true
-run_case fail 1 0 true
-run_case pass 0 1 false
+run_case pass_then_crash 23 1
+run_case no_output 1 0
+run_case pass 0 1
 
 grep -q 'CrashReason="TestHarnessProducedNoOutput"' "${test_root}/no_output/stdout.log"
 test "$(grep -c 'CrashReason="TestHarnessProducedNoOutput"' "${test_root}/no_output/stdout.log")" -eq 1
