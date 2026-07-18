@@ -12624,7 +12624,15 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 		}
 		ssCore.cancel();
 		self.actors = ActorCollection(false);
-		co_await delay(0);
+		try {
+			co_await delay(0);
+		} catch (Error& cleanupError) {
+			// A rollback keeps the KVS open for its rebooter, which cannot reclaim it after cancellation.
+			if (cleanupError.code() == error_code_actor_cancelled && err.code() == error_code_please_reboot) {
+				persistentData->close();
+			}
+			throw;
+		}
 		throw err;
 	}
 }
@@ -12743,7 +12751,15 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 	}
 	ssCore.cancel();
 	self.actors = ActorCollection(false);
-	co_await delay(0);
+	try {
+		co_await delay(0);
+	} catch (Error& cleanupError) {
+		// A rollback keeps the KVS open for its rebooter, which cannot reclaim it after cancellation.
+		if (cleanupError.code() == error_code_actor_cancelled && err.code() == error_code_please_reboot) {
+			persistentData->close();
+		}
+		throw;
+	}
 	throw err;
 }
 

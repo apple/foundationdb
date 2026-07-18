@@ -1033,7 +1033,6 @@ struct PhysicalShard {
 			if (!s.ok()) {
 				logRocksDBError(s, "DestroyShard");
 				logShardEvent(id, ShardOp::DESTROY, SevError, s.ToString());
-				return;
 			}
 		}
 		auto s = db->DestroyColumnFamilyHandle(cf);
@@ -1888,8 +1887,13 @@ public:
 	void closeAllShards() {
 		columnFamilyMap.clear();
 		physicalShards.clear();
+		if (db == nullptr) {
+			return;
+		}
 		// Close DB.
 		auto s = db->Close();
+		delete db;
+		db = nullptr;
 		if (!s.ok()) {
 			logRocksDBError(s, "Close");
 			return;
@@ -1898,6 +1902,9 @@ public:
 	}
 
 	void destroyAllShards() {
+		if (db == nullptr) {
+			return;
+		}
 		auto metadataShard = getMetaDataShard();
 		KeyRange metadataRange = prefixRange(shardMappingPrefix);
 		rocksdb::WriteOptions options;
@@ -1908,6 +1915,8 @@ public:
 		physicalShards.clear();
 		// Close DB.
 		auto s = db->Close();
+		delete db;
+		db = nullptr;
 		if (!s.ok()) {
 			logRocksDBError(s, "Close");
 			return;
@@ -2327,7 +2336,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		struct CompactShardsAction : TypedAction<CompactionWorker, CompactShardsAction> {
 			std::vector<std::shared_ptr<PhysicalShard>> shards;
-			std::shared_ptr<PhysicalShard> metadataShard;
+			PhysicalShard* metadataShard;
 			ThreadReturnPromise<Void> done;
 			CompactShardsAction(std::vector<std::shared_ptr<PhysicalShard>> shards, PhysicalShard* metadataShard)
 			  : shards(shards), metadataShard(metadataShard) {}
@@ -3381,6 +3390,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		self->refreshHolder.cancel();
 		self->refreshRocksDBBackgroundWorkHolder.cancel();
 		self->cleanUpJob.cancel();
+		self->compactionJob.cancel();
 		self->counterLogger.cancel();
 
 		try {
@@ -3388,6 +3398,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		} catch (Error& e) {
 			TraceEvent(SevError, "ShardedRocksCloseReadThreadError").errorUnsuppressed(e);
 		}
+		try {
+			co_await self->compactionThread->stop();
+		} catch (Error& e) {
+			TraceEvent(SevError, "ShardedRocksCloseCompactionThreadError").errorUnsuppressed(e);
+		}
+		self->compactionThread.clear();
 
 		TraceEvent("CloseKeyValueStore").detail("DeleteKVS", deleteOnClose);
 		self->iteratorPool->clear();
@@ -3402,7 +3418,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		try {
 			co_await self->writeThread->stop();
-			co_await self->compactionThread->stop();
 		} catch (Error& e) {
 			TraceEvent(SevError, "ShardedRocksCloseWriteThreadError").errorUnsuppressed(e);
 		}
@@ -3927,6 +3942,24 @@ TEST_CASE("noSim/ShardedRocksDB/Initialization") {
 	kvStore->dispose();
 	co_await closed;
 	ASSERT(!directoryExists(rocksDBTestDir));
+}
+
+TEST_CASE("noSim/ShardedRocksDB/CloseWithoutInit") {
+	const std::string rocksDBTestDir = "sharded-rocksdb-close-without-init";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	for (bool dispose : { false, true }) {
+		IKeyValueStore* kvStore =
+		    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+		Future<Void> closed = kvStore->onClosed();
+		if (dispose) {
+			kvStore->dispose();
+		} else {
+			kvStore->close();
+		}
+		co_await closed;
+		ASSERT(!directoryExists(rocksDBTestDir));
+	}
 }
 
 TEST_CASE("noSim/ShardedRocksDB/SingleShardRead") {
