@@ -394,10 +394,12 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 
 			// Disabling CDC stops new admission, but existing registrations and
 			// owner repair must remain available so durable streams can drain.
-			validateNativeCdcEnabled(cx->clientInfo->get().nativeCdcEnabled);
+			const bool nativeCdcEnabled = cx->clientInfo->get().nativeCdcEnabled;
+			const int nativeCdcTagCount = cx->clientInfo->get().nativeCdcTagCount;
+			validateNativeCdcEnabled(nativeCdcEnabled);
 			NativeCdcIdentifierAllocator allocator;
 			co_await observeNativeCdcMetadata(&tr, &allocator);
-			const auto [streamId, tag] = allocator.allocate(cx->clientInfo->get().nativeCdcTagCount);
+			const auto [streamId, tag] = allocator.allocate(nativeCdcTagCount);
 			// The read version is a conservative lower bound for tag routing.
 			// The versionstamped minimum below is the commit version, and stream
 			// initialization takes their maximum before exposing mutations.
