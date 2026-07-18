@@ -145,8 +145,8 @@ static RelocateShard makeDestinationFailureRetry(RelocateData const& rd, UID ret
 	return retry;
 }
 
-static bool shouldRetryDestinationTeamFailure(bool doBulkLoading, RelocateData const& rd) {
-	return !doBulkLoading && !rd.isRestore();
+static bool shouldRetryDestinationTeamFailure(bool doBulkLoading, RelocateData const&) {
+	return !doBulkLoading;
 }
 
 static bool shouldYieldDestinationFailureRetry(RelocateData const& retry, RelocateData const& queued) {
@@ -3365,7 +3365,8 @@ TEST_CASE("/DataDistribution/DDQueue/RetryDestinationTeamFailure") {
 	ASSERT(!shouldYieldDestinationFailureRetry(retry, unrelated));
 	RelocateData restore = rd;
 	restore.dataMove = std::make_shared<DataMove>();
-	ASSERT(!shouldRetryDestinationTeamFailure(false, restore));
+	ASSERT(shouldRetryDestinationTeamFailure(false, restore));
+	ASSERT(!shouldRetryDestinationTeamFailure(true, restore));
 	return Void();
 }
 
