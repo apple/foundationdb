@@ -104,7 +104,6 @@ void operator delete[](void* ptr, const std::nothrow_t&) throw() {
 
 #else // sampled memory tracker, see design/memory-tracker.md
 
-#include "flow/MemoryTracker.h"
 #include "flow/Platform.h" // aligned_alloc / aligned_free (portable across MSVC/POSIX)
 
 #if FDB_MEMORY_TRACKER
