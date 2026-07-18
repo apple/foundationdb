@@ -10,6 +10,7 @@ datacenters=1
 [[test]]
 testTitle="SnapCyclePre"
 clearAfterTest=false
+disabledFailureInjectionWorkloads='Attrition'
 
     [[test.workload]]
     testName="Cycle"
