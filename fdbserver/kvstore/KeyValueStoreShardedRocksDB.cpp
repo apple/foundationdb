@@ -3945,7 +3945,7 @@ TEST_CASE("noSim/ShardedRocksDB/Initialization") {
 }
 
 TEST_CASE("noSim/ShardedRocksDB/CloseWithoutInit") {
-	const std::string rocksDBTestDir = "sharded-rocksdb-close-without-init";
+	const std::string rocksDBTestDir = joinPath(params.getDataDir(), "sharded-rocksdb-close-without-init");
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
 	for (bool dispose : { false, true }) {
