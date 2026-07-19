@@ -6041,6 +6041,20 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		MappedKeyPlan valuePlan(Tuple::makeTuple("{V[1]}"_sr).pack());
 		ASSERT(valuePlan.constructMappedKey(invalidKey) == Tuple::makeTuple("value-1"_sr).getDataAsStandalone());
 	}
+	{
+		// Substituting {K[i]} parses the whole key, so it must work for keys
+		// containing UUID elements (e.g. Record Layer UUID primary keys).
+		UID uid(0x0102030405060708ULL, 0x090a0b0c0d0e0f10ULL);
+		Key uuidKey = Tuple::makeTuple("key-0"_sr, uid, "key-2"_sr).getDataAsStandalone();
+		Value uuidValue = Tuple::makeTuple("value-0"_sr).getDataAsStandalone();
+		KeyValueRef uuidKvr(uuidKey, uuidValue);
+		MappedKeyPlan mappedKeyPlan(Tuple::makeTuple("prefix"_sr, "{K[1]}"_sr, "{...}"_sr).pack());
+		Key mappedKey = mappedKeyPlan.constructMappedKey(uuidKvr);
+
+		Key expectedMappedKey = Tuple::makeTuple("prefix"_sr, uid).getDataAsStandalone();
+		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
+		ASSERT(mappedKeyPlan.isRangeQuery());
+	}
 	return Void();
 }
 
