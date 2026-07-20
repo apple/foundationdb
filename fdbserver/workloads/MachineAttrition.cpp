@@ -23,7 +23,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/FDBSimulatorProcessInfo.h"

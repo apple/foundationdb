@@ -24,7 +24,7 @@
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logrouter/LogRouter.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "flow/ActorCollection.h"

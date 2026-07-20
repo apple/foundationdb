@@ -37,7 +37,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/ActorCollection.h"

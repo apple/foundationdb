@@ -34,7 +34,7 @@
 #include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "TesterServer.h"
 #include "fdbserver/tester/workloads.h"
 

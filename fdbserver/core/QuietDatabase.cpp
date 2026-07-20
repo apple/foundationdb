@@ -37,7 +37,7 @@
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/CoroUtils.h"

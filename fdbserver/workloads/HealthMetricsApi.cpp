@@ -20,7 +20,7 @@
 
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 
 // NOTE: it might be simpler to test health metrics via something
 // other than simulation. Testing equivalent to what this workload does can
