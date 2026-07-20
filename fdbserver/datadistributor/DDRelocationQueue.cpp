@@ -49,11 +49,6 @@
 using ITeamRef = Reference<IDataDistributionTeam>;
 using SrcDestTeamPair = std::pair<ITeamRef, ITeamRef>;
 
-inline bool isDataMovementForDiskBalancing(DataMovementReason reason) {
-	return reason == DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM ||
-	       reason == DataMovementReason::REBALANCE_OVERUTILIZED_TEAM;
-}
-
 inline bool isDataMovementForReadBalancing(DataMovementReason reason) {
 	return reason == DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM ||
 	       reason == DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM;
