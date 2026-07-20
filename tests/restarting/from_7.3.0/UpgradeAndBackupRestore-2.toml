@@ -1,5 +1,8 @@
 [[knobs]]
 dd_max_shards_on_large_teams = 0
+# This restart can retain many old log generations; dropping a log-router init
+# reply can repeatedly restart recovery and exhaust the starting-config timeout.
+cc_recovery_init_req_allow_drop_in_sim = false
 
 [configuration]
 storageEngineExcludeTypes=[3,5]
