@@ -87,6 +87,7 @@ jobs:
                 ) {
                   allOldComments.push(comment);
                   // Check for older comment matching PR head commit, in case reports came out-of-order.
+                  // Default sort is by created ascending, newest matching head commit wins.
                   const m = comment.body.match(/^\* Commit ID: ([a-f0-9]+)/m);
                   if (m && m[1] === headSha) {
                     oldCommentAtHead = comment;
