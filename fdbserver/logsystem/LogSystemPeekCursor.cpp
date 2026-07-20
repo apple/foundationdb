@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/logsystem/LogSystem.h"
+#include "LogSystemTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MutationTracking.h"
