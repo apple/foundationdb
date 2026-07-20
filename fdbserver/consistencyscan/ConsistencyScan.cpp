@@ -25,7 +25,7 @@
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/FailureMonitor.h"
@@ -1687,8 +1687,9 @@ Future<Void> checkDataConsistency(Database cx,
 		if (firstClient && performQuiescentChecks &&
 		    ((configuration.usableRegions == 1 && (sourceStorageServers.size() > expectedReplicas ||
 		                                           sourceStorageServers.size() < configuration.storageTeamSize)) ||
-		     sourceStorageServers.size() < configuration.usableRegions * configuration.storageTeamSize ||
-		     sourceStorageServers.size() > configuration.usableRegions * expectedReplicas)) {
+		     sourceStorageServers.size() <
+		         static_cast<size_t>(configuration.usableRegions) * configuration.storageTeamSize ||
+		     sourceStorageServers.size() > static_cast<size_t>(configuration.usableRegions) * expectedReplicas)) {
 			TraceEvent("ConsistencyCheck_InvalidTeamSize")
 			    .detail("ShardBegin", printable(range.begin))
 			    .detail("ShardEnd", printable(range.end))

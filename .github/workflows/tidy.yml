@@ -43,9 +43,10 @@ jobs:
 
           ninja -v                      \
             processed_compile_commands  \
-            fdb_c_generated             \
             fdboptions                  \
-            ProtocolVersion
+            ProtocolVersion             \
+            fdb_c_generated             \
+            fdb-java
 
           # all flow actors, for generated headers
           ACTORS=$(

@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <utility>
 
 #include "fdbclient/DatabaseContext.h"
@@ -31,7 +32,7 @@
 #include "RatekeeperMonitor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ProcessClassRecruitment.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbrpc/Locality.h"
 #include "flow/CoroUtils.h"
 #include "flow/NetworkAddress.h"
@@ -2417,6 +2418,31 @@ public:
 		std::set<NetworkAddress> logRouterAddresses;
 		std::vector<WorkerDetails> backup_workers;
 		std::set<NetworkAddress> backup_addresses;
+
+		if (dbi.recoveryState == RecoveryState::FULLY_RECOVERED) {
+			for (const auto& oldLog : dbi.logSystemConfig.oldTLogs) {
+				for (const auto& logSet : oldLog.tLogs) {
+					for (const auto& tlog : logSet.tLogs) {
+						if (!tlog.present()) {
+							continue;
+						}
+
+						auto tlogWorker = std::find_if(id_worker.begin(), id_worker.end(), [&tlog](const auto& worker) {
+							return worker.second.details.interf.address() == tlog.interf().address();
+						});
+						const auto& locality = tlogWorker == id_worker.end()
+						                           ? tlog.interf().filteredLocality
+						                           : tlogWorker->second.details.interf.locality;
+						if (db.config.isExcludedServer(tlog.interf().addresses(), locality)) {
+							TraceEvent("BetterMasterExists", id)
+							    .detail("Reason", "OldTLogExcluded")
+							    .detail("ProcessID", locality.processId());
+							return true;
+						}
+					}
+				}
+			}
+		}
 
 		for (auto& logSet : dbi.logSystemConfig.tLogs) {
 			for (auto& it : logSet.tLogs) {

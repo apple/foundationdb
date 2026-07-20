@@ -417,7 +417,7 @@ struct ConnectionLogWriter : IThreadPoolReceiver {
 			throw io_error();
 		}
 
-		if (file.tellg() > 100 * 1024 * 1024 /* 100 MB */) {
+		if (file.tellg() > 100LL * 1024 * 1024 /* 100 MB */) {
 			file.close();
 			fileName = newFileName();
 			TraceEvent("RollConnectionLog").detail("FileName", fileName);

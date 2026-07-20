@@ -1022,6 +1022,19 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points(FDBTransa
 	    return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr()););
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points_with_limit(FDBTransaction* tr,
+                                                                                  uint8_t const* begin_key_name,
+                                                                                  int begin_key_name_length,
+                                                                                  uint8_t const* end_key_name,
+                                                                                  int end_key_name_length,
+                                                                                  int64_t chunk_size,
+                                                                                  int limit) {
+	RETURN_FUTURE_ON_ERROR(
+	    Standalone<VectorRef<KeyRef>>,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	    return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size, limit).extractPtr()););
+}
+
 #include "fdb_c_function_pointers.g.h"
 
 #define FDB_API_CHANGED(func, ver)                                                                                     \

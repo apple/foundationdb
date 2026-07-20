@@ -41,7 +41,6 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RangeLock.h"
 #include "PartitionedLogIterator.h"
-#include "RestoreInterface.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TaskBucket.h"
@@ -170,13 +169,6 @@ Future<bool> verifyBulkDumpDatasetCompleteness(Reference<IBackupContainer> bc, s
 // because SERVER_KNOBS are not accessible from fdbclient.
 
 Optional<std::string> fileBackupAgentProxy = Optional<std::string>();
-
-#define SevFRTestInfo SevVerbose
-// #define SevFRTestInfo SevInfo
-
-static std::string boolToYesOrNo(bool val) {
-	return val ? std::string("Yes") : std::string("No");
-}
 
 static std::string versionToString(Optional<Version> version) {
 	if (version.present())
@@ -1087,7 +1079,7 @@ PartitionedLogIteratorSimple::PartitionedLogIteratorSimple(Reference<IBackupCont
                                                            std::vector<RestoreConfig::RestoreFile> _files,
                                                            std::vector<Version> _endVersions)
   : bc(_bc), tag(_tag), endVersions(_endVersions), files(std::move(_files)), bufferOffset(0) {
-	bufferCapacity = BATCH_READ_BLOCK_COUNT * BLOCK_SIZE;
+	bufferCapacity = static_cast<size_t>(BATCH_READ_BLOCK_COUNT) * BLOCK_SIZE;
 	buffer = std::shared_ptr<char[]>(new char[bufferCapacity]());
 	fileOffset = 0;
 	fileIndex = 0;
@@ -3174,9 +3166,10 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 			co_return;
 		}
 
-		Version endVersion = std::max<Version>(tr->getReadVersion().get() + 1,
-		                                       beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES - 1) *
-		                                                          CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
+		Version endVersion =
+		    std::max<Version>(tr->getReadVersion().get() + 1,
+		                      beginVersion + static_cast<Version>(CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES - 1) *
+		                                         CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 
 		TraceEvent("FileBackupLogDispatch")
 		    .suppressFor(60)
@@ -8428,77 +8421,4 @@ Future<EBackupState> FileBackupAgent::waitBackup(Database cx,
 
 Future<Void> FileBackupAgent::changePause(Database db, bool pause) {
 	return FileBackupAgentImpl::changePause(this, db, pause);
-}
-
-// Fast Restore addPrefix test helper functions
-static std::pair<bool, bool> insideValidRange(KeyValueRef kv,
-                                              Standalone<VectorRef<KeyRangeRef>> restoreRanges,
-                                              Standalone<VectorRef<KeyRangeRef>> backupRanges) {
-	bool insideRestoreRange = false;
-	bool insideBackupRange = false;
-	for (auto& range : restoreRanges) {
-		TraceEvent(SevFRTestInfo, "InsideValidRestoreRange")
-		    .detail("Key", kv.key)
-		    .detail("Range", range)
-		    .detail("Inside", (kv.key >= range.begin && kv.key < range.end));
-		if (kv.key >= range.begin && kv.key < range.end) {
-			insideRestoreRange = true;
-			break;
-		}
-	}
-	for (auto& range : backupRanges) {
-		TraceEvent(SevFRTestInfo, "InsideValidBackupRange")
-		    .detail("Key", kv.key)
-		    .detail("Range", range)
-		    .detail("Inside", (kv.key >= range.begin && kv.key < range.end));
-		if (kv.key >= range.begin && kv.key < range.end) {
-			insideBackupRange = true;
-			break;
-		}
-	}
-	return std::make_pair(insideBackupRange, insideRestoreRange);
-}
-
-// Write [begin, end) in kvs to DB
-static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs, int begin, int end) {
-	co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		int index = begin;
-		while (index < end) {
-			TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKV")
-			    .detail("Index", index)
-			    .detail("KVs", kvs.size())
-			    .detail("Key", kvs[index].key)
-			    .detail("Value", kvs[index].value);
-			tr->set(kvs[index].key, kvs[index].value);
-			++index;
-		}
-		return Void();
-	});
-
-	// Sanity check data has been written to DB
-	ReadYourWritesTransaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			KeyRef k1 = kvs[begin].key;
-			KeyRef k2 = end < kvs.size() ? kvs[end].key : allKeys.end;
-			TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKVReadBack")
-			    .detail("Range", KeyRangeRef(k1, k2))
-			    .detail("Begin", begin)
-			    .detail("End", end);
-			RangeResult readKVs = co_await tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY);
-			ASSERT(!readKVs.empty() || begin == end);
-			break;
-		} catch (Error& e) {
-			err = e;
-		}
-		TraceEvent("TransformDatabaseContentsWriteKVReadBackError").error(err);
-		co_await tr.onError(err);
-	}
-
-	TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKVDone").detail("Begin", begin).detail("End", end);
 }

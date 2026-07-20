@@ -29,7 +29,7 @@
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/RecoveryState.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 
 struct ServerDBInfo {
 	constexpr static FileIdentifier file_identifier = 13838807;
@@ -111,7 +111,7 @@ struct GetServerDBInfoRequest {
 	}
 };
 
-// Instantiated in worker.actor.cpp
+// Instantiated in worker.cpp
 extern template class RequestStream<GetServerDBInfoRequest, false>;
 extern template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
 

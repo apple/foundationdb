@@ -36,7 +36,7 @@
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/tlog/TLogServer.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/sim_validation.h"
@@ -349,6 +349,7 @@ struct TLogData : NonCopyable {
 	Promise<Void> terminated;
 	FlowLock concurrentLogRouterReads;
 	Reference<FlowLock> persistentDataCommitLock;
+	bool retireRecoveredLogsRunning = false;
 
 	// Beginning of fields used by snapshot based backup and restore
 	double ignorePopDeadline; // time until which the ignorePopRequest will be
@@ -541,7 +542,11 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	*/
 
 	AsyncTrigger stopCommit;
+	AsyncTrigger persistentDataUpdated;
 	bool initialized;
+	bool retirementRequested = false;
+	bool retirementStarted = false;
+	bool retired = false;
 	Promise<Void> stoppedPromise;
 	DBRecoveryCount recoveryCount;
 
@@ -1278,6 +1283,167 @@ Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logData, Ve
 		}
 	}
 	logData->newPersistentDataVersion = invalidVersion;
+	logData->persistentDataUpdated.trigger();
+}
+
+void advanceRetiredLogQueues(TLogData* self) {
+	// A restored queue has no committed location until its first post-recovery commit.
+	if (self->queueCommitEnd.get() == 0) {
+		return;
+	}
+
+	while (!self->popOrder.empty()) {
+		auto log = self->id_data.find(self->popOrder.front());
+		if (log == self->id_data.end()) {
+			self->popOrder.pop_front();
+			continue;
+		}
+		if (!log->second->retired || log->second->persistentDataDurableVersion != log->second->version.get()) {
+			break;
+		}
+
+		if (!log->second->versionLocation.empty()) {
+			auto lastLocation = log->second->versionLocation.lastItem();
+			self->persistentQueue->pop(lastLocation->value.second);
+		}
+		log->second->queuePoppedVersion = std::max(log->second->queuePoppedVersion, log->second->version.get());
+		self->popOrder.pop_front();
+	}
+}
+
+Future<bool> waitForRetirementStep(Future<Void> step, Future<Void> removed) {
+	if (removed.isReady()) {
+		co_return false;
+	}
+	auto result = co_await race(step, errorOr(removed));
+	co_return result.index() == 0 && !removed.isReady();
+}
+
+Future<Void> retireRecoveredLog(TLogData* self, Reference<LogData> logData) {
+	if (!logData->stopped()) {
+		if (!co_await waitForRetirementStep(logData->stoppedPromise.getFuture(), logData->removed)) {
+			co_return;
+		}
+	}
+	ASSERT(logData->stopped());
+	ASSERT(logData->version.get() < MAX_VERSION);
+	if (!co_await waitForRetirementStep(logData->queueCommittedVersion.whenAtLeast(logData->version.get()),
+	                                    logData->removed)) {
+		co_return;
+	}
+	if (!self->id_data.contains(logData->logId)) {
+		co_return;
+	}
+	while (logData->persistentDataDurableVersion < logData->version.get()) {
+		Future<Void> persistentDataUpdated = logData->persistentDataUpdated.onTrigger();
+		if (logData->persistentDataDurableVersion < logData->version.get()) {
+			if (!co_await waitForRetirementStep(persistentDataUpdated, logData->removed)) {
+				co_return;
+			}
+		}
+		if (!self->id_data.contains(logData->logId)) {
+			co_return;
+		}
+	}
+	ASSERT(logData->persistentDataDurableVersion == logData->version.get());
+
+	Reference<FlowLock> persistentDataCommitLock = self->persistentDataCommitLock;
+	co_await persistentDataCommitLock->take();
+	FlowLock::Releaser commitLockReleaser(*persistentDataCommitLock);
+	if (!self->id_data.contains(logData->logId)) {
+		co_return;
+	}
+	ASSERT(logData->persistentDataVersion == logData->version.get());
+	ASSERT(logData->persistentDataDurableVersion == logData->version.get());
+
+	const Version popTo = logData->version.get() + 1;
+	for (int tagLocality = 0; tagLocality < logData->tag_data.size(); ++tagLocality) {
+		for (int tagId = 0; tagId < logData->tag_data[tagLocality].size(); ++tagId) {
+			Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
+			if (tagData && tagData->popped < popTo) {
+				tagData->popped = popTo;
+				tagData->poppedRecently = true;
+				co_await tagData->eraseMessagesBefore(popTo, self, logData, TaskPriority::UpdateStorage);
+			}
+		}
+	}
+	for (const auto& locality : logData->tag_data) {
+		for (const auto& tagData : locality) {
+			if (tagData) {
+				updatePersistentPopped(self, logData, tagData);
+			}
+		}
+	}
+	double tLogMaxCreateDuration = SERVER_KNOBS->TLOG_MAX_CREATE_DURATION;
+	if (g_network->isSimulated() && logData->logSpillType == TLogSpillType::VALUE) {
+		tLogMaxCreateDuration *= 2;
+	}
+	co_await ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration, "TLogRetireCommit");
+
+	logData->retired = true;
+	advanceRetiredLogQueues(self);
+}
+
+Reference<LogData> getNextRecoveredLogToRetire(TLogData* self) {
+	// updateStorage owns spillOrder removals; changing its front here can skip the following generation.
+	if (!self->spillOrder.empty()) {
+		auto log = self->id_data.find(self->spillOrder.front());
+		if (log != self->id_data.end() && log->second->retirementRequested && !log->second->retirementStarted &&
+		    !log->second->retired) {
+			return log->second;
+		}
+	}
+	for (const auto& entry : self->id_data) {
+		const auto& logData = entry.second;
+		if (logData->retirementRequested && !logData->retirementStarted && !logData->retired &&
+		    logData->persistentDataDurableVersion == logData->version.get()) {
+			return logData;
+		}
+	}
+	return {};
+}
+
+Future<Void> retireRecoveredLogs(TLogData* self) {
+	while (Reference<LogData> logData = getNextRecoveredLogToRetire(self)) {
+		logData->retirementStarted = true;
+		co_await retireRecoveredLog(self, logData);
+	}
+	self->retireRecoveredLogsRunning = false;
+}
+
+void startRetiringRecoveredLogs(TLogData* self) {
+	if (!self->retireRecoveredLogsRunning) {
+		self->retireRecoveredLogsRunning = true;
+		self->sharedActors.send(retireRecoveredLogs(self));
+	}
+}
+
+Future<Void> monitorRetainedOldLogs(TLogData* self) {
+	while (true) {
+		Future<Void> dbInfoChange = self->dbInfo->onChange();
+		const auto& dbInfo = self->dbInfo->get();
+		bool retirementRequested = false;
+		if (dbInfo.recoveryState == RecoveryState::FULLY_RECOVERED) {
+			for (const auto& entry : self->id_data) {
+				const auto& logData = entry.second;
+				bool currentLog = false;
+				for (const auto& logSet : dbInfo.logSystemConfig.tLogs) {
+					if (std::find(logSet.tLogs.begin(), logSet.tLogs.end(), logData->logId) != logSet.tLogs.end()) {
+						currentLog = true;
+						break;
+					}
+				}
+				if (!currentLog && dbInfo.logSystemConfig.hasTLog(logData->logId) && !logData->retirementRequested) {
+					logData->retirementRequested = true;
+					retirementRequested = true;
+				}
+			}
+		}
+		if (retirementRequested) {
+			startRetiringRecoveredLogs(self);
+		}
+		co_await dbInfoChange;
+	}
 }
 
 Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Reference<LogData> logData) {
@@ -1432,8 +1598,13 @@ double getTLogStorageUpdateDelayDuration() {
 // This actor is just a loop that calls updatePersistentData and popDiskQueue whenever
 // (a) there's data to be spilled or (b) we should update metadata after some commits have been fully popped.
 Future<Void> updateStorage(TLogData* self) {
+	bool removedGeneration = false;
 	while (!self->spillOrder.empty() && !self->id_data.contains(self->spillOrder.front())) {
 		self->spillOrder.pop_front();
+		removedGeneration = true;
+	}
+	if (removedGeneration) {
+		startRetiringRecoveredLogs(self);
 	}
 
 	if (self->spillOrder.empty()) {
@@ -1449,7 +1620,7 @@ Future<Void> updateStorage(TLogData* self) {
 	FlowLock::Releaser commitLockReleaser;
 
 	if (logData->stopped()) {
-		if (self->bytesInput - self->bytesDurable >= self->targetVolatileBytes) {
+		if (self->bytesInput - self->bytesDurable >= self->targetVolatileBytes || logData->retirementRequested) {
 			while (logData->persistentDataDurableVersion != logData->version.get()) {
 				totalSize = 0;
 				Map<Version, std::pair<int, int>>::iterator sizeItr = logData->version_sizes.begin();
@@ -1488,6 +1659,9 @@ Future<Void> updateStorage(TLogData* self) {
 
 			if (logData->persistentDataDurableVersion == logData->version.get()) {
 				self->spillOrder.pop_front();
+				if (logData->retirementRequested) {
+					startRetiringRecoveredLogs(self);
+				}
 			}
 			co_await delay(0.0, TaskPriority::UpdateStorage);
 		} else {
@@ -2584,6 +2758,7 @@ Future<Void> doQueueCommit(TLogData* self,
 		CODE_PROBE(true, "A TLog was replaced before having a chance to commit its queue", probe::decoration::rare);
 		it->queueCommittedVersion.set(it->version.get());
 	}
+	advanceRetiredLogQueues(self);
 }
 
 Future<Void> commitQueue(TLogData* self) {
@@ -4168,6 +4343,7 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 
 		self.sharedActors.send(commitQueue(&self));
 		self.sharedActors.send(updateStorageLoop(&self));
+		self.sharedActors.send(monitorRetainedOldLogs(&self));
 		self.sharedActors.send(traceRole(Role::SHARED_TRANSACTION_LOG, tlogId));
 		Future<Void> activeSharedChange = Void();
 

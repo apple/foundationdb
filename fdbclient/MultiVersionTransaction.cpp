@@ -246,12 +246,21 @@ ThreadFuture<int64_t> DLTransaction::getEstimatedRangeSizeBytes(const KeyRangeRe
 }
 
 ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(const KeyRangeRef& range,
-                                                                               int64_t chunkSize) {
+                                                                               int64_t chunkSize,
+                                                                               int limit) {
 	if (!api->transactionGetRangeSplitPoints) {
 		return unsupported_operation();
 	}
-	FdbCApi::FDBFuture* f = api->transactionGetRangeSplitPoints(
-	    tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize);
+	FdbCApi::FDBFuture* f;
+	if (limit < 0) {
+		f = api->transactionGetRangeSplitPoints(
+		    tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize);
+	} else if (api->transactionGetRangeSplitPointsWithLimit) {
+		f = api->transactionGetRangeSplitPointsWithLimit(
+		    tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize, limit);
+	} else {
+		return unsupported_operation();
+	}
 
 	return toThreadFuture<Standalone<VectorRef<KeyRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const FdbCApi::FDBKey* splitKeys;
@@ -872,6 +881,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_transaction_get_range_split_points",
 	                   headerVersion >= 700);
+	loadClientFunction(&api->transactionGetRangeSplitPointsWithLimit,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_range_split_points_with_limit",
+	                   false);
 
 	loadClientFunction(&api->futureGetDouble,
 	                   lib,
@@ -1246,8 +1260,10 @@ ThreadFuture<int64_t> MultiVersionTransaction::getEstimatedRangeSizeBytes(const 
 }
 
 ThreadFuture<Standalone<VectorRef<KeyRef>>> MultiVersionTransaction::getRangeSplitPoints(const KeyRangeRef& range,
-                                                                                         int64_t chunkSize) {
-	return executeOperation(&ITransaction::getRangeSplitPoints, range, std::forward<int64_t>(chunkSize));
+                                                                                         int64_t chunkSize,
+                                                                                         int limit) {
+	return executeOperation(
+	    &ITransaction::getRangeSplitPoints, range, std::forward<int64_t>(chunkSize), std::forward<int>(limit));
 }
 
 void MultiVersionTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {

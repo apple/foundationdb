@@ -96,7 +96,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
 #include "fdbserver/storageserver/StorageServer.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "StorageServerUtils.h"
 #include "flow/CoroUtils.h"
 #include "flow/TDMetric.h"
@@ -1985,16 +1985,6 @@ Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanCo
 	}
 }
 
-// If the latest commit version that mutated the shard(s) being served by the specified storage
-// server is below the client specified read version then do a read at the latest commit version
-// of the storage server.
-Version getRealReadVersion(VersionVector& ssLatestCommitVersions, Tag& tag, Version specifiedReadVersion) {
-	Version realReadVersion =
-	    ssLatestCommitVersions.hasVersion(tag) ? ssLatestCommitVersions.getVersion(tag) : specifiedReadVersion;
-	ASSERT(realReadVersion <= specifiedReadVersion);
-	return realReadVersion;
-}
-
 // Find the latest commit version of the given tag.
 Version getLatestCommitVersion(VersionVector& ssLatestCommitVersions, Tag& tag) {
 	Version commitVersion =
@@ -3496,7 +3486,8 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 			if (req.taskID.present() && req.taskID.get() == TaskPriority::FetchKeys) {
 				data->counters.kvFetchServed += r.data.size();
-				data->counters.kvFetchBytesServed += (totalByteSize + (8 - (int)sizeof(KeyValueRef)) * r.data.size());
+				data->counters.kvFetchBytesServed +=
+				    totalByteSize + (8LL - static_cast<int64_t>(sizeof(KeyValueRef))) * r.data.size();
 			}
 
 			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
@@ -4265,23 +4256,6 @@ Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest r
  * allows overwriting existing data, making it suitable for validation purposes.
  *
  */
-
-// Helper: Issue a GetKeyValues request for a given range and return the future
-static Future<ErrorOr<GetKeyValuesReply>> issueGetKeyValuesRequest(StorageServer* data,
-                                                                   KeyRange range,
-                                                                   Version version,
-                                                                   int limit,
-                                                                   int limitBytes) {
-	GetKeyValuesRequest req;
-	req.begin = firstGreaterOrEqual(range.begin);
-	req.end = firstGreaterOrEqual(range.end);
-	req.limit = limit;
-	req.limitBytes = limitBytes;
-	req.version = version;
-	req.tags = TagSet();
-	data->actors.add(getKeyValuesQ(data, req));
-	return errorOr(req.reply.getFuture());
-}
 
 // Helper: Read both source and restored data for a given range
 //
@@ -6247,20 +6221,6 @@ bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
 	validate(data);
 
 	return nextDurableVersion == desiredDurableVersion;
-}
-
-Optional<MutationRef> clipMutation(MutationRef const& m, KeyRangeRef range) {
-	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-		if (range.contains(m.param1))
-			return m;
-	} else if (m.type == MutationRef::ClearRange) {
-		KeyRangeRef i = range & KeyRangeRef(m.param1, m.param2);
-		if (!i.empty())
-			return MutationRef((MutationRef::Type)m.type, i.begin, i.end);
-	} else {
-		ASSERT(false);
-	}
-	return Optional<MutationRef>();
 }
 
 bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, UpdateEagerReadInfo* eager, Arena& ar) {

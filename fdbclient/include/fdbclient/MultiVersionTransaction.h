@@ -257,6 +257,13 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                             uint8_t const* end_key_name,
 	                                             int end_key_name_length,
 	                                             int64_t chunkSize);
+	FDBFuture* (*transactionGetRangeSplitPointsWithLimit)(FDBTransaction* tr,
+	                                                      uint8_t const* begin_key_name,
+	                                                      int begin_key_name_length,
+	                                                      uint8_t const* end_key_name,
+	                                                      int end_key_name_length,
+	                                                      int64_t chunkSize,
+	                                                      int limit);
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
@@ -357,7 +364,8 @@ public:
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
-	                                                                int64_t chunkSize) override;
+	                                                                int64_t chunkSize,
+	                                                                int limit = -1) override;
 
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 
@@ -528,7 +536,8 @@ public:
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
-	                                                                int64_t chunkSize) override;
+	                                                                int64_t chunkSize,
+	                                                                int limit = -1) override;
 
 	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
 	void set(const KeyRef& key, const ValueRef& value) override;

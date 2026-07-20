@@ -1,5 +1,5 @@
 /*
- * WorkerInterface.actor.h
+ * WorkerInterface.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,11 +19,6 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKERINTERFACE_ACTOR_G_H)
-#define FDBSERVER_WORKERINTERFACE_ACTOR_G_H
-#include "fdbserver/core/WorkerInterface.actor.g.h"
-#elif !defined(FDBSERVER_WORKERINTERFACE_ACTOR_H)
-#define FDBSERVER_WORKERINTERFACE_ACTOR_H
 
 #include "fdbserver/core/BackupInterface.h"
 #include "fdbserver/core/DataDistributorInterface.h"
@@ -43,7 +38,7 @@
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "fdbserver/core/RecoveryState.h"
-#include "flow/actorcompiler.h"
+#include "flow/CoroUtils.h"
 
 struct WorkerInterface {
 	constexpr static FileIdentifier file_identifier = 14712718;
@@ -83,7 +78,7 @@ struct WorkerInterface {
 	NetworkAddressList addresses() const { return tLog.getEndpoint().addresses; }
 	Optional<NetworkAddress> grpcAddress() const { return clientInterface.grpcAddress; }
 
-	WorkerInterface() {}
+	WorkerInterface() = default;
 	explicit(false) WorkerInterface(const LocalityData& locality) : locality(locality) {}
 
 	void initEndpoints() {
@@ -371,7 +366,7 @@ struct RecruitFromConfigurationRequest {
 	int maxOldLogRouters;
 	ReplyPromise<RecruitFromConfigurationReply> reply;
 
-	RecruitFromConfigurationRequest() {}
+	RecruitFromConfigurationRequest() = default;
 	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration,
 	                                         bool recruitSeedServers,
 	                                         int maxOldLogRouters)
@@ -404,7 +399,7 @@ struct RecruitRemoteFromConfigurationRequest {
 	Optional<UID> dbgId;
 	ReplyPromise<RecruitRemoteFromConfigurationReply> reply;
 
-	RecruitRemoteFromConfigurationRequest() {}
+	RecruitRemoteFromConfigurationRequest() = default;
 	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration,
 	                                      Optional<Key> const& dcId,
 	                                      int logRouterCount,
@@ -550,7 +545,7 @@ struct TLogRejoinRequest {
 	TLogInterface myInterface;
 	ReplyPromise<TLogRejoinReply> reply;
 
-	TLogRejoinRequest() {}
+	TLogRejoinRequest() = default;
 	explicit TLogRejoinRequest(const TLogInterface& interf) : myInterface(interf) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -591,7 +586,7 @@ struct GetEncryptionAtRestModeRequest {
 	UID tlogId;
 	ReplyPromise<GetEncryptionAtRestModeResponse> reply;
 
-	GetEncryptionAtRestModeRequest() {}
+	GetEncryptionAtRestModeRequest() = default;
 	explicit(false) GetEncryptionAtRestModeRequest(UID tId) : tlogId(tId) {}
 
 	template <class Ar>
@@ -776,7 +771,7 @@ struct RecruitMasterRequest {
 	}
 };
 
-// Instantiated in worker.actor.cpp
+// Instantiated in worker.cpp
 extern template class RequestStream<RecruitMasterRequest, false>;
 extern template struct NetNotifiedQueue<RecruitMasterRequest, false>;
 
@@ -805,7 +800,7 @@ struct InitializeCommitProxyRequest {
 	}
 };
 
-// Instantiated in worker.actor.cpp
+// Instantiated in worker.cpp
 extern template class RequestStream<InitializeCommitProxyRequest, false>;
 extern template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
 
@@ -822,7 +817,7 @@ struct InitializeGrvProxyRequest {
 	}
 };
 
-// Instantiated in worker.actor.cpp
+// Instantiated in worker.cpp
 extern template class RequestStream<InitializeGrvProxyRequest, false>;
 extern template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
 
@@ -846,7 +841,7 @@ struct InitializeDataDistributorRequest {
 	UID reqId;
 	ReplyPromise<DataDistributorInterface> reply;
 
-	InitializeDataDistributorRequest() {}
+	InitializeDataDistributorRequest() = default;
 	explicit InitializeDataDistributorRequest(UID uid) : reqId(uid) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -859,7 +854,7 @@ struct InitializeRatekeeperRequest {
 	UID reqId;
 	ReplyPromise<RatekeeperInterface> reply;
 
-	InitializeRatekeeperRequest() {}
+	InitializeRatekeeperRequest() = default;
 	explicit InitializeRatekeeperRequest(UID uid) : reqId(uid) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -872,7 +867,7 @@ struct InitializeConsistencyScanRequest {
 	UID reqId;
 	ReplyPromise<ConsistencyScanInterface> reply;
 
-	InitializeConsistencyScanRequest() {}
+	InitializeConsistencyScanRequest() = default;
 	explicit InitializeConsistencyScanRequest(UID uid) : reqId(uid) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1044,7 +1039,7 @@ struct DebugEntryRef {
 	StringRef context;
 	Version version;
 	MutationRef mutation;
-	DebugEntryRef() {}
+	DebugEntryRef() = default;
 	DebugEntryRef(const char* c, Version v, MutationRef const& m)
 	  : time(now()), address(g_network->getLocalAddress()), context((const uint8_t*)c, strlen(c)), version(v),
 	    mutation(m) {}
@@ -1174,42 +1169,44 @@ bool addressInDbAndRemoteDc(
 
 extern bool isSimulatorProcessUnreliable();
 
-ACTOR template <class T>
-Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr) {
+template <class T>
+Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr, ExplicitVoid = {}) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
-	state double orig = now();
-	state std::string trace = platform::get_backtrace();
+	double orig = now();
+	std::string trace = platform::get_backtrace();
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
 		time += std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 	}
 	Future<Void> end = lowPriorityDelay(time);
-	choose {
-		when(T t = wait(what)) {
-			return t;
+	auto res = co_await race(what, end);
+	if (res.index() == 0) {
+		T t = std::get<0>(std::move(res));
+		co_return t;
+	} else if (res.index() == 1) {
+		Error err = io_timeout();
+		if (isSimulatorProcessUnreliable()) {
+			err = err.asInjectedFault();
 		}
-		when(wait(end)) {
-			Error err = io_timeout();
-			if (isSimulatorProcessUnreliable()) {
-				err = err.asInjectedFault();
-			}
-			TraceEvent e(SevError, "IoTimeoutError");
-			e.error(err);
-			if (context != nullptr) {
-				e.detail("Context", context);
-			}
-			e.detail("OrigTime", orig).detail("OrigTrace", trace).log();
-			throw err;
+		TraceEvent e(SevError, "IoTimeoutError");
+		e.error(err);
+		if (context != nullptr) {
+			e.detail("Context", context);
 		}
+		e.detail("OrigTime", orig).detail("OrigTrace", trace).log();
+		throw err;
+	} else {
+		UNREACHABLE();
 	}
 }
 
-ACTOR template <class T>
+template <class T>
 Future<T> ioDegradedOrTimeoutError(Future<T> what,
                                    double errTime,
                                    Reference<AsyncVar<bool>> degraded,
                                    double degradedTime,
-                                   const char* context = nullptr) {
+                                   const char* context = nullptr,
+                                   ExplicitVoid = {}) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
@@ -1220,39 +1217,39 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 
 	if (degradedTime < errTime) {
 		Future<Void> degradedEnd = lowPriorityDelay(degradedTime);
-		choose {
-			when(T t = wait(what)) {
-				return t;
-			}
-			when(wait(degradedEnd)) {
-				CODE_PROBE(true, "TLog degraded", probe::func::deduplicate);
-				TraceEvent(SevWarnAlways, "IoDegraded").log();
-				degraded->set(true);
-			}
+		auto res = co_await race(what, degradedEnd);
+		if (res.index() == 0) {
+			T t = std::get<0>(std::move(res));
+			co_return t;
+		} else if (res.index() == 1) {
+			CODE_PROBE(true, "TLog degraded", probe::func::deduplicate);
+			TraceEvent(SevWarnAlways, "IoDegraded").log();
+			degraded->set(true);
+		} else {
+			UNREACHABLE();
 		}
 	}
 
 	Future<Void> end = lowPriorityDelay(errTime - degradedTime);
-	choose {
-		when(T t = wait(what)) {
-			return t;
+	auto res = co_await race(what, end);
+	if (res.index() == 0) {
+		T t = std::get<0>(std::move(res));
+		co_return t;
+	} else if (res.index() == 1) {
+		Error err = io_timeout();
+		if (isSimulatorProcessUnreliable()) {
+			err = err.asInjectedFault();
 		}
-		when(wait(end)) {
-			Error err = io_timeout();
-			if (isSimulatorProcessUnreliable()) {
-				err = err.asInjectedFault();
-			}
-			TraceEvent e(SevError, "IoTimeoutError");
-			e.error(err);
-			if (context != nullptr) {
-				e.detail("Context", context);
-			}
-			e.log();
-			throw err;
+		TraceEvent e(SevError, "IoTimeoutError");
+		e.error(err);
+		if (context != nullptr) {
+			e.detail("Context", context);
 		}
+		e.log();
+		throw err;
+	} else {
+		UNREACHABLE();
 	}
 }
 
-#include "flow/unactorcompiler.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#endif

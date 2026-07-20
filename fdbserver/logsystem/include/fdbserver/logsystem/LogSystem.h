@@ -41,7 +41,7 @@
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/core/TLogInterface.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/ActorCollection.h"
@@ -338,9 +338,8 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	bool remoteStorageRecovered() const;
 
-	// Checks older TLog generations and remove no longer needed generations from the log system.
+	// Removes no-longer-needed older TLog generations from the outgoing core state.
 	void purgeOldRecoveredGenerationsCoreState(DBCoreState&);
-	void purgeOldRecoveredGenerationsInMemory(const DBCoreState&);
 
 	Future<Void> onCoreStateChanged() const;
 

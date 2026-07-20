@@ -300,14 +300,6 @@ int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t ma
 	return passed;
 }
 
-uint64_t extractHexOption(StringRef value) {
-	char* end;
-	uint64_t id = strtoull(value.toString().c_str(), &end, 16);
-	if (*end)
-		throw invalid_option_value();
-	return id;
-}
-
 void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	int defaultFor = FDBDatabaseOptions::optionInfo.getMustExist(option).defaultFor;
 	if (defaultFor >= 0) {
@@ -3246,7 +3238,8 @@ ACTOR Future<Void> getRangeStreamImpl(Reference<TransactionState> trState,
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
                                                                 KeyRange keys,
-                                                                int64_t chunkSize);
+                                                                int64_t chunkSize,
+                                                                int limit);
 // Streams the requested key range directly from storage servers without fragment-level parallelism.
 ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
                                   PromiseStream<RangeResult> _results,
@@ -5970,51 +5963,126 @@ Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getReadH
 	return ::getReadHotRanges(Database(Reference<DatabaseContext>::addRef(this)), keys);
 }
 
+static int getRangeSplitPointsLocationLimit(int splitPointLimit, int maxLocations, int avoidLocationLimit) {
+	int locationLimit = splitPointLimit >= 0 && splitPointLimit < maxLocations ? splitPointLimit + 1 : maxLocations;
+	if (locationLimit == avoidLocationLimit) {
+		ASSERT(maxLocations > 1);
+		locationLimit += locationLimit < maxLocations ? 1 : -1;
+	}
+	return locationLimit;
+}
+
+class RangeSplitPointsBuilder {
+	Standalone<VectorRef<KeyRef>> results;
+	int remaining;
+
+public:
+	RangeSplitPointsBuilder(KeyRef begin, int limit) : remaining(limit) {
+		results.push_back_deep(results.arena(), begin);
+	}
+
+	int getRemaining() const { return remaining; }
+
+	void appendShardBoundary(KeyRef boundary) {
+		if (results.back() == boundary || remaining == 0) {
+			return;
+		}
+		results.push_back_deep(results.arena(), boundary);
+		if (remaining > 0) {
+			--remaining;
+		}
+	}
+
+	void appendSplitPoints(Standalone<VectorRef<KeyRef>> const& splitPoints) {
+		int splitPointCount = splitPoints.size();
+		if (remaining >= 0) {
+			splitPointCount = std::min(splitPointCount, remaining);
+		}
+		if (splitPointCount == 0) {
+			return;
+		}
+		results.append(results.arena(), splitPoints.begin(), splitPointCount);
+		results.arena().dependsOn(splitPoints.arena());
+		if (remaining > 0) {
+			remaining -= splitPointCount;
+		}
+	}
+
+	Standalone<VectorRef<KeyRef>> finish(KeyRef end) {
+		if (results.back() != end) {
+			results.push_back_deep(results.arena(), end);
+		}
+		return results;
+	}
+};
+
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
                                                                 KeyRange keys,
-                                                                int64_t chunkSize) {
+                                                                int64_t chunkSize,
+                                                                int limit) {
 	state Span span("NAPI:GetRangeSplitPoints"_loc, trState->spanContext);
+	state Key beginKey = keys.begin;
+	state RangeSplitPointsBuilder results(keys.begin, limit);
+	if (limit == 0) {
+		return results.finish(keys.end);
+	}
 
 	loop {
 		state std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(
-		    trState, keys, CLIENT_KNOBS->TOO_MANY, Reverse::False, &StorageServerInterface::getRangeSplitPoints));
+		    trState,
+		    KeyRangeRef(beginKey, keys.end),
+		    getRangeSplitPointsLocationLimit(
+		        results.getRemaining(), CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT),
+		    Reverse::False,
+		    &StorageServerInterface::getRangeSplitPoints));
 		try {
 			state int nLocs = locations.size();
-			state std::vector<Future<SplitRangeReply>> fReplies(nLocs);
-			KeyRef partBegin, partEnd;
-			for (int i = 0; i < nLocs; i++) {
-				partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
-				partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
-				SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize);
-				fReplies[i] = loadBalance(locations[i].locations->locations(),
-				                          &StorageServerInterface::getRangeSplitPoints,
-				                          req,
-				                          TaskPriority::DataDistribution);
-			}
-
-			wait(waitForAll(fReplies));
-			Standalone<VectorRef<KeyRef>> results;
-
-			results.push_back_deep(results.arena(), keys.begin);
-			for (int i = 0; i < nLocs; i++) {
-				if (i > 0) {
-					results.push_back_deep(results.arena(),
-					                       locations[i].range.begin); // Need this shard boundary
+			if (limit >= 0) {
+				state int i = 0;
+				for (; i < nLocs; i++) {
+					if (i > 0 || beginKey != keys.begin) {
+						results.appendShardBoundary(locations[i].range.begin);
+					}
+					if (results.getRemaining() == 0) {
+						break;
+					}
+					KeyRef partBegin = (i == 0) ? beginKey : locations[i].range.begin;
+					KeyRef partEnd = std::min(keys.end, locations[i].range.end);
+					SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize, results.getRemaining());
+					SplitRangeReply reply = wait(loadBalance(locations[i].locations->locations(),
+					                                         &StorageServerInterface::getRangeSplitPoints,
+					                                         req,
+					                                         TaskPriority::DataDistribution));
+					results.appendSplitPoints(reply.splitPoints);
 				}
-				if (fReplies[i].get().splitPoints.size() > 0) {
-					results.append(
-					    results.arena(), fReplies[i].get().splitPoints.begin(), fReplies[i].get().splitPoints.size());
-					results.arena().dependsOn(fReplies[i].get().splitPoints.arena());
+			} else {
+				state std::vector<Future<SplitRangeReply>> fReplies(nLocs);
+				for (int i = 0; i < nLocs; i++) {
+					KeyRef partBegin = (i == 0) ? beginKey : locations[i].range.begin;
+					KeyRef partEnd = std::min(keys.end, locations[i].range.end);
+					SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize, limit);
+					fReplies[i] = loadBalance(locations[i].locations->locations(),
+					                          &StorageServerInterface::getRangeSplitPoints,
+					                          req,
+					                          TaskPriority::DataDistribution);
+				}
+				wait(waitForAll(fReplies));
+				for (int i = 0; i < nLocs; i++) {
+					if (i > 0 || beginKey != keys.begin) {
+						results.appendShardBoundary(locations[i].range.begin);
+					}
+					results.appendSplitPoints(fReplies[i].get().splitPoints);
 				}
 			}
-			if (results.back() != keys.end) {
-				results.push_back_deep(results.arena(), keys.end);
+			if (results.getRemaining() == 0 || keys.end <= locations.back().range.end) {
+				return results.finish(keys.end);
 			}
-
-			return results;
+			beginKey = locations.back().range.end;
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				trState->cx->invalidateCache(keys);
+				beginKey = keys.begin;
+				results = RangeSplitPointsBuilder(keys.begin, limit);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			} else {
 				TraceEvent(SevError, "GetRangeSplitPoints").error(e);
@@ -6024,8 +6092,95 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 	}
 }
 
-Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
-	return ::getRangeSplitPoints(trState, keys, chunkSize);
+Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys,
+                                                                       int64_t chunkSize,
+                                                                       int limit) {
+	return ::getRangeSplitPoints(trState, keys, chunkSize, limit);
+}
+
+TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/locationLimit") {
+	constexpr int maxLocations = 1000;
+	constexpr int dataDistributionLocationLimit = 100;
+
+	ASSERT(getRangeSplitPointsLocationLimit(-1, maxLocations, dataDistributionLocationLimit) == maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(0, maxLocations, dataDistributionLocationLimit) == 1);
+	ASSERT(getRangeSplitPointsLocationLimit(16, maxLocations, dataDistributionLocationLimit) == 17);
+	ASSERT(getRangeSplitPointsLocationLimit(99, maxLocations, dataDistributionLocationLimit) == 101);
+	ASSERT(getRangeSplitPointsLocationLimit(9, maxLocations, 10) == 11);
+	ASSERT(getRangeSplitPointsLocationLimit(maxLocations - 1, maxLocations, dataDistributionLocationLimit) ==
+	       maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(maxLocations, maxLocations, dataDistributionLocationLimit) == maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(
+	           std::numeric_limits<int>::max(), maxLocations, dataDistributionLocationLimit) == maxLocations);
+	ASSERT(getRangeSplitPointsLocationLimit(maxLocations, maxLocations, maxLocations) == maxLocations - 1);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/rangeSplitPoints/multipleShards") {
+	Standalone<VectorRef<KeyRef>> firstShard;
+	firstShard.push_back_deep(firstShard.arena(), "A1"_sr);
+	firstShard.push_back_deep(firstShard.arena(), "A2"_sr);
+	Standalone<VectorRef<KeyRef>> secondShard;
+	secondShard.push_back_deep(secondShard.arena(), "B1"_sr);
+	secondShard.push_back_deep(secondShard.arena(), "B2"_sr);
+	Standalone<VectorRef<KeyRef>> firstShardEndingAtBoundary;
+	firstShardEndingAtBoundary.push_back_deep(firstShardEndingAtBoundary.arena(), "B"_sr);
+
+	RangeSplitPointsBuilder zero("A"_sr, 0);
+	zero.appendSplitPoints(firstShard);
+	zero.appendShardBoundary("B"_sr);
+	Standalone<VectorRef<KeyRef>> zeroResults = zero.finish("Z"_sr);
+	ASSERT(zeroResults.size() == 2 && zeroResults[0] == "A"_sr && zeroResults[1] == "Z"_sr);
+
+	RangeSplitPointsBuilder one("A"_sr, 1);
+	one.appendSplitPoints(firstShard);
+	ASSERT(one.getRemaining() == 0);
+	one.appendShardBoundary("B"_sr);
+	Standalone<VectorRef<KeyRef>> oneResults = one.finish("Z"_sr);
+	ASSERT(oneResults.size() == 3 && oneResults[1] == "A1"_sr && oneResults[2] == "Z"_sr);
+
+	RangeSplitPointsBuilder two("A"_sr, 2);
+	two.appendShardBoundary("B"_sr);
+	ASSERT(two.getRemaining() == 1);
+	two.appendSplitPoints(secondShard);
+	ASSERT(two.getRemaining() == 0);
+	two.appendShardBoundary("C"_sr);
+	Standalone<VectorRef<KeyRef>> twoResults = two.finish("Z"_sr);
+	ASSERT(twoResults.size() == 4 && twoResults[1] == "B"_sr && twoResults[2] == "B1"_sr && twoResults[3] == "Z"_sr);
+
+	RangeSplitPointsBuilder four("A"_sr, 4);
+	four.appendSplitPoints(firstShard);
+	ASSERT(four.getRemaining() == 2);
+	four.appendShardBoundary("B"_sr);
+	ASSERT(four.getRemaining() == 1);
+	four.appendSplitPoints(secondShard);
+	ASSERT(four.getRemaining() == 0);
+	Standalone<VectorRef<KeyRef>> fourResults = four.finish("Z"_sr);
+	ASSERT(fourResults.size() == 6 && fourResults[1] == "A1"_sr && fourResults[2] == "A2"_sr &&
+	       fourResults[3] == "B"_sr && fourResults[4] == "B1"_sr && fourResults[5] == "Z"_sr);
+
+	RangeSplitPointsBuilder duplicateBoundary("A"_sr, 2);
+	duplicateBoundary.appendSplitPoints(firstShardEndingAtBoundary);
+	ASSERT(duplicateBoundary.getRemaining() == 1);
+	duplicateBoundary.appendShardBoundary("B"_sr);
+	ASSERT(duplicateBoundary.getRemaining() == 1);
+	duplicateBoundary.appendSplitPoints(secondShard);
+	Standalone<VectorRef<KeyRef>> duplicateBoundaryResults = duplicateBoundary.finish("Z"_sr);
+	ASSERT(duplicateBoundaryResults.size() == 4 && duplicateBoundaryResults[1] == "B"_sr &&
+	       duplicateBoundaryResults[2] == "B1"_sr && duplicateBoundaryResults[3] == "Z"_sr);
+
+	RangeSplitPointsBuilder unlimited("A"_sr, -1);
+	unlimited.appendSplitPoints(firstShard);
+	unlimited.appendShardBoundary("B"_sr);
+	unlimited.appendSplitPoints(secondShard);
+	unlimited.appendShardBoundary("C"_sr);
+	Standalone<VectorRef<KeyRef>> unlimitedResults = unlimited.finish("Z"_sr);
+	ASSERT(unlimitedResults.size() == 8 && unlimitedResults[1] == "A1"_sr && unlimitedResults[2] == "A2"_sr &&
+	       unlimitedResults[3] == "B"_sr && unlimitedResults[4] == "B1"_sr && unlimitedResults[5] == "B2"_sr &&
+	       unlimitedResults[6] == "C"_sr && unlimitedResults[7] == "Z"_sr);
+
+	return Void();
 }
 
 Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
