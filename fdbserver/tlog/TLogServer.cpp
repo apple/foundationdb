@@ -36,7 +36,7 @@
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/tlog/TLogServer.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/sim_validation.h"

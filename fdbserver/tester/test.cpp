@@ -41,7 +41,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "KnobProtectiveGroups.h"
 #include "ConsistencyChecker.h"

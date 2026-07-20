@@ -392,6 +392,103 @@ ThreadFuture<VersionVector> DLTransaction::getVersionVector() {
 	return VersionVector(); // not implemented
 }
 
+namespace {
+
+NativeCdcStreamInfo copyNativeCdcStreamInfo(FdbCApi::FDBNativeCdcStreamInfo const& source) {
+	NativeCdcStreamInfo result;
+	result.name = Key(StringRef(source.name.key, source.name.keyLength));
+	result.streamId = source.streamId;
+	result.keys = KeyRange(
+	    KeyRangeRef(KeyRef(static_cast<const uint8_t*>(source.keyRange.beginKey), source.keyRange.beginKeyLength),
+	                KeyRef(static_cast<const uint8_t*>(source.keyRange.endKey), source.keyRange.endKeyLength)));
+	result.minVersion = source.minVersion;
+	return result;
+}
+
+NativeCdcConsumeResult copyNativeCdcConsumeResult(FdbCApi::FDBNativeCdcVersionedMutations const* source,
+                                                  int count,
+                                                  Version lastConsumedVersion) {
+	NativeCdcConsumeResult result;
+	result.cursor.lastConsumedVersion = lastConsumedVersion;
+	result.mutations.reserve(count);
+	for (int i = 0; i < count; ++i) {
+		NativeCdcVersionedMutations versioned;
+		versioned.version = source[i].version;
+		versioned.mutations.reserve(source[i].mutationCount);
+		for (int j = 0; j < source[i].mutationCount; ++j) {
+			auto const& sourceMutation = source[i].mutations[j];
+			NativeCdcMutation mutation;
+			mutation.type = sourceMutation.type;
+			mutation.param1 = Key(StringRef(sourceMutation.param1, sourceMutation.param1Length));
+			mutation.param2 = Value(StringRef(sourceMutation.param2, sourceMutation.param2Length));
+			versioned.mutations.push_back(std::move(mutation));
+		}
+		result.mutations.push_back(std::move(versioned));
+	}
+	return result;
+}
+
+class DLNativeCdcConsumer final : public INativeCdcConsumer, ThreadSafeReferenceCounted<DLNativeCdcConsumer> {
+public:
+	DLNativeCdcConsumer(Reference<FdbCApi> api, FdbCApi::FDBNativeCdcConsumer* consumer)
+	  : api(api), consumer(consumer) {}
+
+	~DLNativeCdcConsumer() override {
+		if (consumer && api->nativeCdcConsumerDestroy) {
+			api->nativeCdcConsumerDestroy(consumer);
+		}
+	}
+
+	ThreadFuture<NativeCdcConsumeResult> consume() override {
+		if (!api->nativeCdcConsumerConsume || !api->futureGetNativeCdcVersionedMutations) {
+			return unsupported_operation();
+		}
+		FdbCApi::FDBFuture* f = api->nativeCdcConsumerConsume(consumer);
+		auto self = Reference<DLNativeCdcConsumer>::addRef(this);
+		return toThreadFuture<NativeCdcConsumeResult>(api, f, [self](FdbCApi::FDBFuture* f, FdbCApi* api) {
+			FdbCApi::FDBNativeCdcVersionedMutations const* mutations;
+			int count;
+			int64_t lastConsumedVersion;
+			FdbCApi::fdb_error_t error =
+			    api->futureGetNativeCdcVersionedMutations(f, &mutations, &count, &lastConsumedVersion);
+			ASSERT(!error);
+			NativeCdcConsumeResult result = copyNativeCdcConsumeResult(mutations, count, lastConsumedVersion);
+			result.cursor.streamId = self->getPosition().streamId;
+			return result;
+		});
+	}
+
+	ThreadFuture<Void> acknowledge() override {
+		if (!api->nativeCdcConsumerAcknowledge) {
+			return unsupported_operation();
+		}
+		FdbCApi::FDBFuture* f = api->nativeCdcConsumerAcknowledge(consumer);
+		auto self = Reference<DLNativeCdcConsumer>::addRef(this);
+		return toThreadFuture<Void>(api, f, [self](FdbCApi::FDBFuture*, FdbCApi*) {
+			(void)self;
+			return Void();
+		});
+	}
+
+	NativeCdcCursor getPosition() override {
+		if (!api->nativeCdcConsumerGetPosition) {
+			throw unsupported_operation();
+		}
+		NativeCdcCursor position;
+		throwIfError(api->nativeCdcConsumerGetPosition(consumer, &position.streamId, &position.lastConsumedVersion));
+		return position;
+	}
+
+	void addref() override { ThreadSafeReferenceCounted<DLNativeCdcConsumer>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<DLNativeCdcConsumer>::delref(); }
+
+private:
+	const Reference<FdbCApi> api;
+	FdbCApi::FDBNativeCdcConsumer* const consumer;
+};
+
+} // namespace
+
 // DLDatabase
 DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
 	addref();
@@ -455,6 +552,80 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	FdbCApi::FDBFuture* f =
 	    api->databaseCreateSnapshot(db, uid.begin(), uid.size(), snapshot_command.begin(), snapshot_command.size());
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+}
+
+ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
+	if (!api->databaseRegisterNativeCdcStream) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseRegisterNativeCdcStream(
+	    db, name.begin(), name.size(), keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
+	return toThreadFuture<CDCStreamId>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		uint64_t streamId;
+		FdbCApi::fdb_error_t error = api->futureGetUInt64(f, &streamId);
+		ASSERT(!error);
+		return streamId;
+	});
+}
+
+ThreadFuture<Void> DLDatabase::removeNativeCdcStream(const KeyRef& name) {
+	if (!api->databaseRemoveNativeCdcStream) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseRemoveNativeCdcStream(db, name.begin(), name.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture*, FdbCApi*) { return Void(); });
+}
+
+ThreadFuture<std::vector<NativeCdcStreamInfo>> DLDatabase::listNativeCdcStreams() {
+	if (!api->databaseListNativeCdcStreams || !api->futureGetNativeCdcStreamInfoArray) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseListNativeCdcStreams(db);
+	return toThreadFuture<std::vector<NativeCdcStreamInfo>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		FdbCApi::FDBNativeCdcStreamInfo const* streams;
+		int count;
+		FdbCApi::fdb_error_t error = api->futureGetNativeCdcStreamInfoArray(f, &streams, &count);
+		ASSERT(!error);
+		std::vector<NativeCdcStreamInfo> result;
+		result.reserve(count);
+		for (int i = 0; i < count; ++i) {
+			result.push_back(copyNativeCdcStreamInfo(streams[i]));
+		}
+		return result;
+	});
+}
+
+ThreadFuture<Reference<INativeCdcConsumer>> DLDatabase::createNativeCdcConsumer(const KeyRef& name) {
+	if (!api->databaseCreateNativeCdcConsumer || !api->futureGetNativeCdcConsumer) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseCreateNativeCdcConsumer(db, name.begin(), name.size());
+	return toThreadFuture<Reference<INativeCdcConsumer>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		FdbCApi::FDBNativeCdcConsumer* consumer;
+		FdbCApi::fdb_error_t error = api->futureGetNativeCdcConsumer(f, &consumer);
+		ASSERT(!error);
+		return Reference<INativeCdcConsumer>(
+		    makeReference<DLNativeCdcConsumer>(Reference<FdbCApi>::addRef(api), consumer));
+	});
+}
+
+ThreadFuture<Reference<INativeCdcConsumer>> DLDatabase::resumeNativeCdcConsumer(const NativeCdcCursor& cursor) {
+	if (!api->databaseResumeNativeCdcConsumer || !api->futureGetNativeCdcConsumer) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseResumeNativeCdcConsumer(db, cursor.streamId, cursor.lastConsumedVersion);
+	return toThreadFuture<Reference<INativeCdcConsumer>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		FdbCApi::FDBNativeCdcConsumer* consumer;
+		FdbCApi::fdb_error_t error = api->futureGetNativeCdcConsumer(f, &consumer);
+		ASSERT(!error);
+		return Reference<INativeCdcConsumer>(
+		    makeReference<DLNativeCdcConsumer>(Reference<FdbCApi>::addRef(api), consumer));
+	});
 }
 
 ThreadFuture<DatabaseSharedState*> DLDatabase::createSharedState() {
@@ -605,6 +776,51 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_get_client_status",
 	                   headerVersion >= ApiVersion::withGetClientStatus().version());
+	loadClientFunction(&api->databaseRegisterNativeCdcStream,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_register_cdc_stream",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(&api->databaseRemoveNativeCdcStream,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_remove_cdc_stream",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(&api->databaseListNativeCdcStreams,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_list_cdc_streams",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(&api->databaseCreateNativeCdcConsumer,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_create_cdc_consumer",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(&api->databaseResumeNativeCdcConsumer,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_resume_cdc_consumer",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(&api->nativeCdcConsumerDestroy,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_cdc_consumer_destroy",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(&api->nativeCdcConsumerConsume,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_cdc_consumer_consume",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(&api->nativeCdcConsumerAcknowledge,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_cdc_consumer_acknowledge",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(&api->nativeCdcConsumerGetPosition,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_cdc_consumer_get_position",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
 	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy", headerVersion >= 0);
@@ -698,6 +914,21 @@ void DLApi::init() {
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
 	loadClientFunction(
 	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 710);
+	loadClientFunction(&api->futureGetNativeCdcStreamInfoArray,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_future_get_cdc_stream_info_array",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(&api->futureGetNativeCdcConsumer,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_future_get_cdc_consumer",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(&api->futureGetNativeCdcVersionedMutations,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_future_get_cdc_versioned_mutations",
+	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
@@ -1446,6 +1677,27 @@ ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringR
 
 ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
 	return executeOperation(&IDatabase::createSnapshot, uid, snapshot_command);
+}
+
+ThreadFuture<CDCStreamId> MultiVersionDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
+	return executeOperation(&IDatabase::registerNativeCdcStream, name, keys);
+}
+
+ThreadFuture<Void> MultiVersionDatabase::removeNativeCdcStream(const KeyRef& name) {
+	return executeOperation(&IDatabase::removeNativeCdcStream, name);
+}
+
+ThreadFuture<std::vector<NativeCdcStreamInfo>> MultiVersionDatabase::listNativeCdcStreams() {
+	return executeOperation(&IDatabase::listNativeCdcStreams);
+}
+
+ThreadFuture<Reference<INativeCdcConsumer>> MultiVersionDatabase::createNativeCdcConsumer(const KeyRef& name) {
+	return executeOperation(&IDatabase::createNativeCdcConsumer, name);
+}
+
+ThreadFuture<Reference<INativeCdcConsumer>> MultiVersionDatabase::resumeNativeCdcConsumer(
+    const NativeCdcCursor& cursor) {
+	return executeOperation(&IDatabase::resumeNativeCdcConsumer, cursor);
 }
 
 ThreadFuture<DatabaseSharedState*> MultiVersionDatabase::createSharedState() {

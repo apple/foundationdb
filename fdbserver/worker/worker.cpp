@@ -60,7 +60,7 @@
 #include "fdbserver/logrouter/LogRouter.h"
 #include "fdbserver/core/BackupInterface.h"
 #include "RoleLineage.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/worker/Worker.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"

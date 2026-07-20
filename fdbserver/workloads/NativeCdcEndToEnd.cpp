@@ -69,6 +69,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	int rounds;
 	int assignmentPublicationChecks;
 	bool testProxyReplacement;
+	bool injectUndeliveredProxyHalt;
 	bool testMemoryBound;
 	bool testReplyChunking;
 	bool testOversizedPeek;
@@ -436,6 +437,31 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
+	Future<Void> haltProxyUntilReplaced(Database cx, CDCProxyInterface proxy, bool dropFirstAttempt) {
+		while (true) {
+			{
+				const auto& proxies = cx->clientInfo->get().cdcProxies;
+				if (std::find(proxies.begin(), proxies.end(), proxy) == proxies.end()) {
+					co_return;
+				}
+			}
+
+			// The focused scenario can drop one halt before delivery and immediately retry its published proxy.
+			const bool droppedAttempt = std::exchange(dropFirstAttempt, false);
+			ErrorOr<Void> halted = request_maybe_delivered();
+			if (!droppedAttempt) {
+				halted = co_await proxy.haltForTesting.tryGetReply(HaltCDCProxyRequest());
+			}
+			if (halted.present()) {
+				co_return;
+			}
+			CODE_PROBE(true, "Native CDC retries an undelivered proxy halt");
+			if (!droppedAttempt) {
+				co_await delay(0.1);
+			}
+		}
+	}
+
 	Future<Void> validateProxyReplacement(Database cx) {
 		const Key name = "native-cdc-e2e/proxy-replacement"_sr;
 		const KeyRange keys(
@@ -455,8 +481,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 		std::vector<Future<Void>> halts;
 		halts.reserve(originalProxies.size());
+		bool dropFirstHalt = injectUndeliveredProxyHalt;
 		for (const auto& proxy : originalProxies) {
-			halts.push_back(proxy.haltForTesting.getReply(HaltCDCProxyRequest()));
+			halts.push_back(haltProxyUntilReplaced(cx, proxy, std::exchange(dropFirstHalt, false)));
 		}
 		co_await timeoutError(waitForAll(halts), operationTimeout);
 		co_await timeoutError(publications, operationTimeout);
@@ -1380,6 +1407,7 @@ public:
 		rounds = getOption(options, "rounds"_sr, 30);
 		assignmentPublicationChecks = getOption(options, "assignmentPublicationChecks"_sr, 0);
 		testProxyReplacement = getOption(options, "testProxyReplacement"_sr, false);
+		injectUndeliveredProxyHalt = getOption(options, "injectUndeliveredProxyHalt"_sr, false);
 		testMemoryBound = getOption(options, "testMemoryBound"_sr, false);
 		testReplyChunking = getOption(options, "testReplyChunking"_sr, false);
 		testOversizedPeek = getOption(options, "testOversizedPeek"_sr, false);
@@ -1401,6 +1429,7 @@ public:
 		ASSERT_GE(writesPerRound, 1);
 		ASSERT_LE(writesPerRound, keyCount);
 		ASSERT_GE(assignmentPublicationChecks, 0);
+		ASSERT(!injectUndeliveredProxyHalt || testProxyReplacement);
 		ASSERT_GT(memoryTestValueBytes, 0);
 		ASSERT_GE(retentionValidationDelay, 0.0);
 		ASSERT(!(prepareRestartDrain && drainAfterRestart));

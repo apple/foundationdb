@@ -30,7 +30,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/tlog/TLogServer.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/IRandom.h"

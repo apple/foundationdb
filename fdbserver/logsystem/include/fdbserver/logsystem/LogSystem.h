@@ -41,7 +41,7 @@
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/core/TLogInterface.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/ActorCollection.h"
