@@ -31,3 +31,4 @@ testTitle = 'GcGenerations'
     [[test.workload]]
     testName = 'GcGenerations'
     testDuration = 1000.0
+    forceCloggedDcMasterRetry = true
