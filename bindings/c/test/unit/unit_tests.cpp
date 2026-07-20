@@ -1023,9 +1023,9 @@ TEST_CASE("tuple_support_versionstamp") {
 	ASSERT(t.getVersionstamp(2) == vs);
 
 	// verify the round-way pack-unpack path for a Tuple containing a versionstamp
-	StringRef result1 = t.pack();
+	Standalone<StringRef> result1 = t.pack();
 	Tuple t2 = Tuple::unpack(result1);
-	StringRef result2 = t2.pack();
+	Standalone<StringRef> result2 = t2.pack();
 	ASSERT(t2.getVersionstamp(2) == vs);
 	ASSERT(result1.toString() == result2.toString());
 }
