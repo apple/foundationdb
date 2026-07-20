@@ -42,9 +42,10 @@ public:
 	// large, so we see the problem in the logs with time to act before a manifest actually becomes too large
 	// to handle.
 	static void traceManifestSize(const std::string& fileName, int64_t bytes) {
-		if (bytes >= 750 * 1024 * 1024) {
+		constexpr int64_t MB = 1048576; // 1024 * 1024
+		if (bytes >= 750 * MB) {
 			TraceEvent(SevError, "BackupSnapshotManifestTooLarge").detail("FileName", fileName).detail("Bytes", bytes);
-		} else if (bytes >= 500 * 1024 * 1024) {
+		} else if (bytes >= 500 * MB) {
 			TraceEvent(SevWarnAlways, "BackupSnapshotManifestLarge")
 			    .detail("FileName", fileName)
 			    .detail("Bytes", bytes);
