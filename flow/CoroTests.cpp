@@ -2878,6 +2878,8 @@ TEST_CASE("/flow/coro/raceSuccess") {
 	auto result = co_await raced;
 	ASSERT_EQ(result.index(), 1);
 	ASSERT_EQ(std::get<1>(result), "winner");
+	ASSERT_EQ(intPromise.getFutureReferenceCount(), 0);
+	ASSERT_EQ(stringPromise.getFutureReferenceCount(), 0);
 	co_return;
 }
 
@@ -2903,6 +2905,8 @@ TEST_CASE("/flow/coro/raceError") {
 	} catch (Error const& e) {
 		ASSERT_EQ(e.code(), error_code_io_error);
 	}
+	ASSERT_EQ(intPromise.getFutureReferenceCount(), 0);
+	ASSERT_EQ(stringPromise.getFutureReferenceCount(), 0);
 	co_return;
 }
 
@@ -2914,6 +2918,8 @@ TEST_CASE("/flow/coro/raceCancel") {
 	ASSERT(raced.isReady());
 	ASSERT(raced.isError());
 	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
+	ASSERT_EQ(intPromise.getFutureReferenceCount(), 0);
+	ASSERT_EQ(stringPromise.getFutureReferenceCount(), 0);
 	intPromise.send(1);
 	stringPromise.send("late");
 	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);

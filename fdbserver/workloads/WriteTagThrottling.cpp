@@ -21,7 +21,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "BulkSetup.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TagThrottle.h"
 

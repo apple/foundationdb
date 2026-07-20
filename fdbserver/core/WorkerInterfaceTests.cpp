@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 
 #include "flow/ObjectSerializer.h"
 #include "flow/UnitTest.h"

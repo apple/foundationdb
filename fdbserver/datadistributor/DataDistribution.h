@@ -126,6 +126,16 @@ struct RelocateShard {
 
 	UID traceId; // track the lifetime of this relocate shard
 
+	struct RetryRelocationIntent {
+		int boundaryPriority;
+		int healthPriority;
+		bool wantsNewServers;
+	};
+
+	// Retry-only overrides used when an in-flight relocation must be recreated without carrying
+	// attempt-specific state. Queue coalescing can update these independently of moveReason.
+	Optional<RetryRelocationIntent> retryIntent;
+
 	// Initialization when define is a better practice. We should avoid assignment of member after definition.
 	// static RelocateShard emptyRelocateShard() { return {}; }
 
