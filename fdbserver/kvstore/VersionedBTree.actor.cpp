@@ -30,7 +30,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "VersionedBTreeDebug.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/CoroUtils.h"
 #include "flow/Error.h"
