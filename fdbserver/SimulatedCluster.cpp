@@ -39,7 +39,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/core/FDBSimulatorProcessInfo.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/worker/Worker.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/core/Knobs.h"

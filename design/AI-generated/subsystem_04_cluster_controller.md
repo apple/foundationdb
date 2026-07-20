@@ -294,7 +294,7 @@ struct ServerDBInfo {
 
 ---
 
-## WorkerInterface -- [`WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h)`:45-126`
+## WorkerInterface -- [`WorkerInterface.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.h)`:45-126`
 
 RPCs exposed by every worker process:
 
@@ -315,5 +315,5 @@ RPCs exposed by every worker process:
 | [`fdbserver/coordinator/Coordination.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.cpp) | leaderRegister, generation register, coordination |
 | [`fdbserver/core/LeaderElection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.cpp) | tryBecomeLeaderInternal, candidacy, heartbeat |
 | [`fdbserver/core/CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp) | Replicated read/write over generation registers |
-| [`fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h) | WorkerInterface, ClusterControllerFullInterface |
+| [`fdbserver/core/include/fdbserver/core/WorkerInterface.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.h) | WorkerInterface, ClusterControllerFullInterface |
 | `fdbserver/core/include/fdbserver/core/ServerDBInfo.h` | ServerDBInfo structure and broadcasting |
