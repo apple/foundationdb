@@ -32,7 +32,7 @@
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/core/TLogInterface.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/Histogram.h"
 
 struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {

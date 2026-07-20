@@ -96,7 +96,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
 #include "fdbserver/storageserver/StorageServer.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "StorageServerUtils.h"
 #include "flow/CoroUtils.h"
 #include "flow/TDMetric.h"
@@ -1983,16 +1983,6 @@ Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanCo
 		}
 		throw future_version();
 	}
-}
-
-// If the latest commit version that mutated the shard(s) being served by the specified storage
-// server is below the client specified read version then do a read at the latest commit version
-// of the storage server.
-Version getRealReadVersion(VersionVector& ssLatestCommitVersions, Tag& tag, Version specifiedReadVersion) {
-	Version realReadVersion =
-	    ssLatestCommitVersions.hasVersion(tag) ? ssLatestCommitVersions.getVersion(tag) : specifiedReadVersion;
-	ASSERT(realReadVersion <= specifiedReadVersion);
-	return realReadVersion;
 }
 
 // Find the latest commit version of the given tag.
@@ -4267,23 +4257,6 @@ Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest r
  *
  */
 
-// Helper: Issue a GetKeyValues request for a given range and return the future
-static Future<ErrorOr<GetKeyValuesReply>> issueGetKeyValuesRequest(StorageServer* data,
-                                                                   KeyRange range,
-                                                                   Version version,
-                                                                   int limit,
-                                                                   int limitBytes) {
-	GetKeyValuesRequest req;
-	req.begin = firstGreaterOrEqual(range.begin);
-	req.end = firstGreaterOrEqual(range.end);
-	req.limit = limit;
-	req.limitBytes = limitBytes;
-	req.version = version;
-	req.tags = TagSet();
-	data->actors.add(getKeyValuesQ(data, req));
-	return errorOr(req.reply.getFuture());
-}
-
 // Helper: Read both source and restored data for a given range
 //
 // Restored data is stored at validateRestoreLogKeys (\xff\x02/rlog/) in system key space.
@@ -6248,20 +6221,6 @@ bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
 	validate(data);
 
 	return nextDurableVersion == desiredDurableVersion;
-}
-
-Optional<MutationRef> clipMutation(MutationRef const& m, KeyRangeRef range) {
-	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-		if (range.contains(m.param1))
-			return m;
-	} else if (m.type == MutationRef::ClearRange) {
-		KeyRangeRef i = range & KeyRangeRef(m.param1, m.param2);
-		if (!i.empty())
-			return MutationRef((MutationRef::Type)m.type, i.begin, i.end);
-	} else {
-		ASSERT(false);
-	}
-	return Optional<MutationRef>();
 }
 
 bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, UpdateEagerReadInfo* eager, Arena& ar) {

@@ -1457,7 +1457,7 @@ Serializes all endpoints directly: `waitFailure`, `getRateInfo`, `haltRatekeeper
 
 ## 13. Worker Protocol
 
-**Source:** `fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h`
+**Source:** `fdbserver/core/include/fdbserver/core/WorkerInterface.h`
 
 Workers host server roles. The cluster controller sends initialization requests.
 
@@ -1542,9 +1542,6 @@ All follow the pattern: fields describing the role configuration + `ReplyPromise
 
 ### NetworkTestRequest
 `Key key`, `uint32_t replySize`, `reply` → **NetworkTestReply** {`Value value`}.
-
-### NetworkTestStreamingRequest
-`reply` (stream) → **NetworkTestStreamingReply** {`Optional<UID> acknowledgeToken`, `uint16_t sequence`, `int index`}.
 
 ---
 

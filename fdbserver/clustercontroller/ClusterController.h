@@ -32,7 +32,7 @@
 #include "RatekeeperMonitor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ProcessClassRecruitment.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbrpc/Locality.h"
 #include "flow/CoroUtils.h"
 #include "flow/NetworkAddress.h"
