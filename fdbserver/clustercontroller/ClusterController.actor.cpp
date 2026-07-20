@@ -124,6 +124,8 @@ ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface cons
 	serverInfo.masterLifetime.ccID = id;
 	serverInfo.clusterInterface = ccInterface;
 	serverInfo.myLocality = locality;
+	serverInfo.client.nativeCdcEnabled = CLIENT_KNOBS->ENABLE_NATIVE_CDC;
+	serverInfo.client.nativeCdcTagCount = CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT;
 	db.serverInfo->set(serverInfo);
 	cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 
