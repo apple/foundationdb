@@ -595,7 +595,10 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "primary_dc_missing",
                   "fetch_primary_dc_timeout",
                   "fetch_storage_wiggler_stats_timeout",
-                  "fetch_consistency_scan_info_timeout"
+                  "fetch_consistency_scan_info_timeout",
+                  "fetch_coordinator_addresses",
+                  "fetch_blob_granule_status_timed_out",
+                  "fetch_blob_restore_status_timed_out"
                ]
             },
             "issues":[

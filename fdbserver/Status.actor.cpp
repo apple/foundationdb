@@ -2505,7 +2505,7 @@ ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std
 		}
 
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
+		if (e.code() == error_code_actor_cancelled || e.code() == error_code_timed_out)
 			throw;
 		incompleteReason->insert("Unable to query blob restore status");
 	}
@@ -2519,6 +2519,9 @@ static Optional<T> statusFetcherResultOrMessage(ErrorOr<T> result,
                                                 const char* messageDescription) {
 	if (result.present()) {
 		return Optional<T>(std::move(result.get()));
+	}
+	if (result.getError().code() != error_code_timed_out) {
+		throw result.getError();
 	}
 
 	messages->push_back(JsonString::makeMessage(messageName, messageDescription));
@@ -3518,6 +3521,9 @@ ACTOR static Future<Void> clusterGetStatusImpl(JsonBuilderObject* pStatusObj,
 
 			ErrorOr<JsonBuilderObject> blobRestoreResult =
 			    wait(errorOr(timeoutError(blobRestoreStatusFetcher(cx, &status_incomplete_reasons), 2.0)));
+			if (blobRestoreResult.isError()) {
+				status_incomplete_reasons.insert("Unable to query blob restore status");
+			}
 			Optional<JsonBuilderObject> blobRestoreStatus =
 			    statusFetcherResultOrMessage(std::move(blobRestoreResult),
 			                                 &messages,
@@ -4011,7 +4017,7 @@ TEST_CASE("/status/json/merging") {
 }
 
 TEST_CASE("/fdbserver/clustercontroller/statusFetcherTimeoutIsolation") {
-	JsonBuilderArray messages;
+	state JsonBuilderArray messages;
 
 	Optional<std::vector<NetworkAddress>> coordinatorAddresses =
 	    statusFetcherResultOrMessage(ErrorOr<std::vector<NetworkAddress>>(timed_out()),
@@ -4052,6 +4058,53 @@ TEST_CASE("/fdbserver/clustercontroller/statusFetcherTimeoutIsolation") {
 	ASSERT_EQ(successfulAddresses.get(), expectedAddresses);
 	ASSERT_EQ(messages.size(), 3);
 
+	state bool nonTimeoutErrorRethrown = false;
+	try {
+		statusFetcherResultOrMessage(ErrorOr<JsonBuilderObject>(operation_failed()),
+		                             &messages,
+		                             "fetch_blob_restore_status_timed_out",
+		                             "Fetch BlobRestore status timed out.");
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_operation_failed);
+		nonTimeoutErrorRethrown = true;
+	}
+	ASSERT(nonTimeoutErrorRethrown);
+	ASSERT_EQ(messages.size(), 3);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/blobRestoreTimeoutIsolation") {
+	NetworkAddress proxyAddr(IPAddress(0x07070707), 1);
+	UID testUID(1, 2);
+
+	ServerDBInfo testDbInfo;
+	GrvProxyInterface proxyInterf;
+	proxyInterf.getConsistentReadVersion =
+	    PublicRequestStream<struct GetReadVersionRequest>(Endpoint({ proxyAddr }, testUID));
+	testDbInfo.client.grvProxies.push_back(proxyInterf);
+	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+
+	state Reference<AsyncVar<ServerDBInfo>> db = makeReference<AsyncVar<ServerDBInfo>>(testDbInfo);
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
+	state std::set<std::string> incompleteReasons;
+	state JsonBuilderArray messages;
+
+	ErrorOr<JsonBuilderObject> result =
+	    wait(errorOr(timeoutError(blobRestoreStatusFetcher(cx, &incompleteReasons), 2.0)));
+	if (result.isError()) {
+		incompleteReasons.insert("Unable to query blob restore status");
+	}
+	Optional<JsonBuilderObject> status = statusFetcherResultOrMessage(std::move(result),
+	                                                                &messages,
+	                                                                "fetch_blob_restore_status_timed_out",
+	                                                                "Fetch BlobRestore status timed out.");
+
+	ASSERT(!status.present());
+	ASSERT_EQ(messages.size(), 1);
+	ASSERT_EQ(incompleteReasons.count("Unable to query blob restore status"), 1);
+	auto messagesArray = readJSONStrictly(messages.getJson()).get_array();
+	ASSERT_EQ(messagesArray[0].get_obj()["name"].get_str(), "fetch_blob_restore_status_timed_out");
 	return Void();
 }
 
