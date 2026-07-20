@@ -97,6 +97,11 @@ public:
 	// moveShard never change the shard boundary but just change the team value. Move keys to destinationTeams by
 	// updating shard_teams, the old destination teams will be added to new source teams.
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
+	// Remove a cancelled move's destination teams from contained shards. Restore the move's source teams when no
+	// newer destination remains; otherwise retain the newer destination teams.
+	std::vector<KeyRange> cancelMove(KeyRangeRef keys,
+	                                 const std::vector<Team>& destinationTeams,
+	                                 const std::vector<Team>& sourceTeams);
 	// finishMove never change the shard boundary but just clear the old source team value
 	void finishMove(KeyRangeRef keys);
 	// a convenient function for (defineShard, moveShard, finishMove) pipeline
