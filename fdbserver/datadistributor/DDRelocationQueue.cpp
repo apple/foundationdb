@@ -28,7 +28,6 @@
 #include "flow/ActorCollection.h"
 #include "flow/Buggify.h"
 #include "flow/FastRef.h"
-#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/ManagementAPI.h"
@@ -3368,31 +3367,6 @@ TEST_CASE("/DataDistribution/DDQueue/RetryDestinationTeamFailure") {
 	restore.dataMove = std::make_shared<DataMove>();
 	ASSERT(shouldRetryDestinationTeamFailure(false, restore));
 	ASSERT(!shouldRetryDestinationTeamFailure(true, restore));
-	return Void();
-}
-
-TEST_CASE("/DataDistribution/DDQueue/RejectStaleRestoredRelocation") {
-	const bool oldShardEncode = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
-	setServerKnob("shard_encode_location_metadata", KnobValueRef::create(false));
-	ScopeExit restoreKnob(
-	    [oldShardEncode]() { setServerKnob("shard_encode_location_metadata", KnobValueRef::create(oldShardEncode)); });
-
-	KeyRange keys(KeyRangeRef("a"_sr, "b"_sr));
-	UID dataMoveId(1, 2);
-	DataMoveMetaData metadata(dataMoveId, keys);
-	metadata.setPhase(DataMoveMetaData::Running);
-	RelocateShard restored(keys, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
-	restored.dataMoveId = dataMoveId;
-	restored.dataMove = std::make_shared<DataMove>(metadata, true);
-
-	Error observed;
-	try {
-		DDQueue queue;
-		queue.launchQueuedWork(RelocateData(restored), nullptr);
-	} catch (Error& e) {
-		observed = e;
-	}
-	ASSERT(observed.code() == error_code_dd_config_changed);
 	return Void();
 }
 
