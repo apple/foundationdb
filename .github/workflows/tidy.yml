@@ -92,10 +92,11 @@ jobs:
                 ;;
             esac
             # These inputs are not parseable as standalone clang-tidy translation units in this workflow:
-            # the RocksDB compile commands refer to headers that are not built here, and the Flow headers depend
-            # on include order from their real consumers. The C API header is intentionally valid C, not C++.
+            # the public C headers require C consumer setup and intentionally use C typedefs, the RocksDB compile
+            # commands refer to headers that are not built here, and the Flow headers depend on include order
+            # from their real consumers.
             case "$FILE" in
-              bindings/c/foundationdb/fdb_c.h)
+              bindings/c/foundationdb/fdb_c.h|bindings/c/foundationdb/fdb_c_types.h)
                 continue
                 ;;
               fdbserver/core/RocksDBCheckpointUtils.cpp|fdbserver/kvstore/KeyValueStoreRocksDB.cpp|fdbserver/kvstore/KeyValueStoreShardedRocksDB.cpp)
