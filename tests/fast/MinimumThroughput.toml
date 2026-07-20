@@ -4,6 +4,8 @@ buggify = false
 [[test]]
 testTitle = 'MinimumThroughput'
 connectionFailuresDisableDuration = 100000
+# Restoring perpetual wiggle would force recovery and data movement immediately before this error-free throughput check.
+restorePerpetualWiggleSetting = false
 
     [[test.workload]]
     testName = 'MinimumThroughput'
