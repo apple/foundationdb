@@ -77,7 +77,8 @@ public:
 	    const MoveKeysLock& moveKeysLock,
 	    const std::vector<Optional<Key>>& remoteDcIds,
 	    const DDEnabledState* ddEnabledState,
-	    SkipDDModeCheck skipDDModeCheck) = 0;
+	    SkipDDModeCheck skipDDModeCheck,
+	    const DatabaseConfiguration& configuration) = 0;
 
 	virtual ~IDDTxnProcessor() = default;
 
@@ -171,7 +172,8 @@ public:
 	                                                                      const MoveKeysLock& moveKeysLock,
 	                                                                      const std::vector<Optional<Key>>& remoteDcIds,
 	                                                                      const DDEnabledState* ddEnabledState,
-	                                                                      SkipDDModeCheck skipDDModeCheck) override;
+	                                                                      SkipDDModeCheck skipDDModeCheck,
+	                                                                      const DatabaseConfiguration& configuration) override;
 
 	Future<MoveKeysLock> takeMoveKeysLock(UID const& ddId) const override;
 

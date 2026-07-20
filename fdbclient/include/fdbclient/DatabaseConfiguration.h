@@ -222,6 +222,49 @@ struct DatabaseConfiguration {
 	std::string perpetualStorageWiggleLocality;
 	KeyValueStoreType perpetualStoreType;
 
+	// Shard-encode metadata configuration (mirrors the storage_engine +
+	// perpetual_storage_wiggle pair). shard_metadata_format controls how
+	// DD encodes new shard metadata writes; shard_metadata_migration
+	// controls whether DD actively converges existing entries to match
+	// the current format.
+	//
+	// Unset -> DD falls back to reading the legacy SHARD_ENCODE_LOCATION_
+	// METADATA knob (true -> encoded, false -> original) for the
+	// format, and treats migration as disabled. Setting shard_metadata_format
+	// overrides the knob for the encoding target (shard_metadata_migration
+	// has no knob equivalent; unset simply means "no active rewrite").
+	//
+	// Wire-value constants centralize the strings used by toJSON,
+	// setInternal, ManagementAPI::configForToken validation, and
+	// fdbcli's ConfigureCommand help/completion. Keep in sync: a typo
+	// in one site silently breaks configure round-tripping.
+	static constexpr const char* SHARD_METADATA_FORMAT_KEY = "shard_metadata_format";
+	static constexpr const char* SHARD_METADATA_MIGRATION_KEY = "shard_metadata_migration";
+	// "original" = legacy tag-based encoding; "encoded" = shard-encoded
+	// (UID+dataMoveId) location metadata written under SHARD_ENCODE_LOCATION_METADATA.
+	static constexpr const char* SHARD_METADATA_FORMAT_ORIGINAL = "original";
+	static constexpr const char* SHARD_METADATA_FORMAT_ENCODED = "encoded";
+	static constexpr const char* SHARD_METADATA_MIGRATION_ENABLED = "enabled";
+	static constexpr const char* SHARD_METADATA_MIGRATION_DISABLED = "disabled";
+	enum class ShardMetadataFormat { UNSET, ORIGINAL, ENCODED };
+	enum class ShardMetadataMigration { UNSET, DISABLED, ENABLED };
+	ShardMetadataFormat shardMetadataFormat;
+	ShardMetadataMigration shardMetadataMigration;
+
+	// Configured target encoding, or empty when UNSET. Server code applies the
+	// SHARD_ENCODE_LOCATION_METADATA knob fallback (the knob lives in
+	// fdbserver, so the fallback cannot be resolved here in fdbclient).
+	Optional<bool> shardMetadataFormatIsEncoded() const {
+		if (shardMetadataFormat == ShardMetadataFormat::UNSET) {
+			return Optional<bool>();
+		}
+		return shardMetadataFormat == ShardMetadataFormat::ENCODED;
+	}
+	// Whether DD should actively converge existing entries at init.
+	bool shardMetadataMigrationEnabled() const {
+		return shardMetadataMigration == ShardMetadataMigration::ENABLED;
+	}
+
 	// Storage Migration Type
 	StorageMigrationType storageMigrationType;
 
