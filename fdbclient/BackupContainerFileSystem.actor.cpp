@@ -39,6 +39,20 @@
 
 class BackupContainerFileSystemImpl {
 public:
+	// A snapshot manifest is normally a few hundred MB. Warn as it grows and error before it gets dangerously
+	// large, so we see the problem in the logs with time to act before a manifest actually becomes too large
+	// to handle.
+	static void traceManifestSize(const std::string& fileName, int64_t bytes) {
+		constexpr int64_t MB = 1048576; // 1024 * 1024
+		if (bytes >= 750 * MB) {
+			TraceEvent(SevError, "BackupSnapshotManifestTooLarge").detail("FileName", fileName).detail("Bytes", bytes);
+		} else if (bytes >= 500 * MB) {
+			TraceEvent(SevWarnAlways, "BackupSnapshotManifestLarge")
+			    .detail("FileName", fileName)
+			    .detail("Bytes", bytes);
+		}
+	}
+
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of
 	// megabytes.
 	ACTOR static Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
@@ -55,11 +69,25 @@ public:
 		// Read the snapshot file, verify the version range, then find each of the range files by name in the index and
 		// return them.
 		state Reference<IAsyncFile> f = wait(bc->readFile(snapshot.fileName));
-		int64_t size = wait(f->size());
-		state Standalone<StringRef> buf = makeString(size);
-		wait(success(f->read(mutateString(buf), buf.size(), 0)));
+		state int64_t size = wait(f->size());
+		traceManifestSize(snapshot.fileName, size);
+		// A manifest is normally a few hundred MB. Read it into a std::string in chunks; std::string and the
+		// chunked reads guard against an unexpectedly large manifest overflowing the int length that read() takes.
+		// TODO (optimization): the whole manifest is loaded into memory before parsing. Explore if a streaming JSON
+		// parser would avoid this.
+		state std::string buf;
+		buf.resize(size);
+		state int64_t offset = 0;
+		state int toRead;
+		while (offset < size) {
+			toRead = static_cast<int>(std::min<int64_t>(CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE, size - offset));
+			int r = wait(f->read((uint8_t*)buf.data() + offset, toRead, offset));
+			if (r != toRead)
+				throw restore_corrupted_data();
+			offset += r;
+		}
 		json_spirit::mValue json;
-		if (!json_spirit::read_string(buf.toString(), json)) {
+		if (!json_spirit::read_string(buf, json)) {
 			fprintf(stderr,
 			        "ERROR: Failed to read data. Verify that backup and restore encryption keys match (if provided) or "
 			        "the data is corrupted.\n");
@@ -203,10 +231,13 @@ public:
 		}
 
 		wait(yield());
+		// TODO (optimization): the whole manifest is built and serialized in memory before writing. Explore if a
+		// streaming approach would avoid this.
 		state std::string docString = json_spirit::write_string(json);
 
 		state Reference<IBackupFile> f =
 		    wait(bc->writeFile(format("snapshots/snapshot,%lld,%lld,%lld", minVer, maxVer, totalBytes)));
+		traceManifestSize(f->getFileName(), docString.size());
 		wait(f->append(docString.data(), docString.size()));
 		wait(f->finish());
 
@@ -2794,43 +2825,112 @@ TEST_CASE("/backup/containers/localdir/expireProgressVersions") {
 }
 
 // Verify that writeKeyspaceSnapshotFile correctly writes and reads back a snapshot manifest even when the
-// JSON document is larger than BACKUP_MANIFEST_WRITE_CHUNK_SIZE, exercising the chunked-append path.
-TEST_CASE("/backup/containers/localdir/writeKeyspaceSnapshotFile/chunked") {
+// JSON document is larger than BACKUP_MANIFEST_CHUNK_SIZE, exercising the chunked-append path.
+ACTOR static Future<Void> testWriteKeyspaceSnapshotFileChunked(std::string url) {
 	// Force a tiny chunk size so a normal-sized manifest triggers multiple append() calls.
-	int savedChunkSize = CLIENT_KNOBS->BACKUP_MANIFEST_WRITE_CHUNK_SIZE;
-	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_MANIFEST_WRITE_CHUNK_SIZE = 64;
-	ASSERT_EQ(CLIENT_KNOBS->BACKUP_MANIFEST_WRITE_CHUNK_SIZE, 64);
+	state int savedChunkSize = CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE;
+	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_MANIFEST_CHUNK_SIZE = 64;
+	ASSERT_EQ(CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE, 64);
 
-	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
-	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
-	co_await c->create();
+	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	wait(c->create());
 
 	// Use a fixed version and block size for deterministic assertions.
-	Version v = 1000;
-	int blockSize = 3 * sizeof(uint32_t) + 8;
+	state Version v = 1000;
+	state int blockSize = 3 * sizeof(uint32_t) + 8;
 
 	// Write several range files so the resulting JSON manifest exceeds 64 bytes.
-	std::vector<std::string> rangeFileNames;
-	std::vector<std::pair<Key, Key>> beginEndKeys;
-	for (int i = 0; i < 5; ++i) {
-		Reference<IBackupFile> range = co_await c->writeRangeFile(v, 0, v, blockSize);
-		co_await testWriteSnapshotFile(range, ""_sr, ""_sr, blockSize);
+	state std::vector<std::string> rangeFileNames;
+	state std::vector<std::pair<Key, Key>> beginEndKeys;
+	state int i;
+	for (i = 0; i < 5; ++i) {
+		state Reference<IBackupFile> range = wait(c->writeRangeFile(v, 0, v, blockSize));
+		wait(testWriteSnapshotFile(range, ""_sr, ""_sr, blockSize));
 		rangeFileNames.push_back(range->getFileName());
 		beginEndKeys.push_back({ ""_sr, ""_sr });
 		++v;
 	}
 
-	int64_t totalSize = 99999;
-	co_await c->writeKeyspaceSnapshotFile(rangeFileNames, beginEndKeys, totalSize, IncludeKeyRangeMap(false));
+	state int64_t totalSize = 99999;
+	wait(c->writeKeyspaceSnapshotFile(rangeFileNames, beginEndKeys, totalSize, IncludeKeyRangeMap(false)));
 
-	BackupFileList listing = co_await c->dumpFileList();
+	state BackupFileList listing = wait(c->dumpFileList());
 	ASSERT_EQ(listing.snapshots.size(), 1);
 	ASSERT_EQ(listing.snapshots[0].totalSize, totalSize);
 	ASSERT_EQ(listing.snapshots[0].beginVersion, 1000);
 	ASSERT_EQ(listing.snapshots[0].endVersion, 1004);
 
-	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_MANIFEST_WRITE_CHUNK_SIZE = savedChunkSize;
-	co_await c->deleteContainer();
+	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_MANIFEST_CHUNK_SIZE = savedChunkSize;
+	wait(c->deleteContainer());
+	return Void();
+}
+
+TEST_CASE("/backup/containers/localdir/writeKeyspaceSnapshotFile/chunked") {
+	wait(testWriteKeyspaceSnapshotFileChunked(
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int())));
+	return Void();
+}
+
+// Verify that readKeyspaceSnapshot correctly reassembles and parses a snapshot manifest when it is read
+// back in many small pieces, exercising the chunked-read path. A tiny chunk size (that does not divide the
+// manifest evenly) forces the read loop to run many iterations with a partial final chunk, which catches
+// off-by-one / wrong-offset / short-read bugs in the loop. Note: a unit test cannot allocate a >2 GB
+// manifest to reproduce the original int overflow, so this validates the chunking logic instead.
+ACTOR static Future<Void> testReadKeyspaceSnapshotChunked(std::string url) {
+	state int savedChunkSize = CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE;
+	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_MANIFEST_CHUNK_SIZE = 7;
+
+	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	wait(c->create());
+
+	state Version v = 1000;
+	state int blockSize = 64;
+
+	// Write several range files with distinct, non-empty key ranges so the manifest also contains a
+	// populated keyRanges section (exercising that part of the read path too).
+	state std::vector<std::string> rangeFileNames;
+	state std::vector<std::pair<Key, Key>> beginEndKeys;
+	state std::map<std::string, std::pair<std::string, std::string>> expected;
+	state int i;
+	for (i = 0; i < 5; ++i) {
+		state Key begin = StringRef(format("begin-%d", i));
+		state Key end = StringRef(format("end-%d", i));
+		state Reference<IBackupFile> range = wait(c->writeRangeFile(v, 0, v, blockSize));
+		wait(testWriteSnapshotFile(range, begin, end, blockSize));
+		rangeFileNames.push_back(range->getFileName());
+		beginEndKeys.push_back({ begin, end });
+		expected[range->getFileName()] = { begin.toString(), end.toString() };
+		++v;
+	}
+
+	state int64_t totalSize = 99999;
+	wait(c->writeKeyspaceSnapshotFile(rangeFileNames, beginEndKeys, totalSize, IncludeKeyRangeMap::True));
+
+	// Read the manifest back through the chunked-read path and verify every range file and key range.
+	state Reference<BackupContainerFileSystem> bcfs = c.castTo<BackupContainerFileSystem>();
+	state std::vector<KeyspaceSnapshotFile> snapshots = wait(bcfs->listKeyspaceSnapshots());
+	ASSERT_EQ(snapshots.size(), 1);
+
+	state std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> result =
+	    wait(bcfs->readKeyspaceSnapshot(snapshots[0]));
+	ASSERT_EQ(result.first.size(), rangeFileNames.size());
+	ASSERT_EQ(result.second.size(), expected.size());
+	for (const auto& [fileName, range] : expected) {
+		auto it = result.second.find(fileName);
+		ASSERT(it != result.second.end());
+		ASSERT(it->second.begin == StringRef(range.first));
+		ASSERT(it->second.end == StringRef(range.second));
+	}
+
+	const_cast<ClientKnobs*>(CLIENT_KNOBS)->BACKUP_MANIFEST_CHUNK_SIZE = savedChunkSize;
+	wait(c->deleteContainer());
+	return Void();
+}
+
+TEST_CASE("/backup/containers/localdir/readKeyspaceSnapshot/chunked") {
+	wait(testReadKeyspaceSnapshotChunked(
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int())));
+	return Void();
 }
 
 } // namespace backup_test
