@@ -1041,6 +1041,7 @@ public:
 		bool trackHealthyTeam = team->size() == self->configuration.storageTeamSize;
 		bool lastZeroHealthy = self->zeroHealthyTeams->get();
 		bool firstCheck = true;
+		bool firstHealthChangeTrace = true;
 		std::unordered_set<KeyRange> submittedShards;
 
 		Future<Void> zeroServerLeftLogger;
@@ -1054,14 +1055,6 @@ public:
 
 		try {
 			while (true) {
-				if (logTeamEvents) {
-					TraceEvent("ServerTeamHealthChangeDetected", self->distributorId)
-					    .detail("ServerTeam", team->getDesc())
-					    .detail("Primary", self->primary)
-					    .detail("IsReady", self->initialFailureReactionDelay.isReady());
-					self->traceTeamCollectionInfo();
-				}
-
 				// Check if the number of degraded machines has changed
 				std::vector<Future<Void>> change;
 				bool anyUndesired = false;
@@ -1119,6 +1112,20 @@ public:
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed ||
 				                            retryUnhealthyShards);
+				bool teamStateChanged = serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired ||
+				                        anyWrongConfiguration != lastWrongConfiguration ||
+				                        anyWigglingServer != lastAnyWigglingServer ||
+				                        containsFailed != lastContainsFailed;
+				// A retry timer can wake many trackers at once; avoid collection-wide scans when team state is
+				// unchanged.
+				if (logTeamEvents && (firstHealthChangeTrace || teamStateChanged)) {
+					TraceEvent("ServerTeamHealthChangeDetected", self->distributorId)
+					    .detail("ServerTeam", team->getDesc())
+					    .detail("Primary", self->primary)
+					    .detail("IsReady", self->initialFailureReactionDelay.isReady());
+					self->traceTeamCollectionInfo();
+				}
+				firstHealthChangeTrace = false;
 
 				TraceEvent(SevVerbose, "TeamHealthChangeDetected", self->distributorId)
 				    .detail("Team", team->getDesc())
@@ -1152,10 +1159,6 @@ public:
 					lastOptimal = optimal;
 				}
 
-				bool teamStateChanged = serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired ||
-				                        anyWrongConfiguration != lastWrongConfiguration ||
-				                        anyWigglingServer != lastAnyWigglingServer ||
-				                        containsFailed != lastContainsFailed;
 				if (teamStateChanged || recheck) { // NOTE: do not check wrongSize
 					if (logTeamEvents) {
 						TraceEvent("ServerTeamHealthChanged", self->distributorId)
@@ -7182,6 +7185,8 @@ public:
 		auto collection = testTeamCollection(2, policy, 5, shards);
 		collection->teamCollections = { collection.get() };
 		collection->initialFailureReactionDelay = Future<Void>(Void());
+		collection->teamCollectionInfoEventHolder =
+		    makeReference<EventCacheHolder>("TeamTrackerRetriesMergedShardForUndesiredServer");
 		collection->server_status.set(
 		    undesired,
 		    ServerStatus(IsFailed::False,
@@ -7202,6 +7207,10 @@ public:
 		ASSERT(!relocations.isReady());
 		ASSERT((initialLeft.keys == leftRange && initialRight.keys == rightRange) ||
 		       (initialLeft.keys == rightRange && initialRight.keys == leftRange));
+		TraceEventFields initialTeamCollectionInfo =
+		    latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey);
+		ASSERT_GT(initialTeamCollectionInfo.size(), 0);
+		const std::string initialTeamCollectionInfoTime = initialTeamCollectionInfo.getValue("Time");
 
 		shards->defineShard(mergedRange);
 		shards->moveShard(leftRange, { healthy });
@@ -7221,6 +7230,8 @@ public:
 
 		co_await delay(SERVER_KNOBS->CHECK_TEAM_DELAY + 0.1);
 		ASSERT(!relocations.isReady());
+		ASSERT_EQ(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
+		          initialTeamCollectionInfoTime);
 
 		NetworkAddress failedAddress = collection->server_info[undesired]->getLastKnownInterface().address();
 		collection->excludedServers.set(AddressExclusion(failedAddress.ip, failedAddress.port),
@@ -7235,6 +7246,8 @@ public:
 		ASSERT(failedRight.keys == mergedRange);
 		ASSERT_EQ(failedLeft.priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
 		ASSERT_EQ(failedRight.priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		ASSERT_NE(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
+		          initialTeamCollectionInfoTime);
 	}
 };
 
