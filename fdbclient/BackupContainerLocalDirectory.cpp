@@ -40,8 +40,8 @@ public:
 		m_buffer.reserve(m_buffer.arena(), m_blockSize);
 	}
 
-	Future<Void> append(const void* data, int len) override {
-		m_buffer.append(m_buffer.arena(), (const uint8_t*)data, len);
+	Future<Void> appendImpl(const void* data, size_t len) override {
+		m_buffer.append(m_buffer.arena(), (const uint8_t*)data, static_cast<int>(len));
 
 		if (m_buffer.size() >= m_blockSize) {
 			return flush(m_blockSize);

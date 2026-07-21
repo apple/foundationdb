@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Atomic.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/RandomTestUtils.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"

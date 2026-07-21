@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ReadYourWrites.h"
+#include "RYWIterator.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
@@ -27,6 +28,13 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/CoroUtils.h"
 #include "flow/Util.h"
+
+struct ReadYourWritesTransaction::RYWState {
+	explicit RYWState(Arena* arena) : cache(arena), writes(arena) {}
+
+	SnapshotCache cache;
+	WriteMap writes;
+};
 
 class RYWImpl {
 public:
@@ -114,12 +122,12 @@ public:
 			KeyRef k(ryw->arena, read.key);
 
 			if (res.present()) {
-				if (ryw->cache.insert(k, res.get()))
+				if (ryw->rywState->cache.insert(k, res.get()))
 					ryw->arena.dependsOn(res.get().arena());
 				if (!dependent)
 					co_return res;
 			} else {
-				ryw->cache.insert(k, Optional<ValueRef>());
+				ryw->rywState->cache.insert(k, Optional<ValueRef>());
 				if (!dependent)
 					co_return Optional<Value>();
 			}
@@ -240,7 +248,7 @@ public:
 		}
 
 		it.skip(readRange.begin);
-		ryw->updateConflictMap(readRange, it);
+		updateConflictMap(ryw, readRange, it);
 	}
 
 	template <bool mustUnmodified = false, class RangeResultFamily = RangeResult>
@@ -360,7 +368,7 @@ public:
 
 	template <class Req>
 	static Future<typename Req::Result> readWithConflictRangeSnapshot(ReadYourWritesTransaction* ryw, Req req) {
-		SnapshotCache::iterator it(&ryw->cache, &ryw->writes);
+		SnapshotCache::iterator it(&ryw->rywState->cache, &ryw->rywState->writes);
 		co_return co_await waitOrError(read(ryw, req, &it), ryw->resetPromise.getFuture());
 	}
 
@@ -368,7 +376,7 @@ public:
 	static Future<typename Req::Result> readWithConflictRangeRYW(ReadYourWritesTransaction* ryw,
 	                                                             Req req,
 	                                                             Snapshot snapshot) {
-		RYWIterator it(&ryw->cache, &ryw->writes);
+		RYWIterator it(&ryw->rywState->cache, &ryw->rywState->writes);
 		auto result = co_await waitOrError(read(ryw, req, &it), ryw->resetPromise.getFuture());
 
 		// Some overloads of addConflictRange() require it to point to the "right" key and others don't.  The
@@ -747,7 +755,7 @@ public:
 
 				//TraceEvent("RYWCacheInsert", randomID).detail("Range", range).detail("ExpectedSize", snapshot_read.expectedSize()).detail("Rows", snapshot_read.size()).detail("Results", snapshot_read).detail("More", snapshot_read.more).detail("ReadToBegin", snapshot_read.readToBegin).detail("ReadThroughEnd", snapshot_read.readThroughEnd).detail("ReadThrough", snapshot_read.readThrough);
 
-				if (ryw->cache.insert(range, snapshot_read))
+				if (ryw->rywState->cache.insert(range, snapshot_read))
 					ryw->arena.dependsOn(snapshot_read.arena());
 
 				// TODO: Is there a more efficient way to deal with invalidation?
@@ -1061,7 +1069,7 @@ public:
 					reversed[snapshot_read.size() - i - 1] = snapshot_read[i];
 				}
 
-				if (ryw->cache.insert(range, reversed))
+				if (ryw->rywState->cache.insert(range, reversed))
 					ryw->arena.dependsOn(snapshot_read.arena());
 
 				// TODO: Is there a more efficient way to deal with invalidation?
@@ -1191,7 +1199,7 @@ public:
 		// Insert read conflicts (so that it supported Snapshot::True) and check it is not modified (so it masks
 		// sure not break RYW semantic while not implementing RYW) for both the primary getRange and all
 		// underlying getValue/getRanges.
-		WriteMap::iterator writes(&ryw->writes);
+		WriteMap::iterator writes(&ryw->rywState->writes);
 		addConflictRangeAndMustUnmodified<backwards>(ryw, req, writes, result);
 		co_return result;
 	}
@@ -1529,9 +1537,11 @@ public:
 	}
 };
 
+ReadYourWritesTransaction::ReadYourWritesTransaction() : rywState(std::make_unique<RYWState>(&arena)) {}
+
 ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
-  : deferredError(cx->deferredError), tr(cx), cache(&arena), writes(&arena), retries(0), approximateSize(0),
-    creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
+  : deferredError(cx->deferredError), tr(cx), rywState(std::make_unique<RYWState>(&arena)), retries(0),
+    approximateSize(0), creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
     specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end), options(tr) {
 	std::copy(
 	    cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(), std::back_inserter(persistentOptions));
@@ -1889,22 +1899,14 @@ void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 		return;
 	}
 
-	WriteMap::iterator it(&writes);
+	WriteMap::iterator it(&rywState->writes);
 	KeyRangeRef readRange(arena, r);
 	it.skip(readRange.begin);
-	updateConflictMap(readRange, it);
-}
-
-void ReadYourWritesTransaction::updateConflictMap(KeyRef const& key, WriteMap::iterator& it) {
-	RYWImpl::updateConflictMap(this, key, it);
-}
-
-void ReadYourWritesTransaction::updateConflictMap(KeyRangeRef const& keys, WriteMap::iterator& it) {
-	RYWImpl::updateConflictMap(this, keys, it);
+	RYWImpl::updateConflictMap(this, readRange, it);
 }
 
 void ReadYourWritesTransaction::writeRangeToNativeTransaction(KeyRangeRef const& keys) {
-	WriteMap::iterator it(&writes);
+	WriteMap::iterator it(&rywState->writes);
 	it.skip(keys.begin);
 
 	bool inClearRange = false;
@@ -1998,7 +2000,7 @@ bool ReadYourWritesTransactionOptions::getAndResetWriteConflictDisabled() {
 }
 
 void ReadYourWritesTransaction::getWriteConflicts(KeyRangeMap<bool>* result) {
-	WriteMap::iterator it(&writes);
+	WriteMap::iterator it(&rywState->writes);
 	it.skip(allKeys.begin);
 
 	bool inConflictRange = false;
@@ -2078,7 +2080,7 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 
 	if (!options.readYourWritesDisabled) {
 		KeyRangeRef strippedWriteRangePrefix = kr.removePrefix(writeConflictRangeKeysRange.begin);
-		WriteMap::iterator it(&writes);
+		WriteMap::iterator it(&rywState->writes);
 		it.skip(strippedWriteRangePrefix.begin);
 		if (it.beginKey() > allKeys.begin)
 			--it;
@@ -2179,7 +2181,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 		addWriteConflict = AddConflictRange::False;
 		if (!options.readYourWritesDisabled) {
 			writeRangeToNativeTransaction(range);
-			writes.addUnmodifiedAndUnreadableRange(range);
+			rywState->writes.addUnmodifiedAndUnreadableRange(range);
 		}
 		// k is the unversionstamped key provided by the user.  If we've filled in a minimum bound
 		// for the versionstamp, we need to make sure that's reflected when we insert it into the
@@ -2203,7 +2205,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 		return tr.atomicOp(k, v, (MutationRef::Type)operationType, addWriteConflict);
 	}
 
-	writes.mutate(k, (MutationRef::Type)operationType, v, addWriteConflict);
+	rywState->writes.mutate(k, (MutationRef::Type)operationType, v, addWriteConflict);
 	RYWImpl::triggerWatches(this, k, Optional<ValueRef>(), false);
 }
 
@@ -2261,7 +2263,7 @@ void ReadYourWritesTransaction::set(const KeyRef& key, const ValueRef& value) {
 	KeyRef k = KeyRef(arena, key);
 	ValueRef v = ValueRef(arena, value);
 
-	writes.mutate(k, MutationRef::SetValue, v, addWriteConflict);
+	rywState->writes.mutate(k, MutationRef::SetValue, v, addWriteConflict);
 	RYWImpl::triggerWatches(this, key, value);
 }
 
@@ -2310,7 +2312,7 @@ void ReadYourWritesTransaction::clear(const KeyRangeRef& range) {
 
 	r = KeyRangeRef(arena, r);
 
-	writes.clear(r, addWriteConflict);
+	rywState->writes.clear(r, addWriteConflict);
 	RYWImpl::triggerWatches(this, r, Optional<ValueRef>());
 }
 
@@ -2343,7 +2345,7 @@ void ReadYourWritesTransaction::clear(const KeyRef& key) {
 	    r.expectedSize() + sizeof(KeyRangeRef) + (addWriteConflict ? sizeof(KeyRangeRef) + r.expectedSize() : 0);
 
 	// SOMEDAY: add an optimized single key clear to write map
-	writes.clear(r, addWriteConflict);
+	rywState->writes.clear(r, addWriteConflict);
 
 	RYWImpl::triggerWatches(this, r, Optional<ValueRef>());
 }
@@ -2407,7 +2409,7 @@ void ReadYourWritesTransaction::addWriteConflictRange(KeyRangeRef const& keys) {
 	}
 
 	r = KeyRangeRef(arena, r);
-	writes.addConflictRange(r);
+	rywState->writes.addConflictRange(r);
 }
 
 Future<Void> ReadYourWritesTransaction::commit() {
@@ -2448,7 +2450,7 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 	case FDBTransactionOptions::READ_YOUR_WRITES_DISABLE:
 		validateOptionValueNotPresent(value);
 
-		if (reading.getFutureCount() > 0 || !cache.empty() || !writes.empty())
+		if (reading.getFutureCount() > 0 || !rywState->cache.empty() || !rywState->writes.empty())
 			throw client_invalid_operation();
 
 		options.readYourWritesDisabled = true;
@@ -2534,8 +2536,7 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 }
 
 void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcept {
-	cache = std::move(r.cache);
-	writes = std::move(r.writes);
+	rywState = std::move(r.rywState);
 	arena = std::move(r.arena);
 	tr = std::move(r.tr);
 	readConflicts = std::move(r.readConflicts);
@@ -2551,8 +2552,8 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcep
 	commitStarted = r.commitStarted;
 	options = r.options;
 	transactionDebugInfo = r.transactionDebugInfo;
-	cache.arena = &arena;
-	writes.arena = &arena;
+	rywState->cache.arena = &arena;
+	rywState->writes.arena = &arena;
 	persistentOptions = std::move(r.persistentOptions);
 	sensitivePersistentOptions = std::move(r.sensitivePersistentOptions);
 	nativeReadRanges = std::move(r.nativeReadRanges);
@@ -2564,12 +2565,12 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcep
 }
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept
-  : deferredError(r.deferredError), arena(std::move(r.arena)), cache(std::move(r.cache)), writes(std::move(r.writes)),
+  : deferredError(r.deferredError), arena(std::move(r.arena)), rywState(std::move(r.rywState)),
     resetPromise(std::move(r.resetPromise)), reading(std::move(r.reading)), retries(r.retries),
     approximateSize(r.approximateSize), timeoutActor(std::move(r.timeoutActor)), creationTime(r.creationTime),
     commitStarted(r.commitStarted), transactionDebugInfo(r.transactionDebugInfo), options(r.options) {
-	cache.arena = &arena;
-	writes.arena = &arena;
+	rywState->cache.arena = &arena;
+	rywState->writes.arena = &arena;
 	tr = std::move(r.tr);
 	readConflicts = std::move(r.readConflicts);
 	watchMap = std::move(r.watchMap);
@@ -2615,8 +2616,8 @@ void ReadYourWritesTransaction::resetRyow() {
 
 	timeoutActor.cancel();
 	arena = Arena();
-	cache = SnapshotCache(&arena);
-	writes = WriteMap(&arena);
+	rywState->cache = SnapshotCache(&arena);
+	rywState->writes = WriteMap(&arena);
 	readConflicts = CoalescedKeyRefRangeMap<bool>();
 	versionStampKeys = VectorRef<KeyRef>();
 	nativeReadRanges = Standalone<VectorRef<KeyRangeRef>>();
