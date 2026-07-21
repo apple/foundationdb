@@ -58,6 +58,16 @@ std::tuple<int, std::vector<TLogLockResult>, bool> makeLogGroupResults(
 
 void forceLinkLogSystemRecoveryTests() {}
 
+TEST_CASE("/LogSystem/GetPseudoPopTag/LogRouterWithoutMappedLocality") {
+	LocalityData locality;
+	auto logSystem = makeReference<LogSystem>(UID(), locality, LogEpoch(1));
+	ASSERT(!logSystem->hasPseudoLocality(tagLocalityLogRouterMapped));
+
+	Tag tag = logSystem->getPseudoPopTag(Tag(tagLocalityLogRouter, 0), ProcessClass::LogRouterClass);
+	ASSERT(tag == Tag(tagLocalityLogRouterMapped, 0));
+	return Void();
+}
+
 TEST_CASE("/LogSystem/PopLogRouter/CurrentGenerationAcceptsPredecessor") {
 	constexpr Version generationStart = 100;
 	constexpr int8_t remoteTLogLocality = 1;

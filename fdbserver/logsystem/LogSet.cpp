@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSet.h"
 
 #include <limits>
 

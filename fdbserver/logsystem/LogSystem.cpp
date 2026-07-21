@@ -372,7 +372,8 @@ Tag LogSystem::getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const {
 	switch (type) {
 	case ProcessClass::LogRouterClass:
 		if (tag.locality == tagLocalityLogRouter) {
-			ASSERT(pseudoLocalities.contains(tagLocalityLogRouterMapped));
+			// A log router from an earlier multi-region epoch can still forward a delayed pop after the
+			// current epoch becomes single-region. Keep the mapped tag so the TLog can safely discard it.
 			tag.locality = tagLocalityLogRouterMapped;
 		}
 		break;
