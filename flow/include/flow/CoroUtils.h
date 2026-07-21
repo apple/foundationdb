@@ -387,14 +387,18 @@ using Choose = coro::ChooseClause<>;
 
 template <class T>
 Future<T> timeoutChoose(Future<T> what, Future<Void> end, T timedoutValue) {
+	// Move inputs out of coroutine parameters so the losing future is released before completion callbacks run.
+	Future<T> pending(std::move(what));
+	Future<Void> timer(std::move(end));
 	if constexpr (std::is_same_v<T, Void>) {
-		co_await Choose().When(std::move(what), [](Void const&) {}).When(std::move(end), [](Void const&) {}).run();
+		co_await Choose().When(pending, [](Void const&) {}).When(timer, [](Void const&) {}).run();
 		co_return;
 	} else {
+		T timeoutValue(std::move(timedoutValue));
 		Optional<T> result;
 		co_await Choose()
-		    .When(std::move(what), [&](T const& value) { result.withDefault(value); })
-		    .When(std::move(end), [&](Void const&) { result.withDefault(std::move(timedoutValue)); })
+		    .When(pending, [&](T const& value) { result.withDefault(value); })
+		    .When(timer, [&](Void const&) { result.withDefault(std::move(timeoutValue)); })
 		    .run();
 		co_return std::move(result).get();
 	}

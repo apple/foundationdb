@@ -324,7 +324,11 @@ Future<T> uncancellable(Future<T> what, ExplicitVoid = {}) {
 // reverse order, and we need the object to be destructed last.
 template <class T, class X>
 Future<T> holdWhile(X object, Future<T> what, ExplicitVoid = {}) {
-	co_return co_await what;
+	// Coroutine parameters can outlive completion while the returned Future is referenced. Keep the held object before
+	// the pending future so the future is released first and the object last when these locals leave scope.
+	[[maybe_unused]] X heldObject(std::move(object));
+	Future<T> pending(std::move(what));
+	co_return co_await pending;
 }
 
 // Assign the future value of what to out

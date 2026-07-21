@@ -306,6 +306,11 @@ Future<int64_t> notifiedWaitForForwardTest(NotifiedInt* version, bool* fired) {
 	co_return 10;
 }
 
+Future<Void> notifiedWaitForTimeoutVoidTest(NotifiedInt* version, bool* fired) {
+	co_await version->whenAtLeast(10);
+	*fired = true;
+}
+
 Future<Void> cancelForwardWhenReady(Future<int64_t> signal, Future<int64_t>* forwarded) {
 	co_await signal;
 	forwarded->cancel();
@@ -370,6 +375,41 @@ TEST_CASE("/flow/genericactors/NotifiedCancellation") {
 	ASSERT(!expiredWaitFired);
 
 	version = NotifiedInt(0);
+	state bool timedValueWaitFired = false;
+	state Future<int64_t> cancelledTimeoutValue =
+	    timeout(notifiedWaitForForwardTest(&version, &timedValueWaitFired), 60.0, int64_t(-1));
+	cancelledTimeoutValue.cancel();
+	ASSERT(cancelledTimeoutValue.isError() && cancelledTimeoutValue.getError().code() == error_code_actor_cancelled);
+	version.set(10);
+	ASSERT(!timedValueWaitFired);
+
+	version = NotifiedInt(0);
+	state bool expiredValueWaitFired = false;
+	state Future<int64_t> expiredTimeoutValue =
+	    timeout(notifiedWaitForForwardTest(&version, &expiredValueWaitFired), 0.0, int64_t(-1));
+	int64_t timeoutValue = wait(expiredTimeoutValue);
+	ASSERT_EQ(timeoutValue, -1);
+	version.set(10);
+	ASSERT(!expiredValueWaitFired);
+
+	version = NotifiedInt(0);
+	state bool timedVoidWaitFired = false;
+	state Future<Void> cancelledTimeoutVoid =
+	    timeout(notifiedWaitForTimeoutVoidTest(&version, &timedVoidWaitFired), 60.0, Void());
+	cancelledTimeoutVoid.cancel();
+	ASSERT(cancelledTimeoutVoid.isError() && cancelledTimeoutVoid.getError().code() == error_code_actor_cancelled);
+	version.set(10);
+	ASSERT(!timedVoidWaitFired);
+
+	version = NotifiedInt(0);
+	state bool expiredVoidWaitFired = false;
+	state Future<Void> expiredTimeoutVoid =
+	    timeout(notifiedWaitForTimeoutVoidTest(&version, &expiredVoidWaitFired), 0.0, Void());
+	wait(expiredTimeoutVoid);
+	version.set(10);
+	ASSERT(!expiredVoidWaitFired);
+
+	version = NotifiedInt(0);
 	state bool timedErrorWaitFired = false;
 	state Future<int64_t> cancelledTimeoutError =
 	    timeoutError(notifiedWaitForForwardTest(&version, &timedErrorWaitFired), 60.0);
@@ -417,6 +457,37 @@ TEST_CASE("/flow/genericactors/NotifiedCancellation") {
 	erroredInput.sendError(operation_failed());
 	wait(errorCancel);
 	ASSERT(erroredForward.isError() && erroredForward.getError().code() == error_code_operation_failed);
+	return Void();
+}
+
+TEST_CASE("/flow/genericactors/HoldWhileReleasesCapturedState") {
+	state FlowLock lock(1);
+
+	wait(lock.take());
+	state Promise<int64_t> completedInput;
+	state Future<int64_t> completed =
+	    holdWhile(std::make_shared<FlowLock::Releaser>(lock, 1), completedInput.getFuture());
+	ASSERT_EQ(lock.available(), 0);
+	completedInput.send(10);
+	ASSERT(completed.isReady() && !completed.isError() && completed.get() == 10);
+	ASSERT_EQ(lock.available(), 1);
+
+	wait(lock.take());
+	state Promise<int64_t> erroredInput;
+	state Future<int64_t> errored = holdWhile(std::make_shared<FlowLock::Releaser>(lock, 1), erroredInput.getFuture());
+	ASSERT_EQ(lock.available(), 0);
+	erroredInput.sendError(operation_failed());
+	ASSERT(errored.isError() && errored.getError().code() == error_code_operation_failed);
+	ASSERT_EQ(lock.available(), 1);
+
+	wait(lock.take());
+	state Promise<int64_t> cancelledInput;
+	state Future<int64_t> cancelled =
+	    holdWhile(std::make_shared<FlowLock::Releaser>(lock, 1), cancelledInput.getFuture());
+	ASSERT_EQ(lock.available(), 0);
+	cancelled.cancel();
+	ASSERT(cancelled.isError() && cancelled.getError().code() == error_code_actor_cancelled);
+	ASSERT_EQ(lock.available(), 1);
 	return Void();
 }
 
