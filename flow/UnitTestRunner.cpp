@@ -103,7 +103,7 @@ void printUsage(const char* program, const UnitTestRunnerConfig& config) {
 	           "      --max-test-cases N    Stop after N matching tests\n"
 	           "      --no-cleanup          Keep the data directory after each test\n"
 	           "      --list                Print matching test names without running them\n"
-	           "      --simulation          Run using Sim2; skip noSim/ tests unless filtered\n"
+	           "      --simulation          Run using Sim2; apply default simulation exclusions unless filtered\n"
 	           "  -h, --help                Show this help\n",
 	           program,
 	           config.suiteName(),
@@ -247,6 +247,30 @@ bool testMatched(const UnitTestRunnerOptions& options, const UnitTestRunnerConfi
 	}
 
 	return true;
+}
+
+TEST_CASE("/flow/UnitTestRunner/defaultSelection") {
+	UnitTestRunnerOptions options;
+	UnitTestRunnerConfig config("flow", {}, {}, { "normal-only/" }, { "simulation-only/" });
+
+	ASSERT(testMatched(options, config, "/flow/regular"));
+	ASSERT(testMatched(options, config, "/redwood/correctness/btreeCloseWithQueuedCommits"));
+	ASSERT(testMatched(options, config, "noSim/flow/regular"));
+	ASSERT(!testMatched(options, config, "normal-only/test"));
+	ASSERT(!testMatched(options, config, "Lflow/longRunningCorrectness"));
+	ASSERT(!testMatched(options, config, "performance/flow/test"));
+
+	options.simulation = true;
+	ASSERT(testMatched(options, config, "/flow/regular"));
+	ASSERT(testMatched(options, config, "/redwood/correctness/btreeCloseWithQueuedCommits"));
+	ASSERT(!testMatched(options, config, "noSim/flow/regular"));
+	ASSERT(!testMatched(options, config, "simulation-only/test"));
+	ASSERT(!testMatched(options, config, "Lflow/longRunningCorrectness"));
+
+	options.testPattern = "Lflow/";
+	ASSERT(testMatched(options, config, "Lflow/longRunningCorrectness"));
+
+	return Void();
 }
 
 std::vector<UnitTest*> collectTests(const UnitTestRunnerOptions& options, const UnitTestRunnerConfig& config) {
