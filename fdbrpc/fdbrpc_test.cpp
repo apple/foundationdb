@@ -49,11 +49,12 @@ void initializeNetwork() {
 } // namespace
 
 int main(int argc, char** argv) {
-	return runUnitTests(argc,
-	                    argv,
-	                    UnitTestRunnerConfig("fdbrpc",
-	                                         initializeSimulation,
-	                                         initializeNetwork,
-	                                         { "/HTTP/Server/", "/fdbrpc/grpc", "fdbrpc/MockDNS" },
-	                                         { "/fdbrpc/grpc" }));
+	return runUnitTests(
+	    argc,
+	    argv,
+	    UnitTestRunnerConfig("fdbrpc",
+	                         initializeSimulation,
+	                         initializeNetwork,
+	                         { "/HTTP/Server/", "/fdbrpc/asyncFileNonDurable/", "/fdbrpc/grpc", "fdbrpc/MockDNS" },
+	                         { "/fdbrpc/grpc" }));
 }

@@ -111,7 +111,7 @@ int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
 	const auto bytesReadable = socket.available();
 	std::vector<uint8_t> tempReadBuffer(bytesReadable);
 	for (int index = 0; index < bytesReadable;) {
-		index += socket.read_some(mutable_buffers_1(&tempReadBuffer[index], bytesReadable), err);
+		index += socket.read_some(mutable_buffers_1(&tempReadBuffer[index], bytesReadable - index), err);
 	}
 	std::copy(tempReadBuffer.begin(), tempReadBuffer.end(), std::inserter(readBuffer, readBuffer.end()));
 	ASSERT(!err);
@@ -216,8 +216,8 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 	UnsentPacketQueue packetQueue;
 	Reference<IConnection> externalConn;
 	while (true) {
-		Reference<IConnection> connected =
-		    co_await INetworkConnections::net()->connect("localhost", std::to_string(testEchoServerPort));
+		Reference<IConnection> connected = co_await INetworkConnections::net()->connectExternal(
+		    NetworkAddress(IPAddress(0x7f000001), testEchoServerPort));
 		if (connected.isValid()) {
 			externalConn = std::move(connected);
 			break;
