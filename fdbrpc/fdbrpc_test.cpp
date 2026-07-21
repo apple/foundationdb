@@ -57,6 +57,7 @@ int main(int argc, char** argv) {
 	                                         { "/HTTP/Server/",
 	                                           "/fdbrpc/asyncFileNonDurable/sendErrorOnShutdownCancellation",
 	                                           "/fdbrpc/grpc",
+	                                           "fdbrpc/SimExternalClient",
 	                                           "fdbrpc/MockDNS" },
 	                                         { "/fdbrpc/grpc" }));
 }
