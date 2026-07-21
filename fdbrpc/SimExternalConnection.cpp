@@ -29,6 +29,7 @@
 #endif
 #include <boost/asio.hpp>
 #include <boost/range.hpp>
+#include <array>
 #include <thread>
 
 #include "SimExternalConnection.h"
@@ -46,10 +47,39 @@ static io_service ios;
 
 class SimExternalConnectionImpl {
 public:
+	static void readAvailable(SimExternalConnection* self) {
+		const bool wasNonBlocking = self->socket.non_blocking();
+		boost::system::error_code err;
+		if (!wasNonBlocking) {
+			self->socket.non_blocking(true, err);
+			if (err) {
+				throw connection_failed();
+			}
+		}
+
+		std::array<uint8_t, 4096> tempReadBuffer;
+		auto bytesRead = self->socket.read_some(buffer(tempReadBuffer), err);
+
+		boost::system::error_code restoreErr;
+		if (!wasNonBlocking) {
+			self->socket.non_blocking(false, restoreErr);
+		}
+		if (restoreErr || (err && err != boost::asio::error::would_block && err != boost::asio::error::try_again)) {
+			throw connection_failed();
+		}
+		if (!err) {
+			ASSERT(bytesRead > 0);
+			self->readBuffer.insert(self->readBuffer.end(), tempReadBuffer.begin(), tempReadBuffer.begin() + bytesRead);
+		}
+	}
+
 	static Future<Void> onReadable(SimExternalConnection* self) {
-		co_await delayJittered(0.1);
-		if (self->readBuffer.empty()) {
-			co_await self->onReadableTrigger.onTrigger();
+		while (self->readBuffer.empty()) {
+			readAvailable(self);
+			if (self->readBuffer.empty()) {
+				threadSleep(0.01);
+				co_await delayJittered(0.1);
+			}
 		}
 	}
 
@@ -94,6 +124,9 @@ Future<Void> SimExternalConnection::onReadable() {
 }
 
 int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {
+	if (readBuffer.empty()) {
+		SimExternalConnectionImpl::readAvailable(this);
+	}
 	auto toRead = std::min<int>(end - begin, readBuffer.size());
 	std::copy(readBuffer.begin(), readBuffer.begin() + toRead, begin);
 	readBuffer.erase(readBuffer.begin(), readBuffer.begin() + toRead);
@@ -102,23 +135,12 @@ int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {
 
 int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
 	boost::system::error_code err;
-	bool triggerReaders = (socket.available() == 0);
 	int bytesSent = socket.write_some(
 	    boost::iterator_range<SendBufferIterator>(SendBufferIterator(buffer, limit), SendBufferIterator()), err);
-	ASSERT(!err);
+	if (err) {
+		throw connection_failed();
+	}
 	ASSERT(bytesSent > 0);
-	threadSleep(0.1);
-	const auto bytesReadable = socket.available();
-	std::vector<uint8_t> tempReadBuffer(bytesReadable);
-	for (int index = 0; index < bytesReadable;) {
-		index += socket.read_some(mutable_buffers_1(&tempReadBuffer[index], bytesReadable - index), err);
-	}
-	std::copy(tempReadBuffer.begin(), tempReadBuffer.end(), std::inserter(readBuffer, readBuffer.end()));
-	ASSERT(!err);
-	ASSERT(socket.available() == 0);
-	if (triggerReaders) {
-		onReadableTrigger.trigger();
-	}
 	return bytesSent;
 }
 
@@ -192,13 +214,15 @@ SimExternalConnection::SimExternalConnection(ip::tcp::socket&& socket)
 
 static constexpr auto testEchoServerPort = 8000;
 
-static void testEchoServer() {
+static void testEchoServer(size_t expectedBytes) {
 	static constexpr auto readBufferSize = 1000;
+	bool delayedFirstResponse = false;
+	size_t bytesRead = 0;
 	io_service ios;
 	ip::tcp::acceptor acceptor(ios, ip::tcp::endpoint(ip::tcp::v4(), testEchoServerPort));
 	ip::tcp::socket socket(ios);
 	acceptor.accept(socket);
-	while (true) {
+	while (bytesRead < expectedBytes) {
 		char readBuffer[readBufferSize];
 		boost::system::error_code err;
 		auto length = socket.read_some(mutable_buffers_1(readBuffer, readBufferSize), err);
@@ -206,13 +230,20 @@ static void testEchoServer() {
 			return;
 		}
 		ASSERT(!err);
+		bytesRead += length;
+		if (!delayedFirstResponse) {
+			threadSleep(0.2);
+			delayedFirstResponse = true;
+		}
 		write(socket, buffer(readBuffer, length));
 	}
 }
 
 TEST_CASE("fdbrpc/SimExternalClient") {
 	const size_t maxDataLength = 10000;
-	std::thread serverThread([] { return testEchoServer(); });
+	Standalone<StringRef> data(
+	    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(2001, maxDataLength + 1)));
+	std::thread serverThread([expectedBytes = data.size()] { return testEchoServer(expectedBytes); });
 	UnsentPacketQueue packetQueue;
 	Reference<IConnection> externalConn;
 	while (true) {
@@ -225,8 +256,6 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 		// Wait until server is ready
 		threadSleep(0.01);
 	}
-	Standalone<StringRef> data(
-	    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1)));
 	PacketWriter packetWriter(packetQueue.getWriteBuffer(data.size()), nullptr, Unversioned());
 	packetWriter.serializeBytes(data);
 	while (!packetQueue.empty()) {
@@ -236,13 +265,19 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 	std::vector<uint8_t> vec(data.size());
 	size_t bytesRead = 0;
 	while (bytesRead < vec.size()) {
-		co_await externalConn->onReadable();
+		co_await timeoutError(externalConn->onReadable(), 10.0);
 		bytesRead += externalConn->read(vec.data() + bytesRead, vec.data() + vec.size());
 	}
+	try {
+		co_await timeoutError(externalConn->onReadable(), 10.0);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
 	externalConn->close();
+	serverThread.join();
 	StringRef echo(vec.empty() ? reinterpret_cast<const uint8_t*>("") : vec.data(), vec.size());
 	ASSERT(echo.toString() == data.toString());
-	serverThread.join();
 }
 
 TEST_CASE("fdbrpc/MockDNS") {
