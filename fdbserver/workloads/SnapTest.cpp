@@ -26,7 +26,7 @@
 #include "fdbclient/SimpleIni.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "BulkSetup.h"
 #include "fdbserver/tester/workloads.h"

@@ -40,7 +40,7 @@
 #include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/resolver/Resolver.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "ConflictSet.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"

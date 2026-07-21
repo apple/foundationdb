@@ -48,9 +48,11 @@ public:
 	explicit IBackupFile(const std::string& fileName) : m_fileName(fileName) {}
 	virtual ~IBackupFile() = default;
 	// Backup files are append-only and cannot have more than 1 append outstanding at once.
-	virtual Future<Void> append(const void* data, int len) = 0;
-	// Non-virtual size_t overload: safely chunks large writes so len never overflows the int parameter
-	// of the virtual append(). Uses CLIENT_KNOBS->BACKUP_MANIFEST_WRITE_CHUNK_SIZE as the chunk size.
+	// Backend hook that writes a single chunk. len is bounded by the chunk size (see append()), so
+	// backends may safely narrow it to the int length taken by IAsyncFile::write().
+	virtual Future<Void> appendImpl(const void* data, size_t len) = 0;
+	// Writes len bytes, slicing them into chunks of at most CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE
+	// so appendImpl() never receives more than INT_MAX bytes.
 	Future<Void> append(const void* data, size_t len);
 	virtual Future<Void> finish() = 0;
 	inline std::string getFileName() const { return m_fileName; }

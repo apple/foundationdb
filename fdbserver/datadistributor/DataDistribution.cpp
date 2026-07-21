@@ -420,41 +420,6 @@ Future<Void> monitorBackupPartitionRequired(Database cx, KeyRangeMap<ShardTracke
 	}
 }
 
-// Ensures that the serverKeys key space is properly coalesced
-// This method is only used for testing and is not implemented in a manner that is safe for large databases
-Future<Void> debugCheckCoalescing(Database cx) {
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-
-			int i{ 0 };
-			for (i = 0; i < serverList.size(); i++) {
-				UID id = decodeServerListValue(serverList[i].value).id();
-				RangeResult ranges = co_await krmGetRanges(&tr, serverKeysPrefixFor(id), allKeys);
-				ASSERT(ranges.end()[-1].key == allKeys.end);
-
-				for (int j = 0; j < ranges.size() - 2; j++) {
-					if (ranges[j].value == ranges[j + 1].value) {
-						TraceEvent(SevError, "UncoalescedValues", id)
-						    .detail("Key1", ranges[j].key)
-						    .detail("Key2", ranges[j + 1].key)
-						    .detail("Value", ranges[j].value);
-					}
-				}
-			}
-
-			TraceEvent("DoneCheckingCoalescing").log();
-			co_return;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
 struct DataDistributor;
 void runAuditStorage(
     Reference<DataDistributor> self,

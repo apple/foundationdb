@@ -30,7 +30,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "VersionedBTreeDebug.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/CoroUtils.h"
 #include "flow/Error.h"
@@ -1364,10 +1364,6 @@ public:
 		e.detail(format("%sRecordsPerPage", prefix), numPages > 0 ? (double)numEntries / numPages : 0);
 	}
 };
-
-int nextPowerOf2(uint32_t x) {
-	return 1 << (32 - clz(x - 1));
-}
 
 struct RedwoodMetrics {
 	constexpr static unsigned int btreeLevels = 5;

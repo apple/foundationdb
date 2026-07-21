@@ -1,4 +1,5 @@
 #include "fdbserver/logsystem/LogSystemConsumer.h"
+#include "LogSystemTypes.h"
 
 #include <algorithm>
 #include <utility>

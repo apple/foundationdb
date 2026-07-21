@@ -32,7 +32,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/WorkerEvents.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include <time.h>
 #include "ClusterRecovery.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
