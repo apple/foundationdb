@@ -67,6 +67,19 @@ TEST_CASE("/flow/coro/buggifiedDelay") {
 	}
 }
 
+TEST_CASE("/flow/genericactors/ActorHeaderDeclarations") {
+	std::vector<Future<bool>> values = { Future<bool>(true), Future<bool>(false) };
+	bool quorum = co_await quorumEqualsTrue(values, 1);
+	ASSERT(quorum);
+	bool any = co_await shortCircuitAny(values);
+	ASSERT(any);
+	co_await returnIfTrue(Future<bool>(true));
+
+	Reference<AsyncVar<bool>> condition = makeReference<AsyncVar<bool>>(false);
+	co_await delayAfterCleared(condition, 0.0);
+	co_await lowPriorityDelayAfterCleared(condition, 0.0);
+}
+
 template <class T, class Func, class ErrFunc, class CallbackType>
 class LambdaCallback final : public CallbackType, public FastAllocated<LambdaCallback<T, Func, ErrFunc, CallbackType>> {
 	Func func;
