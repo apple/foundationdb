@@ -60,12 +60,13 @@ RUN curl -Ls "https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TA
 
 WORKDIR /
 
-FROM golang:1.25.12-trixie AS go-build
+# Check that glibc version in base image >= glibc in go-build image (unless CGO_ENABLED=0)
+
+FROM golang:1.25.12-bookworm AS go-build
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
 
-# Build the fdb-aws-s3-credentials-fetcher in a dedicated build
 FROM go-build AS go-credentials-fetcher-build
 COPY fdb-aws-s3-credentials-fetcher/ /fdb-aws-s3-credentials-fetcher
 WORKDIR /fdb-aws-s3-credentials-fetcher
