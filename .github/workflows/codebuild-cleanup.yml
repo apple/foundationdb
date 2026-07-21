@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Minimize Outdated Comments
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             // Example header: ### Result of foundationdb-pr-clang on Linux RHEL 9
@@ -43,37 +43,69 @@ jobs:
             let oldCommentAtHead = null;
 
             console.log(`Searching for previous comments with header: "${header}"`);
-            for await (const { data: comments } of github.paginate.iterator(
-              github.rest.issues.listComments,
-              {
-                owner:        context.repo.owner,
-                repo:         context.repo.repo,
-                issue_number: context.issue.number,
-                per_page:     100,
+            const query = `
+              query($owner: String!, $repo: String!, $prNumber: Int!, $cursor: String) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $prNumber) {
+                    comments(first: 100, after: $cursor) {
+                      pageInfo {
+                        hasNextPage
+                        endCursor
+                      }
+                      nodes {
+                        id
+                        databaseId
+                        body
+                        isMinimized
+                        author {
+                          login
+                        }
+                      }
+                    }
+                  }
+                }
               }
-            )) {
-              for (const comment of comments) {
+            `;
+            let hasNextPage = true;
+            let cursor = null;
+
+            while (hasNextPage) {
+              const result = await github.graphql(query, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                prNumber: context.issue.number,
+                cursor: cursor
+              });
+              const prComments = result.repository.pullRequest.comments;
+
+              for (const comment of prComments.nodes) {
                 if (
-                  comment.user.login === 'foundationdb-ci' &&
-                  comment.id !== context.payload.comment.id &&
+                  comment.author &&
+                  comment.author.login === 'foundationdb-ci' &&
+                  comment.databaseId !== context.payload.comment.id &&
                   comment.body.trimStart().startsWith(header)
                 ) {
                   allOldComments.push(comment);
-
                   // Check for older comment matching PR head commit, in case reports came out-of-order.
-                  // Default sort by created ascending, newest matching head commit wins.
+                  // Default sort is by created ascending, newest matching head commit wins.
                   const m = comment.body.match(/^\* Commit ID: ([a-f0-9]+)/m);
                   if (m && m[1] === headSha) {
                     oldCommentAtHead = comment;
                   }
                 }
               }
+              hasNextPage = prComments.pageInfo.hasNextPage;
+              cursor = prComments.pageInfo.endCursor;
             }
             const newCommentM = commentBody.match(/^\* Commit ID: ([a-f0-9]+)/m);
             const newCommentSha = newCommentM ? newCommentM[1] : null;
             if (newCommentSha && newCommentSha !== headSha && oldCommentAtHead) {
               console.log(`New comment is for old commit (${newCommentSha}), but an older comment exists for the head commit (${headSha})`);
-              commentsToMinimize.push(context.payload.comment);
+              commentsToMinimize.push({
+                id: context.payload.comment.node_id,
+                databaseId: context.payload.comment.id,
+                isMinimized: false // new comment must not be minimized yet
+              });
               for (const old of allOldComments) {
                 if (old.id !== oldCommentAtHead.id) {
                   commentsToMinimize.push(old);
@@ -82,29 +114,13 @@ jobs:
             } else {
               commentsToMinimize.push(...allOldComments);
             }
-            console.log(`Found ${commentsToMinimize.length} comments to minimize.`);
-
+            console.log(`Found ${commentsToMinimize.length} comments to evaluate.`);
             for (const comment of commentsToMinimize) {
-              const checkQuery = `
-                query($id: ID!) {
-                  node(id: $id) {
-                    ... on Minimizable {
-                      isMinimized
-                    }
-                  }
-                }
-              `;
-              try {
-                const checkResult = await github.graphql(checkQuery, { id: comment.node_id });
-                if (checkResult.node.isMinimized) {
-                  console.log(`Comment ${comment.id} is already minimized.`);
-                  continue;
-                }
-              } catch (error) {
-                console.error(`Failed to check minimization status for comment ${comment.id}:`, error);
+              if (comment.isMinimized) {
+                console.log(`Comment ${comment.databaseId} is already minimized.`);
                 continue;
               }
-              console.log(`Minimizing comment ${comment.id}`);
+              console.log(`Minimizing comment ${comment.databaseId}`);
               const minimizeMutation = `
                 mutation($id: ID!, $classifier: ReportedContentClassifiers!) {
                   minimizeComment(input: { subjectId: $id, classifier: $classifier }) {
@@ -116,10 +132,10 @@ jobs:
               `;
               try {
                 await github.graphql(minimizeMutation, {
-                  id: comment.node_id,
+                  id: comment.id,
                   classifier: 'OUTDATED'
                 });
               } catch (error) {
-                console.error(`Failed to minimize comment ${comment.id}:`, error);
+                console.error(`Failed to minimize comment ${comment.databaseId}:`, error);
               }
             }
