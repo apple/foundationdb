@@ -1126,6 +1126,11 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 	// kick off relocators from items in the queue as need be
 	for (auto it = combined.begin(); it != combined.end(); it++) {
 		RelocateData rd(*it);
+		// A restored move can be held behind the pipeline gate while shard-encoded metadata is disabled.
+		// Restart DD before mutating the queue so the move is cancelled by the rollback path.
+		if (rd.isRestore() && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			throw dd_config_changed();
+		}
 
 		// If having a bulk load task overlapping the rd range,
 		// attach bulk load task to the input rd if rd is not a data move
