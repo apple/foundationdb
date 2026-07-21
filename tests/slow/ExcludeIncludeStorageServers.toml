@@ -1,3 +1,7 @@
+[configuration]
+# Keep one spare machine per datacenter so excluding a storage server cannot exhaust a replicated team.
+extraMachineCountDC = 1
+
 [[knobs]]
 dd_max_shards_on_large_teams=0
 
