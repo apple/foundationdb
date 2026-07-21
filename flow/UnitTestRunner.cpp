@@ -227,12 +227,9 @@ bool testMatched(const UnitTestRunnerOptions& options, const UnitTestRunnerConfi
 	}
 
 	if (options.testPattern.empty()) {
-		if (options.simulation) {
-			if (!startsWith(testName, "/")) {
-				return false;
-			}
-		} else if (startsWith(testName, ":") || startsWith(testName, "#") || startsWith(testName, "L") ||
-		           startsWith(testName, "perf/") || startsWith(testName, "performance/")) {
+		if ((options.simulation && startsWith(testName, "noSim/")) || startsWith(testName, ":") ||
+		    startsWith(testName, "#") || startsWith(testName, "L") || startsWith(testName, "perf/") ||
+		    startsWith(testName, "performance/")) {
 			return false;
 		}
 

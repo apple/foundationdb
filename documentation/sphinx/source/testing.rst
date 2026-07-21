@@ -35,7 +35,7 @@ Several standalone unit-test binaries can also run their tests under Simulation.
 
    ./bin/fdbclient_test --simulation
 
-Without an explicit test filter, simulation mode runs the standard ``/...`` unit tests and skips the incompatible ``/fdbrpc/grpc`` tests. Normal mode skips standalone-incompatible gRPC and simulation-only HTTP-server and mock-DNS tests, tests requiring an external backup URL, and opt-in performance tests. An explicit ``--filter`` can still select any of these tests. The ``flow_test`` target does not support simulation because it is not linked with simulator support.
+Without an explicit test filter, simulation mode skips ``noSim/...``, incompatible ``/fdbrpc/grpc``, and opt-in performance tests. Normal mode skips standalone-incompatible gRPC and simulation-only HTTP-server and mock-DNS tests, tests requiring an external backup URL, and opt-in performance tests. An explicit ``--filter`` can still select any of these tests. The ``flow_test`` target does not support simulation because it is not linked with simulator support.
 
 Performance testing with Circus
 ===============================
