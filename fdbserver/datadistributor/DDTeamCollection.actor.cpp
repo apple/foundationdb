@@ -1109,9 +1109,9 @@ public:
 					// Partial moves can leave a merged shard associated with this team without another health change.
 					change.push_back(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow));
 				}
+				const bool healthyTeamBecameAvailable = lastZeroHealthy && !self->zeroHealthyTeams->get();
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
-				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed ||
-				                            retryUnhealthyShards);
+				                            healthyTeamBecameAvailable || containsFailed || retryUnhealthyShards);
 				bool teamStateChanged = serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired ||
 				                        anyWrongConfiguration != lastWrongConfiguration ||
 				                        anyWigglingServer != lastAnyWigglingServer ||
@@ -1275,11 +1275,12 @@ public:
 
 						std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 						    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
-						if (teamStateChanged || !retryUnhealthyShards) {
+						if (teamStateChanged || !retryUnhealthyShards || healthyTeamBecameAvailable) {
 							submittedShards.clear();
 						} else {
 							// An unchanged range may still be waiting behind the relocation pipeline gate. Only retry
-							// newly mapped ranges until the team state changes, and forget ranges that disappeared.
+							// newly mapped ranges until the team state or destination availability changes, and forget
+							// ranges that disappeared.
 							std::unordered_set<KeyRange> mappedShards(shards.begin(), shards.end());
 							for (auto it = submittedShards.begin(); it != submittedShards.end();) {
 								if (!mappedShards.contains(*it)) {
@@ -7232,6 +7233,20 @@ public:
 		ASSERT(!relocations.isReady());
 		ASSERT_EQ(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
 		          initialTeamCollectionInfoTime);
+
+		collection->zeroHealthyTeams->set(true);
+		co_await delay(0.1);
+		ASSERT(!relocations.isReady());
+		collection->zeroHealthyTeams->set(false);
+		co_await delay(0.1);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(!relocations.isReady());
+
+		co_await delay(SERVER_KNOBS->CHECK_TEAM_DELAY + 0.1);
+		ASSERT(!relocations.isReady());
 
 		NetworkAddress failedAddress = collection->server_info[undesired]->getLastKnownInterface().address();
 		collection->excludedServers.set(AddressExclusion(failedAddress.ip, failedAddress.port),
