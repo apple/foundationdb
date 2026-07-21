@@ -28,6 +28,8 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
+#include "fdbrpc/simulator.h"
 #include "ClusterHealthMonitor.h"
 #include "RatekeeperMonitor.h"
 #include "fdbserver/core/Knobs.h"
@@ -1507,7 +1509,7 @@ public:
 	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
 	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
 	    bool checkStable = false) {
-		std::map<std::tuple<recruitment::Fitness, int, bool, int>, std::vector<WorkerDetails>> fitness_workers;
+		std::map<std::tuple<recruitment::Fitness, int, bool, bool, int>, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		if (minWorker.present()) {
 			results.push_back(minWorker.get().worker);
@@ -1527,10 +1529,14 @@ public:
 			      (fitness < minWorker.get().fitness ||
 			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
 				auto sharing = preferredSharing.find(it.first);
-				fitness_workers[std::make_tuple(fitness,
-				                                id_used[it.first],
-				                                isLongLivedStateless(it.first),
-				                                sharing != preferredSharing.end() ? sharing->second : 1e6)]
+				fitness_workers[std::make_tuple(
+				                    fitness,
+				                    id_used[it.first],
+				                    role == recruitment::Backup && g_network->isSimulated() &&
+				                        !g_simulator->getProcessByAddress(it.second.details.interf.address())
+				                             ->isReliable(),
+				                    isLongLivedStateless(it.first),
+				                    sharing != preferredSharing.end() ? sharing->second : 1e6)]
 				    .push_back(it.second.details);
 			}
 		}
