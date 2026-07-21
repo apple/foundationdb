@@ -36,7 +36,7 @@
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/tlog/TLogServer.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/sim_validation.h"
@@ -3871,6 +3871,7 @@ Future<Void> restorePersistentState(TLogData* self,
 		Version ver = BinaryReader::fromStringRef<Version>(fVers.get()[idx].value, Unversioned());
 		logData->persistentDataVersion = ver;
 		logData->persistentDataDurableVersion = ver;
+		logData->queuePoppedVersion = ver;
 		logData->version.set(ver);
 		logData->recoveryCount =
 		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
@@ -3903,6 +3904,10 @@ Future<Void> restorePersistentState(TLogData* self,
 				logData->createTagData(
 				    tag, popped, NothingPersistent::False, PoppedRecently::False, UnpoppedRecovered::False);
 				logData->getTagData(tag)->persistentPopped = popped;
+				// Reference-spilled data can still pin disk queue entries before the restored durable version.
+				if (logData->shouldSpillByReference(tag)) {
+					logData->queuePoppedVersion = std::min(logData->queuePoppedVersion, popped);
+				}
 			}
 		}
 	}
@@ -4154,6 +4159,7 @@ Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, LocalityData l
 			logData->persistentDataVersion = logData->unrecoveredBefore - 1;
 			logData->persistentDataDurableVersion = logData->unrecoveredBefore - 1;
 			logData->queueCommittedVersion.set(logData->unrecoveredBefore - 1);
+			logData->queuePoppedVersion = logData->unrecoveredBefore - 1;
 			logData->version.set(logData->unrecoveredBefore - 1);
 
 			logData->unpoppedRecoveredTagCount = req.allTags.size();

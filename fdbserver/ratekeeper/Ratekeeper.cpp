@@ -662,7 +662,18 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	// ratio
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC)) {
+		if (!ss.valid || !ss.acceptingRequests) {
+			continue;
+		}
+
+		int64_t storageQueue = ss.getStorageQueueBytes();
+		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
+
+		int64_t storageDurabilityLag = ss.getDurabilityLag();
+		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
+
+		// Remote storage is reported in health metrics but is not used to rate-limit the primary region.
+		if (remoteDC.present() && ss.locality.dcId() == remoteDC) {
 			continue;
 		}
 		++sscount;
@@ -696,12 +707,6 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 				    .detail("MinFreeSpace", minFreeSpace);
 			}
 		}
-
-		int64_t storageQueue = ss.getStorageQueueBytes();
-		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
-
-		int64_t storageDurabilityLag = ss.getDurabilityLag();
-		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
 
 		storageDurabilityLagReverseIndex.insert(std::make_pair(-1 * storageDurabilityLag, &ss));
 

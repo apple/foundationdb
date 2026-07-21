@@ -300,14 +300,6 @@ int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t ma
 	return passed;
 }
 
-uint64_t extractHexOption(StringRef value) {
-	char* end;
-	uint64_t id = strtoull(value.toString().c_str(), &end, 16);
-	if (*end)
-		throw invalid_option_value();
-	return id;
-}
-
 void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	int defaultFor = FDBDatabaseOptions::optionInfo.getMustExist(option).defaultFor;
 	if (defaultFor >= 0) {

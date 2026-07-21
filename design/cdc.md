@@ -11,11 +11,11 @@ or transaction-system recovery.
 
 ## Background
 
-This design describes the native C++ interface and its server implementation.
-The feature is disabled by default behind `ENABLE_NATIVE_CDC`; the native CDC
-workloads explicitly enable it, and simulation may randomly enable it. The
-initial interface is native-only: it does not expose bindings or an external
-protocol compatibility guarantee.
+This design describes the native C++ interface, its C binding, and its server
+implementation. The feature is disabled by default behind `ENABLE_NATIVE_CDC`;
+the native CDC workloads explicitly enable it, and simulation may randomly
+enable it. The client interface is exposed through the native C++ API and C
+binding; it does not expose an external protocol compatibility guarantee.
 
 The implementation uses the following terms:
 
@@ -85,14 +85,17 @@ The current implementation does not attempt to provide:
   range requires removing and registering a stream.
 * Throughput-aware assignment of streams across CDC proxies.
 * Throughput-aware movement of streams between CDC tags.
-* Client bindings beyond the native API.
+* Language-specific bindings beyond the C API.
 
 ## Client interface
 
-The client-facing declarations are in `fdbclient/NativeCdc.h`; durable
-metadata operations used by server roles are in
-the private `fdbclient/NativeCdcInternal.h`; cursor and wire request types are in
-`fdbclient/CDCProxyInterface.h`.
+The native C++ client-facing declarations are in `fdbclient/NativeCdc.h`;
+value types and the thread-safe surface shared with language bindings are in
+`fdbclient/NativeCdcClient.h`; durable metadata operations used by server
+roles are in the private `fdbclient/NativeCdcInternal.h`; cursor and wire
+request types are in `fdbclient/CDCProxyInterface.h`. The public C binding is
+declared in `bindings/c/foundationdb/fdb_c.h` and documented in
+`documentation/sphinx/source/api-c.rst`.
 `CDCStreamId` is a `uint64_t` typedef. CDC tag IDs are 16-bit, so one
 configured tag pool can contain at most 65,536 distinct tags.
 
@@ -769,8 +772,9 @@ policy simple.
 * There is no background process that changes a live stream's CDC tag in
   response to load. A future implementation can use versioned tag history to
   make such changes without losing the ability to read earlier tagged data.
-* The native interface does not yet provide external binding support,
-  administrative tooling, or a higher-level consumer checkpoint abstraction.
+* The CDC client surface does not yet provide language-specific bindings beyond
+  the C API, administrative tooling, or a higher-level consumer checkpoint
+  abstraction.
 
 These improvements must preserve the acknowledgement and retired-pop
 invariants above. In particular, moving a stream between tags cannot forget an

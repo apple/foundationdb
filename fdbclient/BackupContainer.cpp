@@ -45,15 +45,12 @@ Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<Stri
 	co_await file->append(s.begin(), s.size());
 }
 
-// Writes data in chunks of at most BACKUP_MANIFEST_WRITE_CHUNK_SIZE bytes. This is necessary because
-// IBackupFile::append() takes an int length, so passing a size_t larger than INT_MAX would silently
-// truncate to a negative value and corrupt the write.
-Future<Void> appendChunked(Reference<IBackupFile> file, const void* data, size_t len) {
+Future<Void> append(Reference<IBackupFile> file, const void* data, size_t len) {
 	const char* ptr = static_cast<const char*>(data);
+	size_t chunkLimit = static_cast<size_t>(CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE);
 	for (size_t offset = 0; offset < len;) {
-		int chunkSize = static_cast<int>(
-		    std::min(len - offset, static_cast<size_t>(CLIENT_KNOBS->BACKUP_MANIFEST_WRITE_CHUNK_SIZE)));
-		co_await file->append(ptr + offset, chunkSize);
+		size_t chunkSize = std::min(len - offset, chunkLimit);
+		co_await file->appendImpl(ptr + offset, chunkSize);
 		offset += chunkSize;
 	}
 }
@@ -65,7 +62,7 @@ Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
 }
 
 Future<Void> IBackupFile::append(const void* data, size_t len) {
-	return IBackupFile_impl::appendChunked(Reference<IBackupFile>::addRef(this), data, len);
+	return IBackupFile_impl::append(Reference<IBackupFile>::addRef(this), data, len);
 }
 
 bool isBlobstoreUrl(const std::string& url) {
