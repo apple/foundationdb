@@ -107,7 +107,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - `ServerDBInfo` is the cluster-wide configuration broadcast. Contains: master interface, proxy lists, log system config, recovery state, latency band config.
 - Updated by CC and distributed to all workers. Workers react to changes (e.g., new proxy set).
 
-**Principal files:** [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp), `ClusterController.h`, [`Coordination.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.cpp), [`LeaderElection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.cpp), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h)
+**Principal files:** [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp), `ClusterController.h`, [`Coordination.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.cpp), [`LeaderElection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.cpp), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`WorkerInterface.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.h)
 
 ---
 

@@ -18,6 +18,7 @@ testTitle = 'NativeCdcReplyChunking'
 useDB = true
 waitForQuiescenceEnd = false
 connectionFailuresDisableDuration = 1000000
+runFailureWorkloads = false
 
     [[test.workload]]
     testName = 'NativeCdcEndToEnd'

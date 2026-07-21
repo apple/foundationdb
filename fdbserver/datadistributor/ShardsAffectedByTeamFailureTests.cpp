@@ -164,3 +164,67 @@ TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/RetryMergedShardAfterPar
 
 	return Void();
 }
+
+TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/CancelMove") {
+	ShardsAffectedByTeamFailure shards;
+	shards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+
+	const UID source1(1, 0), source2(2, 0), destination1(3, 0), destination2(4, 0), redirected1(5, 0),
+	    redirected2(6, 0);
+	const ShardsAffectedByTeamFailure::Team source({ source1, source2 }, true);
+	const ShardsAffectedByTeamFailure::Team destination({ destination1, destination2 }, true);
+	const ShardsAffectedByTeamFailure::Team redirected({ redirected1, redirected2 }, true);
+	const KeyRange moveRange = KeyRangeRef("a"_sr, "c"_sr);
+	const KeyRange leftRange = KeyRangeRef("a"_sr, "b"_sr);
+	const KeyRange rightRange = KeyRangeRef("b"_sr, "c"_sr);
+
+	shards.assignRangeToTeams(allKeys, { source });
+	shards.defineShard(moveRange);
+	shards.moveShard(moveRange, { destination });
+	shards.defineShard(leftRange);
+
+	auto restored = shards.cancelMove(moveRange, { destination }, { source });
+	ASSERT((restored == std::vector<KeyRange>{ leftRange, rightRange }));
+	ASSERT(shards.getTeamsForFirstShard(leftRange).first == std::vector<ShardsAffectedByTeamFailure::Team>{ source });
+	ASSERT(shards.getTeamsForFirstShard(rightRange).first == std::vector<ShardsAffectedByTeamFailure::Team>{ source });
+	ASSERT(shards.getTeamsForFirstShard(leftRange).second.empty());
+	ASSERT(shards.getTeamsForFirstShard(rightRange).second.empty());
+	ASSERT_EQ(shards.getNumberOfShards(destination), 0);
+	ASSERT_EQ(shards.getNumberOfShards(source), 4);
+
+	shards.moveShard(moveRange, { destination });
+	shards.moveShard(rightRange, { redirected });
+	restored = shards.cancelMove(moveRange, { destination }, { source });
+	ASSERT((restored == std::vector<KeyRange>{ leftRange }));
+	ASSERT(shards.getTeamsForFirstShard(leftRange).first == std::vector<ShardsAffectedByTeamFailure::Team>{ source });
+	ASSERT(shards.getTeamsForFirstShard(rightRange).first ==
+	       std::vector<ShardsAffectedByTeamFailure::Team>{ redirected });
+	ASSERT_EQ(shards.getNumberOfShards(destination), 0);
+	ASSERT_EQ(shards.getNumberOfShards(redirected), 1);
+
+	shards.moveShard(moveRange, { destination });
+	shards.moveShard(KeyRangeRef("aa"_sr, "ab"_sr), { redirected });
+	restored = shards.cancelMove(moveRange, { destination }, { source });
+	ASSERT((restored == std::vector<KeyRange>{ leftRange, rightRange }));
+	ASSERT(shards.getTeamsForFirstShard(leftRange).first ==
+	       std::vector<ShardsAffectedByTeamFailure::Team>{ redirected });
+	ASSERT(shards.getTeamsForFirstShard(rightRange).first == std::vector<ShardsAffectedByTeamFailure::Team>{ source });
+	ASSERT_EQ(shards.getNumberOfShards(destination), 0);
+	ASSERT_EQ(shards.getNumberOfShards(redirected), 1);
+
+	ShardsAffectedByTeamFailure partialShards;
+	partialShards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+	partialShards.assignRangeToTeams(allKeys, { source });
+	partialShards.moveShard(allKeys, { destination });
+	const KeyRange partialCancelRange = KeyRangeRef("a"_sr, "b"_sr);
+	restored = partialShards.cancelMove(partialCancelRange, { destination }, { source });
+	ASSERT((restored == std::vector<KeyRange>{ partialCancelRange }));
+	ASSERT(partialShards.getTeamsForFirstShard(partialCancelRange).first ==
+	       std::vector<ShardsAffectedByTeamFailure::Team>{ source });
+	ASSERT(partialShards.getTeamsForFirstShard(KeyRangeRef("b"_sr, "c"_sr)).first ==
+	       std::vector<ShardsAffectedByTeamFailure::Team>{ destination });
+	ASSERT_EQ(partialShards.getNumberOfShards(destination), 2);
+	ASSERT_EQ(partialShards.getNumberOfShards(source), 1);
+
+	return Void();
+}

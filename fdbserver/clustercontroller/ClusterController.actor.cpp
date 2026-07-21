@@ -36,7 +36,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ProcessClassRecruitment.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -124,6 +124,8 @@ ClusterControllerData::ClusterControllerData(ClusterControllerFullInterface cons
 	serverInfo.masterLifetime.ccID = id;
 	serverInfo.clusterInterface = ccInterface;
 	serverInfo.myLocality = locality;
+	serverInfo.client.nativeCdcEnabled = CLIENT_KNOBS->ENABLE_NATIVE_CDC;
+	serverInfo.client.nativeCdcTagCount = CLIENT_KNOBS->NATIVE_CDC_TAG_COUNT;
 	db.serverInfo->set(serverInfo);
 	cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 
@@ -2383,60 +2385,56 @@ Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
-	state Future<Void> changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
-	state Future<Void> onChange = self->changingDcIds.onChange();
-	loop {
-		choose {
-			when(wait(onChange)) {
-				changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
-				onChange = self->changingDcIds.onChange();
-			}
-			when(wait(changeDelay)) {
-				changeDelay = Never();
-				onChange = self->changingDcIds.onChange();
+Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
+	Future<Void> changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
+	Future<Void> onChange = self->changingDcIds.onChange();
+	while (true) {
+		auto res = co_await race(onChange, changeDelay);
+		if (res.index() == 0) {
+			changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
+			onChange = self->changingDcIds.onChange();
+		} else {
+			changeDelay = Never();
+			onChange = self->changingDcIds.onChange();
 
-				self->changedDcIds.set(self->changingDcIds.get());
-				if (self->changedDcIds.get().second.present()) {
-					TraceEvent("UpdateChangedDatacenter", self->id).detail("CCFirst", self->changedDcIds.get().first);
-					if (!self->changedDcIds.get().first) {
-						auto& worker = self->id_worker[self->clusterControllerProcessId];
-						uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness(
-						    worker.details.interf.locality.dcId(), self->changedDcIds.get().second.get());
-						if (worker.priorityInfo.dcFitness != newFitness) {
-							worker.priorityInfo.dcFitness = newFitness;
-							if (!worker.reply.isSet()) {
-								worker.reply.send(
-								    RegisterWorkerReply(worker.details.processClass, worker.priorityInfo));
-							}
+			self->changedDcIds.set(self->changingDcIds.get());
+			if (self->changedDcIds.get().second.present()) {
+				TraceEvent("UpdateChangedDatacenter", self->id).detail("CCFirst", self->changedDcIds.get().first);
+				if (!self->changedDcIds.get().first) {
+					auto& worker = self->id_worker[self->clusterControllerProcessId];
+					uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness(
+					    worker.details.interf.locality.dcId(), self->changedDcIds.get().second.get());
+					if (worker.priorityInfo.dcFitness != newFitness) {
+						worker.priorityInfo.dcFitness = newFitness;
+						if (!worker.reply.isSet()) {
+							worker.reply.send(RegisterWorkerReply(worker.details.processClass, worker.priorityInfo));
 						}
-					} else {
-						state int currentFit = recruitment::BestFit;
-						while (currentFit <= recruitment::NeverAssign) {
-							bool updated = false;
-							for (auto& it : self->id_worker) {
-								if ((!it.second.priorityInfo.isExcluded &&
-								     it.second.priorityInfo.processClassFitness == currentFit) ||
-								    currentFit == recruitment::NeverAssign) {
-									uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness(
-									    it.second.details.interf.locality.dcId(),
-									    self->changedDcIds.get().second.get());
-									if (it.first != self->clusterControllerProcessId &&
-									    it.second.priorityInfo.dcFitness != fitness) {
-										updated = true;
-										it.second.priorityInfo.dcFitness = fitness;
-										if (!it.second.reply.isSet()) {
-											it.second.reply.send(RegisterWorkerReply(it.second.details.processClass,
-											                                         it.second.priorityInfo));
-										}
+					}
+				} else {
+					int currentFit = recruitment::BestFit;
+					while (currentFit <= recruitment::NeverAssign) {
+						bool updated = false;
+						for (auto& it : self->id_worker) {
+							if ((!it.second.priorityInfo.isExcluded &&
+							     it.second.priorityInfo.processClassFitness == currentFit) ||
+							    currentFit == recruitment::NeverAssign) {
+								uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness(
+								    it.second.details.interf.locality.dcId(), self->changedDcIds.get().second.get());
+								if (it.first != self->clusterControllerProcessId &&
+								    it.second.priorityInfo.dcFitness != fitness) {
+									updated = true;
+									it.second.priorityInfo.dcFitness = fitness;
+									if (!it.second.reply.isSet()) {
+										it.second.reply.send(RegisterWorkerReply(it.second.details.processClass,
+										                                         it.second.priorityInfo));
 									}
 								}
 							}
-							if (updated && currentFit < recruitment::NeverAssign) {
-								wait(delay(SERVER_KNOBS->CC_CLASS_DELAY));
-							}
-							currentFit++;
 						}
+						if (updated && currentFit < recruitment::NeverAssign) {
+							co_await delay(SERVER_KNOBS->CC_CLASS_DELAY);
+						}
+						currentFit++;
 					}
 				}
 			}
@@ -2806,13 +2804,13 @@ Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) 
 	}
 }
 
-ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
-	state SingletonRecruitThrottler recruitThrottler;
+Future<Void> monitorDataDistributor(ClusterControllerData* self) {
+	SingletonRecruitThrottler recruitThrottler;
 	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-		wait(self->db.serverInfo->onChange());
+		co_await self->db.serverInfo->onChange();
 	}
 
-	loop {
+	while (true) {
 		bool ddExist = self->db.serverInfo->get().distributor.present();
 		TraceEvent(SevInfo, "CCMonitorDataDistributor", self->id)
 		    .detail("Recruiting", self->recruitDistributor.get())
@@ -2820,18 +2818,17 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 		    .detail("ExistingDD", ddExist ? self->db.serverInfo->get().distributor.get().id().toString() : "");
 
 		if (self->db.serverInfo->get().distributor.present() && !self->recruitDistributor.get()) {
-			choose {
-				when(wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,
-				                            SERVER_KNOBS->DD_FAILURE_TIME))) {
-					const auto& distributor = self->db.serverInfo->get().distributor;
-					TraceEvent("CCDataDistributorDied", self->id).detail("DDID", distributor.get().id());
-					DataDistributorSingleton(distributor).halt(*self, distributor.get().locality.processId());
-					self->db.clearInterf(ProcessClass::DataDistributorClass);
-				}
-				when(wait(self->recruitDistributor.onChange())) {}
+			auto res = co_await race(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,
+			                                           SERVER_KNOBS->DD_FAILURE_TIME),
+			                         self->recruitDistributor.onChange());
+			if (res.index() == 0) {
+				const auto& distributor = self->db.serverInfo->get().distributor;
+				TraceEvent("CCDataDistributorDied", self->id).detail("DDID", distributor.get().id());
+				DataDistributorSingleton(distributor).halt(*self, distributor.get().locality.processId());
+				self->db.clearInterf(ProcessClass::DataDistributorClass);
 			}
 		} else {
-			wait(startDataDistributor(self, recruitThrottler.newRecruitment()));
+			co_await startDataDistributor(self, recruitThrottler.newRecruitment());
 		}
 	}
 }
@@ -2904,26 +2901,25 @@ Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
 	}
 }
 
-ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
-	state SingletonRecruitThrottler recruitThrottler;
+Future<Void> monitorRatekeeper(ClusterControllerData* self) {
+	SingletonRecruitThrottler recruitThrottler;
 	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-		wait(self->db.serverInfo->onChange());
+		co_await self->db.serverInfo->onChange();
 	}
 
-	loop {
+	while (true) {
 		if (self->db.serverInfo->get().ratekeeper.present() && !self->recruitRatekeeper.get()) {
-			choose {
-				when(wait(waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure,
-				                            SERVER_KNOBS->RATEKEEPER_FAILURE_TIME))) {
-					const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
-					TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
-					RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
-					self->db.clearInterf(ProcessClass::RatekeeperClass);
-				}
-				when(wait(self->recruitRatekeeper.onChange())) {}
+			auto res = co_await race(waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure,
+			                                           SERVER_KNOBS->RATEKEEPER_FAILURE_TIME),
+			                         self->recruitRatekeeper.onChange());
+			if (res.index() == 0) {
+				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+				TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
+				RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
+				self->db.clearInterf(ProcessClass::RatekeeperClass);
 			}
 		} else {
-			wait(startRatekeeper(self, recruitThrottler.newRecruitment()));
+			co_await startRatekeeper(self, recruitThrottler.newRecruitment());
 		}
 	}
 }
@@ -2996,28 +2992,25 @@ Future<Void> startConsistencyScan(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
+Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		TraceEvent("CCMonitorConsistencyScanWaitingForRecovery", self->id).log();
-		wait(self->db.serverInfo->onChange());
+		co_await self->db.serverInfo->onChange();
 	}
 	TraceEvent("CCMonitorConsistencyScan", self->id).log();
-	loop {
+	while (true) {
 		if (self->db.serverInfo->get().consistencyScan.present() && !self->recruitConsistencyScan.get()) {
-			state Future<Void> wfClient =
-			    waitFailureClient(self->db.serverInfo->get().consistencyScan.get().waitFailure,
-			                      SERVER_KNOBS->CONSISTENCYSCAN_FAILURE_TIME);
-			choose {
-				when(wait(wfClient)) {
-					TraceEvent("CCMonitorConsistencyScanDied", self->id)
-					    .detail("CKID", self->db.serverInfo->get().consistencyScan.get().id());
-					self->db.clearInterf(ProcessClass::ConsistencyScanClass);
-				}
-				when(wait(self->recruitConsistencyScan.onChange())) {}
+			Future<Void> wfClient = waitFailureClient(self->db.serverInfo->get().consistencyScan.get().waitFailure,
+			                                          SERVER_KNOBS->CONSISTENCYSCAN_FAILURE_TIME);
+			auto res = co_await race(wfClient, self->recruitConsistencyScan.onChange());
+			if (res.index() == 0) {
+				TraceEvent("CCMonitorConsistencyScanDied", self->id)
+				    .detail("CKID", self->db.serverInfo->get().consistencyScan.get().id());
+				self->db.clearInterf(ProcessClass::ConsistencyScanClass);
 			}
 		} else {
 			TraceEvent("CCMonitorConsistencyScanStarting", self->id).log();
-			wait(startConsistencyScan(self));
+			co_await startConsistencyScan(self);
 		}
 	}
 }

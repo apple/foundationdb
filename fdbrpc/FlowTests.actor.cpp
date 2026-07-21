@@ -30,6 +30,7 @@
 #include "flow/IThreadPool.h"
 #include "flow/WriteOnlySet.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/AsyncFileNonDurable.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TLSConfig.h"
 #include "fdbrpc/grpc/AsyncTaskExecutor.h"
@@ -337,6 +338,17 @@ TEST_CASE("/flow/flow/cancel1") {
 	       test.isError() && test.getError().code() == error_code_actor_cancelled);
 	ASSERT(p.getPromiseReferenceCount() == 1 && p.getFutureReferenceCount() == 0);
 
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/asyncFileNonDurable/sendErrorOnShutdownCancellation") {
+	Promise<Void> input;
+	Future<Void> wrapped = sendErrorOnShutdown(input.getFuture());
+	ASSERT(input.getFutureReferenceCount() > 0);
+	wrapped.cancel();
+	ASSERT(wrapped.isReady() && wrapped.isError() && wrapped.getError().code() == error_code_actor_cancelled);
+	ASSERT_EQ(input.getFutureReferenceCount(), 0);
+	input.send(Void());
 	return Void();
 }
 

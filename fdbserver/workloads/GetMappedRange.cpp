@@ -565,31 +565,20 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	Future<Void> checkMappedSelectorBoundaries(Database cx, Key mapper, GetMappedRangeWorkload* self) {
 		Key begin = indexEntryKey(10);
 		Key end = indexEntryKey(20);
-		MappedRangeResult greaterThan =
-		    co_await scanMappedRangeWithLimits(cx,
-		                                       KeySelector(firstGreaterThan(begin), begin.arena()),
-		                                       KeySelector(firstGreaterThan(end), end.arena()),
-		                                       mapper,
-		                                       /*limit=*/100,
-		                                       /*byteLimit=*/100000,
-		                                       /*expectedBeginId=*/11,
-		                                       self,
-		                                       /*allMissing=*/false);
-		ASSERT_EQ(greaterThan.size(), 10);
-		ASSERT(!greaterThan.more);
-
-		MappedRangeResult offsets =
-		    co_await scanMappedRangeWithLimits(cx,
-		                                       KeySelector(firstGreaterOrEqual(begin) + 2, begin.arena()),
-		                                       KeySelector(firstGreaterOrEqual(end) - 2, end.arena()),
-		                                       mapper,
-		                                       /*limit=*/100,
-		                                       /*byteLimit=*/100000,
-		                                       /*expectedBeginId=*/12,
-		                                       self,
-		                                       /*allMissing=*/false);
-		ASSERT_EQ(offsets.size(), 6);
-		ASSERT(!offsets.more);
+		co_await checkMappedSelectorRange(cx,
+		                                  KeySelector(firstGreaterThan(begin), begin.arena()),
+		                                  KeySelector(firstGreaterThan(end), end.arena()),
+		                                  mapper,
+		                                  /*expectedBeginId=*/11,
+		                                  /*expectedEndId=*/21,
+		                                  self);
+		co_await checkMappedSelectorRange(cx,
+		                                  KeySelector(firstGreaterOrEqual(begin) + 2, begin.arena()),
+		                                  KeySelector(firstGreaterOrEqual(end) - 2, end.arena()),
+		                                  mapper,
+		                                  /*expectedBeginId=*/12,
+		                                  /*expectedEndId=*/18,
+		                                  self);
 
 		co_await checkEmptyMappedRangeDoesNotConflict(cx,
 		                                              KeySelector(firstGreaterOrEqual(begin), begin.arena()),
@@ -619,6 +608,39 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 		ASSERT(specialKeyRejected);
 		co_return;
+	}
+
+	Future<Void> checkMappedSelectorRange(Database cx,
+	                                      KeySelector begin,
+	                                      KeySelector end,
+	                                      Key mapper,
+	                                      int expectedBeginId,
+	                                      int expectedEndId,
+	                                      GetMappedRangeWorkload* self) {
+		int expectedId = expectedBeginId;
+		while (true) {
+			MappedRangeResult result = co_await scanMappedRangeWithLimits(cx,
+			                                                              begin,
+			                                                              end,
+			                                                              mapper,
+			                                                              /*limit=*/100,
+			                                                              /*byteLimit=*/100000,
+			                                                              expectedId,
+			                                                              self,
+			                                                              /*allMissing=*/false);
+			expectedId += result.size();
+			ASSERT_LE(expectedId, expectedEndId);
+			if (!result.more) {
+				break;
+			}
+			if (result.readThrough.present()) {
+				begin = KeySelector(firstGreaterOrEqual(result.readThrough.get()), result.arena());
+			} else {
+				ASSERT(!result.empty());
+				begin = KeySelector(firstGreaterThan(result.back().key), result.arena());
+			}
+		}
+		ASSERT_EQ(expectedId, expectedEndId);
 	}
 
 	Future<Void> _start(Database cx, GetMappedRangeWorkload* self) {

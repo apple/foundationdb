@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/NativeCdcClient.h"
 #include "fdbclient/Tracing.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.h"
@@ -152,6 +153,15 @@ public:
 	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
+
+	// Native CDC operations. These values are intentionally independent from
+	// NativeAPI so multi-version client wrappers can forward them without
+	// depending on the native client implementation.
+	virtual ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) = 0;
+	virtual ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) = 0;
+	virtual ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() = 0;
+	virtual ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) = 0;
+	virtual ThreadFuture<Reference<INativeCdcConsumer>> resumeNativeCdcConsumer(const NativeCdcCursor& cursor) = 0;
 
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;

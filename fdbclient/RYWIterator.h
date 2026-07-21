@@ -22,8 +22,8 @@
 #define FDBCLIENT_RYWITERATOR_H
 #pragma once
 
-#include "fdbclient/SnapshotCache.h"
-#include "fdbclient/WriteMap.h"
+#include "SnapshotCache.h"
+#include "WriteMap.h"
 
 class RYWIterator {
 public:
@@ -61,10 +61,10 @@ public:
 
 	void bypassUnreadableProtection() { bypassUnreadable = true; }
 
-	virtual WriteMap::iterator& extractWriteMapIterator();
 	// Really this should return an iterator by value, but for performance it's convenient to actually grab the internal
 	// one.  Consider copying the return value if performance isn't critical. If you modify the returned iterator, it
 	// invalidates this iterator until the next call to skip()
+	virtual WriteMap::iterator& extractWriteMapIterator();
 
 	void dbg();
 
@@ -78,67 +78,6 @@ protected:
 	                       // versionstamp operations
 
 	void updateCmp();
-};
-
-class RandomTestImpl {
-public:
-	static ValueRef getRandomValue(Arena& arena) {
-		return ValueRef(arena, std::string(deterministicRandom()->randomInt(0, 1000), 'x'));
-	}
-
-	static ValueRef getRandomVersionstampValue(Arena& arena) {
-		int len = deterministicRandom()->randomInt(10, 98);
-		std::string value = std::string(len, 'x');
-		int32_t pos = deterministicRandom()->randomInt(0, len - 9);
-		if (deterministicRandom()->random01() < 0.01) {
-			pos = value.size() - 10;
-		}
-		pos = littleEndian32(pos);
-		value += std::string((const char*)&pos, sizeof(int32_t));
-		return ValueRef(arena, value);
-	}
-
-	static ValueRef getRandomVersionstampKey(Arena& arena) {
-		int idx = deterministicRandom()->randomInt(0, 100);
-		std::string key = format("%010d", idx / 3);
-		if (idx % 3 >= 1)
-			key += '\x00';
-		if (idx % 3 >= 2)
-			key += '\x00';
-		int32_t pos = key.size() - deterministicRandom()->randomInt(0, 3);
-		if (deterministicRandom()->random01() < 0.01) {
-			pos = 0;
-		}
-		key = key.substr(0, pos);
-		key += "XXXXXXXXYY";
-		key += std::string(deterministicRandom()->randomInt(0, 3), 'z');
-		pos = littleEndian32(pos);
-		key += std::string((const char*)&pos, sizeof(int32_t));
-		return ValueRef(arena, key);
-	}
-
-	static KeyRef getRandomKey(Arena& arena) { return getKeyForIndex(arena, deterministicRandom()->randomInt(0, 100)); }
-
-	static KeyRef getKeyForIndex(Arena& arena, int idx) {
-		std::string key = format("%010d", idx / 3);
-		if (idx % 3 >= 1)
-			key += '\x00';
-		if (idx % 3 >= 2)
-			key += '\x00';
-		return KeyRef(arena, key);
-	}
-
-	static KeyRangeRef getRandomRange(Arena& arena) {
-		int startLocation = deterministicRandom()->randomInt(0, 100);
-		int endLocation = startLocation + deterministicRandom()->randomInt(1, 1 + 100 - startLocation);
-
-		return KeyRangeRef(getKeyForIndex(arena, startLocation), getKeyForIndex(arena, endLocation));
-	}
-
-	static KeySelectorRef getRandomKeySelector(Arena& arena) {
-		return KeySelectorRef(
-		    getRandomKey(arena), deterministicRandom()->random01() < 0.5, deterministicRandom()->randomInt(-10, 10));
-	}
 };
 
 void testESR();
