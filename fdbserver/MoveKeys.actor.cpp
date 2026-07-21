@@ -1680,8 +1680,8 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						if (tssPair != tssMapping.end() && waitForTSSCounter > 0 &&
 						    !tssToIgnore.contains(tssPair->second.id())) {
 							tssReadyInterfs.push_back(tssPair->second);
-							tssReady.push_back(waitForShardReady(
-							    tssPair->second, keys, readVersion, GetShardStateRequest::READABLE));
+							tssReady.push_back(
+							    waitForShardReady(tssPair->second, keys, readVersion, GetShardStateRequest::READABLE));
 						}
 					}
 
@@ -2458,12 +2458,12 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				}
 
 				state ShardStateReads planningState = wait(readShardState(&tr,
-			                                                          lock,
-			                                                          ddEnabledState,
-			                                                          range,
-			                                                          /*dataMoveId=*/{},
-			                                                          SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
-			                                                          SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+				                                                          lock,
+				                                                          ddEnabledState,
+				                                                          range,
+				                                                          /*dataMoveId=*/{},
+				                                                          SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                                          SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
 				state RangeResult UIDtoTagMap = planningState.uidToTagMap;
 				state RangeResult keyServers = planningState.keyServers;
 				ASSERT(!keyServers.empty());
@@ -2579,8 +2579,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 					if (tssPair != tssMapping.end()) {
 						tssReadyInterfs.push_back(tssPair->second);
-						tssReady.push_back(waitForShardReady(
-						    tssPair->second, range, readVersion, GetShardStateRequest::READABLE));
+						tssReady.push_back(
+						    waitForShardReady(tssPair->second, range, readVersion, GetShardStateRequest::READABLE));
 					}
 				}
 
@@ -2803,8 +2803,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					if (range.end == postWaitDataMove.ranges.front().end) {
 						// Post validate consistency of update of keyServers and serverKeys
 						if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-							wait(auditLocationMetadataPostCheck(
-							    occ, postWaitDataMove.ranges.front(), "finishMoveShards_postcheck", relocationIntervalId));
+							wait(auditLocationMetadataPostCheck(occ,
+							                                    postWaitDataMove.ranges.front(),
+							                                    "finishMoveShards_postcheck",
+							                                    relocationIntervalId));
 						}
 						break;
 					}
