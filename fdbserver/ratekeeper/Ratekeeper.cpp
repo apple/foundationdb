@@ -21,6 +21,7 @@
 #include <algorithm>
 
 #include "fdbclient/Knobs.h"
+#include "fdbserver/core/BusyTagCollector.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -1227,18 +1228,13 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	TransactionTag busiestTag;
 	TransactionCommitCostEstimation maxCost;
 	double maxRate = 0;
-	std::priority_queue<BusyTagInfo, std::vector<BusyTagInfo>, std::greater<BusyTagInfo>> topKWriters;
+	BusyTagCollector busiestWriters(SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED,
+	                                SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 	for (const auto& [tag, cost] : tagCostEst) {
 		double rate = cost.getCostSum() / elapsed;
 		double busyness = static_cast<double>(maxCost.getCostSum()) / totalWriteCosts;
-		if (rate < SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
+		if (!busiestWriters.add(tag, rate, busyness)) {
 			continue;
-		}
-		if (topKWriters.size() < SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED) {
-			topKWriters.emplace(tag, rate, busyness);
-		} else if (topKWriters.top().rate < rate) {
-			topKWriters.pop();
-			topKWriters.emplace(tag, rate, busyness);
 		}
 
 		if (rate > maxRate) {
@@ -1248,10 +1244,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 		}
 	}
 
-	while (!topKWriters.empty()) {
-		busiestWriteTags.push_back(topKWriters.top());
-		topKWriters.pop();
-	}
+	busiestWriters.drainInto(busiestWriteTags);
 
 	UpdateCommitCostRequest updateCommitCostRequest{ ratekeeperID,
 		                                             now(),
