@@ -759,43 +759,19 @@ public:
 
 		for (; idx < largeOrBadTeams.size(); idx++) {
 			servers.clear();
+			serverIds.clear();
 			for (const auto& server : largeOrBadTeams[idx]->getServers()) {
 				if (server->isInDesiredDC() && !self->server_status.get(server->getId()).isUnhealthy()) {
 					servers.push_back(server);
+					serverIds.push_back(server->getId());
 				}
 			}
 
 			// For the bad team that is too big (too many servers), we will try to find a subset of servers in the
 			// team to construct a new healthy team, so that moving data to the new healthy team will not cause too
 			// much data movement overhead
-			// FIXME: This code logic can be simplified.
 			if (servers.size() >= self->configuration.storageTeamSize) {
-				bool foundTeam = false;
-				for (int j = 0; j < servers.size() - self->configuration.storageTeamSize + 1 && !foundTeam; j++) {
-					auto const& serverTeams = servers[j]->getTeams();
-					for (int k = 0; k < serverTeams.size(); k++) {
-						auto& testTeam = serverTeams[k]->getServerIDs();
-						bool allInTeam = true; // All servers in testTeam belong to the healthy servers
-						for (int l = 0; l < testTeam.size(); l++) {
-							bool foundServer = false;
-							for (auto it : servers) {
-								if (it->getId() == testTeam[l]) {
-									foundServer = true;
-									break;
-								}
-							}
-							if (!foundServer) {
-								allInTeam = false;
-								break;
-							}
-						}
-						if (allInTeam) {
-							foundTeam = true;
-							break;
-						}
-					}
-				}
-				if (!foundTeam) {
+				if (!self->findTeamFromServers(serverIds, /*wantHealthy=*/false).present()) {
 					if (self->satisfiesPolicy(servers)) {
 						if (servers.size() == self->configuration.storageTeamSize ||
 						    self->satisfiesPolicy(servers, self->configuration.storageTeamSize)) {
