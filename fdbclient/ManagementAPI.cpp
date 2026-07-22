@@ -27,6 +27,7 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/IClientApi.h"
 #include "fdbclient/RangeLock.h"
 #include "flow/Error.h"
 #include "fmt/format.h"
@@ -1420,6 +1421,36 @@ struct AutoQuorumChange final : IQuorumChange {
 };
 Reference<IQuorumChange> autoQuorumChange(int desired) {
 	return makeReference<AutoQuorumChange>(desired);
+}
+
+Future<std::vector<std::string>> getManagementApiSpecialKeyValues(Reference<IDatabase> db,
+                                                                  KeyRange range,
+                                                                  const char* errorEvent) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
+		Error err;
+		try {
+			RangeResult result = co_await safeThreadFutureToFuture(tr->getRange(range, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
+
+			std::vector<std::string> values;
+			values.reserve(result.size());
+			for (const auto& entry : result) {
+				values.push_back(entry.key.removePrefix(range.begin).toString());
+			}
+			co_return values;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			err = e;
+		}
+
+		if (errorEvent != nullptr) {
+			TraceEvent(SevWarn, errorEvent).error(err);
+		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
+	}
 }
 
 Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> servers, bool failed) {
