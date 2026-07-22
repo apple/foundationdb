@@ -2486,6 +2486,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 	bool requiresExtraDBMachines = !fdbSimulationPolicyState().extraDatabases.empty() && !useLocalDatabase;
 	int assignedMachines = 0;
+	int assignedRealMachines = 0;
 	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::StatelessClass };
@@ -2550,11 +2551,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					if (machine < machines && !testConfig.statelessProcessClassesPerDC.present() &&
 					    processClass == ProcessClass::StatelessClass &&
 					    (!simconfig.db.tLogPolicy || simconfig.db.tLogPolicy->info() != "data_hall^2 x zoneid^2 x 1")) {
-						remainingAutoStatelessClasses = std::max(0,
-						                                         std::max({ simconfig.db.getDesiredCommitProxies(),
-						                                                    simconfig.db.getDesiredGrvProxies(),
-						                                                    simconfig.db.getDesiredResolvers() }) -
-						                                             1);
+						const int desiredStatelessMachines = std::max({ simconfig.db.getDesiredCommitProxies(),
+						                                                simconfig.db.getDesiredGrvProxies(),
+						                                                simconfig.db.getDesiredResolvers() });
+						if (desiredStatelessMachines <= machineCount - assignedRealMachines) {
+							remainingAutoStatelessClasses = std::max(0, desiredStatelessMachines - 1);
+						}
 					}
 				} else {
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
@@ -2668,6 +2670,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				}
 			}
 
+			if (machine < machines) {
+				assignedRealMachines++;
+			}
 			assignedMachines++;
 		}
 
