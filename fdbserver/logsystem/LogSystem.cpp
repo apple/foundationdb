@@ -672,20 +672,8 @@ Future<Void> LogSystem::onError() const {
 						}
 					}
 				}
-				// Monitor changes of backup workers for old epochs.
-				for (const auto& worker : old.tLogs[0]->backupWorkers) {
-					if (worker->get().present()) {
-						backupFailed.push_back(
-						    waitFailureClient(worker->get().interf().waitFailure,
-						                      /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
-						                      /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
-						                          SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-						                      /* trace */ true,
-						                      /* traceMsg */ "OldBackupWorkerFailed"_sr));
-					} else {
-						changes.push_back(worker->onChange());
-					}
-				}
+				// Old-generation backup workers are stateless and persist their progress. A failure can retain
+				// this generation, but must not restart transaction-system recovery.
 			}
 		}
 
