@@ -305,7 +305,7 @@ Future<MoveKeysLock> readMoveKeysLock(Database cx) {
 			err = e;
 		}
 		co_await tr.onError(err);
-		CODE_PROBE(true, "readMoveKeysLock retry");
+		CODE_PROBE(true, "readMoveKeysLock retry", probe::decoration::rare);
 	}
 }
 
@@ -1953,7 +1953,7 @@ static Future<Void> finishMoveKeys(Database occ,
 					    .detail("TransactionTooOldRetries", consecutiveTransactionTooOldRetries)
 					    .detail("BackoffSeconds", backoff);
 					if (tooManyConsecutiveTransactionTooOldRetries) {
-						CODE_PROBE(true, "finishMoveKeys giving up after max retries");
+						CODE_PROBE(true, "finishMoveKeys giving up after max retries", probe::decoration::rare);
 						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysGivingUp", relocationIntervalId)
 						    .error(err)
 						    .detail("KeyBegin", keys.begin)

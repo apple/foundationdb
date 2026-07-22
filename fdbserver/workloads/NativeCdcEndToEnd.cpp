@@ -580,9 +580,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	void recordDurableAckProxyReplacement() {
-		CODE_PROBE(true,
-		           "Native CDC durable acknowledgement validation retries after proxy replacement",
-		           probe::decoration::rare);
+		CODE_PROBE(true, "Native CDC durable acknowledgement validation retries after proxy replacement");
 	}
 
 	Future<CDCProxyBufferStatus> getCurrentProxyStatus(Database cx,
@@ -714,7 +712,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			ASSERT_LT(now(), deadline);
 			co_await delay(0.01);
 		}
-		CODE_PROBE(followedProxyReplacement, "Native CDC pop progress validation follows proxy replacement");
+		CODE_PROBE(followedProxyReplacement,
+		           "Native CDC pop progress validation follows proxy replacement",
+		           probe::decoration::rare);
 		stopped->set(true);
 		co_await timeoutError(requester, operationTimeout);
 	}
@@ -1018,8 +1018,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				if (status.popRequests != scanInitial.popRequests) {
 					unrelatedPopRequest = true;
 					CODE_PROBE(true,
-					           "Native CDC durable acknowledgement scan retries after an unrelated proxy pop wake",
-					           probe::decoration::rare);
+					           "Native CDC durable acknowledgement scan retries after an unrelated proxy pop wake");
 					break;
 				}
 				if (status.bufferedBytes < scanInitial.bufferedBytes &&
@@ -1277,8 +1276,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 					ASSERT(found != stream->expected.end());
 					ASSERT_LE(versioned.version, found->second.committedVersion);
 					CODE_PROBE(versioned.version < found->second.committedVersion,
-					           "Native CDC validation accepts a committed retry before the returned commit version",
-					           probe::decoration::rare);
+					           "Native CDC validation accepts a committed retry before the returned commit version");
 					ASSERT(found->second.observedVersions.insert(versioned.version).second);
 				}
 			}

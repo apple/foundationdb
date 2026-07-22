@@ -452,7 +452,7 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 
 			RangeResult assignedProxies = co_await tr.getRange(cdcProxyRangeFor(streamId), 2);
 			if (assignedProxies.size() != 1 || decodeCDCProxyKey(assignedProxies[0].key).second != expectedProxyId) {
-				CODE_PROBE(true, "CDC proxy rejects request for stream owned elsewhere");
+				CODE_PROBE(true, "CDC proxy rejects request for stream owned elsewhere", probe::decoration::rare);
 				throw wrong_shard_server();
 			}
 
@@ -928,7 +928,7 @@ CDCBufferSelection CDCProxy::selectBufferCandidatesForTag(Reference<CDCBufferedT
 		if (stream == streams.end() || !stream->second->active) {
 			continue;
 		}
-		CODE_PROBE(true, "CDC proxy rejects a version larger than its complete buffer budget");
+		CODE_PROBE(true, "CDC proxy rejects a version larger than its complete buffer budget", probe::decoration::rare);
 		TraceEvent(SevWarn, "CDCProxyVersionExceedsBufferLimit", id)
 		    .detail("Tag", tag->tag)
 		    .detail("StreamId", streamId)
@@ -1142,7 +1142,7 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 	try {
 		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, stream->streamId, id, true);
 		if (!isCurrentStreamInitialization(streams, stream)) {
-			CODE_PROBE(true, "CDC proxy discards stale stream initialization", probe::decoration::rare);
+			CODE_PROBE(true, "CDC proxy discards stale stream initialization");
 			co_return;
 		}
 		stream->keys = metadata.keys;
@@ -1348,7 +1348,8 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 			co_return;
 		}
 		if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
-			CODE_PROBE(true, "CDC proxy retries retired pops after log system topology changes");
+			CODE_PROBE(
+			    true, "CDC proxy retries retired pops after log system topology changes", probe::decoration::rare);
 			requestAcknowledgedDataPop();
 			co_return;
 		}
@@ -1372,7 +1373,9 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		}
 	}
 	if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
-		CODE_PROBE(true, "CDC proxy preserves retired pop metadata after log system topology changes");
+		CODE_PROBE(true,
+		           "CDC proxy preserves retired pop metadata after log system topology changes",
+		           probe::decoration::rare);
 		requestAcknowledgedDataPop();
 		co_return;
 	}
@@ -1506,7 +1509,7 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 		auto buffered =
 		    co_await race(waitForBufferedVersion(stream, begin), delay(SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT));
 		if (buffered.index() == 1) {
-			CODE_PROBE(true, "CDC proxy expires an idle consume lease", probe::decoration::rare);
+			CODE_PROBE(true, "CDC proxy expires an idle consume lease");
 			CDCConsumeReply reply;
 			reply.lastConsumedVersion = request.cursor.lastConsumedVersion;
 			request.reply.send(reply);

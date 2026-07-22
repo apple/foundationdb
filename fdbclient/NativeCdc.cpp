@@ -380,10 +380,12 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 					throw client_invalid_operation();
 				}
 				if (!(co_await getNativeCdcProxyAssignment(&tr, streamId)).present()) {
-					CODE_PROBE(true, "Native CDC registration restores missing stream owner");
+					CODE_PROBE(true, "Native CDC registration restores missing stream owner", probe::decoration::rare);
 					const Tag tag = co_await getNativeCdcCurrentTag(&tr, streamId);
 					Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
-					CODE_PROBE(sharedTagProxy.present(), "Native CDC shared-tag streams use one owner");
+					CODE_PROBE(sharedTagProxy.present(),
+					           "Native CDC shared-tag streams use one owner",
+					           probe::decoration::rare);
 					const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
 					tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
 					signalNativeCdcProxyAssignmentChange(&tr);
@@ -439,7 +441,9 @@ Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, 
 			const Key nameKey = cdcStreamNameKeyFor(name);
 			Optional<Value> currentId = co_await tr.get(nameKey);
 			if (!nativeCdcNameMatchesStream(currentId, streamId)) {
-				CODE_PROBE(currentId.present(), "Native CDC preserves a replacement stream during removal retry");
+				CODE_PROBE(currentId.present(),
+				           "Native CDC preserves a replacement stream during removal retry",
+				           probe::decoration::rare);
 				if (currentId.present()) {
 					TraceEvent("NativeCdcRemovalPreservesReplacement")
 					    .detail("RemovedStreamId", streamId)
@@ -450,7 +454,7 @@ Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, 
 
 			Optional<UID> assignedProxy = co_await getNativeCdcProxyAssignment(&tr, streamId);
 			if (!assignedProxy.present() || assignedProxy.get() != proxyId) {
-				CODE_PROBE(true, "Native CDC rejects removal through a stale owner");
+				CODE_PROBE(true, "Native CDC rejects removal through a stale owner", probe::decoration::rare);
 				throw wrong_shard_server();
 			}
 
@@ -669,9 +673,7 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 		if (!registrationEnabled) {
 			Optional<CDCStreamId> existingStream = co_await findNativeCdcStreamId(cx, name);
 			if (cx->clientInfo->get().id != clientInfoId) {
-				CODE_PROBE(true,
-				           "Native CDC registration retries after client info changes during existence check",
-				           probe::decoration::rare);
+				CODE_PROBE(true, "Native CDC registration retries after client info changes during existence check");
 				continue;
 			}
 			if (!existingStream.present()) {
@@ -762,9 +764,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 			if (rewindUnacknowledgedCursorAfterProxyReplacement(
 			        &self->currentPosition, self->lastAcknowledgedVersion, &self->deliveryProxyId, proxy.id())) {
 				self->knownAvailableThrough = self->lastAcknowledgedVersion;
-				CODE_PROBE(true,
-				           "Native CDC consumer rewinds unacknowledged cursor after proxy replacement",
-				           probe::decoration::rare);
+				CODE_PROBE(true, "Native CDC consumer rewinds unacknowledged cursor after proxy replacement");
 			}
 			try {
 				CDCConsumeReply reply =
@@ -772,7 +772,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 				if (reply.lastConsumedVersion == self->currentPosition.lastConsumedVersion && reply.mutations.empty()) {
 					// The server lease bounds abandoned long polls. Renew it transparently so the public consume
 					// operation remains a long poll without accumulating server actors after client cancellation.
-					CODE_PROBE(true, "Native CDC consume renews an idle server lease", probe::decoration::rare);
+					CODE_PROBE(true, "Native CDC consume renews an idle server lease");
 					continue;
 				}
 				self->knownAvailableThrough = reply.lastConsumedVersion;
