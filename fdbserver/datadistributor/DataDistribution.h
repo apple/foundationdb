@@ -731,9 +731,11 @@ public:
 				res = bulkLoadTask;
 			}
 		}
-		TraceEvent(SevDebug, "DDBulkLoadTaskCollectionGetPublishedTask", ddId)
-		    .detail("Range", range)
-		    .detail("Task", res.present() ? describe(res.get()) : "");
+		if (res.present()) {
+			TraceEvent(SevDebug, "DDBulkLoadTaskCollectionGetPublishedTask", ddId)
+			    .detail("Range", range)
+			    .detail("Task", describe(res.get()));
+		}
 		return res;
 	}
 
