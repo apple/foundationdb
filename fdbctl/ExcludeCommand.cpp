@@ -263,6 +263,7 @@ Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> d
 				break;
 
 			co_await delayJittered(1.0); // SOMEDAY: watches!
+			continue;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
