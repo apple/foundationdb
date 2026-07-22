@@ -9757,7 +9757,7 @@ Future<Void> commitAndReportLoadProgress(VersionedBTree* btree,
 
 } // namespace
 
-TEST_CASE("Lredwood/correctness/btreeCloseWithQueuedCommits") {
+TEST_CASE("/redwood/correctness/btreeCloseWithQueuedCommits") {
 	g_redwoodMetricsActor = Void();
 	g_redwoodMetrics.clear();
 

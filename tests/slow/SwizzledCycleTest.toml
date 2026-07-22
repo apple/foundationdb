@@ -1,3 +1,8 @@
+[[knobs]]
+# Dropping a log-router init reply can repeatedly restart recovery and exhaust
+# this test's clear timeout under remote-double Attrition.
+cc_recovery_init_req_allow_drop_in_sim = false
+
 [[test]]
 testTitle = 'SwizzledCycleTest'
 
