@@ -2628,6 +2628,14 @@ public:
 	static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
 		auto* counters = waitHealthyZoneChangeCounters();
 		ReadYourWritesTransaction tr(self->dbContext());
+		// maintenanceStartTime tracks the start time when the maintenance mode was started.
+		// This information is used to report the duration of the maintenance mode when the
+		// maintenance zone is removed, either manually or by a timeout. If the DD gets
+		// restarted during the maintenance window the maintenanceStartTime will be reset.
+		// Right now the healthyZoneKey only stores (ZoneID, EndVersion). We could add the 
+		// StartVersion to the tuple, but that might break other clients. Another option would be to store the Start
+		// time in a second key.
+		auto maintenanceStartTime = self->healthyZone.get().present() ? now() : 0.0;
 		while (true) {
 			counters->started->increment(1);
 			Error err;
@@ -2641,7 +2649,11 @@ public:
 					auto p = decodeHealthyZoneValue(val.get());
 					if (p.first == ignoreSSFailuresZoneString) {
 						// healthyZone is now overloaded for DD disabling purpose, which does not timeout
-						TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId).log();
+						if (self->healthyZone.get() != p.first) {
+							TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId)
+							    .log();
+							maintenanceStartTime = now();
+						}
 						healthyZoneTimeout = Never();
 						self->healthyZone.set(p.first);
 					} else if (p.second > tr.getReadVersion().get()) {
@@ -2654,18 +2666,22 @@ public:
 							    .detail("EndVersion", p.second)
 							    .detail("Duration", timeoutSeconds);
 							self->healthyZone.set(p.first);
+							maintenanceStartTime = now();
 						}
 					} else if (self->healthyZone.get().present()) {
 						// maintenance hits timeout
-						TraceEvent("MaintenanceZoneEndTimeout", self->distributorId).log();
+						TraceEvent("MaintenanceZoneEndTimeout", self->distributorId)
+						    .detail("Duration", now() - maintenanceStartTime);
 						self->healthyZone.set(Optional<Key>());
 					}
 				} else if (self->healthyZone.get().present()) {
 					// `healthyZone` has been cleared
 					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
-						TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId).log();
+						TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId)
+						    .detail("Duration", now() - maintenanceStartTime);
 					} else {
-						TraceEvent("MaintenanceZoneEndManualClear", self->distributorId).log();
+						TraceEvent("MaintenanceZoneEndManualClear", self->distributorId)
+						    .detail("Duration", now() - maintenanceStartTime);
 					}
 					self->healthyZone.set(Optional<Key>());
 				}
