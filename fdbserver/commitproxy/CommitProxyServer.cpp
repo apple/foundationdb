@@ -112,38 +112,50 @@ struct ResolutionRequestBuilder {
 		return *out;
 	}
 
+	std::vector<int> getResolversForRange(const KeyRangeRef& range, Optional<Version> readSnapshot) const {
+		std::vector<int> resolvers;
+		resolvers.reserve(self->resolvers.size());
+		std::vector<unsigned char> seen(self->resolvers.size(), 0);
+		for (auto& intersectingRange : self->keyResolvers.intersectingRanges(range)) {
+			auto& versionResolvers = intersectingRange.value();
+			if (readSnapshot.present()) {
+				for (int i = versionResolvers.size() - 1; i >= 0; --i) {
+					const int resolver = versionResolvers[i].second;
+					if (!seen[resolver]) {
+						seen[resolver] = 1;
+						resolvers.push_back(resolver);
+					}
+					if (versionResolvers[i].first < readSnapshot.get()) {
+						break;
+					}
+				}
+			} else if (!versionResolvers.empty()) {
+				const int resolver = versionResolvers.back().second;
+				if (!seen[resolver]) {
+					seen[resolver] = 1;
+					resolvers.push_back(resolver);
+				}
+			}
+		}
+
+		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && systemKeys.intersects(range)) {
+			resolvers.clear();
+			for (int resolver = 0; resolver < self->resolvers.size(); ++resolver) {
+				resolvers.push_back(resolver);
+			}
+		}
+
+		ASSERT(!resolvers.empty());
+		return resolvers;
+	}
+
 	// Returns a read conflict index map: [resolver_index][read_conflict_range_index_on_the_resolver]
 	// -> read_conflict_range's original index
 	std::vector<std::vector<int>> addReadConflictRanges(CommitTransactionRef& trIn) {
 		std::vector<std::vector<int>> rCRIndexMap(requests.size());
 		for (int idx = 0; idx < trIn.read_conflict_ranges.size(); ++idx) {
 			const auto& r = trIn.read_conflict_ranges[idx];
-			auto ranges = self->keyResolvers.intersectingRanges(r);
-			std::vector<int> resolvers;
-			resolvers.reserve(self->resolvers.size());
-			// O(1) de-dup keyed by resolver id (deterministic)
-			std::vector<unsigned char> seen(self->resolvers.size(), 0);
-			for (auto& ir : ranges) {
-				auto& version_resolver = ir.value();
-				for (int i = version_resolver.size() - 1; i >= 0; i--) {
-					const int resolver_id = version_resolver[i].second;
-					if (!seen[resolver_id]) {
-						seen[resolver_id] = 1;
-						resolvers.push_back(resolver_id);
-					}
-					if (version_resolver[i].first < trIn.read_snapshot)
-						break;
-				}
-			}
-			if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && systemKeys.intersects(r)) {
-				// All resolvers are eligible; skip per-id de-dup and just fill 0..N-1.
-				resolvers.clear();
-				for (int k = 0; k < self->resolvers.size(); ++k) {
-					resolvers.push_back(k);
-				}
-			}
-			ASSERT(!resolvers.empty());
-			for (int resolver : resolvers) {
+			for (int resolver : getResolversForRange(r, trIn.read_snapshot)) {
 				getOutTransaction(resolver, trIn.read_snapshot)
 				    .read_conflict_ranges.push_back(requests[resolver].arena, r);
 				rCRIndexMap[resolver].push_back(idx);
@@ -154,31 +166,10 @@ struct ResolutionRequestBuilder {
 
 	void addWriteConflictRanges(CommitTransactionRef& trIn) {
 		for (auto& r : trIn.write_conflict_ranges) {
-			auto ranges = self->keyResolvers.intersectingRanges(r);
-			std::vector<int> resolvers;
-			resolvers.reserve(self->resolvers.size());
-			std::vector<unsigned char> seen(self->resolvers.size(), 0);
-			for (auto& ir : ranges) {
-				auto& version_resolver = ir.value();
-				if (!version_resolver.empty()) {
-					const int resolver_id = version_resolver.back().second;
-					if (!seen[resolver_id]) {
-						seen[resolver_id] = 1;
-						resolvers.push_back(resolver_id);
-					}
-				}
-			}
-			if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && systemKeys.intersects(r)) {
-				// All resolvers are eligible.
-				resolvers.clear();
-				for (int k = 0; k < self->resolvers.size(); ++k) {
-					resolvers.push_back(k);
-				}
-			}
-			ASSERT(!resolvers.empty());
-			for (int resolver : resolvers)
+			for (int resolver : getResolversForRange(r, Optional<Version>())) {
 				getOutTransaction(resolver, trIn.read_snapshot)
 				    .write_conflict_ranges.push_back(requests[resolver].arena, r);
+			}
 		}
 	}
 
