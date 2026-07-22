@@ -3653,7 +3653,7 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_BACKUPKEYS_FILE:
 				try {
-					std::string line = readFileBytes(args->OptionArg(), 64 * 1024 * 1024);
+					std::string line = readFileBytes(args->OptionArg(), 64ULL * 1024 * 1024);
 					addKeyRange(line, backupKeys);
 				} catch (Error&) {
 					printHelpTeaser(newArgV[0]);
