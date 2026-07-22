@@ -1674,6 +1674,14 @@ public:
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 
 		updateKnownIds(&id_used);
+		// Primary and satellite TLogs can share the remote DC. Account for their workers when placing log routers so
+		// recovery makes the same colocation choice that betterMasterExists() projects.
+		for (const auto& [processId, worker] : id_worker) {
+			if (std::find(req.exclusionWorkerIds.begin(), req.exclusionWorkerIds.end(), worker.details.interf.id()) !=
+			    req.exclusionWorkerIds.end()) {
+				id_used[processId]++;
+			}
+		}
 
 		if (req.dbgId.present()) {
 			TraceEvent(SevDebug, "FindRemoteWorkersForConf", req.dbgId.get())
