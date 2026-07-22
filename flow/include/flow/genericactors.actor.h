@@ -1637,10 +1637,12 @@ Future<T> require(Future<Optional<T>> in, int errorCode, ExplicitVoid = {}) {
 
 template <class T>
 Future<T> waitForFirst(std::vector<Future<T>> items, ExplicitVoid = {}) {
+	// Coroutine parameters outlive completion, so keep the inputs in a local that releases losing futures first.
+	std::vector<Future<T>> pendingItems(std::move(items));
 	PromiseStream<T> resultStream;
 	PromiseStream<Error> errorStream;
 
-	Future<Void> forCancellation = makeStream(items, resultStream, errorStream);
+	Future<Void> forCancellation = makeStream(pendingItems, resultStream, errorStream);
 
 	FutureStream<T> resultFutureStream = resultStream.getFuture();
 	FutureStream<Error> errorFutureStream = errorStream.getFuture();

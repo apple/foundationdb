@@ -460,6 +460,27 @@ TEST_CASE("/flow/genericactors/NotifiedCancellation") {
 	return Void();
 }
 
+TEST_CASE("/flow/genericactors/WaitForFirstReleasesCapturedState") {
+	state Promise<int64_t> pendingSuccess;
+	state Future<int64_t> completed =
+	    waitForFirst(std::vector<Future<int64_t>>{ Future<int64_t>(10), pendingSuccess.getFuture() });
+	ASSERT(completed.isReady() && !completed.isError() && completed.get() == 10);
+	ASSERT_EQ(pendingSuccess.getFutureReferenceCount(), 0);
+
+	state Promise<int64_t> pendingError;
+	state Future<int64_t> failed =
+	    waitForFirst(std::vector<Future<int64_t>>{ Future<int64_t>(operation_failed()), pendingError.getFuture() });
+	ASSERT(failed.isError() && failed.getError().code() == error_code_operation_failed);
+	ASSERT_EQ(pendingError.getFutureReferenceCount(), 0);
+
+	state Promise<int64_t> pendingCancellation;
+	state Future<int64_t> cancelled = waitForFirst(std::vector<Future<int64_t>>{ pendingCancellation.getFuture() });
+	cancelled.cancel();
+	ASSERT(cancelled.isError() && cancelled.getError().code() == error_code_actor_cancelled);
+	ASSERT_EQ(pendingCancellation.getFutureReferenceCount(), 0);
+	return Void();
+}
+
 TEST_CASE("/flow/genericactors/ReadyRaceReleasesCapturedState") {
 	state NotifiedInt version(0);
 	state bool pendingFirstChoiceFired = false;
