@@ -790,10 +790,12 @@ Future<Void> asyncDeserialize(Reference<AsyncVar<Standalone<StringRef>>> input,
 ACTOR template <class T>
 Future<Void> delayedAsyncVar(Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time) {
 	try {
+		state Future<Void> nextChange;
 		loop {
 			wait(delay(time));
+			nextChange = in->onChange();
 			out->set(in->get());
-			wait(in->onChange());
+			wait(nextChange);
 		}
 	} catch (Error& e) {
 		out->set(in->get());

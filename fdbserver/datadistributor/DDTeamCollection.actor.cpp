@@ -1040,7 +1040,6 @@ public:
 		bool lastContainsFailed = false;
 		bool trackHealthyTeam = team->size() == self->configuration.storageTeamSize;
 		bool lastZeroHealthy = self->zeroHealthyTeams->get();
-		bool lastProcessingUnhealthy = self->processingUnhealthy->get();
 		bool firstCheck = true;
 		bool firstHealthChangeTrace = true;
 		std::unordered_set<KeyRange> submittedShards;
@@ -1098,7 +1097,6 @@ public:
 					change.push_back(self->initialFailureReactionDelay);
 				}
 				change.push_back(self->zeroHealthyTeams->onChange());
-				change.push_back(self->processingUnhealthy->onChange());
 
 				bool healthy = !badTeam && !anyUndesired && serversLeft == team->size();
 				team->setHealthy(healthy); // Unhealthy teams won't be chosen by bestTeam
@@ -1108,12 +1106,14 @@ public:
 				    !healthy && self->shardsAffectedByTeamFailure->hasShards(
 				                    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 				if (retryUnhealthyShards) {
+					change.push_back(self->processingUnhealthy->onChange());
+					change.push_back(self->pipelineFull->onChange());
 					// Partial moves can leave a merged shard associated with this team without another health change.
 					change.push_back(delay(checkTeamDelay, TaskPriority::DataDistributionLow));
 				}
 				const bool healthyTeamBecameAvailable = lastZeroHealthy && !self->zeroHealthyTeams->get();
-				const bool unhealthyQueueDrained = lastProcessingUnhealthy && !self->processingUnhealthy->get();
-				lastProcessingUnhealthy = self->processingUnhealthy->get();
+				const bool processingUnhealthy = self->processingUnhealthy->get();
+				const bool pipelineFull = self->pipelineFull->get();
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            healthyTeamBecameAvailable || containsFailed || retryUnhealthyShards);
 				bool teamStateChanged = serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired ||
@@ -1280,7 +1280,9 @@ public:
 						std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 						    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 						if (teamStateChanged || !retryUnhealthyShards || healthyTeamBecameAvailable ||
-						    unhealthyQueueDrained) {
+						    (!processingUnhealthy && !pipelineFull)) {
+							// Undesired and explicitly failed relocations do not set processingUnhealthy. Keep
+							// retrying stranded ranges when the queue is idle and its pipeline can accept them.
 							submittedShards.clear();
 						} else {
 							// An unchanged range may still be waiting behind the relocation pipeline gate. Only retry
@@ -4526,7 +4528,8 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0),
     zeroHealthyTeams(params.zeroHealthyTeams), optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false),
     includedDCs(params.includedDCs), otherTrackedDCs(params.otherTrackedDCs),
-    processingUnhealthy(params.processingUnhealthy), getAverageShardBytes(params.getAverageShardBytes),
+    processingUnhealthy(params.processingUnhealthy), pipelineFull(params.pipelineFull),
+    getAverageShardBytes(params.getAverageShardBytes),
     triggerStorageQueueRebalance(params.triggerStorageQueueRebalance), readyToStart(params.readyToStart),
     checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
@@ -7189,7 +7192,7 @@ public:
 		auto collection = testTeamCollection(2, policy, 5, shards);
 		collection->teamCollections = { collection.get() };
 		collection->initialFailureReactionDelay = Future<Void>(Void());
-		collection->processingUnhealthy->set(true);
+		ASSERT(!collection->processingUnhealthy->get());
 		collection->teamCollectionInfoEventHolder =
 		    makeReference<EventCacheHolder>("TeamTrackerRetriesMergedShardForUndesiredServer");
 		collection->server_status.set(
@@ -7200,6 +7203,18 @@ public:
 		                 collection->server_info[undesired]->getLastKnownInterface().locality));
 		FutureStream<RelocateShard> relocations = collection->output.getFuture();
 
+		const int processingUnhealthyListenersWithoutTrackers =
+		    collection->processingUnhealthy->onChange().getFutureReferenceCount();
+		const int pipelineFullListenersWithoutTrackers = collection->pipelineFull->onChange().getFutureReferenceCount();
+		collection->addTeam({ collection->server_info[healthy1], collection->server_info[healthy2] },
+		                    IsInitialTeam::True,
+		                    IsRedundantTeam::False,
+		                    checkTeamDelay);
+		co_await delay(0.01);
+		ASSERT_EQ(collection->processingUnhealthy->onChange().getFutureReferenceCount(),
+		          processingUnhealthyListenersWithoutTrackers);
+		ASSERT_EQ(collection->pipelineFull->onChange().getFutureReferenceCount(), pipelineFullListenersWithoutTrackers);
+
 		collection->addTeam({ collection->server_info[undesired], collection->server_info[leftServer] },
 		                    IsInitialTeam::True,
 		                    IsRedundantTeam::False,
@@ -7208,11 +7223,7 @@ public:
 		                    IsInitialTeam::True,
 		                    IsRedundantTeam::False,
 		                    checkTeamDelay);
-		collection->addTeam({ collection->server_info[healthy1], collection->server_info[healthy2] },
-		                    IsInitialTeam::True,
-		                    IsRedundantTeam::False,
-		                    checkTeamDelay);
-		co_await delay(0.1);
+		co_await delay(0.01);
 
 		ASSERT(relocations.isReady());
 		RelocateShard initialLeft = relocations.pop();
@@ -7233,7 +7244,7 @@ public:
 		shards->finishMove(rightRange);
 		ASSERT_EQ(shards->getNumberOfShards(undesired), 2);
 
-		co_await delay(checkTeamDelay + 0.1);
+		co_await delay(checkTeamDelay + 0.01);
 		ASSERT(relocations.isReady());
 		RelocateShard retryLeft = relocations.pop();
 		ASSERT(relocations.isReady());
@@ -7241,14 +7252,26 @@ public:
 		ASSERT(!relocations.isReady());
 		ASSERT(retryLeft.keys == mergedRange);
 		ASSERT(retryRight.keys == mergedRange);
+		ASSERT_EQ(retryLeft.priority, SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER);
+		ASSERT_EQ(retryRight.priority, SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER);
 
-		co_await delay(checkTeamDelay + 0.1);
+		// Undesired relocations never make processingUnhealthy true, so unchanged stranded ranges
+		// must still be retried at the next polling interval.
+		co_await delay(checkTeamDelay + 0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
 		ASSERT(!relocations.isReady());
-		ASSERT_EQ(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
-		          initialTeamCollectionInfoTime);
+		ASSERT(!collection->processingUnhealthy->get());
 
-		collection->processingUnhealthy->set(false);
-		co_await delay(checkTeamDelay + 0.1);
+		// A full pipeline must retain submitted ranges even when undesired relocations are not
+		// reflected in processingUnhealthy; otherwise every retry interval grows its input backlog.
+		collection->pipelineFull->set(true);
+		co_await delay(2 * checkTeamDelay + 0.01);
+		ASSERT(!relocations.isReady());
+		collection->pipelineFull->set(false);
+		co_await delay(0.01);
 		ASSERT(relocations.isReady());
 		ASSERT_EQ(relocations.pop().keys, mergedRange);
 		ASSERT(relocations.isReady());
@@ -7256,27 +7279,41 @@ public:
 		ASSERT(!relocations.isReady());
 
 		collection->processingUnhealthy->set(true);
-		co_await delay(checkTeamDelay + 0.1);
+		co_await delay(checkTeamDelay + 0.01);
+		ASSERT(!relocations.isReady());
+		ASSERT_EQ(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
+		          initialTeamCollectionInfoTime);
+
+		collection->processingUnhealthy->set(false);
+		co_await delay(0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(!relocations.isReady());
+
+		collection->processingUnhealthy->set(true);
+		co_await delay(checkTeamDelay + 0.01);
 		ASSERT(!relocations.isReady());
 
 		collection->zeroHealthyTeams->set(true);
-		co_await delay(0.1);
+		co_await delay(0.01);
 		ASSERT(!relocations.isReady());
 		collection->zeroHealthyTeams->set(false);
-		co_await delay(0.1);
+		co_await delay(0.01);
 		ASSERT(relocations.isReady());
 		ASSERT_EQ(relocations.pop().keys, mergedRange);
 		ASSERT(relocations.isReady());
 		ASSERT_EQ(relocations.pop().keys, mergedRange);
 		ASSERT(!relocations.isReady());
 
-		co_await delay(checkTeamDelay + 0.1);
+		co_await delay(checkTeamDelay + 0.01);
 		ASSERT(!relocations.isReady());
 
 		NetworkAddress failedAddress = collection->server_info[undesired]->getLastKnownInterface().address();
 		collection->excludedServers.set(AddressExclusion(failedAddress.ip, failedAddress.port),
 		                                DDTeamCollection::Status::FAILED);
-		co_await delay(checkTeamDelay + 0.1);
+		co_await delay(checkTeamDelay + 0.01);
 		ASSERT(relocations.isReady());
 		RelocateShard failedLeft = relocations.pop();
 		ASSERT(relocations.isReady());
@@ -7286,6 +7323,23 @@ public:
 		ASSERT(failedRight.keys == mergedRange);
 		ASSERT_EQ(failedLeft.priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
 		ASSERT_EQ(failedRight.priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+
+		// Explicitly failed-team relocations are also absent from processingUnhealthy and must remain
+		// retryable after the tracked unhealthy queue is idle.
+		collection->processingUnhealthy->set(false);
+		co_await delay(0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		ASSERT(!relocations.isReady());
+
+		co_await delay(checkTeamDelay + 0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		ASSERT(!relocations.isReady());
 		ASSERT_NE(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
 		          initialTeamCollectionInfoTime);
 	}

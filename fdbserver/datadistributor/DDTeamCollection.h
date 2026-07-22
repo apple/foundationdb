@@ -205,6 +205,7 @@ struct DDTeamCollectionInitParams {
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 	PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
+	Reference<AsyncVar<bool>> pipelineFull = makeReference<AsyncVar<bool>>(false);
 };
 
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
@@ -275,6 +276,7 @@ protected:
 	std::vector<Optional<Key>> includedDCs;
 	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
 	Reference<AsyncVar<bool>> processingUnhealthy;
+	Reference<AsyncVar<bool>> pipelineFull;
 	Future<Void> readyToStart;
 	Future<Void> checkTeamDelay;
 	// A map of teamSize to first failure time
