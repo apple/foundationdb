@@ -2674,7 +2674,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		if (desiredStatelessClasses.present()) {
 			// If this assertion fails, that measn that there were not enough machines in the DC (primary or remote)
 			// to match desired stateless classes
-			ASSERT(actualStatelessClasses == desiredStatelessClasses.get());
+			ASSERT_EQ(actualStatelessClasses, desiredStatelessClasses.get());
 			if (!testConfig.statelessProcessClassesPerDC.present()) {
 				remainingAutoStatelessClasses = remainingAutoStatelessClasses.get() - actualStatelessClasses;
 			}
@@ -2692,7 +2692,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	}
 
 	if (remainingAutoStatelessClasses.present()) {
-		ASSERT(remainingAutoStatelessClasses.get() == 0);
+		ASSERT_EQ(remainingAutoStatelessClasses.get(), 0);
 	}
 
 	fdbSimulationPolicyState().desiredCoordinators = coordinatorCount;
