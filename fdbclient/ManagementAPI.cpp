@@ -1431,7 +1431,8 @@ Future<std::vector<std::string>> getManagementApiSpecialKeyValues(Reference<IDat
 	while (true) {
 		Error err;
 		try {
-			RangeResult result = co_await safeThreadFutureToFuture(tr->getRange(range, CLIENT_KNOBS->TOO_MANY));
+			ThreadFuture<RangeResult> resultFuture = tr->getRange(range, CLIENT_KNOBS->TOO_MANY);
+			RangeResult result = co_await safeThreadFutureToFuture(resultFuture);
 			ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<std::string> values;
