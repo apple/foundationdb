@@ -26,6 +26,7 @@
 TLSPolicy::~TLSPolicy() {}
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <exception>
 #include <map>
@@ -241,60 +242,6 @@ bool TLSConfig::getDisablePlainTextConnection() const {
 	return tlsDisablePlainTextConnection;
 }
 
-LoadedTLSConfig TLSConfig::loadSync() const {
-	LoadedTLSConfig loaded;
-
-	const std::string certPath = getCertificatePathSync();
-	if (!certPath.empty()) {
-		try {
-			loaded.tlsCertBytes = readFileBytes(certPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
-		} catch (Error& e) {
-			fprintf(stderr, "Warning: Error reading TLS Certificate [%s]: %s\n", certPath.c_str(), e.what());
-			throw;
-		}
-	} else {
-		loaded.tlsCertBytes = tlsCertBytes;
-	}
-
-	const std::string keyPath = getKeyPathSync();
-	if (!keyPath.empty()) {
-		try {
-			loaded.tlsKeyBytes = readFileBytes(keyPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
-		} catch (Error& e) {
-			fprintf(stderr, "Warning: Error reading TLS Key [%s]: %s\n", keyPath.c_str(), e.what());
-			throw;
-		}
-	} else {
-		loaded.tlsKeyBytes = tlsKeyBytes;
-	}
-
-	const std::string CAPath = getCAPathSync();
-	if (!CAPath.empty()) {
-		try {
-			loaded.tlsCABytes = readFileBytes(CAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
-		} catch (Error& e) {
-			fprintf(stderr, "Warning: Error reading TLS CA [%s]: %s\n", CAPath.c_str(), e.what());
-			throw;
-		}
-	} else {
-		loaded.tlsCABytes = tlsCABytes;
-	}
-
-	loaded.tlsPassword = tlsPassword;
-	loaded.tlsVerifyPeers = tlsVerifyPeers;
-	loaded.endpointType = endpointType;
-	loaded.tlsDisablePlainTextConnection = tlsDisablePlainTextConnection;
-
-	return loaded;
-}
-
-TLSPolicy::TLSPolicy(const LoadedTLSConfig& loaded, std::function<void()> on_failure)
-  : rules(), on_failure(std::move(on_failure)), is_client(loaded.getEndpointType() == TLSEndpointType::CLIENT) {
-	set_verify_peers(loaded.getVerifyPeers());
-}
-
-// And now do the same thing, but async...
-
 static Future<Void> readEntireFile(std::string filename, std::string* destination) {
 	Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(
 	    filename, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0);
@@ -306,59 +253,102 @@ static Future<Void> readEntireFile(std::string filename, std::string* destinatio
 	co_await file->read(&((*destination)[0]), filesize, 0);
 }
 
+class TLSMaterialSource {
+public:
+	TLSMaterialSource(const char* name, std::string path, const std::string& configuredBytes, std::string& loadedBytes)
+	  : name(name), path(std::move(path)), configuredBytes(configuredBytes), loadedBytes(loadedBytes) {}
+
+	bool hasFile() const { return !path.empty(); }
+
+	void copyConfiguredBytes() const { loadedBytes = configuredBytes; }
+
+	void loadSync() const {
+		if (!hasFile()) {
+			copyConfiguredBytes();
+			return;
+		}
+
+		try {
+			loadedBytes = readFileBytes(path, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
+		} catch (Error& error) {
+			reportError(error);
+			throw;
+		}
+	}
+
+	Future<Void> loadAsync() const { return readEntireFile(path, &loadedBytes); }
+
+	void reportError(const Error& error) const {
+		fprintf(stderr, "Warning: Error reading TLS %s [%s]: %s\n", name, path.c_str(), error.what());
+	}
+
+private:
+	const char* name;
+	std::string path;
+	const std::string& configuredBytes;
+	std::string& loadedBytes;
+};
+
+static std::array<TLSMaterialSource, 3> getTLSMaterialSources(const TLSConfig& config, LoadedTLSConfig& loaded) {
+	return { TLSMaterialSource(
+		         "Certificate", config.getCertificatePathSync(), config.tlsCertBytes, loaded.tlsCertBytes),
+		     TLSMaterialSource("Key", config.getKeyPathSync(), config.tlsKeyBytes, loaded.tlsKeyBytes),
+		     TLSMaterialSource("CA", config.getCAPathSync(), config.tlsCABytes, loaded.tlsCABytes) };
+}
+
+static void copyTLSSettings(const TLSConfig& config, LoadedTLSConfig& loaded) {
+	loaded.tlsPassword = config.tlsPassword;
+	loaded.tlsVerifyPeers = config.tlsVerifyPeers;
+	loaded.endpointType = config.endpointType;
+	loaded.tlsDisablePlainTextConnection = config.tlsDisablePlainTextConnection;
+}
+
+LoadedTLSConfig TLSConfig::loadSync() const {
+	LoadedTLSConfig loaded;
+	for (const auto& material : getTLSMaterialSources(*this, loaded)) {
+		material.loadSync();
+	}
+	copyTLSSettings(*this, loaded);
+	return loaded;
+}
+
+TLSPolicy::TLSPolicy(const LoadedTLSConfig& loaded, std::function<void()> on_failure)
+  : rules(), on_failure(std::move(on_failure)), is_client(loaded.getEndpointType() == TLSEndpointType::CLIENT) {
+	set_verify_peers(loaded.getVerifyPeers());
+}
+
 Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 	LoadedTLSConfig loaded;
+	auto materials = getTLSMaterialSources(*self, loaded);
 	std::vector<Future<Void>> reads;
 
-	int32_t certIdx = -1;
-	int32_t keyIdx = -1;
-	int32_t caIdx = -1;
-
-	std::string certPath = self->getCertificatePathSync();
-	if (!certPath.empty()) {
-		reads.push_back(readEntireFile(certPath, &loaded.tlsCertBytes));
-		certIdx = reads.size() - 1;
-	} else {
-		loaded.tlsCertBytes = self->tlsCertBytes;
-	}
-
-	std::string keyPath = self->getKeyPathSync();
-	if (!keyPath.empty()) {
-		reads.push_back(readEntireFile(keyPath, &loaded.tlsKeyBytes));
-		keyIdx = reads.size() - 1;
-	} else {
-		loaded.tlsKeyBytes = self->tlsKeyBytes;
-	}
-
-	std::string CAPath = self->getCAPathSync();
-	if (!CAPath.empty()) {
-		reads.push_back(readEntireFile(CAPath, &loaded.tlsCABytes));
-		caIdx = reads.size() - 1;
-	} else {
-		loaded.tlsCABytes = self->tlsCABytes;
+	for (const auto& material : materials) {
+		if (material.hasFile()) {
+			reads.push_back(material.loadAsync());
+		} else {
+			material.copyConfiguredBytes();
+		}
 	}
 
 	try {
 		co_await waitForAll(reads);
-	} catch (Error& e) {
-		if (certIdx != -1 && reads[certIdx].isError()) {
-			fprintf(stderr, "Warning: Error reading TLS Certificate [%s]: %s\n", certPath.c_str(), e.what());
-		} else if (keyIdx != -1 && reads[keyIdx].isError()) {
-			fprintf(stderr, "Warning: Error reading TLS Key [%s]: %s\n", keyPath.c_str(), e.what());
-		} else if (caIdx != -1 && reads[caIdx].isError()) {
-			fprintf(stderr, "Warning: Error reading TLS Key [%s]: %s\n", CAPath.c_str(), e.what());
-		} else {
-			fprintf(stderr, "Warning: Error reading TLS needed file: %s\n", e.what());
+	} catch (Error& error) {
+		bool reported = false;
+		size_t readIndex = 0;
+		for (const auto& material : materials) {
+			if (material.hasFile() && reads[readIndex++].isError()) {
+				material.reportError(error);
+				reported = true;
+				break;
+			}
 		}
-
+		if (!reported) {
+			fprintf(stderr, "Warning: Error reading TLS needed file: %s\n", error.what());
+		}
 		throw;
 	}
 
-	loaded.tlsPassword = self->tlsPassword;
-	loaded.tlsVerifyPeers = self->tlsVerifyPeers;
-	loaded.endpointType = self->endpointType;
-	loaded.tlsDisablePlainTextConnection = self->tlsDisablePlainTextConnection;
-
+	copyTLSSettings(*self, loaded);
 	co_return loaded;
 }
 
