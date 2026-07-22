@@ -69,7 +69,6 @@ public:
 	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
 
 	Version getLatestVersion() const { return lastReply.version; }
-	Optional<double> getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const;
 };
 
 class TLogQueueInfo {
