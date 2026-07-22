@@ -34,6 +34,30 @@
 
 struct ServerDBInfo;
 
+class QueueMetricsSmoother {
+	Optional<int64_t> instanceID;
+	int64_t durableBytes{ 0 };
+	Smoother smoothDurableBytes;
+	Smoother smoothInputBytes;
+	Smoother verySmoothDurableBytes;
+	Smoother smoothFreeSpace;
+	Smoother smoothTotalSpace;
+
+public:
+	QueueMetricsSmoother();
+	bool update(int64_t newInstanceID,
+	            int64_t newDurableBytes,
+	            int64_t inputBytes,
+	            const StorageBytes& storageBytes,
+	            Smoother& smoothTotalDurableBytes);
+
+	double getSmoothFreeSpace() const { return smoothFreeSpace.smoothTotal(); }
+	double getSmoothTotalSpace() const { return smoothTotalSpace.smoothTotal(); }
+	double getSmoothDurableBytes() const { return smoothDurableBytes.smoothTotal(); }
+	double getSmoothInputBytesRate() const { return smoothInputBytes.smoothRate(); }
+	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
+};
+
 class StorageQueueInfo {
 	uint64_t totalWriteCosts{ 0 };
 	int totalWriteOps{ 0 };
@@ -41,8 +65,7 @@ class StorageQueueInfo {
 	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
 
 	UID ratekeeperID;
-	Smoother smoothFreeSpace, smoothTotalSpace;
-	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
+	QueueMetricsSmoother queueMetrics;
 	Smoother smoothDurableVersion, smoothLatestVersion;
 
 public:
@@ -57,35 +80,33 @@ public:
 	StorageQueueInfo(const UID& id, const LocalityData& locality);
 	StorageQueueInfo(const UID& rateKeeperID, const UID& id, const LocalityData& locality);
 	UpdateCommitCostRequest refreshCommitCost(double elapsed);
-	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }
+	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - queueMetrics.getSmoothDurableBytes(); }
 	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
 	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
 	void addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost);
 
-	double getSmoothFreeSpace() const { return smoothFreeSpace.smoothTotal(); }
-	double getSmoothTotalSpace() const { return smoothTotalSpace.smoothTotal(); }
-	double getSmoothDurableBytes() const { return smoothDurableBytes.smoothTotal(); }
-	double getSmoothInputBytesRate() const { return smoothInputBytes.smoothRate(); }
-	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
+	double getSmoothFreeSpace() const { return queueMetrics.getSmoothFreeSpace(); }
+	double getSmoothTotalSpace() const { return queueMetrics.getSmoothTotalSpace(); }
+	double getSmoothDurableBytes() const { return queueMetrics.getSmoothDurableBytes(); }
+	double getSmoothInputBytesRate() const { return queueMetrics.getSmoothInputBytesRate(); }
+	double getVerySmoothDurableBytesRate() const { return queueMetrics.getVerySmoothDurableBytesRate(); }
 
 	Version getLatestVersion() const { return lastReply.version; }
 };
 
 class TLogQueueInfo {
-	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-	Smoother smoothFreeSpace;
-	Smoother smoothTotalSpace;
+	QueueMetricsSmoother queueMetrics;
 
 public:
 	TLogQueuingMetricsReply lastReply;
 	bool valid;
 	UID id;
 
-	double getSmoothFreeSpace() const { return smoothFreeSpace.smoothTotal(); }
-	double getSmoothTotalSpace() const { return smoothTotalSpace.smoothTotal(); }
-	double getSmoothDurableBytes() const { return smoothDurableBytes.smoothTotal(); }
-	double getSmoothInputBytesRate() const { return smoothInputBytes.smoothRate(); }
-	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
+	double getSmoothFreeSpace() const { return queueMetrics.getSmoothFreeSpace(); }
+	double getSmoothTotalSpace() const { return queueMetrics.getSmoothTotalSpace(); }
+	double getSmoothDurableBytes() const { return queueMetrics.getSmoothDurableBytes(); }
+	double getSmoothInputBytesRate() const { return queueMetrics.getSmoothInputBytesRate(); }
+	double getVerySmoothDurableBytesRate() const { return queueMetrics.getVerySmoothDurableBytesRate(); }
 
 	explicit TLogQueueInfo(UID id);
 	Version getLastCommittedVersion() const { return lastReply.v; }

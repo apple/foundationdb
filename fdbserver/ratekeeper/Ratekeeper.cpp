@@ -1163,15 +1163,40 @@ Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerD
 	co_await Ratekeeper::run(rkInterf, dbInfo);
 }
 
-StorageQueueInfo::StorageQueueInfo(const UID& ratekeeperID_, const UID& id_, const LocalityData& locality_)
-  : valid(false), ratekeeperID(ratekeeperID_), id(id_), locality(locality_), acceptingRequests(false),
-    smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited) {
-	// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
-	lastReply.instanceID = -1;
+QueueMetricsSmoother::QueueMetricsSmoother()
+  : smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {}
+
+bool QueueMetricsSmoother::update(int64_t newInstanceID,
+                                  int64_t newDurableBytes,
+                                  int64_t inputBytes,
+                                  const StorageBytes& storageBytes,
+                                  Smoother& smoothTotalDurableBytes) {
+	const bool reset = !instanceID.present() || instanceID.get() != newInstanceID;
+	if (reset) {
+		smoothDurableBytes.reset(newDurableBytes);
+		verySmoothDurableBytes.reset(newDurableBytes);
+		smoothInputBytes.reset(inputBytes);
+		smoothFreeSpace.reset(storageBytes.available);
+		smoothTotalSpace.reset(storageBytes.total);
+	} else {
+		smoothTotalDurableBytes.addDelta(newDurableBytes - durableBytes);
+		smoothDurableBytes.setTotal(newDurableBytes);
+		verySmoothDurableBytes.setTotal(newDurableBytes);
+		smoothInputBytes.setTotal(inputBytes);
+		smoothFreeSpace.setTotal(storageBytes.available);
+		smoothTotalSpace.setTotal(storageBytes.total);
+	}
+	instanceID = newInstanceID;
+	durableBytes = newDurableBytes;
+	return reset;
 }
+
+StorageQueueInfo::StorageQueueInfo(const UID& ratekeeperID_, const UID& id_, const LocalityData& locality_)
+  : ratekeeperID(ratekeeperID_), smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), valid(false), id(id_), locality(locality_),
+    acceptingRequests(false), limitReason(limitReason_t::unlimited) {}
 
 StorageQueueInfo::StorageQueueInfo(const UID& id_, const LocalityData& locality_)
   : StorageQueueInfo(UID(), id_, locality_) {}
@@ -1184,23 +1209,12 @@ void StorageQueueInfo::addCommitCost(TransactionTagRef tagName, TransactionCommi
 
 void StorageQueueInfo::update(StorageQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
 	valid = true;
-	auto prevReply = std::move(lastReply);
 	lastReply = reply;
-	if (prevReply.instanceID != reply.instanceID) {
-		smoothDurableBytes.reset(reply.bytesDurable);
-		verySmoothDurableBytes.reset(reply.bytesDurable);
-		smoothInputBytes.reset(reply.bytesInput);
-		smoothFreeSpace.reset(reply.storageBytes.available);
-		smoothTotalSpace.reset(reply.storageBytes.total);
+	if (queueMetrics.update(
+	        reply.instanceID, reply.bytesDurable, reply.bytesInput, reply.storageBytes, smoothTotalDurableBytes)) {
 		smoothDurableVersion.reset(reply.durableVersion);
 		smoothLatestVersion.reset(reply.version);
 	} else {
-		smoothTotalDurableBytes.addDelta(reply.bytesDurable - prevReply.bytesDurable);
-		smoothDurableBytes.setTotal(reply.bytesDurable);
-		verySmoothDurableBytes.setTotal(reply.bytesDurable);
-		smoothInputBytes.setTotal(reply.bytesInput);
-		smoothFreeSpace.setTotal(reply.storageBytes.available);
-		smoothTotalSpace.setTotal(reply.storageBytes.total);
 		smoothDurableVersion.setTotal(reply.durableVersion);
 		smoothLatestVersion.setTotal(reply.version);
 	}
@@ -1257,31 +1271,11 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	return updateCommitCostRequest;
 }
 
-TLogQueueInfo::TLogQueueInfo(UID id)
-  : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
-	// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied
-	// from storageQueueInfO)
-	lastReply.instanceID = -1;
-}
+TLogQueueInfo::TLogQueueInfo(UID id) : valid(false), id(id) {}
 
 void TLogQueueInfo::update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
 	valid = true;
-	auto prevReply = lastReply;
 	lastReply = reply;
-	if (prevReply.instanceID != reply.instanceID) {
-		smoothDurableBytes.reset(reply.bytesDurable);
-		verySmoothDurableBytes.reset(reply.bytesDurable);
-		smoothInputBytes.reset(reply.bytesInput);
-		smoothFreeSpace.reset(reply.storageBytes.available);
-		smoothTotalSpace.reset(reply.storageBytes.total);
-	} else {
-		smoothTotalDurableBytes.addDelta(reply.bytesDurable - prevReply.bytesDurable);
-		smoothDurableBytes.setTotal(reply.bytesDurable);
-		verySmoothDurableBytes.setTotal(reply.bytesDurable);
-		smoothInputBytes.setTotal(reply.bytesInput);
-		smoothFreeSpace.setTotal(reply.storageBytes.available);
-		smoothTotalSpace.setTotal(reply.storageBytes.total);
-	}
+	queueMetrics.update(
+	    reply.instanceID, reply.bytesDurable, reply.bytesInput, reply.storageBytes, smoothTotalDurableBytes);
 }
