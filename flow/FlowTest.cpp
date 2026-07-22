@@ -18,8 +18,19 @@
  * limitations under the License.
  */
 
+#include "fdbrpc/Net2FileSystem.h"
+#include "flow/TLSConfig.h"
 #include "flow/UnitTestRunner.h"
+#include "flow/network.h"
+
+namespace {
+void initializeNetwork() {
+	g_network = newNet2(TLSConfig());
+	g_network->addStopCallback(Net2FileSystem::stop);
+	Net2FileSystem::newFileSystem();
+}
+} // namespace
 
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig("flow"));
+	return runUnitTests(argc, argv, UnitTestRunnerConfig("flow", {}, initializeNetwork));
 }

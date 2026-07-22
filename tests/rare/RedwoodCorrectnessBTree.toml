@@ -9,3 +9,13 @@ startDelay = 0
     testsMatching = 'Lredwood/correctness/btree'
     maxRunTimeWallTime = 250.0
     maxRunTimeSanitizerModeWallTime = 800.0
+
+[[test]]
+testTitle = 'RedwoodQueuedCommitClose'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/redwood/correctness/btreeCloseWithQueuedCommits'

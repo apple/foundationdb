@@ -102,7 +102,7 @@ target_link_libraries(flowlinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>" 
 
 add_flow_target(EXECUTABLE NAME flow_test SRCS FlowTest.cpp)
 set_target_properties(flow_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
-target_link_libraries(flow_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>")
+target_link_libraries(flow_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>" fdbrpc)
 
 set(IS_ARM_MAC NO)
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
