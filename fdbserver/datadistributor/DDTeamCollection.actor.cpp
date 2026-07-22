@@ -1040,6 +1040,7 @@ public:
 		bool lastContainsFailed = false;
 		bool trackHealthyTeam = team->size() == self->configuration.storageTeamSize;
 		bool lastZeroHealthy = self->zeroHealthyTeams->get();
+		bool lastProcessingUnhealthy = self->processingUnhealthy->get();
 		bool firstCheck = true;
 		bool firstHealthChangeTrace = true;
 		std::unordered_set<KeyRange> submittedShards;
@@ -1097,6 +1098,7 @@ public:
 					change.push_back(self->initialFailureReactionDelay);
 				}
 				change.push_back(self->zeroHealthyTeams->onChange());
+				change.push_back(self->processingUnhealthy->onChange());
 
 				bool healthy = !badTeam && !anyUndesired && serversLeft == team->size();
 				team->setHealthy(healthy); // Unhealthy teams won't be chosen by bestTeam
@@ -1110,6 +1112,8 @@ public:
 					change.push_back(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow));
 				}
 				const bool healthyTeamBecameAvailable = lastZeroHealthy && !self->zeroHealthyTeams->get();
+				const bool unhealthyQueueDrained = lastProcessingUnhealthy && !self->processingUnhealthy->get();
+				lastProcessingUnhealthy = self->processingUnhealthy->get();
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            healthyTeamBecameAvailable || containsFailed || retryUnhealthyShards);
 				bool teamStateChanged = serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired ||
@@ -1275,12 +1279,13 @@ public:
 
 						std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 						    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
-						if (teamStateChanged || !retryUnhealthyShards || healthyTeamBecameAvailable) {
+						if (teamStateChanged || !retryUnhealthyShards || healthyTeamBecameAvailable ||
+						    unhealthyQueueDrained) {
 							submittedShards.clear();
 						} else {
 							// An unchanged range may still be waiting behind the relocation pipeline gate. Only retry
-							// newly mapped ranges until the team state or destination availability changes, and forget
-							// ranges that disappeared.
+							// newly mapped ranges while unhealthy relocations remain in the queue, and forget ranges
+							// that disappeared.
 							std::unordered_set<KeyRange> mappedShards(shards.begin(), shards.end());
 							for (auto it = submittedShards.begin(); it != submittedShards.end();) {
 								if (!mappedShards.contains(*it)) {
@@ -7186,6 +7191,7 @@ public:
 		auto collection = testTeamCollection(2, policy, 5, shards);
 		collection->teamCollections = { collection.get() };
 		collection->initialFailureReactionDelay = Future<Void>(Void());
+		collection->processingUnhealthy->set(true);
 		collection->teamCollectionInfoEventHolder =
 		    makeReference<EventCacheHolder>("TeamTrackerRetriesMergedShardForUndesiredServer");
 		collection->server_status.set(
@@ -7233,6 +7239,18 @@ public:
 		ASSERT(!relocations.isReady());
 		ASSERT_EQ(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
 		          initialTeamCollectionInfoTime);
+
+		collection->processingUnhealthy->set(false);
+		co_await delay(SERVER_KNOBS->CHECK_TEAM_DELAY + 0.1);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(!relocations.isReady());
+
+		collection->processingUnhealthy->set(true);
+		co_await delay(SERVER_KNOBS->CHECK_TEAM_DELAY + 0.1);
+		ASSERT(!relocations.isReady());
 
 		collection->zeroHealthyTeams->set(true);
 		co_await delay(0.1);
