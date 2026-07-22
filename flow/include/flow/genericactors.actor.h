@@ -1693,7 +1693,11 @@ Future<Void> orYield(Future<Void> f);
 
 template <class T>
 Future<T> chooseActor(Future<T> lhs, Future<T> rhs, ExplicitVoid = {}) {
-	auto res = co_await race(std::move(lhs), std::move(rhs));
+	// race() does not consume its arguments when an input is already ready. Keep the owning futures in locals so
+	// the losing operation is released before this completed coroutine publishes its result.
+	Future<T> pendingLhs(std::move(lhs));
+	Future<T> pendingRhs(std::move(rhs));
+	auto res = co_await race(std::move(pendingLhs), std::move(pendingRhs));
 	if (res.index() == 0) {
 		co_return std::get<0>(std::move(res));
 	}
@@ -1870,7 +1874,9 @@ Future<Void> tagAndForwardError(PromiseStream<T>* pOutput,
 
 template <class T>
 Future<T> waitOrError(Future<T> f, Future<Void> errorSignal, ExplicitVoid = {}) {
-	auto res = co_await race(std::move(f), std::move(errorSignal));
+	Future<T> pending(std::move(f));
+	Future<Void> pendingError(std::move(errorSignal));
+	auto res = co_await race(std::move(pending), std::move(pendingError));
 	if (res.index() == 0) {
 		co_return std::get<0>(std::move(res));
 	}
@@ -1880,7 +1886,9 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal, ExplicitVoid = {}) 
 
 template <class T>
 Future<T> waitOrError(FutureStream<T> f, Future<Void> errorSignal, ExplicitVoid = {}) {
-	auto res = co_await race(std::move(f), std::move(errorSignal));
+	FutureStream<T> pending(std::move(f));
+	Future<Void> pendingError(std::move(errorSignal));
+	auto res = co_await race(std::move(pending), std::move(pendingError));
 	if (res.index() == 0) {
 		co_return std::get<0>(std::move(res));
 	}

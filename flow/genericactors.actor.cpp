@@ -460,6 +460,43 @@ TEST_CASE("/flow/genericactors/NotifiedCancellation") {
 	return Void();
 }
 
+TEST_CASE("/flow/genericactors/ReadyRaceReleasesCapturedState") {
+	state NotifiedInt version(0);
+	state bool pendingFirstChoiceFired = false;
+	state Future<int64_t> readySecondChoice =
+	    chooseActor(notifiedWaitForForwardTest(&version, &pendingFirstChoiceFired), Future<int64_t>(10));
+	ASSERT(readySecondChoice.isReady() && !readySecondChoice.isError() && readySecondChoice.get() == 10);
+	version.set(10);
+	ASSERT(!pendingFirstChoiceFired);
+
+	version = NotifiedInt(0);
+	state bool pendingSecondChoiceFired = false;
+	state Future<int64_t> readyFirstChoice =
+	    chooseActor(Future<int64_t>(10), notifiedWaitForForwardTest(&version, &pendingSecondChoiceFired));
+	ASSERT(readyFirstChoice.isReady() && !readyFirstChoice.isError() && readyFirstChoice.get() == 10);
+	version.set(10);
+	ASSERT(!pendingSecondChoiceFired);
+
+	version = NotifiedInt(0);
+	state bool failedWaitFired = false;
+	state Future<int64_t> failedWait =
+	    waitOrError(notifiedWaitForForwardTest(&version, &failedWaitFired), Future<Void>(operation_failed()));
+	ASSERT(failedWait.isError() && failedWait.getError().code() == error_code_operation_failed);
+	version.set(10);
+	ASSERT(!failedWaitFired);
+
+	state Promise<Void> unusedErrorSignal;
+	state Future<int64_t> readyValue = waitOrError(Future<int64_t>(10), unusedErrorSignal.getFuture());
+	ASSERT(readyValue.isReady() && !readyValue.isError() && readyValue.get() == 10);
+	ASSERT_EQ(unusedErrorSignal.getFutureReferenceCount(), 0);
+
+	state PromiseStream<int64_t> pendingStream;
+	state Future<int64_t> failedStreamWait = waitOrError(pendingStream.getFuture(), Future<Void>(operation_failed()));
+	ASSERT(failedStreamWait.isError() && failedStreamWait.getError().code() == error_code_operation_failed);
+	ASSERT_EQ(pendingStream.getFutureReferenceCount(), 0);
+	return Void();
+}
+
 TEST_CASE("/flow/genericactors/HoldWhileReleasesCapturedState") {
 	state FlowLock lock(1);
 
