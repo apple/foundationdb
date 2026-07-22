@@ -12,8 +12,11 @@ disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for
 # would never complete, and the workload's checkSame assertion would fire.
 config = 'triple'
 
-# Pair the pinned redundancy with enough machines to guarantee a disjoint team.
+# Pair the pinned redundancy with storage-class capacity for a disjoint team. Ordinary
+# machines may be assigned a non-storage process class, leaving fewer than six storage
+# machines under triple replication.
 machineCount = 15
+extraStorageMachineCountPerDC = 5
 
 # Without datacenters=1 the simulator picks randomInt(1,4) DCs (SimulatedCluster.cpp
 # line ~1610). When it picks 2, the 15 machines get split ~7-8 per DC, the primary
