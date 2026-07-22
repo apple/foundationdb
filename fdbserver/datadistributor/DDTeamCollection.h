@@ -469,7 +469,10 @@ protected:
 
 	// Track a team and issue RelocateShards when the level of degradation changes
 	// A bad team can be unhealthy or just a redundant team removed by machineTeamRemover() or serverTeamRemover()
-	Future<Void> teamTracker(Reference<TCTeamInfo> team, IsBadTeam, IsRedundantTeam);
+	Future<Void> teamTracker(Reference<TCTeamInfo> team,
+	                         IsBadTeam,
+	                         IsRedundantTeam,
+	                         double checkTeamDelay = SERVER_KNOBS->CHECK_TEAM_DELAY);
 
 	// Check the status of a storage server.
 	// Apply all requirements to the server and mark it as excluded if it fails to satisfies these requirements
@@ -636,7 +639,8 @@ protected:
 
 	void addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
 	             IsInitialTeam,
-	             IsRedundantTeam = IsRedundantTeam::False);
+	             IsRedundantTeam = IsRedundantTeam::False,
+	             double checkTeamDelay = SERVER_KNOBS->CHECK_TEAM_DELAY);
 
 	void addTeam(std::set<UID> const& team, IsInitialTeam isInitialTeam);
 

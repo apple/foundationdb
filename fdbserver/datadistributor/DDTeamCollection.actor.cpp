@@ -31,7 +31,6 @@
 #include "TCInfo.h"
 #include "ExclusionTracker.h"
 #include "flow/IRandom.h"
-#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
 #include "flow/TxnCounters.h"
@@ -1027,7 +1026,8 @@ public:
 	static Future<Void> teamTracker(DDTeamCollection* self,
 	                                Reference<TCTeamInfo> team,
 	                                IsBadTeam badTeam,
-	                                IsRedundantTeam redundantTeam) {
+	                                IsRedundantTeam redundantTeam,
+	                                double checkTeamDelay) {
 		int lastServersLeft = team->size();
 		bool lastAnyUndesired = false;
 		bool lastAnyWigglingServer = false;
@@ -1109,7 +1109,7 @@ public:
 				                    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 				if (retryUnhealthyShards) {
 					// Partial moves can leave a merged shard associated with this team without another health change.
-					change.push_back(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow));
+					change.push_back(delay(checkTeamDelay, TaskPriority::DataDistributionLow));
 				}
 				const bool healthyTeamBecameAvailable = lastZeroHealthy && !self->zeroHealthyTeams->get();
 				const bool unhealthyQueueDrained = lastProcessingUnhealthy && !self->processingUnhealthy->get();
@@ -4203,8 +4203,9 @@ Future<Void> DDTeamCollection::buildTeams() {
 
 Future<Void> DDTeamCollection::teamTracker(Reference<TCTeamInfo> team,
                                            IsBadTeam isBadTeam,
-                                           IsRedundantTeam isRedundantTeam) {
-	return DDTeamCollectionImpl::teamTracker(this, team, isBadTeam, isRedundantTeam);
+                                           IsRedundantTeam isRedundantTeam,
+                                           double checkTeamDelay) {
+	return DDTeamCollectionImpl::teamTracker(this, team, isBadTeam, isRedundantTeam, checkTeamDelay);
 }
 
 Future<Void> DDTeamCollection::storageServerTracker(TCServerInfo* server,
@@ -4989,14 +4990,15 @@ void DDTeamCollection::addTeam(std::set<UID> const& team, IsInitialTeam isInitia
 
 void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
                                IsInitialTeam isInitialTeam,
-                               IsRedundantTeam redundantTeam) {
+                               IsRedundantTeam redundantTeam,
+                               double checkTeamDelay) {
 	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
 
 	// Move satisfiesPolicy to the end for performance benefit
 	auto badTeam = IsBadTeam{ redundantTeam || !satisfiesPolicy(teamInfo->getServers()) ||
 		                      (!ddLargeTeamEnabled() && teamInfo->size() != configuration.storageTeamSize) };
 
-	teamInfo->tracker = teamTracker(teamInfo, badTeam, redundantTeam);
+	teamInfo->tracker = teamTracker(teamInfo, badTeam, redundantTeam, checkTeamDelay);
 	// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
 	if (badTeam) {
 		badTeams.push_back(teamInfo);
@@ -7167,11 +7169,7 @@ public:
 	}
 
 	static Future<Void> TeamTracker_RetriesMergedShardForUndesiredServer() {
-		auto serverKnobs = const_cast<ServerKnobs*>(SERVER_KNOBS);
-		const double originalCheckTeamDelay = serverKnobs->CHECK_TEAM_DELAY;
-		serverKnobs->CHECK_TEAM_DELAY = 0.05;
-		auto restoreCheckTeamDelay = ScopeExit(
-		    [serverKnobs, originalCheckTeamDelay]() { serverKnobs->CHECK_TEAM_DELAY = originalCheckTeamDelay; });
+		constexpr double checkTeamDelay = 0.05;
 
 		auto shards = makeReference<ShardsAffectedByTeamFailure>();
 		shards->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
@@ -7202,9 +7200,18 @@ public:
 		                 collection->server_info[undesired]->getLastKnownInterface().locality));
 		FutureStream<RelocateShard> relocations = collection->output.getFuture();
 
-		collection->addTeam(std::set<UID>({ undesired, leftServer }), IsInitialTeam::True);
-		collection->addTeam(std::set<UID>({ undesired, rightServer }), IsInitialTeam::True);
-		collection->addTeam(std::set<UID>({ healthy1, healthy2 }), IsInitialTeam::True);
+		collection->addTeam({ collection->server_info[undesired], collection->server_info[leftServer] },
+		                    IsInitialTeam::True,
+		                    IsRedundantTeam::False,
+		                    checkTeamDelay);
+		collection->addTeam({ collection->server_info[undesired], collection->server_info[rightServer] },
+		                    IsInitialTeam::True,
+		                    IsRedundantTeam::False,
+		                    checkTeamDelay);
+		collection->addTeam({ collection->server_info[healthy1], collection->server_info[healthy2] },
+		                    IsInitialTeam::True,
+		                    IsRedundantTeam::False,
+		                    checkTeamDelay);
 		co_await delay(0.1);
 
 		ASSERT(relocations.isReady());
@@ -7226,7 +7233,7 @@ public:
 		shards->finishMove(rightRange);
 		ASSERT_EQ(shards->getNumberOfShards(undesired), 2);
 
-		co_await delay(SERVER_KNOBS->CHECK_TEAM_DELAY + 0.1);
+		co_await delay(checkTeamDelay + 0.1);
 		ASSERT(relocations.isReady());
 		RelocateShard retryLeft = relocations.pop();
 		ASSERT(relocations.isReady());
@@ -7235,13 +7242,13 @@ public:
 		ASSERT(retryLeft.keys == mergedRange);
 		ASSERT(retryRight.keys == mergedRange);
 
-		co_await delay(SERVER_KNOBS->CHECK_TEAM_DELAY + 0.1);
+		co_await delay(checkTeamDelay + 0.1);
 		ASSERT(!relocations.isReady());
 		ASSERT_EQ(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
 		          initialTeamCollectionInfoTime);
 
 		collection->processingUnhealthy->set(false);
-		co_await delay(SERVER_KNOBS->CHECK_TEAM_DELAY + 0.1);
+		co_await delay(checkTeamDelay + 0.1);
 		ASSERT(relocations.isReady());
 		ASSERT_EQ(relocations.pop().keys, mergedRange);
 		ASSERT(relocations.isReady());
@@ -7249,7 +7256,7 @@ public:
 		ASSERT(!relocations.isReady());
 
 		collection->processingUnhealthy->set(true);
-		co_await delay(SERVER_KNOBS->CHECK_TEAM_DELAY + 0.1);
+		co_await delay(checkTeamDelay + 0.1);
 		ASSERT(!relocations.isReady());
 
 		collection->zeroHealthyTeams->set(true);
@@ -7263,13 +7270,13 @@ public:
 		ASSERT_EQ(relocations.pop().keys, mergedRange);
 		ASSERT(!relocations.isReady());
 
-		co_await delay(SERVER_KNOBS->CHECK_TEAM_DELAY + 0.1);
+		co_await delay(checkTeamDelay + 0.1);
 		ASSERT(!relocations.isReady());
 
 		NetworkAddress failedAddress = collection->server_info[undesired]->getLastKnownInterface().address();
 		collection->excludedServers.set(AddressExclusion(failedAddress.ip, failedAddress.port),
 		                                DDTeamCollection::Status::FAILED);
-		co_await delay(SERVER_KNOBS->CHECK_TEAM_DELAY + 0.1);
+		co_await delay(checkTeamDelay + 0.1);
 		ASSERT(relocations.isReady());
 		RelocateShard failedLeft = relocations.pop();
 		ASSERT(relocations.isReady());
