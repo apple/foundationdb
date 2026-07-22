@@ -91,7 +91,7 @@ Future<RunRYWTransactionResult<Function>> runRYWTransactionDebug(Database cx,
 // The supplied function should be idempotent. Otherwise, outcome of this function will depend on how many times the
 // transaction is retried.
 template <class Function>
-Future<Void> runRYWTransactionVoid(Database cx, Function func) {
+Future<Void> runRYWTransactionVoid(Database cx, Function func, const char* errorEvent = nullptr) {
 	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	while (true) {
 		Error err;
@@ -101,6 +101,9 @@ Future<Void> runRYWTransactionVoid(Database cx, Function func) {
 			co_return;
 		} catch (Error& e) {
 			err = e;
+		}
+		if (errorEvent != nullptr) {
+			TraceEvent(errorEvent).errorUnsuppressed(err);
 		}
 		co_await tr->onError(err);
 	}
