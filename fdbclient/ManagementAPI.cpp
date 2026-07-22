@@ -1492,7 +1492,7 @@ Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, 
 	if (cx->apiVersionAtLeast(700)) {
 		co_await runRYWTransactionVoid(
 		    cx,
-		    [&](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+		    [&servers, failed](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
 			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
 			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			    ryw->set(
@@ -1508,7 +1508,7 @@ Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, 
 			    TraceEvent("ExcludeServersSpecialKeySpaceCommit")
 			        .detail("Servers", describe(servers))
 			        .detail("ExcludeFailed", failed);
-			    co_return;
+			    return Void();
 		    },
 		    "ExcludeServersError");
 		co_return;
@@ -1567,7 +1567,7 @@ Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> loca
 	if (cx->apiVersionAtLeast(700)) {
 		co_await runRYWTransactionVoid(
 		    cx,
-		    [&](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+		    [&localities, failed](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
 			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
 			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			    ryw->set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
@@ -1583,7 +1583,7 @@ Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> loca
 			    TraceEvent("ExcludeLocalitiesSpecialKeySpaceCommit")
 			        .detail("Localities", describe(localities))
 			        .detail("ExcludeFailed", failed);
-			    co_return;
+			    return Void();
 		    },
 		    "ExcludeLocalitiesError");
 		co_return;
@@ -1609,7 +1609,7 @@ Future<Void> includeServers(Database cx, std::vector<AddressExclusion> servers, 
 	if (cx->apiVersionAtLeast(700)) {
 		co_await runRYWTransactionVoid(
 		    cx,
-		    [&](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+		    [&servers, failed](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
 			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
 			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			    for (const auto& server : servers) {
@@ -1632,7 +1632,7 @@ Future<Void> includeServers(Database cx, std::vector<AddressExclusion> servers, 
 				    }
 			    }
 			    TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
-			    co_return;
+			    return Void();
 		    },
 		    "IncludeServersError");
 		co_return;
@@ -1705,7 +1705,7 @@ Future<Void> includeLocalities(Database cx, std::vector<std::string> localities,
 	if (cx->apiVersionAtLeast(700)) {
 		co_await runRYWTransactionVoid(
 		    cx,
-		    [&](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+		    [&localities, failed, includeAll](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
 			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
 			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			    if (includeAll) {
@@ -1725,7 +1725,7 @@ Future<Void> includeLocalities(Database cx, std::vector<std::string> localities,
 			        .detail("Localities", describe(localities))
 			        .detail("Failed", failed)
 			        .detail("IncludeAll", includeAll);
-			    co_return;
+			    return Void();
 		    },
 		    "IncludeLocalitiesError");
 		co_return;
