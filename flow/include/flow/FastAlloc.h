@@ -32,13 +32,6 @@
 // #define ALLOC_INSTRUMENTATION_STDOUT ENABLED(NOT_IN_CLEAN)
 
 // #define ALLOC_INSTRUMENTATION ENABLED(NOT_IN_CLEAN)
-//  The form "(1==1)" in this context is used to satisfy both clang and vc++ with a single syntax.  Clang rejects "1"
-//  and vc++ rejects "true".
-// FIXME: this has been set to true for 4+ years.  We probably do not need the "not thread safe"
-// version of the code.  Consider removing this and just making it thread safe.
-// Also, explain why thread safety is required here and not elsewhere (e.g. Arena and ArenaBlock).
-#define FASTALLOC_THREAD_SAFE (FLOW_THREAD_SAFE || (1 == 1))
-
 #if VALGRIND
 #include <drd.h>
 #include <memcheck.h>
@@ -174,8 +167,6 @@ private:
 
 		return data;
 	}
-	static void* freelist;
-
 	static void getMagazine();
 	static void releaseMagazine(void*);
 };
