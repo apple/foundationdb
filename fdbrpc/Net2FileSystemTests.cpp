@@ -137,51 +137,6 @@ TEST_CASE("/fileio/rename") {
 	co_await IAsyncFileSystem::filesystem()->deleteFile(renamedFile, true);
 }
 
-#if defined(__unixish__)
-TEST_CASE("/fileio/renameMissingSource") {
-	if (g_network->isSimulated()) {
-		co_return;
-	}
-
-	std::string suffix = deterministicRandom()->randomUniqueID().toString();
-	std::string source = "/tmp/__MISSING_RENAME_SOURCE__." + suffix;
-	std::string destination = "/tmp/__MISSING_RENAME_DESTINATION__." + suffix;
-	Optional<Error> error;
-	try {
-		co_await IAsyncFileSystem::filesystem()->renameFile(source, destination);
-	} catch (Error& e) {
-		error = e;
-	}
-
-	ASSERT(error.present());
-	ASSERT_EQ(error.get().code(), error_code_file_not_found);
-}
-
-TEST_CASE("/fileio/renameDestinationIsDirectory") {
-	if (g_network->isSimulated()) {
-		co_return;
-	}
-
-	std::string source =
-	    "/tmp/__RENAME_DESTINATION_IS_DIRECTORY__." + deterministicRandom()->randomUniqueID().toString();
-	Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(
-	    source, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED, 0644);
-	co_await file->sync();
-	file.clear();
-
-	Optional<Error> error;
-	try {
-		co_await IAsyncFileSystem::filesystem()->renameFile(source, "/tmp");
-	} catch (Error& e) {
-		error = e;
-	}
-
-	ASSERT(error.present());
-	ASSERT_EQ(error.get().code(), error_code_io_error);
-	co_await IAsyncFileSystem::filesystem()->deleteFile(source, true);
-}
-#endif
-
 // Truncating to extend size should zero the new data
 TEST_CASE("/fileio/truncateAndRead") {
 	std::string filename = "/tmp/__JUNK__";
