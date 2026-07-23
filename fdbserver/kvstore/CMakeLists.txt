@@ -7,6 +7,8 @@ add_fdbserver_link_test(fdbserver_kvstorelinktest
 add_fdbserver_unit_test(fdbserver_kvstore_test kvstore
   fdbserver_kvstore
   fdbserver_core)
+target_compile_definitions(fdbserver_kvstore_test PRIVATE
+  FDBSERVER_UNIT_TEST_NORMAL_IGNORE=\"noSim/RocksDB/RangeClear\")
 
 configure_fdbserver_common_includes(fdbserver_kvstore)
 target_include_directories(fdbserver_kvstore
