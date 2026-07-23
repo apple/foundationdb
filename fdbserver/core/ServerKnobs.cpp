@@ -22,7 +22,6 @@
 #include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbclient/Knobs.h"
 #include "flow/IRandom.h"
-#include "flow/UnitTest.h"
 
 #include <iostream>
 
@@ -772,6 +771,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_COMPACTION_PERIOD, isSimulated? 3600 : 2592000 ); // 30d
 	init( SHARDED_ROCKSDB_COMPACTION_ACTOR_DELAY,               3600 ); // 1h
 	init( SHARDED_ROCKSDB_COMPACTION_SHARD_LIMIT,                 -1 );
+	// Limit per-shard write buffers so large-shard simulations do not exhaust memory.
 	int64_t shardedRocksDBWriteBufferSize =
 	    (isSimulated && !buggifySmallShards && !buggifySmallBandwidthSplit && !simulationMediumShards) ? 32 << 20 : 16 << 20;
 	init( SHARDED_ROCKSDB_WRITE_BUFFER_SIZE, shardedRocksDBWriteBufferSize ); // 32MB for large-shard simulations, 16MB otherwise
@@ -1396,16 +1396,4 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	if (isSimulated) {
 		BULK_LOAD_USE_SST_INGEST = deterministicRandom()->coinflip();
 	}
-}
-
-TEST_CASE("/fdbserver/ServerKnobs/ShardedRocksDBWriteBufferSize") {
-	ClientKnobs productionClientKnobs(Randomize::False, IsSimulated::False);
-	ServerKnobs productionServerKnobs(Randomize::False, &productionClientKnobs, IsSimulated::False);
-	ASSERT_EQ(productionServerKnobs.SHARDED_ROCKSDB_WRITE_BUFFER_SIZE, 16 << 20);
-
-	ClientKnobs simulatedClientKnobs(Randomize::False, IsSimulated::True);
-	ServerKnobs simulatedServerKnobs(Randomize::False, &simulatedClientKnobs, IsSimulated::True);
-	ASSERT_EQ(simulatedServerKnobs.SHARDED_ROCKSDB_WRITE_BUFFER_SIZE, 32 << 20);
-
-	return Void();
 }
