@@ -130,8 +130,16 @@ public:
 		try {
 			int result = r->result;
 			if (result == -1) {
-				TraceEvent(SevError, "FileRenameError").detail("Errno", r->errorno);
-				throw internal_error();
+				errno = r->errorno;
+				bool notFound = errno == ENOENT;
+				Error e = notFound ? file_not_found() : io_error();
+				TraceEvent(notFound ? SevWarn : SevWarnAlways, "FileRenameError")
+				    .error(e)
+				    .GetLastError()
+				    .detail("Errno", r->errorno)
+				    .detail("From", from)
+				    .detail("To", to);
+				throw e;
 			}
 		} catch (Error& e) {
 			err = e;
