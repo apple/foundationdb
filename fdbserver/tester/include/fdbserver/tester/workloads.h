@@ -75,7 +75,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
 	}
-	virtual ~TestWorkload() {};
+	virtual ~TestWorkload() = default;
 	virtual Future<Void> initialized() { return Void(); }
 	// WARNING: this method must not be implemented by a workload directly. Instead, this will be implemented by
 	// the workload factory. Instead, provide a static member variable called name.
@@ -121,7 +121,7 @@ class DeterministicRandom;
 
 struct FailureInjectionWorkload : TestWorkload {
 	explicit(false) FailureInjectionWorkload(WorkloadContext const&);
-	virtual ~FailureInjectionWorkload() {}
+	~FailureInjectionWorkload() override = default;
 	virtual void initFailureInjectionMode(DeterministicRandom& random);
 	virtual bool shouldInject(DeterministicRandom& random, const WorkloadRequest& work, const unsigned count) const;
 
@@ -178,7 +178,7 @@ struct ClientWorkload : TestWorkload {
 	WorkloadProcess* impl;
 	using CreateWorkload = std::function<Reference<TestWorkload>(WorkloadContext const&)>;
 	ClientWorkload(CreateWorkload const& childCreator, WorkloadContext const& wcx);
-	~ClientWorkload();
+	~ClientWorkload() override;
 	Future<Void> initialized() override;
 	std::string description() const override;
 	Future<Void> setup(Database const& cx) override;

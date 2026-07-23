@@ -54,12 +54,22 @@ struct Descriptor<SingleKeyMutationDescriptor>
 class LogSystemDiskQueueAdapter;
 
 struct ProxyStats {
+	enum class CommitBatchFlushReason {
+		BYTE_LIMIT,
+		COUNT_LIMIT,
+		TIMEOUT,
+		FIRST_IN_BATCH,
+		TRANSACTION_SIZE_LIMIT,
+	};
+
 	CounterCollection cc;
 	Counter txnCommitIn, txnCommitVersionAssigned, txnCommitResolving, txnCommitResolved, txnCommitOut,
 	    txnCommitOutSuccess, txnCommitErrors;
 	Counter txnConflicts;
 	Counter txnRejectedForQueuedTooLong;
 	Counter commitBatchIn, commitBatchOut;
+	Counter commitBatchFlushByteLimit, commitBatchFlushCountLimit, commitBatchFlushTimeout,
+	    commitBatchFlushFirstInBatch, commitBatchFlushTransactionSizeLimit;
 	Counter mutationBytes;
 	Counter mutations;
 	Counter conflictRanges;
@@ -120,6 +130,26 @@ struct ProxyStats {
 		return r;
 	}
 
+	void recordCommitBatchFlush(CommitBatchFlushReason reason) {
+		switch (reason) {
+		case CommitBatchFlushReason::BYTE_LIMIT:
+			++commitBatchFlushByteLimit;
+			break;
+		case CommitBatchFlushReason::COUNT_LIMIT:
+			++commitBatchFlushCountLimit;
+			break;
+		case CommitBatchFlushReason::TIMEOUT:
+			++commitBatchFlushTimeout;
+			break;
+		case CommitBatchFlushReason::FIRST_IN_BATCH:
+			++commitBatchFlushFirstInBatch;
+			break;
+		case CommitBatchFlushReason::TRANSACTION_SIZE_LIMIT:
+			++commitBatchFlushTransactionSizeLimit;
+			break;
+		}
+	}
+
 	explicit ProxyStats(UID id,
 	                    NotifiedVersion* pVersion,
 	                    NotifiedVersion* pCommittedVersion,
@@ -129,8 +159,13 @@ struct ProxyStats {
 	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
 	    txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc),
 	    txnConflicts("TxnConflicts", cc), txnRejectedForQueuedTooLong("TxnRejectedForQueuedTooLong", cc),
-	    commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc),
-	    mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
+	    commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc),
+	    commitBatchFlushByteLimit("CommitBatchFlushByteLimit", cc),
+	    commitBatchFlushCountLimit("CommitBatchFlushCountLimit", cc),
+	    commitBatchFlushTimeout("CommitBatchFlushTimeout", cc),
+	    commitBatchFlushFirstInBatch("CommitBatchFlushFirstInBatch", cc),
+	    commitBatchFlushTransactionSizeLimit("CommitBatchFlushTransactionSizeLimit", cc),
+	    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
 	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
 	    keyServerLocationErrors("KeyServerLocationErrors", cc),
 	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), rangeLockFastPath("RangeLockFastPath", cc),
@@ -182,7 +217,7 @@ struct ExpectedIdempotencyIdCountForKey {
 	int16_t idempotencyIdCount = 0;
 	uint8_t batchIndexHighByte = 0;
 
-	ExpectedIdempotencyIdCountForKey() {}
+	ExpectedIdempotencyIdCountForKey() = default;
 	ExpectedIdempotencyIdCountForKey(Version commitVersion, int16_t idempotencyIdCount, uint8_t batchIndexHighByte)
 	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
 };
@@ -206,6 +241,7 @@ struct ProxyCommitData {
 	Promise<Void> validState; // Set once txnStateStore and version are valid
 	double lastVersionTime;
 	KeyRangeMap<std::set<Key>> vecBackupKeys;
+	CDCRoutingTable cdcRouting;
 	uint64_t commitVersionRequestNumber;
 	uint64_t mostRecentProcessedRequestNumber;
 	KeyRangeMap<Deque<std::pair<Version, int>>> keyResolvers;
@@ -268,7 +304,7 @@ struct ProxyCommitData {
 	// signify they must be repopulated. We do not repopulate them immediately to avoid a slow task.
 	const std::vector<Tag>& tagsForKey(StringRef key) {
 		auto& tags = keyInfo[key].tags;
-		if (!tags.size()) {
+		if (tags.empty()) {
 			auto& r = keyInfo.rangeContaining(key).value();
 			r.populateTags();
 			return r.tags;
@@ -437,6 +473,7 @@ inline ApplyMetadataProxyContext ProxyCommitData::getApplyMetadataProxyContext()
 	return { .dbgid = dbgid,
 		     .txnStateStore = txnStateStore,
 		     .vecBackupKeys = &vecBackupKeys,
+		     .cdcRouting = &cdcRouting,
 		     .keyInfo = &keyInfo,
 		     .uid_applyMutationsData = firstProxy ? &uid_applyMutationsData : nullptr,
 		     .commit = commit,

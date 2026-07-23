@@ -31,7 +31,7 @@ extern void testReplicationPolicy(int nTests);
 
 struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 	IReplicationPolicy() : _depth(-1), _maxdepth(-1) {}
-	virtual ~IReplicationPolicy() {}
+	virtual ~IReplicationPolicy() = default;
 	virtual std::string name() const = 0;
 	virtual std::string info() const = 0;
 	virtual void addref() { ReferenceCounted<IReplicationPolicy>::addref(); }
@@ -121,7 +121,7 @@ inline void save(Archive& ar, const Reference<IReplicationPolicy>& value) {
 }
 
 struct PolicyOne final : IReplicationPolicy {
-	PolicyOne() {};
+	PolicyOne() = default;
 	explicit PolicyOne(const PolicyOne& o) {}
 	std::string name() const override { return "One"; }
 	std::string info() const override { return "1"; }
@@ -222,14 +222,14 @@ struct PolicyAnd final : IReplicationPolicy {
 		std::sort(_sortedPolicies.begin(), _sortedPolicies.end(), PolicyAnd::comparePolicy);
 	}
 	explicit PolicyAnd(const PolicyAnd& other) : _policies(other._policies), _sortedPolicies(other._sortedPolicies) {}
-	explicit PolicyAnd() {}
+	explicit PolicyAnd() = default;
 	std::string name() const override { return "And"; }
 	std::string info() const override {
 		std::string infoText;
 		for (auto& policy : _policies) {
-			infoText += ((infoText.length()) ? " & (" : "(") + policy->info() + ")";
+			infoText += ((!infoText.empty()) ? " & (" : "(") + policy->info() + ")";
 		}
-		if (_policies.size())
+		if (!_policies.empty())
 			infoText = "(" + infoText + ")";
 		return infoText;
 	}
@@ -315,7 +315,7 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
 		} else if (name == "Across"_sr) {
-			PolicyAcross* pointer = new PolicyAcross(0, "", Reference<IReplicationPolicy>());
+			auto* pointer = new PolicyAcross(0, "", Reference<IReplicationPolicy>());
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
 		} else if (name == "And"_sr) {

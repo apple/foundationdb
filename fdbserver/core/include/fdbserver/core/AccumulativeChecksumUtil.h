@@ -117,7 +117,7 @@ void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<Accumulativ
 // each version that has mutations
 class AccumulativeChecksumValidator {
 public:
-	AccumulativeChecksumValidator() {}
+	AccumulativeChecksumValidator() = default;
 
 	// Called when SS pulls a non-ACS mutation
 	// Add the mutation to the mutation buffer

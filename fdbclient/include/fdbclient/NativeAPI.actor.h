@@ -31,6 +31,7 @@
 #include "flow/TDMetric.h"
 #include "flow/IRandom.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBOptions.g.h"
@@ -424,7 +425,8 @@ public:
 
 	// Try to split the given range into equally sized chunks based on estimated size.
 	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
-	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
+	// A non-negative limit caps the number of interior split points, including shard boundaries.
+	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize, int limit = -1);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set(const KeyRef& key, const ValueRef& value, AddConflictRange = AddConflictRange::True);

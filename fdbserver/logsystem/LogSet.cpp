@@ -18,9 +18,13 @@
  * limitations under the License.
  */
 
-#include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSet.h"
+
+#include <limits>
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/CodeProbe.h"
+#include "flow/UnitTest.h"
 
 std::string LogSet::logRouterString() {
 	std::string result;
@@ -62,9 +66,13 @@ std::string LogSet::logServerString() {
 	return result;
 }
 
-void LogSet::populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags, int txsTags, int oldTxsTags) {
+void LogSet::populateSatelliteTagLocations(int logRouterTags,
+                                           int oldLogRouterTags,
+                                           int txsTags,
+                                           int oldTxsTags,
+                                           int cdcTags) {
 	satelliteTagLocations.clear();
-	satelliteTagLocations.resize(std::max({ logRouterTags, oldLogRouterTags, txsTags, oldTxsTags }) + 1);
+	satelliteTagLocations.resize(std::max({ logRouterTags, oldLogRouterTags, txsTags, oldTxsTags, cdcTags }) + 1);
 
 	std::map<int, int> server_usedBest;
 	std::set<std::pair<int, int>> used_servers;
@@ -176,9 +184,26 @@ void LogSet::checkSatelliteTagLocations() {
 	    .detail("NumOfDCs", dcs.size());
 }
 
+int LogSet::satelliteTagLocationIndex(Tag tag) const {
+	ASSERT(!satelliteTagLocations.empty());
+	if (satelliteTagLocations.size() == 1) {
+		return 0;
+	}
+
+	const int locationCount = static_cast<int>(satelliteTagLocations.size());
+	const int directIndex = static_cast<int>(tag.id) + 1;
+	if (tag.locality == tagLocalityCDC) {
+		CODE_PROBE(
+		    directIndex >= locationCount, "CDC tag exceeds the satellite routing table", probe::decoration::rare);
+		return static_cast<int>(tag.id % (locationCount - 1)) + 1;
+	}
+	ASSERT_LT(directIndex, locationCount);
+	return directIndex;
+}
+
 int LogSet::bestLocationFor(Tag tag) {
 	if (locality == tagLocalitySatellite) {
-		return satelliteTagLocations[tag.id + 1][0];
+		return satelliteTagLocations[satelliteTagLocationIndex(tag)][0];
 	}
 
 	return tag.id % logServers.size();
@@ -217,8 +242,9 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
                               const Optional<Reference<LocalitySet>>& restrictedLogSet) {
 	if (locality == tagLocalitySatellite) {
 		for (auto& t : tags) {
-			if (t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter) {
-				for (int loc : satelliteTagLocations[t.id + 1]) {
+			if (t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter || t.locality == tagLocalityCDC) {
+				CODE_PROBE(t.locality == tagLocalityCDC, "CDC mutations are routed to satellite TLogs");
+				for (int loc : satelliteTagLocations[satelliteTagLocationIndex(t)]) {
 					locations.push_back(locationOffset + loc);
 				}
 			}
@@ -267,4 +293,34 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
 	for (auto entry : resultEntries) {
 		locations.push_back(locationOffset + *logServerMap->getObject(entry));
 	}
+}
+
+TEST_CASE("/NativeCDC/SatelliteRouting") {
+	LogSet logSet;
+	logSet.locality = tagLocalitySatellite;
+	logSet.tLogPolicy = makeReference<PolicyOne>();
+	for (int i = 0; i < 3; ++i) {
+		Standalone<StringRef> id(StringRef(format("satellite-%d", i)));
+		logSet.tLogLocalities.emplace_back(id, id, id, "satellite"_sr);
+	}
+	logSet.populateSatelliteTagLocations(1, 1, 1, 1, 4);
+
+	for (int tagId = 0; tagId < 4; ++tagId) {
+		Tag tag(tagLocalityCDC, tagId);
+		std::vector<int> locations;
+		logSet.getPushLocations(VectorRef<Tag>(&tag, 1), locations, 10);
+		ASSERT_EQ(locations.size(), 1);
+		ASSERT_GE(locations.front(), 10);
+		ASSERT_LT(locations.front(), 13);
+	}
+
+	// NATIVE_CDC_TAG_COUNT is process-local. A proxy using a larger pool than the process that built this epoch must
+	// still route a valid durable tag without indexing beyond the precomputed satellite table.
+	Tag wrappedTag(tagLocalityCDC, std::numeric_limits<uint16_t>::max());
+	std::vector<int> wrappedLocations;
+	logSet.getPushLocations(VectorRef<Tag>(&wrappedTag, 1), wrappedLocations, 10);
+	ASSERT_EQ(wrappedLocations.size(), 1);
+	ASSERT_EQ(wrappedLocations.front(), 10 + logSet.bestLocationFor(wrappedTag));
+
+	return Void();
 }

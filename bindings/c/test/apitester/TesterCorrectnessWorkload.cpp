@@ -149,7 +149,7 @@ private:
 			selector.keyLength = key.size();
 			selector.orEqual = Random::get().randomBool(0.5);
 			selector.offset = Random::get().randomInt(0, 4);
-			keysWithSelectors->emplace_back(std::move(key), std::move(selector));
+			keysWithSelectors->emplace_back(std::move(key), selector);
 			// We would ideally do the following above:
 			//   selector.key = key.data();
 			// but key.data() may become invalid after the key is moved to the vector.

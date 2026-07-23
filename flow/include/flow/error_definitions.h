@@ -169,6 +169,8 @@ ERROR( bulkload_invalid_configuration, 1250, "BulkLoad requires cluster configur
 ERROR( transaction_grv_queue_rejected, 1251, "GRV request rejected because estimated queue wait exceeds transaction limit" )
 ERROR( finish_move_keys_too_many_retries, 1252, "finishMoveKeys exceeded retry limit" )
 ERROR( start_move_keys_too_many_retries, 1253, "startMoveKeys exceeded retry limit" )
+ERROR( cdc_proxy_failed, 1254, "Cluster recovery terminating because a CDCProxy failed" )
+ERROR( cdc_tlog_peek_reply_too_large, 1255, "TLog CDC peek reply exceeds configured byte limit" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -267,7 +269,7 @@ ERROR( special_keys_no_module_found, 2113, "Special key space range read does no
 ERROR( special_keys_write_disabled, 2114, "Special Key space is not allowed to write by default. Refer to the `special_key_space_enable_writes` transaction option for more details." )
 ERROR( special_keys_no_write_module_found, 2115, "Special key space key or keyrange in set or clear does not intersect a module" )
 ERROR( special_keys_cross_module_clear, 2116, "Special key space clear crosses modules" )
-ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get on special key 0xff0xff/error_message to get a json string of the error message." )
+ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get - within the same transaction - on special key 0xff0xff/error_message to get a json string of the error message." )
 ERROR( client_lib_invalid_metadata, 2118, "Invalid client library metadata." )
 ERROR( client_lib_already_exists, 2119, "Client library with same identifier already exists on the cluster." )
 ERROR( client_lib_not_found, 2120, "Client library for the given identifier not found." )

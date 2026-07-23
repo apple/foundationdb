@@ -24,9 +24,10 @@
 
 #include <algorithm>
 #include <map>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "fdbrpc/DDSketch.h"
-#include "fdbrpc/HealthMonitor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
@@ -52,7 +53,7 @@ public:
 	NetworkAddressList addresses;
 	Token token{};
 
-	Endpoint() {}
+	Endpoint() = default;
 	Endpoint(const NetworkAddressList& addresses, Token token) : addresses(addresses), token(token) {
 		choosePrimaryAddress();
 	}
@@ -293,7 +294,8 @@ public:
 	Endpoint loadedEndpoint(const UID& token);
 	Future<Void> loadedDisconnect();
 
-	HealthMonitor* healthMonitor();
+	// Returns peers whose recent failed connections have already been evicted from the transport peer map.
+	std::unordered_set<NetworkAddress> getRecentClosedPeers();
 
 	bool currentDeliveryPeerIsTrusted() const;
 	NetworkAddress currentDeliveryPeerAddress() const;

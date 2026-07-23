@@ -193,6 +193,8 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( CHANGE_FEED_CACHE_FLUSH_BYTES,          10e6 ); if( randomize && buggify() ) CHANGE_FEED_CACHE_FLUSH_BYTES = deterministicRandom()->randomInt64(1, 1e6);
 	init( CHANGE_FEED_CACHE_EXPIRE_TIME,          60.0 ); if( randomize && buggify() ) CHANGE_FEED_CACHE_EXPIRE_TIME = 1.0;
 	init( CHANGE_FEED_CACHE_LIMIT_BYTES,        500000 ); if( randomize && buggify() ) CHANGE_FEED_CACHE_LIMIT_BYTES = 50000;
+	init( ENABLE_NATIVE_CDC,                     false ); if( randomize && buggify() ) ENABLE_NATIVE_CDC = true;
+	init( NATIVE_CDC_TAG_COUNT,                    256 ); if( randomize && buggify() ) NATIVE_CDC_TAG_COUNT = 2;
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && buggify() ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && buggify() ) GRV_BATCH_TIMEOUT = 0.1;
@@ -256,7 +258,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	//Backup
 	init( BACKUP_LOCAL_FILE_WRITE_BLOCK,      024*1024 );
-	init( BACKUP_MANIFEST_WRITE_CHUNK_SIZE,  std::numeric_limits<int>::max() ); if( randomize && buggify() ) BACKUP_MANIFEST_WRITE_CHUNK_SIZE = 64;
+	init( BACKUP_MANIFEST_CHUNK_SIZE,  std::numeric_limits<int>::max() ); if( randomize && buggify() ) BACKUP_MANIFEST_CHUNK_SIZE = 64;
 	init( BACKUP_CONCURRENT_DELETES,               100 );
 	init( BACKUP_SIMULATED_LIMIT_BYTES,            1e6 ); if( randomize && buggify() ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
 	init( BACKUP_GET_RANGE_LIMIT_BYTES,            1e6 );
@@ -306,7 +308,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
 	init( RESTORE_RANGES_READ_BATCH,             10000 );
 
-	init( BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL, 100000 * 1000000LL );
+	init( RANGE_PARTITIONED_BACKUP_VDIR_INTERVAL, 100000 * 1000000LL );
 	init( BACKUP_NUM_OF_PARTITIONS,               100 );
 	init( BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH, false );
 	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS, false ); if( randomize && buggify() ) { ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS = true; }

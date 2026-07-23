@@ -280,7 +280,7 @@ void setReplyPriority(const ReplyPromise<Reply>& p, TaskPriority taskID) {
 struct ReplyPromiseStreamReply {
 	Optional<UID> acknowledgeToken;
 	uint16_t sequence;
-	ReplyPromiseStreamReply() {}
+	ReplyPromiseStreamReply() = default;
 };
 
 struct AcknowledgementReply {
@@ -736,8 +736,9 @@ public:
 	void send(U&& value) const {
 		if (queue->isRemoteEndpoint()) {
 			FlowTransport::transport().sendUnreliable(SerializeSource<T>(std::forward<U>(value)), getEndpoint(), true);
-		} else
+		} else {
 			queue->send(std::forward<U>(value));
+		}
 	}
 
 	/*void sendError(const Error& error) const {

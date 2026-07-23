@@ -46,7 +46,7 @@ struct TransactionLineage : LineageProperties<TransactionLineage> {
 
 struct TransactionLineageCollector : IALPCollector<TransactionLineage> {
 	using Operation = TransactionLineage::Operation;
-	std::optional<std::any> collect(ActorLineage* lineage) {
+	std::optional<std::any> collect(ActorLineage* lineage) override {
 		std::map<std::string_view, std::any> res;
 		auto txID = lineage->get(&TransactionLineage::txID);
 		if (txID.has_value()) {

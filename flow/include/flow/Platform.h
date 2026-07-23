@@ -495,11 +495,11 @@ private:
 } // namespace platform
 
 #ifdef __linux__
-typedef struct {
+using ProfilingSample = struct {
 	double timestamp;
 	size_t length;
 	void* frames[];
-} ProfilingSample;
+};
 
 dev_t getDeviceId(std::string path);
 #endif
@@ -754,7 +754,6 @@ inline static void aligned_free(void* ptr) {
 }
 #elif defined(__APPLE__)
 #if !defined(HAS_ALIGNED_ALLOC)
-#include <cstdlib>
 inline static void* aligned_alloc(size_t alignment, size_t size) {
 	void* ptr = nullptr;
 	posix_memalign(&ptr, alignment, size);

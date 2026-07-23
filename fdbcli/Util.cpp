@@ -22,10 +22,11 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/Status.h"
+#include "fdbclient/StatusSchema.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
 #include "flow/Arena.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include <fmt/core.h>
 
 namespace fdb_cli {

@@ -34,7 +34,6 @@
 #include <atomic>
 #include <unordered_map>
 #include "flow/IRandom.h"
-#include "flow/ProtocolVersion.h"
 #include "flow/WriteOnlySet.h"
 
 class Void;
@@ -120,14 +119,14 @@ struct NetworkInfo {
 
 class IEventFD : public ReferenceCounted<IEventFD> {
 public:
-	virtual ~IEventFD() {}
+	virtual ~IEventFD() = default;
 	virtual int getFD() = 0;
 	virtual Future<int64_t> read() = 0;
 };
 
-typedef void* flowGlobalType;
-typedef NetworkAddress (*NetworkAddressFuncPtr)();
-typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
+using flowGlobalType = void*;
+using NetworkAddressFuncPtr = NetworkAddress (*)();
+using NetworkAddressesFuncPtr = NetworkAddressList (*)();
 
 class TLSConfig;
 
@@ -272,14 +271,13 @@ public:
 
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress() {
-		flowGlobalType netAddressFuncPtr =
-		    reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enNetworkAddressFunc));
+		auto netAddressFuncPtr = reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enNetworkAddressFunc));
 		return (netAddressFuncPtr) ? reinterpret_cast<NetworkAddressFuncPtr>(netAddressFuncPtr)() : NetworkAddress();
 	}
 
 	// Shorthand for transport().getLocalAddresses()
 	static NetworkAddressList getLocalAddresses() {
-		flowGlobalType netAddressesFuncPtr =
+		auto netAddressesFuncPtr =
 		    reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enNetworkAddressesFunc));
 		return (netAddressesFuncPtr) ? reinterpret_cast<NetworkAddressesFuncPtr>(netAddressesFuncPtr)()
 		                             : NetworkAddressList();
@@ -288,9 +286,9 @@ public:
 	NetworkInfo networkInfo;
 
 protected:
-	INetwork() {}
+	INetwork() = default;
 
-	~INetwork() {} // Please don't try to delete through this interface!
+	~INetwork() = default; // Please don't try to delete through this interface!
 };
 
 /// A wrapper for `g_network` value  that lets you access global properties from Swift.

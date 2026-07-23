@@ -247,6 +247,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_BUGGIFIED_DELAY,                                   0 ); if( randomize && buggify() ) MAX_BUGGIFIED_DELAY =  0.2 * deterministicRandom()->random01();
 	init( MAX_RUNLOOP_SLEEP_DELAY,                               0 );
 	init( SIM_CONNECT_ERROR_MODE,                                0 ); if( randomize && buggify() ) SIM_CONNECT_ERROR_MODE = deterministicRandom()->randomInt(0,3);
+	init( SIM_DNS_REMOVAL_MAX_DELAY,                             0 ); if( randomize && buggify() ) SIM_DNS_REMOVAL_MAX_DELAY = 2.0 * deterministicRandom()->random01();
 
 	//Tracefiles
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
@@ -323,7 +324,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	// Encryption
 	init( ENCRYPT_CIPHER_KEY_CACHE_TTL, isSimulated ? 5 * 60 : 10 * 60 );
-	if ( randomize && buggify()) { ENCRYPT_CIPHER_KEY_CACHE_TTL = deterministicRandom()->randomInt(2, 10) * 60; }
+	if ( randomize && buggify()) { ENCRYPT_CIPHER_KEY_CACHE_TTL = deterministicRandom()->randomInt(2, 10) * 60LL; }
 	init( ENCRYPT_KEY_REFRESH_INTERVAL,   isSimulated ? 60 : 8 * 60 );
 	if ( randomize && buggify()) { ENCRYPT_KEY_REFRESH_INTERVAL = deterministicRandom()->randomInt(2, 10); }
 	init( ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,                    10 );

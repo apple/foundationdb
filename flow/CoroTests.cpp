@@ -351,6 +351,98 @@ TEST_CASE("/flow/coro/cancel2") {
 	return Void();
 }
 
+namespace {
+
+// Tracks destruction of locals stored in a detached coroutine frame.
+struct DetachedCoroutineLifetime {
+	explicit DetachedCoroutineLifetime(int* destructions) : destructions(destructions) {}
+	~DetachedCoroutineLifetime() { ++*destructions; }
+
+	int* destructions;
+};
+
+coro::DetachedCoroutine detachedWait(Future<Void> signal, int* completions, int* destructions) {
+	DetachedCoroutineLifetime lifetime(destructions);
+	co_await signal;
+	++*completions;
+}
+
+coro::DetachedCoroutine detachedWaitTwice(Future<Void> first,
+                                          Future<Void> second,
+                                          int* completions,
+                                          int* destructions) {
+	DetachedCoroutineLifetime lifetime(destructions);
+	co_await first;
+	co_await second;
+	++*completions;
+}
+
+coro::DetachedCoroutine detachedThrow(Future<Void> signal, int* destructions) {
+	DetachedCoroutineLifetime lifetime(destructions);
+	co_await signal;
+	throw operation_failed();
+}
+
+} // namespace
+
+TEST_CASE("/flow/coro/detached/completion") {
+	int completions = 0;
+	int destructions = 0;
+
+	Promise<Void> signal;
+	detachedWait(signal.getFuture(), &completions, &destructions);
+	ASSERT_EQ(completions, 0);
+	ASSERT_EQ(destructions, 0);
+	ASSERT(signal.getFutureReferenceCount() > 0);
+
+	signal.send(Void());
+	ASSERT_EQ(completions, 1);
+	ASSERT_EQ(destructions, 1);
+	ASSERT_EQ(signal.getFutureReferenceCount(), 0);
+
+	Future<Void> ready = Void();
+	detachedWait(ready, &completions, &destructions);
+	ASSERT_EQ(completions, 2);
+	ASSERT_EQ(destructions, 2);
+
+	return Void();
+}
+
+TEST_CASE("/flow/coro/detached/multipleAwaits") {
+	int completions = 0;
+	int destructions = 0;
+	Promise<Void> first;
+	Promise<Void> second;
+
+	detachedWaitTwice(first.getFuture(), second.getFuture(), &completions, &destructions);
+	first.send(Void());
+	ASSERT_EQ(completions, 0);
+	ASSERT_EQ(destructions, 0);
+
+	second.send(Void());
+	ASSERT_EQ(completions, 1);
+	ASSERT_EQ(destructions, 1);
+
+	return Void();
+}
+
+TEST_CASE("/flow/coro/detached/errors") {
+	int completions = 0;
+	int destructions = 0;
+	Promise<Void> failedSignal;
+	detachedWait(failedSignal.getFuture(), &completions, &destructions);
+	failedSignal.sendError(operation_failed());
+	ASSERT_EQ(completions, 0);
+	ASSERT_EQ(destructions, 1);
+
+	Promise<Void> bodySignal;
+	detachedThrow(bodySignal.getFuture(), &destructions);
+	bodySignal.send(Void());
+	ASSERT_EQ(destructions, 2);
+
+	return Void();
+}
+
 TEST_CASE("/flow/coro/errorOr/ReadyValue") {
 	ErrorOr<int> result = co_await coro::errorOr(Future<int>(42));
 	ASSERT(result.present());
@@ -2515,9 +2607,7 @@ TEST_CASE("/flow/coro/generators") {
 	testFibDivisible();
 	co_await testEmptyGenerator();
 	co_await testSimpleGenerator();
-	if (IAsyncFileSystem::filesystem() != nullptr) {
-		co_await testReadLines();
-	}
+	co_await testReadLines();
 	testElementWalker();
 }
 
@@ -2786,6 +2876,8 @@ TEST_CASE("/flow/coro/raceSuccess") {
 	auto result = co_await raced;
 	ASSERT_EQ(result.index(), 1);
 	ASSERT_EQ(std::get<1>(result), "winner");
+	ASSERT_EQ(intPromise.getFutureReferenceCount(), 0);
+	ASSERT_EQ(stringPromise.getFutureReferenceCount(), 0);
 	co_return;
 }
 
@@ -2811,6 +2903,8 @@ TEST_CASE("/flow/coro/raceError") {
 	} catch (Error const& e) {
 		ASSERT_EQ(e.code(), error_code_io_error);
 	}
+	ASSERT_EQ(intPromise.getFutureReferenceCount(), 0);
+	ASSERT_EQ(stringPromise.getFutureReferenceCount(), 0);
 	co_return;
 }
 
@@ -2822,6 +2916,8 @@ TEST_CASE("/flow/coro/raceCancel") {
 	ASSERT(raced.isReady());
 	ASSERT(raced.isError());
 	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
+	ASSERT_EQ(intPromise.getFutureReferenceCount(), 0);
+	ASSERT_EQ(stringPromise.getFutureReferenceCount(), 0);
 	intPromise.send(1);
 	stringPromise.send("late");
 	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
@@ -2839,6 +2935,18 @@ TEST_CASE("/flow/coro/raceStreamReady") {
 	return Void();
 }
 
+TEST_CASE("/flow/coro/raceThreadFutureStreamReady") {
+	ThreadReturnPromiseStream<int> intStream;
+	intStream.send(11);
+	co_await delay(0);
+	Future<std::variant<int, std::string>> raced = race(intStream.getFuture(), Future<std::string>("later"));
+	ASSERT(raced.isReady());
+	auto result = raced.get();
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 11);
+	co_return;
+}
+
 TEST_CASE("/flow/coro/raceStreamSuccess") {
 	PromiseStream<int> intStream;
 	Promise<std::string> stringPromise;
@@ -2847,6 +2955,36 @@ TEST_CASE("/flow/coro/raceStreamSuccess") {
 	auto result = co_await raced;
 	ASSERT_EQ(result.index(), 0);
 	ASSERT_EQ(std::get<0>(result), 13);
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceThreadFutureStreamSuccess") {
+	ThreadReturnPromiseStream<int> intStream;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intStream.getFuture(), stringPromise.getFuture());
+	intStream.send(13);
+	auto result = co_await raced;
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 13);
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceThreadFutureStreamLoserCleanup") {
+	ThreadReturnPromiseStream<int> intStream;
+	ThreadFutureStream<int> stream = intStream.getFuture();
+	Promise<Void> firstWinner;
+
+	Future<std::variant<Void, int>> firstRace = race(firstWinner.getFuture(), stream);
+	firstWinner.send(Void());
+	auto firstResult = co_await firstRace;
+	ASSERT_EQ(firstResult.index(), 0);
+
+	Promise<Void> secondLoser;
+	Future<std::variant<Void, int>> secondRace = race(secondLoser.getFuture(), stream);
+	intStream.send(17);
+	auto secondResult = co_await secondRace;
+	ASSERT_EQ(secondResult.index(), 1);
+	ASSERT_EQ(std::get<1>(secondResult), 17);
 	co_return;
 }
 

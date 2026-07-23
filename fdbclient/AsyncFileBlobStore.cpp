@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/AsyncFileBlobStore.h"
+#include "AsyncFileBlobStore.h"
 #include "flow/UnitTest.h"
 
 Future<int64_t> AsyncFileBlobStoreRead::size() const {

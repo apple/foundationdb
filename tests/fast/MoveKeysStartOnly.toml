@@ -1,0 +1,19 @@
+[configuration]
+# Manual moveKeys operations can exhaust their retry budget under buggified transaction delays.
+buggify = false
+generateFearless = false
+singleRegion = true
+disableTss = true
+
+[[knobs]]
+max_added_sources_multiplier = 0
+
+[[test]]
+testTitle = 'MoveKeysStartOnly'
+# DD is disabled while the workload performs bounded manual moves.
+runFailureWorkloads = false
+connectionFailuresDisableDuration = 1000000
+
+    [[test.workload]]
+    testName = 'MoveKeysStartOnly'
+    testDuration = 50.0

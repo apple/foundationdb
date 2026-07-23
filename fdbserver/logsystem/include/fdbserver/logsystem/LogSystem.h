@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
@@ -40,7 +41,8 @@
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/core/TLogInterface.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
+#include "fdbserver/logsystem/LogSet.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/ActorCollection.h"
@@ -53,16 +55,6 @@ struct LogPushData;
 struct LocalityData;
 struct LogSystem;
 struct LogSystemConsumer;
-class LogSet;
-
-struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
-	double lastReset;
-	Future<Void> resetCheck;
-	int slowReplies;
-	int fastReplies;
-
-	ConnectionResetInfo() : lastReset(now()), resetCheck(Void()), slowReplies(0), fastReplies(0) {}
-};
 
 // Base cursor contract for consuming a sequential log peek stream.
 struct IPeekCursor {
@@ -86,6 +78,10 @@ struct IPeekCursor {
 
 // Peek cursor that reports log location and can be cloned and repositioned for replay.
 struct IReplayPeekCursor : IPeekCursor {
+	// Upper bound on TLogPeekReply arenas retained before or while satisfying the next getMore().
+	virtual int64_t getMaxRetainedReplyCount() const = 0;
+	// Applies a per-reply cap before the cursor issues its first TLog peek. Zero leaves replies uncapped.
+	virtual void setReplyByteLimit(int limitBytes) = 0;
 	virtual Optional<UID> getPrimaryPeekLocation() const = 0;
 	virtual Optional<UID> getCurrentPeekLocation() const = 0;
 	virtual Version getMaxKnownVersion() const = 0;
@@ -222,10 +218,11 @@ struct OldLogData {
 	Version recoverAt;
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
-	int32_t rangeBackupWorkerTags;
+	int32_t rangePartitionedBackupWorkerTags;
 
 	OldLogData()
-	  : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0), rangeBackupWorkerTags(0) {}
+	  : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0),
+	    rangePartitionedBackupWorkerTags(0) {}
 
 	// Constructor for T of OldTLogConf and OldTLogCoreData
 	template <class T>
@@ -275,7 +272,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	std::set<int8_t> pseudoLocalities; // Represent special localities that will be mapped to tagLocalityLogRouter
 	const LogEpoch epoch;
 	LogEpoch oldestBackupEpoch;
-	int rangeBackupWorkerTags;
+	int rangePartitionedBackupWorkerTags;
 
 	// new members
 	std::map<Tag, Version> pseudoLocalityPopVersion;
@@ -323,8 +320,8 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	          LogEpoch e,
 	          Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
-	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0), rangeBackupWorkerTags(0),
-	    recoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
+	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0),
+	    rangePartitionedBackupWorkerTags(0), recoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
 	    remoteRecoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
 	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
 	    locality(locality), addActor(addActor), popActors(false) {}
@@ -373,17 +370,14 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	bool remoteStorageRecovered() const;
 
-	// Checks older TLog generations and remove no longer needed generations from the log system.
+	// Removes no-longer-needed older TLog generations from the outgoing core state.
 	void purgeOldRecoveredGenerationsCoreState(DBCoreState&);
-	void purgeOldRecoveredGenerationsInMemory(const DBCoreState&);
 
 	Future<Void> onCoreStateChanged() const;
 
 	void coreStateWritten(DBCoreState const& newState);
 
 	Future<Void> onError() const;
-
-	static Future<Void> onError_internal(LogSystem const* self);
 
 	static Future<Void> pushResetChecker(Reference<ConnectionResetInfo> self, NetworkAddress addr);
 
@@ -410,16 +404,15 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	Future<Void> onKnownCommittedVersionChange();
 
-	// pop tag from log up to the version defined in self->outstandingPops[].first
-	static Future<Void> popFromLog(LogSystem* self,
-	                               Reference<AsyncVar<OptionalInterface<TLogInterface>>> log,
-	                               Tag tag,
-	                               double delayBeforePop,
-	                               bool popLogRouter);
+	// pop tag from log up to the version defined in outstandingPops[].first
+	Future<Void> popFromLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> log,
+	                        Tag tag,
+	                        double delayBeforePop,
+	                        bool popLogRouter);
 
 	static Future<Version> getPoppedFromTLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag);
 
-	static Future<Version> getPoppedTxs(LogSystem* self);
+	Future<Version> getPoppedTxs();
 
 	static Future<Void> confirmEpochLive_internal(Reference<LogSet> logSet, Optional<UID> debugID);
 
@@ -468,17 +461,17 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	TLogVersion getTLogVersion() const;
 
 	int getLogRouterTags() const;
-	int getRangeBackupWorkerTags() const;
+	int getRangePartitionedBackupWorkerTags() const;
 
 	Version getBackupStartVersion() const;
 
 	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochLogRouterTagsInfo() const;
-	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochRangeBackupTagsInfo() const;
+	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochRangePartitionedBackupTagsInfo() const;
 
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const;
 
 	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies);
-	void setRangeBackupWorkers(const std::vector<InitializeRangeBackupReply>& replies);
+	void setRangePartitionedBackupWorkers(const std::vector<InitializeRangePartitionedBackupReply>& replies);
 
 	bool removeBackupWorker(const BackupWorkerDoneRequest& req);
 
@@ -508,28 +501,26 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	                             LocalityData locality,
 	                             bool* forceRecovery);
 
-	static Future<Void> recruitOldLogRouters(LogSystem* self,
-	                                         std::vector<WorkerInterface> workers,
-	                                         LogEpoch recoveryCount,
-	                                         int8_t locality,
-	                                         Version startVersion,
-	                                         std::vector<LocalityData> tLogLocalities,
-	                                         Reference<IReplicationPolicy> tLogPolicy,
-	                                         bool forRemote);
+	Future<Void> recruitOldLogRouters(std::vector<WorkerInterface> workers,
+	                                  LogEpoch recoveryCount,
+	                                  int8_t locality,
+	                                  Version startVersion,
+	                                  std::vector<LocalityData> tLogLocalities,
+	                                  Reference<IReplicationPolicy> tLogPolicy,
+	                                  bool forRemote);
 
 	static Version getMaxLocalStartVersion(const std::vector<Reference<LogSet>>& tLogs);
 
 	static std::vector<Tag> getLocalTags(int8_t locality, const std::vector<Tag>& allTags);
 
-	static Future<Void> newRemoteEpoch(LogSystem* self,
-	                                   Reference<LogSystem> oldLogSystem,
-	                                   Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
-	                                   DatabaseConfiguration configuration,
-	                                   LogEpoch recoveryCount,
-	                                   Version recoveryTransactionVersion,
-	                                   int8_t remoteLocality,
-	                                   std::vector<Tag> allTags,
-	                                   std::vector<Version> oldGenerationRecoverAtVersions);
+	Future<Void> newRemoteEpoch(Reference<LogSystem> oldLogSystem,
+	                            Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+	                            DatabaseConfiguration configuration,
+	                            LogEpoch recoveryCount,
+	                            Version recoveryTransactionVersion,
+	                            int8_t remoteLocality,
+	                            std::vector<Tag> allTags,
+	                            std::vector<Version> oldGenerationRecoverAtVersions);
 
 	static Future<Reference<LogSystem>> newEpoch(Reference<LogSystem> oldLogSystem,
 	                                             RecruitFromConfigurationReply recr,
@@ -574,13 +565,11 @@ std::vector<T> LogSystem::getReadyNonError(std::vector<Future<T>> const& futures
 	return result;
 }
 
-#include "LogSystemTypes.h"
-
 template <class T>
 OldLogData::OldLogData(const T& conf)
   : logRouterTags(conf.logRouterTags), txsTags(conf.txsTags), epochBegin(conf.epochBegin), epochEnd(conf.epochEnd),
     recoverAt(conf.recoverAt), pseudoLocalities(conf.pseudoLocalities), epoch(conf.epoch),
-    rangeBackupWorkerTags(conf.rangeBackupWorkerTags) {
+    rangePartitionedBackupWorkerTags(conf.rangePartitionedBackupWorkerTags) {
 	tLogs.resize(conf.tLogs.size());
 	for (int j = 0; j < conf.tLogs.size(); j++) {
 		auto logSet = makeReference<LogSet>(conf.tLogs[j]);
@@ -618,7 +607,7 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 			ASSERT(this->subsequence > 0);
 		}
 	} else {
-		ASSERT(writtenLocations.size() == 0);
+		ASSERT(writtenLocations.empty());
 	}
 
 	uint32_t subseq = this->subsequence++;

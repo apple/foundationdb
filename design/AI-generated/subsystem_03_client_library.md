@@ -279,7 +279,7 @@ Management API exposed as key-value operations:
 |------|---------|
 | [`fdbclient/NativeAPI.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/NativeAPI.actor.cpp) | Core transaction implementation, tryCommit, getValue, getRange |
 | `fdbclient/include/fdbclient/NativeAPI.actor.h` | Transaction class, TransactionState |
-| [`fdbclient/ReadYourWrites.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/ReadYourWrites.actor.cpp) | RYW layer, write map, snapshot cache merging |
+| [`fdbclient/ReadYourWrites.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/ReadYourWrites.cpp) | RYW layer, write map, snapshot cache merging |
 | `fdbclient/include/fdbclient/DatabaseContext.h` | DatabaseContext: location cache, proxy tracking, watches |
 | [`fdbclient/include/fdbclient/CommitTransaction.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/CommitTransaction.h) | MutationRef, CommitTransactionRef |
 | [`fdbclient/MultiVersionTransaction.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/MultiVersionTransaction.cpp) | Multi-version client, DLTransaction |

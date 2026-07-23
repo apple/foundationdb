@@ -86,7 +86,8 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		int nodeSize = key(0).size() + value(0).size();
 		// We use a wide range to avoid flakiness because the underlying function
 		// is making an estimation.
-		return size > nodeCount * nodeSize / 2 && size < nodeCount * nodeSize * 5;
+		return size > static_cast<int64_t>(nodeCount) * nodeSize / 2 &&
+		       size < static_cast<int64_t>(nodeCount) * nodeSize * 5;
 	}
 
 	Future<int64_t> getSize(Database cx) {

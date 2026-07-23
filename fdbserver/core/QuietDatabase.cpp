@@ -37,7 +37,7 @@
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/CoroUtils.h"
@@ -701,8 +701,26 @@ Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> 
 	if (g_network->isSimulated() && fdbSimulationPolicyState().usableRegions > 1 &&
 	    !fdbSimulationPolicyState().quiesced) {
 		auto& simPolicy = fdbSimulationPolicyState();
+		const auto primaryDcId = simPolicy.primaryDcId;
+		const auto remoteDcId = simPolicy.remoteDcId;
 		bool primaryDead = g_simulator->datacenterDead(simPolicy.primaryDcId);
 		bool remoteDead = g_simulator->datacenterDead(simPolicy.remoteDcId);
+		if (primaryDead || remoteDead) {
+			// A single-replica region can look dead while a workload intentionally reboots its master. Confirm the
+			// failure after the maximum simulated worker reboot time before making an irreversible region change.
+			TraceEvent("ConfirmingDeadDatacenter")
+			    .detail("Location", context)
+			    .detail("PrimaryDead", primaryDead)
+			    .detail("RemoteDead", remoteDead)
+			    .detail("Delay", SERVER_KNOBS->MAX_REBOOT_TIME);
+			co_await delay(SERVER_KNOBS->MAX_REBOOT_TIME);
+			if (simPolicy.usableRegions <= 1 || simPolicy.quiesced || simPolicy.primaryDcId != primaryDcId ||
+			    simPolicy.remoteDcId != remoteDcId) {
+				co_return;
+			}
+			primaryDead = primaryDead && g_simulator->datacenterDead(simPolicy.primaryDcId);
+			remoteDead = remoteDead && g_simulator->datacenterDead(simPolicy.remoteDcId);
+		}
 
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function

@@ -25,7 +25,7 @@
 #include "flow/flow.h"
 #include "fdbrpc/ReplicationTypes.h"
 
-typedef std::string repTestType;
+using repTestType = std::string;
 // string value defining test type
 
 extern repTestType convertToTestType(int iValue);
@@ -49,19 +49,6 @@ extern bool findBestPolicySet(std::vector<LocalityEntry>& bestResults,
                               unsigned int nMinItems,
                               unsigned int nSelectTests,
                               unsigned int nPolicyTests);
-// returns the best policy set
-// given locality set, replication policy, number of min items, number of select
-// test, number of policy tests, find the best from locality set, including few
-// random items, get the rate policy having test rate, best rate and returning
-// the success state.
-
-extern bool findBestUniquePolicySet(std::vector<LocalityEntry>& bestResults,
-                                    Reference<LocalitySet>& localitySet,
-                                    Reference<IReplicationPolicy> const& policy,
-                                    StringRef localityUniquenessKey,
-                                    unsigned int nMinItems,
-                                    unsigned int nSelectTests,
-                                    unsigned int nPolicyTests);
 
 // The following function will return TRUE if all possible combinations
 // of the new Item array will not pass the specified policy

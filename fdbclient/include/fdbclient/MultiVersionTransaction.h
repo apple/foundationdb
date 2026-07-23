@@ -29,71 +29,93 @@
 #include "fdbclient/IClientApi.h"
 #include "flow/ApiVersion.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/WipedString.h"
 
 // FdbCApi is used as a wrapper around the FoundationDB C API that gets loaded from an external client library.
 // All of the required functions loaded from that external library are stored in function pointers in this struct.
 struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
-	typedef struct FDB_future FDBFuture;
-	typedef struct FDB_result FDBResult;
-	typedef struct FDB_cluster FDBCluster;
-	typedef struct FDB_database FDBDatabase;
-	typedef struct FDB_transaction FDBTransaction;
+	using FDBFuture = struct FDB_future;
+	using FDBResult = struct FDB_result;
+	using FDBCluster = struct FDB_cluster;
+	using FDBDatabase = struct FDB_database;
+	using FDBTransaction = struct FDB_transaction;
+	using FDBNativeCdcConsumer = struct FDB_native_cdc_consumer;
 
-	typedef int fdb_error_t;
-	typedef int fdb_bool_t;
+	using fdb_error_t = int;
+	using fdb_bool_t = int;
 
 #pragma pack(push, 4)
-	typedef struct key {
+	using FDBKey = struct key {
 		const uint8_t* key;
 		int keyLength;
-	} FDBKey;
-	typedef struct keyvalue {
+	};
+	using FDBKeyValue = struct keyvalue {
 		const void* key;
 		int keyLength;
 		const void* value;
 		int valueLength;
-	} FDBKeyValue;
+	};
 
 #pragma pack(pop)
 
 	/* Memory layout of KeySelectorRef. */
-	typedef struct keyselector {
+	using FDBKeySelector = struct keyselector {
 		FDBKey key;
 		/* orEqual and offset have not be tested in C binding. Just a placeholder. */
 		fdb_bool_t orEqual;
 		int offset;
-	} FDBKeySelector;
+	};
 
 	/* Memory layout of GetRangeReqAndResultRef. */
-	typedef struct getrangereqandresult {
+	using FDBGetRangeReqAndResult = struct getrangereqandresult {
 		FDBKeySelector begin;
 		FDBKeySelector end;
 		FDBKeyValue* data;
 		int m_size, m_capacity;
-	} FDBGetRangeReqAndResult;
+	};
 
-	typedef struct mappedkeyvalue {
+	using FDBMappedKeyValue = struct mappedkeyvalue {
 		FDBKey key;
 		FDBKey value;
 		/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange
 		 * and take the shortcut. */
 		FDBGetRangeReqAndResult getRange;
 		unsigned char buffer[32];
-	} FDBMappedKeyValue;
+	};
 
 #pragma pack(push, 4)
-	typedef struct keyrange {
+	using FDBKeyRange = struct keyrange {
 		const void* beginKey;
 		int beginKeyLength;
 		const void* endKey;
 		int endKeyLength;
-	} FDBKeyRange;
+	};
+
+	using FDBNativeCdcStreamInfo = struct native_cdc_stream_info {
+		FDBKey name;
+		uint64_t streamId;
+		FDBKeyRange keyRange;
+		int64_t minVersion;
+	};
+
+	using FDBNativeCdcMutation = struct native_cdc_mutation {
+		uint8_t type;
+		const uint8_t* param1;
+		int param1Length;
+		const uint8_t* param2;
+		int param2Length;
+	};
+
+	using FDBNativeCdcVersionedMutations = struct native_cdc_versioned_mutations {
+		int64_t version;
+		const FDBNativeCdcMutation* mutations;
+		int mutationCount;
+	};
 
 #pragma pack(pop)
 
-	typedef void (*FDBCallback)(FDBFuture* future, void* callback_parameter);
+	using FDBCallback = void (*)(FDBFuture*, void*);
 
 	// Network
 	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
@@ -132,6 +154,26 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
 
 	FDBFuture* (*databaseGetClientStatus)(FDBDatabase* db);
+	FDBFuture* (*databaseRegisterNativeCdcStream)(FDBDatabase* database,
+	                                              uint8_t const* name,
+	                                              int nameLength,
+	                                              uint8_t const* beginKey,
+	                                              int beginKeyLength,
+	                                              uint8_t const* endKey,
+	                                              int endKeyLength);
+	FDBFuture* (*databaseRemoveNativeCdcStream)(FDBDatabase* database, uint8_t const* name, int nameLength);
+	FDBFuture* (*databaseListNativeCdcStreams)(FDBDatabase* database);
+	FDBFuture* (*databaseCreateNativeCdcConsumer)(FDBDatabase* database, uint8_t const* name, int nameLength);
+	FDBFuture* (*databaseResumeNativeCdcConsumer)(FDBDatabase* database,
+	                                              uint64_t streamId,
+	                                              int64_t lastConsumedVersion);
+
+	void (*nativeCdcConsumerDestroy)(FDBNativeCdcConsumer* consumer);
+	FDBFuture* (*nativeCdcConsumerConsume)(FDBNativeCdcConsumer* consumer);
+	FDBFuture* (*nativeCdcConsumerAcknowledge)(FDBNativeCdcConsumer* consumer);
+	fdb_error_t (*nativeCdcConsumerGetPosition)(FDBNativeCdcConsumer* consumer,
+	                                            uint64_t* outStreamId,
+	                                            int64_t* outLastConsumedVersion);
 
 	// Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction* tr,
@@ -215,6 +257,13 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                             uint8_t const* end_key_name,
 	                                             int end_key_name_length,
 	                                             int64_t chunkSize);
+	FDBFuture* (*transactionGetRangeSplitPointsWithLimit)(FDBTransaction* tr,
+	                                                      uint8_t const* begin_key_name,
+	                                                      int begin_key_name_length,
+	                                                      uint8_t const* end_key_name,
+	                                                      int end_key_name_length,
+	                                                      int64_t chunkSize,
+	                                                      int limit);
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
@@ -250,6 +299,14 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                            FDBMappedKeyValue const** outKVM,
 	                                            int* outCount,
 	                                            fdb_bool_t* outMore);
+	fdb_error_t (*futureGetNativeCdcStreamInfoArray)(FDBFuture* f,
+	                                                 FDBNativeCdcStreamInfo const** outStreams,
+	                                                 int* outCount);
+	fdb_error_t (*futureGetNativeCdcConsumer)(FDBFuture* f, FDBNativeCdcConsumer** outConsumer);
+	fdb_error_t (*futureGetNativeCdcVersionedMutations)(FDBFuture* f,
+	                                                    FDBNativeCdcVersionedMutations const** outMutations,
+	                                                    int* outCount,
+	                                                    int64_t* outLastConsumedVersion);
 
 	fdb_error_t (*futureGetSharedState)(FDBFuture* f, DatabaseSharedState** outPtr);
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
@@ -307,7 +364,8 @@ public:
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
-	                                                                int64_t chunkSize) override;
+	                                                                int64_t chunkSize,
+	                                                                int limit = -1) override;
 
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 
@@ -375,6 +433,11 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) override;
+	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
+	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;
+	ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) override;
+	ThreadFuture<Reference<INativeCdcConsumer>> resumeNativeCdcConsumer(const NativeCdcCursor& cursor) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
@@ -473,7 +536,8 @@ public:
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
-	                                                                int64_t chunkSize) override;
+	                                                                int64_t chunkSize,
+	                                                                int limit = -1) override;
 
 	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
 	void set(const KeyRef& key, const ValueRef& value) override;
@@ -687,6 +751,11 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) override;
+	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
+	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;
+	ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) override;
+	ThreadFuture<Reference<INativeCdcConsumer>> resumeNativeCdcConsumer(const NativeCdcCursor& cursor) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
@@ -802,6 +871,7 @@ public:
 	bool hasNonFailedExternalClients();
 
 	void updateSupportedVersions();
+	void ignoreEnvironmentVariableNetworkOption(FDBNetworkOptions::Option option);
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
@@ -860,6 +930,7 @@ private:
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
+	std::set<FDBNetworkOptions::Option> ignoredEnvOptions;
 	volatile bool envOptionsLoaded;
 
 	friend struct MultiVersionDatabase::DatabaseState;

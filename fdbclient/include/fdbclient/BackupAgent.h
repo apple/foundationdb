@@ -27,7 +27,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/Notified.h"
-#include "flow/IAsyncFile.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/BackupContainer.h"
 
@@ -145,13 +144,13 @@ public:
 	FileBackupAgent();
 
 	explicit(false) FileBackupAgent(FileBackupAgent&& r) noexcept
-	  : subspace(std::move(r.subspace)), config(std::move(r.config)), lastRestorable(std::move(r.lastRestorable)),
-	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)) {}
+	  : subspace(r.subspace), config(r.config), lastRestorable(r.lastRestorable), taskBucket(std::move(r.taskBucket)),
+	    futureBucket(std::move(r.futureBucket)) {}
 
 	void operator=(FileBackupAgent&& r) noexcept {
-		subspace = std::move(r.subspace);
-		config = std::move(r.config);
-		lastRestorable = std::move(r.lastRestorable), taskBucket = std::move(r.taskBucket);
+		subspace = r.subspace;
+		config = r.config;
+		lastRestorable = r.lastRestorable, taskBucket = std::move(r.taskBucket);
 		futureBucket = std::move(r.futureBucket);
 	}
 
@@ -317,7 +316,7 @@ public:
 	Future<Void> discontinueBackup(Database cx, Key tagName) {
 		return runRYWTransaction(
 		           cx, [=](Reference<ReadYourWritesTransaction> tr) { return discontinueBackup(tr, tagName); }) +
-		       checkAndDisableBackupWorkers(cx) + checkAndDisableRangeBackupWorkers(cx);
+		       checkAndDisableBackupWorkers(cx) + checkAndDisableRangePartitionedBackupWorkers(cx);
 	}
 
 	// Terminate an ongoing backup, without waiting for the backup to finish.
@@ -332,14 +331,14 @@ public:
 		// First abort the backup, then check and disable backup workers if needed.
 		return runRYWTransaction(cx,
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return abortBackup(tr, tagName); }) +
-		       checkAndDisableBackupWorkers(cx) + checkAndDisableRangeBackupWorkers(cx);
+		       checkAndDisableBackupWorkers(cx) + checkAndDisableRangePartitionedBackupWorkers(cx);
 	}
 
 	// Disable backup workers if no active partitioned backup is running.
 	Future<Void> checkAndDisableBackupWorkers(Database cx);
 
 	// Disable range backup workers if no active range-partitioned backup is running.
-	Future<Void> checkAndDisableRangeBackupWorkers(Database cx);
+	Future<Void> checkAndDisableRangePartitionedBackupWorkers(Database cx);
 
 	Future<std::string> getStatus(Database cx, ShowErrors, std::string tagName);
 	Future<std::string> getStatusJSON(Database cx, std::string tagName);
@@ -395,22 +394,21 @@ public:
 	explicit DatabaseBackupAgent(Database src);
 
 	explicit(false) DatabaseBackupAgent(DatabaseBackupAgent&& r) noexcept
-	  : subspace(std::move(r.subspace)), states(std::move(r.states)), config(std::move(r.config)),
-	    errors(std::move(r.errors)), ranges(std::move(r.ranges)), tagNames(std::move(r.tagNames)),
-	    sourceStates(std::move(r.sourceStates)), sourceTagNames(std::move(r.sourceTagNames)),
+	  : subspace(r.subspace), states(r.states), config(r.config), errors(r.errors), ranges(r.ranges),
+	    tagNames(r.tagNames), sourceStates(r.sourceStates), sourceTagNames(r.sourceTagNames),
 	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)) {}
 
 	void operator=(DatabaseBackupAgent&& r) noexcept {
-		subspace = std::move(r.subspace);
-		states = std::move(r.states);
-		config = std::move(r.config);
-		errors = std::move(r.errors);
-		ranges = std::move(r.ranges);
-		tagNames = std::move(r.tagNames);
+		subspace = r.subspace;
+		states = r.states;
+		config = r.config;
+		errors = r.errors;
+		ranges = r.ranges;
+		tagNames = r.tagNames;
 		taskBucket = std::move(r.taskBucket);
 		futureBucket = std::move(r.futureBucket);
-		sourceStates = std::move(r.sourceStates);
-		sourceTagNames = std::move(r.sourceTagNames);
+		sourceStates = r.sourceStates;
+		sourceTagNames = r.sourceTagNames;
 	}
 
 	Future<Void> run(Database cx, double pollDelay, int maxConcurrentTasks) {
@@ -616,7 +614,7 @@ inline EBackupState TupleCodec<EBackupState>::unpack(Standalone<StringRef> const
 // All tasks on the UID will have a validation key/value that requires aborted_flag to be
 // false, so changing that value, such as changing the UID or setting aborted_flag to true,
 // will kill all of the active tasks on that backup/restore UID.
-typedef std::pair<UID, bool> UidAndAbortedFlagT;
+using UidAndAbortedFlagT = std::pair<UID, bool>;
 class KeyBackedTag : public KeyBackedProperty<UidAndAbortedFlagT> {
 public:
 	KeyBackedTag() : KeyBackedProperty(StringRef()) {}
@@ -639,7 +637,7 @@ public:
 	Key tagMapPrefix;
 };
 
-typedef KeyBackedMap<std::string, UidAndAbortedFlagT> TagMap;
+using TagMap = KeyBackedMap<std::string, UidAndAbortedFlagT>;
 // Map of tagName to {UID, aborted_flag} located in the fileRestorePrefixRange keyspace.
 class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
 	static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
@@ -820,7 +818,7 @@ public:
 	};
 
 	// Map of range end boundaries to info about the backup file written for that range.
-	typedef KeyBackedMap<Key, RangeSlice> RangeFileMapT;
+	using RangeFileMapT = KeyBackedMap<Key, RangeSlice>;
 	RangeFileMapT snapshotRangeFileMap() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Number of kv range files that were both committed to persistent storage AND inserted into
@@ -831,7 +829,7 @@ public:
 	KeyBackedBinaryValue<int64_t> snapshotRangeFileCount() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Coalesced set of ranges already dispatched for writing.
-	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
+	using RangeDispatchMapT = KeyBackedMap<Key, bool>;
 	RangeDispatchMapT snapshotRangeDispatchMap() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Interval to use for the first (initial) snapshot.
@@ -1041,67 +1039,6 @@ public:
 	KeyBackedProperty<bool> blobBackupEnabled() { return configSpace.pack(__FUNCTION__sr); }
 };
 
-// Helper class for reading restore data from a buffer and throwing the right errors.
-struct StringRefReader {
-	explicit StringRefReader(StringRef s = StringRef(), Error e = Error())
-	  : rptr(s.begin()), end(s.end()), failure_error(e) {}
-
-	// Return remainder of data as a StringRef
-	StringRef remainder() { return StringRef(rptr, end - rptr); }
-
-	// Return a pointer to len bytes at the current read position and advance read pos
-	const uint8_t* consume(unsigned int len) {
-		if (rptr == end && len != 0)
-			throw end_of_stream();
-		const uint8_t* p = rptr;
-		rptr += len;
-		if (rptr > end)
-			throw failure_error;
-		return p;
-	}
-
-	// Return a T from the current read position and advance read pos
-	template <typename T>
-	const T consume() {
-		return *(const T*)consume(sizeof(T));
-	}
-
-	// Functions for consuming big endian (network byte order) integers.
-	// Consumes a big endian number, swaps it to little endian, and returns it.
-	int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
-	uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
-
-	// Convert big Endian value (e.g., encoded in log file) into a littleEndian uint64_t value.
-	int64_t consumeNetworkInt64() { return (int64_t)bigEndian64((uint32_t)consume<int64_t>()); }
-	uint64_t consumeNetworkUInt64() { return bigEndian64(consume<uint64_t>()); }
-
-	bool eof() { return rptr == end; }
-
-	const uint8_t *rptr, *end;
-	Error failure_error;
-};
-
-namespace fileBackup {
-Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringRef>& buf);
-
-Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
-                                                                int64_t offset,
-                                                                int len,
-                                                                Database cx);
-
-Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(const Standalone<StringRef>& buf);
-
-// Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
-Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,
-                                                                      int64_t offset,
-                                                                      int len);
-
-// Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
-Value makePadding(int size);
-} // namespace fileBackup
-
-void simulateBlobFailure();
-
 // Add the set of ranges that are backed up in a default backup to the given vector. This consists of all normal keys
 // and the system backup ranges.
 void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys);
@@ -1123,11 +1060,11 @@ bool isDefaultBackup(Container ranges) {
 		return false;
 	}
 
-	if (!uniqueRanges.count(normalKeys)) {
+	if (!uniqueRanges.contains(normalKeys)) {
 		return false;
 	}
 	for (auto range : getSystemBackupRanges()) {
-		if (!uniqueRanges.count(range)) {
+		if (!uniqueRanges.contains(range)) {
 			return false;
 		}
 	}

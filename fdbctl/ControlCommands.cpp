@@ -21,6 +21,7 @@
 #include "fdbctl/ControlCommands.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/Schemas.h"
+#include "fdbclient/StatusSchema.h"
 #include "fmt/format.h"
 #include <boost/algorithm/string.hpp>
 

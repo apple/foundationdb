@@ -49,6 +49,12 @@ class EnsembleResults:
             )
         else:
             coverage_dict = collections.OrderedDict()
+        self.stats: List[Tuple[str, int, int]] = []
+        for k, v in self.statistics.stats.items():
+            self.global_statistics.total_test_runs += v.run_count
+            self.global_statistics.total_cpu_time += v.runtime
+            self.stats.append((k, v.runtime, v.run_count))
+        self.stats.sort(key=lambda x: x[1], reverse=True)
         self.coverage: List[Tuple[Coverage, int]] = []
         self.min_coverage_hit: int | None = None
         self.ratio = self.global_statistics.total_test_runs / config.hit_per_runs_ratio
@@ -66,12 +72,6 @@ class EnsembleResults:
             if self.min_coverage_hit is None or self.min_coverage_hit > count:
                 self.min_coverage_hit = count
         self.coverage.sort(key=lambda x: (x[1], x[0].file, x[0].line))
-        self.stats: List[Tuple[str, int, int]] = []
-        for k, v in self.statistics.stats.items():
-            self.global_statistics.total_test_runs += v.run_count
-            self.global_statistics.total_cpu_time += v.runtime
-            self.stats.append((k, v.runtime, v.run_count))
-        self.stats.sort(key=lambda x: x[1], reverse=True)
         if not self.code_probe_tracking_enabled:
             self.coverage_ok = True
         elif self.min_coverage_hit is not None:

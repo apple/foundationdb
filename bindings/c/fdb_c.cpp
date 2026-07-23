@@ -27,6 +27,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
+#include "fdbclient/NativeCdcClient.h"
 #include "foundationdb/fdb_c.h"
 #include "foundationdb/fdb_c_internal.h"
 
@@ -41,12 +42,14 @@ int g_api_version = 0;
  *   FDBResult -> ThreadSingleAssignmentVarBase
  *   FDBDatabase -> IDatabase
  *   FDBTransaction -> ITransaction
+ *   FDBCdcConsumer -> INativeCdcConsumer
  */
 #define TSAVB(f) ((ThreadSingleAssignmentVarBase*)(f))
 #define TSAV(T, f) ((ThreadSingleAssignmentVar<T>*)(f))
 
 #define DB(d) ((IDatabase*)d)
 #define TXN(t) ((ITransaction*)t)
+#define NATIVE_CDC_CONSUMER(c) ((INativeCdcConsumer*)c)
 
 // Legacy (pre API version 610)
 #define CLUSTER(c) ((char*)c)
@@ -64,6 +67,96 @@ static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_SET_VALUE) == static_cast<in
               "FDB_BG_MUTATION_TYPE_SET_VALUE enum value mismatch");
 static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_CLEAR_RANGE) == static_cast<int>(MutationRef::Type::ClearRange),
               "FDB_BG_MUTATION_TYPE_CLEAR_RANGE enum value mismatch");
+
+namespace {
+
+// These wrappers own the C-shaped arrays returned by the corresponding future
+// getters. The mapped ThreadFuture keeps their arenas alive until the public
+// FDBFuture is destroyed or releases its result memory.
+struct CNativeCdcStreamInfoArray {
+	Arena arena;
+	VectorRef<FDBCdcStreamInfo> streams;
+};
+
+struct CNativeCdcConsumeResult {
+	Arena arena;
+	VectorRef<FDBCdcVersionedMutations> mutations;
+	Version lastConsumedVersion = invalidVersion;
+};
+
+FDBKey copyNativeCdcKey(Arena& arena, KeyRef source) {
+	StringRef copy(arena, source);
+	return FDBKey{ copy.begin(), copy.size() };
+}
+
+FDBKeyRange copyNativeCdcKeyRange(Arena& arena, KeyRangeRef source) {
+	StringRef begin(arena, source.begin);
+	StringRef end(arena, source.end);
+	return FDBKeyRange{ begin.begin(), begin.size(), end.begin(), end.size() };
+}
+
+CNativeCdcStreamInfoArray makeCNativeCdcStreamInfoArray(std::vector<NativeCdcStreamInfo> const& source) {
+	CNativeCdcStreamInfoArray result;
+	result.streams.reserve(result.arena, source.size());
+	for (auto const& stream : source) {
+		FDBCdcStreamInfo cStream;
+		cStream.name = copyNativeCdcKey(result.arena, stream.name);
+		cStream.stream_id = stream.streamId;
+		cStream.key_range = copyNativeCdcKeyRange(result.arena, stream.keys);
+		cStream.min_version = stream.minVersion;
+		result.streams.push_back(result.arena, cStream);
+	}
+	return result;
+}
+
+CNativeCdcConsumeResult makeCNativeCdcConsumeResult(NativeCdcConsumeResult const& source) {
+	CNativeCdcConsumeResult result;
+	result.lastConsumedVersion = source.cursor.lastConsumedVersion;
+	result.mutations.reserve(result.arena, source.mutations.size());
+	for (auto const& versioned : source.mutations) {
+		FDBCdcVersionedMutations cVersioned;
+		cVersioned.version = versioned.version;
+		cVersioned.mutation_count = versioned.mutations.size();
+		cVersioned.mutations = nullptr;
+		if (!versioned.mutations.empty()) {
+			auto* cMutations = new (result.arena) FDBCdcMutation[versioned.mutations.size()];
+			for (int i = 0; i < versioned.mutations.size(); ++i) {
+				auto const& mutation = versioned.mutations[i];
+				StringRef param1(result.arena, mutation.param1);
+				StringRef param2(result.arena, mutation.param2);
+				cMutations[i] =
+				    FDBCdcMutation{ mutation.type, param1.begin(), param1.size(), param2.begin(), param2.size() };
+			}
+			cVersioned.mutations = cMutations;
+		}
+		result.mutations.push_back(result.arena, cVersioned);
+	}
+	return result;
+}
+
+FDBFuture* mapNativeCdcStreamInfoFuture(ThreadFuture<std::vector<NativeCdcStreamInfo>> source) {
+	auto result = mapThreadFuture<std::vector<NativeCdcStreamInfo>, CNativeCdcStreamInfoArray>(
+	    source, [](ErrorOr<std::vector<NativeCdcStreamInfo>> source) -> ErrorOr<CNativeCdcStreamInfoArray> {
+		    if (source.isError()) {
+			    return ErrorOr<CNativeCdcStreamInfoArray>(source.getError());
+		    }
+		    return makeCNativeCdcStreamInfoArray(source.get());
+	    });
+	return (FDBFuture*)result.extractPtr();
+}
+
+FDBFuture* mapNativeCdcConsumeFuture(ThreadFuture<NativeCdcConsumeResult> source) {
+	auto result = mapThreadFuture<NativeCdcConsumeResult, CNativeCdcConsumeResult>(
+	    source, [](ErrorOr<NativeCdcConsumeResult> source) -> ErrorOr<CNativeCdcConsumeResult> {
+		    if (source.isError()) {
+			    return ErrorOr<CNativeCdcConsumeResult>(source.getError());
+		    }
+		    return makeCNativeCdcConsumeResult(source.get());
+	    });
+	return (FDBFuture*)result.extractPtr();
+}
+
+} // namespace
 
 #define TSAV_ERROR(type, error) ((FDBFuture*)(ThreadFuture<type>(error())).extractPtr())
 
@@ -260,7 +353,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_double(FDBFuture* f, double* out
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_key(FDBFuture* f, uint8_t const** out_key, int* out_key_length) {
-	CATCH_AND_RETURN(KeyRef key = TSAV(Key, f)->get(); *out_key = key.begin(); *out_key_length = key.size(););
+	CATCH_AND_RETURN(Key key = TSAV(Key, f)->get(); *out_key = key.begin(); *out_key_length = key.size(););
 }
 
 fdb_error_t fdb_future_get_cluster_v609(FDBFuture* f, FDBCluster** out_cluster) {
@@ -330,6 +423,29 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_key_array(FDBFuture* f, FDBKey c
 	CATCH_AND_RETURN(Standalone<VectorRef<KeyRef>> na = TSAV(Standalone<VectorRef<KeyRef>>, f)->get();
 	                 *out_key_array = (FDBKey*)na.begin();
 	                 *out_count = na.size(););
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_cdc_stream_info_array(FDBFuture* f,
+                                                                      FDBCdcStreamInfo const** out_streams,
+                                                                      int* out_count) {
+	CATCH_AND_RETURN(CNativeCdcStreamInfoArray result = TSAV(CNativeCdcStreamInfoArray, f)->get();
+	                 *out_streams = result.streams.begin();
+	                 *out_count = result.streams.size(););
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_cdc_consumer(FDBFuture* f, FDBCdcConsumer** out_consumer) {
+	CATCH_AND_RETURN(Reference<INativeCdcConsumer> consumer = TSAV(Reference<INativeCdcConsumer>, f)->get();
+	                 *out_consumer = (FDBCdcConsumer*)consumer.extractPtr(););
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_cdc_versioned_mutations(FDBFuture* f,
+                                                                        FDBCdcVersionedMutations const** out_mutations,
+                                                                        int* out_count,
+                                                                        int64_t* out_last_consumed_version) {
+	CATCH_AND_RETURN(CNativeCdcConsumeResult result = TSAV(CNativeCdcConsumeResult, f)->get();
+	                 *out_mutations = result.mutations.begin();
+	                 *out_count = result.mutations.size();
+	                 *out_last_consumed_version = result.lastConsumedVersion;);
 }
 
 extern "C" DLLEXPORT void fdb_result_destroy(FDBResult* r) {
@@ -444,6 +560,72 @@ extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
 	CATCH_AND_RETURN(Reference<ITransaction> tr = DB(d)->createTransaction();
 	                 if (g_api_version <= 15) tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	                 *out_transaction = (FDBTransaction*)tr.extractPtr(););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* db,
+                                                                 uint8_t const* name,
+                                                                 int name_length,
+                                                                 uint8_t const* begin_key,
+                                                                 int begin_key_length,
+                                                                 uint8_t const* end_key,
+                                                                 int end_key_length) {
+	RETURN_FUTURE_ON_ERROR(
+	    CDCStreamId,
+	    return (FDBFuture*)(DB(db)
+	                            ->registerNativeCdcStream(
+	                                KeyRef(name, name_length),
+	                                KeyRangeRef(KeyRef(begin_key, begin_key_length), KeyRef(end_key, end_key_length)))
+	                            .extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* db, uint8_t const* name, int name_length) {
+	RETURN_FUTURE_ON_ERROR(Void,
+	                       return (FDBFuture*)(DB(db)->removeNativeCdcStream(KeyRef(name, name_length)).extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_list_cdc_streams(FDBDatabase* db) {
+	RETURN_FUTURE_ON_ERROR(CNativeCdcStreamInfoArray,
+	                       return mapNativeCdcStreamInfoFuture(DB(db)->listNativeCdcStreams()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_create_cdc_consumer(FDBDatabase* db,
+                                                                 uint8_t const* name,
+                                                                 int name_length) {
+	RETURN_FUTURE_ON_ERROR(
+	    Reference<INativeCdcConsumer>,
+	    return (FDBFuture*)(DB(db)->createNativeCdcConsumer(KeyRef(name, name_length)).extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_resume_cdc_consumer(FDBDatabase* db,
+                                                                 uint64_t stream_id,
+                                                                 int64_t last_consumed_version) {
+	RETURN_FUTURE_ON_ERROR(Reference<INativeCdcConsumer>, NativeCdcCursor cursor; cursor.streamId = stream_id;
+	                       cursor.lastConsumedVersion = last_consumed_version;
+	                       return (FDBFuture*)(DB(db)->resumeNativeCdcConsumer(cursor).extractPtr()););
+}
+
+extern "C" DLLEXPORT void fdb_cdc_consumer_destroy(FDBCdcConsumer* consumer) {
+	try {
+		NATIVE_CDC_CONSUMER(consumer)->delref();
+	} catch (...) {
+	}
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_cdc_consumer_consume(FDBCdcConsumer* consumer) {
+	RETURN_FUTURE_ON_ERROR(CNativeCdcConsumeResult,
+	                       return mapNativeCdcConsumeFuture(NATIVE_CDC_CONSUMER(consumer)->consume()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_cdc_consumer_acknowledge(FDBCdcConsumer* consumer) {
+	RETURN_FUTURE_ON_ERROR(Void, return (FDBFuture*)(NATIVE_CDC_CONSUMER(consumer)->acknowledge().extractPtr()););
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_cdc_consumer_get_position(FDBCdcConsumer* consumer,
+                                                               uint64_t* out_stream_id,
+                                                               int64_t* out_last_consumed_version) {
+	CATCH_AND_RETURN(NativeCdcCursor position = NATIVE_CDC_CONSUMER(consumer)->getPosition();
+	                 *out_stream_id = position.streamId;
+	                 *out_last_consumed_version = position.lastConsumedVersion;);
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_database_reboot_worker(FDBDatabase* db,
@@ -838,6 +1020,19 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points(FDBTransa
 	    Standalone<VectorRef<KeyRef>>,
 	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
 	    return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points_with_limit(FDBTransaction* tr,
+                                                                                  uint8_t const* begin_key_name,
+                                                                                  int begin_key_name_length,
+                                                                                  uint8_t const* end_key_name,
+                                                                                  int end_key_name_length,
+                                                                                  int64_t chunk_size,
+                                                                                  int limit) {
+	RETURN_FUTURE_ON_ERROR(
+	    Standalone<VectorRef<KeyRef>>,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	    return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size, limit).extractPtr()););
 }
 
 #include "fdb_c_function_pointers.g.h"

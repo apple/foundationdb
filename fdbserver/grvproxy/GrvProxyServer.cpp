@@ -35,7 +35,7 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbrpc/sim_validation.h"
 #include "flow/Buggify.h"
 #include "flow/IRandom.h"
@@ -291,6 +291,9 @@ Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 			co_await tr->onError(err);
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		// Catch non-retryable errors (and do nothing).
 		TraceEvent(SevWarnAlways, "GlobalConfigMigrationError").error(e);
 	}

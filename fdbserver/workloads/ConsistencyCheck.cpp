@@ -29,11 +29,12 @@
 #include "fdbserver/tester/workloads.h"
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/core/StorageMetrics.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/TSSMappingUtil.h"
 #include "flow/DeterministicRandom.h"
@@ -742,8 +743,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		std::vector<ISimulator::ProcessInfo*> all = g_simulator->getAllProcesses();
 		for (int i = 0; i < all.size(); i++) {
 			if (all[i]->isReliable() && all[i]->name == std::string("Server") &&
-			    all[i]->startingClass != ProcessClass::TesterClass &&
-			    all[i]->startingClass != ProcessClass::SimHTTPServerClass &&
+			    getSimulatorProcessClass(all[i]) != ProcessClass::TesterClass &&
+			    getSimulatorProcessClass(all[i]) != ProcessClass::SimHTTPServerClass &&
 			    all[i]->protocolVersion == g_network->protocolVersion()) {
 				if (!workerAddresses.contains(all[i]->address)) {
 					TraceEvent("ConsistencyCheck_WorkerMissingFromList").detail("Addr", all[i]->address);
@@ -755,13 +756,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		co_return true;
 	}
 
-	static ProcessClass::Fitness getBestAvailableFitness(
-	    const std::vector<ProcessClass::ClassType>& availableClassTypes,
-	    ProcessClass::ClusterRole role) {
-		ProcessClass::Fitness bestAvailableFitness = ProcessClass::NeverAssign;
+	static recruitment::Fitness getBestAvailableFitness(const std::vector<ProcessClass::ClassType>& availableClassTypes,
+	                                                    recruitment::ClusterRole role) {
+		recruitment::Fitness bestAvailableFitness = recruitment::NeverAssign;
 		for (auto classType : availableClassTypes) {
-			bestAvailableFitness = std::min(
-			    bestAvailableFitness, ProcessClass(classType, ProcessClass::InvalidSource).machineClassFitness(role));
+			bestAvailableFitness =
+			    std::min(bestAvailableFitness,
+			             recruitment::machineClassFitness(ProcessClass(classType, ProcessClass::InvalidSource), role));
 		}
 
 		return bestAvailableFitness;
@@ -900,95 +901,101 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check CC
-		ProcessClass::Fitness bestClusterControllerFitness =
-		    getBestAvailableFitness(dcToNonExcludedClassTypes[ccDcId], ProcessClass::ClusterController);
+		recruitment::Fitness bestClusterControllerFitness =
+		    getBestAvailableFitness(dcToNonExcludedClassTypes[ccDcId], recruitment::ClusterController);
 		if (!nonExcludedWorkerProcessMap.contains(db.clusterInterface.clientInterface.address()) ||
-		    nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].processClass.machineClassFitness(
-		        ProcessClass::ClusterController) != bestClusterControllerFitness) {
+		    recruitment::machineClassFitness(
+		        nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].processClass,
+		        recruitment::ClusterController) != bestClusterControllerFitness) {
 			TraceEvent("ConsistencyCheck_ClusterControllerNotBest")
 			    .detail("BestClusterControllerFitness", bestClusterControllerFitness)
-			    .detail("ExistingClusterControllerFit",
-			            nonExcludedWorkerProcessMap.contains(db.clusterInterface.clientInterface.address())
-			                ? nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()]
-			                      .processClass.machineClassFitness(ProcessClass::ClusterController)
-			                : -1);
+			    .detail(
+			        "ExistingClusterControllerFit",
+			        nonExcludedWorkerProcessMap.contains(db.clusterInterface.clientInterface.address())
+			            ? recruitment::machineClassFitness(
+			                  nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].processClass,
+			                  recruitment::ClusterController)
+			            : -1);
 			co_return false;
 		}
 
 		// Check Master
-		ProcessClass::Fitness bestMasterFitness =
-		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Master);
-		if (bestMasterFitness == ProcessClass::NeverAssign) {
-			bestMasterFitness = getBestAvailableFitness(dcToAllClassTypes[masterDcId], ProcessClass::Master);
-			if (bestMasterFitness != ProcessClass::NeverAssign) {
-				bestMasterFitness = ProcessClass::ExcludeFit;
+		recruitment::Fitness bestMasterFitness =
+		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], recruitment::Master);
+		if (bestMasterFitness == recruitment::NeverAssign) {
+			bestMasterFitness = getBestAvailableFitness(dcToAllClassTypes[masterDcId], recruitment::Master);
+			if (bestMasterFitness != recruitment::NeverAssign) {
+				bestMasterFitness = recruitment::ExcludeFit;
 			}
 		}
 
 		if ((!nonExcludedWorkerProcessMap.contains(db.master.address()) &&
-		     bestMasterFitness != ProcessClass::ExcludeFit) ||
-		    nonExcludedWorkerProcessMap[db.master.address()].processClass.machineClassFitness(ProcessClass::Master) !=
-		        bestMasterFitness) {
+		     bestMasterFitness != recruitment::ExcludeFit) ||
+		    recruitment::machineClassFitness(nonExcludedWorkerProcessMap[db.master.address()].processClass,
+		                                     recruitment::Master) != bestMasterFitness) {
 			TraceEvent("ConsistencyCheck_MasterNotBest")
 			    .detail("BestMasterFitness", bestMasterFitness)
 			    .detail("ExistingMasterFit",
 			            nonExcludedWorkerProcessMap.contains(db.master.address())
-			                ? nonExcludedWorkerProcessMap[db.master.address()].processClass.machineClassFitness(
-			                      ProcessClass::Master)
+			                ? recruitment::machineClassFitness(
+			                      nonExcludedWorkerProcessMap[db.master.address()].processClass, recruitment::Master)
 			                : -1);
 			co_return false;
 		}
 
 		// Check commit proxy
-		ProcessClass::Fitness bestCommitProxyFitness =
-		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::CommitProxy);
+		recruitment::Fitness bestCommitProxyFitness =
+		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], recruitment::CommitProxy);
 		for (const auto& commitProxy : db.client.commitProxies) {
 			if (!nonExcludedWorkerProcessMap.contains(commitProxy.address()) ||
-			    nonExcludedWorkerProcessMap[commitProxy.address()].processClass.machineClassFitness(
-			        ProcessClass::CommitProxy) != bestCommitProxyFitness) {
+			    recruitment::machineClassFitness(nonExcludedWorkerProcessMap[commitProxy.address()].processClass,
+			                                     recruitment::CommitProxy) != bestCommitProxyFitness) {
 				TraceEvent("ConsistencyCheck_CommitProxyNotBest")
 				    .detail("BestCommitProxyFitness", bestCommitProxyFitness)
 				    .detail("ExistingCommitProxyFitness",
 				            nonExcludedWorkerProcessMap.contains(commitProxy.address())
-				                ? nonExcludedWorkerProcessMap[commitProxy.address()].processClass.machineClassFitness(
-				                      ProcessClass::CommitProxy)
+				                ? recruitment::machineClassFitness(
+				                      nonExcludedWorkerProcessMap[commitProxy.address()].processClass,
+				                      recruitment::CommitProxy)
 				                : -1);
 				co_return false;
 			}
 		}
 
 		// Check grv proxy
-		ProcessClass::Fitness bestGrvProxyFitness =
-		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::GrvProxy);
+		recruitment::Fitness bestGrvProxyFitness =
+		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], recruitment::GrvProxy);
 		for (const auto& grvProxy : db.client.grvProxies) {
 			if (!nonExcludedWorkerProcessMap.contains(grvProxy.address()) ||
-			    nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(
-			        ProcessClass::GrvProxy) != bestGrvProxyFitness) {
+			    recruitment::machineClassFitness(nonExcludedWorkerProcessMap[grvProxy.address()].processClass,
+			                                     recruitment::GrvProxy) != bestGrvProxyFitness) {
 				TraceEvent("ConsistencyCheck_GrvProxyNotBest")
 				    .detail("BestGrvProxyFitness", bestGrvProxyFitness)
-				    .detail("ExistingGrvProxyFitness",
-				            nonExcludedWorkerProcessMap.contains(grvProxy.address())
-				                ? nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(
-				                      ProcessClass::GrvProxy)
-				                : -1);
+				    .detail(
+				        "ExistingGrvProxyFitness",
+				        nonExcludedWorkerProcessMap.contains(grvProxy.address())
+				            ? recruitment::machineClassFitness(
+				                  nonExcludedWorkerProcessMap[grvProxy.address()].processClass, recruitment::GrvProxy)
+				            : -1);
 				co_return false;
 			}
 		}
 
 		// Check resolver
-		ProcessClass::Fitness bestResolverFitness =
-		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Resolver);
+		recruitment::Fitness bestResolverFitness =
+		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], recruitment::Resolver);
 		for (const auto& resolver : db.resolvers) {
 			if (!nonExcludedWorkerProcessMap.contains(resolver.address()) ||
-			    nonExcludedWorkerProcessMap[resolver.address()].processClass.machineClassFitness(
-			        ProcessClass::Resolver) != bestResolverFitness) {
+			    recruitment::machineClassFitness(nonExcludedWorkerProcessMap[resolver.address()].processClass,
+			                                     recruitment::Resolver) != bestResolverFitness) {
 				TraceEvent("ConsistencyCheck_ResolverNotBest")
 				    .detail("BestResolverFitness", bestResolverFitness)
-				    .detail("ExistingResolverFitness",
-				            nonExcludedWorkerProcessMap.contains(resolver.address())
-				                ? nonExcludedWorkerProcessMap[resolver.address()].processClass.machineClassFitness(
-				                      ProcessClass::Resolver)
-				                : -1);
+				    .detail(
+				        "ExistingResolverFitness",
+				        nonExcludedWorkerProcessMap.contains(resolver.address())
+				            ? recruitment::machineClassFitness(
+				                  nonExcludedWorkerProcessMap[resolver.address()].processClass, recruitment::Resolver)
+				            : -1);
 				co_return false;
 			}
 		}
@@ -1017,50 +1024,52 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check DataDistributor
-		ProcessClass::Fitness fitnessLowerBound =
-		    allWorkerProcessMap[db.master.address()].processClass.machineClassFitness(ProcessClass::DataDistributor);
+		recruitment::Fitness fitnessLowerBound = recruitment::machineClassFitness(
+		    allWorkerProcessMap[db.master.address()].processClass, recruitment::DataDistributor);
 		if (db.distributor.present() &&
 		    (!nonExcludedWorkerProcessMap.contains(db.distributor.get().address()) ||
-		     nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(
-		         ProcessClass::DataDistributor) > fitnessLowerBound)) {
+		     recruitment::machineClassFitness(nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass,
+		                                      recruitment::DataDistributor) > fitnessLowerBound)) {
 			TraceEvent("ConsistencyCheck_DistributorNotBest")
 			    .detail("DataDistributorFitnessLowerBound", fitnessLowerBound)
-			    .detail(
-			        "ExistingDistributorFitness",
-			        nonExcludedWorkerProcessMap.contains(db.distributor.get().address())
-			            ? nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(
-			                  ProcessClass::DataDistributor)
-			            : -1);
+			    .detail("ExistingDistributorFitness",
+			            nonExcludedWorkerProcessMap.contains(db.distributor.get().address())
+			                ? recruitment::machineClassFitness(
+			                      nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass,
+			                      recruitment::DataDistributor)
+			                : -1);
 			co_return false;
 		}
 
 		// Check Ratekeeper
 		if (db.ratekeeper.present() &&
 		    (!nonExcludedWorkerProcessMap.contains(db.ratekeeper.get().address()) ||
-		     nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(
-		         ProcessClass::Ratekeeper) > fitnessLowerBound)) {
+		     recruitment::machineClassFitness(nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass,
+		                                      recruitment::Ratekeeper) > fitnessLowerBound)) {
 			TraceEvent("ConsistencyCheck_RatekeeperNotBest")
 			    .detail("BestRatekeeperFitness", fitnessLowerBound)
-			    .detail(
-			        "ExistingRatekeeperFitness",
-			        nonExcludedWorkerProcessMap.contains(db.ratekeeper.get().address())
-			            ? nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(
-			                  ProcessClass::Ratekeeper)
-			            : -1);
+			    .detail("ExistingRatekeeperFitness",
+			            nonExcludedWorkerProcessMap.contains(db.ratekeeper.get().address())
+			                ? recruitment::machineClassFitness(
+			                      nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass,
+			                      recruitment::Ratekeeper)
+			                : -1);
 			co_return false;
 		}
 
 		// Check ConsistencyScan
 		if (db.consistencyScan.present() &&
 		    (!nonExcludedWorkerProcessMap.contains(db.consistencyScan.get().address()) ||
-		     nonExcludedWorkerProcessMap[db.consistencyScan.get().address()].processClass.machineClassFitness(
-		         ProcessClass::ConsistencyScan) > fitnessLowerBound)) {
+		     recruitment::machineClassFitness(
+		         nonExcludedWorkerProcessMap[db.consistencyScan.get().address()].processClass,
+		         recruitment::ConsistencyScan) > fitnessLowerBound)) {
 			TraceEvent("ConsistencyCheck_ConsistencyScanNotBest")
 			    .detail("BestConsistencyScanFitness", fitnessLowerBound)
 			    .detail("ExistingConsistencyScanFitness",
 			            nonExcludedWorkerProcessMap.contains(db.consistencyScan.get().address())
-			                ? nonExcludedWorkerProcessMap[db.consistencyScan.get().address()]
-			                      .processClass.machineClassFitness(ProcessClass::ConsistencyScan)
+			                ? recruitment::machineClassFitness(
+			                      nonExcludedWorkerProcessMap[db.consistencyScan.get().address()].processClass,
+			                      recruitment::ConsistencyScan)
 			                : -1);
 			co_return false;
 		}
@@ -1118,8 +1127,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		if (!g_network->isSimulated()) {
 			return true;
 		}
-
-		CODE_PROBE(self->performQuiescentChecks, "Checking for single singletons");
 
 		std::vector<ISimulator::ProcessInfo*> allProcesses = g_simulator->getAllProcesses();
 

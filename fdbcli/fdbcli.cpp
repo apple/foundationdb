@@ -53,7 +53,7 @@
 #include "flow/CoroUtils.h"
 
 #include "flow/TLSConfig.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "SimpleOpt/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
@@ -2096,6 +2096,9 @@ int main(int argc, char** argv) {
 	CLIOptions opt(argc, argv);
 	if (opt.exit_code != -1)
 		return opt.exit_code;
+
+	// fdbcli connects to one cluster, so multiple client threads per version have no effect.
+	MultiVersionApi::api->ignoreEnvironmentVariableNetworkOption(FDBNetworkOptions::CLIENT_THREADS_PER_VERSION);
 
 	if (opt.trace) {
 		if (opt.traceDir.empty())

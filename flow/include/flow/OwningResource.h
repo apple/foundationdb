@@ -80,7 +80,7 @@ protected:
 		return *this;
 	}
 
-	virtual ~ResourceRef() {}
+	virtual ~ResourceRef() = default;
 
 public:
 	// Retrieves the resource as a pointer

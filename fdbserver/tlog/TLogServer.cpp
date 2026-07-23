@@ -36,7 +36,7 @@
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/tlog/TLogServer.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/sim_validation.h"
@@ -134,7 +134,7 @@ public:
 	Future<bool> initializeRecovery(IDiskQueue::location recoverAt) { return queue->initializeRecovery(recoverAt); }
 
 	template <class T>
-	void push(T const& qe, Reference<LogData> logData);
+	uint32_t push(T const& qe, Reference<LogData> logData);
 	void forgetBefore(Version upToVersion, Reference<LogData> logData);
 	void pop(IDiskQueue::location upToLocation);
 	Future<Void> commit() { return queue->commit(); }
@@ -325,6 +325,7 @@ struct TLogData : NonCopyable {
 	TLogQueue* persistentQueue; // Logical queue the log operates on and persist its data.
 
 	int64_t diskQueueCommitBytes;
+	uint64_t diskQueueCommitSerializedBytes;
 	AsyncVar<bool>
 	    largeDiskQueueCommitBytes; // becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
 
@@ -348,6 +349,7 @@ struct TLogData : NonCopyable {
 	Promise<Void> terminated;
 	FlowLock concurrentLogRouterReads;
 	Reference<FlowLock> persistentDataCommitLock;
+	bool retireRecoveredLogsRunning = false;
 
 	// Beginning of fields used by snapshot based backup and restore
 	double ignorePopDeadline; // time until which the ignorePopRequest will be
@@ -380,6 +382,12 @@ struct TLogData : NonCopyable {
 	// and ends when the data is flushed and durable.
 	Reference<Histogram> timeUntilDurableDist;
 
+	// Distribution of serialized queue entry sizes passed to IDiskQueue::push.
+	Reference<Histogram> diskQueueWriteSizeDist;
+
+	// Distribution of aggregate serialized bytes included in each IDiskQueue::commit.
+	Reference<Histogram> diskQueueCommitSizeDist;
+
 	// Controls whether the health monitoring running in this TLog force checking any other processes are degraded.
 	Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck;
 
@@ -394,17 +402,28 @@ struct TLogData : NonCopyable {
 	         Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck)
 	  : dbgid(dbgid), workerID(workerID), persistentData(persistentData), rawPersistentQueue(persistentQueue),
 	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), diskQueueCommitBytes(0),
-	    largeDiskQueueCommitBytes(false), dbInfo(dbInfo), queueCommitEnd(0), queueCommitBegin(0),
-	    instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0), bytesDurable(0),
-	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
-	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
+	    diskQueueCommitSerializedBytes(0), largeDiskQueueCommitBytes(false), dbInfo(dbInfo), queueCommitEnd(0),
+	    queueCommitBegin(0), instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0),
+	    bytesDurable(0), targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0),
+	    overheadBytesDurable(0), peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), persistentDataCommitLock(new FlowLock()),
 	    ignorePopDeadline(0), dataFolder(folder), degraded(degraded), lowDiskTLogExclusion(lowDiskTLogExclusion),
 	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::milliseconds)),
 	    queueWaitLatencyDist(Histogram::getHistogram("tLog"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)),
 	    timeUntilDurableDist(Histogram::getHistogram("tLog"_sr, "TimeUntilDurable"_sr, Histogram::Unit::milliseconds)),
+	    diskQueueWriteSizeDist(Histogram::getHistogram("tLog"_sr, "DiskQueueWriteSize"_sr, Histogram::Unit::bytes)),
+	    diskQueueCommitSizeDist(Histogram::getHistogram("tLog"_sr, "DiskQueueCommitSize"_sr, Histogram::Unit::bytes)),
 	    enablePrimaryTxnSystemHealthCheck(enablePrimaryTxnSystemHealthCheck) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	}
+
+	void recordDiskQueueWrite(uint32_t serializedBytes, size_t mutationBytes) {
+		diskQueueWriteSizeDist->sample(serializedBytes);
+		diskQueueCommitSerializedBytes += serializedBytes;
+		diskQueueCommitBytes += mutationBytes;
+		if (diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
+			largeDiskQueueCommitBytes.set(true);
+		}
 	}
 
 	double availableSpaceRatio(StorageBytes const& kvStoreBytes, StorageBytes const& queueBytes) const {
@@ -523,7 +542,11 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	*/
 
 	AsyncTrigger stopCommit;
+	AsyncTrigger persistentDataUpdated;
 	bool initialized;
+	bool retirementRequested = false;
+	bool retirementStarted = false;
+	bool retired = false;
 	Promise<Void> stoppedPromise;
 	DBRecoveryCount recoveryCount;
 
@@ -822,7 +845,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 };
 
 template <class T>
-void TLogQueue::push(T const& qe, Reference<LogData> logData) {
+uint32_t TLogQueue::push(T const& qe, Reference<LogData> logData) {
 	BinaryWriter wr(Unversioned()); // outer framing is not versioned
 	wr << uint32_t(0);
 	IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr); // payload is versioned
@@ -834,6 +857,7 @@ void TLogQueue::push(T const& qe, Reference<LogData> logData) {
 	const IDiskQueue::location endloc = queue->push(wr.toValue());
 	//TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Loc", loc);
 	logData->versionLocation[qe.version] = std::make_pair(startloc, endloc);
+	return static_cast<uint32_t>(wr.getLength());
 }
 
 void TLogQueue::forgetBefore(Version upToVersion, Reference<LogData> logData) {
@@ -1259,6 +1283,167 @@ Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logData, Ve
 		}
 	}
 	logData->newPersistentDataVersion = invalidVersion;
+	logData->persistentDataUpdated.trigger();
+}
+
+void advanceRetiredLogQueues(TLogData* self) {
+	// A restored queue has no committed location until its first post-recovery commit.
+	if (self->queueCommitEnd.get() == 0) {
+		return;
+	}
+
+	while (!self->popOrder.empty()) {
+		auto log = self->id_data.find(self->popOrder.front());
+		if (log == self->id_data.end()) {
+			self->popOrder.pop_front();
+			continue;
+		}
+		if (!log->second->retired || log->second->persistentDataDurableVersion != log->second->version.get()) {
+			break;
+		}
+
+		if (!log->second->versionLocation.empty()) {
+			auto lastLocation = log->second->versionLocation.lastItem();
+			self->persistentQueue->pop(lastLocation->value.second);
+		}
+		log->second->queuePoppedVersion = std::max(log->second->queuePoppedVersion, log->second->version.get());
+		self->popOrder.pop_front();
+	}
+}
+
+Future<bool> waitForRetirementStep(Future<Void> step, Future<Void> removed) {
+	if (removed.isReady()) {
+		co_return false;
+	}
+	auto result = co_await race(step, errorOr(removed));
+	co_return result.index() == 0 && !removed.isReady();
+}
+
+Future<Void> retireRecoveredLog(TLogData* self, Reference<LogData> logData) {
+	if (!logData->stopped()) {
+		if (!co_await waitForRetirementStep(logData->stoppedPromise.getFuture(), logData->removed)) {
+			co_return;
+		}
+	}
+	ASSERT(logData->stopped());
+	ASSERT(logData->version.get() < MAX_VERSION);
+	if (!co_await waitForRetirementStep(logData->queueCommittedVersion.whenAtLeast(logData->version.get()),
+	                                    logData->removed)) {
+		co_return;
+	}
+	if (!self->id_data.contains(logData->logId)) {
+		co_return;
+	}
+	while (logData->persistentDataDurableVersion < logData->version.get()) {
+		Future<Void> persistentDataUpdated = logData->persistentDataUpdated.onTrigger();
+		if (logData->persistentDataDurableVersion < logData->version.get()) {
+			if (!co_await waitForRetirementStep(persistentDataUpdated, logData->removed)) {
+				co_return;
+			}
+		}
+		if (!self->id_data.contains(logData->logId)) {
+			co_return;
+		}
+	}
+	ASSERT(logData->persistentDataDurableVersion == logData->version.get());
+
+	Reference<FlowLock> persistentDataCommitLock = self->persistentDataCommitLock;
+	co_await persistentDataCommitLock->take();
+	FlowLock::Releaser commitLockReleaser(*persistentDataCommitLock);
+	if (!self->id_data.contains(logData->logId)) {
+		co_return;
+	}
+	ASSERT(logData->persistentDataVersion == logData->version.get());
+	ASSERT(logData->persistentDataDurableVersion == logData->version.get());
+
+	const Version popTo = logData->version.get() + 1;
+	for (int tagLocality = 0; tagLocality < logData->tag_data.size(); ++tagLocality) {
+		for (int tagId = 0; tagId < logData->tag_data[tagLocality].size(); ++tagId) {
+			Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
+			if (tagData && tagData->popped < popTo) {
+				tagData->popped = popTo;
+				tagData->poppedRecently = true;
+				co_await tagData->eraseMessagesBefore(popTo, self, logData, TaskPriority::UpdateStorage);
+			}
+		}
+	}
+	for (const auto& locality : logData->tag_data) {
+		for (const auto& tagData : locality) {
+			if (tagData) {
+				updatePersistentPopped(self, logData, tagData);
+			}
+		}
+	}
+	double tLogMaxCreateDuration = SERVER_KNOBS->TLOG_MAX_CREATE_DURATION;
+	if (g_network->isSimulated() && logData->logSpillType == TLogSpillType::VALUE) {
+		tLogMaxCreateDuration *= 2;
+	}
+	co_await ioTimeoutError(self->persistentData->commit(), tLogMaxCreateDuration, "TLogRetireCommit");
+
+	logData->retired = true;
+	advanceRetiredLogQueues(self);
+}
+
+Reference<LogData> getNextRecoveredLogToRetire(TLogData* self) {
+	// updateStorage owns spillOrder removals; changing its front here can skip the following generation.
+	if (!self->spillOrder.empty()) {
+		auto log = self->id_data.find(self->spillOrder.front());
+		if (log != self->id_data.end() && log->second->retirementRequested && !log->second->retirementStarted &&
+		    !log->second->retired) {
+			return log->second;
+		}
+	}
+	for (const auto& entry : self->id_data) {
+		const auto& logData = entry.second;
+		if (logData->retirementRequested && !logData->retirementStarted && !logData->retired &&
+		    logData->persistentDataDurableVersion == logData->version.get()) {
+			return logData;
+		}
+	}
+	return {};
+}
+
+Future<Void> retireRecoveredLogs(TLogData* self) {
+	while (Reference<LogData> logData = getNextRecoveredLogToRetire(self)) {
+		logData->retirementStarted = true;
+		co_await retireRecoveredLog(self, logData);
+	}
+	self->retireRecoveredLogsRunning = false;
+}
+
+void startRetiringRecoveredLogs(TLogData* self) {
+	if (!self->retireRecoveredLogsRunning) {
+		self->retireRecoveredLogsRunning = true;
+		self->sharedActors.send(retireRecoveredLogs(self));
+	}
+}
+
+Future<Void> monitorRetainedOldLogs(TLogData* self) {
+	while (true) {
+		Future<Void> dbInfoChange = self->dbInfo->onChange();
+		const auto& dbInfo = self->dbInfo->get();
+		bool retirementRequested = false;
+		if (dbInfo.recoveryState == RecoveryState::FULLY_RECOVERED) {
+			for (const auto& entry : self->id_data) {
+				const auto& logData = entry.second;
+				bool currentLog = false;
+				for (const auto& logSet : dbInfo.logSystemConfig.tLogs) {
+					if (std::find(logSet.tLogs.begin(), logSet.tLogs.end(), logData->logId) != logSet.tLogs.end()) {
+						currentLog = true;
+						break;
+					}
+				}
+				if (!currentLog && dbInfo.logSystemConfig.hasTLog(logData->logId) && !logData->retirementRequested) {
+					logData->retirementRequested = true;
+					retirementRequested = true;
+				}
+			}
+		}
+		if (retirementRequested) {
+			startRetiringRecoveredLogs(self);
+		}
+		co_await dbInfoChange;
+	}
 }
 
 Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Reference<LogData> logData) {
@@ -1320,6 +1505,7 @@ Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Reference<Log
 				    .detail("Tag", tag.toString())
 				    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
 				    .detail("RecoveredAt", logData->recoveredAt)
+				    .setMaxFieldLength(495)
 				    .detail("UnpoppedTags", describe(logData->unpoppedRecoveredTags));
 				if (logData->unpoppedRecoveredTagCount == 0 &&
 				    logData->durableKnownCommittedVersion >= logData->recoveredAt &&
@@ -1412,8 +1598,13 @@ double getTLogStorageUpdateDelayDuration() {
 // This actor is just a loop that calls updatePersistentData and popDiskQueue whenever
 // (a) there's data to be spilled or (b) we should update metadata after some commits have been fully popped.
 Future<Void> updateStorage(TLogData* self) {
+	bool removedGeneration = false;
 	while (!self->spillOrder.empty() && !self->id_data.contains(self->spillOrder.front())) {
 		self->spillOrder.pop_front();
+		removedGeneration = true;
+	}
+	if (removedGeneration) {
+		startRetiringRecoveredLogs(self);
 	}
 
 	if (self->spillOrder.empty()) {
@@ -1429,7 +1620,7 @@ Future<Void> updateStorage(TLogData* self) {
 	FlowLock::Releaser commitLockReleaser;
 
 	if (logData->stopped()) {
-		if (self->bytesInput - self->bytesDurable >= self->targetVolatileBytes) {
+		if (self->bytesInput - self->bytesDurable >= self->targetVolatileBytes || logData->retirementRequested) {
 			while (logData->persistentDataDurableVersion != logData->version.get()) {
 				totalSize = 0;
 				Map<Version, std::pair<int, int>>::iterator sizeItr = logData->version_sizes.begin();
@@ -1468,6 +1659,9 @@ Future<Void> updateStorage(TLogData* self) {
 
 			if (logData->persistentDataDurableVersion == logData->version.get()) {
 				self->spillOrder.pop_front();
+				if (logData->retirementRequested) {
+					startRetiringRecoveredLogs(self);
+				}
 			}
 			co_await delay(0.0, TaskPriority::UpdateStorage);
 		} else {
@@ -1577,13 +1771,19 @@ void commitMessages(TLogData* self,
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for (auto tag : msg.tags) {
 			if (logData->locality == tagLocalitySatellite) {
-				if (!(tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter || tag == txsTag)) {
+				if (!(tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter ||
+				      tag.locality == tagLocalityCDC || tag == txsTag)) {
 					continue;
 				}
 			} else if (!(logData->locality == tagLocalitySpecial || logData->locality == tag.locality ||
 			             tag.locality < 0)) {
 				continue;
 			}
+			CODE_PROBE(logData->locality == tagLocalitySatellite && tag.locality == tagLocalityCDC,
+			           "Satellite TLog indexes CDC mutation");
+			CODE_PROBE(!logData->isPrimary && logData->locality != tagLocalitySatellite &&
+			               tag.locality == tagLocalityCDC,
+			           "Remote TLog indexes CDC mutation");
 
 			if (tag.locality == tagLocalityLogRouter) {
 				if (!logData->logRouterTags) {
@@ -1756,6 +1956,81 @@ void peekMessagesFromMemory(Reference<LogData> self,
 	}
 }
 
+struct TLogPeekMemoryVersion {
+	Version version;
+	Standalone<StringRef> messages;
+};
+
+struct TLogPeekMemoryVersions {
+	std::vector<TLogPeekMemoryVersion> versions;
+	bool truncated = false;
+	Optional<Version> firstExcludedVersion;
+};
+
+// Capture memory messages as complete versions before waiting on a spilled-data read. A capped Native CDC peek can
+// then append only versions that fit after the spilled prefix, without either splitting a version or re-reading a
+// moving in-memory tail after the disk wait.
+TLogPeekMemoryVersions peekMessageVersionsFromMemory(Reference<LogData> self, Tag tag, Version begin, int byteTarget) {
+	ASSERT(byteTarget > 0);
+
+	TLogPeekMemoryVersions result;
+	int messageCount = 0;
+	int collectedBytes = 0;
+	auto& deque = getVersionMessages(self, tag);
+
+	begin = std::max(begin, self->persistentDataDurableVersion + 1);
+	auto it = std::lower_bound(deque.begin(),
+	                           deque.end(),
+	                           std::make_pair(begin, LengthPrefixedStringRef()),
+	                           [](const auto& l, const auto& r) -> bool { return l.first < r.first; });
+
+	while (it != deque.end()) {
+		Version currentVersion = it->first;
+		BinaryWriter versionMessages(Unversioned());
+		versionMessages << VERSION_HEADER << currentVersion;
+
+		while (it != deque.end() && it->first == currentVersion) {
+			// We need the 4 byte length prefix to be a TagsAndMessage format, but that prefix is added as part of
+			// StringRef serialization.
+			int offset = versionMessages.getLength();
+			versionMessages << it->second.toStringRef();
+			void* data = versionMessages.getData();
+			DEBUG_TAGS_AND_MESSAGE("TLogPeek",
+			                       currentVersion,
+			                       StringRef((uint8_t*)data + offset, versionMessages.getLength() - offset),
+			                       self->logId)
+			    .detail("PeekTag", tag);
+			++messageCount;
+			++it;
+		}
+
+		collectedBytes += versionMessages.getLength();
+		result.versions.push_back({ currentVersion, versionMessages.toValue() });
+		if (collectedBytes >= byteTarget) {
+			result.truncated = it != deque.end();
+			if (result.truncated) {
+				result.firstExcludedVersion = it->first;
+			}
+			break;
+		}
+	}
+
+	if (messageCount == 0) {
+		++self->emptyPeeks;
+	} else {
+		++self->nonEmptyPeeks;
+		auto [it, _] = self->peekVersionCounts.try_emplace(tag,
+		                                                   "PeekVersionCounts " + tag.toString(),
+		                                                   deterministicRandom()->randomUniqueID(),
+		                                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		LatencySample& sample = it->second;
+		sample.addMeasurement(messageCount);
+	}
+
+	return result;
+}
+
 Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, Tag tag, int logRouters) {
 	// See the comment in LogSystem.cpp for the binary format of commitBlob.
 	std::vector<StringRef> relevantMessages;
@@ -1778,6 +2053,39 @@ Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, Tag tag
 	co_return relevantMessages;
 }
 
+namespace {
+
+int tLogPeekReplyByteLimit(Tag tag, int requestedLimit) {
+	return tag.locality == tagLocalityCDC && requestedLimit > 0
+	           ? std::min(requestedLimit, SERVER_KNOBS->MAXIMUM_PEEK_BYTES)
+	           : 0;
+}
+
+enum class TLogPeekVersionAppendResult { Appended, ReplyByteLimitReached, VersionTooLarge };
+
+TLogPeekVersionAppendResult appendTLogPeekVersion(BinaryWriter& messages,
+                                                  StringRef versionMessages,
+                                                  int replyByteLimit) {
+	if (replyByteLimit > 0) {
+		if (versionMessages.size() > replyByteLimit) {
+			return TLogPeekVersionAppendResult::VersionTooLarge;
+		}
+		if (messages.getLength() > replyByteLimit - versionMessages.size()) {
+			return TLogPeekVersionAppendResult::ReplyByteLimitReached;
+		}
+	}
+
+	messages.serializeBytes(versionMessages);
+	return TLogPeekVersionAppendResult::Appended;
+}
+
+Version tLogPeekTruncatedEndVersion(Optional<Version> firstExcludedVersion, Optional<Version> lastReplyVersion) {
+	ASSERT(firstExcludedVersion.present() || lastReplyVersion.present());
+	return firstExcludedVersion.present() ? firstExcludedVersion.get() : lastReplyVersion.get() + 1;
+}
+
+} // namespace
+
 // Common logics to peek TLog and create TLogPeekReply that serves both streaming peek or normal peek request
 template <typename PromiseType>
 Future<Void> tLogPeekMessages(PromiseType replyPromise,
@@ -1789,7 +2097,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
                               bool reqOnlySpilled = false,
                               Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>(),
                               Optional<Version> reqEnd = Optional<Version>(),
-                              Optional<bool> reqReturnEmptyIfStopped = Optional<bool>()) {
+                              Optional<bool> reqReturnEmptyIfStopped = Optional<bool>(),
+                              int reqReplyByteLimit = 0) {
 	BinaryWriter messages(Unversioned());
 	BinaryWriter messages2(Unversioned());
 	int sequence = -1;
@@ -1799,6 +2108,30 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	if (reqTag.locality == tagLocalityTxs && reqTag.id >= logData->txsTags && logData->txsTags > 0) {
 		reqTag.id = reqTag.id % logData->txsTags;
 	}
+
+	const int replyByteLimit = tLogPeekReplyByteLimit(reqTag, reqReplyByteLimit);
+	bool replyByteLimitReached = false;
+	bool replyVersionTooLarge = false;
+	int oversizedVersionBytes = 0;
+	Optional<Version> lastReplyVersion;
+	Optional<Version> firstExcludedVersion;
+	auto appendVersion = [&](Version version, StringRef versionMessages) {
+		auto result = appendTLogPeekVersion(messages, versionMessages, replyByteLimit);
+		if (result == TLogPeekVersionAppendResult::Appended) {
+			lastReplyVersion = version;
+		} else {
+			replyByteLimitReached = true;
+			if (!firstExcludedVersion.present()) {
+				firstExcludedVersion = version;
+			}
+			if (result == TLogPeekVersionAppendResult::VersionTooLarge && messages.getLength() == 0 &&
+			    version == reqBegin) {
+				replyVersionTooLarge = true;
+				oversizedVersionBytes = versionMessages.size();
+			}
+		}
+		return result;
+	};
 
 	if (reqSequence.present()) {
 		try {
@@ -1941,6 +2274,24 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	Version poppedVer{ 0 };
 	Version endVersion{ 0 };
 	bool onlySpilled{ false };
+	auto setTruncatedEndVersion = [&]() {
+		endVersion = tLogPeekTruncatedEndVersion(firstExcludedVersion, lastReplyVersion);
+	};
+	auto appendMemoryVersions = [&](const TLogPeekMemoryVersions& memoryVersions) {
+		for (const auto& version : memoryVersions.versions) {
+			auto result = appendVersion(version.version, version.messages);
+			if (result != TLogPeekVersionAppendResult::Appended) {
+				return result;
+			}
+		}
+		if (memoryVersions.truncated) {
+			ASSERT(memoryVersions.firstExcludedVersion.present());
+			if (!firstExcludedVersion.present()) {
+				firstExcludedVersion = memoryVersions.firstExcludedVersion;
+			}
+		}
+		return TLogPeekVersionAppendResult::Appended;
+	};
 
 	// Run the peek logic in a loop to account for the case where there is no data to return to the caller, and we may
 	// want to wait a little bit instead of just sending back an empty message. This feature is controlled by a knob.
@@ -1950,8 +2301,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		auto tagData = logData->getTagData(reqTag);
 		bool tagRecovered = tagData && !tagData->unpoppedRecovered;
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && poppedVer <= reqBegin &&
-		    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
-		    !reqReturnIfBlocked && tagRecovered) {
+		    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled &&
+		    (reqTag.locality >= 0 || reqTag.locality == tagLocalityCDC) && !reqReturnIfBlocked && tagRecovered) {
 			double startTime = now();
 			co_await waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT);
 			double latency = now() - startTime;
@@ -2022,11 +2373,14 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			// Just in case the durable version changes while we are waiting for the read, we grab this data from
 			// memory. We may or may not actually send it depending on whether we get enough data from disk. SOMEDAY:
 			// Only do this if an initial attempt to read from disk results in insufficient data and the required data
-			// is no longer in memory SOMEDAY: Should we only send part of the messages we collected, to actually limit
-			// the size of the result?
+			// is no longer in memory.
+			TLogPeekMemoryVersions memoryVersions;
 
 			if (reqOnlySpilled) {
 				endVersion = logData->persistentDataDurableVersion + 1;
+			} else if (replyByteLimit > 0) {
+				memoryVersions = peekMessageVersionsFromMemory(
+				    logData, reqTag, reqBegin, std::min(replyByteLimit, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
 			} else {
 				peekMessagesFromMemory(logData, reqTag, reqBegin, messages2, endVersion);
 			}
@@ -2041,13 +2395,27 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 				for (auto& kv : kvs) {
 					auto ver = decodeTagMessagesKey(kv.key);
-					messages << VERSION_HEADER << ver;
-					messages.serializeBytes(kv.value);
+					BinaryWriter versionMessages(Unversioned());
+					versionMessages << VERSION_HEADER << ver;
+					versionMessages.serializeBytes(kv.value);
+					auto result = appendVersion(ver, versionMessages.toValue());
+					if (result != TLogPeekVersionAppendResult::Appended) {
+						break;
+					}
 				}
 
-				if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+				if (replyByteLimitReached) {
+					setTruncatedEndVersion();
+					onlySpilled = true;
+				} else if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+					ASSERT(!kvs.empty());
 					endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
 					onlySpilled = true;
+				} else if (replyByteLimit > 0) {
+					auto result = appendMemoryVersions(memoryVersions);
+					if (result != TLogPeekVersionAppendResult::Appended || memoryVersions.truncated) {
+						setTruncatedEndVersion();
+					}
 				} else {
 					messages.serializeBytes(messages2.toValue());
 				}
@@ -2115,17 +2483,22 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 					ASSERT(valid == 0x01);
 					ASSERT(length + sizeof(valid) == queueEntryData.size());
 
-					messages << VERSION_HEADER << entry.version;
-
+					BinaryWriter versionMessages(Unversioned());
+					versionMessages << VERSION_HEADER << entry.version;
 					std::vector<StringRef> rawMessages =
 					    co_await parseMessagesForTag(entry.messages, reqTag, logData->logRouterTags);
 					for (const StringRef& msg : rawMessages) {
-						messages.serializeBytes(msg);
+						versionMessages.serializeBytes(msg);
 						DEBUG_TAGS_AND_MESSAGE("TLogPeekFromDisk", entry.version, msg, logData->logId)
 						    .detail("DebugID", self->dbgid)
 						    .detail("PeekTag", reqTag);
 					}
 
+					auto result = appendVersion(entry.version, versionMessages.toValue());
+					if (result != TLogPeekVersionAppendResult::Appended) {
+						earlyEnd = true;
+						break;
+					}
 					lastRefMessageVersion = entry.version;
 					index++;
 				}
@@ -2133,9 +2506,18 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				messageReads.clear();
 				memoryReservation.release();
 
-				if (earlyEnd) {
-					endVersion = lastRefMessageVersion + 1;
+				if (earlyEnd || replyByteLimitReached) {
+					if (firstExcludedVersion.present() || lastReplyVersion.present()) {
+						setTruncatedEndVersion();
+					} else {
+						endVersion = lastRefMessageVersion + 1;
+					}
 					onlySpilled = true;
+				} else if (replyByteLimit > 0) {
+					auto result = appendMemoryVersions(memoryVersions);
+					if (result != TLogPeekVersionAppendResult::Appended || memoryVersions.truncated) {
+						setTruncatedEndVersion();
+					}
 				} else {
 					messages.serializeBytes(messages2.toValue());
 				}
@@ -2143,6 +2525,13 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		} else {
 			if (reqOnlySpilled) {
 				endVersion = logData->persistentDataDurableVersion + 1;
+			} else if (replyByteLimit > 0) {
+				auto memoryVersions = peekMessageVersionsFromMemory(
+				    logData, reqTag, reqBegin, std::min(replyByteLimit, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
+				auto result = appendMemoryVersions(memoryVersions);
+				if (result != TLogPeekVersionAppendResult::Appended || memoryVersions.truncated) {
+					setTruncatedEndVersion();
+				}
 			} else {
 				peekMessagesFromMemory(logData, reqTag, reqBegin, messages, endVersion);
 			}
@@ -2154,7 +2543,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		//   - Have data return to the caller, or
 		//   - Batching empty peek is disabled, or
 		//   - Batching empty peek interval has been reached.
-		if (messages.getLength() > 0 || !SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG ||
+		if (replyByteLimitReached || messages.getLength() > 0 || !SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG ||
 		    (now() - blockStart > SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG_INTERVAL)) {
 			break;
 		}
@@ -2170,6 +2559,19 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			       // peek logic.
 		}
 	}
+
+	if (replyVersionTooLarge) {
+		CODE_PROBE(true, "TLog rejects an oversized Native CDC version");
+		TraceEvent(SevWarn, "TLogPeekVersionExceedsByteLimit", logData->logId)
+		    .detail("Tag", reqTag)
+		    .detail("ReqBegin", reqBegin)
+		    .detail("Version", firstExcludedVersion.get())
+		    .detail("VersionBytes", oversizedVersionBytes)
+		    .detail("ReplyByteLimit", replyByteLimit);
+		replyPromise.sendError(cdc_tlog_peek_reply_too_large());
+		co_return;
+	}
+	ASSERT(replyByteLimit <= 0 || messages.getLength() <= replyByteLimit);
 
 	TLogPeekReply reply;
 	reply.maxKnownVersion = logData->version.get();
@@ -2262,7 +2664,8 @@ Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference
 			                           onlySpilled,
 			                           Optional<std::pair<UID, int>>(),
 			                           req.end,
-			                           req.returnEmptyIfStopped));
+			                           req.returnEmptyIfStopped,
+			                           0));
 
 			reply.rep.begin = begin;
 			req.reply.send(reply);
@@ -2301,8 +2704,13 @@ Future<Void> doQueueCommit(TLogData* self,
 	logData->queueCommittingVersion = ver;
 
 	g_network->setCurrentTask(TaskPriority::TLogCommitReply);
+	if (self->diskQueueCommitSerializedBytes > 0) {
+		self->diskQueueCommitSizeDist->sample(static_cast<uint32_t>(
+		    std::min<uint64_t>(self->diskQueueCommitSerializedBytes, std::numeric_limits<uint32_t>::max())));
+	}
 	Future<Void> c = self->persistentQueue->commit();
 	self->diskQueueCommitBytes = 0;
+	self->diskQueueCommitSerializedBytes = 0;
 	self->largeDiskQueueCommitBytes.set(false);
 
 	co_await ioDegradedOrTimeoutError(
@@ -2350,6 +2758,7 @@ Future<Void> doQueueCommit(TLogData* self,
 		CODE_PROBE(true, "A TLog was replaced before having a chance to commit its queue", probe::decoration::rare);
 		it->queueCommittedVersion.set(it->version.get());
 	}
+	advanceRetiredLogQueues(self);
 }
 
 Future<Void> commitQueue(TLogData* self) {
@@ -2479,12 +2888,7 @@ Future<Void> tLogCommit(TLogData* self,
 		qe.knownCommittedVersion = logData->knownCommittedVersion;
 		qe.messages = req.messages;
 		qe.id = logData->logId;
-		self->persistentQueue->push(qe, logData);
-
-		self->diskQueueCommitBytes += qe.expectedSize();
-		if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
-			self->largeDiskQueueCommitBytes.set(true);
-		}
+		self->recordDiskQueueWrite(self->persistentQueue->push(qe, logData), qe.expectedSize());
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set(req.version);
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
@@ -2869,7 +3273,8 @@ class ServeTLogInterface {
 			                                        req.onlySpilled,
 			                                        req.sequence,
 			                                        req.end,
-			                                        req.returnEmptyIfStopped));
+			                                        req.returnEmptyIfStopped,
+			                                        req.replyByteLimit));
 		}
 	}
 
@@ -3026,7 +3431,7 @@ static void throwLowDiskTLogRecoveryFailed(TLogData* self,
 	    .detail("QueueDiskBytesTotal", queueBytes.total)
 	    .detail("Version", ver)
 	    .detail("Action", "FailRecoveryAndRecruitNewTLogs");
-	CODE_PROBE(true, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO");
+	CODE_PROBE(true, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
 	throw recruitment_failed();
 }
 
@@ -3058,7 +3463,7 @@ static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> log
 			return;
 		}
 	}
-	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
+	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
 	// Outside speedUpSimulation, fail recovery and temporarily exclude this worker from TLog recruitment until disk
 	// space recovers.
 	throwLowDiskTLogRecoveryFailed(self, logData, ver, minAvailableSpaceRatio, kvStoreBytes, queueBytes);
@@ -3157,12 +3562,7 @@ Future<Void> pullAsyncData(TLogData* self,
 					qe.knownCommittedVersion = logData->knownCommittedVersion;
 					qe.alternativeMessages = &messages;
 					qe.id = logData->logId;
-					self->persistentQueue->push(qe, logData);
-
-					self->diskQueueCommitBytes += qe.expectedSize();
-					if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
-						self->largeDiskQueueCommitBytes.set(true);
-					}
+					self->recordDiskQueueWrite(self->persistentQueue->push(qe, logData), qe.expectedSize());
 
 					// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
 					// actors
@@ -3201,12 +3601,7 @@ Future<Void> pullAsyncData(TLogData* self,
 						qe.knownCommittedVersion = logData->knownCommittedVersion;
 						qe.messages = StringRef();
 						qe.id = logData->logId;
-						self->persistentQueue->push(qe, logData);
-
-						self->diskQueueCommitBytes += qe.expectedSize();
-						if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
-							self->largeDiskQueueCommitBytes.set(true);
-						}
+						self->recordDiskQueueWrite(self->persistentQueue->push(qe, logData), qe.expectedSize());
 
 						// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
 						// actors
@@ -3476,6 +3871,7 @@ Future<Void> restorePersistentState(TLogData* self,
 		Version ver = BinaryReader::fromStringRef<Version>(fVers.get()[idx].value, Unversioned());
 		logData->persistentDataVersion = ver;
 		logData->persistentDataDurableVersion = ver;
+		logData->queuePoppedVersion = ver;
 		logData->version.set(ver);
 		logData->recoveryCount =
 		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
@@ -3508,6 +3904,10 @@ Future<Void> restorePersistentState(TLogData* self,
 				logData->createTagData(
 				    tag, popped, NothingPersistent::False, PoppedRecently::False, UnpoppedRecovered::False);
 				logData->getTagData(tag)->persistentPopped = popped;
+				// Reference-spilled data can still pin disk queue entries before the restored durable version.
+				if (logData->shouldSpillByReference(tag)) {
+					logData->queuePoppedVersion = std::min(logData->queuePoppedVersion, popped);
+				}
 			}
 		}
 	}
@@ -3759,6 +4159,7 @@ Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, LocalityData l
 			logData->persistentDataVersion = logData->unrecoveredBefore - 1;
 			logData->persistentDataDurableVersion = logData->unrecoveredBefore - 1;
 			logData->queueCommittedVersion.set(logData->unrecoveredBefore - 1);
+			logData->queuePoppedVersion = logData->unrecoveredBefore - 1;
 			logData->version.set(logData->unrecoveredBefore - 1);
 
 			logData->unpoppedRecoveredTagCount = req.allTags.size();
@@ -3831,12 +4232,7 @@ Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, LocalityData l
 				qe.knownCommittedVersion = logData->knownCommittedVersion;
 				qe.messages = StringRef();
 				qe.id = logData->logId;
-				self->persistentQueue->push(qe, logData);
-
-				self->diskQueueCommitBytes += qe.expectedSize();
-				if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
-					self->largeDiskQueueCommitBytes.set(true);
-				}
+				self->recordDiskQueueWrite(self->persistentQueue->push(qe, logData), qe.expectedSize());
 				logData->version.set(lastVersionPrevEpoch);
 			}
 
@@ -3953,6 +4349,7 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 
 		self.sharedActors.send(commitQueue(&self));
 		self.sharedActors.send(updateStorageLoop(&self));
+		self.sharedActors.send(monitorRetainedOldLogs(&self));
 		self.sharedActors.send(traceRole(Role::SHARED_TRANSACTION_LOG, tlogId));
 		Future<Void> activeSharedChange = Void();
 
@@ -4007,6 +4404,42 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 }
 
 // UNIT TESTS
+TEST_CASE("/NativeCDC/TLogPeekReplyLimit") {
+	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), 0) == 0);
+	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES) ==
+	       SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
+	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), 4096) == std::min(4096, SERVER_KNOBS->MAXIMUM_PEEK_BYTES));
+	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityLogRouter, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES) == 0);
+	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityTxs, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES) == 0);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TLogPeekReplyVersionBoundary") {
+	BinaryWriter firstVersion(Unversioned());
+	firstVersion << VERSION_HEADER << Version(1) << uint32_t(1);
+	auto firstVersionValue = firstVersion.toValue();
+
+	BinaryWriter secondVersion(Unversioned());
+	secondVersion << VERSION_HEADER << Version(2) << uint64_t(2);
+	auto secondVersionValue = secondVersion.toValue();
+
+	BinaryWriter reply(Unversioned());
+	int replyByteLimit = firstVersionValue.size() + secondVersionValue.size() - 1;
+	ASSERT(appendTLogPeekVersion(reply, firstVersionValue, replyByteLimit) == TLogPeekVersionAppendResult::Appended);
+	ASSERT(appendTLogPeekVersion(reply, secondVersionValue, replyByteLimit) ==
+	       TLogPeekVersionAppendResult::ReplyByteLimitReached);
+	ASSERT(reply.getLength() == firstVersionValue.size());
+
+	BinaryWriter oversizedReply(Unversioned());
+	ASSERT(appendTLogPeekVersion(oversizedReply, secondVersionValue, secondVersionValue.size() - 1) ==
+	       TLogPeekVersionAppendResult::VersionTooLarge);
+	ASSERT(oversizedReply.getLength() == 0);
+	// A sparse tag can safely advance through an empty gap before retrying an excluded version.
+	ASSERT_EQ(tLogPeekTruncatedEndVersion(Optional<Version>(150), Optional<Version>()), 150);
+	ASSERT_EQ(tLogPeekTruncatedEndVersion(Optional<Version>(), Optional<Version>(100)), 101);
+	return Void();
+}
+
 struct DequeAllocatorStats {
 	static int64_t allocatedBytes;
 };

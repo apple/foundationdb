@@ -19,8 +19,9 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
@@ -777,7 +778,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::vector<ISimulator::ProcessInfo*> machines;
 		std::vector<ISimulator::ProcessInfo*> all = g_simulator->getAllProcesses();
 		for (int i = 0; i < all.size(); i++) {
-			if (all[i]->name == std::string("Server") && all[i]->isAvailableClass()) {
+			if (all[i]->name == std::string("Server") && isAvailableSimulatorProcessClass(all[i])) {
 				machines.push_back(all[i]);
 			}
 		}

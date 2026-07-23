@@ -348,14 +348,21 @@ struct RaceImplActor final : Actor<Result>,
 
 	template <std::size_t Idx, class T>
 	void finish(T&& value) {
+		Result result(std::in_place_index<Idx>, std::forward<T>(value));
 		this->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
-		this->SAV<Result>::sendAndDelPromiseRef(Result(std::in_place_index<Idx>, std::forward<T>(value)));
+		{
+			auto futuresToRelease = std::move(futures);
+		}
+		this->SAV<Result>::sendAndDelPromiseRef(std::move(result));
 	}
 
 	void fail(Error e) {
 		this->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
+		{
+			auto futuresToRelease = std::move(futures);
+		}
 		this->SAV<Result>::sendErrorAndDelPromiseRef(e);
 	}
 
@@ -364,6 +371,9 @@ struct RaceImplActor final : Actor<Result>,
 		this->actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
 		if (actorWaitStateIsWaiting(waitState)) {
 			RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
+			{
+				auto futuresToRelease = std::move(futures);
+			}
 			this->SAV<Result>::sendErrorAndDelPromiseRef(actor_cancelled());
 		}
 	}
@@ -375,11 +385,11 @@ struct RaceImplActor final : Actor<Result>,
 
 using Choose = coro::ChooseClause<>;
 
-// Waits for the first input Future/FutureStream to become ready and returns its value in a variant whose index
-// matches the winning argument. If multiple inputs are already ready, the lowest-index argument wins; for streams,
-// the next queued element is consumed. Errors and explicit cancellation propagate to the returned Future, while
-// non-winning inputs are only detached from the race. They are not actively cancelled here, but may still cancel
-// if dropping the race also drops their last reference.
+// Waits for the first input Future/FutureStream/ThreadFutureStream to become ready and returns its value in a
+// variant whose index matches the winning argument. If multiple inputs are already ready, the lowest-index argument
+// wins; for streams, the next queued element is consumed. Errors and explicit cancellation propagate to the returned
+// Future, while non-winning inputs are only detached from the race. They are not actively cancelled here, but may
+// still cancel if dropping the race also drops their last reference.
 template <class... Futures>
 [[nodiscard]] auto race(Futures&&... futures) -> Future<coro::RaceResult<std::decay_t<Futures>...>> {
 	static_assert(sizeof...(Futures) > 0, "race requires at least one Future argument");

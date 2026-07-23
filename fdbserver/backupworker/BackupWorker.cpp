@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -33,7 +34,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/backupworker/BackupWorker.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/Error.h"
 
 #include "flow/IRandom.h"

@@ -1457,7 +1457,7 @@ Serializes all endpoints directly: `waitFailure`, `getRateInfo`, `haltRatekeeper
 
 ## 13. Worker Protocol
 
-**Source:** `fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h`
+**Source:** `fdbserver/core/include/fdbserver/core/WorkerInterface.h`
 
 Workers host server roles. The cluster controller sends initialization requests.
 
@@ -1500,7 +1500,7 @@ All follow the pattern: fields describing the role configuration + `ReplyPromise
 - **InitializeConsistencyScanRequest**: `UID reqId`, `reply` → `ConsistencyScanInterface`
 - **InitializeLogRouterRequest**: `uint64_t recoveryCount`, `Tag routerTag`, `Version startVersion`, `std::vector<LocalityData> tLogLocalities`, `Reference<IReplicationPolicy> tLogPolicy`, `int8_t locality`, `Optional<Version> recoverAt`, `Optional<std::map<uint8_t, std::vector<uint16_t>>> knownLockedTLogIds`, `bool allowDropInSim/isReplacement`, `UID reqId`, `reply` → `TLogInterface`
 - **InitializeBackupRequest**: `UID reqId`, `LogEpoch recruitedEpoch/backupEpoch`, `Tag tag`, `int totalTags`, `Version startVersion`, `Optional<Version> endVersion`, `reply` → **InitializeBackupReply** {`BackupInterface interf`, `LogEpoch backupEpoch`}
-- **InitializeRangeBackupRequest**: `UID reqId`, `LogEpoch recruitedEpoch/backupEpoch`, `Tag tag`, `int totalTags`, `Version startVersion`, `Optional<Version> endVersion`, `reply` → **InitializeRangeBackupReply** {`BackupInterface interf`, `LogEpoch backupEpoch`}
+- **InitializeRangePartitionedBackupRequest**: `UID reqId`, `LogEpoch recruitedEpoch/backupEpoch`, `Tag tag`, `int totalTags`, `Version startVersion`, `Optional<Version> endVersion`, `reply` → **InitializeRangePartitionedBackupReply** {`BackupInterface interf`, `LogEpoch backupEpoch`}
 
 ### Recruitment Requests
 - **RecruitFromConfigurationRequest**: `DatabaseConfiguration configuration`, `bool recruitSeedServers`, `int maxOldLogRouters`, `reply` → **RecruitFromConfigurationReply** {`std::vector<WorkerInterface>` for: tLogs, satelliteTLogs, commitProxies, grvProxies, resolvers, storageServers, oldLogRouters, backupWorkers; `Optional<Key> dcId`, `bool satelliteFallback`}
@@ -1542,9 +1542,6 @@ All follow the pattern: fields describing the role configuration + `ReplyPromise
 
 ### NetworkTestRequest
 `Key key`, `uint32_t replySize`, `reply` → **NetworkTestReply** {`Value value`}.
-
-### NetworkTestStreamingRequest
-`reply` (stream) → **NetworkTestStreamingReply** {`Optional<UID> acknowledgeToken`, `uint16_t sequence`, `int index`}.
 
 ---
 
@@ -1608,7 +1605,7 @@ Conditionally serializes a full interface or just its UID.
 | txsTags | `int32_t` | Number of txs tags |
 | pseudoLocalities | `std::set<int8_t>` | Pseudo-localities |
 | epoch | `LogEpoch` → `uint64_t` | Epoch number |
-| rangeBackupWorkerTags | `int32_t` | Number of range backup worker tags |
+| rangePartitionedBackupWorkerTags | `int32_t` | Number of range backup worker tags |
 
 ### LogSystemConfig
 
@@ -1627,7 +1624,7 @@ Conditionally serializes a full interface or just its UID.
 | epoch | `LogEpoch` → `uint64_t` | Current epoch |
 | oldestBackupEpoch | `LogEpoch` → `uint64_t` | Oldest backup epoch |
 | knownLockedTLogIds | `std::map<uint8_t, std::vector<uint16_t>>` | Known locked TLog IDs |
-| rangeBackupWorkerTags | `int32_t` | Range backup worker tag count |
+| rangePartitionedBackupWorkerTags | `int32_t` | Range backup worker tag count |
 
 ### CoreTLogSet
 Persisted on coordinators (UIDs only, no full interfaces).
@@ -1657,7 +1654,7 @@ Persisted on coordinators (UIDs only, no full interfaces).
 | recoverAt | `Version` → `int64_t` | Recovery version (conditional on protocol version) |
 | pseudoLocalities | `std::set<int8_t>` | Pseudo-localities |
 | epoch | `LogEpoch` → `uint64_t` | Epoch |
-| rangeBackupWorkerTags | `int32_t` | Rrange backup worker tags |
+| rangePartitionedBackupWorkerTags | `int32_t` | Rrange backup worker tags |
 
 ### DBCoreState
 Persisted on coordinators — the ground truth for recovery.
@@ -1674,7 +1671,7 @@ Persisted on coordinators — the ground truth for recovery.
 | newestProtocolVersion | `ProtocolVersion` → `uint64_t` | Newest protocol (conditional) |
 | lowestCompatibleProtocolVersion | `ProtocolVersion` → `uint64_t` | Lowest compatible (conditional) |
 | encryptionAtRestModeDeprecated | `EncryptionAtRestModeDeprecated` → `uint32_t` | Encryption mode (conditional) |
-| rangeBackupWorkerTags | `int32_t` | Range backup worker tags |
+| rangePartitionedBackupWorkerTags | `int32_t` | Range backup worker tags |
 
 ### ServerDBInfo
 Distributed to all server processes.
@@ -2314,7 +2311,7 @@ Taskbucket workflows that run as normal transactions within the cluster.
 
 **Source:** `fdbserver/commitproxy/CommitProxyServer.actor.cpp`,
 `fdbserver/clustercontroller/ClusterRecovery.cpp`,
-`fdbserver/storageserver/storageserver.actor.cpp`,
+`fdbserver/storageserver/storageserver.cpp`,
 `fdbserver/sequencer/masterserver.cpp`
 
 ### F.1 Transaction Commit Path

@@ -45,6 +45,13 @@ struct AwaitCancelHandler {
 	virtual void cancelWait() = 0;
 };
 
+// Pass this as the first argument to a coroutine to record the exact frame
+// size that its promise allocator receives. The argument is consumed during
+// frame allocation, before the coroutine body begins.
+struct FrameSizeRecorder {
+	size_t* frameSize;
+};
+
 template <class F>
 struct FutureReturnType;
 
@@ -59,12 +66,22 @@ struct FutureReturnType<FutureStream<T>> {
 };
 
 template <class T>
+struct FutureReturnType<ThreadFutureStream<T>> {
+	using type = T;
+};
+
+template <class T>
 struct FutureReturnType<Future<T> const&> {
 	using type = T;
 };
 
 template <class T>
 struct FutureReturnType<FutureStream<T> const&> {
+	using type = T;
+};
+
+template <class T>
+struct FutureReturnType<ThreadFutureStream<T> const&> {
 	using type = T;
 };
 
@@ -102,12 +119,22 @@ struct GetFutureType<FutureStream<T>> {
 };
 
 template <class T>
+struct GetFutureType<ThreadFutureStream<T>> {
+	constexpr static FutureType value = FutureType::FutureStream;
+};
+
+template <class T>
 struct GetFutureType<Future<T> const&> {
 	constexpr static FutureType value = FutureType::Future;
 };
 
 template <class T>
 struct GetFutureType<FutureStream<T> const&> {
+	constexpr static FutureType value = FutureType::FutureStream;
+};
+
+template <class T>
+struct GetFutureType<ThreadFutureStream<T> const&> {
 	constexpr static FutureType value = FutureType::FutureStream;
 };
 
@@ -848,6 +875,76 @@ struct ThreadAwaitableFutureStream
 	}
 };
 
+// Promise for fire-and-forget coroutines. It deliberately has no result SAV:
+// the coroutine frame remains attached to its pending Future callback and
+// destroys itself at final suspend.
+struct DetachedCoroutinePromise : Actor<void> {
+	static void* operator new(size_t size) { return allocateFast(int(size)); }
+	static void operator delete(void* ptr, size_t size) { freeFast(int(size), ptr); }
+
+	DetachedCoroutine get_return_object() noexcept { return {}; }
+	[[nodiscard]] n_coroutine::suspend_never initial_suspend() const noexcept { return {}; }
+	[[nodiscard]] n_coroutine::suspend_never final_suspend() const noexcept { return {}; }
+
+	void return_void() const noexcept {}
+	// Detached coroutines have no result channel through which to propagate errors.
+	void unhandled_exception() const noexcept {}
+
+	void resume() {
+		// Reconstruct the handle instead of storing another pointer in the frame.
+		auto handle = n_coroutine::coroutine_handle<DetachedCoroutinePromise>::from_promise(*this);
+		handle.resume();
+	}
+
+	int8_t& waitState() { return actor_wait_state; }
+
+	template <class T>
+	auto await_transform(const Future<T>& future);
+};
+
+// A detached coroutine cannot be cancelled through its return value, so its
+// Future awaiter does not need AwaitCancelHandler or cancellation bookkeeping.
+// Keeping that state out of the frame also avoids a larger fast-allocation
+// bucket for detached coroutines with additional parameters.
+template <class ValueType>
+struct DetachedAwaitableFuture : Callback<ToFutureVal<ValueType>>,
+                                 AwaitableResume<DetachedAwaitableFuture<ValueType>, ValueType, false> {
+	using FutureValue = ToFutureVal<ValueType>;
+
+	Future<FutureValue> const& future;
+	DetachedCoroutinePromise* pt;
+
+	DetachedAwaitableFuture(Future<FutureValue> const& future, DetachedCoroutinePromise* promise)
+	  : future(future), pt(promise) {}
+
+	// await_resume reads the completed value or error directly from future.
+	void fire(FutureValue const&) override { pt->resume(); }
+	void fire(FutureValue&&) override { pt->resume(); }
+	void error(Error) override { pt->resume(); }
+
+	[[nodiscard]] bool await_ready() const { return future.isReady(); }
+
+	void await_suspend(n_coroutine::coroutine_handle<>) {
+		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
+		StrictFuture<FutureValue> strictFuture = future;
+		strictFuture.addCallbackAndClear(this);
+	}
+
+	bool resumeImpl() {
+		bool wasReady = pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
+		if (actorWaitStateIsWaiting(pt->waitState())) {
+			this->remove();
+			pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
+		}
+		return wasReady;
+	}
+};
+
+template <class T>
+auto DetachedCoroutinePromise::await_transform(const Future<T>& future) {
+	return DetachedAwaitableFuture<T>{ future, this };
+}
+
 template <class T, class Promise, bool ReturnsExplicitVoid = false>
 struct CoroReturn {
 	template <class U>
@@ -906,7 +1003,16 @@ struct CoroPromiseBase : CoroReturn<T, Derived, ReturnsExplicitVoid> {
 	}
 
 	static void* operator new(size_t s) { return allocateFast(int(s)); }
+	template <class... Args>
+	static void* operator new(size_t s, FrameSizeRecorder recorder, Args&&...) {
+		*recorder.frameSize = s;
+		return allocateFast(int(s));
+	}
 	static void operator delete(void* p, size_t s) { freeFast(int(s), p); }
+	template <class... Args>
+	static void operator delete(void* p, size_t s, FrameSizeRecorder, Args&&...) {
+		freeFast(int(s), p);
+	}
 
 	template <class U>
 	void setReturnValue(U&& value) {
@@ -983,7 +1089,7 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, false>
 
 	ActorType coroActor; // Embedded in coroutine frame — single allocation
 
-	CoroPromise() {}
+	CoroPromise() = default;
 
 	ActorType* actor() { return &coroActor; }
 
@@ -1033,7 +1139,7 @@ struct CoroPromise<T, IsCancellable, ReturnsExplicitVoid, true>
 	// allocates it separately because cancel() intentionally destroys that frame.
 	ActorType* coroActor = new ActorType();
 
-	CoroPromise() {}
+	CoroPromise() = default;
 
 	ActorType* actor() { return coroActor; }
 

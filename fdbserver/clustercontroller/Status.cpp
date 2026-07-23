@@ -32,7 +32,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/WorkerEvents.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include <time.h>
 #include "ClusterRecovery.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -43,6 +43,7 @@
 #include "fdbserver/core/RatekeeperLimitReasons.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/StorageWiggleMetrics.h"
 
@@ -1380,6 +1381,9 @@ static Future<Void> doProbe(Future<double> probe,
 			                            format("Unable to %s after %d seconds.", description, timeoutSeconds).c_str()));
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		if (isAvailable != nullptr) {
 			*isAvailable = false;
 		}
@@ -2051,7 +2055,7 @@ static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
 	std::set<StringRef> allZones;
 	std::map<Key, std::set<StringRef>> dcId_zone;
 	for (auto const& worker : workers) {
-		if (worker.processClass.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign &&
+		if (recruitment::machineClassFitness(worker.processClass, recruitment::TLog) < recruitment::NeverAssign &&
 		    !configuration.isExcludedServer(worker.interf.addresses(), worker.interf.locality)) {
 			allZones.insert(worker.interf.locality.zoneId().get());
 			if (worker.interf.locality.dcId().present()) {
@@ -2715,6 +2719,9 @@ AsyncResult<JsonBuilderObject> layerStatusFetcher(Database cx,
 							json.absorb(doc.get_obj());
 							co_await yield();
 						} catch (Error& e) {
+							if (e.code() == error_code_actor_cancelled) {
+								throw;
+							}
 							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", docs[j].key);
 						}
 					}

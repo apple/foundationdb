@@ -7,6 +7,8 @@ add_fdbserver_link_test(fdbserver_kvstorelinktest
 add_fdbserver_unit_test(fdbserver_kvstore_test kvstore
   fdbserver_kvstore
   fdbserver_core)
+target_compile_definitions(fdbserver_kvstore_test PRIVATE
+  FDBSERVER_UNIT_TEST_NORMAL_IGNORE=\"noSim/RocksDB/RangeClear\")
 
 configure_fdbserver_common_includes(fdbserver_kvstore)
 target_include_directories(fdbserver_kvstore
@@ -15,8 +17,7 @@ target_include_directories(fdbserver_kvstore
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/contrib/sqlite
-    ${CMAKE_SOURCE_DIR}/fdbserver/include
-    ${CMAKE_BINARY_DIR}/fdbserver/include)
+    ${CMAKE_SOURCE_DIR}/fdbserver/include)
 target_link_libraries(fdbserver_kvstore PUBLIC fdbserver_core sqlite)
 
 if(WITH_ROCKSDB)

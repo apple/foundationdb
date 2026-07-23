@@ -22,10 +22,12 @@
 #define FDBCLIENT_COMMITPROXYINTERFACE_H
 #pragma once
 
+#include <map>
 #include <utility>
 #include <vector>
 
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/CDCProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
@@ -111,6 +113,10 @@ struct ClientDBInfo {
 	UID id; // Changes each time anything else changes
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<CommitProxyInterface> commitProxies;
+	bool nativeCdcEnabled = false;
+	int nativeCdcTagCount = 0;
+	std::vector<CDCProxyInterface> cdcProxies;
+	std::map<CDCStreamId, UID> streamToCDCProxyId;
 	Optional<CommitProxyInterface>
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	Optional<Value> forward;
@@ -119,17 +125,35 @@ struct ClientDBInfo {
 
 	ClusterType clusterType = ClusterType::STANDALONE;
 
-	ClientDBInfo() {}
+	ClientDBInfo() = default;
 
 	bool operator==(ClientDBInfo const& r) const { return id == r.id; }
 	bool operator!=(ClientDBInfo const& r) const { return id != r.id; }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		if constexpr (!is_fb_function<Archive>) {
+		// FlatBuffer serializers include every schema field. Versioned binary serializers must omit Native CDC fields
+		// for peers predating withNativeCdc so a new client can still decode their ClientDBInfo payloads.
+		if constexpr (is_fb_function<Archive>) {
+			serializer(ar,
+			           grvProxies,
+			           commitProxies,
+			           id,
+			           forward,
+			           history,
+			           clusterId,
+			           clusterType,
+			           nativeCdcEnabled,
+			           nativeCdcTagCount,
+			           cdcProxies,
+			           streamToCDCProxyId);
+		} else {
 			ASSERT(ar.protocolVersion().isValid());
+			serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
+			if (ar.protocolVersion().hasNativeCdc()) {
+				serializer(ar, nativeCdcEnabled, nativeCdcTagCount, cdcProxies, streamToCDCProxyId);
+			}
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
 	}
 };
 
@@ -143,7 +167,7 @@ struct ExpireIdempotencyIdRequest {
 	Version commitVersion = invalidVersion;
 	uint8_t batchIndexHighByte = 0;
 
-	ExpireIdempotencyIdRequest() {}
+	ExpireIdempotencyIdRequest() = default;
 	ExpireIdempotencyIdRequest(Version commitVersion, uint8_t batchIndexHighByte)
 	  : commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte) {}
 
@@ -335,7 +359,7 @@ struct GetStorageServerRejoinInfoRequest {
 	Optional<Value> dcId;
 	ReplyPromise<GetStorageServerRejoinInfoReply> reply;
 
-	GetStorageServerRejoinInfoRequest() {}
+	GetStorageServerRejoinInfoRequest() = default;
 	explicit GetStorageServerRejoinInfoRequest(UID const& id, Optional<Value> const& dcId) : id(id), dcId(dcId) {}
 
 	template <class Ar>
@@ -363,7 +387,7 @@ struct GetDDMetricsReply {
 	constexpr static FileIdentifier file_identifier = 7277713;
 	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
 
-	GetDDMetricsReply() {}
+	GetDDMetricsReply() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -377,7 +401,7 @@ struct GetDDMetricsRequest {
 	int shardLimit;
 	ReplyPromise<struct GetDDMetricsReply> reply;
 
-	GetDDMetricsRequest() {}
+	GetDDMetricsRequest() = default;
 	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
 
 	template <class Ar>
@@ -422,7 +446,7 @@ struct ExclusionSafetyCheckRequest {
 	std::vector<AddressExclusion> exclusions;
 	ReplyPromise<ExclusionSafetyCheckReply> reply;
 
-	ExclusionSafetyCheckRequest() {}
+	ExclusionSafetyCheckRequest() = default;
 	explicit ExclusionSafetyCheckRequest(std::vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
 
 	template <class Ar>
@@ -434,7 +458,7 @@ struct ExclusionSafetyCheckRequest {
 struct SetThrottledShardReply {
 	constexpr static FileIdentifier file_identifier = 2828140;
 
-	SetThrottledShardReply() {}
+	SetThrottledShardReply() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -448,7 +472,7 @@ struct SetThrottledShardRequest {
 	double expirationTime;
 	ReplyPromise<SetThrottledShardReply> reply;
 
-	SetThrottledShardRequest() {}
+	SetThrottledShardRequest() = default;
 	explicit SetThrottledShardRequest(std::vector<KeyRange> throttledShards, double expirationTime)
 	  : throttledShards(throttledShards), expirationTime(expirationTime) {}
 
