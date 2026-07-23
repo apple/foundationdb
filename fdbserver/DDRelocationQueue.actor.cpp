@@ -3097,7 +3097,7 @@ struct DDQueueImpl {
 			if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time
 			                                             // we are killed by the master dying
 			    e.code() != error_code_movekeys_conflict && e.code() != error_code_data_move_cancelled &&
-			    e.code() != error_code_data_move_dest_team_not_found)
+			    e.code() != error_code_data_move_dest_team_not_found && e.code() != error_code_dd_config_changed)
 				TraceEvent(SevError, "DataDistributionQueueError", self->distributorId).error(e);
 			throw e;
 		}

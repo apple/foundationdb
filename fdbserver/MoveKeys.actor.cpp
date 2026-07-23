@@ -508,6 +508,10 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
                                                  std::vector<UID> servers,
                                                  std::string context,
                                                  UID dataMoveId) {
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		throw dd_config_changed();
+	}
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	if (range.empty()) {
 		TraceEvent(SevWarn, "CheckLocationMetadataEmptyInputRange").detail("By", "PreCheck").detail("Range", range);
 		return Void();
@@ -574,6 +578,10 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 }
 
 ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::string context, UID dataMoveId) {
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		throw dd_config_changed();
+	}
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	if (range.empty()) {
 		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "CheckLocationMetadataEmptyInputRange")
 		    .detail("By", "PostCheck")
@@ -715,6 +723,9 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
                                               FlowLock* cleanUpDataMoveParallelismLock,
                                               UID dataMoveId,
                                               const DDEnabledState* ddEnabledState) {
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		throw dd_config_changed();
+	}
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
 	state SimpleCounter<int64_t>* txnStarted = counterCleanUpSingleShardDataMoveStarted();
@@ -737,7 +748,18 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 			                                                    keys,
 			                                                    SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
 			                                                    SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
-			ASSERT(!currentShards.empty() && !currentShards.more);
+			if (currentShards.more) {
+				// The data-move range has been subdivided into more shards than fit in
+				// one krmGetRanges page since this cleanup was scheduled. The caller's
+				// view is stale; let DD re-discover the current shard layout.
+				throw operation_cancelled();
+			}
+			if (currentShards.empty()) {
+				if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					throw dd_config_changed();
+				}
+				ASSERT(!currentShards.empty());
+			}
 
 			state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
@@ -1783,7 +1805,17 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						    .detail("BackgroundCleanUp", dataMove.ranges.empty());
 						throw data_move_cancelled();
 					}
-					ASSERT(!dataMove.ranges.empty() && dataMove.ranges.front().begin == keys.begin);
+					if (dataMove.ranges.empty() || dataMove.ranges.front().begin != keys.begin) {
+						// DataMoveMetaData unexpectedly empty or mismatched. During knob
+						// rollback, a concurrent DD instance may have cleared it via
+						// rewriteShardEncodedMetadata(). We can't assert here because the
+						// old DD still has knob=true (shared process in simulation) — the
+						// knob guard doesn't help. Throwing dd_config_changed restarts this
+						// DD instance, which then picks up the new knob value. In production
+						// (no concurrent DDs), this condition shouldn't occur; if it does,
+						// a restart is still safer than a crash.
+						throw dd_config_changed();
+					}
 					if (cancelDataMove) {
 						dataMove.setPhase(DataMoveMetaData::Deleting);
 						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
@@ -3466,6 +3498,11 @@ Future<Void> rawStartMovement(Database occ,
                               const MoveKeysParams& params,
                               std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		// A relocation launched before the knob changed can still carry the old-path sentinel.
+		// Never persist it as a shard-encoded data move; restart DD with the new configuration.
+		if (!params.ranges.present() || params.dataMoveId == anonymousShardId) {
+			throw dd_config_changed();
+		}
 		ASSERT(params.ranges.present());
 		return startMoveShards(std::move(occ),
 		                       params.dataMoveId,
@@ -3479,7 +3516,9 @@ Future<Void> rawStartMovement(Database occ,
 		                       params.cancelConflictingDataMoves,
 		                       params.bulkLoadTaskState);
 	}
-	ASSERT(params.keys.present());
+	if (!params.keys.present()) {
+		throw dd_config_changed();
+	}
 	return startMoveKeys(std::move(occ),
 	                     params.keys.get(),
 	                     params.destinationTeam,
@@ -3494,6 +3533,9 @@ Future<Void> rawCheckFetchingState(const Database& cx,
                                    const MoveKeysParams& params,
                                    const std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		if (!params.ranges.present()) {
+			throw dd_config_changed();
+		}
 		ASSERT(params.ranges.present());
 		// TODO: make startMoveShards work with multiple ranges.
 		ASSERT(params.ranges.get().size() == 1);
@@ -3504,7 +3546,9 @@ Future<Void> rawCheckFetchingState(const Database& cx,
 		                          params.relocationIntervalId,
 		                          tssMapping);
 	}
-	ASSERT(params.keys.present());
+	if (!params.keys.present()) {
+		throw dd_config_changed();
+	}
 	return checkFetchingState(cx,
 	                          params.healthyDestinations,
 	                          params.keys.get(),
@@ -3517,7 +3561,9 @@ Future<Void> rawFinishMovement(Database occ,
                                const MoveKeysParams& params,
                                const std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		ASSERT(params.ranges.present());
+		if (!params.ranges.present()) {
+			throw dd_config_changed();
+		}
 		return finishMoveShards(std::move(occ),
 		                        params.dataMoveId,
 		                        params.ranges.get(),
@@ -3530,7 +3576,9 @@ Future<Void> rawFinishMovement(Database occ,
 		                        params.ddEnabledState,
 		                        params.bulkLoadTaskState);
 	}
-	ASSERT(params.keys.present());
+	if (!params.keys.present()) {
+		throw dd_config_changed();
+	}
 	return finishMoveKeys(std::move(occ),
 	                      params.keys.get(),
 	                      params.destinationTeam,

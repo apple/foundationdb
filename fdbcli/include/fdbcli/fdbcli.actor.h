@@ -208,6 +208,10 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
 // Retrieve shard information command
 ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> tokens);
+// Check metadata encoding format (old vs shard-encoded)
+// Note: implemented as a C++20 coroutine (see CheckMetadataEncodingCommand.cpp), not an ACTOR,
+// so it is declared without the ACTOR keyword to keep by-value parameter linkage.
+Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRef> tokens);
 // Bulk loading command
 ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens);
 // Bulk dumping command
