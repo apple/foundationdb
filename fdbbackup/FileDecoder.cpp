@@ -46,6 +46,7 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
+#include "flow/ApiVersion.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
@@ -97,6 +98,18 @@ void printDecodeUsage() {
 	             "                 The version range's begin version (inclusive) for filtering.\n"
 	             "  --end-version-filter END_VERSION\n"
 	             "                 The version range's end version (exclusive) for filtering.\n"
+	             "  --begin-timestamp-filter DATETIME\n"
+	             "                 The version range's begin time (inclusive) for filtering, as a\n"
+	             "                 timestamp in the form \"YYYY/MM/DD.HH:MI:SS+HHMM\". Requires -C.\n"
+	             "                 Cannot be combined with --begin-version-filter.\n"
+	             "  --end-timestamp-filter DATETIME\n"
+	             "                 The version range's end time (exclusive) for filtering, as a\n"
+	             "                 timestamp in the form \"YYYY/MM/DD.HH:MI:SS+HHMM\". Requires -C.\n"
+	             "                 Cannot be combined with --end-version-filter.\n"
+	             "  -C, --cluster-file FILE\n"
+	             "                 Path to the cluster file used to resolve timestamps to versions.\n"
+	             "                 Required when --begin-timestamp-filter or --end-timestamp-filter\n"
+	             "                 is specified.\n"
 	             "  --knob-KNOBNAME KNOBVALUE\n"
 	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
 	             "  -s, --save     Save a copy of downloaded files (default: not saving).\n"
@@ -130,6 +143,9 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 
 	std::vector<std::pair<std::string, std::string>> knobs;
 	Optional<std::string> encryptionKeyFileName;
+	Optional<std::string> beginTimestamp;
+	Optional<std::string> endTimestamp;
+	std::string clusterFile;
 
 	// Returns if [begin, end) overlap with the filter range
 	bool overlap(Version begin, Version end) const {
@@ -241,6 +257,15 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		s.append(", SaveFile: ").append(save_file_locally ? "true" : "false");
 		if (encryptionKeyFileName.present()) {
 			s.append(", EncryptionKeyFile: ").append(encryptionKeyFileName.get());
+		}
+		if (beginTimestamp.present()) {
+			s.append(", BeginTimestamp: ").append(beginTimestamp.get());
+		}
+		if (endTimestamp.present()) {
+			s.append(", EndTimestamp: ").append(endTimestamp.get());
+		}
+		if (!clusterFile.empty()) {
+			s.append(", ClusterFile: ").append(clusterFile);
 		}
 		return s;
 	}
@@ -401,6 +426,18 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 
 		case OPT_ENCRYPTION_KEY_FILE:
 			param->encryptionKeyFileName = args->OptionArg();
+			break;
+
+		case OPT_BEGIN_TIMESTAMP:
+			param->beginTimestamp = args->OptionArg();
+			break;
+
+		case OPT_END_TIMESTAMP:
+			param->endTimestamp = args->OptionArg();
+			break;
+
+		case OPT_CLUSTER_FILE:
+			param->clusterFile = args->OptionArg();
 			break;
 
 		case TLSConfig::OPT_TLS_PLUGIN:
@@ -808,6 +845,86 @@ Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Ref
 }
 
 Future<Void> decode_logs(Reference<DecodeParams> params) {
+	// Resolve timestamp filters to versions before doing anything else.
+	// timeKeeperVersionFromDatetime() reads \xff\x02/timeKeeper/map/ from the live cluster.
+	if (params->beginTimestamp.present() || params->endTimestamp.present()) {
+		Database db = Database::createDatabase(params->clusterFile, ApiVersion::LATEST_VERSION);
+		// Fetch the current version to provide a warning message to a user if the provided date time resolves
+		// to a version in the future.
+		Transaction tr(db);
+		Version currentVersion = co_await tr.getReadVersion();
+
+		if (params->beginTimestamp.present()) {
+			params->beginVersionFilter = co_await timeKeeperVersionFromDatetime(params->beginTimestamp.get(), db);
+			TraceEvent("BeginTimeStampResolved")
+			    .detail("Timestamp", params->beginTimestamp.get())
+			    .detail("Version", params->beginVersionFilter);
+			// If the date time is too far in the past timeKeeperVersionFromDatetime will return a 0.
+			// This will be the same as the default for params->beginVersionFilter, so we just print a warning.
+			// Per default TimeKeeper has the timestamp to version mapping for ~6 months.
+			if (params->beginVersionFilter <= 0) {
+				fprintf(stderr,
+				        "WARNING: --begin-timestamp-filter = %s resolved to version %ld, which basically disables "
+				        "the --begin-timestamp-filter.\n",
+				        params->beginTimestamp.get().c_str(),
+				        params->beginVersionFilter);
+			}
+			// If the date time is too far in the future the returned version filter will be an extrapolated version.
+			// If this resolves beginVersionFilter: all mutations are filtered out since nothing has such a high
+			// version. In this case we throw an error, assuming that the user provided the wrong date time.
+			if (params->beginVersionFilter > currentVersion) {
+				fprintf(stderr,
+				        "ERROR: --begin-timestamp-filter = %s resolved to version %ld which is ahead of the "
+				        "current cluster version %ld. The timestamp may be in the future.\n",
+				        params->beginTimestamp.get().c_str(),
+				        params->beginVersionFilter,
+				        currentVersion);
+				throw backup_error();
+			}
+		}
+		if (params->endTimestamp.present()) {
+			params->endVersionFilter = co_await timeKeeperVersionFromDatetime(params->endTimestamp.get(), db);
+			TraceEvent("EndTimeStampResolved")
+			    .detail("Timestamp", params->endTimestamp.get())
+			    .detail("Version", params->endVersionFilter);
+			// If the date time is too far in the past we should throw an error and warn the user.
+			// Per default TimeKeeper has the timestamp to version mapping for ~6 months.
+			// This would fail the later step in params->validVersionFilters() anyways.
+			if (params->endVersionFilter <= 0) {
+				fprintf(stderr,
+				        "ERROR: --end-timestamp-filter = %s resolved to version %ld which would "
+				        "be below the --begin-timestamp-filter. The timestamp may be too much in the past.\n",
+				        params->endTimestamp.get().c_str(),
+				        params->endVersionFilter);
+				throw backup_error();
+			}
+			// If the date time is too far in the future the returned version filter will be an extrapolated version.
+			// If this resolves endVersionFilter: effectively no filtering (same as the default INT64_MAX behavior)
+			if (params->endVersionFilter > currentVersion) {
+				fprintf(stderr,
+				        "WARNING: --end-timestamp-filter = %s resolved to version %ld which is ahead of the "
+				        "current cluster version %ld. The timestamp may be in the future.\n",
+				        params->endTimestamp.get().c_str(),
+				        params->endVersionFilter,
+				        currentVersion);
+			}
+		}
+
+		// Check if the beginVersionFilter is greater than the endVersionFilter, otherwise the filtering will be
+		// invalid.
+		if (!params->validVersionFilters()) {
+			std::cerr << (params->beginTimestamp.present()
+			                  ? "--begin-timestamp-filter " + params->beginTimestamp.get()
+			                  : "--begin-version-filter " + std::to_string(params->beginVersionFilter))
+			          << " cannot be equal or greater than "
+			          << (params->endTimestamp.present()
+			                  ? "--end-timestamp-filter " + params->endTimestamp.get()
+			                  : "--end-version-filter " + std::to_string(params->endVersionFilter))
+			          << "\n";
+			throw backup_error();
+		}
+	}
+
 	Reference<IBackupContainer> container =
 	    IBackupContainer::openContainer(params->container_url, params->proxy, params->encryptionKeyFileName, 0);
 	UID uid = deterministicRandom()->randomUniqueID();
@@ -896,6 +1013,25 @@ int main(int argc, char** argv) {
 		if (status != FDB_EXIT_SUCCESS) {
 			file_converter::printDecodeUsage();
 			return status;
+		}
+
+		// Reject combining a timestamp and a version filter for the same bound.
+		if (param->beginTimestamp.present() && param->beginVersionFilter != 0) {
+			std::cerr << "ERROR: --begin-timestamp-filter and --begin-version-filter cannot be used together.\n";
+			file_converter::printDecodeUsage();
+			return FDB_EXIT_ERROR;
+		}
+		if (param->endTimestamp.present() && param->endVersionFilter != std::numeric_limits<Version>::max()) {
+			std::cerr << "ERROR: --end-timestamp-filter and --end-version-filter cannot be used together.\n";
+			file_converter::printDecodeUsage();
+			return FDB_EXIT_ERROR;
+		}
+
+		// A cluster file is required to resolve timestamps.
+		if ((param->beginTimestamp.present() || param->endTimestamp.present()) && param->clusterFile.empty()) {
+			std::cerr << "ERROR: -C / --cluster-file is required when using timestamp filters.\n";
+			file_converter::printDecodeUsage();
+			return FDB_EXIT_ERROR;
 		}
 
 		// Check if the beginVersionFilter is greater than the endVersionFilter, otherwise the filtering will be
