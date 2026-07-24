@@ -3413,13 +3413,35 @@ void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerI
 	}
 }
 
-static void throwLowDiskTLogRecoveryFailed(TLogData* self,
-                                           Reference<LogData> logData,
-                                           Version ver,
-                                           double minAvailableSpaceRatio,
-                                           StorageBytes kvStoreBytes,
-                                           StorageBytes queueBytes,
-                                           bool failRecovery) {
+double effectiveTLogMinAvailableSpaceRatio() {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
+		return 0.0;
+	}
+	return SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO;
+}
+
+static bool canTLogAcceptNewData(TLogData* self, Reference<LogData> logData, Version ver, bool failRecovery) {
+	StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
+	StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
+	const double minAvailableSpaceRatio = effectiveTLogMinAvailableSpaceRatio();
+	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, minAvailableSpaceRatio)) {
+		return true;
+	}
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
+		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpeedUpSimulation", logData->logId)
+		    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
+		    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
+		    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
+		    .detail("KvstoreBytesTotal", kvStoreBytes.total)
+		    .detail("QueueDiskBytesAvailable", queueBytes.available)
+		    .detail("QueueDiskBytesTotal", queueBytes.total)
+		    .detail("Version", ver);
+		g_simulator->speedUpSimulation = true;
+		if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, effectiveTLogMinAvailableSpaceRatio())) {
+			return true;
+		}
+	}
+	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
 	if (!self->lowDiskTLogExclusion->get()) {
 		self->lowDiskTLogExclusion->set(true);
 	}
@@ -3433,39 +3455,10 @@ static void throwLowDiskTLogRecoveryFailed(TLogData* self,
 	    .detail("Version", ver)
 	    .detail("Action", failRecovery ? "FailRecoveryAndRecruitNewTLogs" : "PausePullAndRecruitNewTLogs");
 	CODE_PROBE(failRecovery, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO");
-	throw recruitment_failed();
-}
-
-double effectiveTLogMinAvailableSpaceRatio() {
-	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
-		return 0.0;
+	if (failRecovery) {
+		throw recruitment_failed();
 	}
-	return SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO;
-}
-
-static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> logData, Version ver, bool failRecovery) {
-	StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
-	StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
-	const double minAvailableSpaceRatio = effectiveTLogMinAvailableSpaceRatio();
-	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, minAvailableSpaceRatio)) {
-		return;
-	}
-	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
-		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpeedUpSimulation", logData->logId)
-		    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
-		    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
-		    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
-		    .detail("KvstoreBytesTotal", kvStoreBytes.total)
-		    .detail("QueueDiskBytesAvailable", queueBytes.available)
-		    .detail("QueueDiskBytesTotal", queueBytes.total)
-		    .detail("Version", ver);
-		g_simulator->speedUpSimulation = true;
-		if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, effectiveTLogMinAvailableSpaceRatio())) {
-			return;
-		}
-	}
-	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
-	throwLowDiskTLogRecoveryFailed(self, logData, ver, minAvailableSpaceRatio, kvStoreBytes, queueBytes, failRecovery);
+	return false;
 }
 
 static Future<Void> waitUntilTLogAcceptsNewDataImpl(TLogData* self, Reference<LogData> logData, Version ver) {
@@ -3480,13 +3473,8 @@ static Future<Void> waitUntilTLogAcceptsNewDataImpl(TLogData* self, Reference<Lo
 			co_return;
 		}
 
-		try {
-			failIfTLogCannotAcceptNewData(self, logData, ver, false);
+		if (canTLogAcceptNewData(self, logData, ver, false)) {
 			co_return;
-		} catch (Error& e) {
-			if (e.code() != error_code_recruitment_failed) {
-				throw;
-			}
 		}
 	}
 }
@@ -3495,15 +3483,9 @@ static Future<Void> waitUntilTLogAcceptsNewData(TLogData* self,
                                                 Reference<LogData> logData,
                                                 Version ver,
                                                 Optional<Version> endVersion) {
-	try {
-		failIfTLogCannotAcceptNewData(self, logData, ver, endVersion.present());
+	if (canTLogAcceptNewData(self, logData, ver, endVersion.present())) {
 		return Void();
-	} catch (Error& e) {
-		if (e.code() != error_code_recruitment_failed || endVersion.present()) {
-			throw;
-		}
 	}
-
 	return waitUntilTLogAcceptsNewDataImpl(self, logData, ver);
 }
 
