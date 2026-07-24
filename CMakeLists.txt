@@ -83,6 +83,12 @@ if(WITH_ACAC)
   add_compile_definitions(WITH_ACAC)
 endif()
 
+option(FDB_MEMORY_TRACKER "Compile in the sampled per-call-site memory tracker (flow/MemoryTracker)" ON)
+if(NOT FDB_MEMORY_TRACKER)
+  message(STATUS "Building FoundationDB with the memory tracker compiled out")
+  add_compile_definitions(FDB_MEMORY_TRACKER=0)
+endif()
+
 ###############################################################################
 # Packages used for bindings
 ###############################################################################
