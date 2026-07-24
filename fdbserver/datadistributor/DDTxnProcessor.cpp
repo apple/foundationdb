@@ -853,13 +853,32 @@ class DDTxnProcessorImpl {
 				if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 					bool canRemove = co_await canRemoveStorageServer(tr, serverID);
 					auto shards = shardsAffectedByTeamFailure->getNumberOfShards(serverID);
-					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
+					TraceEvent(SevInfo, "WaitForAllDataRemoved")
 					    .detail("Server", serverID)
 					    .detail("CanRemove", canRemove)
 					    .detail("Shards", shards);
 					ASSERT_GE(shards, 0);
-					if (canRemove && shards == 0) {
-						co_return;
+					if (canRemove) {
+						// canRemoveStorageServer() consults the authoritative on-disk serverKeys: when it is
+						// true the server owns no data. The in-memory ShardsAffectedByTeamFailure count can
+						// nonetheless be stranded > 0 by moveShard()'s partial-overlap branch -- a sub-range
+						// move (e.g. produced by DDQueue relocation splitting under a saturated
+						// DD_MAX_PIPELINE_MOVES pipeline) appends the destination team without erasing the
+						// drained source team, and no later fully-contained move rewrites that coarse entry.
+						// That stale count would otherwise block removeStorageServer() indefinitely until a DD
+						// restart rebuilt the map from disk. Since the on-disk state already confirms the server
+						// is empty, reconcile the in-memory map to it instead of waiting.
+						if (shards == 0) {
+							co_return;
+						} else if (SERVER_KNOBS->DD_RECONCILE_SHARDS_ON_EXCLUDE) {
+							TraceEvent(SevWarnAlways, "ShardsAffectedReconciledOnExclude")
+							    .detail("Server", serverID)
+							    .detail("StrandedShards", shards);
+							shardsAffectedByTeamFailure->removeFailedServerForRange(allKeys, serverID);
+							co_return;
+						}
+						// Knob disabled and the count is still > 0: fall through to the delay below and keep
+						// waiting for it to reach 0 on its own (legacy behavior).
 					}
 				}
 
