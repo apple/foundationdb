@@ -3450,7 +3450,8 @@ static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> log
 		return;
 	}
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
-		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpeedUpSimulation", logData->logId)
+		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSimulationBypass", logData->logId)
+		    .suppressFor(60.0)
 		    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
 		    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
 		    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
@@ -3458,8 +3459,7 @@ static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> log
 		    .detail("QueueDiskBytesAvailable", queueBytes.available)
 		    .detail("QueueDiskBytesTotal", queueBytes.total)
 		    .detail("Version", ver);
-		g_simulator->speedUpSimulation = true;
-		if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, effectiveTLogMinAvailableSpaceRatio())) {
+		if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, 0.0)) {
 			return;
 		}
 	}
