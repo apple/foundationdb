@@ -36,90 +36,17 @@ namespace fdbctl {
 namespace utils {
 
 Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
-	Reference<ITransaction> tr = db->createTransaction();
-	loop {
-		Error err;
-		try {
-			ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(special_keys::excludedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::vector<std::string> exclusions;
-			for (const auto& i : r) {
-				auto addr = i.key.removePrefix(special_keys::excludedServersSpecialKeyRange.begin).toString();
-				exclusions.push_back(addr);
-			}
-			co_return exclusions;
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-
-			TraceEvent(SevWarn, "GetExcludedServersError").error(e);
-			err = e;
-		}
-
-		co_await safeThreadFutureToFuture(tr->onError(err));
-	}
+	return getManagementApiSpecialKeyValues(
+	    db, special_keys::excludedServersSpecialKeyRange, "GetExcludedServersError");
 }
 
 Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
-	Reference<ITransaction> tr = db->createTransaction();
-	loop {
-		Error err;
-		try {
-			ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(special_keys::failedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::vector<std::string> exclusions;
-			for (const auto& i : r) {
-				auto addr = i.key.removePrefix(special_keys::failedServersSpecialKeyRange.begin).toString();
-				exclusions.push_back(addr);
-			}
-
-			co_return exclusions;
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-
-			TraceEvent(SevWarn, "GetExcludedServersError").error(e);
-			err = e;
-		}
-
-		co_await safeThreadFutureToFuture(tr->onError(err));
-	}
+	return getManagementApiSpecialKeyValues(db, special_keys::failedServersSpecialKeyRange, "GetExcludedServersError");
 }
 
 Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) {
-	Reference<ITransaction> tr = db->createTransaction();
-	loop {
-		Error err;
-		try {
-			ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(special_keys::excludedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::vector<std::string> excludedLocalities;
-			for (const auto& i : r) {
-				auto locality = i.key.removePrefix(special_keys::excludedLocalitySpecialKeyRange.begin).toString();
-				excludedLocalities.push_back(locality);
-			}
-			co_return excludedLocalities;
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-
-			TraceEvent(SevWarn, "GetExcludedLocalitiesError").error(e);
-			err = e;
-		}
-		co_await safeThreadFutureToFuture(tr->onError(err));
-	}
+	return getManagementApiSpecialKeyValues(
+	    db, special_keys::excludedLocalitySpecialKeyRange, "GetExcludedLocalitiesError");
 }
 
 Future<std::set<NetworkAddress>> getInProgressExclusion(Reference<ITransaction> tr) {
@@ -136,32 +63,8 @@ Future<std::set<NetworkAddress>> getInProgressExclusion(Reference<ITransaction> 
 }
 
 Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
-	Reference<ITransaction> tr = db->createTransaction();
-	loop {
-		Error err;
-		try {
-			ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(special_keys::failedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::vector<std::string> excludedLocalities;
-			for (const auto& i : r) {
-				auto locality = i.key.removePrefix(special_keys::failedLocalitySpecialKeyRange.begin).toString();
-				excludedLocalities.push_back(locality);
-			}
-			co_return excludedLocalities;
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-
-			TraceEvent(SevWarn, "GetFailedLocalitiesError").error(e);
-			err = e;
-		}
-
-		co_await safeThreadFutureToFuture(tr->onError(err));
-	}
+	return getManagementApiSpecialKeyValues(
+	    db, special_keys::failedLocalitySpecialKeyRange, "GetFailedLocalitiesError");
 }
 
 } // namespace utils
@@ -263,6 +166,7 @@ Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> d
 				break;
 
 			co_await delayJittered(1.0); // SOMEDAY: watches!
+			continue;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;

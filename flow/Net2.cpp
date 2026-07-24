@@ -922,7 +922,8 @@ public:
 	static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
 	                                              Reference<ReferencedObject<boost::asio::ssl::context>> context,
 	                                              NetworkAddress addr,
-	                                              tcp::socket* existingSocket = nullptr) {
+	                                              tcp::socket* existingSocket = nullptr,
+	                                              std::string hostname = {}) {
 		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
@@ -949,6 +950,7 @@ public:
 
 		Reference<SSLConnection> self(new SSLConnection(*ios, context));
 		self->peer_address = addr;
+		self->sni_hostname = std::move(hostname);
 		try {
 			auto to = tcpEndpoint(self->peer_address);
 			BindPromise p("N2_ConnectError", self->id, self->peer_address);
@@ -956,51 +958,6 @@ public:
 			self->socket.async_connect(to, std::move(p));
 
 			co_await onConnected;
-			self->init();
-			co_return self;
-		} catch (Error&) {
-			// Either the connection failed, or was cancelled by the caller
-			self->closeSocket();
-			throw;
-		}
-	}
-
-	// Connect with hostname for SNI (Server Name Indication) support
-	static Future<Reference<IConnection>> connectWithHostname(
-	    boost::asio::io_service* ios,
-	    Reference<ReferencedObject<boost::asio::ssl::context>> context,
-	    NetworkAddress addr,
-	    std::string hostname) {
-		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
-		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-			if (now() < iter->second.second) {
-				if (iter->second.first >= FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS) {
-					TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", addr);
-					co_await delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
-					throw connection_failed();
-				}
-			} else {
-				g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
-			}
-		}
-
-		Reference<SSLConnection> self(new SSLConnection(*ios, context));
-		self->peer_address = addr;
-		self->sni_hostname = hostname; // Store hostname for SNI during handshake
-
-		// Store hostname for SNI use during handshake
-
-		try {
-			auto to = tcpEndpoint(self->peer_address);
-			BindPromise p("N2_ConnectError", self->id, self->peer_address);
-			Future<Void> onConnected = p.getFuture();
-			self->socket.async_connect(to, std::move(p));
-
-			co_await onConnected;
-
-			// SNI will be set later in doConnectHandshake before SSL handshake
-
 			self->init();
 			co_return self;
 		} catch (Error&) {
@@ -2020,7 +1977,7 @@ Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr) {
 Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr, const std::string& hostname) {
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
-		return SSLConnection::connectWithHostname(&this->reactor.ios, this->sslContextVar.get(), toAddr, hostname);
+		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, nullptr, hostname);
 	}
 	return connect(toAddr);
 }
