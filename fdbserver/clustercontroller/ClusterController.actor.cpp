@@ -3566,6 +3566,43 @@ TEST_CASE("/fdbserver/clustercontroller/recoverForExcludedOldTLogLocality") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/clustercontroller/recoverForLowDiskCurrentTLog") {
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+
+	LocalityData masterLocality;
+	masterLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "master" }));
+	data.id_worker[masterLocality.processId()];
+
+	const NetworkAddress tLogAddress(IPAddress(0x02020202), 1);
+	LocalityData tLogLocality;
+	tLogLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "low-disk-tlog" }));
+	WorkerInterface worker(tLogLocality);
+	worker.tLog = RequestStream<InitializeTLogRequest>(Endpoint({ tLogAddress }, UID(1, 2)));
+	auto& tLogWorker = data.id_worker[tLogLocality.processId()];
+	tLogWorker.details.interf = worker;
+	tLogWorker.issues.push_back_deep(tLogWorker.issues.arena(), "exclude_from_tlog_recruitment_low_disk"_sr);
+	ASSERT(!tLogWorker.priorityInfo.isExcluded);
+	ASSERT(excludesFromTLogRecruitmentDueToLowDisk(tLogWorker.issues));
+
+	TLogInterface currentTLog(tLogLocality);
+	currentTLog.peekMessages = RequestStream<TLogPeekRequest>(Endpoint({ tLogAddress }, UID(3, 4)));
+	TLogSet tLogSet;
+	tLogSet.tLogs.push_back(OptionalInterface(currentTLog));
+
+	ServerDBInfo dbInfo;
+	dbInfo.master.locality = masterLocality;
+	dbInfo.logSystemConfig.tLogs.push_back(tLogSet);
+	dbInfo.recoveryState = RecoveryState::FULLY_RECOVERED;
+	data.db.serverInfo->set(dbInfo);
+
+	ASSERT(data.betterMasterExists());
+	return Void();
+}
+
 // Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth`
 // based on `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
