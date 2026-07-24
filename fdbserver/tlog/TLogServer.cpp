@@ -3459,9 +3459,8 @@ static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> log
 		    .detail("QueueDiskBytesAvailable", queueBytes.available)
 		    .detail("QueueDiskBytesTotal", queueBytes.total)
 		    .detail("Version", ver);
-		if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, 0.0)) {
-			return;
-		}
+		// Bypass only this simulated pull; do not speed up the whole simulation.
+		return;
 	}
 	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
 	// Outside speedUpSimulation, fail recovery and temporarily exclude this worker from TLog recruitment until disk
