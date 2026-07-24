@@ -2416,12 +2416,12 @@ std::shared_ptr<MoveInShard> StorageServer::getMoveInShard(const UID& dataMoveId
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, req.spanContext);
+	state CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	try {
 		++data->counters.getValueQueries;
-		++data->counters.allQueries;
 		if (req.key.startsWith(systemKeys.begin)) {
 			++data->counters.systemKeyQueries;
 		}
@@ -2539,8 +2539,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	// Key size is not included in "BytesQueried", but still contributes to cost,
 	// so it must be accounted for here.
 	data->transactionTagCounter.addRequest(req.tags, req.key.size() + resultSize);
-
-	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -4535,8 +4533,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
+	state CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	++data->counters.getRangeQueries;
-	++data->counters.allQueries;
 	if (req.begin.getKey().startsWith(systemKeys.begin)) {
 		++data->counters.systemKeyQueries;
 		++data->counters.getRangeSystemKeyQueries;
@@ -4711,7 +4709,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -6224,8 +6221,8 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
-	++data->counters.getMappedRangeQueries;
-	++data->counters.allQueries;
+	state CountedSection csAll(data->counters.allQueries, data->counters.finishedQueries);
+	state CountedSection csRangeMapped(data->counters.getMappedRangeQueries, data->counters.finishedGetMappedRangeQueries);
 	if (req.begin.getKey().startsWith(systemKeys.begin)) {
 		++data->counters.systemKeyQueries;
 	}
@@ -6404,8 +6401,6 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-	++data->counters.finishedQueries;
-	++data->counters.finishedGetMappedRangeQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -6433,8 +6428,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	state int64_t resultSize = 0;
 
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
+	state CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	++data->counters.getRangeStreamQueries;
-	++data->counters.allQueries;
 	if (req.begin.getKey().startsWith(systemKeys.begin)) {
 		++data->counters.systemKeyQueries;
 	}
@@ -6632,7 +6627,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-	++data->counters.finishedQueries;
 
 	return Void();
 }
@@ -6643,8 +6637,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
+	state CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	++data->counters.getKeyQueries;
-	++data->counters.allQueries;
 	data->maxQueryQueue = std::max<int>(
 	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
