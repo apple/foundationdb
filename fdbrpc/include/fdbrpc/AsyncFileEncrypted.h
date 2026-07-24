@@ -25,10 +25,12 @@
 #include "flow/flow.h"
 #include "flow/IRandom.h"
 #include "flow/StreamCipher.h"
+#include "flow/EncryptionFormatVersion.h"
 
 /*
  * Append-only file encrypted using AES-256-GCM.
- * */
+ *
+ */
 class AsyncFileEncrypted : public IAsyncFile, public ReferenceCounted<AsyncFileEncrypted> {
 public:
 	enum class Mode { APPEND_ONLY, READ_ONLY };
@@ -49,10 +51,11 @@ private:
 	int offsetInBlock{ 0 };
 	std::vector<unsigned char> writeBuffer;
 	int encryptionBlockSize{ 0 };
+	FormatVersion formatVersion{ CURRENT_FORMAT_VERSION };
 	Future<Void> initialize();
 
 public:
-	AsyncFileEncrypted(Reference<IAsyncFile>, Mode, int);
+	AsyncFileEncrypted(Reference<IAsyncFile>, Mode, int, FormatVersion);
 	void addref() override;
 	void delref() override;
 	Future<int> read(void* data, int length, int64_t offset) override;
@@ -67,10 +70,14 @@ public:
 	void releaseZeroCopy(void* data, int length, int64_t offset) override;
 	int64_t debugFD() const override;
 
+	FormatVersion getFormatVersion() const { return formatVersion; }
+
 	// Convert raw on-disk file size (including per-block GCM tags) to logical plaintext size.
 	// Pure math, no I/O. blockSize is the plaintext block size (encryptionBlockSize).
+	// Only meaningful for formatVersion >= V2. For V1, raw size equals logical size.
 	static int64_t rawToLogicalSize(int64_t rawSize, int blockSize);
 
 	// Inverse of rawToLogicalSize: given a logical plaintext size, return the raw on-disk size.
+	// Only meaningful for formatVersion >= V2. For V1, raw size equals logical size.
 	static int64_t logicalToRawSize(int64_t logicalSize, int blockSize);
 };

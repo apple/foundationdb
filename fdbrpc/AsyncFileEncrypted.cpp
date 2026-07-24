@@ -44,9 +44,19 @@ public:
 		return iv;
 	}
 
-	// Read a single block of encryptionBlockSize bytes plus the trailing GCM tag, verify tag, and decrypt.
+	// Read a single encrypted block from disk and return the decrypted plaintext.
 	static Future<Standalone<StringRef>> readBlock(AsyncFileEncrypted* self, uint32_t block) {
 		Arena arena;
+		if (self->formatVersion == FormatVersion::V1) {
+			auto* encrypted = new (arena) unsigned char[self->encryptionBlockSize];
+			int bytes = co_await uncancellable(holdWhile(
+			    arena,
+			    self->file->read(encrypted, self->encryptionBlockSize, int64_t(self->encryptionBlockSize) * block)));
+			StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
+			DecryptionStreamCipher decryptor(cipherKey, self->getIV(block));
+			auto decrypted = decryptor.decrypt(encrypted, bytes, arena);
+			co_return Standalone<StringRef>(decrypted, arena);
+		}
 		const int rawBlockSize = self->encryptionBlockSize + GCM_TAG_LEN;
 		auto* encrypted = new (arena) unsigned char[rawBlockSize];
 		int bytes = co_await uncancellable(
@@ -67,7 +77,9 @@ public:
 	static Future<int> read(Reference<AsyncFileEncrypted> self, void* data, int length, int64_t offset) {
 		if (self->fileSize == -1) {
 			int64_t rawSize = co_await self->file->size();
-			self->fileSize = AsyncFileEncrypted::rawToLogicalSize(rawSize, self->encryptionBlockSize);
+			self->fileSize = (self->formatVersion == FormatVersion::V1)
+			                     ? rawSize
+			                     : AsyncFileEncrypted::rawToLogicalSize(rawSize, self->encryptionBlockSize);
 		}
 		if (offset >= self->fileSize) {
 			co_return 0;
@@ -143,9 +155,14 @@ public:
 	}
 };
 
-AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode, int encryptionBlockSize)
-  : file(file), mode(mode), currentBlock(0), encryptionBlockSize(encryptionBlockSize) {
+AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file,
+                                       Mode mode,
+                                       int encryptionBlockSize,
+                                       FormatVersion formatVersion)
+  : file(file), mode(mode), currentBlock(0), encryptionBlockSize(encryptionBlockSize), formatVersion(formatVersion) {
 	ASSERT(encryptionBlockSize > 0);
+	// Assert if writing (APPEND_ONLY) is attempted on a legacy (v1) file. Writes always use CURRENT_FORMAT_VERSION.
+	ASSERT(mode != Mode::APPEND_ONLY || formatVersion == CURRENT_FORMAT_VERSION);
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (mode == Mode::APPEND_ONLY) {
 		writeBuffer = std::vector<unsigned char>(encryptionBlockSize, 0);
@@ -197,6 +214,7 @@ Future<Void> AsyncFileEncrypted::zeroRange(int64_t offset, int64_t length) {
 
 Future<Void> AsyncFileEncrypted::truncate(int64_t size) {
 	ASSERT(mode == Mode::APPEND_ONLY);
+	// Writes always use CURRENT_FORMAT_VERSION.
 	return file->truncate(logicalToRawSize(size, encryptionBlockSize));
 }
 
@@ -212,6 +230,9 @@ Future<Void> AsyncFileEncrypted::flush() {
 
 Future<int64_t> AsyncFileEncrypted::size() const {
 	ASSERT(mode == Mode::READ_ONLY);
+	if (formatVersion == FormatVersion::V1) {
+		return file->size();
+	}
 	int blockSize = encryptionBlockSize;
 	return map(file->size(), [blockSize](int64_t raw) { return rawToLogicalSize(raw, blockSize); });
 }
@@ -272,8 +293,8 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
 	Reference<IAsyncFile> rawFile = co_await IAsyncFileSystem::filesystem()->open(
 	    joinPath(params.getDataDir(), "test-encrypted-file"), flags, 0600);
-	Reference<IAsyncFile> file =
-	    makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize);
+	Reference<IAsyncFile> file = makeReference<AsyncFileEncrypted>(
+	    rawFile, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize, CURRENT_FORMAT_VERSION);
 	int bytesWritten = 0;
 	int chunkSize;
 	while (bytesWritten < bytes) {
@@ -282,7 +303,8 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 		bytesWritten += chunkSize;
 	}
 	co_await file->sync();
-	file = makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
+	file = makeReference<AsyncFileEncrypted>(
+	    rawFile, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize, CURRENT_FORMAT_VERSION);
 	int bytesRead = 0;
 	while (bytesRead < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesRead);
