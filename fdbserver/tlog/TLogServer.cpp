@@ -3442,18 +3442,21 @@ static bool canTLogAcceptNewData(TLogData* self, Reference<LogData> logData, Ver
 		}
 	}
 	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
-	if (!self->lowDiskTLogExclusion->get()) {
+	const bool enteringLowDisk = !self->lowDiskTLogExclusion->get();
+	if (enteringLowDisk) {
 		self->lowDiskTLogExclusion->set(true);
 	}
-	TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpace", logData->logId)
-	    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
-	    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
-	    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
-	    .detail("KvstoreBytesTotal", kvStoreBytes.total)
-	    .detail("QueueDiskBytesAvailable", queueBytes.available)
-	    .detail("QueueDiskBytesTotal", queueBytes.total)
-	    .detail("Version", ver)
-	    .detail("Action", failRecovery ? "FailRecoveryAndRecruitNewTLogs" : "PausePullAndRecruitNewTLogs");
+	if (enteringLowDisk || failRecovery) {
+		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpace", logData->logId)
+		    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
+		    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
+		    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
+		    .detail("KvstoreBytesTotal", kvStoreBytes.total)
+		    .detail("QueueDiskBytesAvailable", queueBytes.available)
+		    .detail("QueueDiskBytesTotal", queueBytes.total)
+		    .detail("Version", ver)
+		    .detail("Action", failRecovery ? "FailRecoveryAndRecruitNewTLogs" : "PausePullAndRecruitNewTLogs");
+	}
 	CODE_PROBE(failRecovery, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO");
 	if (failRecovery) {
 		throw recruitment_failed();
