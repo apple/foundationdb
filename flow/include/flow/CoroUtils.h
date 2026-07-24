@@ -385,6 +385,25 @@ struct RaceImplActor final : Actor<Result>,
 
 using Choose = coro::ChooseClause<>;
 
+template <class T>
+Future<T> timeoutChoose(Future<T> what, Future<Void> end, T timedoutValue) {
+	// Move inputs out of coroutine parameters so the losing future is released before completion callbacks run.
+	Future<T> pending(std::move(what));
+	Future<Void> timer(std::move(end));
+	if constexpr (std::is_same_v<T, Void>) {
+		co_await Choose().When(pending, [](Void const&) {}).When(timer, [](Void const&) {}).run();
+		co_return;
+	} else {
+		T timeoutValue(std::move(timedoutValue));
+		Optional<T> result;
+		co_await Choose()
+		    .When(pending, [&](T const& value) { result.withDefault(value); })
+		    .When(timer, [&](Void const&) { result.withDefault(std::move(timeoutValue)); })
+		    .run();
+		co_return std::move(result).get();
+	}
+}
+
 // Waits for the first input Future/FutureStream/ThreadFutureStream to become ready and returns its value in a
 // variant whose index matches the winning argument. If multiple inputs are already ready, the lowest-index argument
 // wins; for streams, the next queued element is consumed. Errors and explicit cancellation propagate to the returned

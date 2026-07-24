@@ -66,7 +66,7 @@ private:
 		//   "" -> "1"    "d" -> ""    "j" -> "1"    "\xff\xff" -> ""
 		{
 			auto tr = makeReference<ReadYourWritesTransaction>(cx);
-			loop {
+			while (true) {
 				Error err;
 				try {
 					co_await krmSetRange(tr, testPrefix, allKeys, serverKeysTrue);
@@ -80,7 +80,7 @@ private:
 		}
 		{
 			auto tr = makeReference<ReadYourWritesTransaction>(cx);
-			loop {
+			while (true) {
 				Error err;
 				try {
 					co_await krmSetRange(tr, testPrefix, KeyRangeRef("d"_sr, "j"_sr), serverKeysFalse);
@@ -96,7 +96,7 @@ private:
 		// Verify setup.
 		{
 			auto tr = makeReference<ReadYourWritesTransaction>(cx);
-			loop {
+			while (true) {
 				Error err;
 				try {
 					RangeResult result = co_await krmGetRanges(tr, testPrefix, allKeys);
@@ -139,7 +139,7 @@ private:
 			KeyRangeRef currentKeys("a"_sr, "m"_sr);
 
 			auto tr = makeReference<ReadYourWritesTransaction>(cx);
-			loop {
+			while (true) {
 				Error err;
 				try {
 					co_await removeOldDestinations(tr, testPrefix, shards, currentKeys);
@@ -164,7 +164,7 @@ private:
 		// coalesces left through the now-extended "" region back to "c".
 		{
 			auto tr = makeReference<ReadYourWritesTransaction>(cx);
-			loop {
+			while (true) {
 				Error err;
 				try {
 					RangeResult result = co_await krmGetRanges(tr, testPrefix, allKeys);
