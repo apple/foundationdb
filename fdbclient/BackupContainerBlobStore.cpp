@@ -198,15 +198,15 @@ void BackupContainerBlobStore::validateBackupUrl(const std::string& resource) {
 Future<Reference<IAsyncFile>> BackupContainerBlobStore::readFile(const std::string& path) {
 	Reference<IAsyncFile> f = makeReference<AsyncFileBlobStoreRead>(m_bstore, m_bucket, dataPath(path));
 
-	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
-	}
 	if (m_bstore->knobs.enable_read_cache) {
 		f = makeReference<AsyncFileReadAheadCache>(f,
 		                                           m_bstore->knobs.read_block_size,
 		                                           m_bstore->knobs.read_ahead_blocks,
 		                                           m_bstore->knobs.concurrent_reads_per_file,
 		                                           m_bstore->knobs.read_cache_blocks_per_file);
+	}
+	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
+		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
 	}
 	return f;
 }
