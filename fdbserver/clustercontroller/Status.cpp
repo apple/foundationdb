@@ -1795,6 +1795,7 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 
 static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
                                                         DatabaseConfiguration configuration,
+                                                        bool degradedMultiRegion,
                                                         int* minStorageReplicasRemaining) {
 	JsonBuilderObject statusObjData;
 
@@ -1817,14 +1818,6 @@ static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 
 		TraceEventFields startingStats = dataInfo[0];
 		TraceEventFields dataStats = dataInfo[1];
-
-		if (startingStats.size() && startingStats.getValue("State") != "Active") {
-			JsonBuilderObject stateSectionObj;
-			stateSectionObj["name"] = "initializing";
-			stateSectionObj["description"] = "(Re)initializing automatic data distribution";
-			statusObjData["state"] = stateSectionObj;
-			co_return statusObjData;
-		}
 
 		TraceEventFields md = dataInfo[2];
 
@@ -1854,6 +1847,18 @@ static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 			statusObjData.setKeyRawNumber("total_kv_size_bytes", dataStats.getValue("TotalSizeBytes"));
 			statusObjData.setKeyRawNumber("system_kv_size_bytes", dataStats.getValue("SystemSizeBytes"));
 			statusObjData.setKeyRawNumber("partitions_count", dataStats.getValue("Shards"));
+		}
+
+		if (startingStats.size() && startingStats.getValue("State") != "Active") {
+			JsonBuilderObject stateSectionObj;
+			stateSectionObj["name"] = "initializing";
+			// When operating with a region down (data recovered in the surviving region but recovery is stuck at
+			// accepting_commits waiting for the other region's logs), make the degraded multiregional explicit.
+			stateSectionObj["description"] = degradedMultiRegion
+			                                     ? "Degraded multiregional (Re)initializing automatic data distribution"
+			                                     : "(Re)initializing automatic data distribution";
+			statusObjData["state"] = stateSectionObj;
+			co_return statusObjData;
 		}
 
 		JsonBuilderArray teamTrackers;
@@ -3167,11 +3172,18 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 
 			int minStorageReplicasRemaining = -1;
 			int fullyReplicatedRegions = -1;
+			// The cluster is "degraded multi-region" when it is configured for two usable regions but recovery is
+			// stuck at accepting_commits: the primary region recovered and is committing, but the other region's
+			// logs are missing. Committed data is still safe in the surviving region (and its satellite), so this
+			// is a degraded-but-not-data-losing state.
+			bool degradedMultiRegion = configuration.present() && configuration.get().usableRegions > 1 &&
+			                           statusCode == RecoveryStatus::accepting_commits;
+			statusObj["degraded_multi_region"] = degradedMultiRegion;
 			// NOTE: here we should start all the transaction before wait in order to overlay latency
 			Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
 			std::vector<AsyncResult<JsonBuilderObject>> statusSectionFetchers;
 			statusSectionFetchers.push_back(
-			    dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
+			    dataStatusFetcher(ddWorker, configuration.get(), degradedMultiRegion, &minStorageReplicasRemaining));
 			statusSectionFetchers.push_back(workloadStatusFetcher(
 			    db, workers, mWorker, rkWorker, &qos, &dataOverlay, &status_incomplete_reasons, storageServerFuture));
 			statusSectionFetchers.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
