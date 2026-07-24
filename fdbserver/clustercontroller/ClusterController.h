@@ -28,6 +28,8 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
+#include "fdbrpc/simulator.h"
 #include "ClusterHealthMonitor.h"
 #include "RatekeeperMonitor.h"
 #include "fdbserver/core/Knobs.h"
@@ -1508,6 +1510,9 @@ public:
 	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
 	    bool checkStable = false) {
 		std::map<std::tuple<recruitment::Fitness, int, bool, int>, std::vector<WorkerDetails>> fitness_workers;
+		// A fault-injected machine can remain registered; retain the usual fallback if no backup worker is reliable.
+		std::map<std::tuple<recruitment::Fitness, int, bool, int>, std::vector<WorkerDetails>>
+		    unreliable_fitness_workers;
 		std::vector<WorkerDetails> results;
 		if (minWorker.present()) {
 			results.push_back(minWorker.get().worker);
@@ -1527,12 +1532,20 @@ public:
 			      (fitness < minWorker.get().fitness ||
 			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
 				auto sharing = preferredSharing.find(it.first);
-				fitness_workers[std::make_tuple(fitness,
-				                                id_used[it.first],
-				                                isLongLivedStateless(it.first),
-				                                sharing != preferredSharing.end() ? sharing->second : 1e6)]
+				auto& workers =
+				    role == recruitment::Backup && g_network->isSimulated() &&
+				            !g_simulator->getProcessByAddress(it.second.details.interf.address())->isReliable()
+				        ? unreliable_fitness_workers
+				        : fitness_workers;
+				workers[std::make_tuple(fitness,
+				                        id_used[it.first],
+				                        isLongLivedStateless(it.first),
+				                        sharing != preferredSharing.end() ? sharing->second : 1e6)]
 				    .push_back(it.second.details);
 			}
+		}
+		if (fitness_workers.empty()) {
+			fitness_workers = std::move(unreliable_fitness_workers);
 		}
 
 		for (auto& it : fitness_workers) {
