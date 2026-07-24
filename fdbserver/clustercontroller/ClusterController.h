@@ -2459,6 +2459,12 @@ public:
 					    .detail("ProcessID", it.interf().filteredLocality.processId());
 					return true;
 				}
+				if (excludesFromTLogRecruitmentDueToLowDisk(tlogWorker->second.issues)) {
+					TraceEvent("BetterMasterExists", id)
+					    .detail("Reason", "TLogLowDisk")
+					    .detail("ProcessID", it.interf().filteredLocality.processId());
+					return true;
+				}
 
 				if (logSet.isLocal && logSet.locality == tagLocalitySatellite) {
 					satellite_tlogs.push_back(tlogWorker->second.details);

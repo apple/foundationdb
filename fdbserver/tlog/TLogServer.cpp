@@ -3418,7 +3418,8 @@ static void throwLowDiskTLogRecoveryFailed(TLogData* self,
                                            Version ver,
                                            double minAvailableSpaceRatio,
                                            StorageBytes kvStoreBytes,
-                                           StorageBytes queueBytes) {
+                                           StorageBytes queueBytes,
+                                           bool failRecovery) {
 	if (!self->lowDiskTLogExclusion->get()) {
 		self->lowDiskTLogExclusion->set(true);
 	}
@@ -3430,8 +3431,8 @@ static void throwLowDiskTLogRecoveryFailed(TLogData* self,
 	    .detail("QueueDiskBytesAvailable", queueBytes.available)
 	    .detail("QueueDiskBytesTotal", queueBytes.total)
 	    .detail("Version", ver)
-	    .detail("Action", "FailRecoveryAndRecruitNewTLogs");
-	CODE_PROBE(true, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
+	    .detail("Action", failRecovery ? "FailRecoveryAndRecruitNewTLogs" : "PausePullAndRecruitNewTLogs");
+	CODE_PROBE(failRecovery, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO");
 	throw recruitment_failed();
 }
 
@@ -3442,7 +3443,7 @@ double effectiveTLogMinAvailableSpaceRatio() {
 	return SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO;
 }
 
-static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> logData, Version ver) {
+static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> logData, Version ver, bool failRecovery) {
 	StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
 	StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
 	const double minAvailableSpaceRatio = effectiveTLogMinAvailableSpaceRatio();
@@ -3464,9 +3465,46 @@ static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> log
 		}
 	}
 	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
-	// Outside speedUpSimulation, fail recovery and temporarily exclude this worker from TLog recruitment until disk
-	// space recovers.
-	throwLowDiskTLogRecoveryFailed(self, logData, ver, minAvailableSpaceRatio, kvStoreBytes, queueBytes);
+	throwLowDiskTLogRecoveryFailed(self, logData, ver, minAvailableSpaceRatio, kvStoreBytes, queueBytes, failRecovery);
+}
+
+static Future<Void> waitUntilTLogAcceptsNewDataImpl(TLogData* self, Reference<LogData> logData, Version ver) {
+	while (true) {
+		if (logData->stopped()) {
+			co_return;
+		}
+		co_await race(self->lowDiskTLogExclusion->onChange(),
+		              logData->stoppedPromise.getFuture(),
+		              delayJittered(1.0, TaskPriority::TLogCommit));
+		if (logData->stopped()) {
+			co_return;
+		}
+
+		try {
+			failIfTLogCannotAcceptNewData(self, logData, ver, false);
+			co_return;
+		} catch (Error& e) {
+			if (e.code() != error_code_recruitment_failed) {
+				throw;
+			}
+		}
+	}
+}
+
+static Future<Void> waitUntilTLogAcceptsNewData(TLogData* self,
+                                                Reference<LogData> logData,
+                                                Version ver,
+                                                Optional<Version> endVersion) {
+	try {
+		failIfTLogCannotAcceptNewData(self, logData, ver, endVersion.present());
+		return Void();
+	} catch (Error& e) {
+		if (e.code() != error_code_recruitment_failed || endVersion.present()) {
+			throw;
+		}
+	}
+
+	return waitUntilTLogAcceptsNewDataImpl(self, logData, ver);
 }
 
 // remote tLog pull data from log routers
@@ -3545,7 +3583,7 @@ Future<Void> pullAsyncData(TLogData* self,
 						    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 					}
 
-					failIfTLogCannotAcceptNewData(self, logData, ver);
+					co_await waitUntilTLogAcceptsNewData(self, logData, ver, endVersion);
 					if (logData->stopped()) {
 						co_return;
 					}
@@ -3586,7 +3624,7 @@ Future<Void> pullAsyncData(TLogData* self,
 							    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 						}
 
-						failIfTLogCannotAcceptNewData(self, logData, ver);
+						co_await waitUntilTLogAcceptsNewData(self, logData, ver, endVersion);
 						if (logData->stopped()) {
 							co_return;
 						}
