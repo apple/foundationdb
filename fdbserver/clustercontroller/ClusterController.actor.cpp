@@ -1255,21 +1255,92 @@ Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Standalone<
 	}
 }
 
+void removeFailedWorker(WorkerInterface const& worker, ClusterControllerData* cluster) {
+	auto workerInfo = cluster->id_worker.find(worker.locality.processId());
+	if (workerInfo == cluster->id_worker.end() || workerInfo->second.details.interf.id() != worker.id()) {
+		return;
+	}
+
+	WorkerInfo& failedWorkerInfo = workerInfo->second;
+	if (!failedWorkerInfo.reply.isSet()) {
+		failedWorkerInfo.reply.send(
+		    RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo));
+	}
+	if (worker.locality.processId() == cluster->masterProcessId) {
+		cluster->masterProcessId = Optional<Key>();
+	}
+	TraceEvent("ClusterControllerWorkerFailed", cluster->id)
+	    .detail("ProcessId", worker.locality.processId())
+	    .detail("ProcessClass", failedWorkerInfo.details.processClass.toString())
+	    .detail("Address", worker.address());
+	cluster->removedDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
+	cluster->id_worker.erase(workerInfo);
+	// Currently, only CC_ONLY_CONSIDER_INTRA_DC_LATENCY feature relies on addr_locality mapping. In the
+	// future, if needed, we can populate the mapping unconditionally.
+	if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY) {
+		cluster->addr_locality.erase(worker.address());
+		if (worker.secondaryAddress().present()) {
+			cluster->addr_locality.erase(worker.secondaryAddress().get());
+		}
+	}
+	cluster->updateClusterHealthMonitorInputs();
+	cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
+}
+
+void processRegisteredSingletons(ClusterControllerData* self,
+                                 WorkerInterface const& worker,
+                                 Optional<DataDistributorInterface> const& distributorInterf,
+                                 Optional<RatekeeperInterface> const& ratekeeperInterf,
+                                 Optional<ConsistencyScanInterface> const& consistencyScanInterf);
+
 ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
                                            ProcessClass startingClass,
                                            ClusterControllerData* cluster) {
 	state Future<Void> failed = (worker.address() == g_network->getLocalAddress())
 	                                ? Never()
 	                                : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
+	state LoadedPingRequest registrationPing;
+	state Future<Optional<ErrorOr<LoadedReply>>> registrationPingReply;
 	cluster->updateWorkerList.set(
 	    worker.locality.processId(),
 	    ProcessData(worker.locality, startingClass, worker.stableAddress(), worker.grpcAddress()));
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch
 	// fails for the worker.
 	wait(delay(0));
+	// A RegisterWorkerRequest can be delivered after its sender dies. Verify this exact WorkerInterface before
+	// making it eligible for recruitment.
+	registrationPing.id = worker.id();
+	registrationPing.loadReply = false;
+	registrationPingReply =
+	    timeout(worker.debugPing.getReplyUnlessFailedFor(
+	                registrationPing, SERVER_KNOBS->WORKER_FAILURE_TIME, /* sustainedFailureSlope */ 0),
+	            SERVER_KNOBS->WORKER_FAILURE_TIME);
 
 	loop {
 		choose {
+			when(Optional<ErrorOr<LoadedReply>> reply = wait(registrationPingReply)) {
+				if (!reply.present() || !reply.get().present() || reply.get().get().id != registrationPing.id) {
+					TraceEvent("ClusterControllerWorkerRegistrationPingFailed", cluster->id)
+					    .detail("WorkerID", worker.id())
+					    .detail("Address", worker.address())
+					    .detail("TimedOut", !reply.present());
+					removeFailedWorker(worker, cluster);
+					return Void();
+				}
+
+				auto workerInfo = cluster->id_worker.find(worker.locality.processId());
+				if (workerInfo == cluster->id_worker.end() || workerInfo->second.details.interf.id() != worker.id()) {
+					return Void();
+				}
+				workerInfo->second.verified = true;
+				registrationPingReply = Never();
+				processRegisteredSingletons(cluster,
+				                            worker,
+				                            workerInfo->second.distributorInterf,
+				                            workerInfo->second.ratekeeperInterf,
+				                            workerInfo->second.consistencyScanInterf);
+				checkOutstandingRequests(cluster);
+			}
 			when(wait(IFailureMonitor::failureMonitor().onStateEqual(
 			    worker.storage.getEndpoint(),
 			    FailureStatus(
@@ -1280,31 +1351,7 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 				}
 			}
 			when(wait(failed)) { // remove workers that have failed
-				WorkerInfo& failedWorkerInfo = cluster->id_worker[worker.locality.processId()];
-
-				if (!failedWorkerInfo.reply.isSet()) {
-					failedWorkerInfo.reply.send(
-					    RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo));
-				}
-				if (worker.locality.processId() == cluster->masterProcessId) {
-					cluster->masterProcessId = Optional<Key>();
-				}
-				TraceEvent("ClusterControllerWorkerFailed", cluster->id)
-				    .detail("ProcessId", worker.locality.processId())
-				    .detail("ProcessClass", failedWorkerInfo.details.processClass.toString())
-				    .detail("Address", worker.address());
-				cluster->removedDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
-				cluster->id_worker.erase(worker.locality.processId());
-				// Currently, only CC_ONLY_CONSIDER_INTRA_DC_LATENCY feature relies on addr_locality mapping. In the
-				// future, if needed, we can populate the mapping unconditionally.
-				if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY) {
-					cluster->addr_locality.erase(worker.address());
-					if (worker.secondaryAddress().present()) {
-						cluster->addr_locality.erase(worker.secondaryAddress().get());
-					}
-				}
-				cluster->updateClusterHealthMonitorInputs();
-				cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
+				removeFailedWorker(worker, cluster);
 				return Void();
 			}
 		}
@@ -1522,6 +1569,36 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 	}
 }
 
+void processRegisteredSingletons(ClusterControllerData* self,
+                                 WorkerInterface const& worker,
+                                 Optional<DataDistributorInterface> const& distributorInterf,
+                                 Optional<RatekeeperInterface> const& ratekeeperInterf,
+                                 Optional<ConsistencyScanInterface> const& consistencyScanInterf) {
+	// For each singleton
+	// - if the registering singleton conflicts with the singleton being recruited, kill the registering one
+	// - if the singleton is not being recruited, kill the existing one in favour of the registering one
+	if (distributorInterf.present()) {
+		auto currSingleton = DataDistributorSingleton(self->db.serverInfo->get().distributor);
+		auto registeringSingleton = DataDistributorSingleton(distributorInterf);
+		haltRegisteringOrCurrentSingleton<DataDistributorSingleton>(
+		    self, worker, currSingleton, registeringSingleton, self->recruitingDistributorID);
+	}
+
+	if (ratekeeperInterf.present()) {
+		auto currSingleton = RatekeeperSingleton(self->db.serverInfo->get().ratekeeper);
+		auto registeringSingleton = RatekeeperSingleton(ratekeeperInterf);
+		haltRegisteringOrCurrentSingleton<RatekeeperSingleton>(
+		    self, worker, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
+	}
+
+	if (consistencyScanInterf.present()) {
+		auto currSingleton = ConsistencyScanSingleton(self->db.serverInfo->get().consistencyScan);
+		auto registeringSingleton = ConsistencyScanSingleton(consistencyScanInterf);
+		haltRegisteringOrCurrentSingleton<ConsistencyScanSingleton>(
+		    self, worker, currSingleton, registeringSingleton, self->recruitingConsistencyScanID);
+	}
+}
+
 void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 	const WorkerInterface& w = req.wi;
 	if (req.clusterId.present() && self->clusterId->get().present() && req.clusterId != self->clusterId->get() &&
@@ -1612,6 +1689,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		}
 	}
 
+	bool acceptedRegistration = false;
 	if (info == self->id_worker.end()) {
 		self->id_worker[w.locality.processId()] = WorkerInfo(workerAvailabilityWatch(w, newProcessClass, self),
 		                                                     req.reply,
@@ -1648,6 +1726,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
+		acceptedRegistration = true;
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
 		if (!info->second.reply.isSet()) {
 			info->second.reply.send(Never());
@@ -1664,6 +1743,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		if (info->second.details.interf.id() != w.id()) {
 			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
 			info->second.details.interf = w;
+			info->second.verified = false;
 			// Cancel the existing watcher actor; possible race condition could be, the older registered watcher
 			// detects failures and removes the worker from id_worker even before the new watcher starts monitoring the
 			// new interface
@@ -1676,32 +1756,24 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
+		acceptedRegistration = true;
 	} else {
 		CODE_PROBE(true, "Received an old worker registration request.", probe::decoration::rare);
 	}
 
-	// For each singleton
-	// - if the registering singleton conflicts with the singleton being recruited, kill the registering one
-	// - if the singleton is not being recruited, kill the existing one in favour of the registering one
-	if (req.distributorInterf.present()) {
-		auto currSingleton = DataDistributorSingleton(self->db.serverInfo->get().distributor);
-		auto registeringSingleton = DataDistributorSingleton(req.distributorInterf);
-		haltRegisteringOrCurrentSingleton<DataDistributorSingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingDistributorID);
-	}
-
-	if (req.ratekeeperInterf.present()) {
-		auto currSingleton = RatekeeperSingleton(self->db.serverInfo->get().ratekeeper);
-		auto registeringSingleton = RatekeeperSingleton(req.ratekeeperInterf);
-		haltRegisteringOrCurrentSingleton<RatekeeperSingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
-	}
-
-	if (req.consistencyScanInterf.present()) {
-		auto currSingleton = ConsistencyScanSingleton(self->db.serverInfo->get().consistencyScan);
-		auto registeringSingleton = ConsistencyScanSingleton(req.consistencyScanInterf);
-		haltRegisteringOrCurrentSingleton<ConsistencyScanSingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingConsistencyScanID);
+	if (acceptedRegistration) {
+		auto workerInfo = self->id_worker.find(w.locality.processId());
+		ASSERT(workerInfo != self->id_worker.end() && workerInfo->second.details.interf.id() == w.id());
+		workerInfo->second.distributorInterf = req.distributorInterf;
+		workerInfo->second.ratekeeperInterf = req.ratekeeperInterf;
+		workerInfo->second.consistencyScanInterf = req.consistencyScanInterf;
+		if (workerInfo->second.verified) {
+			processRegisteredSingletons(self,
+			                            w,
+			                            workerInfo->second.distributorInterf,
+			                            workerInfo->second.ratekeeperInterf,
+			                            workerInfo->second.consistencyScanInterf);
+		}
 	}
 
 	// Notify the worker to register again with new process class/exclusive property
@@ -3469,6 +3541,242 @@ void addProcessesToSameDC(ClusterControllerData& self, const std::vector<Network
 		const bool added = self.addr_locality.insert({ process, locality }).second;
 		ASSERT(added);
 	}
+}
+
+TEST_CASE("/fdbserver/clustercontroller/rejectUnverifiedWorkerRegistration") {
+	state ClusterControllerData data(ClusterControllerFullInterface(),
+	                                 LocalityData(),
+	                                 ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                                     new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                                 makeReference<AsyncVar<Optional<UID>>>());
+	state LocalityData workerLocality;
+	workerLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "stale-worker" }));
+	state WorkerInterface worker(workerLocality);
+	worker.initEndpoints();
+	worker.storage.getEndpoint(TaskPriority::Worker);
+
+	state RegisterWorkerRequest request;
+	request.wi = worker;
+	request.initialClass = ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource);
+	request.processClass = request.initialClass;
+	request.generation = 0;
+	request.recoveredDiskFiles = true;
+	registerWorker(request, &data);
+
+	state Optional<Standalone<StringRef>> processId = worker.locality.processId();
+	ASSERT(processId.present());
+	ASSERT(data.id_worker.contains(processId));
+	ASSERT(!data.id_worker[processId].verified);
+	ASSERT(!data.workerAvailable(data.id_worker[processId], false));
+
+	wait(delay(SERVER_KNOBS->WORKER_FAILURE_TIME + 1.0));
+	ASSERT(!data.id_worker.contains(processId));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/verifyLiveWorkerRegistration") {
+	state ClusterControllerData data(ClusterControllerFullInterface(),
+	                                 LocalityData(),
+	                                 ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                                     new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                                 makeReference<AsyncVar<Optional<UID>>>());
+	state LocalityData workerLocality;
+	workerLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "verified-worker" }));
+	state WorkerInterface worker(workerLocality);
+	worker.initEndpoints();
+	worker.storage.getEndpoint(TaskPriority::Worker);
+	state FutureStream<LoadedPingRequest> pings = worker.debugPing.getFuture();
+
+	state RegisterWorkerRequest request;
+	request.wi = worker;
+	request.initialClass = ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource);
+	request.processClass = request.initialClass;
+	request.generation = 0;
+	request.recoveredDiskFiles = true;
+	registerWorker(request, &data);
+
+	state Optional<Standalone<StringRef>> processId = worker.locality.processId();
+	ASSERT(processId.present());
+	ASSERT(data.id_worker.contains(processId));
+	ASSERT(!data.id_worker[processId].verified);
+
+	state LoadedPingRequest ping = waitNext(pings);
+	ASSERT(ping.id == worker.id());
+	state LoadedReply reply;
+	reply.id = ping.id;
+	reply.payload = ""_sr;
+	ping.reply.send(reply);
+
+	// Allow workerAvailabilityWatch to mark this exact interface verified.
+	wait(delay(0.1));
+	ASSERT(data.id_worker.contains(processId));
+	ASSERT(data.id_worker[processId].details.interf.id() == worker.id());
+	ASSERT(data.id_worker[processId].verified);
+	ASSERT(data.workerAvailable(data.id_worker[processId], false));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/unverifiedRegistrationCannotPublishSingleton") {
+	state ClusterControllerData data(ClusterControllerFullInterface(),
+	                                 LocalityData(),
+	                                 ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                                     new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                                 makeReference<AsyncVar<Optional<UID>>>());
+	state LocalityData workerLocality;
+	workerLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "singleton-worker" }));
+	state WorkerInterface worker(workerLocality);
+	worker.initEndpoints();
+	worker.storage.getEndpoint(TaskPriority::Worker);
+	state FutureStream<LoadedPingRequest> pings = worker.debugPing.getFuture();
+	state LocalityData currentDistributorLocality;
+	currentDistributorLocality.set(LocalityData::keyProcessId,
+	                               Standalone<StringRef>(std::string{ "current-singleton" }));
+	state DataDistributorInterface currentDistributor(currentDistributorLocality, UID(1, 1));
+	state DataDistributorInterface distributor(workerLocality, UID(1, 2));
+	data.db.setDistributor(currentDistributor);
+
+	state RegisterWorkerRequest request;
+	request.wi = worker;
+	request.initialClass = ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource);
+	request.processClass = request.initialClass;
+	request.generation = 0;
+	request.distributorInterf = distributor;
+	request.recoveredDiskFiles = true;
+	registerWorker(request, &data);
+
+	state Optional<Standalone<StringRef>> processId = worker.locality.processId();
+	ASSERT(processId.present());
+	ASSERT(data.id_worker.contains(processId));
+	ASSERT(!data.id_worker[processId].verified);
+	ASSERT(data.db.serverInfo->get().distributor.present());
+	ASSERT(data.db.serverInfo->get().distributor.get().id() == currentDistributor.id());
+
+	state LoadedPingRequest ping = waitNext(pings);
+	ASSERT(ping.id == worker.id());
+	state LoadedReply reply;
+	reply.id = ping.id;
+	reply.payload = ""_sr;
+	ping.reply.send(reply);
+
+	// The singleton can be published only after this exact worker interface answers the verification ping.
+	wait(delay(0.1));
+	ASSERT(data.id_worker.contains(processId));
+	ASSERT(data.id_worker[processId].verified);
+	ASSERT(data.db.serverInfo->get().distributor.present());
+	ASSERT(data.db.serverInfo->get().distributor.get().id() == distributor.id());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/staleWatcherCannotRemoveReplacement") {
+	state ClusterControllerData data(ClusterControllerFullInterface(),
+	                                 LocalityData(),
+	                                 ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                                     new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                                 makeReference<AsyncVar<Optional<UID>>>());
+	state LocalityData workerLocality;
+	workerLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "replaced-worker" }));
+
+	state WorkerInterface oldWorker(workerLocality);
+	oldWorker.initEndpoints();
+	oldWorker.storage.getEndpoint(TaskPriority::Worker);
+	state FutureStream<LoadedPingRequest> oldPings = oldWorker.debugPing.getFuture();
+
+	state RegisterWorkerRequest oldRequest;
+	oldRequest.wi = oldWorker;
+	oldRequest.initialClass = ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource);
+	oldRequest.processClass = oldRequest.initialClass;
+	oldRequest.generation = 0;
+	oldRequest.recoveredDiskFiles = true;
+	registerWorker(oldRequest, &data);
+
+	state Optional<Standalone<StringRef>> processId = oldWorker.locality.processId();
+	ASSERT(processId.present());
+
+	// Receive but deliberately do not answer the old interface's verification ping.
+	state LoadedPingRequest unansweredOldPing = waitNext(oldPings);
+	ASSERT(unansweredOldPing.id == oldWorker.id());
+
+	// Retain the old watcher while preventing normal replacement from cancelling it.
+	state Future<Void> lateOldWatcher = data.id_worker[processId].watcher;
+	data.id_worker[processId].watcher = Never();
+
+	state WorkerInterface newWorker(workerLocality);
+	newWorker.initEndpoints();
+	newWorker.storage.getEndpoint(TaskPriority::Worker);
+	ASSERT(newWorker.id() != oldWorker.id());
+	state FutureStream<LoadedPingRequest> newPings = newWorker.debugPing.getFuture();
+
+	state RegisterWorkerRequest newRequest;
+	newRequest.wi = newWorker;
+	newRequest.initialClass = ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource);
+	newRequest.processClass = newRequest.initialClass;
+	newRequest.generation = 1;
+	newRequest.recoveredDiskFiles = true;
+	registerWorker(newRequest, &data);
+
+	ASSERT(data.id_worker.contains(processId));
+	ASSERT(data.id_worker[processId].details.interf.id() == newWorker.id());
+	ASSERT(!data.id_worker[processId].verified);
+
+	state LoadedPingRequest newPing = waitNext(newPings);
+	ASSERT(newPing.id == newWorker.id());
+	state LoadedReply newReply;
+	newReply.id = newPing.id;
+	newReply.payload = ""_sr;
+	newPing.reply.send(newReply);
+
+	wait(delay(0.1));
+	ASSERT(data.id_worker.contains(processId));
+	ASSERT(data.id_worker[processId].details.interf.id() == newWorker.id());
+	ASSERT(data.id_worker[processId].verified);
+
+	// The old ping timeout runs removeFailedWorker(oldWorker, ...). Its interface-ID guard must
+	// leave the verified replacement untouched.
+	wait(delay(SERVER_KNOBS->WORKER_FAILURE_TIME + 1.0));
+	ASSERT(lateOldWatcher.isReady());
+	ASSERT(!lateOldWatcher.isError());
+	ASSERT(data.id_worker.contains(processId));
+	ASSERT(data.id_worker[processId].details.interf.id() == newWorker.id());
+	ASSERT(data.id_worker[processId].verified);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/unverifiedMasterCannotWinSingletonRecruitment") {
+	state ClusterControllerData data(ClusterControllerFullInterface(),
+	                                 LocalityData(),
+	                                 ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                                     new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                                 makeReference<AsyncVar<Optional<UID>>>());
+	state LocalityData masterLocality;
+	masterLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "unverified-master" }));
+	state WorkerInterface master(masterLocality);
+	master.initEndpoints();
+	master.storage.getEndpoint(TaskPriority::Worker);
+
+	state LocalityData candidateLocality;
+	candidateLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "singleton-candidate" }));
+	state WorkerInterface candidate(candidateLocality);
+	candidate.initEndpoints();
+	candidate.storage.getEndpoint(TaskPriority::Worker);
+
+	state Optional<Standalone<StringRef>> masterProcessId = master.locality.processId();
+	state Optional<Standalone<StringRef>> candidateProcessId = candidate.locality.processId();
+	ASSERT(masterProcessId.present());
+	ASSERT(candidateProcessId.present());
+	data.masterProcessId = masterProcessId;
+	// Make the candidate count as used by a non-singleton role so the master would otherwise be preferred.
+	data.clusterControllerProcessId = candidateProcessId;
+	data.id_worker[masterProcessId].details =
+	    WorkerDetails(master, ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource), false, true);
+
+	state WorkerDetails candidateDetails(
+	    candidate, ProcessClass(ProcessClass::StorageClass, ProcessClass::CommandLineSource), false, true);
+	ASSERT(!data.id_worker[masterProcessId].verified);
+	ASSERT(!data.onMasterIsBetter(candidateDetails, recruitment::DataDistributor));
+
+	data.id_worker[masterProcessId].verified = true;
+	ASSERT(data.onMasterIsBetter(candidateDetails, recruitment::DataDistributor));
+	return Void();
 }
 
 TEST_CASE("/fdbserver/clustercontroller/ignoreStaleWorkerRegistration") {
