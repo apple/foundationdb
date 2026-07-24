@@ -40,8 +40,6 @@ var (
 	ErrWrongShardServer = Error{Code: 1001}
 	// Operation result no longer necessary
 	ErrOperationObsolete = Error{Code: 1002}
-	// Cache server is not warm for this range
-	ErrColdCacheServer = Error{Code: 1003}
 	// Operation timed out
 	ErrTimedOut = Error{Code: 1004}
 	// Conflict occurred while changing coordination information
