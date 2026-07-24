@@ -166,6 +166,7 @@ ERROR( bulkload_manifest_decode_error, 1246, "Bulkload manifest string is failed
 ERROR( range_lock_reject, 1247, "Range lock is rejected" )
 ERROR( range_unlock_reject, 1248, "Range unlock is rejected" )
 ERROR( finish_move_keys_too_many_retries, 1249, "finishMoveKeys exceeded retry limit" )
+ERROR( start_move_keys_too_many_retries, 1250, "startMoveKeys exceeded retry limit" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
