@@ -2838,8 +2838,16 @@ Future<Void> tLogCommit(TLogData* self,
 	Optional<UID> tlogDebugID;
 	if (req.debugID.present()) {
 		tlogDebugID = nondeterministicRandom()->randomUniqueID();
-		g_traceBatch.addAttach("CommitAttachID", req.debugID.get().first(), tlogDebugID.get().first());
-		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.BeforeWaitForVersion");
+		g_traceBatch.addAttach("CommitAttachID",
+		                       req.debugID.get().first(),
+		                       tlogDebugID.get().first(),
+		                       req.spanContext.traceID,
+		                       req.spanContext.spanID);
+		g_traceBatch.addEvent("CommitDebug",
+		                      tlogDebugID.get().first(),
+		                      "TLog.tLogCommit.BeforeWaitForVersion",
+		                      req.spanContext.traceID,
+		                      req.spanContext.spanID);
 	}
 
 	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
@@ -2875,7 +2883,11 @@ Future<Void> tLogCommit(TLogData* self,
 	bool isNotDuplicate = (logData->version.get() == req.prevVersion);
 	if (isNotDuplicate) {
 		if (req.debugID.present())
-			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
+			g_traceBatch.addEvent("CommitDebug",
+			                      tlogDebugID.get().first(),
+			                      "TLog.tLogCommit.Before",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
 		commitMessages(self, logData, req.version, req.arena, req.messages);
@@ -2902,7 +2914,11 @@ Future<Void> tLogCommit(TLogData* self,
 		}
 
 		if (req.debugID.present())
-			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.AfterTLogCommit");
+			g_traceBatch.addEvent("CommitDebug",
+			                      tlogDebugID.get().first(),
+			                      "TLog.tLogCommit.AfterTLogCommit",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 	}
 	// Send replies only once all prior messages have been received and committed.
 	Future<Void> stopped = logData->stopCommit.onTrigger();
@@ -2919,7 +2935,11 @@ Future<Void> tLogCommit(TLogData* self,
 	}
 
 	if (req.debugID.present())
-		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
+		g_traceBatch.addEvent("CommitDebug",
+		                      tlogDebugID.get().first(),
+		                      "TLog.tLogCommit.After",
+		                      req.spanContext.traceID,
+		                      req.spanContext.spanID);
 
 	req.reply.send(logData->durableKnownCommittedVersion);
 

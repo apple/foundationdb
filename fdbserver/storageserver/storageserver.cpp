@@ -812,9 +812,15 @@ public:
 	int watchReplyCount{ 0 };
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
+	SpanContext spanContext;
 
-	ServerWatchMetadata(Key key, Optional<Value> value, Version version, Optional<TagSet> tags, Optional<UID> debugID)
-	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
+	ServerWatchMetadata(Key key,
+	                    Optional<Value> value,
+	                    Version version,
+	                    Optional<TagSet> tags,
+	                    Optional<UID> debugID,
+	                    SpanContext spanContext)
+	  : key(key), value(value), version(version), tags(tags), debugID(debugID), spanContext(spanContext) {}
 };
 
 struct BusiestWriteTagContext {
@@ -2146,7 +2152,9 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
+			                      "getValueQ.DoRead",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 		}
 
 		Optional<Value> v;
@@ -2158,7 +2166,9 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
+			                      "getValueQ.AfterVersion",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 		}
 
 		uint64_t changeCounter = data->shardChangeCounter;
@@ -2225,7 +2235,9 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
+			                      "getValueQ.AfterRead",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 		}
 
 		GetValueReply reply(v, /*cached=*/false);
@@ -2266,7 +2278,9 @@ Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* 
 	if (metadata->debugID.present()) {
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
-		                      "watchValueSendReply.Before"); //.detail("TaskID", g_network->getCurrentTask());
+		                      "watchValueSendReply.Before",
+		                      metadata->spanContext.traceID,
+		                      metadata->spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 	}
 
 	Version originalMetadataVersion = metadata->version;
@@ -2274,7 +2288,9 @@ Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* 
 	if (metadata->debugID.present()) {
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
-		                      "watchValueSendReply.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
+		                      "watchValueSendReply.AfterVersion",
+		                      metadata->spanContext.traceID,
+		                      metadata->spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 	}
 
 	Version minVersion = data->data().latestVersion;
@@ -2311,10 +2327,11 @@ Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* 
 			               data->thisServerID);
 
 			if (metadata->debugID.present()) {
-				g_traceBatch.addEvent(
-				    "WatchValueDebug",
-				    metadata->debugID.get().first(),
-				    "watchValueSendReply.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
+				g_traceBatch.addEvent("WatchValueDebug",
+				                      metadata->debugID.get().first(),
+				                      "watchValueSendReply.AfterRead",
+				                      metadata->spanContext.traceID,
+				                      metadata->spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 			}
 
 			// If the version we read is less than minVersion, then we may fail to be notified of any changes that occur
@@ -2355,8 +2372,11 @@ Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* 
 				}
 
 				if (metadata->debugID.present())
-					g_traceBatch.addEvent(
-					    "WatchValueDebug", metadata->debugID.get().first(), "watchValueSendReply.WaitChange");
+					g_traceBatch.addEvent("WatchValueDebug",
+					                      metadata->debugID.get().first(),
+					                      "watchValueSendReply.WaitChange",
+					                      metadata->spanContext.traceID,
+					                      metadata->spanContext.spanID);
 				co_await watchFuture;
 				data->watchBytes -= watchBytes;
 			} catch (Error& e) {
@@ -3353,8 +3373,11 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.Before");
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getKeyValues.Before",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);
@@ -3374,8 +3397,11 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		KeyRange shard = getShardKeyRange(data, req.begin);
 
 		if (req.options.present() && req.options.get().debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getKeyValues.AfterVersion",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
 		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
@@ -3404,8 +3430,11 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		Key end = co_await fEnd;
 
 		if (req.options.present() && req.options.get().debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.AfterKeys");
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getKeyValues.AfterKeys",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
@@ -3434,8 +3463,11 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 		if (begin >= end) {
 			if (req.options.present() && req.options.get().debugID.present())
-				g_traceBatch.addEvent(
-				    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.Send");
+				g_traceBatch.addEvent("TransactionDebug",
+				                      req.options.get().debugID.get().first(),
+				                      "storageserver.getKeyValues.Send",
+				                      req.spanContext.traceID,
+				                      req.spanContext.spanID);
 			//.detail("Begin",begin).detail("End",end);
 
 			GetKeyValuesReply none;
@@ -3464,7 +3496,9 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
-				                      "storageserver.getKeyValues.AfterReadRange");
+				                      "storageserver.getKeyValues.AfterReadRange",
+				                      req.spanContext.traceID,
+				                      req.spanContext.spanID);
 			}
 			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 			data->checkChangeCounter(
@@ -3547,7 +3581,9 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
-		                      "storageserver.quickGetKeyValues.Before");
+		                      "storageserver.quickGetKeyValues.Before",
+		                      pOriginalReq->spanContext.traceID,
+		                      pOriginalReq->spanContext.spanID);
 	}
 	try {
 		// TODO: Use a lower level API may be better?
@@ -3583,7 +3619,9 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 			if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      pOriginalReq->options.get().debugID.get().first(),
-				                      "storageserver.quickGetKeyValues.AfterLocalFetch");
+				                      "storageserver.quickGetKeyValues.AfterLocalFetch",
+				                      pOriginalReq->spanContext.traceID,
+				                      pOriginalReq->spanContext.spanID);
 			}
 			co_return getRange;
 		}
@@ -3613,7 +3651,9 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      pOriginalReq->options.get().debugID.get().first(),
-			                      "storageserver.quickGetKeyValues.AfterRemoteFetch");
+			                      "storageserver.quickGetKeyValues.AfterRemoteFetch",
+			                      pOriginalReq->spanContext.traceID,
+			                      pOriginalReq->spanContext.spanID);
 		}
 		co_return getRange;
 	} else {
@@ -5544,8 +5584,11 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 
 	result.data.reserve(result.arena, input.data.size());
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
-		g_traceBatch.addEvent(
-		    "TransactionDebug", pOriginalReq->options.get().debugID.get().first(), "storageserver.mapKeyValues.Start");
+		g_traceBatch.addEvent("TransactionDebug",
+		                      pOriginalReq->options.get().debugID.get().first(),
+		                      "storageserver.mapKeyValues.Start",
+		                      pOriginalReq->spanContext.traceID,
+		                      pOriginalReq->spanContext.spanID);
 	Tuple mappedKeyFormatTuple;
 
 	try {
@@ -5566,7 +5609,9 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
-		                      "storageserver.mapKeyValues.BeforeLoop");
+		                      "storageserver.mapKeyValues.BeforeLoop",
+		                      pOriginalReq->spanContext.traceID,
+		                      pOriginalReq->spanContext.spanID);
 	}
 
 	for (; (offset < sz) && (*remainingLimitBytes > 0); offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
@@ -5591,7 +5636,9 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      pOriginalReq->options.get().debugID.get().first(),
-			                      "storageserver.mapKeyValues.AfterBatch");
+			                      "storageserver.mapKeyValues.AfterBatch",
+			                      pOriginalReq->spanContext.traceID,
+			                      pOriginalReq->spanContext.spanID);
 		}
 		subqueries.clear();
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
@@ -5619,7 +5666,9 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
-		                      "storageserver.mapKeyValues.AfterAll");
+		                      "storageserver.mapKeyValues.AfterAll",
+		                      pOriginalReq->spanContext.traceID,
+		                      pOriginalReq->spanContext.spanID);
 	}
 	co_return result;
 }
@@ -5655,8 +5704,11 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getMappedKeyValues.Before");
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getMappedKeyValues.Before",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 		// VERSION_VECTOR change
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);
@@ -5670,7 +5722,9 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "storageserver.getMappedKeyValues.AfterVersion");
+			                      "storageserver.getMappedKeyValues.AfterVersion",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 		}
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
@@ -5698,7 +5752,9 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "storageserver.getMappedKeyValues.AfterKeys");
+			                      "storageserver.getMappedKeyValues.AfterKeys",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 		}
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
@@ -5720,7 +5776,9 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
-				                      "storageserver.getMappedKeyValues.Send");
+				                      "storageserver.getMappedKeyValues.Send",
+				                      req.spanContext.traceID,
+				                      req.spanContext.spanID);
 			}
 			//.detail("Begin",begin).detail("End",end);
 
@@ -5762,7 +5820,9 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
-				                      "storageserver.getMappedKeyValues.AfterReadRange");
+				                      "storageserver.getMappedKeyValues.AfterReadRange",
+				                      req.spanContext.traceID,
+				                      req.spanContext.spanID);
 			}
 			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 			data->checkChangeCounter(
@@ -5832,8 +5892,11 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValuesStream.Before");
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getKeyValuesStream.Before",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);
@@ -5845,7 +5908,9 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "storageserver.getKeyValuesStream.AfterVersion");
+			                      "storageserver.getKeyValuesStream.AfterVersion",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 		}
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
@@ -5872,7 +5937,9 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "storageserver.getKeyValuesStream.AfterKeys");
+			                      "storageserver.getKeyValuesStream.AfterKeys",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 		}
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
@@ -5894,7 +5961,9 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
-				                      "storageserver.getKeyValuesStream.Send");
+				                      "storageserver.getKeyValuesStream.Send",
+				                      req.spanContext.traceID,
+				                      req.spanContext.spanID);
 			}
 			//.detail("Begin",begin).detail("End",end);
 
@@ -5938,7 +6007,9 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 				if (req.options.present() && req.options.get().debugID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      req.options.get().debugID.get().first(),
-					                      "storageserver.getKeyValuesStream.AfterReadRange");
+					                      "storageserver.getKeyValuesStream.AfterReadRange",
+					                      req.spanContext.traceID,
+					                      req.spanContext.spanID);
 				}
 				//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 				data->checkChangeCounter(
@@ -11579,7 +11650,9 @@ Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueReq
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
+			                      "storageServer.received",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 		}
 
 		if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
@@ -11661,7 +11734,8 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 
 		// case 1: no watch set for the current key
 		if (!metadata.isValid()) {
-			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+			metadata = makeReference<ServerWatchMetadata>(
+			    req.key, req.value, req.version, req.tags, req.debugID, req.spanContext);
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
 			addWatchValueReply(self, req, metadata, span.context);
@@ -11670,11 +11744,17 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 		else if (metadata->value == req.value) {
 			if (req.debugID.present()) {
 				if (metadata->debugID.present()) {
-					g_traceBatch.addAttach(
-					    "WatchRequestCase2", req.debugID.get().first(), metadata->debugID.get().first());
+					g_traceBatch.addAttach("WatchRequestCase2",
+					                       req.debugID.get().first(),
+					                       metadata->debugID.get().first(),
+					                       req.spanContext.traceID,
+					                       req.spanContext.spanID);
 				} else {
-					g_traceBatch.addEvent(
-					    "WatchValueDebug", metadata->debugID.get().first(), "watchValueSendReply.Case2");
+					g_traceBatch.addEvent("WatchValueDebug",
+					                      req.debugID.get().first(),
+					                      "watchValueSendReply.Case2",
+					                      req.spanContext.traceID,
+					                      req.spanContext.spanID);
 				}
 			}
 
@@ -11684,6 +11764,7 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 				if (req.debugID.present()) {
 					metadata->debugID = req.debugID;
 				}
+				metadata->spanContext = req.spanContext;
 			}
 
 			addWatchValueReply(self, req, metadata, span.context);
@@ -11694,7 +11775,8 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 			metadata->versionPromise.send(req.version);
 			metadata->watch_impl.cancel();
 
-			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+			metadata = makeReference<ServerWatchMetadata>(
+			    req.key, req.value, req.version, req.tags, req.debugID, req.spanContext);
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
 
@@ -11726,8 +11808,8 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 					}
 
 					if (reply.value == req.value) { // valSS == valreq
-						metadata =
-						    makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+						metadata = makeReference<ServerWatchMetadata>(
+						    req.key, req.value, req.version, req.tags, req.debugID, req.spanContext);
 						KeyRef key = self->setWatchMetadata(metadata);
 						metadata->watch_impl =
 						    forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
