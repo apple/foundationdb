@@ -59,6 +59,7 @@ void forceLinkGrvProxyStarvationTests();
 // TODO akanksha: Remove once a production caller of rangePartitionedBackupWorker() is wired up;
 // this only exists to keep TEST_CASEs in RangePartitionedBackupWorker.cpp from being dead-stripped.
 void forceLinkRangePartitionedBackupWorkerTests();
+void forceLinkCountedSectionTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -137,6 +138,7 @@ struct UnitTestWorkload : TestWorkload {
 		// TODO akanksha: Remove once a production caller of rangePartitionedBackupWorker() is wired up;
 		// this only exists to keep TEST_CASEs in RangePartitionedBackupWorker.cpp from being dead-stripped.
 		forceLinkRangePartitionedBackupWorkerTests();
+		forceLinkCountedSectionTests();
 
 #ifdef FLOW_GRPC_ENABLED
 		forceLinkGrpcTests();
