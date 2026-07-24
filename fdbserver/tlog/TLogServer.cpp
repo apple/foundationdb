@@ -183,7 +183,7 @@ private:
 
 			Standalone<StringRef> e = co_await self->queue->readNext(payloadSize + 1);
 			if (e.size() != payloadSize + 1) {
-				CODE_PROBE(true, "Zero fill within payload", probe::decoration::rare);
+				CODE_PROBE(true, "Zero fill within payload");
 				zeroFillSize = payloadSize + 1 - e.size();
 				break;
 			}
@@ -199,7 +199,7 @@ private:
 			}
 		}
 		if (zeroFillSize) {
-			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue", probe::decoration::rare);
+			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue");
 			for (int i = 0; i < zeroFillSize; i++)
 				self->queue->push(StringRef((const uint8_t*)"", 1));
 		}
@@ -2345,8 +2345,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				}
 				if (sequenceData.isSet()) {
 					if (sequenceData.getFuture().get().first != rep.end) {
-						CODE_PROBE(
-						    true, "tlog peek second attempt ended at a different version", probe::decoration::rare);
+						CODE_PROBE(true, "tlog peek second attempt ended at a different version");
 						replyPromise.sendError(operation_obsolete());
 						co_return;
 					}
