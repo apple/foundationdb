@@ -1,0 +1,21 @@
+# Exercise startup with enough proxy demand to expose a singleton stateless machine.
+# Do not set statelessProcessClassesPerDC: the simulator must infer the required capacity.
+[configuration]
+config = 'storage_replicas:=1 log_replicas:=2 log_anti_quorum:=1 log_engine=ssd-2 log_spill:=2 storage_engine=ssd-redwood-1 storage_migration_type=disabled perpetual_storage_wiggle=1 perpetual_storage_wiggle_locality=data_hall:0'
+generateFearless = false
+singleRegion = true
+datacenters = 1
+machineCount = 8
+processesPerMachine = 3
+desiredTLogCount = 3
+commitProxyCount = 3
+grvProxyCount = 1
+resolverCount = 1
+logAntiQuorum = 1
+simHTTPServerEnabled = true
+
+[[test]]
+testTitle = 'AtomicOpsCorrectnessStatelessStartup'
+
+    [[test.workload]]
+    testName = 'AtomicOpsApiCorrectness'

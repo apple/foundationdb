@@ -2486,9 +2486,11 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 	bool requiresExtraDBMachines = !fdbSimulationPolicyState().extraDatabases.empty() && !useLocalDatabase;
 	int assignedMachines = 0;
+	int assignedRealMachines = 0;
 	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::StatelessClass };
+	Optional<int> remainingAutoStatelessClasses;
 	for (int dc = 0; dc < dataCenters; dc++) {
 		// FIXME: test unset dcID
 		Optional<Standalone<StringRef>> dcUID = StringRef(format("%d", dc));
@@ -2544,6 +2546,18 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					processClass = ProcessClass(
 					    processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())],
 					    ProcessClass::CommandLineSource); // Unset or Stateless
+					// Preserve the original draw and the first four storage-eligible machines.
+					// Three-data-hall policies also need multiple TLog-eligible zones in each hall.
+					if (machine < machines && !testConfig.statelessProcessClassesPerDC.present() &&
+					    processClass == ProcessClass::StatelessClass &&
+					    (!simconfig.db.tLogPolicy || simconfig.db.tLogPolicy->info() != "data_hall^2 x zoneid^2 x 1")) {
+						const int desiredStatelessMachines = std::max({ simconfig.db.getDesiredCommitProxies(),
+						                                                simconfig.db.getDesiredGrvProxies(),
+						                                                simconfig.db.getDesiredResolvers() });
+						if (desiredStatelessMachines <= machineCount - assignedRealMachines) {
+							remainingAutoStatelessClasses = std::max(0, desiredStatelessMachines - 1);
+						}
+					}
 				} else {
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
@@ -2554,9 +2568,22 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				}
 			}
 
-			if (desiredStatelessClasses.present() && actualStatelessClasses < desiredStatelessClasses.get()) {
+			if (machine < machines && desiredStatelessClasses.present() &&
+			    actualStatelessClasses < desiredStatelessClasses.get()) {
+				if (assignClasses &&
+				    (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass)) {
+					possible_ss--;
+				}
 				processClass = ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource);
 				actualStatelessClasses++;
+			} else if (machine < machines && assignedMachines > 4 && remainingAutoStatelessClasses.present() &&
+			           remainingAutoStatelessClasses.get() > 0) {
+				if (assignClasses &&
+				    (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass)) {
+					possible_ss--;
+				}
+				processClass = ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource);
+				remainingAutoStatelessClasses = remainingAutoStatelessClasses.get() - 1;
 			}
 
 			// FIXME: hack to add machines specifically to (some removed process types and) http server.
@@ -2643,13 +2670,16 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				}
 			}
 
+			if (machine < machines) {
+				assignedRealMachines++;
+			}
 			assignedMachines++;
 		}
 
 		if (desiredStatelessClasses.present()) {
 			// If this assertion fails, that measn that there were not enough machines in the DC (primary or remote)
 			// to match desired stateless classes
-			ASSERT(actualStatelessClasses == desiredStatelessClasses.get());
+			ASSERT_EQ(actualStatelessClasses, desiredStatelessClasses.get());
 		}
 
 		if (possible_ss - simconfig.db.desiredTSSCount / simconfig.db.usableRegions <= simconfig.db.storageTeamSize) {
@@ -2661,6 +2691,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		    .detail("PossibleSS", possible_ss)
 		    .detail("Machines", machines)
 		    .detail("DcCoordinators", dcCoordinators);
+	}
+
+	if (remainingAutoStatelessClasses.present()) {
+		ASSERT_EQ(remainingAutoStatelessClasses.get(), 0);
 	}
 
 	fdbSimulationPolicyState().desiredCoordinators = coordinatorCount;
