@@ -285,6 +285,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// guess (thus 20 moves).  Do not buggify this too small: testing under artificial scarcity results in
 	// uninteresting degenerate cases.
 	init( DD_MAX_PIPELINE_MOVES,                                1000 ); if( randomize && buggify() ) DD_MAX_PIPELINE_MOVES = 20;
+	init( DD_RECONCILE_SHARDS_ON_EXCLUDE,                       true );
 	init( DD_REBALANCE_RESET_AMOUNT,                              30 );
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
 	init( INFLIGHT_PENALTY_UNHEALTHY,                          500.0 );

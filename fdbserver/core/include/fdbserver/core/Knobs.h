@@ -160,6 +160,11 @@ public:
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
 	int DD_MAX_PIPELINE_MOVES; // Hard cap on total relocations DD tracks (queued + in-flight).
+	bool DD_RECONCILE_SHARDS_ON_EXCLUDE; // On graceful exclude, if the server's on-disk serverKeys are empty
+	                                     // (canRemove) but its in-memory ShardsAffectedByTeamFailure count is
+	                                     // still > 0, reconcile the map to the on-disk truth so removal is not
+	                                     // blocked. When false, fall back to the legacy behavior of waiting for
+	                                     // the count to reach 0 on its own.
 	int DD_REBALANCE_RESET_AMOUNT;
 	double INFLIGHT_PENALTY_HEALTHY;
 	double INFLIGHT_PENALTY_REDUNDANT;

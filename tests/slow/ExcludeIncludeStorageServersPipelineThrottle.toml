@@ -1,0 +1,25 @@
+[configuration]
+# Keep one spare machine per datacenter so excluding a storage server cannot exhaust a replicated team.
+extraMachineCountDC = 1
+
+[[knobs]]
+# Force the data-distribution relocation pipeline to a small cap so the exclude's re-replication runs against a
+# saturated pipeline. Under a pegged pipeline, DDQueue splits relocations into sub-ranges, which drives
+# moveShard()'s partial-overlap branch and can strand a drained server's in-memory ShardsAffectedByTeamFailure
+# count > 0 -- the graceful-exclude finalize stall this regression exercises. The removal gate now reconciles
+# that stale count against the on-disk serverKeys, so the exclude must still complete.
+dd_max_pipeline_moves = 20
+dd_max_shards_on_large_teams = 0
+
+[[test]]
+testTitle = 'ExcludeIncludeStorageServersPipelineThrottle'
+
+    # Continuously write and verify data so excluded storage servers actually own shards that must drain,
+    # producing the re-replication traffic that (under the small pipeline cap) reproduces the stranding.
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'ExcludeIncludeStorageServers'

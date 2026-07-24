@@ -192,3 +192,36 @@ TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/CancelMove") {
 
 	return Void();
 }
+
+// Regression test for the graceful-exclude finalize stall: a partial-overlap (sub-range) moveShard leaves the
+// drained source server counted in ShardsAffectedByTeamFailure even though its data is gone, which blocks
+// removeStorageServer() indefinitely. The removal gate reconciles this by scrubbing the server from the map
+// (removeFailedServerForRange) once the on-disk serverKeys confirm it owns no data. This verifies both that the
+// stranding reproduces and that the scrub clears it without disturbing the surviving replica.
+TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/GateReconcilesStrandedServer") {
+	ShardsAffectedByTeamFailure shards;
+	shards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+
+	const UID excluded(9, 0);
+	const ShardsAffectedByTeamFailure::Team teamWithExcluded({ UID(1, 0), UID(2, 0), excluded }, true);
+	const ShardsAffectedByTeamFailure::Team replacementTeam({ UID(3, 0), UID(4, 0), UID(5, 0) }, true);
+
+	// Reproduce the stall's stranded state: a partial-overlap move (its key range does not fully contain the
+	// tracked shard) takes moveShard()'s else-branch, which appends the destination team without erasing the
+	// source team -- so the excluded server stays counted even though the move relocated data off it.
+	shards.assignRangeToTeams(KeyRangeRef("e"_sr, "z"_sr), { teamWithExcluded });
+	ASSERT_EQ(shards.getNumberOfShards(excluded), 1);
+	shards.moveShard(KeyRangeRef("e"_sr, "m"_sr), { replacementTeam }); // partial: [e,m) does not contain [e,z)
+	ASSERT(shards.getNumberOfShards(excluded) > 0); // stranded: this is what blocks removeStorageServer()
+
+	// The removal gate's reconciliation once canRemoveStorageServer() (on-disk truth) reports the server empty.
+	shards.removeFailedServerForRange(allKeys, excluded);
+
+	// The stranded count clears -> the gate opens and the server can be removed.
+	ASSERT_EQ(shards.getNumberOfShards(excluded), 0);
+	// The surviving replica's accounting is untouched (ForceCheck also validated the map invariant throughout).
+	ASSERT(shards.getNumberOfShards(UID(3, 0)) > 0);
+	shards.check();
+
+	return Void();
+}
