@@ -328,7 +328,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "type":"x",
                   "name":{
                      "$enum":[
-                        "file_open_error",
                         "incorrect_cluster_file_contents",
                         "trace_log_file_write_error",
                         "trace_log_could_not_create_file",
