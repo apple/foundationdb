@@ -268,6 +268,23 @@ TEST_CASE("/flow/genericactors/AsyncListener") {
 	return Void();
 }
 
+TEST_CASE("/flow/genericactors/DelayedAsyncVarPreservesReentrantInputChange") {
+	state Reference<AsyncVar<bool>> input = makeReference<AsyncVar<bool>>(true);
+	state Reference<AsyncVar<bool>> output = makeReference<AsyncVar<bool>>(true);
+	state Future<Void> feedback = generic_coro::trigger(SetAsyncVarTrue{ input }, output->onChange());
+	state Future<Void> publisher = delayedAsyncVar(input, output, 0);
+
+	wait(delay(0));
+	input->set(false);
+	wait(feedback);
+	wait(delay(0.01));
+	ASSERT(input->get());
+	ASSERT(output->get());
+
+	publisher.cancel();
+	return Void();
+}
+
 TEST_CASE("/flow/genericactors/WaitForMost") {
 	state std::vector<Future<ErrorOr<Void>>> futures;
 	{
