@@ -29,6 +29,7 @@
 
 #include "flow/Platform.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "TestSpecParser.h"
@@ -231,13 +232,40 @@ template <typename T>
 std::string toml_to_string(const T& value) {
 	// TOML formatting converts numbers to strings exactly how they're in the file
 	// and thus, is equivalent to testspec.  However, strings are quoted, so we
-	// must remove the quotes.
+	// must remove the quotes. Arrays are encoded as comma-separated lists to
+	// match the legacy testspec vector format.
 	if (value.type() == toml::value_t::string) {
 		const std::string& formatted = toml::format(value);
 		return formatted.substr(1, formatted.size() - 2);
+	} else if (value.type() == toml::value_t::array) {
+		std::stringstream formatted;
+		bool first = true;
+		for (const auto& item : value.as_array()) {
+			if (!first) {
+				formatted << ",";
+			}
+			formatted << toml_to_string(item);
+			first = false;
+		}
+		return formatted.str();
 	} else {
 		return toml::format(value);
 	}
+}
+
+TEST_CASE("/fdbserver/tester/TestSpecParser/TOMLArrayToString") {
+	std::istringstream input(R"(
+strings = ['a', 'b']
+integers = [1, 2]
+booleans = [true, false]
+)");
+	const auto parsed = toml::parse(input, "TOMLArrayToString");
+
+	ASSERT(toml_to_string(toml::find(parsed, "strings")) == "a,b");
+	ASSERT(toml_to_string(toml::find(parsed, "integers")) == "1,2");
+	ASSERT(toml_to_string(toml::find(parsed, "booleans")) == "true,false");
+
+	return Void();
 }
 
 } // namespace
@@ -395,6 +423,39 @@ TestSet readTOMLTests_(std::string fileName) {
 	}
 
 	return result;
+}
+
+TEST_CASE("/fdbserver/tester/TestSpecParser/TOMLWorkloadArrayOption") {
+	const std::string fileName = joinPath(params.getDataDir(), "toml-workload-array-option.toml");
+	{
+		std::ofstream testFile(fileName);
+		testFile << R"(
+[[test]]
+testTitle = 'TOML workload array option'
+
+[[test.workload]]
+testName = 'Attrition'
+targetIds = ['a', 'b']
+targetNumbers = [1, 2]
+)";
+	}
+
+	TestSet testSet = readTOMLTests_(fileName);
+	ASSERT(testSet.testSpecs.size() == 1);
+	ASSERT(testSet.testSpecs[0].options.size() == 1);
+
+	std::vector<std::string> targetIds =
+	    getOption(testSet.testSpecs[0].options[0], "targetIds"_sr, std::vector<std::string>());
+	ASSERT(targetIds.size() == 2);
+	ASSERT(targetIds[0] == "a");
+	ASSERT(targetIds[1] == "b");
+
+	std::vector<int> targetNumbers = getOption(testSet.testSpecs[0].options[0], "targetNumbers"_sr);
+	ASSERT(targetNumbers.size() == 2);
+	ASSERT(targetNumbers[0] == 1);
+	ASSERT(targetNumbers[1] == 2);
+
+	return Void();
 }
 
 } // namespace
