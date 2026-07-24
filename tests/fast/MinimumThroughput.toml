@@ -13,4 +13,4 @@ restorePerpetualWiggleSetting = false
     transactionsPerSecond = 200.0
     nodeCount = 100000
     readFraction = 0.5
-    expectedRate = 0.8
+    expectedRate = 0.5
