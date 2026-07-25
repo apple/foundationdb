@@ -557,8 +557,8 @@ struct DDBulkLoadEngineTask {
 	}
 };
 
-inline bool bulkLoadIsEnabled(int bulkLoadModeValue) {
-	return SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && bulkLoadModeValue == 1;
+inline bool bulkLoadIsEnabled(int bulkLoadModeValue, bool shardEncodeLocationMetadata) {
+	return shardEncodeLocationMetadata && bulkLoadModeValue == 1;
 }
 
 inline bool bulkDumpIsEnabled(int bulkDumpModeValue) {

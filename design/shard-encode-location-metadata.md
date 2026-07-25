@@ -317,31 +317,130 @@ shard IDs on every entry (auditing, bulk load). Basic DD operation works without
 
 ## Rollout and Rollback
 
-### Rollout (enable knob)
+### Rollout (enable new format)
 
 Safe — the new binary reads both formats. Mixed-format coexistence works because
-the decoder checks the protocol version embedded in each value.
+the decoder checks the protocol version embedded in each value. Enable via
+`configure shard_metadata_format=encoded` (or, on a cluster that has not set
+the config, the `SHARD_ENCODE_LOCATION_METADATA=true` knob fallback).
 
-### Rollback within same binary (flip knob false)
+### Rollback within same binary (config-driven)
 
-Safe — tested and verified in simulation (`ShardEncodeRollback.toml`):
+Safe — tested and verified in simulation (`ShardEncodeRollback.toml` for the
+knob-fallback path, `ShardEncodeRollbackConfig.toml` for the config-driven
+path).
+
+**Migration is optional.** Setting the target back to old format
+(`configure shard_metadata_format=original`, no restart) is a
+zero-additional-work operation from the cluster's perspective:
+
+- The cluster keeps running fine after the target change. DD's decoders
+  handle both old and new formats; SS's `applyPrivateData` accepts
+  both.
+- DD writes old-format for every new shard move going forward.
+- Existing new-format entries linger. `audit_storage
+  metadata_encoding` reports `MIGRATION IN PROGRESS` indefinitely.
+
+The only thing this mixed state prevents is **downgrading the FDB
+binary**. Old FDB versions cannot decode new-format `serverKeys`
+values and will misbehave. To make downgrade safe, all entries must
+be drained to old format — reflected in `audit_storage
+metadata_encoding` returning `ROLLBACK COMPLETE — safe to downgrade
+binary`.
+
+Operators pick from three paths to reach `ROLLBACK COMPLETE`:
+
+1. **Do nothing beyond setting the target.** Natural DD moves gradually
+   drain entries over time. Timeframe unbounded — could be days or
+   weeks on a quiescent cluster. Fine if you don't need to downgrade
+   on a schedule.
+
+2. **Active rewrite (this doc's remaining subsections).** Opt in via
+   the two DatabaseConfiguration options. Bounded — scales with cluster
+   size (the serverKeys drain is serial per SS): minutes on typical
+   clusters, potentially hours on a very large (~250k-shard) cluster.
+   These are estimates. Progress is observable via DD trace events and
+   `audit_storage metadata_encoding` (see the serverKeys subsection).
+
+3. **Storage wiggle.** Enable perpetual storage wiggle. Every SS
+   rotates through the cluster, causing every shard to move at least
+   once. Slow (hours-to-days) but exercises only pre-existing code
+   paths. Recommended when active rewrite is too aggressive for
+   safety envelope.
+
+The active rewrite path described below is **opt-in per operator event**
+via two database configuration options that mirror the
+`storage_engine` + `perpetual_storage_wiggle` pattern:
+
+```
+fdbcli> configure shard_metadata_format=original
+fdbcli> configure shard_metadata_migration=enabled
+```
+
+- `shard_metadata_format` = the target format DD converges existing
+  entries toward. When unset, DD falls back to the
+  `SHARD_ENCODE_LOCATION_METADATA` knob (`true → encoded`,
+  `false → original`).
+- `shard_metadata_migration` = whether DD actively runs the rewrite
+  pass at init. When unset or `disabled` (default), DD does nothing at
+  init and both directions converge via natural DD moves or a manual
+  storage wiggle (unbounded timescale).
+
+Deploying a binary with this feature onto an existing cluster is a
+byte-identical no-op unless the operator explicitly enables migration.
+
+When migration is enabled, the safety properties below apply:
 
 1. **Decoders handle both formats.** SS processes both old-format and shard-encoded
    serverKeys mutations correctly regardless of its persistent `shardAware` flag.
    No data loss from format mismatch.
 
-2. **DD restarts on knob change.** In production, changing the knob requires a
-   process restart. On restart, DD initializes with the new value and runs the
-   startup rewrite. In-flight actors from the old DD are cancelled.
+2. **DD re-inits on a config change.** A `configure shard_metadata_format=...`
+   (or `shard_metadata_migration=...`) change triggers a recovery that
+   re-elects DD; the new DD resolves the effective target and runs the
+   startup rewrite. No knob change or process restart is required (the knob
+   is only the fallback when the config is unset). In-flight actors from the
+   old DD are cancelled.
 
-3. **DD rewrites keyServers on startup.** When DD restarts with knob=false, it
-   scans keyServers entries and rewrites shard-encoded ones to old tag-based format.
-   DataMoveMetaData entries are cleared.
+3. **DD rewrites keyServers on startup.** When DD re-inits with the effective
+   target = `original` and migration=enabled, it scans keyServers entries and
+   rewrites shard-encoded ones to old tag-based format. DataMoveMetaData
+   entries are cleared.
 
-4. **serverKeys drains naturally.** Shard-encoded serverKeys entries are NOT
-   rewritten on startup (doing so causes KRM fragmentation and SS pair-processing
-   issues). They remain readable in both formats and drain to old format as DD
-   moves shards using the old path.
+4. **serverKeys are rewritten on startup.** DD scans each SS's serverKeys
+   KRM and rewrites shard-encoded ranges back to old-format constants
+   using `krmSetRangeCoalescing` — the same primitive natural moves
+   use. This preserves the two KRM invariants (no fragmentation because
+   coalescing merges adjacent same-value entries; paired `[begin, end)`
+   mutations because that is what `krmSetRangeCoalescing` emits, matching
+   what `applyPrivateData` on the SS expects). Unlike the keyServers
+   rewrite (step 3), the serverKeys rewrite is not paginated across
+   DD-init re-invocations: a single invocation drains every SS's
+   serverKeys KRM (looping over the serverList until it stabilizes),
+   then writes the completion sentinel. It blocks DD init for the
+   duration of the drain, and the serverKeys rewrite processes storage
+   servers **serially** (``co_await`` per SS, each SS re-scanned until a
+   pass rewrites nothing), so the time scales with cluster size:
+   (# SSes) × (shard-encoded ranges per SS). On typical clusters this is
+   minutes (e.g. a 12-SS live-cluster test drained within minutes); on a
+   very large (~250k-shard) cluster it could be substantially longer —
+   order of hours. These are estimates, not measured bounds. It is a
+   rare, opt-in, per-rollback (``shard_metadata_migration=enabled``)
+   event.
+
+   Progress is observable while it runs: DD emits ``DDShardEncodeRewriteBegin``,
+   per-SS ``DDShardEncodeRollbackPhase3SSStart`` / ``...Phase3SSDone``, and
+   ``DDShardEncodeRewriteComplete`` (with ``Phase3Rewrites`` / ``Phase3Passes``
+   / ``Phase3ElapsedSec``) trace events; operators can also poll
+   ``fdbcli> audit_storage metadata_encoding`` (new-format counts trending to
+   zero) and ``fdbcli> location_metadata physicalshards`` (physical shards
+   trending to zero).
+
+   Direct
+   `tr.set()` at each entry — an earlier design that this section used
+   to warn against — would produce fragmentation and violate the SS
+   pair-processing invariant; the current implementation avoids both
+   by routing through the same KRM primitive natural moves use.
 
 5. **Safety net for rolling restarts.** During a rolling restart, an old DD
    instance (not yet killed) may find its DataMoveMetaData cleared by a new DD
@@ -350,28 +449,153 @@ Safe — tested and verified in simulation (`ShardEncodeRollback.toml`):
    once more and pick up the new knob value. This is at most one extra restart
    per DD instance during the transition, not per-shard.
 
-The rollback procedure:
-1. Set `SHARD_ENCODE_LOCATION_METADATA=false`
-2. Restart the `fdbserver` processes (knob change requires restart)
-3. On DD init, keyServers entries are rewritten to old format and DataMoveMetaData is cleared
-4. DD proceeds with old path for all new moves
-5. serverKeys entries drain to old format as DD touches shards over time
+6. **Sentinel-based idempotency.** DD writes a completion sentinel key
+   (`\xff/dd/shard_encode_migration_complete = "old"`) at the end of a
+   successful rewrite pass. Subsequent DD inits read the sentinel and
+   fast-path skip — steady-state cost when migration is enabled is one
+   key read per DD init. On forward-direction knob flips
+   (`shard_metadata_format=encoded` or knob=true), DD clears the
+   stale sentinel so subsequent rollback events don't fast-path skip
+   incorrectly. If DD dies mid-rewrite, the sentinel remains absent →
+   the next DD does a full scan and converges.
 
-No need to stop writes or trigger wiggle.
+The rollback procedure (config-driven, no knob flip, no restart):
+1. `fdbcli> configure shard_metadata_format=original shard_metadata_migration=enabled`
+2. Force DD to re-init so it picks up the new configuration
+   immediately (the configure in step 1 already triggers a
+   recovery; this only expedites it):
+
+       fdbcli> datadistribution off
+       fdbcli> datadistribution on
+
+   The newly-elected DD resolves `effective = original` from the
+   config and runs the rewrite pass. No process restart and no knob
+   flip is needed — DD's write paths follow the config target.
+3. On the DD's next init, keyServers entries and serverKeys entries
+   are both rewritten to old format, and DataMoveMetaData is
+   cleared. The keyServers rewrite is paginated (up to 1000 entries
+   per DD-init pass, re-invoking until the prefix is covered); the
+   serverKeys rewrite then drains all storage servers within a
+   single DD-init invocation before the completion sentinel is
+   written.
+4. DD proceeds with old path for all new moves.
+5. Verify via `fdbcli> audit_storage metadata_encoding` returning
+   `ROLLBACK COMPLETE`.
+
+Alternative rollback procedure (drain via storage wiggle, no
+configure needed):
+1. Set `SHARD_ENCODE_LOCATION_METADATA=false` and restart processes.
+2. Leave `shard_metadata_migration` unset or `disabled`.
+3. Enable perpetual storage wiggle. Every SS rotates through,
+   causing DD to rewrite every shard's metadata in the current
+   (old) format as part of natural moves.
+4. Verify via `audit_storage metadata_encoding`. Reaches
+   `ROLLBACK COMPLETE` over hours-to-days depending on cluster
+   size and wiggle throttling.
+
+Because DD rewrites serverKeys directly on init when migration is
+enabled (using the same KRM primitive natural moves use — see step 4
+in the previous section), storage wiggle is not required to reach
+`ROLLBACK COMPLETE` on a quiescent cluster. Both paths are
+supported; operators pick based on how quickly they need
+`ROLLBACK COMPLETE`.
+
+### Config is the source of truth; the knob is the fallback
+
+DD resolves its effective encoding target once at init:
+
+```
+effective = shard_metadata_format.present()
+                ? shard_metadata_format
+                : SHARD_ENCODE_LOCATION_METADATA   // knob fallback
+```
+
+`shard_metadata_format` (configure option) is authoritative for **all** of
+DD's decisions — both the migration decision at init and the write paths
+(MoveKeys, natural moves, failed-server / dataMove cleanup). The
+`SHARD_ENCODE_LOCATION_METADATA` knob is consulted **only as the fallback**
+when `shard_metadata_format` is UNSET.
+
+DD does **not** write the config. It re-resolves the effective target on every
+init, and a `configure shard_metadata_format=...` change triggers a recovery
+that re-elects a DD which reads the new value. So nothing needs to be "kept in
+sync" on a running cluster and there is no self-seeding write (which would
+force an extra recovery on upgrade): just set the config and DD converges.
+Deploying the binary is a byte-identical no-op until an operator sets the
+config.
+
+**Two DD features stay gated on the raw knob, not the config target — a
+known limitation.** Physical shard moves (`ENABLE_DD_PHYSICAL_SHARD`) and
+per-range replication / "large teams" (`ddLargeTeamEnabled`, i.e.
+`DD_MAX_SHARDS_ON_LARGE_TEAMS > 0 && !SHARD_ENCODE_LOCATION_METADATA`) are
+**mutually exclusive with shard-encoded metadata** — they operate only in the
+old (tag-based) format. They still read the `SHARD_ENCODE_LOCATION_METADATA`
+knob directly rather than the resolved `shard_metadata_format` target. That is
+a deliberate trade-off, not a full solution:
+
+- Gating them on `shard_metadata_format` would be *worse*: the config flips
+  instantly but the metadata drains asynchronously, so they would switch on
+  the moment `shard_metadata_format=original` is set — while encoded entries
+  still exist — violating the mutual exclusion during the active rollback.
+  Gating on the knob (which only changes via a process restart) avoids that.
+- But the knob gating is not fully safe either, once config and knob can
+  disagree. Two consequences:
+  - After a **config-only** rollback (config=old, knob still `true`), large
+    teams / physical shard stay **disabled** even at `ROLLBACK COMPLETE`. To
+    re-enable them, redeploy with `SHARD_ENCODE_LOCATION_METADATA=false` (the
+    same knob=false deploy a binary downgrade needs — see the downgrade
+    contract below).
+  - Conversely, a contradictory `SHARD_ENCODE_LOCATION_METADATA=false` flip
+    while `shard_metadata_format=encoded` would **wrongly enable** large
+    teams / physical shard on encoded metadata.
+- Impact is low in practice: large teams is rarely used, physical shard is
+  experimental (off by default), and the bad case requires an operator
+  deliberately contradicting the config with the knob. The correct fix (gate
+  these on the fully-drained old-format state) is deferred.
+
+**Operational rule:** once you set `shard_metadata_format`, do not move the
+`SHARD_ENCODE_LOCATION_METADATA` knob except as part of a downgrade
+(knob=false on a fully rolled-back cluster). Config drives the *encoding*; the
+knob gates the mutually-exclusive *old-format-only features*.
+
+Neither of these affects the keyServers/serverKeys encoding or the
+rollback/downgrade contract.
 
 ### Rollback to old binary (downgrade)
 
 NOT safe if shard-encoded values exist. Old binary cannot parse new-format
-serverKeys values. Requires a migration step (drain all entries to old format)
-before downgrade.
+serverKeys values. Requires DD's rewrite to complete first — verify via
+`audit_storage metadata_encoding` reporting `ROLLBACK COMPLETE`.
+
+**Downgrade contract (config-only clusters).** A pre-config binary cannot read
+`shard_metadata_format`; it decides encoding **solely from the
+`SHARD_ENCODE_LOCATION_METADATA` knob**. Config-only convergence leaves the
+knob untouched (it may still be `true`). So a binary downgrade is safe only
+when **both**:
+
+1. the cluster is already in unencoded (old) metadata (`ROLLBACK COMPLETE`), and
+2. the downgrade-target binary is deployed with `SHARD_ENCODE_LOCATION_METADATA=false`
+   in its command-line / knob config.
+
+Condition 2 is natural — a binary downgrade is itself a redeploy/restart, so
+you set the knob on the target binary at that moment; no live knob change on
+the running config-only binary is needed. If you skip it, the old binary boots
+with `knob=true` and resumes new-format writes, re-corrupting the metadata the
+config-driven rollback just drained. (Downgrades *among* config-aware binaries
+are unaffected — they all read `shard_metadata_format`.)
 
 ### Migration for downgrade
 
-1. Set knob false, restart (DD uses old path, writes old format)
-2. Run background rewriter or trigger storage wiggle to touch all shards
-3. Verify completion: scan keyServers/serverKeys, confirm zero shard-encoded entries
-4. Clear `\xff/dataMoves/` range
-5. Safe to downgrade binary
+1. Converge to old format via config, no restart:
+   `fdbcli> configure shard_metadata_format=original shard_metadata_migration=enabled`
+   (optionally `datadistribution off; on` to expedite). DD rewrites both
+   keyServers and serverKeys to old format on init; DataMoveMetaData is cleared.
+2. Verify completion: `fdbcli> audit_storage metadata_encoding` reports
+   `ROLLBACK COMPLETE — safe to downgrade binary`. Large clusters may
+   require several DD init passes to fully drain; the tool's status
+   line shows progress.
+3. Downgrade the binary, deploying it with `SHARD_ENCODE_LOCATION_METADATA=false`
+   (see the downgrade contract above).
 
 ### Verifying migration state
 
@@ -437,29 +661,29 @@ both forward migration completion and rollback readiness. Runs client-side
 ```
 fdbcli> audit_storage metadata_encoding
 keyServers: 45021 entries
-  Old format (tag-based): 0
-  New format (UID-based): 45021
+  Original format (tag-based): 0
+  Encoded format (UID-based): 45021
 serverKeys: 123004 entries
-  Old format (constants): 0
-  New format (UID-encoded): 123004
+  Original format (constants): 0
+  Encoded format (UID-encoded): 123004
 dataMoves: 3 entries (in-progress moves)
 
 Migration status: FORWARD COMPLETE
 ```
 
-After rollback (knob flipped false, drain in progress):
+After rollback (target set to `original`, drain in progress):
 
 ```
 fdbcli> audit_storage metadata_encoding
 keyServers: 45021 entries
-  Old format (tag-based): 44800
-  New format (UID-based): 221
+  Original format (tag-based): 44800
+  Encoded format (UID-based): 221
 serverKeys: 123004 entries
-  Old format (constants): 122500
-  New format (UID-encoded): 504
+  Original format (constants): 122500
+  Encoded format (UID-encoded): 504
 dataMoves: 0 entries
 
-Migration status: MIGRATION IN PROGRESS (mixed format: 221 new keyServers, 504 new serverKeys)
+Migration status: MIGRATION IN PROGRESS (mixed format: 221 encoded keyServers, 504 encoded serverKeys)
 ```
 
 When all zeros:

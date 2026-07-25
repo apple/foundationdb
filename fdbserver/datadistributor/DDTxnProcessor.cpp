@@ -21,6 +21,7 @@
 #include "DDTxnProcessor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include "DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/TxnCounters.h"
@@ -300,62 +301,57 @@ class DDTxnProcessorImpl {
 		co_return Optional<Key>();
 	}
 
-	// When SHARD_ENCODE_LOCATION_METADATA is false on DD init, do a bounded
-	// rewrite to start the rollback. Two phases, both bounded:
+	// Rollback rewrite invoked at DD init when the migration target is
+	// old format: converts shard-encoded metadata back to old format so
+	// `audit_storage metadata_encoding` can reach ROLLBACK COMPLETE.
+	// See design/shard-encode-location-metadata.md for the full design.
 	//
-	// Phase 1: Clear all DataMoveMetaData (single transaction; the dataMoves
-	// keyspace is small, this is always one commit).
+	// Three phases: (1) clear DataMoveMetaData, (2) rewrite keyServers
+	// (paginated, re-entrant), (3) rewrite each SS's serverKeys KRM. A
+	// completion sentinel lets later DD inits fast-path skip.
 	//
-	// Phase 2: Rewrite up to 1000 keyServers entries at the head of the
-	// prefix from new (UID-based) to old (tag-based) format. Returns true
-	// if either phase committed; the caller restarts the outer init loop
-	// and calls back in. The Phase-2 cap means clusters with more than
-	// 1000 shard-encoded keyServers entries are NOT fully rewritten by
-	// this function — by design. Bulk rewrite happens through normal
-	// shard movement / storage wiggle once the knob is false (see the
-	// "Migration for downgrade" section of
-	// design/shard-encode-location-metadata.md); this function just
-	// clears dataMoves and rewrites the small remnant at the head so DD
-	// init has a tidy starting point.
-	//
-	// Calling this when nothing needs rewriting (knob has been false the
-	// whole time, or rollback already complete) is safe and
-	// write-cost-free: the reads find no shard-encoded entries, no
-	// commits happen, returns false. Cost is three system-key reads on
-	// every DD init when knob is false.
-	//
-	// serverKeys entries are left in place — they drain naturally as DD
-	// moves shards using the old path.
-	static Future<bool> rewriteShardEncodedMetadata(Transaction& tr, UID distributorId) {
-		TraceEvent(SevInfo, "DDInitShardEncodeOff", distributorId)
-		    .detail("KnobValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-		// Phase 1: Clear all DataMoveMetaData
+	// Two non-obvious properties:
+	//  - The Phase 3 serverKeys rewrite is required for convergence;
+	//    without it, new-format serverKeys only drain opportunistically
+	//    as DD moves shards, so ROLLBACK COMPLETE may never be reached.
+	//  - Phase 3 is NOT re-entrant: it drains all SSes in one DD-init
+	//    invocation (up to ~3.5h serial on a 250k-shard cluster) before
+	//    setting the sentinel. Rare, opt-in, runs per rollback event
+	//    (configure shard_metadata_migration=enabled).
+	// Phase 1 of rewriteShardEncodedMetadata: clear all persisted
+	// DataMoveMetaData entries. New-format dataMoves are meaningless to
+	// old-format DD; on rollback DD needs a clean slate to plan moves.
+	// Any clear commits on the caller's tr (batched with the sentinel-
+	// clear that the top-level function queued on the same tr). Returns
+	// true if any were cleared — caller re-enters until this returns
+	// false.
+	static Future<bool> clearShardEncodedDataMoves(Transaction& tr, UID distributorId) {
 		RangeResult dmsCheck = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!dmsCheck.more && dmsCheck.size() < CLIENT_KNOBS->TOO_MANY);
-		if (!dmsCheck.empty()) {
-			TraceEvent(SevWarnAlways, "DDInitCancellingShardEncodedMoves", distributorId)
-			    .detail("Count", dmsCheck.size());
-			tr.clear(dataMoveKeys);
-			co_await tr.commit();
-			tr.reset();
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			co_return true;
+		if (dmsCheck.empty()) {
+			co_return false;
 		}
+		TraceEvent(SevWarnAlways, "DDInitCancellingShardEncodedMoves", distributorId).detail("Count", dmsCheck.size());
+		tr.clear(dataMoveKeys);
+		co_await tr.commit();
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		co_return true;
+	}
 
-		// Phase 2: Rewrite shard-encoded keyServers entries to old format.
-		// Reads 1000 entries per iteration. Caller loops (co_return true triggers
-		// re-entry) until no shard-encoded entries remain. Previously-rewritten
-		// entries won't match hasShardEncodeLocationMetaData() on re-read.
+	// Phase 2: rewrite one batch (SHARD_ENCODE_REWRITE_KS_BATCH_SIZE
+	// entries) of shard-encoded keyServers entries to old format. Caller
+	// owns `beginKey` and re-enters until this returns false, so the
+	// cursor persists across calls to cover the whole prefix.
+	static Future<bool> rewriteShardEncodedKeyServers(Transaction& tr, UID distributorId, Key& beginKey) {
 		RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 		bool rewroteAny = false;
-		RangeResult ksEntries = co_await tr.getRange(KeyRangeRef(keyServersPrefix, keyServersEnd), 1000);
+		RangeResult ksEntries =
+		    co_await tr.getRange(KeyRangeRef(beginKey, keyServersEnd), SERVER_KNOBS->SHARD_ENCODE_REWRITE_KS_BATCH_SIZE);
 		for (const auto& kv : ksEntries) {
 			if (kv.value.empty())
 				continue;
@@ -369,19 +365,406 @@ class DDTxnProcessorImpl {
 				rewroteAny = true;
 			}
 		}
-
-		if (rewroteAny) {
-			TraceEvent(SevInfo, "DDInitRewritingShardEncodedMetadata", distributorId)
-			    .detail("KeyServersEntries", ksEntries.size());
-			co_await tr.commit();
-			tr.reset();
+		// Compute the next cursor, but DO NOT publish it to the caller-owned
+		// `beginKey` until AFTER a successful commit below. This tr carries
+		// the caller's DD-init read set (serverList/workers/mode keys), so
+		// its commit can throw not_committed on a conflict — common under
+		// churn (e.g. Attrition changing the server list). If we advanced
+		// beginKey before committing, the caller's retry would resume from
+		// the already-advanced cursor and permanently skip this batch's
+		// unconverted new-format entries. That is the root cause of the
+		// KeyServersNew residual / early-seal (seeds 2611177188, 1561219216):
+		// only the FIRST batch leaked, because after tr.reset() below later
+		// batches carry a small read set and rarely conflict.
+		const bool atEnd = !ksEntries.more;
+		Key nextBegin = ksEntries.empty() ? beginKey : keyAfter(ksEntries.back().key);
+		if (atEnd) {
+			nextBegin = keyServersPrefix; // defensive: caller won't re-enter after false
+		}
+		if (!rewroteAny) {
+			// Only safe to declare Phase 2 done once the whole prefix is
+			// walked. If more pages remain we must re-enter — returning
+			// false here would reach ROLLBACK COMPLETE while unrewritten
+			// entries remain further along the prefix.
+			if (atEnd) {
+				co_return false; // done; leave tr for the caller's sentinel-clear commit
+			}
+			beginKey = nextBegin; // read-only page (no commit to fail): safe to advance
+			tr.reset(); // no writes this page; drop read set before re-entering
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			co_return true;
 		}
+		TraceEvent(SevInfo, "DDInitRewritingShardEncodedMetadata", distributorId)
+		    .detail("KeyServersEntries", ksEntries.size())
+		    .detail("More", ksEntries.more);
+		co_await tr.commit();
+		beginKey = nextBegin; // publish the cursor ONLY after the durable commit
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		co_return true;
+	}
 
-		co_return false;
+	// Phase 3 per-SS: rewrite one SS's serverKeys KRM from new-format
+	// entries to old-format constants. Uses ONE FRESH TRANSACTION PER
+	// krmSetRangeCoalescing CALL — same pattern natural DD moves use in
+	// MoveKeys.cpp:99. See rewriteShardEncodedMetadata's Phase 3 comment
+	// for the correctness argument. Returns the number of ranges
+	// rewritten across the entire SS (paginates internally so callers
+	// don't need to re-invoke to finish one SS).
+	static Future<int64_t> rewriteOneServerKeysKRM(Database cx, UID ssId, UID distributorId, bool& fullyDrained) {
+		Key mapPrefix = serverKeysPrefixFor(ssId);
+		int64_t rewritesForThisSS = 0;
+		double ssStart = now();
+		int scanIdx = 0;
+		// True unless we bail below with possible residue (no-progress or
+		// scan-limit break). The caller must NOT seal the completion
+		// sentinel if any SS returns fullyDrained=false, else it would
+		// report ROLLBACK COMPLETE while new-format serverKeys remain.
+		fullyDrained = true;
+
+		// Repeat full KRM scans until a complete scan finds no new-format
+		// spans. A single forward paginated pass can leave residue (a
+		// no-progress break under a small KRM_GET_RANGE_LIMIT, a partial
+		// page, or coalescing shifting boundaries mid-pass), so we must not
+		// return "drained" until a whole scan rewrote nothing.
+		loop {
+			scanIdx++;
+			int64_t rewritesThisScan = 0;
+			bool noProgress = false;
+			Key beginKey = allKeys.begin;
+			int pageIdx = 0;
+
+			while (beginKey < allKeys.end) {
+				// Read one page of this SS's KRM in its own fresh snapshot
+				// transaction. KRM_GET_RANGE_LIMIT bounds page size; under
+				// buggify this can be as small as 10 entries.
+				RangeResult ranges;
+				bool morePages = false;
+				{
+					Transaction readTr(cx);
+					readTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					readTr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+					readTr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+					// Guard: krmGetRanges hangs on an empty KRM prefix
+					// (freshly registered SS with no assignments yet).
+					if (beginKey == allKeys.begin) {
+						RangeResult probe = co_await readTr.getRange(KeyRangeRef(mapPrefix, strinc(mapPrefix)), 1);
+						if (probe.empty()) {
+							co_return rewritesForThisSS;
+						}
+					}
+
+					ranges = co_await krmGetRanges(&readTr,
+					                               mapPrefix,
+					                               KeyRangeRef(beginKey, allKeys.end),
+					                               CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+					                               CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
+					morePages = ranges.more;
+				}
+
+				if (scanIdx == 1 && pageIdx == 0) {
+					TraceEvent(SevInfo, "DDShardEncodeRollbackPhase3SSStart", distributorId)
+					    .detail("SS", ssId)
+					    .detail("FirstPageEntries", ranges.size());
+				}
+
+				for (int i = 0; i + 1 < ranges.size(); i++) {
+					const ValueRef& v = ranges[i].value;
+					if (isServerKeysUnassigned(v) || isServerKeysOldFormatAssigned(v)) {
+						continue;
+					}
+					bool assigned = false;
+					bool emptyRange = false;
+					DataMoveType dataMoveType = DataMoveType::LOGICAL;
+					DataMovementReason dataMoveReason = DataMovementReason::INVALID;
+					UID id;
+					try {
+						decodeServerKeysValue(v, assigned, emptyRange, dataMoveType, id, dataMoveReason);
+					} catch (Error& e) {
+						// Malformed serverKeys value from a partial upgrade
+						// or corrupted state — skip this span, don't abort
+						// DD init. The audit tool will report the residual
+						// entry via its own scan.
+						TraceEvent(SevWarnAlways, "DDShardEncodeRollbackSkipUndecodable", distributorId)
+						    .detail("SS", ssId)
+						    .detail("Key", ranges[i].key)
+						    .detail("Error", e.code());
+						continue;
+					}
+					Value oldValue = !assigned ? serverKeysFalse : emptyRange ? serverKeysTrueEmptyRange : serverKeysTrue;
+					KeyRange span = KeyRangeRef(ranges[i].key, ranges[i + 1].key);
+
+					// One transaction per span. Retry on transient errors
+					// via the standard idiom.
+					loop {
+						Transaction spanTr(cx);
+						spanTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						spanTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						Error err;
+						try {
+							co_await krmSetRangeCoalescing(&spanTr, mapPrefix, span, allKeys, oldValue);
+							co_await spanTr.commit();
+							break;
+						} catch (Error& e) {
+							err = e;
+						}
+						co_await spanTr.onError(err);
+					}
+					rewritesThisScan++;
+				}
+
+				if (!morePages) {
+					break;
+				}
+				if (ranges.size() == 0) {
+					// morePages with size==0 shouldn't happen; guard against infinite loop.
+					break;
+				}
+				Key nextBegin = ranges.back().key;
+				// Monotonic-progress guard: if the KRM returned a page
+				// that doesn't advance beginKey (degenerate KRM under
+				// BUGGIFY KRM_GET_RANGE_LIMIT=10), stop and mark this SS
+				// not fully drained (fullyDrained=false below) so the
+				// caller leaves the sentinel unset and a later DD init
+				// retries rather than falsely reporting ROLLBACK COMPLETE.
+				if (!(beginKey < nextBegin)) {
+					TraceEvent(SevWarnAlways, "DDShardEncodeRollbackPhase3NoProgress", distributorId)
+					    .detail("SS", ssId)
+					    .detail("BeginKey", beginKey)
+					    .detail("NextBegin", nextBegin)
+					    .detail("PageEntries", ranges.size());
+					noProgress = true;
+					break;
+				}
+				beginKey = nextBegin;
+				pageIdx++;
+			}
+
+			rewritesForThisSS += rewritesThisScan;
+			if (rewritesThisScan == 0) {
+				break; // a complete scan found nothing new-format → SS drained
+			}
+			if (noProgress) {
+				fullyDrained = false; // bailed with possible residue; caller must not seal
+				break;
+			}
+			if (scanIdx >= 8) {
+				fullyDrained = false; // bailed with possible residue; caller must not seal
+				TraceEvent(SevWarnAlways, "DDShardEncodeRollbackPhase3SSScanLimit", distributorId)
+				    .detail("SS", ssId)
+				    .detail("Rewrites", rewritesForThisSS);
+				break;
+			}
+		}
+
+		TraceEvent(SevInfo, "DDShardEncodeRollbackPhase3SSDone", distributorId)
+		    .detail("SS", ssId)
+		    .detail("Rewrites", rewritesForThisSS)
+		    .detail("Scans", scanIdx)
+		    .detail("ElapsedSec", now() - ssStart);
+		co_return rewritesForThisSS;
+	}
+
+	// Set the shard-encode migration sentinel to `value` in its own
+	// transaction, retrying on transient errors. Load-bearing commit —
+	// audit tools and future DD inits read this key as the authoritative
+	// migration-complete signal.
+	static Future<Void> commitShardEncodeMigrationSentinel(Database cx, Value value) {
+		co_await runRYWTransactionVoid(cx, [value](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->set(shardEncodeMigrationCompleteKey, value);
+			return Void();
+		});
+	}
+
+	static Future<bool> rewriteShardEncodedMetadata(Transaction& tr, UID distributorId, Key& phase2Cursor) {
+		Database cx = tr.getDatabase();
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+		// Fast-path: sentinel says already rolled back → skip everything.
+		// Cost per DD init when the cluster has been at knob=false for a
+		// while is a single key read.
+		Optional<Value> marker = co_await tr.get(shardEncodeMigrationCompleteKey);
+		if (marker.present() && marker.get() == shardEncodeMigrationValueOld) {
+			TraceEvent(SevInfo, "DDShardEncodeRewriteSkipped", distributorId)
+			    .detail("Direction", "rollback")
+			    .detail("Reason", "SentinelSaysOld");
+			co_return false;
+		}
+		TraceEvent(SevInfo, "DDShardEncodeRewriteBegin", distributorId)
+		    .detail("Direction", "rollback")
+		    .detail("KnobValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)
+		    .detail("PreviousSentinel", marker.present() ? marker.get() : "absent"_sr);
+
+		// Clear the sentinel so any observer during the rewrite (audit
+		// tool) sees "in progress" rather than a stale "complete"
+		// marker. This clear is committed alongside whichever phase's
+		// first commit fires (or as a standalone commit before Phase 3
+		// if 1 & 2 are no-ops).
+		tr.clear(shardEncodeMigrationCompleteKey);
+
+		if (co_await clearShardEncodedDataMoves(tr, distributorId)) {
+			co_return true; // committed; caller re-enters
+		}
+
+		if (co_await rewriteShardEncodedKeyServers(tr, distributorId, phase2Cursor)) {
+			co_return true; // committed; caller re-enters
+		}
+
+		// No Phase 1 or Phase 2 work. Commit the sentinel-clear, then
+		// Phase 3 opens per-span transactions. Re-read serverList until
+		// stable to close the register-during-migration race — see
+		// comment before the do/while loop below.
+		co_await tr.commit();
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+		// Phase 3: for each SS, rewrite its serverKeys KRM. Uses ONE
+		// FRESH TRANSACTION PER krmSetRangeCoalescing CALL — the same
+		// pattern natural DD moves use in MoveKeys.cpp:99. Correctness
+		// argument: krmSetRangeCoalescing uses Snapshot::True reads to
+		// compute coalescing boundaries; NativeAPI Transaction does not
+		// surface prior same-tx writes to those reads, so batching
+		// calls in one tx produces fragmentation (see
+		// KeyRangeMap.cpp:302 assertion; observed in v4/v5/v6-fix
+		// pre-sentinel iterations). One-tx-per-span sidesteps the RYW
+		// dependency entirely.
+		//
+		// Loop until the serverList is stable across a full Phase 3
+		// pass. Closes the race where an SS registers between the
+		// snapshot and the sentinel commit — its serverKeys entries
+		// might otherwise be missed while sentinel="old" is set. In the
+		// steady case this runs once (empty second pass).
+		int64_t totalPhase3Rewrites = 0;
+		double phase3Start = now();
+		std::set<UID> processed;
+		int passes = 0;
+		bool ssListStabilized = false;
+		// Cleared if any per-SS drain bails with possible residue (no-progress
+		// / scan-limit). We only seal the sentinel when every processed SS
+		// fully drained.
+		bool allDrained = true;
+		while (true) {
+			passes++;
+			Transaction slTr(cx);
+			slTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			slTr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			slTr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			RangeResult serverList = co_await slTr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+			int64_t passRewrites = 0;
+			int newSSCount = 0;
+			for (const auto& serverKv : serverList) {
+				UID ssId = decodeServerListValue(serverKv.value).id();
+				if (!processed.insert(ssId).second) {
+					continue; // Already processed in a prior pass
+				}
+				newSSCount++;
+				bool ssDrained = true;
+				passRewrites += co_await rewriteOneServerKeysKRM(cx, ssId, distributorId, ssDrained);
+				if (!ssDrained) {
+					allDrained = false;
+				}
+			}
+			totalPhase3Rewrites += passRewrites;
+			if (newSSCount == 0) {
+				// No SSes appeared since the last pass — safe to seal.
+				ssListStabilized = true;
+				break;
+			}
+			TraceEvent(SevInfo, "DDShardEncodeRollbackPhase3Repass", distributorId)
+			    .detail("Pass", passes)
+			    .detail("NewSSes", newSSCount)
+			    .detail("PassRewrites", passRewrites);
+			// Bounded safety net: if an operator is registering SSes
+			// continuously, break out after a reasonable number of
+			// passes and let the next DD init retry.
+			if (passes >= 8) {
+				TraceEvent(SevWarnAlways, "DDShardEncodeRollbackPhase3PassLimit", distributorId)
+				    .detail("Passes", passes)
+				    .detail("Reason", "SSListNotStabilizing");
+				break;
+			}
+		}
+
+		if (!ssListStabilized || !allDrained) {
+			// Either an SS registered after our last pass (list not stable),
+			// or a per-SS drain bailed with possible residue (no-progress /
+			// scan-limit). Leave the sentinel unset so a later DD init
+			// re-scans — sealing "old" here would falsely report "safe to
+			// downgrade". Return false (not true) so we don't immediately
+			// re-enter and spin on the same churn.
+			TraceEvent(SevWarnAlways, "DDShardEncodeRollbackPhase3Incomplete", distributorId)
+			    .detail("Phase3Rewrites", totalPhase3Rewrites)
+			    .detail("Phase3Passes", passes)
+			    .detail("SSListStabilized", ssListStabilized)
+			    .detail("AllDrained", allDrained)
+			    .detail("Phase3ElapsedSec", now() - phase3Start);
+			co_return false;
+		}
+
+		// All phases drained. Set sentinel = "old" so subsequent DD
+		// inits fast-path skip.
+		co_await commitShardEncodeMigrationSentinel(cx, shardEncodeMigrationValueOld);
+		TraceEvent(SevInfo, "DDShardEncodeRewriteComplete", distributorId)
+		    .detail("Direction", "rollback")
+		    .detail("Phase3Rewrites", totalPhase3Rewrites)
+		    .detail("Phase3Passes", passes)
+		    .detail("Phase3ElapsedSec", now() - phase3Start);
+
+		// Return true if we did any Phase 3 work (caller restart is
+		// cheap — sentinel fast-path skip on re-entry).
+		co_return totalPhase3Rewrites > 0;
+	}
+
+	// When the effective encoding target is "encoded" (new format) on DD
+	// init -- i.e. shard_metadata_format=encoded, or the
+	// SHARD_ENCODE_LOCATION_METADATA knob when the config is UNSET -- clear
+	// any stale "sentinel=='old'" that a prior rollback
+	// (rewriteShardEncodedMetadata) committed. This runs unconditionally on
+	// the forward path (independent of shard_metadata_migration): without
+	// it, natural DD moves during the forward window would write new-format
+	// entries while the sentinel still claims "old"; a subsequent rollback
+	// (target back to original) would see sentinel=="old" in
+	// rewriteShardEncodedMetadata's fast-path, skip the rewrite, and leave
+	// those new-format entries in place -- old-format DD would then trip on
+	// them.
+	//
+	// We do NOT actively rewrite old-format entries to new format on
+	// re-forward: new-format code paths (decodeServerKeysValue,
+	// decodeKeyServersValue) explicitly accept old-format inputs, and
+	// natural DD moves gradually rewrite as ranges move. Trade: audit
+	// tool's FORWARD COMPLETE terminal state converges over the natural-
+	// move timescale rather than in a bounded post-flip window.
+	//
+	// Idempotent -- safe on a fresh cluster (sentinel absent) and on
+	// repeat DD inits. Steady-state cost when the target is encoded: one
+	// system-key read per DD init, zero commits after the initial clear.
+	static Future<bool> clearStaleShardEncodedRewriteSentinel(Transaction& tr, UID distributorId) {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+		Optional<Value> marker = co_await tr.get(shardEncodeMigrationCompleteKey);
+		if (!marker.present()) {
+			co_return false;
+		}
+		tr.clear(shardEncodeMigrationCompleteKey);
+		co_await tr.commit();
+		TraceEvent(SevInfo, "DDShardEncodeSentinelCleared", distributorId).detail("PreviousValue", marker.get());
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		co_return true;
 	}
 
 	// Read keyservers, return unique set of teams
@@ -390,7 +773,8 @@ class DDTxnProcessorImpl {
 	                                                                             MoveKeysLock moveKeysLock,
 	                                                                             std::vector<Optional<Key>> remoteDcIds,
 	                                                                             const DDEnabledState* ddEnabledState,
-	                                                                             SkipDDModeCheck skipDDModeCheck) {
+	                                                                             SkipDDModeCheck skipDDModeCheck,
+	                                                                             DatabaseConfiguration dbConfig) {
 		auto result = makeReference<InitialDataDistribution>();
 		Key beginKey = allKeys.begin;
 
@@ -409,6 +793,28 @@ class DDTxnProcessorImpl {
 
 		Optional<Key> healthyZone = co_await getHealthyZone(cx, distributorId);
 		result->initHealthyZoneValue = healthyZone;
+
+		// Reuse DD's already-loaded DatabaseConfiguration (passed in from
+		// loadDatabaseConfiguration) rather than a per-init read here.
+		// The rewrite is gated on shard_metadata_migration below; with the
+		// default (UNSET) config no rewrite runs. NOTE this is an
+		// intentional change from the legacy behavior where the
+		// SHARD_ENCODE_LOCATION_METADATA knob being false alone triggered
+		// the rollback rewrite — the knob now only selects the target
+		// format as a fallback when shard_metadata_format is UNSET.
+		bool migrationEnabled =
+		    dbConfig.shardMetadataMigration == DatabaseConfiguration::ShardMetadataMigration::ENABLED;
+		bool targetIsNewFormat;
+		if (dbConfig.shardMetadataFormat != DatabaseConfiguration::ShardMetadataFormat::UNSET) {
+			targetIsNewFormat =
+			    (dbConfig.shardMetadataFormat == DatabaseConfiguration::ShardMetadataFormat::ENCODED);
+		} else {
+			targetIsNewFormat = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+		}
+		// Phase 2 keyServers cursor — persists across re-entries so the
+		// rewrite paginates the whole prefix instead of rescanning from
+		// the head each time.
+		Key phase2Cursor = keyServersPrefix;
 
 		CODE_PROBE((bool)skipDDModeCheck, "DD Mode won't prevent read initial data distribution.");
 		// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
@@ -476,10 +882,53 @@ class DDTxnProcessorImpl {
 					}
 				}
 
-				// If SHARD_ENCODE is off, rewrite any shard-encoded metadata to old format.
-				if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-					if (co_await rewriteShardEncodedMetadata(tr, distributorId)) {
-						continue; // Committed a rewrite — re-read from the top
+				// Rewrite metadata that doesn't match the current effective
+				// format (rollback direction — actively drains new-format
+				// entries to old), or invalidate any stale rollback-complete
+				// sentinel on re-forward so a subsequent rollback doesn't
+				// fast-path skip incorrectly. On re-forward we rely on
+				// natural DD moves to eventually rewrite entries in new
+				// format; new-format code paths accept old-format inputs,
+				// so mixed state is safe.
+				//
+				// The rollback (active rewrite) branch is GATED on the two
+				// DatabaseConfiguration options (default UNSET), resolved once
+				// above the retry loop. The forward branch's stale-sentinel
+				// clear runs UNCONDITIONALLY (independent of
+				// shard_metadata_migration). Direction is implicit -- DD
+				// converges toward the format specified by
+				// shard_metadata_format.
+				//
+				// Coexistence with the legacy SHARD_ENCODE_LOCATION_METADATA
+				// knob: if shard_metadata_format is UNSET, DD falls back to
+				// the knob value (true -> encoded, false -> original)
+				// as the target. If shard_metadata_migration is UNSET, no
+				// migration runs — the knob being false no longer triggers
+				// a rewrite on its own (an intentional change from the
+				// legacy knob-only trigger).
+				if (!targetIsNewFormat) {
+					// Rollback direction: the active rewrite is opt-in via
+					// shard_metadata_migration.
+					if (migrationEnabled) {
+						if (co_await rewriteShardEncodedMetadata(tr, distributorId, phase2Cursor)) {
+							continue; // Committed a rewrite — re-read from the top
+						}
+					}
+				} else {
+					// Forward direction: ALWAYS clear a stale rollback-complete
+					// sentinel, independent of shard_metadata_migration. The
+					// forward direction has no active rewrite, but if a prior
+					// rollback left sentinel=="old" and the operator re-forwards
+					// with migration disabled, the sentinel must still be cleared
+					// — otherwise a later rollback reads the stale "old" via
+					// rewriteShardEncodedMetadata's fast-path and skips the
+					// rewrite, so the new-format entries written while forward
+					// never converge. clearStaleShardEncodedRewriteSentinel is a
+					// single-key read (a no-op when the sentinel is absent, i.e.
+					// on clusters that never rolled back), so this stays a no-op
+					// for never-migrated clusters.
+					if (co_await clearStaleShardEncodedRewriteSentinel(tr, distributorId)) {
+						continue; // Committed a clear — re-read from the top
 					}
 				}
 
@@ -673,7 +1122,7 @@ class DDTxnProcessorImpl {
 		    .detail("NumShards", result->shards.size())
 		    .detail("ElapsedSeconds", now() - keyServerScanStart);
 
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
+		if (targetIsNewFormat && numDataMoves > 0) {
 			for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
 				const DDShardInfo& iShard = result->shards[shard];
 				KeyRangeRef keys = KeyRangeRef(iShard.key, result->shards[shard + 1].key);
@@ -916,9 +1365,10 @@ Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistrib
     const MoveKeysLock& moveKeysLock,
     const std::vector<Optional<Key>>& remoteDcIds,
     const DDEnabledState* ddEnabledState,
-    SkipDDModeCheck skipDDModeCheck) {
+    SkipDDModeCheck skipDDModeCheck,
+    const DatabaseConfiguration& configuration) {
 	return DDTxnProcessorImpl::getInitialDataDistribution(
-	    cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState, skipDDModeCheck);
+	    cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState, skipDDModeCheck, configuration);
 }
 
 Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {

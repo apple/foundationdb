@@ -252,7 +252,17 @@ public:
 	bool ALLOW_LARGE_SHARD;
 	int MAX_LARGE_SHARD_BYTES;
 
-	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
+	// If true, location metadata is written in the shard-encoded (UID+dataMoveId)
+	// "new" format. As of the config-driven rollback work this knob is only a
+	// FALLBACK for the encoding target: DD resolves its effective target from the
+	// DatabaseConfiguration shard_metadata_format option and consults this knob only
+	// when that config is UNSET (see DDEnabledState::shardEncodeLocationMetadata).
+	// This knob still DIRECTLY gates the old-format-only features that are mutually
+	// exclusive with shard encoding -- large teams (ddLargeTeamEnabled) and physical
+	// shard moves (ENABLE_DD_PHYSICAL_SHARD) read this knob, not the config; see the
+	// "known limitation" note in design/shard-encode-location-metadata.md.
+	bool SHARD_ENCODE_LOCATION_METADATA;
+	int SHARD_ENCODE_REWRITE_KS_BATCH_SIZE; // keyServers entries rewritten per DD-init rollback pass (Phase 2).
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	double DD_PHYSICAL_SHARD_MOVE_PROBABILITY; // Percentage of physical shard move, in the range of [0, 1].
 	bool ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT;

@@ -64,7 +64,7 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>] [perpetual_storage_wiggle_engine=<ENGINE>] [storage_migration_type={disabled|aggressive|gradual}]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>] [perpetual_storage_wiggle_engine=<ENGINE>] [storage_migration_type={disabled|aggressive|gradual}] [shard_metadata_format={original|encoded}] [shard_metadata_migration={enabled|disabled}]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
 
@@ -130,6 +130,171 @@ The default is ``disabled``, which means changing the storage engine will not be
 ``gradual`` replaces a single storage at a time when the ``perpetual storage wiggle`` is active. This requires the perpetual storage wiggle to be set to a non-zero value to actually migrate storage servers. It is somewhat slow but very safe. This is the recommended method for all production clusters.
 ``aggressive`` tries to replace as many storages as it can at once, and will recruit a new storage server on the same process as the old one. This will be faster, but can potentially hit degraded performance or OOM with two storages on the same process. The main benefit over ``gradual`` is that this doesn't need to take one storage out of rotation, so it works for small or development clusters that have the same number of storage processes as the replication factor. Note that ``aggressive`` is not exclusive to running the perpetual wiggle.
 ``disabled`` means that if the storage engine is changed, fdb will not move the cluster over to the new storage engine. This will disable the perpetual wiggle from rewriting storage files.
+
+shard metadata format and migration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Two related configuration options that control migration of the cluster's
+shard-location metadata (``\xff/keyServers/`` and ``\xff/serverKeys/``)
+between the legacy tag-based encoding and the newer UID+dataMoveId
+encoding introduced with ``SHARD_ENCODE_LOCATION_METADATA``. The pair
+mirrors the ``storage_engine`` + ``perpetual_storage_wiggle`` pattern.
+
+``shard_metadata_format={original|encoded}`` — target encoding
+Data Distributor should converge existing metadata entries toward. When
+unset, DD falls back to the legacy ``SHARD_ENCODE_LOCATION_METADATA``
+knob (``true → encoded``, ``false → original``).
+
+``shard_metadata_migration={enabled|disabled}`` — whether DD actively
+runs a rewrite pass at init to converge existing entries to
+``shard_metadata_format``. Default is unset (equivalent to
+``disabled``); DD does nothing at init in either direction and entries
+drain via natural DD moves or a manual storage wiggle (unbounded
+timescale). Enable per-event when a bounded-time migration is needed.
+
+These options are how you drive a shard-metadata migration. If you never
+set them, DD falls back to the ``SHARD_ENCODE_LOCATION_METADATA`` knob for
+its target format and runs no active rewrite. See "Do I need to migrate?"
+below for the decision.
+
+Do I need to migrate?
+~~~~~~~~~~~~~~~~~~~~~
+
+**No, unless you plan to downgrade the FDB binary.** After rolling the
+target to old format (``configure shard_metadata_format=original``, or —
+with the config unset — the legacy ``SHARD_ENCODE_LOCATION_METADATA=false``
+knob), the cluster keeps running normally: DD writes old-format for every
+new shard move, existing new-format entries linger, ``audit_storage
+metadata_encoding`` reports ``MIGRATION IN PROGRESS`` indefinitely.
+This mixed state is fully functional. The current binary understands
+both formats.
+
+The one thing you *cannot* do while entries are in mixed state is
+downgrade to an older FDB binary. Old binaries cannot parse
+new-format ``serverKeys`` entries and will misbehave. To make
+downgrade safe, all new-format entries must be rewritten to old
+format — reflected in ``audit_storage metadata_encoding`` returning
+``ROLLBACK COMPLETE — safe to downgrade binary``.
+
+Three ways to reach ``ROLLBACK COMPLETE``:
+
+**A. Do nothing beyond setting the target.** Rely on natural DD moves
+over time. Every shard move rewrites its metadata in the current
+(now old) format. Eventually every entry drains. **Timeframe is
+unbounded** and depends on workload — could be days or weeks on a
+quiescent cluster; hours on a busy one. If you don't have a specific
+downgrade deadline, this is the least effort.
+
+**B. Active rewrite (this PR's fast path).** Set the two configure
+options plus toggle DD. Bounded, but the time scales with cluster size —
+the serverKeys drain runs serially per storage server: minutes on typical
+clusters, potentially hours on a very large (250k-shard) cluster (these
+are estimates). Progress is observable (see the Rollback flow below).
+
+**C. Storage wiggle.** Enable ``perpetual_storage_wiggle=1``. Every
+SS gets rotated, forcing every shard to move at least once. Slow
+(hours to days depending on data size and wiggle throttling) but
+proven — no new code paths involved. Recommended when the active
+rewrite is too aggressive for your safety envelope.
+
+Rollback flow (drain new-format entries to old; bounded, but the time
+scales with cluster size — the serverKeys drain runs serially per storage
+server, so minutes on typical clusters and potentially hours on a very
+large 250k-shard cluster; these are estimates). This is driven purely by
+configuration — no knob change and no process restart. DD's effective
+target comes from ``shard_metadata_format``; the
+``SHARD_ENCODE_LOCATION_METADATA`` knob is only a fallback consulted when
+the config is unset, so the knob is not touched here:
+
+.. code-block:: console
+
+    # 1. Set the target to original and enable migration (single
+    #    fdbcli command). No knob flip, no rolling restart.
+    fdbcli> configure shard_metadata_format=original shard_metadata_migration=enabled
+
+    # 2. The configure triggers a recovery, so the re-elected DD picks
+    #    up the new target automatically. To expedite (optional), force a
+    #    DD re-election — a few seconds, not a process restart:
+    fdbcli> datadistribution off
+    fdbcli> datadistribution on
+
+    # 3. Watch progress. DD emits DDShardEncodeRewriteBegin, per-SS
+    #    DDShardEncodeRollbackPhase3SSStart/SSDone, and
+    #    DDShardEncodeRewriteComplete (Phase3Rewrites/Phase3Passes/
+    #    Phase3ElapsedSec) trace events. You can also poll:
+    fdbcli> audit_storage metadata_encoding
+    #    (new-format counts trend to zero) and
+    fdbcli> location_metadata physicalshards
+    #    (physical shards trend to zero)
+    # ... poll until "ROLLBACK COMPLETE — safe to downgrade binary" ...
+
+    # 4. Optionally leave migration enabled (steady-state cost is
+    #    one key read per DD init) or disable it:
+    fdbcli> configure shard_metadata_migration=disabled
+
+Downgrading the binary afterward: an older (pre-config) binary cannot
+read ``shard_metadata_format`` and decides encoding solely from the
+``SHARD_ENCODE_LOCATION_METADATA`` knob. A binary downgrade is therefore
+safe only once ``ROLLBACK COMPLETE`` is reached **and** the
+downgrade-target binary is deployed with
+``SHARD_ENCODE_LOCATION_METADATA=false`` in its knob config. A downgrade
+is itself a redeploy/restart, so you set the knob on the target binary at
+that moment — no live knob change on the running cluster is needed. If you
+skip it, the old binary boots with ``knob=true`` and resumes new-format
+writes, re-corrupting the metadata the rollback just drained.
+
+Old-format-only features after a config-only rollback (known limitation):
+per-range replication ("large teams", ``DD_MAX_SHARDS_ON_LARGE_TEAMS``) and
+physical shard moves (``ENABLE_DD_PHYSICAL_SHARD``) are mutually exclusive
+with shard-encoded metadata and still read the
+``SHARD_ENCODE_LOCATION_METADATA`` knob directly, not ``shard_metadata_format``.
+Consequences: after a config-only rollback (knob still true) they stay
+disabled even once ``ROLLBACK COMPLETE`` is reached; and a contradictory
+``SHARD_ENCODE_LOCATION_METADATA=false`` flip while
+``shard_metadata_format=encoded`` would wrongly enable them on encoded
+metadata. Gating them on ``shard_metadata_format`` instead would be worse
+(the config flips instantly while metadata drains asynchronously, enabling
+them mid-rollback while encoded entries still exist), so they are left on the
+knob; impact is low (large teams is rarely used, physical shard is
+experimental). Rule: once you set ``shard_metadata_format``, do not move the
+knob except as part of a downgrade. To re-enable these features on a
+rolled-back cluster, redeploy with ``SHARD_ENCODE_LOCATION_METADATA=false``
+(the same knob=false deploy a binary downgrade requires).
+
+Re-forward flow (after a rollback), also config-driven (no knob flip):
+
+.. code-block:: console
+
+    # 1. Set the target back to encoded and (re-)enable migration:
+    fdbcli> configure shard_metadata_format=encoded shard_metadata_migration=enabled
+
+    # 2. Force DD to re-init to pick up the new configuration (optional;
+    #    the configure already triggers a recovery):
+    fdbcli> datadistribution off
+    fdbcli> datadistribution on
+
+    # 3. The re-elected DD clears any stale rollback-complete
+    #    sentinel. Old-format entries drain via natural DD moves;
+    #    new-format entries appear as DD writes new moves.
+    #    `FORWARD COMPLETE` converges over the natural-move
+    #    timescale (unbounded) rather than in a bounded post-flip
+    #    window. New-format code paths accept old-format entries,
+    #    so mixed state is safe throughout.
+    fdbcli> audit_storage metadata_encoding
+
+Minimum recipe: if ``shard_metadata_format`` is left unset, DD falls
+back to reading the ``SHARD_ENCODE_LOCATION_METADATA`` knob directly
+for the target format. You can therefore skip setting the format
+and just enable migration; DD infers direction from the knob:
+
+.. code-block:: console
+
+    fdbcli> configure shard_metadata_migration=enabled
+    fdbcli> datadistribution off ; datadistribution on
+
+For more details including the safety and observability story, see
+the ``design/shard-encode-location-metadata.md`` design document in
+the source tree.
 
 consistencyscan
 ----------------

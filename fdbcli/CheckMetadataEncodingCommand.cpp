@@ -136,11 +136,11 @@ Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRe
 	int64_t serverKeysTotal = serverKeysOld + serverKeysNew;
 
 	fmt::println("keyServers: {} entries", keyServersTotal);
-	fmt::println("  Old format (tag-based): {}", keyServersOld);
-	fmt::println("  New format (UID-based): {}", keyServersNew);
+	fmt::println("  Original format (tag-based): {}", keyServersOld);
+	fmt::println("  Encoded format (UID-based): {}", keyServersNew);
 	fmt::println("serverKeys: {} entries", serverKeysTotal);
-	fmt::println("  Old format (constants): {}", serverKeysOld);
-	fmt::println("  New format (UID-encoded): {}", serverKeysNew);
+	fmt::println("  Original format (constants): {}", serverKeysOld);
+	fmt::println("  Encoded format (UID-encoded): {}", serverKeysNew);
 	fmt::println("dataMoves: {} entries", dataMovesCount);
 	fmt::println("");
 
@@ -149,11 +149,11 @@ Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRe
 	} else if (keyServersOld == 0 && serverKeysOld == 0) {
 		fmt::println("Migration status: FORWARD COMPLETE");
 	} else if (keyServersNew > 0 || serverKeysNew > 0) {
-		fmt::println("Migration status: MIGRATION IN PROGRESS (mixed format: {} new keyServers, {} new serverKeys)",
+		fmt::println("Migration status: MIGRATION IN PROGRESS (mixed format: {} encoded keyServers, {} encoded serverKeys)",
 		             keyServersNew,
 		             serverKeysNew);
 	} else {
-		fmt::println("Migration status: NOT STARTED (all old format)");
+		fmt::println("Migration status: NOT STARTED (all original format)");
 	}
 
 	co_return true;
