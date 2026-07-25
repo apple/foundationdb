@@ -1097,6 +1097,8 @@ public:
 
 	bool hasEmptyData() const { return bytes == 0; }
 
+	size_t getBytes() const { return bytes; }
+
 	Key getBeginKey() const { return beginKey; }
 
 	Key getEndKey() const { return endKey; }
