@@ -168,12 +168,13 @@ public:
 	// Call NativeAPI implementation directly
 	Future<ServerWorkerInfos> getServerListAndProcessClasses() override;
 
-	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(const UID& distributorId,
-	                                                                      const MoveKeysLock& moveKeysLock,
-	                                                                      const std::vector<Optional<Key>>& remoteDcIds,
-	                                                                      const DDEnabledState* ddEnabledState,
-	                                                                      SkipDDModeCheck skipDDModeCheck,
-	                                                                      const DatabaseConfiguration& configuration) override;
+	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
+	    const UID& distributorId,
+	    const MoveKeysLock& moveKeysLock,
+	    const std::vector<Optional<Key>>& remoteDcIds,
+	    const DDEnabledState* ddEnabledState,
+	    SkipDDModeCheck skipDDModeCheck,
+	    const DatabaseConfiguration& configuration) override;
 
 	Future<MoveKeysLock> takeMoveKeysLock(UID const& ddId) const override;
 

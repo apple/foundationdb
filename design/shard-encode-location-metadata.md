@@ -343,7 +343,7 @@ zero-additional-work operation from the cluster's perspective:
 
 The only thing this mixed state prevents is **downgrading the FDB
 binary**. Old FDB versions cannot decode new-format `serverKeys`
-values and will misbehave. To make downgrade safe, all entries must
+values and will misbehave/crash. To make downgrade safe, all entries must
 be drained to old format — reflected in `audit_storage
 metadata_encoding` returning `ROLLBACK COMPLETE — safe to downgrade
 binary`.
@@ -461,9 +461,9 @@ When migration is enabled, the safety properties below apply:
 
 The rollback procedure (config-driven, no knob flip, no restart):
 1. `fdbcli> configure shard_metadata_format=original shard_metadata_migration=enabled`
-2. Force DD to re-init so it picks up the new configuration
-   immediately (the configure in step 1 already triggers a
-   recovery; this only expedites it):
+2. Check step 1 caused DD to reinit, just in case. If not, force DD to re-init so it
+   picks up the new configuration immediately (the configure in step 1 triggers a
+   recovery; this should not be needed):
 
        fdbcli> datadistribution off
        fdbcli> datadistribution on

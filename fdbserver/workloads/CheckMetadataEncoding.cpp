@@ -127,7 +127,7 @@ struct CheckMetadataEncodingWorkload : TestWorkload {
 		// matches the knob direction; a mismatched request is a test
 		// misconfiguration and should fail loudly and immediately below.
 		const bool pollForConvergence = (self->requireRollbackComplete && !self->shardEncodeExpected) ||
-		                                 (self->requireForwardComplete && self->shardEncodeExpected);
+		                                (self->requireForwardComplete && self->shardEncodeExpected);
 		// Deadline is generous: under BUGGIFY the DD rollback rewrite can be
 		// throttled hard (tiny SHARD_ENCODE_REWRITE_KS_BATCH_SIZE and
 		// KRM_GET_RANGE_LIMIT), making Phase 2/3 legitimately take a few
@@ -258,8 +258,7 @@ struct CheckMetadataEncodingWorkload : TestWorkload {
 			// requested in principle; require whichever are set.
 			bool terminalReached = true;
 			if (self->requireRollbackComplete) {
-				terminalReached =
-				    terminalReached && (keyServersNew == 0 && serverKeysNew == 0 && dataMovesCount == 0);
+				terminalReached = terminalReached && (keyServersNew == 0 && serverKeysNew == 0 && dataMovesCount == 0);
 			}
 			if (self->requireForwardComplete) {
 				terminalReached = terminalReached && (keyServersOld == 0 && serverKeysOld == 0);

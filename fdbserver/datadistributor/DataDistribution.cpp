@@ -643,15 +643,13 @@ public:
 			// only when shard_metadata_format is UNSET. Publish it on
 			// ddEnabledState so every downstream write/move path reads one
 			// resolved value instead of the raw knob.
-			bool shardEncodeLocationMetadata =
-			    self->configuration.shardMetadataFormatIsEncoded().orDefault(
-			        SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+			bool shardEncodeLocationMetadata = self->configuration.shardMetadataFormatIsEncoded().orDefault(
+			    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 			self->context->ddEnabledState->setShardEncodeLocationMetadata(shardEncodeLocationMetadata);
 			TraceEvent("DDInitShardEncodeTarget", self->ddId)
 			    .detail("ShardEncodeLocationMetadata", shardEncodeLocationMetadata)
 			    .detail("ConfigFormatUnset",
-			            self->configuration.shardMetadataFormat ==
-			                DatabaseConfiguration::ShardMetadataFormat::UNSET)
+			            self->configuration.shardMetadataFormat == DatabaseConfiguration::ShardMetadataFormat::UNSET)
 			    .detail("Knob", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 
 			if (self->configuration.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
@@ -788,7 +786,8 @@ public:
 		}
 
 		std::vector<Key> customBoundaries;
-		if (bulkLoadIsEnabled(self->initData->bulkLoadMode, self->context->ddEnabledState->shardEncodeLocationMetadata())) {
+		if (bulkLoadIsEnabled(self->initData->bulkLoadMode,
+		                      self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 			// Bulk load does not allow boundary change
 			TraceEvent(SevInfo, "DDInitCustomRangeConfigDisabledByBulkLoadMode", self->ddId);
 		} else {
@@ -2902,20 +2901,19 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			actors.push_back(self->pollMoveKeysLock());
 			actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
 
-			self->context->tracker = makeReference<DataDistributionTracker>(
-			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
-			                                       .distributorId = self->ddId,
-			                                       .readyToStart = self->initialized,
-			                                       .output = self->relocationProducer,
-			                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
-			                                       .physicalShardCollection = self->physicalShardCollection,
-			                                       .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
-			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
-			                                       .shards = &shards,
-			                                       .trackerCancelled = &self->context->trackerCancelled,
-			                                       .usableRegions = self->configuration.usableRegions,
-			                                       .shardEncodeLocationMetadata =
-			                                           self->context->ddEnabledState->shardEncodeLocationMetadata() });
+			self->context->tracker = makeReference<DataDistributionTracker>(DataDistributionTrackerInitParams{
+			    .db = self->txnProcessor,
+			    .distributorId = self->ddId,
+			    .readyToStart = self->initialized,
+			    .output = self->relocationProducer,
+			    .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			    .physicalShardCollection = self->physicalShardCollection,
+			    .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
+			    .anyZeroHealthyTeams = anyZeroHealthyTeams,
+			    .shards = &shards,
+			    .trackerCancelled = &self->context->trackerCancelled,
+			    .usableRegions = self->configuration.usableRegions,
+			    .shardEncodeLocationMetadata = self->context->ddEnabledState->shardEncodeLocationMetadata() });
 			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
 			                                                                 self->initData,
 			                                                                 getShardMetrics.getFuture(),
