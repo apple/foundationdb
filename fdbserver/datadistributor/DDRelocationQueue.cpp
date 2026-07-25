@@ -3508,7 +3508,7 @@ TEST_CASE("/DataDistribution/DDQueue/RetryDestinationTeamFailure") {
 }
 
 TEST_CASE("/DataDistribution/DDQueue/SerializeRelocatorError") {
-	Reference<DDQueue> self = makeReference<DDQueue>();
+	auto self = makeReference<DDQueue>();
 	DDQueueImpl::RunState state(self);
 	Promise<Void> error;
 	Future<Void> propagated;

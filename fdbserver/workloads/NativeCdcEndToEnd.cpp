@@ -700,7 +700,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		bool followedProxyReplacement = proxy->id() != initialProxyStatus.first.id();
 		updateObservedProxy(*proxy, initialProxyStatus.first);
 		const CDCProxyBufferStatus initial = initialProxyStatus.second;
-		Reference<AsyncVar<bool>> stopped = makeReference<AsyncVar<bool>>(false);
+		auto stopped = makeReference<AsyncVar<bool>>(false);
 		Future<Void> requester = requestPopsUntilStopped(cx, stopped);
 		const double deadline = now() + operationTimeout;
 		while (true) {
@@ -734,7 +734,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 
 		Promise<Void> releaseAcknowledgements;
-		Reference<AsyncVar<int>> completed = makeReference<AsyncVar<int>>(0);
+		auto completed = makeReference<AsyncVar<int>>(0);
 		std::vector<Future<Void>> consumers;
 		consumers.reserve(streams.size());
 		for (const auto& stream : streams) {
