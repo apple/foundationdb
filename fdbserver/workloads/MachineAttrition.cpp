@@ -165,10 +165,6 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		enabled = !clientId && g_network->isSimulated() && faultInjectionActivated;
 		suspendDuration = 10.0;
 		iterate = true;
-		if (enabled) {
-			phase = MachineAttritionPhase::get(wcx.sharedRandomNumber);
-			phaseOwner = phase->registerWorkload(machinesToLeave);
-		}
 	}
 
 	explicit MachineAttritionWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
@@ -198,6 +194,13 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		allowFaultInjection = getOption(options, "allowFaultInjection"_sr, allowFaultInjection);
 		if (enabled) {
 			phase = MachineAttritionPhase::get(wcx.sharedRandomNumber);
+			phaseOwner = phase->registerWorkload(machinesToLeave);
+		}
+	}
+
+	void initFailureInjectionMode(DeterministicRandom&) override {
+		if (enabled) {
+			phase = MachineAttritionPhase::get(sharedRandomNumber);
 			phaseOwner = phase->registerWorkload(machinesToLeave);
 		}
 	}
@@ -623,6 +626,40 @@ TEST_CASE("/fdbserver/workloads/MachineAttrition/phaseCoordination") {
 	ASSERT(phase.get() != nextPhase.get());
 	ASSERT(nextPhase->prepareTargets(nextTargets, nextOwner));
 	ASSERT(nextTargets.size() == allMachines.size());
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/workloads/MachineAttrition/failureInjectorSelection") {
+	WorkloadContext wcx;
+	wcx.clientId = 0;
+	wcx.clientCount = 1;
+	wcx.sharedRandomNumber = -3;
+
+	auto phase = MachineAttritionPhase::get(wcx.sharedRandomNumber);
+	auto explicitOwner = phase->registerWorkload(0);
+	std::vector<LocalityData> machines = { LocalityData(Optional<Standalone<StringRef>>(),
+		                                                Standalone<StringRef>("zone0"_sr),
+		                                                Standalone<StringRef>("zone0"_sr),
+		                                                Optional<Standalone<StringRef>>()) };
+	phase->observe(machines);
+
+	TestWorkloadImpl<MachineAttritionWorkload, true> unselected(wcx, NoOptions{});
+	ASSERT(!unselected.phase);
+	ASSERT(unselected.phaseOwner == 0);
+	auto unselectedTargets = machines;
+	ASSERT(phase->prepareTargets(unselectedTargets, explicitOwner));
+	ASSERT(unselectedTargets.size() == 1);
+
+	TestWorkloadImpl<MachineAttritionWorkload, true> selected(wcx, NoOptions{});
+	ASSERT(!selected.phase);
+	selected.enabled = true;
+	DeterministicRandom random(wcx.sharedRandomNumber);
+	selected.initFailureInjectionMode(random);
+	ASSERT(selected.phase == phase);
+	ASSERT(selected.phaseOwner != 0);
+	auto selectedTargets = machines;
+	ASSERT(!phase->prepareTargets(selectedTargets, explicitOwner));
 
 	return Void();
 }
