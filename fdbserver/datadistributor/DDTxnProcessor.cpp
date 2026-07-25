@@ -350,8 +350,8 @@ class DDTxnProcessorImpl {
 		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 		bool rewroteAny = false;
-		RangeResult ksEntries =
-		    co_await tr.getRange(KeyRangeRef(beginKey, keyServersEnd), SERVER_KNOBS->SHARD_ENCODE_REWRITE_KS_BATCH_SIZE);
+		RangeResult ksEntries = co_await tr.getRange(KeyRangeRef(beginKey, keyServersEnd),
+		                                             SERVER_KNOBS->SHARD_ENCODE_REWRITE_KS_BATCH_SIZE);
 		for (const auto& kv : ksEntries) {
 			if (kv.value.empty())
 				continue;
@@ -496,7 +496,9 @@ class DDTxnProcessorImpl {
 						    .detail("Error", e.code());
 						continue;
 					}
-					Value oldValue = !assigned ? serverKeysFalse : emptyRange ? serverKeysTrueEmptyRange : serverKeysTrue;
+					Value oldValue = !assigned    ? serverKeysFalse
+					                 : emptyRange ? serverKeysTrueEmptyRange
+					                              : serverKeysTrue;
 					KeyRange span = KeyRangeRef(ranges[i].key, ranges[i + 1].key);
 
 					// One transaction per span. Retry on transient errors
@@ -806,8 +808,7 @@ class DDTxnProcessorImpl {
 		    dbConfig.shardMetadataMigration == DatabaseConfiguration::ShardMetadataMigration::ENABLED;
 		bool targetIsNewFormat;
 		if (dbConfig.shardMetadataFormat != DatabaseConfiguration::ShardMetadataFormat::UNSET) {
-			targetIsNewFormat =
-			    (dbConfig.shardMetadataFormat == DatabaseConfiguration::ShardMetadataFormat::ENCODED);
+			targetIsNewFormat = (dbConfig.shardMetadataFormat == DatabaseConfiguration::ShardMetadataFormat::ENCODED);
 		} else {
 			targetIsNewFormat = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
 		}

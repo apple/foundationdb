@@ -261,9 +261,7 @@ struct DatabaseConfiguration {
 		return shardMetadataFormat == ShardMetadataFormat::ENCODED;
 	}
 	// Whether DD should actively converge existing entries at init.
-	bool shardMetadataMigrationEnabled() const {
-		return shardMetadataMigration == ShardMetadataMigration::ENABLED;
-	}
+	bool shardMetadataMigrationEnabled() const { return shardMetadataMigration == ShardMetadataMigration::ENABLED; }
 
 	// Storage Migration Type
 	StorageMigrationType storageMigrationType;

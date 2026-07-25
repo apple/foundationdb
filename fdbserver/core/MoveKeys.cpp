@@ -2180,8 +2180,13 @@ static Future<Void> startMoveShards(Database occ,
 						if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 							std::vector<UID> servers(src.size() + dest.size());
 							std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-							co_await auditLocationMetadataPreCheck(
-							    occ, &tr, rangeIntersectKeys, servers, "startMoveShards_precheck", dataMoveId, ddEnabledState);
+							co_await auditLocationMetadataPreCheck(occ,
+							                                       &tr,
+							                                       rangeIntersectKeys,
+							                                       servers,
+							                                       "startMoveShards_precheck",
+							                                       dataMoveId,
+							                                       ddEnabledState);
 						}
 
 						if (destId.isValid()) {
@@ -2472,9 +2477,9 @@ static Future<DecodedShardsKeyServers> decodeAndPreCheckShards(Database occ,
                                                                bool runPreCheck,
                                                                DataMoveMetaData const& dataMove,
                                                                UID relocationIntervalId,
-                                                                Severity sevDm,
-                                                                bool* cancelDataMove,
-                                                                const DDEnabledState* ddEnabledState) {
+                                                               Severity sevDm,
+                                                               bool* cancelDataMove,
+                                                               const DDEnabledState* ddEnabledState) {
 	std::vector<UID> completeSrc;
 	std::unordered_set<UID> allServers;
 
@@ -3830,8 +3835,13 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 						std::vector<UID> servers(src.size() + dest.size());
 						std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-						co_await auditLocationMetadataPreCheck(
-						    occ, &tr, rangeIntersectKeys, servers, "cleanUpDataMoveCore_precheck", dataMoveId, ddEnabledState);
+						co_await auditLocationMetadataPreCheck(occ,
+						                                       &tr,
+						                                       rangeIntersectKeys,
+						                                       servers,
+						                                       "cleanUpDataMoveCore_precheck",
+						                                       dataMoveId,
+						                                       ddEnabledState);
 					}
 
 					for (const auto& uid : src) {
@@ -3873,11 +3883,8 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 					Value cleanupKsValue = ddEnabledState->shardEncodeLocationMetadata()
 					                           ? keyServersValue(src, {}, srcId, UID())
 					                           : keyServersValue(UIDtoTagMap, src, {});
-					krmSetPreviouslyEmptyRange(&tr,
-					                           keyServersPrefix,
-					                           rangeIntersectKeys,
-					                           cleanupKsValue,
-					                           currentShards[i + 1].value);
+					krmSetPreviouslyEmptyRange(
+					    &tr, keyServersPrefix, rangeIntersectKeys, cleanupKsValue, currentShards[i + 1].value);
 				}
 
 				if (range.end == dataMove.ranges.front().end) {
