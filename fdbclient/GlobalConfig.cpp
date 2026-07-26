@@ -23,7 +23,9 @@
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tuple.h"
+#include "fdbrpc/FailureMonitor.h"
 #include "flow/Error.h"
+#include "flow/UnitTest.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
@@ -203,6 +205,8 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 			while (true) {
 				// run one iteration at the beginning
 				co_await delay(0);
+				// Subscribe before processing history so a reentrant DB info update cannot be lost.
+				Future<Void> nextDbInfoChange = dbInfoChanged.onTrigger();
 				if (!dbInfo->history.empty()) {
 					if (lastUpdate < dbInfo->history[0].version) {
 						// This process missed too many global configuration
@@ -243,7 +247,7 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 				}
 				// In case this actor is canceled in the d'tor of GlobalConfig we can exit here.
 				co_await delay(0);
-				co_await dbInfoChanged.onTrigger();
+				co_await nextDbInfoChange;
 			}
 		} catch (Error& e) {
 			err = e;
@@ -257,4 +261,80 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 		TraceEvent("GlobalConfigUpdaterError").error(err);
 		co_await delay(1.0);
 	}
+}
+
+namespace {
+
+Future<Void> serveGlobalConfigTestRefresh(GrvProxyInterface proxy, Version version) {
+	GlobalConfigRefreshRequest request = co_await proxy.refreshGlobalConfig.getFuture();
+	RangeResult result;
+	request.reply.send(GlobalConfigRefreshReply{ result.arena(), version, result });
+	co_return;
+}
+
+} // namespace
+
+TEST_CASE("/fdbclient/GlobalConfig/PreservesReentrantHistoryUpdate") {
+	GrvProxyInterface grvProxy;
+	grvProxy.provisional = false;
+	grvProxy.initEndpoints();
+	IFailureMonitor::failureMonitor().setStatus(grvProxy.address(), FailureStatus(false));
+	ASSERT(IFailureMonitor::failureMonitor().getState(grvProxy.address()).isAvailable());
+
+	CommitProxyInterface commitProxy;
+	commitProxy.provisional = false;
+	commitProxy.initEndpoints();
+
+	ClientDBInfo initialInfo;
+	initialInfo.id = UID(1, 1);
+	initialInfo.grvProxies.push_back(grvProxy);
+	initialInfo.commitProxies.push_back(commitProxy);
+
+	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>(initialInfo);
+	Database db =
+	    DatabaseContext::create(clientInfo, Future<Void>(Never()), LocalityData(), EnableLocalityLoadBalance::False);
+	Future<Void> refresh = serveGlobalConfigTestRefresh(grvProxy, 1);
+	db->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
+
+	co_await timeoutError(db->globalConfig->onInitialized(), 1.0);
+	co_await timeoutError(refresh, 1.0);
+
+	VersionHistory sentinel(1);
+	VersionHistory enabled(2);
+	enabled.mutations.emplace_back_deep(
+	    enabled.mutations.arena(),
+	    MutationRef(MutationRef::SetValue, fdbClientInfoTxnSampleRate, Tuple::makeTuple(0.1).pack()));
+
+	VersionHistory disabled(3);
+	disabled.mutations.emplace_back_deep(
+	    disabled.mutations.arena(),
+	    MutationRef(MutationRef::SetValue, fdbClientInfoTxnSampleRate, Tuple::makeTuple(0.0).pack()));
+
+	ClientDBInfo enabledInfo = clientInfo->get();
+	enabledInfo.id = UID(1, 2);
+	enabledInfo.history.push_back(sentinel);
+	enabledInfo.history.push_back(enabled);
+
+	ClientDBInfo disabledInfo = enabledInfo;
+	disabledInfo.id = UID(1, 3);
+	disabledInfo.history.push_back(disabled);
+
+	Future<Void> disabledApplied;
+	Future<Void> deferredDisable;
+	Future<Void> publishDisabled = trigger(
+	    [&]() {
+		    ASSERT_EQ(db->globalConfig->get<double>(fdbClientInfoTxnSampleRate, -1.0), 0.1);
+		    disabledApplied = db->globalConfig->onChange();
+		    deferredDisable = trigger([&]() { clientInfo->set(disabledInfo); }, delay(0));
+	    },
+	    db->globalConfig->onChange());
+
+	clientInfo->set(enabledInfo);
+	co_await timeoutError(publishDisabled, 1.0);
+	ASSERT(deferredDisable.isValid());
+	co_await timeoutError(deferredDisable, 1.0);
+	ASSERT(disabledApplied.isValid());
+	co_await timeoutError(disabledApplied, 1.0);
+	ASSERT_EQ(db->globalConfig->get<double>(fdbClientInfoTxnSampleRate, -1.0), 0.0);
+	co_return;
 }
