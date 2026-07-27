@@ -58,6 +58,7 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
+#include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
 #include "flow/CodeProbeUtils.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
@@ -2228,6 +2229,28 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setTss(testConfig);
 }
 
+bool canReserveAutoStatelessMachines(int machineCount,
+                                     int assignedRealMachines,
+                                     int desiredStatelessMachines,
+                                     int storageTeamSize,
+                                     int tLogReplicationFactor) {
+	const int requiredStatefulMachines = std::max({ 4, storageTeamSize, tLogReplicationFactor });
+	return desiredStatelessMachines <= machineCount - assignedRealMachines &&
+	       machineCount - desiredStatelessMachines >= requiredStatefulMachines;
+}
+
+TEST_CASE("/fdbserver/SimulatedCluster/autoStatelessReservesStatefulCapacity") {
+	// An HTTP helper must not make three real stateful machines look like four.
+	ASSERT(!canReserveAutoStatelessMachines(9, 3, 6, 4, 4));
+	ASSERT(canReserveAutoStatelessMachines(8, 4, 3, 1, 2));
+	ASSERT(canReserveAutoStatelessMachines(10, 3, 6, 4, 4));
+	ASSERT(!canReserveAutoStatelessMachines(9, 7, 3, 1, 2));
+	ASSERT(!canReserveAutoStatelessMachines(9, 4, 5, 5, 4));
+	ASSERT(!canReserveAutoStatelessMachines(9, 4, 5, 4, 5));
+	ASSERT(canReserveAutoStatelessMachines(9, 4, 5, 4, 4));
+	return Void();
+}
+
 // Configures the system according to the given specifications in order to run
 // simulation under the correct conditions
 void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
@@ -2546,7 +2569,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					processClass = ProcessClass(
 					    processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())],
 					    ProcessClass::CommandLineSource); // Unset or Stateless
-					// Preserve the original draw and the first four storage-eligible machines.
+					// Preserve the original class draw and enough real storage- and TLog-eligible machines.
 					// Three-data-hall policies also need multiple TLog-eligible zones in each hall.
 					if (machine < machines && !testConfig.statelessProcessClassesPerDC.present() &&
 					    processClass == ProcessClass::StatelessClass &&
@@ -2554,7 +2577,11 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 						const int desiredStatelessMachines = std::max({ simconfig.db.getDesiredCommitProxies(),
 						                                                simconfig.db.getDesiredGrvProxies(),
 						                                                simconfig.db.getDesiredResolvers() });
-						if (desiredStatelessMachines <= machineCount - assignedRealMachines) {
+						if (canReserveAutoStatelessMachines(machineCount,
+						                                    assignedRealMachines,
+						                                    desiredStatelessMachines,
+						                                    simconfig.db.storageTeamSize,
+						                                    simconfig.db.tLogReplicationFactor)) {
 							remainingAutoStatelessClasses = std::max(0, desiredStatelessMachines - 1);
 						}
 					}

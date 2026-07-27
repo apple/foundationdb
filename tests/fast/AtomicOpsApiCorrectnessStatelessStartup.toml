@@ -19,3 +19,12 @@ testTitle = 'AtomicOpsCorrectnessStatelessStartup'
 
     [[test.workload]]
     testName = 'AtomicOpsApiCorrectness'
+
+[[test]]
+testTitle = 'AutoStatelessStatefulCapacity'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    testsMatching = '/fdbserver/SimulatedCluster/autoStatelessReservesStatefulCapacity'
