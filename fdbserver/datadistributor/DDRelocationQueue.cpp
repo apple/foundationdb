@@ -21,7 +21,9 @@
 #include <algorithm>
 #include <deque>
 #include <functional>
+#include <list>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <utility>
 #include <vector>
@@ -2920,6 +2922,65 @@ Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovem
 	}
 }
 
+class DeferredPipelineRelocations {
+	using Relocations = std::list<RelocateShard>;
+	using RangeKey = std::pair<Key, Key>;
+
+	Relocations relocations;
+	std::map<RangeKey, std::deque<Relocations::iterator>> relocationsByRange;
+
+	static RangeKey rangeKey(KeyRange const& range) { return { Key(range.begin), Key(range.end) }; }
+
+public:
+	bool empty() const { return relocations.empty(); }
+
+	void push(RelocateShard relocation) {
+		relocations.push_back(std::move(relocation));
+		auto entry = std::prev(relocations.end());
+		relocationsByRange[rangeKey(entry->keys)].push_back(entry);
+	}
+
+	RelocateShard pop() {
+		ASSERT(!relocations.empty());
+		auto entry = relocations.begin();
+		auto range = relocationsByRange.find(rangeKey(entry->keys));
+		ASSERT(range != relocationsByRange.end());
+		ASSERT(!range->second.empty());
+		ASSERT(range->second.front() == entry);
+		range->second.pop_front();
+		if (range->second.empty()) {
+			relocationsByRange.erase(range);
+		}
+		RelocateShard relocation = std::move(*entry);
+		relocations.erase(entry);
+		return relocation;
+	}
+
+	template <class Callback>
+	void consumeMatchingOrdinaryRelocations(KeyRange const& range, Callback&& callback) {
+		auto matches = relocationsByRange.find(rangeKey(range));
+		if (matches == relocationsByRange.end()) {
+			return;
+		}
+
+		std::deque<Relocations::iterator> retained;
+		for (auto entry : matches->second) {
+			// Restored moves have durable identity and cannot be absorbed into a new relocation.
+			if (entry->isRestore()) {
+				retained.push_back(entry);
+				continue;
+			}
+			callback(*entry);
+			relocations.erase(entry);
+		}
+		if (retained.empty()) {
+			relocationsByRange.erase(matches);
+		} else {
+			matches->second = std::move(retained);
+		}
+	}
+};
+
 // Gates the relocation input stream by the pipeline limit. Reserve one tracked slot for
 // failed-team recovery so a full queue of ordinary moves cannot prevent the recovery
 // needed to drain it. Continue consuming the input while ordinary moves are deferred;
@@ -2927,12 +2988,13 @@ Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovem
 // Cancellations always pass through because they reduce tracked metadata.
 // The global isDDPipelineControlEnabled() flag (cleared by disableDDPipelineControl()) also
 // bypasses the gate, allowing the test harness to open up the pipeline so DD can quiesce.
-// We poll it via delay() rather than AsyncVar to avoid cross-process callbacks in simulation.
+// Poll that global flag rather than registering cross-process callbacks in simulation.
 Future<Void> pipelineGateActor(Reference<DDQueue> self,
                                FutureStream<RelocateShard> input,
-                               PromiseStream<RelocateShard> output) {
-	std::deque<RelocateShard> deferredRelocations;
-	std::deque<RelocateShard> deferredFailureRecoveries;
+                               PromiseStream<RelocateShard> output,
+                               Reference<AsyncVar<int>> pipelineSizeChanges) {
+	DeferredPipelineRelocations deferredRelocations;
+	std::map<int, std::deque<RelocateShard>, std::greater<int>> deferredFailureRecoveries;
 
 	auto hasPipelineCapacity = [&self](bool failureRecovery) {
 		if (!isDDPipelineControlEnabled()) {
@@ -2943,14 +3005,35 @@ Future<Void> pipelineGateActor(Reference<DDQueue> self,
 		return self->pipelineSize() < admissionLimit;
 	};
 
-	auto isFailureRecovery = [](RelocateShard const& relocation) {
+	auto failureRecoveryPriority = [](RelocateShard const& relocation) {
 		auto isFailurePriority = [](int priority) {
 			return priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
 			       priority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT || priority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
 			       priority == SERVER_KNOBS->PRIORITY_TEAM_FAILED || priority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
 		};
-		return isFailurePriority(relocation.priority) ||
-		       (relocation.retryIntent.present() && isFailurePriority(relocation.retryIntent.get().healthPriority));
+		int priority = isFailurePriority(relocation.priority) ? relocation.priority : -1;
+		if (relocation.retryIntent.present() && isFailurePriority(relocation.retryIntent.get().healthPriority)) {
+			priority = std::max(priority, relocation.retryIntent.get().healthPriority);
+		}
+		return priority;
+	};
+
+	auto relocationIntent = [&failureRecoveryPriority](RelocateShard const& relocation) {
+		int healthPriority = failureRecoveryPriority(relocation);
+		if (relocation.retryIntent.present()) {
+			auto intent = relocation.retryIntent.get();
+			intent.healthPriority = std::max(intent.healthPriority, healthPriority);
+			return intent;
+		}
+		return RelocateShard::RetryRelocationIntent{
+			RelocateData::isBoundaryPriority(relocation.priority) ? relocation.priority : -1,
+			RelocateData::isHealthPriority(relocation.priority) ? relocation.priority : healthPriority,
+			isDataMovementForMountainChopper(relocation.moveReason) ||
+			    isDataMovementForValleyFiller(relocation.moveReason) ||
+			    relocation.moveReason == DataMovementReason::SPLIT_SHARD ||
+			    relocation.moveReason == DataMovementReason::TEAM_REDUNDANT ||
+			    relocation.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE
+		};
 	};
 
 	auto forwardRelocation = [&self, &output](RelocateShard relocation) {
@@ -2959,17 +3042,40 @@ Future<Void> pipelineGateActor(Reference<DDQueue> self,
 		output.send(std::move(relocation));
 	};
 
+	auto forwardFailureRecovery = [&deferredRelocations, &forwardRelocation, &relocationIntent](
+	                                  RelocateShard relocation) {
+		// Coalesce only identical ranges: swallowing a partial overlap would lose work for its unaffected keys.
+		deferredRelocations.consumeMatchingOrdinaryRelocations(relocation.keys, [&](RelocateShard const& deferred) {
+			auto mergedIntent = relocationIntent(relocation);
+			auto deferredIntent = relocationIntent(deferred);
+			mergedIntent.boundaryPriority = std::max(mergedIntent.boundaryPriority, deferredIntent.boundaryPriority);
+			mergedIntent.healthPriority = std::max(mergedIntent.healthPriority, deferredIntent.healthPriority);
+			mergedIntent.wantsNewServers |= deferredIntent.wantsNewServers;
+			relocation.priority = std::max(relocation.priority, deferred.priority);
+			relocation.priority =
+			    std::max(relocation.priority, std::max(mergedIntent.boundaryPriority, mergedIntent.healthPriority));
+			relocation.retryIntent = mergedIntent;
+			if (!relocation.getParentRange().present() && deferred.getParentRange().present()) {
+				relocation.reason = deferred.reason;
+				relocation.setParentRange(deferred.getParentRange().get());
+			}
+		});
+		forwardRelocation(std::move(relocation));
+	};
+
 	while (true) {
 		if (!deferredFailureRecoveries.empty() && hasPipelineCapacity(true)) {
-			RelocateShard relocation = std::move(deferredFailureRecoveries.front());
-			deferredFailureRecoveries.pop_front();
-			forwardRelocation(std::move(relocation));
+			auto highestPriority = deferredFailureRecoveries.begin();
+			RelocateShard relocation = std::move(highestPriority->second.front());
+			highestPriority->second.pop_front();
+			if (highestPriority->second.empty()) {
+				deferredFailureRecoveries.erase(highestPriority);
+			}
+			forwardFailureRecovery(std::move(relocation));
 			continue;
 		}
 		if (deferredFailureRecoveries.empty() && !deferredRelocations.empty() && hasPipelineCapacity(false)) {
-			RelocateShard relocation = std::move(deferredRelocations.front());
-			deferredRelocations.pop_front();
-			forwardRelocation(std::move(relocation));
+			forwardRelocation(deferredRelocations.pop());
 			continue;
 		}
 
@@ -2982,7 +3088,8 @@ Future<Void> pipelineGateActor(Reference<DDQueue> self,
 				    .suppressFor(30.0)
 				    .detail("PipelineFull", self->pipelineFull->get());
 			}
-			auto event = co_await race(input, self->pipelineFull->onChange() || delay(1.0));
+			auto event =
+			    co_await race(input, self->pipelineFull->onChange(), pipelineSizeChanges->onChange(), delay(1.0));
 			if (event.index() != 0) {
 				continue;
 			}
@@ -2991,16 +3098,16 @@ Future<Void> pipelineGateActor(Reference<DDQueue> self,
 
 		if (relocation.cancelled) {
 			forwardRelocation(std::move(relocation));
-		} else if (isFailureRecovery(relocation)) {
+		} else if (int priority = failureRecoveryPriority(relocation); priority >= 0) {
 			if (deferredFailureRecoveries.empty() && hasPipelineCapacity(true)) {
-				forwardRelocation(std::move(relocation));
+				forwardFailureRecovery(std::move(relocation));
 			} else {
-				deferredFailureRecoveries.push_back(std::move(relocation));
+				deferredFailureRecoveries[priority].push_back(std::move(relocation));
 			}
 		} else if (deferredFailureRecoveries.empty() && deferredRelocations.empty() && hasPipelineCapacity(false)) {
 			forwardRelocation(std::move(relocation));
 		} else {
-			deferredRelocations.push_back(std::move(relocation));
+			deferredRelocations.push(std::move(relocation));
 		}
 	}
 }
@@ -3008,18 +3115,23 @@ Future<Void> pipelineGateActor(Reference<DDQueue> self,
 struct DDQueueImpl {
 	struct RunState {
 		explicit RunState(Reference<DDQueue> self)
-		  : self(self), completedRelocations(self->relocationComplete.getFuture()) {}
+		  : self(self), completedRelocations(self->relocationComplete.getFuture()),
+		    pipelineSizeChanges(makeReference<AsyncVar<int>>(self->pipelineSize())) {}
 
 		Reference<DDQueue> self;
 		std::set<UID> serversToLaunchFrom;
 		FutureStream<RelocateData> completedRelocations;
+		Reference<AsyncVar<int>> pipelineSizeChanges;
 		PromiseStream<KeyRange> rangesComplete;
 		PromiseStream<Void> launchQueuedWorkTrigger;
 		// Serialize queue mutations so inline stream callbacks cannot observe partially updated state.
 		FlowLock queueMutationLock;
 	};
 
-	static void validate(RunState* state) { state->self->validate(); }
+	static void validate(RunState* state) {
+		state->self->validate();
+		state->pipelineSizeChanges->set(state->self->pipelineSize());
+	}
 
 	static void scheduleQueuedServerWork(RunState* state) { state->launchQueuedWorkTrigger.send(Void()); }
 
@@ -3272,7 +3384,8 @@ struct DDQueueImpl {
 		// Gate the input stream by the pipeline limit so that DD never tracks more
 		// than DD_MAX_PIPELINE_MOVES relocations at once (queued + in-flight).
 		PromiseStream<RelocateShard> gatedRelocationStream;
-		Future<Void> pipelineGate = pipelineGateActor(self, self->input, gatedRelocationStream);
+		Future<Void> pipelineGate =
+		    pipelineGateActor(self, self->input, gatedRelocationStream, state.pipelineSizeChanges);
 
 		for (int i = 0; i < self->teamCollections.size(); i++) {
 			ddQueueFutures.push_back(
@@ -3345,7 +3458,8 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 	PromiseStream<RelocateShard> input;
 	PromiseStream<RelocateShard> output;
 	FutureStream<RelocateShard> forwarded = output.getFuture();
-	Future<Void> gate = pipelineGateActor(self, input.getFuture(), output);
+	Reference<AsyncVar<int>> pipelineSizeChanges = makeReference<AsyncVar<int>>(self->pipelineSize());
+	Future<Void> gate = pipelineGateActor(self, input.getFuture(), output, pipelineSizeChanges);
 
 	const KeyRange firstSplitRange = KeyRangeRef("a"_sr, "b"_sr);
 	const KeyRange secondSplitRange = KeyRangeRef("b"_sr, "c"_sr);
@@ -3454,6 +3568,360 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 
 	self->pendingGateRelocations = 0;
 	self->updatePipelineFull();
+	gate.cancel();
+	ASSERT(gate.isReady());
+	ASSERT(gate.isError());
+	ASSERT_EQ(gate.getError().code(), error_code_actor_cancelled);
+	co_return;
+}
+
+TEST_CASE("/DataDistribution/DDQueue/PipelineGateWakesBelowReservedSlot") {
+	const int pipelineLimit = SERVER_KNOBS->DD_MAX_PIPELINE_MOVES;
+	ASSERT_GT(pipelineLimit, 2);
+	ASSERT(isDDPipelineControlEnabled());
+
+	Reference<DDQueue> self = makeReference<DDQueue>();
+	self->distributorId = UID(2, 0);
+	self->activeRelocations = pipelineLimit - 1;
+	self->queuedRelocations = 0;
+	self->pendingGateRelocations = 0;
+	self->pipelineFull = makeReference<AsyncVar<bool>>(false);
+
+	PromiseStream<RelocateShard> input;
+	PromiseStream<RelocateShard> output;
+	FutureStream<RelocateShard> forwarded = output.getFuture();
+	Reference<AsyncVar<int>> pipelineSizeChanges = makeReference<AsyncVar<int>>(self->pipelineSize());
+	Future<Void> gate = pipelineGateActor(self, input.getFuture(), output, pipelineSizeChanges);
+
+	const KeyRange firstRange = KeyRangeRef("a"_sr, "b"_sr);
+	const KeyRange secondRange = KeyRangeRef("b"_sr, "c"_sr);
+	input.send(RelocateShard(firstRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT));
+	input.send(RelocateShard(secondRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT));
+	ASSERT(!forwarded.isReady());
+	ASSERT(!self->pipelineFull->get());
+
+	// Neither side of this transition reaches the hard-full threshold.
+	--self->activeRelocations;
+	self->updatePipelineFull();
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit - 2);
+	ASSERT(!self->pipelineFull->get());
+	ASSERT(!forwarded.isReady());
+	pipelineSizeChanges->set(self->pipelineSize());
+	ASSERT(forwarded.isReady());
+	ASSERT(forwarded.pop().keys == firstRange);
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit - 1);
+	ASSERT(!self->pipelineFull->get());
+	ASSERT(!forwarded.isReady());
+
+	// Account for the admitted move, then repeat the otherwise silent transition.
+	--self->pendingGateRelocations;
+	++self->activeRelocations;
+	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
+	ASSERT(!forwarded.isReady());
+	--self->activeRelocations;
+	self->updatePipelineFull();
+	ASSERT(!forwarded.isReady());
+	pipelineSizeChanges->set(self->pipelineSize());
+	ASSERT(forwarded.isReady());
+	ASSERT(forwarded.pop().keys == secondRange);
+	ASSERT_LE(self->pipelineSize(), pipelineLimit);
+
+	gate.cancel();
+	ASSERT(gate.isReady());
+	ASSERT(gate.isError());
+	ASSERT_EQ(gate.getError().code(), error_code_actor_cancelled);
+	co_return;
+}
+
+TEST_CASE("/DataDistribution/DDQueue/PipelineGateOrdersFailedTeamRecoveries") {
+	const int pipelineLimit = SERVER_KNOBS->DD_MAX_PIPELINE_MOVES;
+	ASSERT_GT(pipelineLimit, 2);
+	ASSERT(isDDPipelineControlEnabled());
+
+	Reference<DDQueue> self = makeReference<DDQueue>();
+	self->distributorId = UID(3, 0);
+	self->activeRelocations = pipelineLimit;
+	self->queuedRelocations = 0;
+	self->pendingGateRelocations = 0;
+	self->pipelineFull = makeReference<AsyncVar<bool>>(false);
+	self->updatePipelineFull();
+	ASSERT(self->pipelineFull->get());
+
+	PromiseStream<RelocateShard> input;
+	PromiseStream<RelocateShard> output;
+	FutureStream<RelocateShard> forwarded = output.getFuture();
+	Reference<AsyncVar<int>> pipelineSizeChanges = makeReference<AsyncVar<int>>(self->pipelineSize());
+	Future<Void> gate = pipelineGateActor(self, input.getFuture(), output, pipelineSizeChanges);
+
+	const KeyRange unhealthyRange = KeyRangeRef("a"_sr, "b"_sr);
+	const KeyRange firstOneLeftRange = KeyRangeRef("b"_sr, "c"_sr);
+	const KeyRange failedRange = KeyRangeRef("c"_sr, "d"_sr);
+	const KeyRange secondOneLeftRange = KeyRangeRef("d"_sr, "e"_sr);
+	const KeyRange zeroLeftRetryRange = KeyRangeRef("e"_sr, "f"_sr);
+
+	input.send(RelocateShard(unhealthyRange, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY, RelocateReason::OTHER));
+	input.send(RelocateShard(firstOneLeftRange, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT, RelocateReason::OTHER));
+	input.send(RelocateShard(failedRange, SERVER_KNOBS->PRIORITY_TEAM_FAILED, RelocateReason::OTHER));
+
+	RelocateShard secondOneLeft(secondOneLeftRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT);
+	secondOneLeft.retryIntent = RelocateShard::RetryRelocationIntent{ SERVER_KNOBS->PRIORITY_SPLIT_SHARD,
+		                                                              SERVER_KNOBS->PRIORITY_TEAM_1_LEFT,
+		                                                              true };
+	input.send(std::move(secondOneLeft));
+
+	RelocateShard zeroLeftRetry(zeroLeftRetryRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT);
+	zeroLeftRetry.retryIntent = RelocateShard::RetryRelocationIntent{ SERVER_KNOBS->PRIORITY_SPLIT_SHARD,
+		                                                              SERVER_KNOBS->PRIORITY_TEAM_0_LEFT,
+		                                                              true };
+	input.send(std::move(zeroLeftRetry));
+	ASSERT(!forwarded.isReady());
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+
+	--self->activeRelocations;
+	self->updatePipelineFull();
+	ASSERT(forwarded.isReady());
+	RelocateShard first = forwarded.pop();
+	ASSERT(first.keys == zeroLeftRetryRange);
+	ASSERT(first.retryIntent.present());
+	ASSERT_EQ(first.retryIntent.get().healthPriority, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT);
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+
+	--self->pendingGateRelocations;
+	self->updatePipelineFull();
+	ASSERT(forwarded.isReady());
+	ASSERT(forwarded.pop().keys == failedRange);
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+
+	--self->pendingGateRelocations;
+	self->updatePipelineFull();
+	ASSERT(forwarded.isReady());
+	ASSERT(forwarded.pop().keys == firstOneLeftRange);
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+
+	--self->pendingGateRelocations;
+	self->updatePipelineFull();
+	ASSERT(forwarded.isReady());
+	RelocateShard second = forwarded.pop();
+	ASSERT(second.keys == secondOneLeftRange);
+	ASSERT(second.retryIntent.present());
+	ASSERT_EQ(second.retryIntent.get().healthPriority, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT);
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+
+	--self->pendingGateRelocations;
+	self->updatePipelineFull();
+	ASSERT(forwarded.isReady());
+	ASSERT(forwarded.pop().keys == unhealthyRange);
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+	ASSERT(!forwarded.isReady());
+
+	gate.cancel();
+	ASSERT(gate.isReady());
+	ASSERT(gate.isError());
+	ASSERT_EQ(gate.getError().code(), error_code_actor_cancelled);
+	co_return;
+}
+
+TEST_CASE("/DataDistribution/DDQueue/PipelineGateCoalescesFailedTeamRecovery") {
+	const int pipelineLimit = SERVER_KNOBS->DD_MAX_PIPELINE_MOVES;
+	ASSERT_GT(pipelineLimit, 2);
+	ASSERT(isDDPipelineControlEnabled());
+
+	Reference<DDQueue> self = makeReference<DDQueue>();
+	self->distributorId = UID(4, 0);
+	self->activeRelocations = pipelineLimit - 1;
+	self->queuedRelocations = 0;
+	self->pendingGateRelocations = 0;
+	self->pipelineFull = makeReference<AsyncVar<bool>>(false);
+
+	PromiseStream<RelocateShard> input;
+	PromiseStream<RelocateShard> output;
+	FutureStream<RelocateShard> forwarded = output.getFuture();
+	Reference<AsyncVar<int>> pipelineSizeChanges = makeReference<AsyncVar<int>>(self->pipelineSize());
+	Future<Void> gate = pipelineGateActor(self, input.getFuture(), output, pipelineSizeChanges);
+
+	const KeyRange recoveryRange = KeyRangeRef("a"_sr, "b"_sr);
+	const KeyRange parentRange = KeyRangeRef("a"_sr, "c"_sr);
+	const KeyRange partiallyOverlappingRange = KeyRangeRef("aa"_sr, "ab"_sr);
+	const KeyRange ordinaryRange = KeyRangeRef("b"_sr, "c"_sr);
+
+	RelocateShard restored(recoveryRange, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
+	restored.dataMove = std::make_shared<DataMove>();
+	restored.dataMoveId = UID(4, 1);
+	input.send(std::move(restored));
+
+	RelocateShard firstSplit(recoveryRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT);
+	firstSplit.setParentRange(parentRange);
+	input.send(std::move(firstSplit));
+	input.send(RelocateShard(recoveryRange, DataMovementReason::SPLIT_SHARD, RelocateReason::WRITE_SPLIT));
+	input.send(RelocateShard(partiallyOverlappingRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT));
+	input.send(RelocateShard(ordinaryRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT));
+	ASSERT(!forwarded.isReady());
+
+	input.send(RelocateShard(recoveryRange, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY, RelocateReason::OTHER));
+	ASSERT(forwarded.isReady());
+	RelocateShard recovered = forwarded.pop();
+	ASSERT(recovered.keys == recoveryRange);
+	ASSERT_EQ(recovered.moveReason, DataMovementReason::TEAM_UNHEALTHY);
+	ASSERT(recovered.reason == RelocateReason::SIZE_SPLIT);
+	ASSERT_EQ(recovered.priority, std::max(SERVER_KNOBS->PRIORITY_SPLIT_SHARD, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY));
+	ASSERT(recovered.retryIntent.present());
+	ASSERT_EQ(recovered.retryIntent.get().boundaryPriority, SERVER_KNOBS->PRIORITY_SPLIT_SHARD);
+	ASSERT_EQ(recovered.retryIntent.get().healthPriority, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
+	ASSERT(recovered.retryIntent.get().wantsNewServers);
+	ASSERT(recovered.getParentRange().present());
+	ASSERT(recovered.getParentRange().get() == parentRange);
+	RelocateData recoveredData(recovered);
+	ASSERT(recoveredData.reason == RelocateReason::SIZE_SPLIT);
+	ASSERT_EQ(recoveredData.boundaryPriority, SERVER_KNOBS->PRIORITY_SPLIT_SHARD);
+	ASSERT_EQ(recoveredData.healthPriority, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
+	ASSERT(recoveredData.wantsNewServers);
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+	ASSERT(!forwarded.isReady());
+
+	// Durable restores and partial overlaps are retained; only exact-range ordinary splits disappear.
+	--self->pendingGateRelocations;
+	self->activeRelocations = 0;
+	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
+	ASSERT(forwarded.isReady());
+	RelocateShard retainedRestore = forwarded.pop();
+	ASSERT(retainedRestore.keys == recoveryRange);
+	ASSERT(retainedRestore.isRestore());
+	ASSERT_EQ(retainedRestore.dataMoveId, UID(4, 1));
+	--self->pendingGateRelocations;
+	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
+	ASSERT(forwarded.isReady());
+	ASSERT(forwarded.pop().keys == partiallyOverlappingRange);
+	ASSERT(forwarded.isReady());
+	ASSERT(forwarded.pop().keys == ordinaryRange);
+	ASSERT(!forwarded.isReady());
+	ASSERT_LE(self->pipelineSize(), pipelineLimit);
+
+	gate.cancel();
+	ASSERT(gate.isReady());
+	ASSERT(gate.isError());
+	ASSERT_EQ(gate.getError().code(), error_code_actor_cancelled);
+	co_return;
+}
+
+TEST_CASE("/DataDistribution/DDQueue/PipelineGateCoalescesExplicitlyFailedTeamRecovery") {
+	const int pipelineLimit = SERVER_KNOBS->DD_MAX_PIPELINE_MOVES;
+	ASSERT_GT(pipelineLimit, 2);
+	ASSERT(isDDPipelineControlEnabled());
+
+	Reference<DDQueue> self = makeReference<DDQueue>();
+	self->distributorId = UID(5, 0);
+	self->activeRelocations = pipelineLimit - 1;
+	self->queuedRelocations = 0;
+	self->pendingGateRelocations = 0;
+	self->pipelineFull = makeReference<AsyncVar<bool>>(false);
+
+	PromiseStream<RelocateShard> input;
+	PromiseStream<RelocateShard> output;
+	FutureStream<RelocateShard> forwarded = output.getFuture();
+	Reference<AsyncVar<int>> pipelineSizeChanges = makeReference<AsyncVar<int>>(self->pipelineSize());
+	Future<Void> gate = pipelineGateActor(self, input.getFuture(), output, pipelineSizeChanges);
+
+	const KeyRange recoveryRange = KeyRangeRef("a"_sr, "b"_sr);
+	const KeyRange parentRange = KeyRangeRef("a"_sr, "c"_sr);
+	RelocateShard split(recoveryRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT);
+	split.setParentRange(parentRange);
+	input.send(std::move(split));
+	ASSERT(!forwarded.isReady());
+
+	RelocateShard failure(recoveryRange, SERVER_KNOBS->PRIORITY_TEAM_FAILED, RelocateReason::OTHER);
+	failure.retryIntent = RelocateShard::RetryRelocationIntent{ -1, -1, false };
+	input.send(std::move(failure));
+	ASSERT(forwarded.isReady());
+	RelocateShard recovered = forwarded.pop();
+	ASSERT(recovered.keys == recoveryRange);
+	ASSERT_EQ(recovered.moveReason, DataMovementReason::TEAM_FAILED);
+	ASSERT(recovered.reason == RelocateReason::SIZE_SPLIT);
+	ASSERT_EQ(recovered.priority, std::max(SERVER_KNOBS->PRIORITY_SPLIT_SHARD, SERVER_KNOBS->PRIORITY_TEAM_FAILED));
+	ASSERT(recovered.retryIntent.present());
+	ASSERT_EQ(recovered.retryIntent.get().boundaryPriority, SERVER_KNOBS->PRIORITY_SPLIT_SHARD);
+	ASSERT_EQ(recovered.retryIntent.get().healthPriority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+	ASSERT(recovered.retryIntent.get().wantsNewServers);
+	ASSERT(recovered.getParentRange().present());
+	ASSERT(recovered.getParentRange().get() == parentRange);
+	RelocateData recoveredData(recovered);
+	ASSERT(recoveredData.reason == RelocateReason::SIZE_SPLIT);
+	ASSERT_EQ(recoveredData.boundaryPriority, SERVER_KNOBS->PRIORITY_SPLIT_SHARD);
+	ASSERT_EQ(recoveredData.healthPriority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+	ASSERT(recoveredData.wantsNewServers);
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+	ASSERT(!forwarded.isReady());
+
+	--self->pendingGateRelocations;
+	self->activeRelocations = 0;
+	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
+	ASSERT(!forwarded.isReady());
+
+	gate.cancel();
+	ASSERT(gate.isReady());
+	ASSERT(gate.isError());
+	ASSERT_EQ(gate.getError().code(), error_code_actor_cancelled);
+	co_return;
+}
+
+TEST_CASE("/DataDistribution/DDQueue/PipelineGateCoalescesCompositeFailedTeamRetry") {
+	const int pipelineLimit = SERVER_KNOBS->DD_MAX_PIPELINE_MOVES;
+	ASSERT_GT(pipelineLimit, 2);
+	ASSERT(isDDPipelineControlEnabled());
+
+	Reference<DDQueue> self = makeReference<DDQueue>();
+	self->distributorId = UID(6, 0);
+	self->activeRelocations = pipelineLimit - 1;
+	self->queuedRelocations = 0;
+	self->pendingGateRelocations = 0;
+	self->pipelineFull = makeReference<AsyncVar<bool>>(false);
+
+	PromiseStream<RelocateShard> input;
+	PromiseStream<RelocateShard> output;
+	FutureStream<RelocateShard> forwarded = output.getFuture();
+	Reference<AsyncVar<int>> pipelineSizeChanges = makeReference<AsyncVar<int>>(self->pipelineSize());
+	Future<Void> gate = pipelineGateActor(self, input.getFuture(), output, pipelineSizeChanges);
+
+	const KeyRange recoveryRange = KeyRangeRef("a"_sr, "b"_sr);
+	const KeyRange parentRange = KeyRangeRef("a"_sr, "c"_sr);
+	RelocateShard split(recoveryRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT);
+	split.setParentRange(parentRange);
+	input.send(std::move(split));
+	ASSERT(!forwarded.isReady());
+
+	RelocateShard retry(recoveryRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT);
+	retry.retryIntent = RelocateShard::RetryRelocationIntent{ SERVER_KNOBS->PRIORITY_SPLIT_SHARD,
+		                                                      SERVER_KNOBS->PRIORITY_TEAM_0_LEFT,
+		                                                      true };
+	input.send(std::move(retry));
+	ASSERT(forwarded.isReady());
+	RelocateShard recovered = forwarded.pop();
+	ASSERT(recovered.keys == recoveryRange);
+	ASSERT(recovered.reason == RelocateReason::SIZE_SPLIT);
+	ASSERT_EQ(recovered.priority, SERVER_KNOBS->PRIORITY_SPLIT_SHARD);
+	ASSERT(recovered.retryIntent.present());
+	ASSERT_EQ(recovered.retryIntent.get().boundaryPriority, SERVER_KNOBS->PRIORITY_SPLIT_SHARD);
+	ASSERT_EQ(recovered.retryIntent.get().healthPriority, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT);
+	ASSERT(recovered.retryIntent.get().wantsNewServers);
+	ASSERT(recovered.getParentRange().present());
+	ASSERT(recovered.getParentRange().get() == parentRange);
+	RelocateData recoveredData(recovered);
+	ASSERT(recoveredData.reason == RelocateReason::SIZE_SPLIT);
+	ASSERT_EQ(recoveredData.boundaryPriority, SERVER_KNOBS->PRIORITY_SPLIT_SHARD);
+	ASSERT_EQ(recoveredData.healthPriority, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT);
+	ASSERT(recoveredData.wantsNewServers);
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+	ASSERT(!forwarded.isReady());
+
+	--self->pendingGateRelocations;
+	self->activeRelocations = 0;
+	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
+	ASSERT(!forwarded.isReady());
+
 	gate.cancel();
 	ASSERT(gate.isReady());
 	ASSERT(gate.isError());
