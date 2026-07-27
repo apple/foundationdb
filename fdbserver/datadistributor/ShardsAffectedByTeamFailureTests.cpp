@@ -192,3 +192,149 @@ TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/CancelMove") {
 
 	return Void();
 }
+
+// A relocation is frequently launched for a STRICT SUB-RANGE of a tracked shard (DDQueue truncates queued
+// relocations against overlapping ones, and launches a relocator per range returned by
+// getRangesAffectedByInsertion, whose leftover fragments are pieces of an already in-flight relocation). Such a
+// move must still erase the source team for the range that actually moved, otherwise the drained source servers
+// stay counted in storageServerShards forever and a graceful exclude of one of them never completes.
+TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/MoveSubRangeErasesSource") {
+	ShardsAffectedByTeamFailure shards;
+	shards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+
+	const UID drained(9, 0);
+	const ShardsAffectedByTeamFailure::Team source({ UID(1, 0), UID(2, 0), drained }, true);
+	const ShardsAffectedByTeamFailure::Team destination({ UID(3, 0), UID(4, 0), UID(5, 0) }, true);
+
+	shards.assignRangeToTeams(KeyRangeRef("e"_sr, "z"_sr), { source });
+	ASSERT_EQ(shards.getNumberOfShards(drained), 1);
+
+	// [e,m) does not contain the tracked shard [e,z): the shard is split at the move boundary so that the
+	// source team is erased for [e,m) and retained for [m,z).
+	shards.moveShard(KeyRangeRef("e"_sr, "m"_sr), { destination });
+
+	auto movedTeams = shards.getTeamsFor("e"_sr);
+	ASSERT_EQ(movedTeams.first.size(), 1);
+	ASSERT(movedTeams.first[0] == destination);
+	auto untouchedTeams = shards.getTeamsFor("m"_sr);
+	ASSERT_EQ(untouchedTeams.first.size(), 1);
+	ASSERT(untouchedTeams.first[0] == source);
+
+	// The drained server is still counted for the half that did not move, and only that half.
+	ASSERT_EQ(shards.getNumberOfShards(drained), 1);
+	ASSERT_EQ(shards.getNumberOfShards(source), 1);
+	ASSERT_EQ(shards.getNumberOfShards(destination), 1);
+
+	// Moving the remainder clears it entirely -- the removal gate for `drained` can now open.
+	shards.moveShard(KeyRangeRef("m"_sr, "z"_sr), { destination });
+	ASSERT_EQ(shards.getNumberOfShards(drained), 0);
+	shards.check();
+
+	return Void();
+}
+
+// Regression test for the graceful-exclude finalize stall: a server can remain counted in
+// ShardsAffectedByTeamFailure after its data is gone, which blocks removeStorageServer() indefinitely. The
+// removal gate reconciles this with scrubServer() once the on-disk serverKeys confirm the server owns no data.
+// The stranded state is constructed directly (a shard attributed to two teams, one of them containing the
+// excluded server) rather than by provoking a specific accounting bug, so this stays a test of the gate's
+// reconciliation regardless of how the map came to be stale. Critically it also verifies that the scrub drops
+// the whole stale TEAM REFERENCE rather than shrinking the team.
+TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/GateReconcilesStrandedServer") {
+	ShardsAffectedByTeamFailure shards;
+	shards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+
+	const UID excluded(9, 0);
+	const ShardsAffectedByTeamFailure::Team teamWithExcluded({ UID(1, 0), UID(2, 0), excluded }, true);
+	const ShardsAffectedByTeamFailure::Team replacementTeam({ UID(3, 0), UID(4, 0), UID(5, 0) }, true);
+	const KeyRange shardRange = KeyRangeRef("e"_sr, "z"_sr);
+
+	shards.assignRangeToTeams(shardRange, { teamWithExcluded, replacementTeam });
+	ASSERT_EQ(shards.getNumberOfShards(excluded), 1); // stranded: this is what blocks removeStorageServer()
+	ASSERT_EQ(shards.getNumberOfShards(replacementTeam), 1);
+
+	// The removal gate's reconciliation, once canRemoveStorageServer() (on-disk truth) reports the server empty.
+	auto scrub = shards.scrubServer(excluded);
+	ASSERT_EQ(scrub.shardsRewritten, 1);
+	ASSERT_EQ(scrub.ownerlessShards, 0);
+
+	// The stranded count clears -> the gate opens and the server can be removed.
+	ASSERT_EQ(shards.getNumberOfShards(excluded), 0);
+	// The surviving replica's accounting is untouched, and -- the point of scrubServer() over
+	// removeFailedServerForRange() -- the shard is left attributed to the REAL replacement team only. A shrunken
+	// {UID(1,0), UID(2,0)} team here would exist nowhere in DDTeamCollection and would be re-relocated forever at
+	// PRIORITY_TEAM_REDUNDANT by teamTracker()'s "team not found" path.
+	auto teams = shards.getTeamsFor("e"_sr);
+	ASSERT_EQ(teams.first.size(), 1);
+	ASSERT(teams.first[0] == replacementTeam);
+	ASSERT_EQ(shards.getNumberOfShards(replacementTeam), 1);
+	ASSERT_EQ(shards.getNumberOfShards(UID(1, 0)), 0);
+	for (const auto& id : shards.getSourceServerIdsFor("e"_sr)) {
+		ASSERT(id != excluded);
+	}
+	shards.check();
+
+	return Void();
+}
+
+// The degenerate case the scrub has to have an answer for: the stranded server's team is the ONLY team the map
+// has for that shard, so there is no real owner to fall back to. Dropping the reference must still clear the
+// count (otherwise the exclude hangs) and must not leave a fabricated shrunken team behind.
+TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/ScrubServerOnlyTeam") {
+	ShardsAffectedByTeamFailure shards;
+	shards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+
+	const UID excluded(9, 0);
+	const ShardsAffectedByTeamFailure::Team teamWithExcluded({ UID(1, 0), UID(2, 0), excluded }, true);
+	const KeyRange shardRange = KeyRangeRef("e"_sr, "z"_sr);
+
+	shards.assignRangeToTeams(shardRange, { teamWithExcluded });
+	ASSERT_EQ(shards.getNumberOfShards(excluded), 1);
+
+	auto scrub = shards.scrubServer(excluded);
+	ASSERT_EQ(scrub.shardsRewritten, 1);
+	// No surviving team and no previous-source team to promote: the entry is left with an empty current-team
+	// list, which is the state a freshly-initialized map is in, and the shard tracker is asked to restart.
+	ASSERT_EQ(scrub.ownerlessShards, 1);
+	ASSERT_EQ(shards.getNumberOfShards(excluded), 0);
+	ASSERT_EQ(shards.getNumberOfShards(UID(1, 0)), 0);
+	ASSERT(shards.getTeamsFor("e"_sr).first.empty());
+	shards.check();
+
+	return Void();
+}
+
+// A stranded server can also be left in the PREVIOUS-SOURCE list, which is not mirrored in team_shards (so it
+// does not affect getNumberOfShards) but IS what getSourceServerIdsFor() prefers -- a drained server left there
+// would be handed back out as a relocation source.
+TEST_CASE("/DataDistributor/ShardsAffectedByTeamFailure/ScrubServerPreviousSources") {
+	ShardsAffectedByTeamFailure shards;
+	shards.setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+
+	const UID excluded(9, 0);
+	const ShardsAffectedByTeamFailure::Team teamWithExcluded({ UID(1, 0), UID(2, 0), excluded }, true);
+	const ShardsAffectedByTeamFailure::Team replacementTeam({ UID(3, 0), UID(4, 0), UID(5, 0) }, true);
+	const KeyRange shardRange = KeyRangeRef("e"_sr, "z"_sr);
+
+	// A full-shard move leaves the old team in the previous-source list (no finishMove yet).
+	shards.assignRangeToTeams(shardRange, { teamWithExcluded });
+	shards.moveShard(shardRange, { replacementTeam });
+	ASSERT_EQ(shards.getNumberOfShards(excluded), 0); // the count itself was reconciled by the full-shard move
+	auto sources = shards.getSourceServerIdsFor("e"_sr);
+	ASSERT(std::find(sources.begin(), sources.end(), excluded) != sources.end()); // still a candidate source
+
+	auto scrub = shards.scrubServer(excluded);
+	ASSERT_EQ(scrub.shardsRewritten, 1);
+	ASSERT_EQ(scrub.ownerlessShards, 0);
+	ASSERT_EQ(shards.getNumberOfShards(excluded), 0);
+	for (const auto& id : shards.getSourceServerIdsFor("e"_sr)) {
+		ASSERT(id != excluded);
+	}
+	// The current team is untouched.
+	auto teams = shards.getTeamsFor("e"_sr);
+	ASSERT_EQ(teams.first.size(), 1);
+	ASSERT(teams.first[0] == replacementTeam);
+	shards.check();
+
+	return Void();
+}
