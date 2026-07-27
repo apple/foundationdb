@@ -45,6 +45,20 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 
 struct DataLossRecoveryWorkload : TestWorkload {
 	static constexpr auto NAME = "DataLossRecovery";
+
+	// Per-attempt timeout for the reads this workload performs, so that the test fails fast if
+	// something goes wrong instead of hanging until the test timeout. The phase that kills the only
+	// team holding the key relies on this to produce the timed_out it expects.
+	static constexpr double READ_TIMEOUT = 90.0;
+
+	// A read that is expected to return a value can also time out for reasons that have nothing to do
+	// with data loss: the cluster can be transiently unable to serve the key, for example when data
+	// distribution reboots every storage server at once (rebootWhenDurableKey) and some of them are
+	// slow to re-register. That is not what this workload is testing, so keep retrying such a read for
+	// this long before giving up. If the key is still unreadable after that, the read error is
+	// propagated and the test fails exactly as it did before.
+	static constexpr double READ_RETRY_DEADLINE = 300.0;
+
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	const bool enabled;
@@ -116,11 +130,12 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	                                 Key key,
 	                                 ErrorOr<Optional<Value>> expectedValue) {
 		state Transaction tr(cx);
+		state double startTime = now();
 
 		loop {
 			try {
 				// add timeout to read so test fails faster if something goes wrong
-				state Optional<Value> res = wait(timeoutError(tr.get(key), 90.0));
+				state Optional<Value> res = wait(timeoutError(tr.get(key), READ_TIMEOUT));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
 					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
@@ -130,7 +145,20 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				if (expectedValue.isError() && expectedValue.getError().code() == e.code()) {
 					break;
 				}
-				wait(tr.onError(e));
+				// This read is supposed to succeed, so a timeout means the key was transiently
+				// unreadable rather than lost. Retry with a fresh read version instead of failing the
+				// test, until READ_RETRY_DEADLINE is exhausted. timed_out is not retryable, so without
+				// this tr.onError() below would rethrow it and abort the workload.
+				if (e.code() == error_code_timed_out && !expectedValue.isError() &&
+				    now() - startTime < READ_RETRY_DEADLINE) {
+					TraceEvent(SevWarn, "DataLossRecoveryReadTimedOutRetrying")
+					    .detail("Key", key)
+					    .detail("Elapsed", now() - startTime)
+					    .detail("Deadline", READ_RETRY_DEADLINE);
+					tr.reset();
+				} else {
+					wait(tr.onError(e));
+				}
 			}
 		}
 
