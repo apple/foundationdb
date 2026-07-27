@@ -1097,7 +1097,13 @@ public:
 
 	bool hasEmptyData() const { return bytes == 0; }
 
-	size_t getBytes() const { return bytes; }
+	// Data byte count for this manifest entry. Returned as int64_t to match the byte-count
+	// convention (getTotalBytes) and avoid a size_t round-trip of the -1 "unknown" sentinel;
+	// returns 0 when the size is unknown/unset so it can't corrupt byte-based task coalescing.
+	int64_t getBytes() const {
+		const int64_t b = static_cast<int64_t>(bytes);
+		return b > 0 ? b : 0;
+	}
 
 	Key getBeginKey() const { return beginKey; }
 

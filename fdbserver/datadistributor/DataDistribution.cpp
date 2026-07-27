@@ -2051,7 +2051,7 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 	if (SERVER_KNOBS->DD_BULKLOAD_TASK_TARGET_RATIO > 0) {
 		int64_t datasetBytes = 0;
 		for (const auto& manifestEntryPair : *self->bulkLoadJobManager.get().manifestEntryMap) {
-			datasetBytes += static_cast<int64_t>(manifestEntryPair.second.getBytes());
+			datasetBytes += manifestEntryPair.second.getBytes();
 		}
 		bulkLoadTaskTargetBytes = static_cast<int64_t>(getMaxShardSize(static_cast<double>(datasetBytes)) *
 		                                               SERVER_KNOBS->DD_BULKLOAD_TASK_TARGET_RATIO);
@@ -2136,7 +2136,7 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 						ASSERT(it != self->bulkLoadJobManager.get().manifestEntryMap->end());
 						manifestEntry = it->second;
 						manifestEntries.push_back(manifestEntry);
-						accumulatedBytes += static_cast<int64_t>(manifestEntry.getBytes());
+						accumulatedBytes += manifestEntry.getBytes();
 						beginKey = manifestEntry.getEndKey();
 						if (bulkLoadTaskTargetBytes > 0 && accumulatedBytes >= bulkLoadTaskTargetBytes) {
 							break; // reached ~target shard size; cut the task here
