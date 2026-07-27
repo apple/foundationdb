@@ -2241,13 +2241,41 @@ bool canReserveAutoStatelessMachines(int machineCount,
 
 TEST_CASE("/fdbserver/SimulatedCluster/autoStatelessReservesStatefulCapacity") {
 	// An HTTP helper must not make three real stateful machines look like four.
-	ASSERT(!canReserveAutoStatelessMachines(9, 3, 6, 4, 4));
-	ASSERT(canReserveAutoStatelessMachines(8, 4, 3, 1, 2));
-	ASSERT(canReserveAutoStatelessMachines(10, 3, 6, 4, 4));
-	ASSERT(!canReserveAutoStatelessMachines(9, 7, 3, 1, 2));
-	ASSERT(!canReserveAutoStatelessMachines(9, 4, 5, 5, 4));
-	ASSERT(!canReserveAutoStatelessMachines(9, 4, 5, 4, 5));
-	ASSERT(canReserveAutoStatelessMachines(9, 4, 5, 4, 4));
+	ASSERT(!canReserveAutoStatelessMachines(/* machineCount = */ 9,
+	                                        /* assignedRealMachines = */ 3,
+	                                        /* desiredStatelessMachines = */ 6,
+	                                        /* storageTeamSize = */ 4,
+	                                        /* tLogReplicationFactor = */ 4));
+	ASSERT(canReserveAutoStatelessMachines(/* machineCount = */ 8,
+	                                       /* assignedRealMachines = */ 4,
+	                                       /* desiredStatelessMachines = */ 3,
+	                                       /* storageTeamSize = */ 1,
+	                                       /* tLogReplicationFactor = */ 2));
+	ASSERT(canReserveAutoStatelessMachines(/* machineCount = */ 10,
+	                                       /* assignedRealMachines = */ 3,
+	                                       /* desiredStatelessMachines = */ 6,
+	                                       /* storageTeamSize = */ 4,
+	                                       /* tLogReplicationFactor = */ 4));
+	ASSERT(!canReserveAutoStatelessMachines(/* machineCount = */ 9,
+	                                        /* assignedRealMachines = */ 7,
+	                                        /* desiredStatelessMachines = */ 3,
+	                                        /* storageTeamSize = */ 1,
+	                                        /* tLogReplicationFactor = */ 2));
+	ASSERT(!canReserveAutoStatelessMachines(/* machineCount = */ 9,
+	                                        /* assignedRealMachines = */ 4,
+	                                        /* desiredStatelessMachines = */ 5,
+	                                        /* storageTeamSize = */ 5,
+	                                        /* tLogReplicationFactor = */ 4));
+	ASSERT(!canReserveAutoStatelessMachines(/* machineCount = */ 9,
+	                                        /* assignedRealMachines = */ 4,
+	                                        /* desiredStatelessMachines = */ 5,
+	                                        /* storageTeamSize = */ 4,
+	                                        /* tLogReplicationFactor = */ 5));
+	ASSERT(canReserveAutoStatelessMachines(/* machineCount = */ 9,
+	                                       /* assignedRealMachines = */ 4,
+	                                       /* desiredStatelessMachines = */ 5,
+	                                       /* storageTeamSize = */ 4,
+	                                       /* tLogReplicationFactor = */ 4));
 	return Void();
 }
 
