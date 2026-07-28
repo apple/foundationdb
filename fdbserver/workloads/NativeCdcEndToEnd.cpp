@@ -1167,11 +1167,11 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT(g_network->isSimulated());
 		const uint64_t recoveryCount = dbInfo->get().recoveryCount;
 		while (true) {
-			const auto masterZone = dbInfo->get().master.locality.zoneId();
-			if (g_simulator->killZone(masterZone, ISimulator::KillType::Reboot, true)) {
+			const auto masterMachine = dbInfo->get().master.locality.machineId();
+			if (g_simulator->killMachine(masterMachine, ISimulator::KillType::Reboot, true)) {
 				break;
 			}
-			co_await dbInfo->onChange();
+			co_await (dbInfo->onChange() || delay(1.0));
 		}
 		co_await timeoutError(waitForTransactionSystemRecoveryAfter(recoveryCount), operationTimeout);
 	}
