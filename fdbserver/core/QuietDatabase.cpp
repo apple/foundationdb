@@ -1052,7 +1052,7 @@ Future<Void> waitForQuietDatabase(Database cx,
 
 	co_await disableConsistencyScanInSim(cx, false);
 
-	if (g_network->isSimulated()) {
+	if (g_network->isSimulated() && phase != "Start") {
 		disableDDPipelineControl();
 	}
 
