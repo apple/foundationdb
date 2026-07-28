@@ -16,6 +16,19 @@ over it at high allocation rates and the always-compiled off-state cost is not
 confidently measured, so the feature ships sampling-**off** by default and can be
 compiled out entirely via `FDB_MEMORY_TRACKER=OFF` — see Performance and Rollout.)
 
+**What this targets — and what it does not.** The point is to surface memory
+*leaks* and *untuned / oversized allocations* that drive RSS growth. FDB
+effectively never hits a real `malloc` / `operator new` failure: a process is
+killed by `fdbmonitor` when its RSS crosses a configured ceiling (typically
+~12–16 GB against an ~8 GB target), i.e. "OOM" is a self-imposed RSS threshold,
+not an allocator failure. So the interesting regime is memory growth well *short*
+of any allocation failure, and the tracker's behaviour under an actual
+allocation failure is explicitly not a scenario we optimize for — the hooks fail
+open (drop the sample). Reviewers should not over-index on `bad_alloc` paths.
+(The sampled path is nonetheless ordered so its own table growth happens before
+any counter update, so even that never-in-practice case leaves the accounting
+consistent — see "Fail-open" below.)
+
 ## Background
 
 Historically memory leaks that happen in FDB production or at scale
@@ -440,13 +453,6 @@ for the aligned variants) and then `memTrackerOnAlloc`/`OnFree`. The throwing
 overloads retry through the installed `std::new_handler` on failure, exactly as
 the default `operator new` does, so an allocation failure still reaches FDB's
 `platform::outOfMemory` handler (`FDB_EXIT_NO_MEM`) instead of throwing past it.
-
-The tracker hooks themselves **fail open**: `memTrackerSampleAlloc`,
-`memTrackerSampleFree`, and `memTrackerDump` swallow any exception (e.g. a
-`std::bad_alloc` from growing the tracker's own tables). By the time a hook runs
-the underlying user allocation has already succeeded, so a diagnostic-only failure
-must never leak it, turn a `nothrow` `new` into a spurious `nullptr`, or abort the
-process — the sample is simply dropped.
 
 These overloads live in a translation unit compiled directly into the
 `fdbserver` executable — not in the `flow` static library — for two

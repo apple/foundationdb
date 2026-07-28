@@ -603,32 +603,57 @@ TEST_CASE("/flow/MemoryTracker/arenaHugeAccounting") {
 #ifndef __linux__
 	return Void(); // see /coverage for rationale
 #endif
+	// Verify the huge Arena-block path (reqSize >= LARGE), including that a block is
+	// tracked once (not double-counted by both the explicit Arena hook and the inner
+	// operator new[]). This is the deepest tracked call chain, and under a real
+	// (non-simulation) network its frame-pointer backtrace is unreliable — the
+	// best-effort walker may, run to run and even alloc to alloc, fail to climb to
+	// the test's frame or attribute the blocks to varying fingerprints. So instead of
+	// the sentinel-frame approach the other *Accounting tests use, we identify the
+	// huge blocks by their unmistakable ~100 KB size signature: the recorded size is
+	// correct regardless of which frames were captured, and no incidental or
+	// foreign-thread allocation comes anywhere near this large.
 	KnobOverride ko;
 	constexpr int N = 10;
+	constexpr int64_t BLOCK = 100000;
+	constexpr int64_t HUGE_MIN = 90000; // mean bytes/alloc of a huge site; nothing else is this big
 
 	std::vector<Arena> arenas;
 	arenas.reserve(N);
 
 	memTrackerResetForTest();
-	void* sentinel = allocateArenaHugeSentinel(N, arenas);
+	allocateArenaHugeSentinel(N, arenas);
 
-	auto pre = collectAccounting(sentinel);
-	if (pre.sitesWithSentinelFrames != 1) {
-		dumpSitesForFailure("arenaHugeAccounting/post-alloc");
-	}
-	ASSERT_EQ(pre.sitesWithSentinelFrames, 1);
-	ASSERT_EQ(pre.cumAllocsSentinel, N);
-	ASSERT_EQ(pre.liveCountSentinel, N);
-	ASSERT_EQ(pre.liveBytesSentinel, pre.cumBytesSentinel);
-	// Global totals intentionally not asserted (flaky at inverse=1; see above).
+	int64_t cumAllocs = 0, cumBytes = 0, liveBytes = 0, liveCount = 0;
+	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
+		if (s.cumulativeAllocs > 0 && s.cumulativeBytes / s.cumulativeAllocs >= HUGE_MIN) {
+			cumAllocs += s.cumulativeAllocs;
+			cumBytes += s.cumulativeBytes;
+			liveBytes += s.liveBytes;
+			liveCount += s.liveCount;
+		}
+	});
+	// Exactly N huge blocks, each tracked once (double-tracking would show as 2N),
+	// all currently live, with live bytes == cumulative bytes (nothing freed yet).
+	ASSERT_EQ(cumAllocs, N);
+	ASSERT_EQ(liveCount, N);
+	ASSERT_EQ(liveBytes, cumBytes);
+	ASSERT(cumBytes >= int64_t(N) * BLOCK);
 
 	arenas.clear();
 
-	auto post = collectAccounting(sentinel);
-	ASSERT_EQ(post.liveBytesSentinel, 0);
-	ASSERT_EQ(post.liveCountSentinel, 0);
-	// Global live totals intentionally not asserted (flaky at inverse=1; see above).
-	ASSERT_EQ(post.cumAllocsSentinel, N);
+	int64_t cumAllocsPost = 0, liveBytesPost = 0, liveCountPost = 0;
+	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
+		if (s.cumulativeAllocs > 0 && s.cumulativeBytes / s.cumulativeAllocs >= HUGE_MIN) {
+			cumAllocsPost += s.cumulativeAllocs;
+			liveBytesPost += s.liveBytes;
+			liveCountPost += s.liveCount;
+		}
+	});
+	// After freeing, the huge blocks are debited: live returns to 0, cumulative persists.
+	ASSERT_EQ(liveBytesPost, 0);
+	ASSERT_EQ(liveCountPost, 0);
+	ASSERT_EQ(cumAllocsPost, N);
 	return Void();
 }
 

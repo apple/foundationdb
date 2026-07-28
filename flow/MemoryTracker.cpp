@@ -20,6 +20,17 @@
 
 // Implementation of the sampled per-call-site memory tracker.
 // See design/memory-tracker.md and flow/include/flow/MemoryTracker.h.
+//
+// What this is for: finding memory LEAKS and untuned / oversized allocations
+// that drive RSS growth. FDB effectively never sees a real malloc / operator new
+// failure — a process is killed by fdbmonitor when its RSS crosses a configured
+// ceiling (typically ~12-16 GB against an ~8 GB target), i.e. "OOM" here is a
+// self-imposed RSS threshold, not an allocator failure. So the interesting range
+// is memory growth well SHORT of any allocation failure, and the tracker's
+// behaviour under an actual malloc/new failure is not a scenario we optimize for:
+// the hooks fail open (drop the sample; see memTrackerSampleAlloc). The sampled
+// path is nonetheless ordered so its table growth happens before any counter
+// update, so even that never-in-practice case leaves the accounting consistent.
 
 #include "flow/MemoryTracker.h"
 
@@ -338,7 +349,16 @@ static void memTrackerSampleAllocImpl(void* p, std::size_t n) {
 	ThreadSpinLockHolder lk(g_mtLock);
 	ensureMaps();
 
-	auto& site = (*g_aggMap)[fp];
+	auto nBytes = static_cast<std::int64_t>(n);
+	auto estBytes = nBytes * weight;
+
+	// Do both node-allocating map operations up front, before mutating any
+	// counter, so that if one throws (a bad_alloc while a table grows) the
+	// exception unwinds with all per-site and global totals still consistent and
+	// the fail-open catch in memTrackerSampleAlloc simply drops the sample. FDB
+	// never sees a real malloc/new failure in practice (see the file header), so
+	// this is cheap hygiene rather than a hot path.
+	auto& site = (*g_aggMap)[fp]; // inserts a node for a new fingerprint; may throw
 	if (site.fingerprint == 0 && site.cumulativeAllocs == 0) {
 		site.fingerprint = fp;
 		site.exemplarFrameCount = static_cast<std::uint8_t>(kept);
@@ -346,8 +366,42 @@ static void memTrackerSampleAllocImpl(void* p, std::size_t n) {
 			site.exemplarFrames[i] = keep[i];
 		}
 	}
-	auto nBytes = static_cast<std::int64_t>(n);
-	auto estBytes = nBytes * weight;
+
+	// Reserve the live-block slot before crediting anything. A brand-new key
+	// allocates a node here (may throw); an existing key — a stale entry whose
+	// free was suppressed (e.g. during memTrackerDump or a memTrackerForEachSite
+	// callback) so it was never debited — reuses its slot and cannot throw. We
+	// capture the stale value so it can be debited below; otherwise its live
+	// credit would leak once the address is reused and live totals would creep up.
+	bool hadStale = false;
+	LiveEntry stalePrev{};
+	if (liveTracking) {
+		auto key = reinterpret_cast<std::uintptr_t>(p);
+		auto res = g_liveMap->try_emplace(key, LiveEntry{ fp, static_cast<std::uint64_t>(n), weight });
+		if (!res.second) {
+			hadStale = true;
+			stalePrev = res.first->second;
+			res.first->second = LiveEntry{ fp, static_cast<std::uint64_t>(n), weight };
+		}
+	}
+
+	// ---- Nothing below allocates or throws; per-site and global totals move in lockstep. ----
+
+	if (hadStale) {
+		auto oldBytes = static_cast<std::int64_t>(stalePrev.size);
+		auto oldEst = oldBytes * stalePrev.weight;
+		auto oldSite = g_aggMap->find(stalePrev.fingerprint);
+		if (oldSite != g_aggMap->end()) {
+			oldSite->second.liveBytes -= oldBytes;
+			oldSite->second.liveCount -= 1;
+			oldSite->second.estLiveBytes -= oldEst;
+			oldSite->second.estLiveCount -= stalePrev.weight;
+		}
+		g_liveBytesTotal -= oldBytes;
+		g_liveBlocksTotal -= 1;
+		g_estLiveBytesTotal -= oldEst;
+		g_estLiveBlocksTotal -= stalePrev.weight;
+	}
 
 	site.cumulativeAllocs += 1;
 	site.cumulativeBytes += nBytes;
@@ -358,32 +412,6 @@ static void memTrackerSampleAllocImpl(void* p, std::size_t n) {
 	}
 
 	if (liveTracking) {
-		auto key = reinterpret_cast<std::uintptr_t>(p);
-		// If a stale entry already exists for this address — its free was
-		// suppressed (e.g. during memTrackerDump or a memTrackerForEachSite
-		// callback) so it was never debited — debit it now before overwriting.
-		// Otherwise its live credit leaks permanently once the address is reused
-		// and live totals creep upward over long uptime.
-		auto stale = g_liveMap->find(key);
-		if (stale != g_liveMap->end()) {
-			const LiveEntry& old = stale->second;
-			auto oldBytes = static_cast<std::int64_t>(old.size);
-			auto oldEst = oldBytes * old.weight;
-			if (g_aggMap) {
-				auto oldSite = g_aggMap->find(old.fingerprint);
-				if (oldSite != g_aggMap->end()) {
-					oldSite->second.liveBytes -= oldBytes;
-					oldSite->second.liveCount -= 1;
-					oldSite->second.estLiveBytes -= oldEst;
-					oldSite->second.estLiveCount -= old.weight;
-				}
-			}
-			g_liveBytesTotal -= oldBytes;
-			g_liveBlocksTotal -= 1;
-			g_estLiveBytesTotal -= oldEst;
-			g_estLiveBlocksTotal -= old.weight;
-		}
-
 		site.liveBytes += nBytes;
 		site.liveCount += 1;
 		if (site.liveBytes > site.peakBytes) {
@@ -394,7 +422,6 @@ static void memTrackerSampleAllocImpl(void* p, std::size_t n) {
 		if (site.estLiveBytes > site.estPeakBytes) {
 			site.estPeakBytes = site.estLiveBytes;
 		}
-		(*g_liveMap)[key] = LiveEntry{ fp, static_cast<std::uint64_t>(n), weight };
 		g_liveBytesTotal += nBytes;
 		g_liveBlocksTotal += 1;
 		g_estLiveBytesTotal += estBytes;
