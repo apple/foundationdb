@@ -108,6 +108,15 @@ void operator delete[](void* ptr, const std::nothrow_t&) throw() {
 
 #if FDB_MEMORY_TRACKER
 
+// NOTE: We (Apple) do not maintain a local facility to build FDB with MSVC on
+// Windows, and CI only *configures* (not compiles) there — so the MSVC-specific
+// pieces below are best-effort and not compile-verified: the exact signatures of
+// the replaceable global operator new/delete set, and the
+// aligned_alloc/aligned_free ↔ _aligned_malloc/_aligned_free pairing routed
+// through flow/Platform.h. This code may have issues on MSVC; community help for
+// the Windows build would be welcome. (See flow/MemoryTracker.cpp for the parallel
+// note on the non-Linux frame walker.)
+
 namespace {
 
 // Retry through the installed std::new_handler on failure, as the default
