@@ -103,7 +103,7 @@ void printUsage(const char* program, const UnitTestRunnerConfig& config) {
 	           "      --max-test-cases N    Stop after N matching tests\n"
 	           "      --no-cleanup          Keep the data directory after each test\n"
 	           "      --list                Print matching test names without running them\n"
-	           "      --simulation          Run using Sim2; skip noSim/ tests unless filtered\n"
+	           "      --simulation          Run using Sim2; apply default simulation exclusions unless filtered\n"
 	           "  -h, --help                Show this help\n",
 	           program,
 	           config.suiteName(),
@@ -221,13 +221,23 @@ bool pathComponentMatches(std::string_view path, std::string_view component) {
 	return false;
 }
 
-bool testMatched(const UnitTestRunnerOptions& options, std::string_view testName) {
+bool testMatched(const UnitTestRunnerOptions& options, const UnitTestRunnerConfig& config, std::string_view testName) {
 	if (!startsWith(testName, options.testPattern)) {
 		return false;
 	}
 
-	if (options.simulation && options.testPattern.empty() && startsWith(testName, "noSim/")) {
-		return false;
+	if (options.testPattern.empty()) {
+		if ((options.simulation && startsWith(testName, "noSim/")) || startsWith(testName, ":") ||
+		    startsWith(testName, "#") || startsWith(testName, "L") || startsWith(testName, "perf/") ||
+		    startsWith(testName, "performance/")) {
+			return false;
+		}
+
+		for (const auto& ignorePattern : config.defaultTestsIgnored(options.simulation)) {
+			if (startsWith(testName, ignorePattern)) {
+				return false;
+			}
+		}
 	}
 
 	for (const auto& ignorePattern : options.testsIgnored) {
@@ -239,13 +249,37 @@ bool testMatched(const UnitTestRunnerOptions& options, std::string_view testName
 	return true;
 }
 
+TEST_CASE("/flow/UnitTestRunner/defaultSelection") {
+	UnitTestRunnerOptions options;
+	UnitTestRunnerConfig config("flow", {}, {}, { "normal-only/" }, { "simulation-only/" });
+
+	ASSERT(testMatched(options, config, "/flow/regular"));
+	ASSERT(testMatched(options, config, "/redwood/correctness/btreeCloseWithQueuedCommits"));
+	ASSERT(testMatched(options, config, "noSim/flow/regular"));
+	ASSERT(!testMatched(options, config, "normal-only/test"));
+	ASSERT(!testMatched(options, config, "Lflow/longRunningCorrectness"));
+	ASSERT(!testMatched(options, config, "performance/flow/test"));
+
+	options.simulation = true;
+	ASSERT(testMatched(options, config, "/flow/regular"));
+	ASSERT(testMatched(options, config, "/redwood/correctness/btreeCloseWithQueuedCommits"));
+	ASSERT(!testMatched(options, config, "noSim/flow/regular"));
+	ASSERT(!testMatched(options, config, "simulation-only/test"));
+	ASSERT(!testMatched(options, config, "Lflow/longRunningCorrectness"));
+
+	options.testPattern = "Lflow/";
+	ASSERT(testMatched(options, config, "Lflow/longRunningCorrectness"));
+
+	return Void();
+}
+
 std::vector<UnitTest*> collectTests(const UnitTestRunnerOptions& options, const UnitTestRunnerConfig& config) {
 	std::vector<UnitTest*> tests;
 	for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
 		if (!pathComponentMatches(test->file, config.suiteName())) {
 			continue;
 		}
-		if (testMatched(options, test->name)) {
+		if (testMatched(options, config, test->name)) {
 			tests.push_back(test);
 		}
 	}
@@ -355,8 +389,14 @@ Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int
 
 } // namespace
 
-UnitTestRunnerConfig::UnitTestRunnerConfig(std::string_view sourceSubDir, SimulationInitializer simulationInitializer)
-  : sourceSubDir(sourceSubDir), simulationInitializer(std::move(simulationInitializer)) {}
+UnitTestRunnerConfig::UnitTestRunnerConfig(std::string_view sourceSubDir,
+                                           SimulationInitializer simulationInitializer,
+                                           NetworkInitializer networkInitializer,
+                                           std::vector<std::string> normalTestsIgnored,
+                                           std::vector<std::string> simulationTestsIgnored)
+  : sourceSubDir(sourceSubDir), simulationInitializer(std::move(simulationInitializer)),
+    networkInitializer(std::move(networkInitializer)), normalTestsIgnored(std::move(normalTestsIgnored)),
+    simulationTestsIgnored(std::move(simulationTestsIgnored)) {}
 
 std::string_view UnitTestRunnerConfig::suiteName() const {
 	return sourceSubDir;
@@ -376,6 +416,18 @@ bool UnitTestRunnerConfig::supportsSimulation() const {
 
 Future<Void> UnitTestRunnerConfig::initializeSimulation() const {
 	return simulationInitializer();
+}
+
+void UnitTestRunnerConfig::initializeNetwork() const {
+	if (networkInitializer) {
+		networkInitializer();
+	} else {
+		g_network = newNet2(TLSConfig());
+	}
+}
+
+const std::vector<std::string>& UnitTestRunnerConfig::defaultTestsIgnored(bool simulation) const {
+	return simulation ? simulationTestsIgnored : normalTestsIgnored;
 }
 
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
@@ -416,12 +468,15 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 		fmt::print(stderr, "ERROR: Could not chdir to {}\n", runDirectory);
 		return 1;
 	}
+	if (!options.simulation) {
+		options.dataDir = abspath(options.dataDir);
+	}
 
 	Future<Void> initialization = Void();
 	if (options.simulation) {
 		initialization = config.initializeSimulation();
 	} else {
-		g_network = newNet2(TLSConfig());
+		config.initializeNetwork();
 	}
 	openTraceFile({}, 10 << 20, 10 << 20, ".", traceName);
 

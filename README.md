@@ -26,7 +26,7 @@ The latest stable releases are (were) versions that are recommended for producti
 
 | Branch   |     Latest Production Release      |  Notes |
 |:--------:|:-------------:|------:|
-| 7.3      |  [7.3.69](https://github.com/apple/foundationdb/releases/tag/7.3.69) | Supported |
+| 7.3      |  [7.3.77](https://github.com/apple/foundationdb/releases/tag/7.3.77) | Supported |
 | 7.2      |   | Experimental |
 | 7.1      |  [7.1.57](https://github.com/apple/foundationdb/releases/tag/7.1.57)   |   Bug fixes |
 | 7.0      |           |   Experimental |
