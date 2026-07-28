@@ -37,7 +37,7 @@ struct ClientMetricWorkload : TestWorkload {
 	double samplingProbability;
 	double testDuration;
 	bool toSet;
-	bool completed = false;
+	bool observedAdvancingMetrics = false;
 	int64_t trInfoSizeLimit;
 	std::vector<Future<Void>> clients;
 
@@ -227,7 +227,7 @@ struct ClientMetricWorkload : TestWorkload {
 			uint64_t vs2 = co_await self->writeKeysAndGetLatencyVersion(cx, self, secondWrites, vs1);
 			std::cout << "vs2=" << vs2 << std::endl;
 			ASSERT(vs2 > vs1);
-			self->completed = true;
+			self->observedAdvancingMetrics = true;
 
 		} catch (Error& e) {
 			TraceEvent("ClientMetricError").error(e);
@@ -235,7 +235,7 @@ struct ClientMetricWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if (clientId != 0 || completed) {
+		if (clientId != 0 || observedAdvancingMetrics) {
 			return true;
 		}
 		TraceEvent(SevError, "ClientMetricCheckFailed").detail("Reason", "WorkloadDidNotComplete");

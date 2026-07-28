@@ -31,6 +31,7 @@
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
+#include "flow/UnitTest.h"
 #include "fdbrpc/simulator.h"
 
 const std::string simulationBulkDumpFolder = joinPath("simfdb", "bulkdump");
@@ -105,7 +106,8 @@ struct BulkDumping : TestWorkload {
 	}
 
 	KeyRange getRandomRange(BulkDumping* self, KeyRange maxRange) const {
-		while (true) {
+		constexpr int maxRandomRangeAttempts = 100;
+		for (int attempt = 0; attempt < maxRandomRangeAttempts; ++attempt) {
 			Standalone<StringRef> keyA = self->getRandomStringRef();
 			Standalone<StringRef> keyB = self->getRandomStringRef();
 			if (!maxRange.contains(keyA) || !maxRange.contains(keyB)) {
@@ -117,6 +119,16 @@ struct BulkDumping : TestWorkload {
 			}
 			return range;
 		}
+
+		// Sampling the whole keyspace can never finish for a sufficiently narrow range.
+		Key keyA = randomKeyBetween(maxRange);
+		Key keyB = randomKeyBetween(maxRange);
+		if (keyA == maxRange.end || keyB == maxRange.end || keyA == keyB) {
+			return maxRange;
+		}
+
+		KeyRange range = keyA < keyB ? KeyRangeRef(keyA, keyB) : KeyRangeRef(keyB, keyA);
+		return range.singleKeyRange() ? maxRange : range;
 	}
 
 	std::map<Key, Value> generateOrderedKVS(BulkDumping* self, KeyRange maxRange, size_t count) {
@@ -673,5 +685,27 @@ struct BulkDumping : TestWorkload {
 		}
 	}
 };
+
+TEST_CASE("/fdbserver/workloads/BulkDumping/boundedNarrowRange") {
+	WorkloadContext context;
+	context.clientId = 0;
+	context.clientCount = 1;
+	context.sharedRandomNumber = 1;
+	TestWorkloadImpl<BulkDumping> workload(context);
+
+	KeyRange narrowRange = KeyRangeRef("aaaaaaaa\x01"_sr, "aaaaaaaa\x02"_sr);
+	KeyRange generatedRange = workload.getRandomRange(&workload, narrowRange);
+	ASSERT(narrowRange.contains(generatedRange));
+	ASSERT(!generatedRange.empty());
+	ASSERT(!generatedRange.singleKeyRange());
+
+	KeyRange singleSampleableKeyRange = KeyRangeRef("aaaaaaaaa"_sr, "aaaaaaaaa\x00\x00"_sr);
+	KeyRange fallbackRange = workload.getRandomRange(&workload, singleSampleableKeyRange);
+	ASSERT(fallbackRange == singleSampleableKeyRange);
+	ASSERT(!fallbackRange.empty());
+	ASSERT(!fallbackRange.singleKeyRange());
+
+	return Void();
+}
 
 WorkloadFactory<BulkDumping> BulkDumpingFactory;

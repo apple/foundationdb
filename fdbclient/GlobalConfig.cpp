@@ -203,6 +203,8 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 			while (true) {
 				// run one iteration at the beginning
 				co_await delay(0);
+				// Subscribe before processing history so a reentrant DB info update cannot be lost.
+				Future<Void> nextDbInfoChange = dbInfoChanged.onTrigger();
 				if (!dbInfo->history.empty()) {
 					if (lastUpdate < dbInfo->history[0].version) {
 						// This process missed too many global configuration
@@ -243,7 +245,7 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 				}
 				// In case this actor is canceled in the d'tor of GlobalConfig we can exit here.
 				co_await delay(0);
-				co_await dbInfoChanged.onTrigger();
+				co_await nextDbInfoChange;
 			}
 		} catch (Error& e) {
 			err = e;
