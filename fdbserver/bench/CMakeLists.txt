@@ -1,3 +1,6 @@
+# Most bench stuff is in flow/bench. This is in fdbserver because it links with
+# code we specifically do not want in flow/ (to avoid pulling into clients).
+
 include(FDBBenchmark)
 
 fdb_find_sources(FDBSERVER_BENCH_SRCS)
