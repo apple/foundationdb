@@ -342,7 +342,7 @@ def main():
                 "b": parse_run(os.path.join(args.outdir, "b", eng)),
             }
     else:
-        clobber_ramdisk(args.ram_mount)  # clean slate up front; no end-of-run cleanup
+        clobber_ramdisk(args.ramdir, args.ram_mount)  # clean slate up front; no end-of-run cleanup
         os.makedirs(args.ramdir, exist_ok=True)
         os.makedirs(args.outdir, exist_ok=True)
         data = collect(

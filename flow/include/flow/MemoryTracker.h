@@ -141,6 +141,16 @@ public:
 	MemTrackerSuppress& operator=(const MemTrackerSuppress&) = delete;
 };
 
+// Initialize the tracker from the current knob values. Call once, from process
+// startup, AFTER all knobs are finalized and BEFORE any serving role starts (see
+// fdbserver.cpp). Publishes the enabled state and arms the calling (network)
+// thread from MEMORY_TRACKING_SAMPLE_INVERSE, so early startup allocations on the
+// main thread cannot latch the tracker off before the knob is configured. The
+// sample-inverse knob is read here (and in memTrackerResetForTest) rather than
+// inferred from the first allocation; dynamic runtime enable/disable is a
+// Non-requirement (see design/memory-tracker.md).
+void memTrackerInit();
+
 void memTrackerSampleAlloc(void* p, std::size_t n);
 void memTrackerSampleFree(void* p);
 
@@ -186,8 +196,16 @@ void memTrackerForEachSite(std::function<void(const MemoryTrackerCallSite&)> cb)
 // Reset all state. Tests only — not safe for production use.
 void memTrackerResetForTest();
 
+// Test only: arm a one-shot so the next sampled allocation simulates a tracker
+// metadata-allocation failure (the sampled path throws std::bad_alloc, which the
+// tracker swallows). Lets tests verify the tracker fails open — the underlying
+// allocation still succeeds and tracking recovers afterward. Never used in
+// production.
+void memTrackerFailNextSampleForTest();
+
 #else // !FDB_MEMORY_TRACKER — compiled out: hooks are no-ops, no operator new override.
 
+inline void memTrackerInit() {}
 inline void memTrackerOnAlloc(void*, std::size_t) {}
 inline void memTrackerOnFree(void*) {}
 inline void memTrackerDump(int64_t) {}

@@ -105,9 +105,6 @@ force_noinline void* triggerArenaSentinel(int n) {
 // ---------------------------------------------------------------------------
 // Accounting tests: verify byte/block counts come out right per allocation path
 // and there's no double-tracking.
-
-// Allocate n arenas (each holding one >256-byte block, exercising the
-// allocateAndMaybeKeepalive / new uint8_t[] path).
 force_noinline void* allocateArenaMediumSentinel(int n, std::vector<Arena>& arenas) {
 	for (int i = 0; i < n; i++) {
 		arenas.emplace_back();
@@ -117,8 +114,6 @@ force_noinline void* allocateArenaMediumSentinel(int n, std::vector<Arena>& aren
 	return reinterpret_cast<void*>(&allocateArenaMediumSentinel);
 }
 
-// Allocate n arenas (each holding one huge block, exercising the
-// reqSize >= LARGE path of ArenaBlock::create).
 force_noinline void* allocateArenaHugeSentinel(int n, std::vector<Arena>& arenas) {
 	for (int i = 0; i < n; i++) {
 		arenas.emplace_back();
@@ -128,7 +123,6 @@ force_noinline void* allocateArenaHugeSentinel(int n, std::vector<Arena>& arenas
 	return reinterpret_cast<void*>(&allocateArenaHugeSentinel);
 }
 
-// Allocate n arenas (each holding one small block via FastAllocator<128|256>).
 force_noinline void* allocateArenaSmallSentinel(int n, std::vector<Arena>& arenas) {
 	for (int i = 0; i < n; i++) {
 		arenas.emplace_back();
@@ -138,8 +132,15 @@ force_noinline void* allocateArenaSmallSentinel(int n, std::vector<Arena>& arena
 	return reinterpret_cast<void*>(&allocateArenaSmallSentinel);
 }
 
-// Allocate n FastAllocator<32> blocks; pointers retained so the test can
-// release them later.
+force_noinline void* allocateOperatorNewSentinel(int n, int k, std::vector<int*>& ptrs) {
+	for (int i = 0; i < n; i++) {
+		auto* p = new int[k];
+		escape(p);
+		ptrs.push_back(p);
+	}
+	return reinterpret_cast<void*>(&allocateOperatorNewSentinel);
+}
+
 force_noinline void* allocateFastAlloc32Sentinel(int n, std::vector<void*>& ptrs) {
 	for (int i = 0; i < n; i++) {
 		void* p = FastAllocator<32>::allocate();
@@ -289,21 +290,14 @@ TEST_CASE("/flow/MemoryTracker/coverage") {
 }
 
 TEST_CASE("/flow/MemoryTracker/offSwitch") {
-	// With sample inverse 0, no allocations should be attributed.
+	// With sample inverse 0, no allocations are attributed. memTrackerResetForTest
+	// arms this thread's off-latch straight from the knob (as memTrackerInit does
+	// at startup), so even the first allocation short-circuits.
 	auto* k = const_cast<FlowKnobs*>(FLOW_KNOBS);
 	int prev = k->MEMORY_TRACKING_SAMPLE_INVERSE;
 	k->MEMORY_TRACKING_SAMPLE_INVERSE = 0;
 
 	memTrackerResetForTest();
-
-	// Burn through the per-thread initial counter (which is 1, so the very
-	// first allocation will still be sampled before the reseed observes
-	// inverse==0). Then run a flurry that should NOT be tracked.
-	{
-		auto* warm = new int[4];
-		delete[] warm;
-	}
-	memTrackerResetForTest(); // discard the unavoidable first sample
 
 	for (int i = 0; i < 100; i++) {
 		auto* p = new int[4];
@@ -635,6 +629,115 @@ TEST_CASE("/flow/MemoryTracker/arenaHugeAccounting") {
 	ASSERT_EQ(post.liveCountSentinel, 0);
 	// Global live totals intentionally not asserted (flaky at inverse=1; see above).
 	ASSERT_EQ(post.cumAllocsSentinel, N);
+	return Void();
+}
+
+TEST_CASE("/flow/MemoryTracker/operatorNewAccounting") {
+#ifndef __linux__
+	return Void(); // see /coverage for rationale
+#endif
+	KnobOverride ko;
+	constexpr int N = 30;
+	constexpr int K = 8; // new int[8] -> 32 bytes; int is trivial so no array cookie
+
+	std::vector<int*> ptrs;
+	ptrs.reserve(N);
+
+	memTrackerResetForTest();
+	void* sentinel = allocateOperatorNewSentinel(N, K, ptrs);
+
+	auto pre = collectAccounting(sentinel);
+	if (pre.sitesWithSentinelFrames != 1) {
+		dumpSitesForFailure("operatorNewAccounting/post-alloc");
+	}
+	ASSERT_EQ(pre.sitesWithSentinelFrames, 1);
+	ASSERT_EQ(pre.cumAllocsSentinel, N);
+	ASSERT_EQ(pre.liveCountSentinel, N);
+	ASSERT_EQ(pre.cumBytesSentinel, static_cast<int64_t>(N) * K * static_cast<int64_t>(sizeof(int)));
+	ASSERT_EQ(pre.liveBytesSentinel, pre.cumBytesSentinel);
+	// Global totals intentionally not asserted (flaky at inverse=1; see above).
+
+	for (auto* p : ptrs) {
+		delete[] p;
+	}
+	ptrs.clear();
+
+	auto post = collectAccounting(sentinel);
+	ASSERT_EQ(post.liveBytesSentinel, 0);
+	ASSERT_EQ(post.liveCountSentinel, 0);
+	// Global live totals intentionally not asserted (flaky at inverse=1; see above).
+	ASSERT_EQ(post.cumAllocsSentinel, N);
+	return Void();
+}
+
+TEST_CASE("/flow/MemoryTracker/failOpenOnMetadataAllocFailure") {
+	// The tracker must fail open: if its own metadata allocation throws, the
+	// underlying user allocation still succeeds and tracking recovers on this
+	// thread afterward (the reentrancy guard is restored, not leaked). Runs on all
+	// platforms — no frame inspection.
+	KnobOverride ko; // inverse = 1: sample every allocation
+	memTrackerResetForTest();
+
+	// Arm the one-shot; it is consumed by the next sampled allocation, which throws
+	// inside the tracker. new/delete must not observe that exception.
+	memTrackerFailNextSampleForTest();
+	int* p = new int[4];
+	ASSERT(p != nullptr);
+	p[0] = 42;
+	int observed = p[0];
+	delete[] p;
+	ASSERT_EQ(observed, 42);
+
+	// Tracking must still work after the injected failure.
+	memTrackerResetForTest();
+	std::vector<int*> ptrs;
+	ptrs.reserve(8);
+	for (int i = 0; i < 8; i++) {
+		auto* q = new int[4];
+		escape(q);
+		ptrs.push_back(q);
+	}
+	int siteCount = 0;
+	memTrackerForEachSite([&](const MemoryTrackerCallSite&) { siteCount++; });
+	for (auto* q : ptrs) {
+		delete[] q;
+	}
+	ASSERT(siteCount > 0);
+	return Void();
+}
+
+TEST_CASE("/flow/MemoryTracker/initEnablesFromKnob") {
+	// Exercises the *production* enablement path (memTrackerInit), not the test-only
+	// reset — the reviewer noted that memTrackerResetForTest masks the startup race.
+	// memTrackerInit must set the global enabled flag and this thread's fast-path
+	// off-latch straight from MEMORY_TRACKING_SAMPLE_INVERSE, and (the regression)
+	// must re-arm a thread that a prior off-configuration had already latched off.
+	auto* k = const_cast<FlowKnobs*>(FLOW_KNOBS);
+	int prev = k->MEMORY_TRACKING_SAMPLE_INVERSE;
+
+	// Sampling off: init publishes disabled and latches this thread off. This is the
+	// state an early startup allocation used to get stuck in before init existed.
+	k->MEMORY_TRACKING_SAMPLE_INVERSE = 0;
+	memTrackerInit();
+	ASSERT(!g_memTrackerEnabled.value.load(std::memory_order_relaxed));
+	ASSERT(gMemTrackerOff); // alloc hot path short-circuits
+
+	// Knobs now configured with sampling on: init must re-arm THIS thread. The bug
+	// was that nothing re-armed the network thread once it latched off before the
+	// knobs were ready, so sampling stayed dead for the life of the process.
+	k->MEMORY_TRACKING_SAMPLE_INVERSE = 8;
+	memTrackerInit();
+	ASSERT(g_memTrackerEnabled.value.load(std::memory_order_relaxed));
+	ASSERT(!gMemTrackerOff); // re-armed: alloc hot path now reaches the sampler
+
+	// And the reverse transition: a subsequent off-configuration re-latches it.
+	k->MEMORY_TRACKING_SAMPLE_INVERSE = 0;
+	memTrackerInit();
+	ASSERT(!g_memTrackerEnabled.value.load(std::memory_order_relaxed));
+	ASSERT(gMemTrackerOff);
+
+	k->MEMORY_TRACKING_SAMPLE_INVERSE = prev;
+	memTrackerInit(); // restore tracker state from the baseline knob for later tests
 	return Void();
 }
 

@@ -77,6 +77,7 @@
 #include "flow/ProtocolVersion.h"
 #include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
+#include "flow/MemoryTracker.h"
 #include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
@@ -1909,6 +1910,13 @@ int main(int argc, char* argv[]) {
 		setServerKnob("server_mem_limit", KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		initializeServerKnobs(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+
+		// Knobs are now final; initialize the sampled memory tracker from them on
+		// this (soon-to-be network) thread, before any serving role starts. Reading
+		// the sample-inverse knob explicitly here — rather than inferring it from
+		// the first allocation — keeps early startup allocations from latching the
+		// tracker off before the knobs were configured. See design/memory-tracker.md.
+		memTrackerInit();
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);

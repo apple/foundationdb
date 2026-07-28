@@ -230,4 +230,7 @@ endif()
 
 target_link_libraries(fdbserver PUBLIC fdbctl)
 
-add_subdirectory(bench EXCLUDE_FROM_ALL)
+if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
+                                     # x-compiling.
+  add_subdirectory(bench EXCLUDE_FROM_ALL)
+endif()

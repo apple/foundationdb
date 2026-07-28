@@ -233,9 +233,16 @@ debit a live entry — so it cannot be gated the way an alloc is. Gating it on
 the enabled flag instead keeps the disabled free path lock-free: without this
 gate, every hooked `delete`/`FastAllocator::release`/`ArenaBlock` teardown
 would acquire the global spinlock even with sampling off, defeating the
-off-switch. The flag is published once from `memTrackerSampleAlloc` (the one
-place that reads the knob), so its cache line stays shared across cores and the
-hot-path read is cheap.
+off-switch. The flag is published by `memTrackerInit()` — an explicit call
+`fdbserver` makes once, after all knobs are finalized and before any serving role
+starts — which reads `MEMORY_TRACKING_SAMPLE_INVERSE` and, on the calling
+(network) thread, either arms sampling or latches it off. Publishing it from a
+known init point rather than inferring it from the first allocation is what keeps
+an early startup allocation from latching the tracker off before the knobs are
+configured. It stays constant thereafter (the knob is read at startup only), so
+its cache line stays shared across cores and the hot-path read is cheap.
+`memTrackerResetForTest()` performs the same publish-and-arm so unit tests can
+flip the knob and re-initialize deterministically.
 
 The counter is reseeded on every sample to a uniform random integer on
 `[1, 2·INV−1]`, whose mean is exactly `INV`, so the sampling rate averages
@@ -434,6 +441,13 @@ overloads retry through the installed `std::new_handler` on failure, exactly as
 the default `operator new` does, so an allocation failure still reaches FDB's
 `platform::outOfMemory` handler (`FDB_EXIT_NO_MEM`) instead of throwing past it.
 
+The tracker hooks themselves **fail open**: `memTrackerSampleAlloc`,
+`memTrackerSampleFree`, and `memTrackerDump` swallow any exception (e.g. a
+`std::bad_alloc` from growing the tracker's own tables). By the time a hook runs
+the underlying user allocation has already succeeded, so a diagnostic-only failure
+must never leak it, turn a `nothrow` `new` into a spurious `nullptr`, or abort the
+process — the sample is simply dropped.
+
 These overloads live in a translation unit compiled directly into the
 `fdbserver` executable — not in the `flow` static library — for two
 reasons:
@@ -595,7 +609,11 @@ buggify of the rate is needed.
 ### Code layout
 
 - **Tracker core:** `flow/MemoryTracker.{cpp,h}` — hot-path inlines, out-of-line
-  sample/free paths, the two tables, and the dump.
+  sample/free paths, the two tables, the dump, and `memTrackerInit()`.
+- **Startup init:** `fdbserver/fdbserver.cpp` calls `memTrackerInit()` once, after
+  server knobs are finalized and before any serving role starts, so the enabled
+  state is set from the final knob values rather than inferred from the first
+  allocation.
 - **Global `operator new`/`delete`:** `fdbserver/GlobalNewDelete.cpp` — compiled
   only into the `fdbserver` executable (client isolation), and also home to the
   legacy `ALLOC_INSTRUMENTATION` overrides via `#if`/`#else`.
@@ -604,8 +622,11 @@ buggify of the rate is needed.
   `ALLOC_INSTRUMENTATION` lines (which are left untouched — dormant in default
   builds).
 - **Dump driver / knobs:** `flow/SystemMonitor.cpp` and `flow/Knobs.{cpp,h}`.
-- **Tests / bench:** `flow/MemoryTrackerTest.cpp` (unit tests) and
-  `fdbserver/bench/` (`fdbserver_bench`).
+- **Tests / bench:** `fdbserver/MemoryTrackerTest.cpp` (unit tests) and
+  `fdbserver/bench/` (`fdbserver_bench`). The unit tests live under `fdbserver`,
+  not `flow`, so they run in a binary that links the global `operator new`/`delete`
+  override and can assert operator-new attribution end to end (a test in `flow`
+  would exercise the standard-library allocator, which never calls the hook).
 
 Most files are picked up by the source globs; the exceptions are the
 `fdbserver/bench/` subdirectory (its own `CMakeLists.txt` + an `add_subdirectory`
@@ -789,8 +810,9 @@ Rejected because:
 
 ### Unit tests
 
-`flow/MemoryTrackerTest.cpp` implements these `TEST_CASE`s (all under
-`/flow/MemoryTracker/`):
+`fdbserver/MemoryTrackerTest.cpp` implements these `TEST_CASE`s (all under
+`/flow/MemoryTracker/`). They live under `fdbserver`, not `flow`, so they run in a
+binary that links the global `operator new`/`delete` override and can exercise it:
 
 - **`coverage`** — sentinel functions drive one allocation each through
   `operator new`, `FastAllocator`, and `Arena`; confirms a captured call
@@ -800,9 +822,20 @@ Rejected because:
   returns to 0 while `cumulativeAllocs` does not decrement.
 - **`offSwitch`** — with sample inverse 0, no sites are recorded and the
   `g_memTrackerEnabled` flag is false (so frees skip the lock).
+  `memTrackerResetForTest` arms the off-latch from the knob, matching
+  `memTrackerInit` at startup.
+- **`initEnablesFromKnob`** — drives the production `memTrackerInit()` path
+  directly (not the test-only reset, which the reviewer noted masks the startup
+  race): init publishes the enabled flag and arms/latches this thread from
+  `MEMORY_TRACKING_SAMPLE_INVERSE`, including re-arming a thread a prior
+  off-configuration had already latched off.
 - **`operatorNewHonorsNewHandler`** — a failing `::operator new` invokes the
   installed `std::new_handler`, so allocation failure reaches FDB's OOM path
   (item 1) rather than throwing past it.
+- **`operatorNewAccounting`** — allocations via `new` / `delete[]` (through the
+  fdbserver global override) are attributed to the calling site with correct
+  byte/block counts, and `delete` debits the live totals. Only meaningful because
+  the test runs in `fdbserver`, where the override is linked.
 - **`samplingRate`** — at inverse N the observed sampled fraction is ~1-in-N,
   checking the `[1, 2N-1]` reseed's mean.
 - **`freeOfUntrackedPtrIsNoop`** — `memTrackerOnFree` on a never-sampled
@@ -815,10 +848,12 @@ Rejected because:
   per allocation path; the "exactly one site carries the sentinel's frames"
   assertion is the B1 double-tracking regression test (the medium and huge
   `Arena` paths are the ones that regressed).
+- **`failOpenOnMetadataAllocFailure`** — an injected tracker-metadata allocation
+  failure is swallowed: the underlying `new`/`delete` still succeeds and tracking
+  recovers on the thread afterward (the reentrancy guard is restored, not leaked).
 
-Not yet covered by dedicated unit tests: an explicit reentrancy-guard test
-and a frame-pointer-walk-depth test — both behaviors are exercised
-indirectly by the tests above.
+Not yet covered by a dedicated unit test: a frame-pointer-walk-depth test — that
+behavior is exercised indirectly by the sentinel tests above.
 
 ### Microbenchmarks
 

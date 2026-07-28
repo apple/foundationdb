@@ -55,6 +55,10 @@ thread_local std::size_t gForceSampleBytes = static_cast<std::size_t>(-1);
 // read the knob; set true there if sampling is off (see memTrackerSampleAlloc).
 thread_local bool gMemTrackerOff = false;
 
+// Test-only one-shot: when set, the next sampled allocation throws to simulate a
+// tracker metadata-allocation failure (see memTrackerFailNextSampleForTest).
+static thread_local bool gFailNextSampleForTest = false;
+
 // Definition of the cache-line-isolated enabled flag declared in the header.
 MemTrackerEnabledFlag g_memTrackerEnabled;
 // Same initial seed for every thread; cheap and adequate. Threads in
@@ -161,13 +165,19 @@ __attribute__((no_instrument_function, noinline)) int captureFramesFP(void** out
 
 #else // !__linux__
 
+// NOTE: We (Apple) do not maintain a local facility to build FDB with
+// MSVC on Windows. The code in this file **may** have issues. We are
+// doing a best-effort attempt not to break the build.  Support for
+// this memory tracking feature by community users of Windows would be
+// welcome.
+
 // macOS / non-Linux: stack walking is unreliable here (system runtime
 // has -fomit-frame-pointer in places we can't avoid, and pthread_getattr_np
-// is Linux-specific). FDB is required to compile on macOS but is not run
+// is Linux-specific). FDB is required to compile on macOS/Windows but is not run
 // in production there, so we just no-op the walker. The rest of the
 // tracker still compiles and runs; per-call-site reports will simply
 // lack stack attribution.
-__attribute__((no_instrument_function, noinline)) int captureFramesFP(void**, int) {
+force_noinline int captureFramesFP(void**, int) {
 	return 0;
 }
 
@@ -227,7 +237,34 @@ void ensureMaps() {
 
 } // namespace
 
-void memTrackerSampleAlloc(void* p, std::size_t n) {
+// Publish the enabled flag and arm the calling thread from the current
+// MEMORY_TRACKING_SAMPLE_INVERSE. Shared by memTrackerInit (once, at startup)
+// and memTrackerResetForTest. Reading the knob explicitly here — rather than
+// inferring the enabled state from the first sampled allocation — is what keeps
+// an early main-thread allocation from latching the tracker off before the
+// knobs are configured.
+static void memTrackerArmFromKnobs() {
+	int inverse = FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_SAMPLE_INVERSE : 0;
+	bool enabled = (inverse > 0);
+	g_memTrackerEnabled.value.store(enabled, std::memory_order_relaxed);
+	// If enabled, clear this thread's off-latch and force its next allocation onto
+	// the slow path (counter==1) to seed the reseed; if disabled, latch off so the
+	// alloc hot path short-circuits on a single TLS load.
+	gMemTrackerOff = !enabled;
+	gMemTrackerCounter = 1;
+	gForceSampleBytes = FLOW_KNOBS ? static_cast<std::size_t>(FLOW_KNOBS->MEMORY_TRACKING_FORCE_SAMPLE_BYTES)
+	                               : static_cast<std::size_t>(-1);
+}
+
+void memTrackerInit() {
+	memTrackerArmFromKnobs();
+}
+
+static void memTrackerSampleAllocImpl(void* p, std::size_t n) {
+	if (gFailNextSampleForTest) {
+		gFailNextSampleForTest = false;
+		throw std::bad_alloc(); // simulate a tracker metadata-allocation failure (test only)
+	}
 	int inverse = 0;
 	int frames = 6;
 	bool liveTracking = true;
@@ -247,15 +284,6 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 	// values; 1-in-256M sampling is already effectively off.
 	if (inverse > (1 << 28)) {
 		inverse = 1 << 28;
-	}
-
-	// Publish the enabled state for the free hot path's gate. Store only on an
-	// actual change so the flag's cache line stays in MESI shared state (see
-	// MemTrackerEnabledFlag in the header). Published once, since the sample knob
-	// is read at startup only and not changed at runtime.
-	bool enabled = (inverse > 0);
-	if (g_memTrackerEnabled.value.load(std::memory_order_relaxed) != enabled) {
-		g_memTrackerEnabled.value.store(enabled, std::memory_order_relaxed);
 	}
 
 	if (inverse <= 0) {
@@ -379,7 +407,17 @@ void memTrackerSampleAlloc(void* p, std::size_t n) {
 	g_samplesEmitted += 1;
 }
 
-void memTrackerSampleFree(void* p) {
+void memTrackerSampleAlloc(void* p, std::size_t n) {
+	// Fail open: the tracker is a diagnostic; a std::bad_alloc from its own map
+	// growth (or the test injection) must never propagate into the caller's
+	// allocation path, which has already handed out the underlying block.
+	try {
+		memTrackerSampleAllocImpl(p, n);
+	} catch (...) {
+	}
+}
+
+static void memTrackerSampleFreeImpl(void* p) {
 	bool liveTracking = FLOW_KNOBS ? FLOW_KNOBS->MEMORY_TRACKING_LIVE_TRACKING : true;
 	if (!liveTracking) {
 		return;
@@ -412,6 +450,15 @@ void memTrackerSampleFree(void* p) {
 	g_liveBlocksTotal -= 1;
 	g_estLiveBytesTotal -= eEstBytes;
 	g_estLiveBlocksTotal -= e.weight;
+}
+
+void memTrackerSampleFree(void* p) {
+	// Fail open (see memTrackerSampleAlloc): operator delete is noexcept, so the
+	// tracker must never let an exception escape the free path.
+	try {
+		memTrackerSampleFreeImpl(p);
+	} catch (...) {
+	}
 }
 
 void memTrackerForEachSite(std::function<void(const MemoryTrackerCallSite&)> cb) {
@@ -454,17 +501,18 @@ void memTrackerResetForTest() {
 		g_estCumulativeBytesTotal = 0;
 		g_estCumulativeAllocsTotal = 0;
 	}
-	// Force the next allocation on this thread to take the slow path so it
-	// re-reads the (possibly just-changed) sample-inverse knob.
-	gMemTrackerOff = false;
-	gMemTrackerCounter = 1;
-	gForceSampleBytes = static_cast<std::size_t>(-1);
-	// Clear the enabled flag; the next slow-path visit republishes it from the
-	// current knob value.
-	g_memTrackerEnabled.value.store(false, std::memory_order_relaxed);
+	// Publish the enabled flag and arm this thread from the current knob value
+	// (a test typically sets MEMORY_TRACKING_SAMPLE_INVERSE via KnobOverride just
+	// before calling this), mirroring memTrackerInit at process startup.
+	gFailNextSampleForTest = false;
+	memTrackerArmFromKnobs();
 }
 
-void memTrackerDump(int64_t bytesThreshold) {
+void memTrackerFailNextSampleForTest() {
+	gFailNextSampleForTest = true;
+}
+
+static void memTrackerDumpImpl(int64_t bytesThreshold) {
 	MemTrackerSuppress _suppress;
 
 	std::vector<MemoryTrackerCallSite> sites;
@@ -594,6 +642,21 @@ void memTrackerDump(int64_t bytesThreshold) {
 	    // scaled by SampleInverse; force-sampled blocks (>= ForceSampleBytes) count once.
 	    // Accuracy improves with SamplesEmitted; a site with few samples is noisy.
 	    .detail("EstimateBasis", "Est*=sampled*SampleInverse; force-sampled weight 1; statistical estimate");
+}
+
+void memTrackerDump(int64_t bytesThreshold) {
+	// Disabled: nothing is sampled, so skip the dump entirely rather than emit an
+	// empty MemoryTrackerSummary every report interval (the production default is
+	// off, and SystemMonitor calls this on a fixed cadence regardless).
+	if (!g_memTrackerEnabled.value.load(std::memory_order_relaxed)) {
+		return;
+	}
+	// Fail open (see memTrackerSampleAlloc): a diagnostic dump must never crash the
+	// server, e.g. on an allocation failure while building the report.
+	try {
+		memTrackerDumpImpl(bytesThreshold);
+	} catch (...) {
+	}
 }
 
 // The global operator new / operator delete replacements that route through

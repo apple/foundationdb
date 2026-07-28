@@ -91,18 +91,26 @@ def _assert_safe_scratch_mount(mount):
         )
 
 
-def clobber_ramdisk(ram_mount):
-    """Clear all scratch under the tmpfs so every run starts with an empty
-    ramdisk. /mnt/ram is only ~24 GB and fills fast across runs. Done at startup
-    rather than teardown: a killed run can't be trusted to have cleaned up, and
-    leaving the last run's data in place until the next run keeps it available
-    to inspect when something fails."""
-    if not os.path.isdir(ram_mount):
+def clobber_ramdisk(ramdir, ram_mount):
+    """Clear only this benchmark's own scratch dir under the tmpfs so every run
+    starts clean, without touching anything else sharing the mount (e.g. other
+    processes' data under /dev/shm). The ramdisk (~24 GB) fills fast across runs.
+    Done at startup rather than teardown: a killed run can't be trusted to have
+    cleaned up, and leaving the last run's data in place until the next run keeps
+    it available to inspect when something fails."""
+    if not os.path.isdir(ramdir):
         return
     _assert_safe_scratch_mount(ram_mount)
-    for name in os.listdir(ram_mount):
-        subprocess.run(["rm", "-rf", os.path.join(ram_mount, name)], check=False)
-    print(f"clobbered ramdisk contents under {ram_mount}", flush=True)
+    real_mount = os.path.realpath(ram_mount)
+    real_ramdir = os.path.realpath(ramdir)
+    # Only ever delete a directory strictly beneath the validated tmpfs mount, so a
+    # stray --ramdir can't wipe the mount root or unrelated data elsewhere.
+    if real_ramdir == real_mount or os.path.commonpath([real_mount, real_ramdir]) != real_mount:
+        raise SystemExit(
+            f"refusing to clobber {ramdir!r} -> {real_ramdir!r}: not strictly under mount {real_mount!r}"
+        )
+    subprocess.run(["rm", "-rf", real_ramdir], check=False)
+    print(f"clobbered benchmark scratch dir {real_ramdir}", flush=True)
 
 
 def save_metrics(dst, metrics):
@@ -540,7 +548,7 @@ def main():
             for arm, inverse in ARMS:
                 data[eng][arm] = load_metrics(os.path.join(args.outdir, arm, eng))
     else:
-        clobber_ramdisk(args.ram_mount)  # clean slate up front; no end-of-run cleanup
+        clobber_ramdisk(args.ramdir, args.ram_mount)  # clean slate up front; no end-of-run cleanup
         os.makedirs(args.ramdir, exist_ok=True)
         os.makedirs(args.outdir, exist_ok=True)
         data = collect(
