@@ -183,6 +183,24 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			out[p + key] = format("%d", type);
 		}
 
+		if (key == DatabaseConfiguration::SHARD_METADATA_FORMAT_KEY) {
+			if (value != DatabaseConfiguration::SHARD_METADATA_FORMAT_ORIGINAL &&
+			    value != DatabaseConfiguration::SHARD_METADATA_FORMAT_ENCODED) {
+				printf("Error: shard_metadata_format must be `original' or `encoded'.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
+
+		if (key == DatabaseConfiguration::SHARD_METADATA_MIGRATION_KEY) {
+			if (value != DatabaseConfiguration::SHARD_METADATA_MIGRATION_ENABLED &&
+			    value != DatabaseConfiguration::SHARD_METADATA_MIGRATION_DISABLED) {
+				printf("Error: shard_metadata_migration must be `enabled' or `disabled'.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
+
 		if (key == "exclude") {
 			int p = 0;
 			while (p < value.size()) {

@@ -190,6 +190,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/CheckMetadataEncodingForward.toml)
   add_fdb_test(TEST_FILES fast/CheckMetadataEncodingOldPath.toml)
   add_fdb_test(TEST_FILES fast/ShardEncodeRollback.toml)
+  add_fdb_test(TEST_FILES fast/ShardEncodeRollbackConfig.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
 
   add_fdb_test(TEST_FILES fast/GetEstimatedRangeSize.toml)
