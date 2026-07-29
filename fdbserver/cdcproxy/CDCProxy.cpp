@@ -1161,7 +1161,7 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 		for (const auto& interval : stream->tagIntervals) {
 			auto tag = tags.find(interval.tag);
 			if (tag == tags.end()) {
-				Reference<CDCBufferedTag> newTag = makeReference<CDCBufferedTag>(interval.tag);
+				auto newTag = makeReference<CDCBufferedTag>(interval.tag);
 				tag = tags.emplace(interval.tag, newTag).first;
 				tag->second->streamIds.insert(stream->streamId);
 				actors.add(bufferTag(newTag));
@@ -1411,7 +1411,7 @@ void CDCProxy::reconcileStreams() {
 		if (proxyId == id) {
 			assignedStreams.insert(streamId);
 			if (!streams.contains(streamId)) {
-				Reference<CDCBufferedStream> stream = makeReference<CDCBufferedStream>(streamId);
+				auto stream = makeReference<CDCBufferedStream>(streamId);
 				streams.emplace(streamId, stream);
 				actors.add(initializeStream(stream));
 			}
@@ -1968,8 +1968,8 @@ TEST_CASE("/NativeCDC/LagMetrics") {
 
 TEST_CASE("/NativeCDC/StreamInitializationLifecycle") {
 	std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> streams;
-	Reference<CDCBufferedStream> stream = makeReference<CDCBufferedStream>(1);
-	Reference<CDCBufferedStream> replacement = makeReference<CDCBufferedStream>(1);
+	auto stream = makeReference<CDCBufferedStream>(1);
+	auto replacement = makeReference<CDCBufferedStream>(1);
 
 	ASSERT(!isCurrentStreamInitialization(streams, stream));
 	streams.emplace(stream->streamId, stream);
