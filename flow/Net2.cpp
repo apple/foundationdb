@@ -2082,7 +2082,7 @@ static Future<Void> coordinatorDNSCacheRefresh(Net2* self) {
 	if (!FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
 		co_return;
 	}
-	loop {
+	while (true) {
 		co_await delay(FLOW_KNOBS->COORDINATOR_DNS_CACHE_REFRESH_INTERVAL);
 		std::vector<std::string> keys = self->dnsCache.getKeys();
 		for (int i = 0; i < keys.size(); i++) {
