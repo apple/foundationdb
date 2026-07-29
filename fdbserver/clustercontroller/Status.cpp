@@ -744,7 +744,6 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
     WorkerEvents mMetrics,
     WorkerEvents nMetrics,
     WorkerEvents errors,
-    WorkerEvents traceFileOpenErrors,
     WorkerEvents programStarts,
     std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     std::vector<StorageServerStatusInfo> storageServers,
@@ -759,35 +758,6 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
     std::set<std::string>* incomplete_reasons) {
 
 	JsonBuilderObject processMap;
-
-	// construct a map from a process address to a status object containing a trace file open error
-	// this is later added to the messages subsection
-	std::map<std::string, JsonBuilderObject> tracefileOpenErrorMap;
-	WorkerEvents::iterator traceFileErrorsItr;
-	for (traceFileErrorsItr = traceFileOpenErrors.begin(); traceFileErrorsItr != traceFileOpenErrors.end();
-	     ++traceFileErrorsItr) {
-		co_await yield();
-		if (traceFileErrorsItr->second.size()) {
-			try {
-				// Have event fields, parse it and turn it into a message object describing the trace file opening error
-				const TraceEventFields& event = traceFileErrorsItr->second;
-				std::string fileName = event.getValue("Filename");
-				JsonBuilderObject msgObj = JsonString::makeMessage(
-				    "file_open_error",
-				    format("Could not open file '%s' (%s).", fileName.c_str(), event.getValue("Error").c_str())
-				        .c_str());
-				msgObj["file_name"] = fileName;
-
-				// Map the address of the worker to the error message object
-				tracefileOpenErrorMap[traceFileErrorsItr->first.toString()] = msgObj;
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw;
-				}
-				incomplete_reasons->insert("file_open_error details could not be retrieved");
-			}
-		}
-	}
 
 	std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo> machineMemoryUsage;
 	std::vector<WorkerDetails>::iterator workerItr;
@@ -1055,11 +1025,6 @@ static AsyncResult<JsonBuilderObject> processStatusFetcher(
 			// If this process has a process issue, identified by strAddress, then add it to messages array
 			for (const auto& issue : processIssues[strAddress]) {
 				messages.push_back(issue);
-			}
-
-			// If this process had a trace file open error, identified by strAddress, then add it to messages array
-			if (tracefileOpenErrorMap.contains(strAddress)) {
-				messages.push_back(tracefileOpenErrorMap[strAddress]);
 			}
 
 			if (ssLag[address] >= 60) {
@@ -2607,26 +2572,50 @@ static std::string getIssueDescription(std::string name) {
 		       "its "
 		       "parent directory are writable and that the cluster file has not been overwritten externally.";
 	}
+	if (name == "trace_log_could_not_create_file") {
+		return "The process could not create a trace log file. Check the process stderr for details.";
+	}
 	if (name == "exclude_from_tlog_recruitment_low_disk") {
 		return "Process is temporarily excluded from TLog recruitment because its available disk space is below the "
 		       "minimum TLog threshold.";
 	}
 
-	// FIXME: name and description will be the same unless the message is 'incorrect_cluster_file_contents', which
-	// is currently the only possible message
+	// Fall back to the issue name when no user-facing description is available.
 	return name;
 }
 
+static JsonBuilderObject getProcessIssueMessage(std::string const& name, TraceEventFields const* traceFileOpenError) {
+	if (name == "trace_log_could_not_create_file" && traceFileOpenError != nullptr) {
+		std::string fileName;
+		std::string error;
+		if (traceFileOpenError->tryGetValue("Filename", fileName) && traceFileOpenError->tryGetValue("Error", error)) {
+			return JsonString::makeMessage(
+			    name.c_str(),
+			    format("Could not create trace log file '%s' (%s).", fileName.c_str(), error.c_str()).c_str());
+		}
+	}
+
+	return JsonString::makeMessage(name.c_str(), getIssueDescription(name).c_str());
+}
+
 static std::map<std::string, std::vector<JsonBuilderObject>> getProcessIssuesAsMessages(
-    std::vector<ProcessIssues> const& issues) {
+    std::vector<ProcessIssues> const& issues,
+    WorkerEvents const& traceFileOpenErrors) {
 	std::map<std::string, std::vector<JsonBuilderObject>> issuesMap;
+	std::map<std::string, TraceEventFields const*> traceFileOpenErrorsByAddress;
+	for (const auto& [address, event] : traceFileOpenErrors) {
+		traceFileOpenErrorsByAddress[address.toString()] = &event;
+	}
 
 	try {
 		for (const auto& processIssues : issues) {
+			std::string processAddress = processIssues.address.toString();
+			auto traceFileOpenError = traceFileOpenErrorsByAddress.find(processAddress);
+			TraceEventFields const* traceFileOpenErrorFields =
+			    traceFileOpenError != traceFileOpenErrorsByAddress.end() ? traceFileOpenError->second : nullptr;
 			for (auto issue : processIssues.issues) {
 				std::string issueStr = issue.toString();
-				issuesMap[processIssues.address.toString()].push_back(
-				    JsonString::makeMessage(issueStr.c_str(), getIssueDescription(issueStr).c_str()));
+				issuesMap[processAddress].push_back(getProcessIssueMessage(issueStr, traceFileOpenErrorFields));
 			}
 		}
 	} catch (Error& e) {
@@ -3084,7 +3073,8 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 			statusObj["generation"] = db->get().recoveryCount;
 		}
 
-		std::map<std::string, std::vector<JsonBuilderObject>> processIssues = getProcessIssuesAsMessages(workerIssues);
+		std::map<std::string, std::vector<JsonBuilderObject>> processIssues =
+		    getProcessIssuesAsMessages(workerIssues, traceFileOpenErrors);
 		std::vector<StorageServerStatusInfo> storageServers;
 		std::vector<std::pair<TLogInterface, EventMap>> tLogs;
 		std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
@@ -3331,7 +3321,6 @@ static AsyncResult<Void> clusterGetStatusImpl(Reference<ClusterGetStatusState> s
 		                                  mMetrics,
 		                                  networkMetrics,
 		                                  latestError,
-		                                  traceFileOpenErrors,
 		                                  programStarts,
 		                                  processIssues,
 		                                  storageServers,
@@ -3563,6 +3552,35 @@ bool checkJson(const JsonBuilder& j, const char* expected) {
 	}
 
 	return js == expected;
+}
+
+TEST_CASE("/status/processIssues/traceLogCouldNotCreateFile") {
+	const char* genericMessage =
+	    R"({"name":"trace_log_could_not_create_file","description":"The process could not create a trace log file. Check the process stderr for details."})";
+	NetworkAddress address(IPAddress(0x01010101), 1);
+	Standalone<VectorRef<StringRef>> issueNames;
+	issueNames.push_back_deep(issueNames.arena(), "trace_log_could_not_create_file"_sr);
+	std::vector<ProcessIssues> issues;
+	issues.emplace_back(address, issueNames);
+
+	TraceEventFields traceFileOpenError;
+	traceFileOpenError.addField("Filename", "/var/log/foundationdb/trace.xml");
+	traceFileOpenError.addField("Error", "Permission denied");
+	WorkerEvents traceFileOpenErrors;
+	traceFileOpenErrors.emplace(address, std::move(traceFileOpenError));
+	auto detailedMessages = getProcessIssuesAsMessages(issues, traceFileOpenErrors);
+	ASSERT(detailedMessages.size() == 1);
+	ASSERT(detailedMessages.at(address.toString()).size() == 1);
+	ASSERT(checkJson(
+	    detailedMessages.at(address.toString()).front(),
+	    R"({"name":"trace_log_could_not_create_file","description":"Could not create trace log file '/var/log/foundationdb/trace.xml' (Permission denied)."})"));
+
+	auto genericMessages = getProcessIssuesAsMessages(issues, WorkerEvents());
+	ASSERT(genericMessages.size() == 1);
+	ASSERT(genericMessages.at(address.toString()).size() == 1);
+	ASSERT(checkJson(genericMessages.at(address.toString()).front(), genericMessage));
+
+	return Void();
 }
 
 TEST_CASE("/status/json/builder") {
