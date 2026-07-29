@@ -700,7 +700,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		bool followedProxyReplacement = proxy->id() != initialProxyStatus.first.id();
 		updateObservedProxy(*proxy, initialProxyStatus.first);
 		const CDCProxyBufferStatus initial = initialProxyStatus.second;
-		Reference<AsyncVar<bool>> stopped = makeReference<AsyncVar<bool>>(false);
+		auto stopped = makeReference<AsyncVar<bool>>(false);
 		Future<Void> requester = requestPopsUntilStopped(cx, stopped);
 		const double deadline = now() + operationTimeout;
 		while (true) {
@@ -734,7 +734,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 
 		Promise<Void> releaseAcknowledgements;
-		Reference<AsyncVar<int>> completed = makeReference<AsyncVar<int>>(0);
+		auto completed = makeReference<AsyncVar<int>>(0);
 		std::vector<Future<Void>> consumers;
 		consumers.reserve(streams.size());
 		for (const auto& stream : streams) {
@@ -1167,11 +1167,11 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT(g_network->isSimulated());
 		const uint64_t recoveryCount = dbInfo->get().recoveryCount;
 		while (true) {
-			const auto masterZone = dbInfo->get().master.locality.zoneId();
-			if (g_simulator->killZone(masterZone, ISimulator::KillType::Reboot, true)) {
+			const auto masterMachine = dbInfo->get().master.locality.machineId();
+			if (g_simulator->killMachine(masterMachine, ISimulator::KillType::Reboot, true)) {
 				break;
 			}
-			co_await dbInfo->onChange();
+			co_await (dbInfo->onChange() || delay(1.0));
 		}
 		co_await timeoutError(waitForTransactionSystemRecoveryAfter(recoveryCount), operationTimeout);
 	}
