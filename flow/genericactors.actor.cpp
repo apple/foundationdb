@@ -587,8 +587,8 @@ TEST_CASE("/flow/genericactors/TransformError") {
 	    transformError<int>(Future<int>(transaction_too_old()), transaction_too_old(), operation_failed())));
 	ASSERT_EQ(transformedErrorCode, error_code_operation_failed);
 
-	int preservedErrorCode =
-	    wait(getErrorCode(transformError<int>(Future<int>(process_behind()), transaction_too_old(), operation_failed())));
+	int preservedErrorCode = wait(
+	    getErrorCode(transformError<int>(Future<int>(process_behind()), transaction_too_old(), operation_failed())));
 	ASSERT_EQ(preservedErrorCode, error_code_process_behind);
 
 	return Void();
