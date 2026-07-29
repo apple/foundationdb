@@ -127,6 +127,28 @@ struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
 
 struct ClusterRecoveryData;
 
+struct OldBackupWorkerInfo {
+	LogEpoch backupEpoch;
+	Version epochEnd;
+	int totalTags;
+	bool rangePartitioned;
+	BackupInterface interf;
+};
+
+std::vector<OldBackupWorkerInfo> collectOldBackupWorkers(LogSystemConfig const& config);
+bool canMonitorOldBackupWorkers(RecoveryState recoveryState);
+bool shouldRestartOldBackupWorkerMonitor(RecoveryState recoveryState,
+                                         LogEpoch monitoredRecoveryCount,
+                                         LogEpoch currentRecoveryCount,
+                                         bool sameLogSystem);
+bool validateOldBackupWorkerProgress(OldBackupWorkerInfo const& failedWorker,
+                                     std::vector<OldBackupWorkerInfo> const& oldWorkers,
+                                     std::map<UID, WorkerBackupStatus> const& workerProgress);
+Optional<Tag> resolveOldBackupWorkerTag(OldBackupWorkerInfo const& failedWorker,
+                                        std::vector<OldBackupWorkerInfo> const& oldWorkers,
+                                        std::map<UID, WorkerBackupStatus> const& workerProgress,
+                                        std::map<Tag, Version> const& unfinishedTags);
+
 class ClusterControllerData {
 public:
 	struct DBInfo {
