@@ -4235,7 +4235,7 @@ double DDTeamCollection::loadBytesBalanceRatio(int64_t smallLoadThreshold) const
 	// avoid division-by-zero
 	double avgLoad = totalLoadBytes / count;
 	if (totalLoadBytes == 0 || avgLoad < smallLoadThreshold) {
-		CODE_PROBE(true, "The cluster load is small enough to ignore load bytes balance.");
+		CODE_PROBE(true, "The cluster load is small enough to ignore load bytes balance.", probe::decoration::rare);
 		return 1;
 	}
 

@@ -1006,7 +1006,7 @@ Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<L
 			                       std::vector<UID>());
 		} else {
 			// The cluster should enter the accepting commits phase soon, and then we will register again
-			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet", probe::decoration::rare);
+			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet");
 		}
 	}
 }
