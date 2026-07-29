@@ -569,6 +569,13 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Version minSysPopTagVersion;
 	Tag minSysPopTag; // The system locality tag (locality < 0) with the minimum popped version.
 
+	// Cached minimum popped version across all spill-by-reference tags, for O(1) lookup
+	// in updatePersistentData instead of scanning all tags. Recomputed lazily when the
+	// tag at the minimum advances past its old value.
+	Version cachedMinRefPoppedVersion = std::numeric_limits<Version>::max();
+	bool hasCachedMinRefPopped = false; // true once at least one spill-by-ref tag exists
+	bool hasSpillByValueTags = false; // true once at least one spill-by-value tag exists
+
 	// For each version above knownCommittedVersion, track:
 	// <Version, PrevVersion (that the sequencer provided), TLogs that the version has been sent to (the tLogs
 	//  are represented by their corresponding positions in "LogSystem::tLogs")>
@@ -593,6 +600,27 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		return tag_data[idx][tag.id];
 	}
 
+	// Recompute the cached minimum popped version across all spill-by-reference tags.
+	// Called when the tag that was at the minimum advances, which is infrequent.
+	void recomputeCachedMinRefPopped() {
+		cachedMinRefPoppedVersion = std::numeric_limits<Version>::max();
+		hasCachedMinRefPopped = false;
+		hasSpillByValueTags = false;
+		for (int loc = 0; loc < tag_data.size(); loc++) {
+			for (int id = 0; id < tag_data[loc].size(); id++) {
+				if (tag_data[loc][id]) {
+					if (shouldSpillByValue(tag_data[loc][id]->tag)) {
+						hasSpillByValueTags = true;
+					} else {
+						hasCachedMinRefPopped = true;
+						cachedMinRefPoppedVersion =
+						    std::min(cachedMinRefPoppedVersion, tag_data[loc][id]->popped);
+					}
+				}
+			}
+		}
+	}
+
 	// only callable after getTagData returns a null reference
 	Reference<TagData> createTagData(Tag tag,
 	                                 Version popped,
@@ -605,6 +633,17 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		}
 		auto newTagData = makeReference<TagData>(tag, popped, 0, nothingPersistent, poppedRecently, unpoppedRecovered);
 		tag_data[tag.toTagDataIndex()][tag.id] = newTagData;
+
+		// Maintain the cached minimum for O(1) lookup in updatePersistentData
+		if (shouldSpillByValue(tag)) {
+			hasSpillByValueTags = true;
+		} else {
+			hasCachedMinRefPopped = true;
+			if (popped < cachedMinRefPoppedVersion) {
+				cachedMinRefPoppedVersion = popped;
+			}
+		}
+
 		return newTagData;
 	}
 
@@ -1261,19 +1300,15 @@ Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logData, Ve
 	ASSERT(self->bytesDurable <= self->bytesInput);
 
 	if (self->queueCommitEnd.get() > 0) {
-		// FIXME: Maintain a heap of tags ordered by version to make this O(1) instead of O(n).
+		// Use cached minimum instead of scanning all tags (was O(n), now O(1)).
+		// Spill-by-value tags always contribute newPersistentDataVersion;
+		// spill-by-reference tags contribute their popped version (tracked incrementally).
 		Version minVersion = std::numeric_limits<Version>::max();
-		for (tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
-			for (tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
-				Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
-				if (tagData) {
-					if (logData->shouldSpillByValue(tagData->tag)) {
-						minVersion = std::min(minVersion, newPersistentDataVersion);
-					} else {
-						minVersion = std::min(minVersion, tagData->popped);
-					}
-				}
-			}
+		if (logData->hasSpillByValueTags) {
+			minVersion = newPersistentDataVersion;
+		}
+		if (logData->hasCachedMinRefPopped) {
+			minVersion = std::min(minVersion, logData->cachedMinRefPoppedVersion);
 		}
 		if (minVersion != std::numeric_limits<Version>::max()) {
 			self->persistentQueue->forgetBefore(
@@ -1367,6 +1402,7 @@ Future<Void> retireRecoveredLog(TLogData* self, Reference<LogData> logData) {
 			}
 		}
 	}
+	logData->recomputeCachedMinRefPopped();
 	for (const auto& locality : logData->tag_data) {
 		for (const auto& tagData : locality) {
 			if (tagData) {
@@ -1477,8 +1513,14 @@ Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Reference<Log
 		tagData =
 		    logData->createTagData(tag, upTo, NothingPersistent::True, PoppedRecently::True, UnpoppedRecovered::False);
 	} else if (upTo > tagData->popped) {
+		Version oldPopped = tagData->popped;
 		tagData->popped = upTo;
 		tagData->poppedRecently = true;
+
+		// If this spill-by-reference tag was at the cached minimum, recompute.
+		if (!logData->shouldSpillByValue(tag) && oldPopped <= logData->cachedMinRefPoppedVersion) {
+			logData->recomputeCachedMinRefPopped();
+		}
 
 		if (tagData->unpoppedRecovered) {
 			// Check for `tag`, if earlier generations are no longer needed. This is by comparing the `upTo` value with
