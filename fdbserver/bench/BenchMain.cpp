@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+// Most microbenchmarks belong in flow/bench; this fdbserver-local benchmark
+// binary exists only for benchmarks that must link against fdbserver-only code.
+// See BenchMemoryTracker.cpp for why that one lives here.
+
 #include "flow/BenchMain.h"
 
 int main(int argc, char** argv) {
