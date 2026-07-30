@@ -1679,7 +1679,7 @@ public:
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
 		    now() > fdbSimulationPolicyState().injectTargetedSSRestartTime &&
 		    rebootAfterDurableVersion == std::numeric_limits<Version>::max()) {
-			CODE_PROBE(true, "Injecting SS targeted restart");
+			CODE_PROBE(true, "Injecting SS targeted restart", probe::decoration::rare);
 			TraceEvent("SimSSInjectTargetedRestart", thisServerID).detail("Version", v);
 			rebootAfterDurableVersion = v;
 			fdbSimulationPolicyState().injectTargetedSSRestartTime = std::numeric_limits<double>::max();
@@ -1689,7 +1689,7 @@ public:
 	bool maybeInjectDelay() {
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
 		    now() > fdbSimulationPolicyState().injectSSDelayTime) {
-			CODE_PROBE(true, "Injecting SS targeted delay");
+			CODE_PROBE(true, "Injecting SS targeted delay", probe::decoration::rare);
 			TraceEvent("SimSSInjectDelay", thisServerID).log();
 			fdbSimulationPolicyState().injectSSDelayTime = std::numeric_limits<double>::max();
 			return true;
