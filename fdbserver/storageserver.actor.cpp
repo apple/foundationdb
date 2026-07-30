@@ -1310,83 +1310,6 @@ public:
 	Key sk;
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	Database cx;
-	ActorCollection actors;
-
-	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
-	AsyncVar<bool> byteSampleClearsTooLarge;
-	Future<Void> byteSampleRecovery;
-	Future<Void> durableInProgress;
-
-	AsyncMap<Key, bool> watches;
-	AsyncMap<int64_t, bool> tenantWatches;
-	int64_t watchBytes;
-	int64_t numWatches;
-	AsyncVar<bool> noRecentUpdates;
-	double lastUpdate;
-
-	std::string folder;
-	std::string checkpointFolder;
-	std::string fetchedCheckpointFolder;
-
-	// defined only during splitMutations()/addMutation()
-	UpdateEagerReadInfo* updateEagerReads;
-
-	FlowLock durableVersionLock;
-	FlowLock fetchKeysParallelismLock;
-	// Extra lock that prevents too much post-initial-fetch work from building up, such as mutation applying and change
-	// feed tail fetching
-	FlowLock fetchKeysParallelismChangeFeedLock;
-	int64_t fetchKeysBytesBudget;
-	AsyncVar<bool> fetchKeysBudgetUsed;
-	int64_t fetchKeysTotalCommitBytes;
-	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
-
-	FlowLock serveFetchCheckpointParallelismLock;
-
-	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
-
-	Reference<PriorityMultiLock> ssLock;
-	std::vector<int> readPriorityRanks;
-
-	Future<PriorityMultiLock::Lock> getReadLock(const Optional<ReadOptions>& options) {
-		int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
-		readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
-		return ssLock->lock(readPriorityRanks[readType]);
-	}
-
-	FlowLock serveAuditStorageParallelismLock;
-
-	int64_t instanceID;
-
-	Promise<Void> otherError;
-	Promise<Void> coreStarted;
-	bool shuttingDown;
-
-	Promise<Void> registerInterfaceAcceptingRequests;
-	Future<Void> interfaceRegistered;
-
-	bool behind;
-	bool versionBehind;
-
-	bool debug_inApplyUpdate;
-	double debug_lastValidateTime;
-
-	int64_t lastBytesInputEBrake;
-	Version lastDurableVersionEBrake;
-
-	int maxQueryQueue;
-	int getAndResetMaxQueryQueueSize() {
-		int val = maxQueryQueue;
-		maxQueryQueue = 0;
-		return val;
-	}
-
-	TransactionTagCounter transactionTagCounter;
-	BusiestWriteTagContext busiestWriteTagContext;
-
-	Optional<LatencyBandConfig> latencyBandConfig;
-
-	Optional<EncryptionAtRestMode> encryptionMode;
 
 	struct Counters {
 		CounterCollection cc;
@@ -1615,6 +1538,84 @@ public:
 			specialCounter(cc, "ChangeFeedMemoryBytes", [self]() { return self->changeFeedMemoryBytes; });
 		}
 	} counters;
+
+	ActorCollection actors;
+
+	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
+	AsyncVar<bool> byteSampleClearsTooLarge;
+	Future<Void> byteSampleRecovery;
+	Future<Void> durableInProgress;
+
+	AsyncMap<Key, bool> watches;
+	AsyncMap<int64_t, bool> tenantWatches;
+	int64_t watchBytes;
+	int64_t numWatches;
+	AsyncVar<bool> noRecentUpdates;
+	double lastUpdate;
+
+	std::string folder;
+	std::string checkpointFolder;
+	std::string fetchedCheckpointFolder;
+
+	// defined only during splitMutations()/addMutation()
+	UpdateEagerReadInfo* updateEagerReads;
+
+	FlowLock durableVersionLock;
+	FlowLock fetchKeysParallelismLock;
+	// Extra lock that prevents too much post-initial-fetch work from building up, such as mutation applying and change
+	// feed tail fetching
+	FlowLock fetchKeysParallelismChangeFeedLock;
+	int64_t fetchKeysBytesBudget;
+	AsyncVar<bool> fetchKeysBudgetUsed;
+	int64_t fetchKeysTotalCommitBytes;
+	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
+
+	FlowLock serveFetchCheckpointParallelismLock;
+
+	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
+
+	Reference<PriorityMultiLock> ssLock;
+	std::vector<int> readPriorityRanks;
+
+	Future<PriorityMultiLock::Lock> getReadLock(const Optional<ReadOptions>& options) {
+		int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
+		readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
+		return ssLock->lock(readPriorityRanks[readType]);
+	}
+
+	FlowLock serveAuditStorageParallelismLock;
+
+	int64_t instanceID;
+
+	Promise<Void> otherError;
+	Promise<Void> coreStarted;
+	bool shuttingDown;
+
+	Promise<Void> registerInterfaceAcceptingRequests;
+	Future<Void> interfaceRegistered;
+
+	bool behind;
+	bool versionBehind;
+
+	bool debug_inApplyUpdate;
+	double debug_lastValidateTime;
+
+	int64_t lastBytesInputEBrake;
+	Version lastDurableVersionEBrake;
+
+	int maxQueryQueue;
+	int getAndResetMaxQueryQueueSize() {
+		int val = maxQueryQueue;
+		maxQueryQueue = 0;
+		return val;
+	}
+
+	TransactionTagCounter transactionTagCounter;
+	BusiestWriteTagContext busiestWriteTagContext;
+
+	Optional<LatencyBandConfig> latencyBandConfig;
+
+	Optional<EncryptionAtRestMode> encryptionMode;
 
 	// Bytes read from storage engine when a storage server starts.
 	int64_t bytesRestored = 0;
