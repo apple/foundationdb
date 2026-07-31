@@ -1,0 +1,71 @@
+[configuration]
+config = 'single'
+buggify = false
+faultInjection = false
+
+[[test]]
+testTitle = 'MakoReverseRangeParity'
+useDB = true
+
+    [[test.workload]]
+    testName = 'Mako'
+    testDuration = 2.0
+    transactionsPerSecond = 20.0
+    rows = 200
+    sampleSize = 2
+    actorCountPerClient = 2
+    keyPrefix = 'mrev'
+    operations = 'gr2:-8sgr2:-6'
+    populateData = true
+    preserveData = false
+
+[[test]]
+testTitle = 'MakoBlindOverwriteChecksumParity'
+useDB = true
+
+    [[test.workload]]
+    testName = 'Mako'
+    testDuration = 2.0
+    transactionsPerSecond = 20.0
+    rows = 128
+    sampleSize = 1
+    actorCountPerClient = 1
+    keyPrefix = 'movr'
+    operations = 'o8'
+    csSize = 16
+    csCount = 8
+    populateData = true
+    preserveData = true
+
+[[test]]
+testTitle = 'MakoStatusJsonParity'
+useDB = true
+runFailureWorkloads = false
+
+    [[test.workload]]
+    testName = 'Mako'
+    testDuration = 3.0
+    transactionsPerSecond = 2.0
+    rows = 100
+    sampleSize = 1
+    actorCountPerClient = 1
+    keyPrefix = 'mstat'
+    operations = 'sj'
+    populateData = false
+    preserveData = false
+
+[[test]]
+testTitle = 'MakoCompositeTransactionParity'
+useDB = true
+
+    [[test.workload]]
+    testName = 'Mako'
+    testDuration = 2.0
+    transactionsPerSecond = 10.0
+    rows = 200
+    sampleSize = 2
+    actorCountPerClient = 1
+    keyPrefix = 'mmix'
+    operations = 'g2gr1:5sg2sgr1:4u2i2ir1:3c1sc1cr1:2scr1:3grv1'
+    populateData = true
+    preserveData = false
