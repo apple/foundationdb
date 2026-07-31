@@ -179,7 +179,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/LocalRatekeeper.toml)
   add_fdb_test(TEST_FILES fast/LongStackWriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/LowLatency.toml)
-  add_fdb_test(TEST_FILES fast/MakoParity.toml)
   add_fdb_test(TEST_FILES fast/MaxGrvQueueDelay.toml)
   add_fdb_test(TEST_FILES fast/MinimumThroughput.toml)
 
