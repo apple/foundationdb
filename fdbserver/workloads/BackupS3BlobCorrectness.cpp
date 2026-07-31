@@ -356,7 +356,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("ExpectedBackupUID", expectedBackupUID)
 		    .detail("BackupTag", backupTag);
 
-		loop {
+		while (true) {
 			Optional<BulkDumpProgress> progressOpt = co_await getBulkDumpProgress(cx);
 
 			if (progressOpt.present()) {

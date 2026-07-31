@@ -1677,7 +1677,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
 	} else {
-		CODE_PROBE(true, "Received an old worker registration request.", probe::decoration::rare);
+		CODE_PROBE(true, "Received an old worker registration request.");
 	}
 
 	// For each singleton
@@ -2263,7 +2263,7 @@ Future<Void> monitorCDCProxyAssignmentsPass(ClusterControllerData* self) {
 					tr.clear(cdcProxyRangeFor(streamId));
 					tr.set(cdcProxyKeyFor(streamId, resolvedProxyId), Value());
 					repairedAssignment = true;
-					CODE_PROBE(true, "CDC stream assignment is repaired after missing owner");
+					CODE_PROBE(true, "CDC stream assignment is repaired after missing owner", probe::decoration::rare);
 					TraceEvent("CDCProxyAssignmentMissingRepaired")
 					    .detail("StreamId", streamId)
 					    .detail("CDCProxyID", resolvedProxyId)
