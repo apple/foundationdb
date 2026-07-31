@@ -884,7 +884,7 @@ Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 			r->value().emplace_back(versionReply.resolverChangesVersion, it.dest);
 	}
 
-	pProxyCommitData->stats.commitPreresolutionLatency.addMeasurement(now() - startTime);
+	pProxyCommitData->stats.commitPreresolutionLatency.addMeasurement(g_network->timer_monotonic() - startTime);
 	//TraceEvent("ProxyGotVer", pProxyContext->dbgid).detail("Commit", commitVersion).detail("Prev", prevVersion);
 
 	if (debugID.present()) {
