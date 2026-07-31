@@ -303,11 +303,35 @@ public:
 		std::string toString() const {
 			std::string roleCodes;
 
+			auto appendRoleCode = [&](recruitment::ClusterRole role) {
+				switch (role) {
+				case recruitment::Storage:
+				case recruitment::TLog:
+				case recruitment::CommitProxy:
+				case recruitment::GrvProxy:
+				case recruitment::Master:
+				case recruitment::Resolver:
+				case recruitment::LogRouter:
+				case recruitment::ClusterController:
+				case recruitment::DataDistributor:
+				case recruitment::Ratekeeper:
+				case recruitment::ConsistencyScan:
+				case recruitment::Backup:
+				case recruitment::EncryptKeyProxy:
+				case recruitment::Worker:
+					roleCodes.append(Role::get(role).abbreviation);
+					break;
+				default:
+					roleCodes.append(format("role%d", role));
+					break;
+				}
+			};
+
 			for (unsigned r = 0; r < recruitment::NoRole; r++)
 				if (roles.test((recruitment::ClusterRole)r)) {
 					if (!roleCodes.empty())
 						roleCodes.append(",");
-					roleCodes.append(Role::get((recruitment::ClusterRole)r).abbreviation);
+					appendRoleCode((ProcessClass::ClusterRole)r);
 				}
 			return roleCodes;
 		}
@@ -1864,13 +1888,6 @@ public:
 		    dcId, recruitment::Resolver, recruitment::ExcludeFit, req.configuration, id_used, preferredSharing);
 		preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
 
-		// If one of the first process recruitments is forced to share a process, allow all of next recruitments
-		// to also share a process.
-		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
-		first_commit_proxy.used = maxUsed;
-		first_grv_proxy.used = maxUsed;
-		first_resolver.used = maxUsed;
-
 		auto commit_proxies = getWorkersForRoleInDatacenter(dcId,
 		                                                    recruitment::CommitProxy,
 		                                                    req.configuration.getDesiredCommitProxies(),
@@ -2120,13 +2137,6 @@ public:
 					                                                   used,
 					                                                   preferredSharing);
 					preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
-
-					// If one of the first process recruitments is forced to share a process, allow all of next
-					// recruitments to also share a process.
-					auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
-					first_commit_proxy.used = maxUsed;
-					first_grv_proxy.used = maxUsed;
-					first_resolver.used = maxUsed;
 
 					auto commit_proxies = getWorkersForRoleInDatacenter(dcId,
 					                                                    recruitment::CommitProxy,
@@ -2865,10 +2875,6 @@ public:
 		                                                   preferredSharing,
 		                                                   true);
 		preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
-		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
-		first_commit_proxy.used = maxUsed;
-		first_grv_proxy.used = maxUsed;
-		first_resolver.used = maxUsed;
 		auto commit_proxies = getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                                    recruitment::CommitProxy,
 		                                                    db.config.getDesiredCommitProxies(),
