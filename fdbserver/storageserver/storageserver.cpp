@@ -11589,28 +11589,30 @@ Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueReq
 	}
 }
 
-Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues) {
-	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
+template <class Request, class Handler>
+Future<Void> serveGuardedReadRequests(StorageServer* self,
+                                      FutureStream<Request> requests,
+                                      TransactionLineage::Operation operation,
+                                      Handler handler) {
+	getCurrentLineage()->modify(&TransactionLineage::operation) = operation;
 	while (true) {
-		GetKeyValuesRequest req = co_await getKeyValues;
-
+		Request req = co_await requests;
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
-		self->actors.add(self->readGuard(req, getKeyValuesQ));
+		self->actors.add(self->readGuard(req, handler));
 	}
+}
+
+Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues) {
+	return serveGuardedReadRequests(
+	    self, std::move(getKeyValues), TransactionLineage::Operation::GetKeyValues, getKeyValuesQ);
 }
 
 Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
                                              FutureStream<GetMappedKeyValuesRequest> getMappedKeyValues) {
 	// TODO: Is it fine to keep TransactionLineage::Operation::GetKeyValues here?
-	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
-	while (true) {
-		GetMappedKeyValuesRequest req = co_await getMappedKeyValues;
-
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
-		// downgrade before doing real work
-		self->actors.add(self->readGuard(req, getMappedKeyValuesQ));
-	}
+	return serveGuardedReadRequests(
+	    self, std::move(getMappedKeyValues), TransactionLineage::Operation::GetKeyValues, getMappedKeyValuesQ);
 }
 
 Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
@@ -11625,13 +11627,7 @@ Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
 }
 
 Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyRequest> getKey) {
-	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKey;
-	while (true) {
-		GetKeyRequest req = co_await getKey;
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
-		// downgrade before doing real work
-		self->actors.add(self->readGuard(req, getKeyQ));
-	}
+	return serveGuardedReadRequests(self, std::move(getKey), TransactionLineage::Operation::GetKey, getKeyQ);
 }
 
 Future<Void> watchValueWaitForVersion(StorageServer* self,

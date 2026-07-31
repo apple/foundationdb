@@ -759,43 +759,19 @@ public:
 
 		for (; idx < largeOrBadTeams.size(); idx++) {
 			servers.clear();
+			serverIds.clear();
 			for (const auto& server : largeOrBadTeams[idx]->getServers()) {
 				if (server->isInDesiredDC() && !self->server_status.get(server->getId()).isUnhealthy()) {
 					servers.push_back(server);
+					serverIds.push_back(server->getId());
 				}
 			}
 
 			// For the bad team that is too big (too many servers), we will try to find a subset of servers in the
 			// team to construct a new healthy team, so that moving data to the new healthy team will not cause too
 			// much data movement overhead
-			// FIXME: This code logic can be simplified.
 			if (servers.size() >= self->configuration.storageTeamSize) {
-				bool foundTeam = false;
-				for (int j = 0; j < servers.size() - self->configuration.storageTeamSize + 1 && !foundTeam; j++) {
-					auto const& serverTeams = servers[j]->getTeams();
-					for (int k = 0; k < serverTeams.size(); k++) {
-						auto& testTeam = serverTeams[k]->getServerIDs();
-						bool allInTeam = true; // All servers in testTeam belong to the healthy servers
-						for (int l = 0; l < testTeam.size(); l++) {
-							bool foundServer = false;
-							for (auto it : servers) {
-								if (it->getId() == testTeam[l]) {
-									foundServer = true;
-									break;
-								}
-							}
-							if (!foundServer) {
-								allInTeam = false;
-								break;
-							}
-						}
-						if (allInTeam) {
-							foundTeam = true;
-							break;
-						}
-					}
-				}
-				if (!foundTeam) {
+				if (!self->findTeamFromServers(serverIds, /*wantHealthy=*/false).present()) {
 					if (self->satisfiesPolicy(servers)) {
 						if (servers.size() == self->configuration.storageTeamSize ||
 						    self->satisfiesPolicy(servers, self->configuration.storageTeamSize)) {
@@ -1098,6 +1074,10 @@ public:
 
 				if (!self->initialFailureReactionDelay.isReady()) {
 					change.push_back(self->initialFailureReactionDelay);
+				}
+				if (!badTeam) {
+					// SS failure suppression changes effective team health without changing server status.
+					change.push_back(self->healthyZone.onChange());
 				}
 				change.push_back(self->zeroHealthyTeams->onChange());
 
@@ -2016,6 +1996,8 @@ public:
 						} else if (SERVER_KNOBS->DD_REMOVE_MAINTENANCE_ON_FAILURE &&
 						           self->clearHealthyZoneFuture.isReady()) {
 							self->clearHealthyZoneFuture = clearHealthyZone(self->dbContext());
+							// For now we are not logging the duration here, e.g. in cases where another storage
+							// server outside of the maintenance zone failed.
 							TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
 							self->healthyZone.set(Optional<Key>());
 						}
@@ -2625,15 +2607,50 @@ public:
 		}
 	}
 
+	// Persists the version at which the current maintenance mode was started, so that a DD
+	// recruited mid-maintenance (see getOrRecordMaintenanceStart) can recover the true start.
+	static Version recordNewMaintenanceStart(ReadYourWritesTransaction* tr) {
+		Version version = tr->getReadVersion().get();
+		BinaryWriter bw(Unversioned());
+		bw << version;
+		tr->set(healthyZoneStartVersionKey, bw.toValue());
+		return version;
+	}
+
+	// Adopts the start version persisted by whichever DD instance first observed the current
+	// maintenance mode, for the case where this DD was (re)recruited while the maintenance was active.
+	// Falls back to recording a fresh start now if the key was never written.
+	static Future<Version> getOrRecordMaintenanceStart(ReadYourWritesTransaction* tr) {
+		Optional<Value> startVal = co_await tr->get(healthyZoneStartVersionKey);
+		if (startVal.present()) {
+			co_return BinaryReader::fromStringRef<Version>(startVal.get(), Unversioned());
+		}
+		co_return recordNewMaintenanceStart(tr);
+	}
+
+	// -1.0 if the start version was never established (should only happen if this DD instance
+	// raced a commit failure with a window's start/end); otherwise the elapsed window duration.
+	static double maintenanceDurationSeconds(ReadYourWritesTransaction* tr, Version startVersion) {
+		if (startVersion == invalidVersion) {
+			return -1.0;
+		}
+		return (tr->getReadVersion().get() - startVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+	}
+
 	static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
 		auto* counters = waitHealthyZoneChangeCounters();
 		ReadYourWritesTransaction tr(self->dbContext());
+		// maintenanceStartVersion tracks the version at which the current maintenance/disable-DD
+		// window began, durably persisted via healthyZoneStartVersionKey, so that
+		// MaintenanceZoneEnd*/DataDistributionDisabledForStorageServerFailuresEnd can report an
+		// accurate Duration even if this DD instance was recruited mid-window.
+		Version maintenanceStartVersion = invalidVersion;
 		while (true) {
 			counters->started->increment(1);
 			Error err;
 			bool hasErr = false;
 			try {
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = co_await tr.get(healthyZoneKey);
 				Future<Void> healthyZoneTimeout = Never();
@@ -2641,7 +2658,13 @@ public:
 					auto p = decodeHealthyZoneValue(val.get());
 					if (p.first == ignoreSSFailuresZoneString) {
 						// healthyZone is now overloaded for DD disabling purpose, which does not timeout
-						TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId).log();
+						if (self->healthyZone.get() != p.first) {
+							TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId)
+							    .log();
+							maintenanceStartVersion = recordNewMaintenanceStart(&tr);
+						} else if (maintenanceStartVersion == invalidVersion) {
+							maintenanceStartVersion = co_await getOrRecordMaintenanceStart(&tr);
+						}
 						healthyZoneTimeout = Never();
 						self->healthyZone.set(p.first);
 					} else if (p.second > tr.getReadVersion().get()) {
@@ -2654,20 +2677,30 @@ public:
 							    .detail("EndVersion", p.second)
 							    .detail("Duration", timeoutSeconds);
 							self->healthyZone.set(p.first);
+							maintenanceStartVersion = recordNewMaintenanceStart(&tr);
+						} else if (maintenanceStartVersion == invalidVersion) {
+							maintenanceStartVersion = co_await getOrRecordMaintenanceStart(&tr);
 						}
 					} else if (self->healthyZone.get().present()) {
 						// maintenance hits timeout
-						TraceEvent("MaintenanceZoneEndTimeout", self->distributorId).log();
+						TraceEvent("MaintenanceZoneEndTimeout", self->distributorId)
+						    .detail("Duration", maintenanceDurationSeconds(&tr, maintenanceStartVersion));
 						self->healthyZone.set(Optional<Key>());
+						tr.clear(healthyZoneStartVersionKey);
+						maintenanceStartVersion = invalidVersion;
 					}
 				} else if (self->healthyZone.get().present()) {
 					// `healthyZone` has been cleared
+					double duration = maintenanceDurationSeconds(&tr, maintenanceStartVersion);
 					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
-						TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId).log();
+						TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId)
+						    .detail("Duration", duration);
 					} else {
-						TraceEvent("MaintenanceZoneEndManualClear", self->distributorId).log();
+						TraceEvent("MaintenanceZoneEndManualClear", self->distributorId).detail("Duration", duration);
 					}
 					self->healthyZone.set(Optional<Key>());
+					tr.clear(healthyZoneStartVersionKey);
+					maintenanceStartVersion = invalidVersion;
 				}
 
 				Future<Void> watchFuture = tr.watch(healthyZoneKey);
@@ -7124,6 +7157,32 @@ public:
 		recruitment.cancel();
 		co_await delay(0);
 	}
+
+	static Future<Void> TeamTracker_RechecksHealthyZone() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		auto collection = testTeamCollection(3, policy, 3);
+		const UID failedServer(1, 0);
+
+		collection->healthyZone.set(ignoreSSFailuresZoneString);
+		collection->server_status.set(
+		    failedServer,
+		    ServerStatus(IsFailed::True,
+		                 IsUndesired::False,
+		                 IsWiggling::False,
+		                 collection->server_info[failedServer]->getLastKnownInterface().locality));
+		collection->addTeam(std::set<UID>({ failedServer, UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		co_await delay(0.1);
+
+		ASSERT_EQ(collection->teams.size(), 1);
+		ASSERT(collection->teams.front()->isHealthy());
+		ASSERT_EQ(collection->teams.front()->getPriority(), SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
+
+		collection->healthyZone.set(Optional<Key>());
+		co_await delay(0.1);
+
+		ASSERT(!collection->teams.front()->isHealthy());
+		ASSERT_EQ(collection->teams.front()->getPriority(), SERVER_KNOBS->PRIORITY_TEAM_2_LEFT);
+	}
 };
 
 TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
@@ -7285,5 +7344,10 @@ TEST_CASE("/DataDistribution/GetTeam/PreferWithinShardRange") {
 
 TEST_CASE("/DataDistribution/Recruitment/RecruitmentFailedCooldownReleasesId") {
 	wait(DDTeamCollectionUnitTest::InitializeStorage_RecruitmentFailedCooldownReleasesId());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/TeamTracker/RechecksHealthyZone") {
+	wait(DDTeamCollectionUnitTest::TeamTracker_RechecksHealthyZone());
 	return Void();
 }

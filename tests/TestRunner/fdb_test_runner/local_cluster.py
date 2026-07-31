@@ -531,17 +531,27 @@ knob_min_trace_severity=5
         )
         self.active_servers.remove(server_id)
 
+    def _wait_for_status_update(self, expected, read_status, description, timeout):
+        deadline = time.monotonic() + timeout
+        while True:
+            actual = read_status()
+            if actual == expected:
+                return
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    "Failed to apply {} changes after {}sec. Expected: {}, Actual: {}".format(
+                        description, timeout, expected, actual
+                    )
+                )
+            time.sleep(RETRY_INTERVAL_SEC)
+
     # Wait until changes to the set of servers (additions & removals) are applied
     def wait_for_server_update(self, timeout=CLUSTER_UPDATE_TIMEOUT_SEC):
-        time_limit = time.time() + timeout
-        servers_found = set()
-        while time.time() <= time_limit:
-            servers_found = self.get_all_servers_from_status()
-            if servers_found != self.active_servers:
-                break
-            time.sleep(RETRY_INTERVAL_SEC)
-        assert "Failed to apply server changes after {}sec. Expected: {}, Actual: {}".format(
-            timeout, self.active_servers, servers_found
+        self._wait_for_status_update(
+            self.active_servers,
+            self.get_all_servers_from_status,
+            "server",
+            timeout,
         )
 
     # Apply changes to the set of the coordinators, based on the current value of self.coordinators
@@ -554,15 +564,11 @@ knob_min_trace_severity=5
 
     # Wait until the changes to the set of the coordinators are applied
     def wait_for_coordinator_update(self, timeout=CLUSTER_UPDATE_TIMEOUT_SEC):
-        time_limit = time.time() + timeout
-        coord_found = set()
-        while time.time() <= time_limit:
-            coord_found = self.get_coordinators_from_status()
-            if coord_found != self.coordinators:
-                break
-            time.sleep(RETRY_INTERVAL_SEC)
-        assert "Failed to apply coordinator changes after {}sec. Expected: {}, Actual: {}".format(
-            timeout, self.coordinators, coord_found
+        self._wait_for_status_update(
+            self.coordinators,
+            self.get_coordinators_from_status,
+            "coordinator",
+            timeout,
         )
         # Check if the cluster file was successfully updated too
         connection_string = open(self.cluster_file, "r").read()
