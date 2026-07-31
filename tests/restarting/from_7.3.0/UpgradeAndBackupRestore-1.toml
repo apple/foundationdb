@@ -1,5 +1,8 @@
 [[knobs]]
 dd_max_shards_on_large_teams = 0
+# Give the old tester's one-shot dead-region repair the maximum reboot interval
+# before it can exclude a region that Attrition is intentionally restarting.
+sim_speedup_after_seconds = 470.0
 
 [configuration]
 storageEngineExcludeTypes=[3,5]

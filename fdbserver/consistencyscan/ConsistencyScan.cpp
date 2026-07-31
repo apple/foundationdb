@@ -516,9 +516,7 @@ Future<int> consistencyCheckReadData(UID myId,
 			// should for sure have found it
 			TraceEvent(SevError, "ConsistencyCheck_ShouldHaveFoundInjectedCorruption", myId);
 		} else {
-			CODE_PROBE(true,
-			           "consistency check potentially missed injected corruption due to failures",
-			           probe::decoration::rare);
+			CODE_PROBE(true, "consistency check potentially missed injected corruption due to failures");
 			TraceEvent(SevInfo, "ConsistencyCheck_MissedCorruptionDueToFailures");
 			fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
 			                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
@@ -1145,8 +1143,7 @@ void resetSimCorruptionCheckOnDeath(Reference<ConsistencyScanMemoryState> memSta
 	if (fdbSimulationPolicyState().consistencyScanCorruptor.present() &&
 	    fdbSimulationPolicyState().consistencyScanCorruptor.get().first == memState->csId) {
 		TraceEvent("ConsistencyScan_ResetCorruptionOnDeath");
-		CODE_PROBE(
-		    true, "Consistency Scan skipped corruption check because scan died in the middle", probe::decoration::rare);
+		CODE_PROBE(true, "Consistency Scan skipped corruption check because scan died in the middle");
 		fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
 		                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
 	}
@@ -2127,7 +2124,7 @@ Future<Void> checkDataConsistency(Database cx,
 	}
 
 	if (customReplicatedShards == SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS && underReplicatedShards > 0) {
-		CODE_PROBE(true, "Reached max shard on large team limit");
+		CODE_PROBE(true, "Reached max shard on large team limit", probe::decoration::rare);
 	}
 
 	*bytesReadInPrevRound = bytesReadInthisRound;
