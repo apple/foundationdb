@@ -1721,6 +1721,7 @@ const KeyRangeRef monitorConfKeys("\xff\x02/monitorConf/"_sr, "\xff\x02/monitorC
 
 const KeyRef healthyZoneKey = "\xff\x02/healthyZone"_sr;
 const StringRef ignoreSSFailuresZoneString = "IgnoreSSFailures"_sr;
+const KeyRef healthyZoneStartVersionKey = "\xff\x02/healthyZoneStartVersion"_sr;
 const KeyRef rebalanceDDIgnoreKey = "\xff\x02/rebalanceDDIgnored"_sr;
 
 Value healthyZoneValue(StringRef const& zoneId, Version version) {
