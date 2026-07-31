@@ -108,6 +108,19 @@ bool copyDefaultParameters(Reference<Task> source, Reference<Task> dest) {
 	return false;
 }
 
+Future<Key> addTaskWithOptionalDependency(Reference<ReadYourWritesTransaction> tr,
+                                          Reference<TaskBucket> taskBucket,
+                                          Reference<Task> task,
+                                          Key validationKey,
+                                          Reference<TaskFuture> waitFor) {
+	if (!waitFor) {
+		co_return taskBucket->addTask(tr, task, validationKey, task->params[BackupAgentBase::keyFolderId]);
+	}
+
+	co_await waitFor->onSetAddTask(tr, taskBucket, task, validationKey, task->params[BackupAgentBase::keyFolderId]);
+	co_return "OnSetAddTask"_sr;
+}
+
 template <class Tr>
 Future<Void> checkTaskVersion(Tr tr, Reference<Task> task, StringRef name, uint32_t version) {
 	uint32_t taskVersion = task->getVersion();
@@ -188,19 +201,8 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		task->params[BackupAgentBase::keyBeginKey] = begin;
 		task->params[BackupAgentBase::keyEndKey] = end;
 
-		if (!waitFor) {
-			co_return taskBucket->addTask(tr,
-			                              task,
-			                              parentTask->params[Task::reservedTaskParamValidKey],
-			                              task->params[BackupAgentBase::keyFolderId]);
-		}
-
-		co_await waitFor->onSetAddTask(tr,
-		                               taskBucket,
-		                               task,
-		                               parentTask->params[Task::reservedTaskParamValidKey],
-		                               task->params[BackupAgentBase::keyFolderId]);
-		co_return "OnSetAddTask"_sr;
+		co_return co_await addTaskWithOptionalDependency(
+		    tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], waitFor);
 	}
 
 	static Future<Void> _execute(Database cx,
@@ -582,19 +584,8 @@ struct FinishFullBackupTaskFunc : TaskFuncBase {
 
 		copyDefaultParameters(parentTask, task);
 
-		if (!waitFor) {
-			co_return taskBucket->addTask(tr,
-			                              task,
-			                              parentTask->params[Task::reservedTaskParamValidKey],
-			                              task->params[BackupAgentBase::keyFolderId]);
-		}
-
-		co_await waitFor->onSetAddTask(tr,
-		                               taskBucket,
-		                               task,
-		                               parentTask->params[Task::reservedTaskParamValidKey],
-		                               task->params[BackupAgentBase::keyFolderId]);
-		co_return "OnSetAddTask"_sr;
+		co_return co_await addTaskWithOptionalDependency(
+		    tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], waitFor);
 	}
 
 	StringRef getName() const override { return name; };
@@ -683,19 +674,8 @@ struct EraseLogRangeTaskFunc : TaskFuncBase {
 		    BinaryWriter::toValue(1, Unversioned()); // FIXME: remove in 6.X, only needed for 5.2 backward compatibility
 		task->params[DatabaseBackupAgent::keyEndVersion] = BinaryWriter::toValue(endVersion, Unversioned());
 
-		if (!waitFor) {
-			co_return taskBucket->addTask(tr,
-			                              task,
-			                              parentTask->params[Task::reservedTaskParamValidKey],
-			                              task->params[BackupAgentBase::keyFolderId]);
-		}
-
-		co_await waitFor->onSetAddTask(tr,
-		                               taskBucket,
-		                               task,
-		                               parentTask->params[Task::reservedTaskParamValidKey],
-		                               task->params[BackupAgentBase::keyFolderId]);
-		co_return "OnSetAddTask"_sr;
+		co_return co_await addTaskWithOptionalDependency(
+		    tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], waitFor);
 	}
 
 	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -965,19 +945,8 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		task->params[DatabaseBackupAgent::keyBeginVersion] = BinaryWriter::toValue(beginVersion, Unversioned());
 		task->params[DatabaseBackupAgent::keyEndVersion] = BinaryWriter::toValue(endVersion, Unversioned());
 
-		if (!waitFor) {
-			co_return taskBucket->addTask(tr,
-			                              task,
-			                              parentTask->params[Task::reservedTaskParamValidKey],
-			                              task->params[BackupAgentBase::keyFolderId]);
-		}
-
-		co_await waitFor->onSetAddTask(tr,
-		                               taskBucket,
-		                               task,
-		                               parentTask->params[Task::reservedTaskParamValidKey],
-		                               task->params[BackupAgentBase::keyFolderId]);
-		co_return "OnSetAddTask"_sr;
+		co_return co_await addTaskWithOptionalDependency(
+		    tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], waitFor);
 	}
 
 	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -1127,19 +1096,8 @@ struct CopyLogsTaskFunc : TaskFuncBase {
 		task->params[BackupAgentBase::keyBeginVersion] = BinaryWriter::toValue(beginVersion, Unversioned());
 		task->params[DatabaseBackupAgent::keyPrevBeginVersion] = BinaryWriter::toValue(prevBeginVersion, Unversioned());
 
-		if (!waitFor) {
-			co_return taskBucket->addTask(tr,
-			                              task,
-			                              parentTask->params[Task::reservedTaskParamValidKey],
-			                              task->params[BackupAgentBase::keyFolderId]);
-		}
-
-		co_await waitFor->onSetAddTask(tr,
-		                               taskBucket,
-		                               task,
-		                               parentTask->params[Task::reservedTaskParamValidKey],
-		                               task->params[BackupAgentBase::keyFolderId]);
-		co_return "OnSetAddTask"_sr;
+		co_return co_await addTaskWithOptionalDependency(
+		    tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], waitFor);
 	}
 
 	StringRef getName() const override { return name; };
@@ -1250,19 +1208,8 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 
 		copyDefaultParameters(parentTask, task);
 
-		if (!waitFor) {
-			co_return taskBucket->addTask(tr,
-			                              task,
-			                              parentTask->params[Task::reservedTaskParamValidKey],
-			                              task->params[BackupAgentBase::keyFolderId]);
-		}
-
-		co_await waitFor->onSetAddTask(tr,
-		                               taskBucket,
-		                               task,
-		                               parentTask->params[Task::reservedTaskParamValidKey],
-		                               task->params[BackupAgentBase::keyFolderId]);
-		co_return "OnSetAddTask"_sr;
+		co_return co_await addTaskWithOptionalDependency(
+		    tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], waitFor);
 	}
 
 	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -1409,19 +1356,8 @@ struct CopyDiffLogsTaskFunc : TaskFuncBase {
 		task->params[DatabaseBackupAgent::keyBeginVersion] = BinaryWriter::toValue(beginVersion, Unversioned());
 		task->params[DatabaseBackupAgent::keyPrevBeginVersion] = BinaryWriter::toValue(prevBeginVersion, Unversioned());
 
-		if (!waitFor) {
-			co_return taskBucket->addTask(tr,
-			                              task,
-			                              parentTask->params[Task::reservedTaskParamValidKey],
-			                              task->params[BackupAgentBase::keyFolderId]);
-		}
-
-		co_await waitFor->onSetAddTask(tr,
-		                               taskBucket,
-		                               task,
-		                               parentTask->params[Task::reservedTaskParamValidKey],
-		                               task->params[BackupAgentBase::keyFolderId]);
-		co_return "OnSetAddTask"_sr;
+		co_return co_await addTaskWithOptionalDependency(
+		    tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], waitFor);
 	}
 
 	StringRef getName() const override { return name; };
@@ -1670,19 +1606,8 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 		task->params[DatabaseBackupAgent::keyBeginVersion] = BinaryWriter::toValue(beginVersion, Unversioned());
 		task->params[DatabaseBackupAgent::keyEndVersion] = BinaryWriter::toValue(endVersion, Unversioned());
 
-		if (!waitFor) {
-			co_return taskBucket->addTask(tr,
-			                              task,
-			                              parentTask->params[Task::reservedTaskParamValidKey],
-			                              task->params[BackupAgentBase::keyFolderId]);
-		}
-
-		co_await waitFor->onSetAddTask(tr,
-		                               taskBucket,
-		                               task,
-		                               parentTask->params[Task::reservedTaskParamValidKey],
-		                               task->params[BackupAgentBase::keyFolderId]);
-		co_return "OnSetAddTask"_sr;
+		co_return co_await addTaskWithOptionalDependency(
+		    tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], waitFor);
 	}
 
 	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -1772,19 +1697,8 @@ struct AbortOldBackupTaskFunc : TaskFuncBase {
 
 		copyDefaultParameters(parentTask, task);
 
-		if (!waitFor) {
-			co_return taskBucket->addTask(tr,
-			                              task,
-			                              parentTask->params[Task::reservedTaskParamValidKey],
-			                              task->params[BackupAgentBase::keyFolderId]);
-		}
-
-		co_await waitFor->onSetAddTask(tr,
-		                               taskBucket,
-		                               task,
-		                               parentTask->params[Task::reservedTaskParamValidKey],
-		                               task->params[BackupAgentBase::keyFolderId]);
-		co_return "OnSetAddTask"_sr;
+		co_return co_await addTaskWithOptionalDependency(
+		    tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], waitFor);
 	}
 
 	StringRef getName() const override { return name; };
@@ -2066,19 +1980,8 @@ struct BackupRestorableTaskFunc : TaskFuncBase {
 
 		copyDefaultParameters(parentTask, task);
 
-		if (!waitFor) {
-			co_return taskBucket->addTask(tr,
-			                              task,
-			                              parentTask->params[Task::reservedTaskParamValidKey],
-			                              task->params[BackupAgentBase::keyFolderId]);
-		}
-
-		co_await waitFor->onSetAddTask(tr,
-		                               taskBucket,
-		                               task,
-		                               parentTask->params[Task::reservedTaskParamValidKey],
-		                               task->params[BackupAgentBase::keyFolderId]);
-		co_return "OnSetAddTask"_sr;
+		co_return co_await addTaskWithOptionalDependency(
+		    tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], waitFor);
 	}
 
 	StringRef getName() const override { return name; };
@@ -2351,25 +2254,11 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		task->params[DatabaseBackupAgent::keyDatabasesInSync] =
 		    backupAction == DatabaseBackupAgent::PreBackupAction::NONE ? "t"_sr : "f"_sr;
 
-		if (!waitFor) {
-			co_return taskBucket->addTask(tr,
-			                              task,
-			                              Subspace(databaseBackupPrefixRange.begin)
-			                                  .get(BackupAgentBase::keyConfig)
-			                                  .get(logUid)
-			                                  .pack(BackupAgentBase::keyFolderId),
-			                              task->params[BackupAgentBase::keyFolderId]);
-		}
-
-		co_await waitFor->onSetAddTask(tr,
-		                               taskBucket,
-		                               task,
-		                               Subspace(databaseBackupPrefixRange.begin)
-		                                   .get(BackupAgentBase::keyConfig)
-		                                   .get(logUid)
-		                                   .pack(BackupAgentBase::keyFolderId),
-		                               task->params[BackupAgentBase::keyFolderId]);
-		co_return "OnSetAddTask"_sr;
+		Key validationKey = Subspace(databaseBackupPrefixRange.begin)
+		                        .get(BackupAgentBase::keyConfig)
+		                        .get(logUid)
+		                        .pack(BackupAgentBase::keyFolderId);
+		co_return co_await addTaskWithOptionalDependency(tr, taskBucket, task, validationKey, waitFor);
 	}
 
 	StringRef getName() const override { return name; };

@@ -1,0 +1,167 @@
+/*
+ * BenchMemoryTracker.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// Microbenchmarks for the per-call-site memory tracker (see
+// design/memory-tracker.md, Testing Considerations -> Microbenchmarks).
+//
+// Two questions, both about "is it cheap enough to leave on?" (R0):
+//   * off-state cost  — the always-compiled hooks with sampling disabled;
+//   * enabled-state cost — hooks at the envisioned production 1% rate
+//     and the pessimal every-allocation rate, which includes both the
+//     sampled-alloc slow path and the per-free lock+probe (the
+//     dominant enabled-state cost).
+//
+// Run: bin/fdbserver_bench --benchmark_filter=memtracker
+//
+// This bench lives under fdbserver/ (not flow/) and its CMake compiles
+// fdbserver/GlobalNewDelete.cpp into the executable, so the real global
+// operator new/delete override is active here and bench_memtracker_operator_new
+// actually exercises the tracker. flow_bench links only flow (no override), so
+// the operator-new path could not be measured there.
+//
+// FLOW_KNOBS points at the process-default (non-simulated) bootstrap knobs in
+// fdbserver_bench, so MEMORY_TRACKING_SAMPLE_INVERSE starts at 0 (off); we drive
+// it per benchmark via const_cast, exactly like the unit tests do.
+
+#include "benchmark/benchmark.h"
+
+#include "flow/Arena.h"
+#include "flow/FastAlloc.h"
+#include "flow/Knobs.h"
+#include "flow/MemoryTracker.h"
+
+#include <cstdlib>
+
+namespace {
+
+constexpr int kSize = 64;
+
+// Set the sample-inverse knob (0=off, N=1-in-N) and clear tracker state so the
+// run starts clean. Returns the previous inverse for restoration.
+int setInverseAndReset(int inverse) {
+	auto* k = const_cast<FlowKnobs*>(FLOW_KNOBS);
+	int prev = k->MEMORY_TRACKING_SAMPLE_INVERSE;
+	k->MEMORY_TRACKING_SAMPLE_INVERSE = inverse;
+	memTrackerResetForTest();
+	return prev;
+}
+
+} // namespace
+
+// Baseline: raw libc malloc/free. std::malloc is NOT hooked (we override
+// operator new, not libc malloc), so this is the tracker-free reference the
+// operator-new benchmark is compared against.
+static void bench_memtracker_malloc_free(benchmark::State& state) {
+	for (auto _ : state) {
+		void* p = std::malloc(kSize);
+		benchmark::DoNotOptimize(p);
+		std::free(p);
+	}
+	state.SetItemsProcessed(state.iterations());
+}
+
+// End-to-end cost of a hooked allocation: global operator new[]/delete[] (which
+// fire memTrackerOnAlloc/OnFree) at sample inverse Arg(0). 0 = off, 100 = prod
+// 1%, 1 = every allocation. Compare Arg(0) against bench_memtracker_malloc_free
+// for the disabled-hook cost, and Arg(100)/Arg(1) against Arg(0) for sampling.
+static void bench_memtracker_operator_new(benchmark::State& state) {
+	int prev = setInverseAndReset(state.range(0));
+	for (auto _ : state) {
+		char* p = new char[kSize];
+		benchmark::DoNotOptimize(p);
+		delete[] p;
+	}
+	state.SetItemsProcessed(state.iterations());
+	setInverseAndReset(prev); // restore so later benchmarks aren't sampled
+}
+
+// Isolated tracker-hook cost: call memTrackerOnAlloc/OnFree directly on one
+// preallocated buffer, with no real allocation in the loop, so only the
+// tracker's own work is measured. At inverse>0 with live-tracking on, every
+// OnFree still takes the global lock and probes the live table (the dominant
+// enabled-state cost), while ~1/inverse of the OnAlloc calls take the sampling
+// slow path (frame walk + table insert).
+//
+// This is doing a stack unwind against the same stack, and is going
+// to hit the same hash table entries each iteration, so this is definitely
+// a best-case estimate.
+static void bench_memtracker_hooks(benchmark::State& state) {
+	int prev = setInverseAndReset(state.range(0));
+	void* p = std::malloc(kSize);
+	for (auto _ : state) {
+		memTrackerOnAlloc(p, kSize);
+		memTrackerOnFree(p);
+	}
+	state.SetItemsProcessed(state.iterations());
+	std::free(p);
+	setInverseAndReset(prev);
+}
+
+BENCHMARK(bench_memtracker_malloc_free);
+BENCHMARK(bench_memtracker_operator_new)->Arg(0)->Arg(100)->Arg(1);
+BENCHMARK(bench_memtracker_hooks)->Arg(0)->Arg(100)->Arg(1);
+
+// --- Per-path unweighted overhead (for the FDB_MEMORY_TRACKER compile gate) ---
+// Plain allocation loops with no knob manipulation: in a default build
+// (FDB_MEMORY_TRACKER=1) they run with the tracker present but sampling off; in a
+// FDB_MEMORY_TRACKER=0 build the tracker code is absent. Diffing the two builds
+// gives each path's always-compiled off-state cost per op, unweighted by how
+// often the path is actually taken at runtime.
+
+// operator new[]/delete[] at size Arg(0): exercises GlobalNewDelete.cpp (our
+// override when FDB_MEMORY_TRACKER, else libc++'s operator new).
+static void bench_path_operator_new(benchmark::State& state) {
+	size_t n = state.range(0);
+	for (auto _ : state) {
+		char* p = new char[n];
+		benchmark::DoNotOptimize(p);
+		delete[] p;
+	}
+	state.SetItemsProcessed(state.iterations());
+}
+
+// FastAllocator<Size> allocate/release: exercises the flow/FastAlloc.cpp hook.
+template <int Size>
+static void bench_path_fastalloc(benchmark::State& state) {
+	for (auto _ : state) {
+		void* p = FastAllocator<Size>::allocate();
+		benchmark::DoNotOptimize(p);
+		FastAllocator<Size>::release(p);
+	}
+	state.SetItemsProcessed(state.iterations());
+}
+
+// Arena block create/destroy: exercises the flow/Arena.cpp hook. Arg(0) is the
+// user allocation size, which selects the block class (medium vs huge).
+static void bench_path_arena(benchmark::State& state) {
+	int n = state.range(0);
+	for (auto _ : state) {
+		Arena a;
+		uint8_t* p = new (a) uint8_t[n];
+		benchmark::DoNotOptimize(p);
+	}
+	state.SetItemsProcessed(state.iterations());
+}
+
+BENCHMARK(bench_path_operator_new)->Arg(64)->Arg(96)->Arg(256)->Arg(100000);
+BENCHMARK_TEMPLATE(bench_path_fastalloc, 64);
+BENCHMARK_TEMPLATE(bench_path_fastalloc, 96);
+BENCHMARK_TEMPLATE(bench_path_fastalloc, 256);
+BENCHMARK(bench_path_arena)->Arg(600)->Arg(100000);

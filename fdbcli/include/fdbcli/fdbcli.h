@@ -98,15 +98,15 @@ extern const KeyRef coordinatorsProcessSpecialKey;
 extern const KeyRef ddModeSpecialKey;
 extern const KeyRef ddIgnoreRebalanceSpecialKey;
 
-extern const KeyRangeRef excludedServersSpecialKeyRange;
-extern const KeyRangeRef failedServersSpecialKeyRange;
-extern const KeyRangeRef excludedLocalitySpecialKeyRange;
-extern const KeyRangeRef failedLocalitySpecialKeyRange;
-extern const KeyRef excludedForceOptionSpecialKey;
-extern const KeyRef failedForceOptionSpecialKey;
-extern const KeyRef excludedLocalityForceOptionSpecialKey;
-extern const KeyRef failedLocalityForceOptionSpecialKey;
-extern const KeyRangeRef exclusionInProgressSpecialKeyRange;
+using management_api::excludedForceOptionSpecialKey;
+using management_api::excludedLocalityForceOptionSpecialKey;
+using management_api::excludedLocalitySpecialKeyRange;
+using management_api::excludedServersSpecialKeyRange;
+using management_api::exclusionInProgressSpecialKeyRange;
+using management_api::failedForceOptionSpecialKey;
+using management_api::failedLocalityForceOptionSpecialKey;
+using management_api::failedLocalitySpecialKeyRange;
+using management_api::failedServersSpecialKeyRange;
 
 extern const KeyRef lockSpecialKey;
 
