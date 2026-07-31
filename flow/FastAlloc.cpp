@@ -110,9 +110,6 @@ bool valgrindPrecise() {
 }
 #endif
 
-template <int Size>
-void* FastAllocator<Size>::freelist = nullptr;
-
 std::atomic<int64_t> g_hugeArenaMemory(0);
 
 double hugeArenaLastLogged = 0;
@@ -398,7 +395,6 @@ void* FastAllocator<Size>::allocate() {
 	}
 #endif
 
-#if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData();
 	if (!thr.freelist) {
 		ASSERT(thr.count == 0);
@@ -418,15 +414,6 @@ void* FastAllocator<Size>::allocate() {
 	thr.freelist = *(void**)p;
 	ASSERT(!thr.freelist == (thr.count == 0)); // freelist is empty if and only if count is 0
 	// check( p, true );
-#else
-	void* p = freelist;
-	if (!p)
-		getMagazine();
-#if VALGRIND
-	VALGRIND_MAKE_MEM_DEFINED(p, sizeof(void*));
-#endif
-	freelist = *(void**)p;
-#endif
 #if VALGRIND
 	VALGRIND_MALLOCLIKE_BLOCK(p, Size, 0, 0);
 #endif
@@ -481,7 +468,6 @@ void FastAllocator<Size>::release(void* ptr) {
 	}
 #endif
 
-#if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData();
 	if (thr.count == magazine_size) {
 		if (thr.alternate) // Two full magazines, return one
@@ -500,10 +486,6 @@ void FastAllocator<Size>::release(void* ptr) {
 	*(void**)ptr = thr.freelist;
 	// check(ptr, false);
 	thr.freelist = ptr;
-#else
-	*(void**)ptr = freelist;
-	freelist = ptr;
-#endif
 
 #if VALGRIND
 	VALGRIND_FREELIKE_BLOCK(ptr, 0);
