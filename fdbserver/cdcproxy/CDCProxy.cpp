@@ -476,6 +476,9 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 					break;
 				}
 				begin = keyAfter(history.back().key);
+				if (begin >= tagHistoryRange.end) {
+					break;
+				}
 				historyFuture = tr.getRange(KeyRangeRef(begin, tagHistoryRange.end), CLIENT_KNOBS->TOO_MANY);
 			}
 			if (tagAssignments.empty()) {
