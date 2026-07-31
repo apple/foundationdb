@@ -39,7 +39,7 @@ jobs:
           # CXXFLAGS to work-around "fdb_c_options.g.h not found" by clang-tidy
           CC=clang CXX=clang++ USE_LD=LLD USE_LIBCXX=1 \
             CXXFLAGS=-I${PWD}/fdbclient/include/fdbclient \
-            cmake -S .. -G Ninja -D BUILD_AWS_BACKUP=ON -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
+            cmake -S .. -G Ninja -D BUILD_AWS_BACKUP=ON -D BUILD_MAKO=ON -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
 
           ninja -v                      \
             processed_compile_commands  \
