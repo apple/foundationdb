@@ -4823,7 +4823,7 @@ TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
 
 	data.masterProcessId = statelessWorkers[0].locality.processId();
 	data.clusterControllerProcessId = statelessWorkers[1].locality.processId();
-	data.startTime = 0;
+	data.startTime = now();
 	data.gotFullyRecoveredConfig = true;
 	data.gotProcessClasses = true;
 
