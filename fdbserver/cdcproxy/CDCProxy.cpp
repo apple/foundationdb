@@ -436,32 +436,36 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
+			Future<Optional<Value>> keysFuture = tr.get(cdcStreamKeyFor(streamId));
+			Future<Optional<Value>> minVersionFuture = tr.get(cdcMinVersionKeyFor(streamId));
+			Future<RangeResult> assignedProxiesFuture = tr.getRange(cdcProxyRangeFor(streamId), 2);
+			KeyRange tagHistoryRange = cdcTagHistoryRangeFor(streamId);
+			Future<RangeResult> historyFuture = tr.getRange(tagHistoryRange, CLIENT_KNOBS->TOO_MANY);
+
 			CDCStreamReadState result;
-			Optional<Value> keysValue = co_await tr.get(cdcStreamKeyFor(streamId));
+			Optional<Value> keysValue = co_await keysFuture;
 			if (keysValue.present()) {
 				result.keys = decodeCDCStreamKeysValue(keysValue.get());
 			} else if (requireKeys) {
 				throw client_invalid_operation();
 			}
 
-			Optional<Value> minVersionValue = co_await tr.get(cdcMinVersionKeyFor(streamId));
+			Optional<Value> minVersionValue = co_await minVersionFuture;
 			if (!minVersionValue.present()) {
 				throw client_invalid_operation();
 			}
 			result.minVersion = decodeCDCMinVersionValue(minVersionValue.get());
 
-			RangeResult assignedProxies = co_await tr.getRange(cdcProxyRangeFor(streamId), 2);
+			RangeResult assignedProxies = co_await assignedProxiesFuture;
 			if (assignedProxies.size() != 1 || decodeCDCProxyKey(assignedProxies[0].key).second != expectedProxyId) {
 				CODE_PROBE(true, "CDC proxy rejects request for stream owned elsewhere", probe::decoration::rare);
 				throw wrong_shard_server();
 			}
 
 			std::vector<std::pair<Version, Tag>> tagAssignments;
-			KeyRange tagHistoryRange = cdcTagHistoryRangeFor(streamId);
 			Key begin = tagHistoryRange.begin;
 			while (begin < tagHistoryRange.end) {
-				RangeResult history =
-				    co_await tr.getRange(KeyRangeRef(begin, tagHistoryRange.end), CLIENT_KNOBS->TOO_MANY);
+				RangeResult history = co_await historyFuture;
 				for (KeyValueRef const& kv : history) {
 					const CDCTagHistoryEntry historyEntry = decodeCDCTagHistoryKey(kv.key);
 					ASSERT_WE_THINK(historyEntry.streamId == streamId);
@@ -472,6 +476,7 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 					break;
 				}
 				begin = keyAfter(history.back().key);
+				historyFuture = tr.getRange(KeyRangeRef(begin, tagHistoryRange.end), CLIENT_KNOBS->TOO_MANY);
 			}
 			if (tagAssignments.empty()) {
 				throw client_invalid_operation();
