@@ -28,10 +28,8 @@
 #include "flow/ThreadHelper.h"
 #include "flow/IAsyncFile.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-ACTOR static Future<Void> increment(TaskPriority priority, uint32_t* sum) {
-	wait(delay(0, priority));
+static Future<Void> increment(TaskPriority priority, uint32_t* sum, NoThrowOnCancel = {}) {
+	co_await delay(0, priority);
 	DeterministicRandom rand(1);
 	int randSum = 0;
 	for (int i = 0; i < 1e6; ++i) {
@@ -39,37 +37,36 @@ ACTOR static Future<Void> increment(TaskPriority priority, uint32_t* sum) {
 	}
 	benchmark::DoNotOptimize(randSum);
 	++(*sum);
-	return Void();
 }
 
 static inline TaskPriority getRandomTaskPriority(DeterministicRandom& rand) {
 	return static_cast<TaskPriority>(rand.randomInt(0, 100));
 }
 
-ACTOR static Future<Void> benchIONet2Actor(benchmark::State* benchState) {
-	state size_t actorCount = benchState->range(0);
-	state uint32_t sum;
-	state uint64_t seed = platform::getRandomSeed();
-	state std::unique_ptr<char[]> data(new char[4096]);
+static Future<Void> benchIONet2Actor(benchmark::State* benchState) {
+	size_t actorCount = benchState->range(0);
+	uint32_t sum{ 0 };
+	uint64_t seed = platform::getRandomSeed();
+	std::unique_ptr<char[]> data(new char[4096]);
+	// The actor version declared this as state inside the loop, so keep these futures across iterations.
+	std::vector<Future<Void>> futures;
+	futures.reserve(actorCount);
 	memset(data.get(), 0, 4096);
 	while (benchState->KeepRunning()) {
 		sum = 0;
-		state std::vector<Future<Void>> futures;
-		futures.reserve(actorCount);
 		DeterministicRandom rand(seed);
 		for (int i = 0; i < actorCount; ++i) {
 			futures.push_back(increment(getRandomTaskPriority(rand), &sum));
 		}
-		state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
+		Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
 		    "/tmp/__test-benchmark-file__",
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
-		    0600));
-		wait(f->write(data.get(), 4096, 0));
-		wait(f->sync());
+		    0600);
+		co_await f->write(data.get(), 4096, 0);
+		co_await f->sync();
 		benchmark::DoNotOptimize(sum);
 	}
 	benchState->SetItemsProcessed(actorCount * static_cast<long>(benchState->iterations()));
-	return Void();
 }
 
 static void bench_ionet2(benchmark::State& benchState) {
