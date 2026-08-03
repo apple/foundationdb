@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM docker.io/rockylinux/rockylinux:9.5-minimal AS base
+FROM docker.io/rockylinux/rockylinux:9.8-minimal AS base
 
 RUN microdnf install -y \
     bind-utils \
@@ -57,7 +57,7 @@ RUN curl -Ls "https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TA
 
 WORKDIR /
 
-FROM docker.io/library/golang:1.24.7-bookworm AS go-build
+FROM docker.io/library/golang:1.24.13-bookworm AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
@@ -84,7 +84,7 @@ ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
 FROM base AS foundationdb-base
 
 WORKDIR /tmp
-ARG FDB_VERSION=6.3.22
+ARG FDB_VERSION=7.3.79
 ARG FDB_LIBRARY_VERSIONS="${FDB_VERSION}"
 ARG FDB_WEBSITE=https://github.com/apple/foundationdb/releases/download
 
