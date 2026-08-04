@@ -1265,6 +1265,10 @@ public:
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
 		    getRangeStreamQueries, lowPriorityQueries, rowsQueried, watchQueries, emptyQueries;
 
+		// How the watches counted by watchQueries ended. Exactly one is incremented per watch, so
+		// watchQueries == triggeredWatches + timedOutWatches + erroredWatches + numWatches.
+		Counter triggeredWatches, timedOutWatches, erroredWatches;
+
 		// counters related to getMappedRange queries
 		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
 		    finishedGetMappedRangeQueries;
@@ -1342,8 +1346,10 @@ public:
 		    getRangeSystemKeyQueries("GetRangeSystemKeyQueries", cc),
 		    getMappedRangeQueries("GetMappedRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
 		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
-		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
-		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
+		    watchQueries("WatchQueries", cc), triggeredWatches("TriggeredWatches", cc),
+		    timedOutWatches("TimedOutWatches", cc), erroredWatches("ErroredWatches", cc),
+		    emptyQueries("EmptyQueries", cc), logicalBytesInput("LogicalBytesInput", cc),
+		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
 		    bytesDurable("BytesDurable", cc), sampledBytesCleared("SampledBytesCleared", cc),
@@ -2427,6 +2433,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 
 					// fire watch
 					req.reply.send(WatchValueReply{ ver });
+					++data->counters.triggeredWatches;
 					finishWatchValueReply(data, metadata);
 					--data->numWatches;
 					data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
@@ -2444,9 +2451,11 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 				if (response.present()) {
 					// fire watch
 					req.reply.send(WatchValueReply{ response.get() });
+					++data->counters.triggeredWatches;
 				} else {
 					// watch timed out
 					data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
+					++data->counters.timedOutWatches;
 				}
 				finishWatchValueReply(data, metadata);
 				--data->numWatches;
@@ -2460,6 +2469,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 			data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
 			finishWatchValueReply(data, metadata);
 			--data->numWatches;
+			++data->counters.erroredWatches;
 
 			if (!canReplyWith(e))
 				throw e;
