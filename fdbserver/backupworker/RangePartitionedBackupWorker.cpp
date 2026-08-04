@@ -103,6 +103,10 @@ struct RangePartitionedBackupData {
 			BackupConfig config(uid);
 			container = config.backupContainer().get(data->cx.getReference());
 			ranges = config.backupRanges().get(data->cx.getReference());
+			if (self->backupEpoch == self->recruitedEpoch) {
+				// Only current epoch's worker update the number of backup workers.
+				updateWorker = _updateStartedWorkers(this, data, uid);
+			}
 			TraceEvent("RangePartitionedBWAddBackup", data->myId).detail("BackupID", uid).detail("Version", v);
 		}
 
@@ -113,13 +117,102 @@ struct RangePartitionedBackupData {
 		Version startVersion = invalidVersion;
 		// The next log's begin version.
 		Version nextFileBeginVersion = invalidVersion;
+		Future<Void> updateWorker;
 
 		bool isBackupReady() const { return container.isReady() && ranges.isReady(); }
 
 		Future<Void> waitBackupReady() { co_await (success(container) && success(ranges)); }
+
+		// Each backup worker writes (epoch, tag.id) into BackupConfig(uid).startedBackupWorkers to announce it has
+		// registered the backup. Worker 0 watches the key, and once all expected workers for the current epoch have
+		// written, sets BackupConfig(uid).allWorkerStarted = true. That flips the watch
+		// StartFullBackupTaskFunc::_execute is blocked on (in FileBackupAgent.cpp), letting BackupAgent proceed with
+		// the snapshot. See StartFullBackupTaskFunc::_execute for the full handshake (why both keys are needed,
+		// watch-loss recovery, idempotency on retry).
+		static Future<Void> _updateStartedWorkers(PerBackupInfo* info, RangePartitionedBackupData* self, UID uid) {
+			BackupConfig config(uid);
+			Future<Void> watchFuture;
+			bool updated = false;
+			const bool firstWorker = info->self->tag.id == 0;
+			bool allUpdated = false;
+			Optional<std::vector<std::pair<int64_t, int64_t>>> workers;
+			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+
+			while (true) {
+				Error err;
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+					workers = co_await config.startedBackupWorkers().get(tr);
+					if (!updated) {
+						if (workers.present()) {
+							workers.get().emplace_back(self->recruitedEpoch, (int64_t)self->tag.id);
+						} else {
+							std::vector<std::pair<int64_t, int64_t>> v(1, { self->recruitedEpoch, self->tag.id });
+							workers = Optional<std::vector<std::pair<int64_t, int64_t>>>(v);
+						}
+					}
+
+					if (firstWorker) {
+						if (!workers.present()) {
+							TraceEvent("RangePartitionedBWDetectAbortedJob", self->myId).detail("BackupID", uid);
+							co_return;
+						}
+						ASSERT(workers.present() && !workers.get().empty());
+						auto& v = workers.get();
+						v.erase(std::remove_if(v.begin(),
+						                       v.end(),
+						                       [epoch = self->recruitedEpoch](const std::pair<int64_t, int64_t>& p) {
+							                       return p.first != epoch;
+						                       }),
+						        v.end());
+						std::set<int64_t> tags;
+						for (const auto& p : v) {
+							tags.insert(p.second);
+						}
+						if (self->totalTags == tags.size()) {
+							config.allWorkerStarted().set(tr, true);
+							allUpdated = true;
+						} else {
+							// Monitor all workers' updates.
+							watchFuture = tr->watch(config.startedBackupWorkers().key);
+						}
+						ASSERT(workers.present() && !workers.get().empty());
+						if (!updated) {
+							config.startedBackupWorkers().set(tr, workers.get());
+						}
+						for (const auto& p : workers.get()) {
+							TraceEvent("RangePartitionedBWDebugTag", self->myId)
+							    .detail("Epoch", p.first)
+							    .detail("TagID", p.second);
+						}
+						co_await tr->commit();
+
+						updated = true; // Only set to true after commit.
+						if (allUpdated) {
+							break;
+						}
+						co_await watchFuture;
+						tr->reset();
+						continue;
+					} else {
+						ASSERT(workers.present() && !workers.get().empty());
+						config.startedBackupWorkers().set(tr, workers.get());
+						co_await tr->commit();
+						break;
+					}
+				} catch (Error& e) {
+					err = e;
+					allUpdated = false;
+				}
+				co_await tr->onError(err);
+			}
+			TraceEvent("RangePartitionedBWSetReady", self->myId).detail("BackupID", uid).detail("TagId", self->tag.id);
+		}
 	};
 
-	// TODO akanksha: Add backups in this map when backup worker receives backup request.
 	std::unordered_map<UID, PerBackupInfo> backups; // Backup UID to infos
 
 	explicit RangePartitionedBackupData(UID id,
@@ -1013,15 +1106,21 @@ Future<Void> setBackupKeys(RangePartitionedBackupData* self, std::map<UID, Versi
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			std::vector<Future<Optional<Version>>> prevBackupWorkerSavedVersions;
+			std::vector<Future<Optional<bool>>> allWorkersReady;
 			std::vector<BackupConfig> versionConfigs;
 			for (const auto& [uid, version] : savedLogVersions) {
 				BackupConfig config(uid);
 				versionConfigs.emplace_back(config);
 				prevBackupWorkerSavedVersions.push_back(config.latestBackupWorkerSavedVersion().get(tr));
+				allWorkersReady.push_back(config.allWorkerStarted().get(tr));
 			}
-			co_await waitForAll(prevBackupWorkerSavedVersions);
+			co_await (waitForAll(prevBackupWorkerSavedVersions) && waitForAll(allWorkersReady));
 
 			for (int i = 0; i < prevBackupWorkerSavedVersions.size(); i++) {
+				// Skip backups where not all workers have ack'd registration yet.
+				if (!allWorkersReady[i].get().present() || !allWorkersReady[i].get().get()) {
+					continue;
+				}
 				const Version current = savedLogVersions[versionConfigs[i].getUid()];
 				if (prevBackupWorkerSavedVersions[i].get().present()) {
 					const Version prev = prevBackupWorkerSavedVersions[i].get().get();

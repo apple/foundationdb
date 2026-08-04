@@ -403,12 +403,13 @@ Future<Void> monitorBackupPartitionRequired(Database cx, KeyRangeMap<ShardTracke
 						tr.set(backupPartitionListKey, encodeBackupPartitionListValue(partitions));
 						tr.clear(backupPartitionRequiredKey);
 						co_await tr.commit();
-						TraceEvent("DDBackupPartitionsComputed", ddId).detail("NumPartitions", partitions.size());
+						TraceEvent("RangePartitionedBWPartitionsComputedByDD", ddId)
+						    .detail("NumPartitions", partitions.size());
 					} else {
 						tr.clear(backupPartitionListKey);
 						tr.clear(backupPartitionRequiredKey);
 						co_await tr.commit();
-						TraceEvent("DDBackupPartitionsCleared", ddId);
+						TraceEvent("RangePartitionedBWPartitionsClearedByDD", ddId);
 					}
 					break;
 				} catch (Error& e) {
