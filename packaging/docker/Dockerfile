@@ -16,8 +16,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM docker.io/rockylinux/rockylinux:9.8-minimal AS base
+FROM rockylinux/rockylinux:9.8-minimal AS base
 
+# It seems mirrorlist can be less reliable, just use original baseurl for package repo.
+RUN sed -i.bak 's/^#baseurl=/baseurl=/; s/^mirrorlist=/#mirrorlist=/' /etc/yum.repos.d/rocky.repo
 RUN microdnf install -y \
     bind-utils \
     binutils \
@@ -57,7 +59,9 @@ RUN curl -Ls "https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TA
 
 WORKDIR /
 
-FROM docker.io/library/golang:1.24.13-bookworm AS go-build
+# Check that glibc version in base image >= glibc in go-build image (unless CGO_ENABLED=0)
+
+FROM golang:1.24.13-bookworm AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
