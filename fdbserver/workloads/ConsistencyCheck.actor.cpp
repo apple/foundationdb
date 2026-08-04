@@ -572,7 +572,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			// consistency check on the first client
 			state Key lastSampleKey;
 			state Key lastStartSampleKey;
-			state int64_t totalReadAmount = 0;
 
 			state KeySelector begin = firstGreaterOrEqual(iter->begin());
 			state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
@@ -582,178 +581,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				try {
 					lastSampleKey = lastStartSampleKey;
 
-					// Get the min version of the storage servers
-					Version version = wait(getVersion(cx));
-
-					state GetKeyValuesRequest req;
-					req.begin = begin;
-					req.end = firstGreaterOrEqual(iter->end());
-					req.limit = 1e4;
-					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-					req.version = version;
-					req.tags = TagSet();
-					req.options = ReadOptions(debugRandom()->randomUniqueID());
-					DisabledTraceEvent("CCD", req.options.get().debugID.get()).detail("Version", version);
-
-					// Try getting the entries in the specified range
-					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
-					state int j = 0;
-					for (j = 0; j < iter_ss.size(); j++) {
-						resetReply(req);
-						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-							cx->getLatestCommitVersion(iter_ss[j], req.version, req.ssLatestCommitVersions);
-						}
-						keyValueFutures.push_back(iter_ss[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
-					}
-
-					wait(waitForAll(keyValueFutures));
+					state std::vector<ErrorOr<GetKeyValuesReply>> readReplies = wait(readFromAllStorageServers(cx, iter_ss, iter.range(), begin));
 					TraceEvent(SevDebug, "CheckCacheConsistencyComparison")
-					    .detail("Begin", req.begin)
-					    .detail("End", req.end)
-					    .detail("SSInterfaces", describe(iter_ss));
-
-					// Read the resulting entries
-					state int firstValidServer = -1;
-					totalReadAmount = 0;
-					for (j = 0; j < keyValueFutures.size(); j++) {
-						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
-						// if (rangeResult.isError()) {
-						//	throw rangeResult.getError();
-						// }
-
-						// Compare the results with other storage servers
-						if (rangeResult.present() && !rangeResult.get().error.present()) {
-							state GetKeyValuesReply current = rangeResult.get();
-							totalReadAmount += current.data.expectedSize();
-							TraceEvent(SevDebug, "CheckCacheConsistencyResult")
-							    .detail("SSInterface", iter_ss[j].uniqueID);
-							// If we haven't encountered a valid storage server yet, then mark this as the baseline
-							// to compare against
-							if (firstValidServer == -1)
-								firstValidServer = j;
-
-							// Compare this shard against the first
-							else {
-								GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
-
-								if (current.data != reference.data || current.more != reference.more) {
-									// Be especially verbose if in simulation
-									if (g_network->isSimulated()) {
-										int invalidIndex = -1;
-										printf("\nSERVER %d (%s); shard = %s - %s:\n",
-										       j,
-										       iter_ss[j].address().toString().c_str(),
-										       printable(req.begin.getKey()).c_str(),
-										       printable(req.end.getKey()).c_str());
-										for (int k = 0; k < current.data.size(); k++) {
-											printf("%d. %s => %s\n",
-											       k,
-											       printable(current.data[k].key).c_str(),
-											       printable(current.data[k].value).c_str());
-											if (invalidIndex < 0 && (k >= reference.data.size() ||
-											                         current.data[k].key != reference.data[k].key ||
-											                         current.data[k].value != reference.data[k].value))
-												invalidIndex = k;
-										}
-
-										printf("\nSERVER %d (%s); shard = %s - %s:\n",
-										       firstValidServer,
-										       iter_ss[firstValidServer].address().toString().c_str(),
-										       printable(req.begin.getKey()).c_str(),
-										       printable(req.end.getKey()).c_str());
-										for (int k = 0; k < reference.data.size(); k++) {
-											printf("%d. %s => %s\n",
-											       k,
-											       printable(reference.data[k].key).c_str(),
-											       printable(reference.data[k].value).c_str());
-											if (invalidIndex < 0 && (k >= current.data.size() ||
-											                         reference.data[k].key != current.data[k].key ||
-											                         reference.data[k].value != current.data[k].value))
-												invalidIndex = k;
-										}
-
-										printf("\nMISMATCH AT %d\n\n", invalidIndex);
-									}
-
-									// Data for trace event
-									// The number of keys unique to the current shard
-									int currentUniques = 0;
-									// The number of keys unique to the reference shard
-									int referenceUniques = 0;
-									// The number of keys in both shards with conflicting values
-									int valueMismatches = 0;
-									// The number of keys in both shards with matching values
-									int matchingKVPairs = 0;
-									// Last unique key on the current shard
-									KeyRef currentUniqueKey;
-									// Last unique key on the reference shard
-									KeyRef referenceUniqueKey;
-									// Last value mismatch
-									KeyRef valueMismatchKey;
-
-									// Loop indeces
-									int currentI = 0;
-									int referenceI = 0;
-									while (currentI < current.data.size() || referenceI < reference.data.size()) {
-										if (currentI >= current.data.size()) {
-											referenceUniqueKey = reference.data[referenceI].key;
-											referenceUniques++;
-											referenceI++;
-										} else if (referenceI >= reference.data.size()) {
-											currentUniqueKey = current.data[currentI].key;
-											currentUniques++;
-											currentI++;
-										} else {
-											KeyValueRef currentKV = current.data[currentI];
-											KeyValueRef referenceKV = reference.data[referenceI];
-
-											if (currentKV.key == referenceKV.key) {
-												if (currentKV.value == referenceKV.value)
-													matchingKVPairs++;
-												else {
-													valueMismatchKey = currentKV.key;
-													valueMismatches++;
-												}
-
-												currentI++;
-												referenceI++;
-											} else if (currentKV.key < referenceKV.key) {
-												currentUniqueKey = currentKV.key;
-												currentUniques++;
-												currentI++;
-											} else {
-												referenceUniqueKey = referenceKV.key;
-												referenceUniques++;
-												referenceI++;
-											}
-										}
-									}
-
-									TraceEvent("CacheConsistencyCheck_DataInconsistent")
-									    .detail(format("StorageServer%d", j).c_str(), iter_ss[j].toString())
-									    .detail(format("StorageServer%d", firstValidServer).c_str(),
-									            iter_ss[firstValidServer].toString())
-									    .detail("ShardBegin", req.begin.getKey())
-									    .detail("ShardEnd", req.end.getKey())
-									    .detail("VersionNumber", req.version)
-									    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-									    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
-									    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
-									    .detail(format("Server%dUniqueKey", firstValidServer).c_str(),
-									            referenceUniqueKey)
-									    .detail("ValueMismatches", valueMismatches)
-									    .detail("ValueMismatchKey", valueMismatchKey)
-									    .detail("MatchingKVPairs", matchingKVPairs);
-
-									self->testFailure("Data inconsistent", true);
-								}
-							}
-						}
-					}
+						.detail("Begin", begin)
+						.detail("End", iter.range().end)
+						.detail("SSInterfaces", describe(iter_ss));
+					state RangeConsistencyResult rangeConsistencyResult = checkRangeReplies(iter_ss, readReplies, iter.range(), begin, false);
 
 					// after requesting each shard, enforce rate limit based on how much data will likely be read
 					if (rateLimitForThisRound > 0) {
-						wait(rateLimiter->getAllowance(totalReadAmount));
+						wait(rateLimiter->getAllowance(rangeConsistencyResult.totalReadAmount));
 						// Set ratelimit to max allowed if current round has been going on for a while
 						if (now() - rateLimiterStartTime >
 						        1.1 * CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME &&
@@ -765,13 +602,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							    .detail("RateLimit", rateLimitForThisRound);
 						}
 					}
-					bytesReadInRange += totalReadAmount;
+					bytesReadInRange += rangeConsistencyResult.totalReadAmount;
 
-					// Advance to the next set of entries
-					if (firstValidServer >= 0 && keyValueFutures[firstValidServer].get().get().more) {
-						VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer].get().get().data;
-						ASSERT(result.size() > 0);
-						begin = firstGreaterThan(result[result.size() - 1].key);
+					if (rangeConsistencyResult.nextKey.present()) {
+						begin = firstGreaterThan(rangeConsistencyResult.nextKey.get());
 						ASSERT(begin.getKey() != allKeys.end);
 						lastStartSampleKey = lastSampleKey;
 						TraceEvent(SevDebug, "CacheConsistencyCheckNextBeginKey").detail("Key", begin);
