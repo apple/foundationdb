@@ -32,6 +32,7 @@
 #include <vector>
 
 #define AES_256_KEY_LENGTH 32
+#define GCM_TAG_LEN 16
 
 // Wrapper class for openssl implementation of AES GCM
 // encryption/decryption
@@ -93,7 +94,7 @@ class DecryptionStreamCipher final : NonCopyable, public ReferenceCounted<Decryp
 public:
 	DecryptionStreamCipher(const StreamCipherKey* key, const StreamCipher::IV& iv);
 	StringRef decrypt(unsigned char const* ciphertext, int len, Arena&);
-	StringRef finish(Arena&);
+	StringRef finish(const uint8_t* tag, Arena&);
 };
 
 class HmacSha256StreamCipher final : NonCopyable, public ReferenceCounted<HmacSha256StreamCipher> {
