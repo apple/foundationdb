@@ -790,8 +790,9 @@ Future<Void> delayedAsyncVar(Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> o
 	try {
 		while (true) {
 			co_await delay(time);
+			Future<Void> nextChange = in->onChange();
 			out->set(in->get());
-			co_await in->onChange();
+			co_await nextChange;
 		}
 	} catch (Error& e) {
 		out->set(in->get());
