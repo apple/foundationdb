@@ -505,6 +505,7 @@ struct CommitBatchContext {
 	const int currentBatchMemBytesCount;
 
 	double startTime;
+	double timerStartTime;
 
 	// The current stage of batch commit
 	std::string_view stage = UNSET;
@@ -746,6 +747,7 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
                                        const int currentBatchMemBytesCount)
   : pProxyCommitData(pProxyCommitData_), trs(std::move(*const_cast<std::vector<CommitTransactionRequest>*>(trs_))),
     currentBatchMemBytesCount(currentBatchMemBytesCount), startTime(g_network->now()),
+    timerStartTime(g_network->timer()),
     localBatchNumber(++pProxyCommitData->localCommitBatchesStarted),
     toCommit(pProxyCommitData->logSystem, pProxyCommitData->localTLogCount), span("MP:commitBatch"_loc),
     committed(trs.size()), lastShardMove(invalidVersion) {
@@ -2077,7 +2079,7 @@ Future<Void> reply(CommitBatchContext* self) {
 		// TODO: filter if pipelined with large commit
 		const double duration = endTime - tr.requestTime();
 		pProxyCommitData->stats.commitLatencySample.addMeasurement(duration);
-		pProxyCommitData->stats.commitBatchingWaiting.addMeasurement(self->startTime - tr.requestTime());
+		pProxyCommitData->stats.commitBatchingWaiting.addMeasurement(self->timerStartTime - tr.requestTime());
 		if (pProxyCommitData->latencyBandConfig.present()) {
 			bool filter = self->maxTransactionBytes >
 			              pProxyCommitData->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(
