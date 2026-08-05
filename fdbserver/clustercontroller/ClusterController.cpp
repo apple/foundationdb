@@ -4784,7 +4784,10 @@ TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
 // This test ensures that the desired number of proxies (3) is now fully recruited
 // when sufficient stateless processes exist.
 TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
-	ClusterControllerData data(ClusterControllerFullInterface(),
+	ClusterControllerFullInterface cci;
+	cci.initEndpoints();
+
+	ClusterControllerData data(cci,
 	                           LocalityData(),
 	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
 	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
@@ -4808,7 +4811,7 @@ TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
 			               ProcessClass(classType, ProcessClass::CommandLineSource),
 			               ProcessClass(classType, ProcessClass::CommandLineSource),
 			               ClusterControllerPriorityInfo(
-			                   ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown),
+			                   recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown),
 			               false,
 			               true,
 			               Standalone<VectorRef<StringRef>>());
