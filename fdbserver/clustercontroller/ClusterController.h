@@ -344,7 +344,7 @@ public:
 				if (roles.test((recruitment::ClusterRole)r)) {
 					if (!roleCodes.empty())
 						roleCodes.append(",");
-					appendRoleCode((ProcessClass::ClusterRole)r);
+					appendRoleCode((recruitment::ClusterRole)r);
 				}
 			return roleCodes;
 		}
@@ -1597,6 +1597,8 @@ public:
 	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
 	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
 	    bool checkStable = false) {
+		// for avoiding recruiting workers with worse fitness
+		recruitment::Fitness used_fitness = recruitment::NeverAssign;
 		struct WorkerFitnessKey {
 			recruitment::Fitness fitness;
 			unsigned used;
@@ -1611,6 +1613,7 @@ public:
 		std::map<WorkerFitnessKey, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		if (minWorker.present()) {
+			used_fitness = minWorker.get().fitness;
 			results.push_back(minWorker.get().worker);
 		}
 		if (amount <= results.size()) {
@@ -1623,14 +1626,11 @@ public:
 			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    it.second.details.interf.locality.dcId() == dcId &&
-			    (!minWorker.present() ||
-				 (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
-				  (fitness < minWorker.get().fitness ||
-			       (fitness == minWorker.get().fitness && id_used[it.first].getWeight() <= minWorker.get().used))))) {
+			    (!minWorker.present() || (it.second.details.interf.id() != minWorker.get().worker.interf.id()))) {
 				auto sharing = preferredSharing.find(it.first);
 				fitness_workers[{ fitness,
 				                  id_used[it.first].getWeight(),
-								  role == recruitment::Backup && g_network->isSimulated() &&
+				                  role == recruitment::Backup && g_network->isSimulated() &&
 				                      !g_simulator->getProcessByAddress(it.second.details.interf.address())
 				                           ->isReliable(),
 				                  isLongLivedStateless(it.first),
@@ -1641,6 +1641,11 @@ public:
 		}
 
 		for (auto& it : fitness_workers) {
+			recruitment::Fitness next_fitness = it.first.fitness;
+
+			if (next_fitness > used_fitness)
+				break; // do not recruit with a greater fitness
+			used_fitness = next_fitness;
 			deterministicRandom()->randomShuffle(it.second);
 			for (int i = 0; i < it.second.size(); i++) {
 				results.push_back(it.second[i]);
