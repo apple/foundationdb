@@ -28,6 +28,7 @@
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbrpc/AsyncFileEncrypted.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
 
@@ -612,6 +613,9 @@ public:
 		std::pair<bool, int> encryptionMeta = wait(readEncryptionMetadata(bc));
 		fileLevelEncryptionEnabled = encryptionMeta.first;
 		encryptionBlockSize = encryptionMeta.second;
+		if (fileLevelEncryptionEnabled) {
+			bc->setEncryptionBlockSize(encryptionBlockSize);
+		}
 
 		TraceEvent("BackupContainerDescribe2")
 		    .detail("URL", bc->getURL())
@@ -1531,13 +1535,18 @@ Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beg
 	};
 
 	return map(listFiles((mutationLogType == MutationLogType::PARTITIONED_LOG ? "plogs/" : "logs/"), pathFilter),
-	           [=](const FilesAndSizesT& files) {
+	           [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
 		           std::vector<LogFile> results;
 		           LogFile lf;
 		           for (auto& f : files) {
 			           if (BackupContainerFileSystemImpl::pathToLogFile(lf, f.first, f.second) &&
-			               lf.endVersion > beginVersion && lf.beginVersion <= targetVersion)
+			               lf.endVersion > beginVersion && lf.beginVersion <= targetVersion) {
+				           if (self->usesEncryption()) {
+					           lf.fileSize =
+					               AsyncFileEncrypted::rawToLogicalSize(lf.fileSize, self->encryptionBlockSize);
+				           }
 				           results.push_back(lf);
+			           }
 		           }
 		           return results;
 	           });
@@ -1559,16 +1568,22 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::old_listRangeFiles(Ver
 		       (cleaned > firstPath && cleaned < lastPath);
 	};
 
-	return map(listFiles("ranges/", pathFilter), [=](const FilesAndSizesT& files) {
-		std::vector<RangeFile> results;
-		RangeFile rf;
-		for (auto& f : files) {
-			if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) && rf.version >= beginVersion &&
-			    rf.version <= endVersion)
-				results.push_back(rf);
-		}
-		return results;
-	});
+	return map(listFiles("ranges/", pathFilter),
+	           [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
+		           std::vector<RangeFile> results;
+		           RangeFile rf;
+		           for (auto& f : files) {
+			           if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) &&
+			               rf.version >= beginVersion && rf.version <= endVersion) {
+				           if (self->usesEncryption()) {
+					           rf.fileSize =
+					               AsyncFileEncrypted::rawToLogicalSize(rf.fileSize, self->encryptionBlockSize);
+				           }
+				           results.push_back(rf);
+			           }
+		           }
+		           return results;
+	           });
 }
 
 Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version beginVersion, Version endVersion) {
@@ -1581,16 +1596,22 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version
 		return BackupContainerFileSystemImpl::extractSnapshotBeginVersion(path) <= endVersion;
 	};
 
-	Future<std::vector<RangeFile>> newFiles = map(listFiles("kvranges/", pathFilter), [=](const FilesAndSizesT& files) {
-		std::vector<RangeFile> results;
-		RangeFile rf;
-		for (auto& f : files) {
-			if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) && rf.version >= beginVersion &&
-			    rf.version <= endVersion)
-				results.push_back(rf);
-		}
-		return results;
-	});
+	Future<std::vector<RangeFile>> newFiles =
+	    map(listFiles("kvranges/", pathFilter),
+	        [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
+		        std::vector<RangeFile> results;
+		        RangeFile rf;
+		        for (auto& f : files) {
+			        if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) &&
+			            rf.version >= beginVersion && rf.version <= endVersion) {
+				        if (self->usesEncryption()) {
+					        rf.fileSize = AsyncFileEncrypted::rawToLogicalSize(rf.fileSize, self->encryptionBlockSize);
+				        }
+				        results.push_back(rf);
+			        }
+		        }
+		        return results;
+	        });
 
 	return map(success(oldFiles) && success(newFiles), [=](Void _) {
 		std::vector<RangeFile> results = std::move(newFiles.get());
@@ -2147,6 +2168,28 @@ TEST_CASE("/backup/containers/localdir/encrypted") {
 	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
 	                         {},
 	                         format("%s/test_encryption_key", params.getDataDir().c_str())));
+	return Void();
+}
+
+TEST_CASE("/backup/containers/localdir/encryptedDescribeWithoutBlockSize") {
+	state std::string url = fmt::format("file://{}/fdb_backups/{:x}", params.getDataDir(), timer_int());
+	state std::string keyFile = fmt::format("{}/test_encryption_key_describe", params.getDataDir());
+	wait(BackupContainerFileSystem::createTestEncryptionKeyFile(keyFile));
+
+	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, keyFile, 4096);
+	wait(c->create());
+	wait(c->writeEncryptionMetadata(4096));
+	state Reference<IBackupFile> log = wait(c->writeLogFile(1, 2, 1));
+	uint8_t value = 1;
+	wait(log->append(&value, 1));
+	wait(log->finish());
+
+	c->setEncryptionBlockSize(0);
+	BackupDescription desc = wait(c->describeBackup(true));
+	ASSERT(desc.fileLevelEncryption);
+	ASSERT_EQ(desc.encryptionBlockSize, 4096);
+	ASSERT_EQ(c->getEncryptionBlockSize(), 4096);
+	wait(c->deleteContainer());
 	return Void();
 }
 
