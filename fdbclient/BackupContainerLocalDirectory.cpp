@@ -235,7 +235,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::readFile");
 	// Simulation does not properly handle opening the same file from multiple machines using a shared filesystem,
-	// so create a symbolic link to make each file opening appear to be unique.  This could also work in production
+	// so create a symbolic link to make each file opening appear to be unique. This could also work in production
 	// but only if the source directory is writeable which shouldn't be required for a restore.
 	std::string fullPath = joinPath(m_path, path);
 #ifndef _WIN32
@@ -253,16 +253,22 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 		fullPath = uniquePath;
 	}
 // Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
-// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
+// can't be used because backup files are read-only. Cached mode can only help during restore task retries handled
 // by the same process that failed the first task execution anyway, which is a very rare case.
 #endif
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(fullPath, flags, 0644);
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		int encBlockSize = encryptionBlockSize;
-		f = map(f, [encBlockSize](Reference<IAsyncFile> r) {
-			return Reference<IAsyncFile>(
-			    makeReference<AsyncFileEncrypted>(r, AsyncFileEncrypted::Mode::READ_ONLY, encBlockSize));
+		Reference<BackupContainerLocalDirectory> self = Reference<BackupContainerLocalDirectory>::addRef(this);
+		f = mapAsync(f, [self](Reference<IAsyncFile> r) -> Future<Reference<IAsyncFile>> {
+			return mapAsync(self->encryptionSetupComplete(), [self, r](Void) {
+				return map(self->ensureEncryptionPropertiesLoaded(), [self, r](bool) {
+					return Reference<IAsyncFile>(makeReference<AsyncFileEncrypted>(r,
+					                                                               AsyncFileEncrypted::Mode::READ_ONLY,
+					                                                               self->encryptionBlockSize,
+					                                                               self->encryptionFormatVersion));
+				});
+			});
 		});
 	}
 
@@ -302,10 +308,12 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		int encBlockSize = encryptionBlockSize;
-		f = map(f, [encBlockSize](Reference<IAsyncFile> r) {
-			return Reference<IAsyncFile>(
-			    makeReference<AsyncFileEncrypted>(r, AsyncFileEncrypted::Mode::APPEND_ONLY, encBlockSize));
+		Reference<BackupContainerLocalDirectory> self = Reference<BackupContainerLocalDirectory>::addRef(this);
+		f = mapAsync(f, [self](Reference<IAsyncFile> r) -> Future<Reference<IAsyncFile>> {
+			return map(self->encryptionSetupComplete(), [self, r](Void) {
+				return Reference<IAsyncFile>(makeReference<AsyncFileEncrypted>(
+				    r, AsyncFileEncrypted::Mode::APPEND_ONLY, self->encryptionBlockSize, CURRENT_FORMAT_VERSION));
+			});
 		});
 	}
 	return map(f, [=](Reference<IAsyncFile> file) -> Reference<IBackupFile> {

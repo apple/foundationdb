@@ -173,8 +173,13 @@ public:
 	// Waits for encryption initialization to complete by reading encryption key file during container opening.
 	Future<Void> encryptionSetupComplete() const override;
 
+	Future<bool> ensureEncryptionPropertiesLoaded();
+
 	int getEncryptionBlockSize() const override { return encryptionBlockSize; }
 	void setEncryptionBlockSize(int blockSize) override { encryptionBlockSize = blockSize; }
+
+	FormatVersion getEncryptionFormatVersion() const override { return encryptionFormatVersion; }
+	void setEncryptionFormatVersion(FormatVersion v) override { encryptionFormatVersion = v; }
 
 protected:
 	// Returns true if an encryption key file was provided.
@@ -185,6 +190,7 @@ protected:
 	Future<Void> writeEntireFileFallback(const std::string& fileName, const std::string& fileContents);
 
 	int encryptionBlockSize = 0;
+	FormatVersion encryptionFormatVersion = CURRENT_FORMAT_VERSION;
 
 private:
 	struct VersionProperty {
@@ -223,6 +229,7 @@ private:
 	friend class BackupContainerFileSystemImpl;
 
 	Future<Void> encryptionSetupFuture;
+	Future<bool> encryptionPropertiesLoadFuture;
 };
 
 #endif

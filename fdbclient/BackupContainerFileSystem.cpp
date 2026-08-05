@@ -587,8 +587,8 @@ public:
 		return prevEnd;
 	}
 
-	// Read encryption metadata from JSON file
-	static Future<std::pair<bool, int>> readEncryptionMetadata(Reference<BackupContainerFileSystem> bc) {
+	// Read encryption metadata from JSON file.
+	static Future<bool> readEncryptionMetadata(Reference<BackupContainerFileSystem> bc) {
 		try {
 			Reference<IAsyncFile> f = co_await bc->readFile(BackupContainerFileSystem::encryptionMetadataFileName());
 			int64_t size = co_await f->size();
@@ -615,6 +615,18 @@ public:
 				bool enabled = obj.at("is_encryption_enabled").get_bool();
 				int blockSize = obj.at("encryption_block_size").get_int();
 
+				FormatVersion formatVersion = FormatVersion::V1;
+				if (obj.contains("encryption_format_version")) {
+					if (obj.at("encryption_format_version").type() != json_spirit::int_type) {
+						fprintf(stderr, "ERROR: encryption_format_version field has wrong type.\n");
+						TraceEvent(SevError, "BackupContainerReadEncryptionMetadataMalformed")
+						    .detail("URL", bc->getURL())
+						    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
+						throw file_corrupt();
+					}
+					formatVersion = static_cast<FormatVersion>(obj.at("encryption_format_version").get_int());
+				}
+
 				if ((enabled && blockSize <= 0) || (!enabled && blockSize != 0)) {
 					fprintf(stderr,
 					        "ERROR: Encryption metadata is inconsistent (enabled=%d, blockSize=%d).\n",
@@ -630,8 +642,14 @@ public:
 				TraceEvent("BackupContainerReadEncryptionMetadata")
 				    .detail("URL", bc->getURL())
 				    .detail("IsEncryptionEnabled", enabled)
-				    .detail("EncryptionBlockSize", blockSize);
-				co_return std::make_pair(enabled, blockSize);
+				    .detail("EncryptionBlockSize", blockSize)
+				    .detail("EncryptionFormatVersion", static_cast<int>(formatVersion));
+
+				if (enabled) {
+					bc->setEncryptionBlockSize(blockSize);
+					bc->setEncryptionFormatVersion(formatVersion);
+				}
+				co_return enabled;
 			} else {
 				// If the file is malformed, throw an error.
 				fprintf(stderr, "ERROR: Failed to read encryption_metadata file due to incorrect format\n");
@@ -646,7 +664,7 @@ public:
 				TraceEvent(SevWarn, "BackupContainerEncryptionMetadataNotFound")
 				    .detail("URL", bc->getURL())
 				    .detail("File", BackupContainerFileSystem::encryptionMetadataFileName());
-				co_return std::make_pair(false, 0);
+				co_return false;
 			}
 			fprintf(stderr, "ERROR: Failed to read encryption_metadata file due to an error.\n");
 			TraceEvent(SevError, "BackupContainerReadEncryptionMetadataError")
@@ -706,11 +724,10 @@ public:
 
 		co_await waitForAll(metaReads);
 
-		std::pair<bool, int> encryptionMeta = co_await readEncryptionMetadata(bc);
-		fileLevelEncryptionEnabled = encryptionMeta.first;
-		encryptionBlockSize = encryptionMeta.second;
+		fileLevelEncryptionEnabled = co_await bc->ensureEncryptionPropertiesLoaded();
 		if (fileLevelEncryptionEnabled) {
-			bc->setEncryptionBlockSize(encryptionBlockSize);
+			encryptionBlockSize = bc->getEncryptionBlockSize();
+			desc.encryptionFormatVersion = bc->getEncryptionFormatVersion();
 		}
 
 		TraceEvent("BackupContainerDescribe2")
@@ -722,7 +739,8 @@ public:
 		    .detail("LogEndVersion", metaLogEnd.orDefault(invalidVersion))
 		    .detail("LogType", metaLogType.orDefault(-1))
 		    .detail("FileLevelEncryption", fileLevelEncryptionEnabled)
-		    .detail("EncryptionBlockSize", encryptionBlockSize);
+		    .detail("EncryptionBlockSize", encryptionBlockSize)
+		    .detail("EncryptionFormatVersion", static_cast<int>(bc->getEncryptionFormatVersion()));
 
 		// If the logStartVersionOverride is positive (not relative) then ensure that unreliableEndVersion is equal or
 		// greater
@@ -1545,11 +1563,14 @@ public:
 			co_await bc->create();
 		}
 
-		// Write JSON with encryption metadata
+		// Write JSON with encryption metadata.
 		bool enabled = bc->encryptionKeyFileName.present();
 		JsonBuilderObject doc;
 		doc.setKey("is_encryption_enabled", enabled);
 		doc.setKey("encryption_block_size", encryptionBlockSize);
+		if (enabled) {
+			doc.setKey("encryption_format_version", static_cast<int>(CURRENT_FORMAT_VERSION));
+		}
 
 		std::string jsonStr = doc.getJson();
 		TraceEvent("WriteEncryptionMetadataCompleted").detail("URL", bc->getURL()).detail("JSON", jsonStr);
@@ -1663,22 +1684,25 @@ Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beg
 		       (cleaned > firstPath && cleaned < lastPath);
 	};
 
-	return map(listFiles((mutationLogType == MutationLogType::PARTITIONED_LOG ? "plogs/" : "logs/"), pathFilter),
-	           [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
-		           std::vector<LogFile> results;
-		           LogFile lf;
-		           for (auto& f : files) {
-			           if (BackupContainerFileSystemImpl::pathToLogFile(lf, f.first, f.second) &&
-			               lf.endVersion > beginVersion && lf.beginVersion <= targetVersion) {
-				           if (self->usesEncryption()) {
-					           lf.fileSize =
-					               AsyncFileEncrypted::rawToLogicalSize(lf.fileSize, self->encryptionBlockSize);
-				           }
-				           results.push_back(lf);
-			           }
-		           }
-		           return results;
-	           });
+	return mapAsync(listFiles((mutationLogType == MutationLogType::PARTITIONED_LOG ? "plogs/" : "logs/"), pathFilter),
+	                [=, self = Reference<BackupContainerFileSystem>::addRef(this)](
+	                    const FilesAndSizesT& files) -> Future<std::vector<LogFile>> {
+		                return map(self->ensureEncryptionPropertiesLoaded(), [=](bool) {
+			                std::vector<LogFile> results;
+			                LogFile lf;
+			                for (auto& f : files) {
+				                if (BackupContainerFileSystemImpl::pathToLogFile(lf, f.first, f.second) &&
+				                    lf.endVersion > beginVersion && lf.beginVersion <= targetVersion) {
+					                if (self->usesEncryption() && self->encryptionFormatVersion != FormatVersion::V1) {
+						                lf.fileSize = AsyncFileEncrypted::rawToLogicalSize(lf.fileSize,
+						                                                                   self->encryptionBlockSize);
+					                }
+					                results.push_back(lf);
+				                }
+			                }
+			                return results;
+		                });
+	                });
 }
 
 Future<std::vector<RangeFile>> BackupContainerFileSystem::old_listRangeFiles(Version beginVersion, Version endVersion) {
@@ -1697,22 +1721,25 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::old_listRangeFiles(Ver
 		       (cleaned > firstPath && cleaned < lastPath);
 	};
 
-	return map(listFiles("ranges/", pathFilter),
-	           [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
-		           std::vector<RangeFile> results;
-		           RangeFile rf;
-		           for (auto& f : files) {
-			           if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) &&
-			               rf.version >= beginVersion && rf.version <= endVersion) {
-				           if (self->usesEncryption()) {
-					           rf.fileSize =
-					               AsyncFileEncrypted::rawToLogicalSize(rf.fileSize, self->encryptionBlockSize);
-				           }
-				           results.push_back(rf);
-			           }
-		           }
-		           return results;
-	           });
+	return mapAsync(listFiles("ranges/", pathFilter),
+	                [=, self = Reference<BackupContainerFileSystem>::addRef(this)](
+	                    const FilesAndSizesT& files) -> Future<std::vector<RangeFile>> {
+		                return map(self->ensureEncryptionPropertiesLoaded(), [=](bool) {
+			                std::vector<RangeFile> results;
+			                RangeFile rf;
+			                for (auto& f : files) {
+				                if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) &&
+				                    rf.version >= beginVersion && rf.version <= endVersion) {
+					                if (self->usesEncryption() && self->encryptionFormatVersion != FormatVersion::V1) {
+						                rf.fileSize = AsyncFileEncrypted::rawToLogicalSize(rf.fileSize,
+						                                                                   self->encryptionBlockSize);
+					                }
+					                results.push_back(rf);
+				                }
+			                }
+			                return results;
+		                });
+	                });
 }
 
 Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version beginVersion, Version endVersion) {
@@ -1726,21 +1753,25 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version
 	};
 
 	Future<std::vector<RangeFile>> newFiles =
-	    map(listFiles("kvranges/", pathFilter),
-	        [=, self = Reference<BackupContainerFileSystem>::addRef(this)](const FilesAndSizesT& files) {
-		        std::vector<RangeFile> results;
-		        RangeFile rf;
-		        for (auto& f : files) {
-			        if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) &&
-			            rf.version >= beginVersion && rf.version <= endVersion) {
-				        if (self->usesEncryption()) {
-					        rf.fileSize = AsyncFileEncrypted::rawToLogicalSize(rf.fileSize, self->encryptionBlockSize);
-				        }
-				        results.push_back(rf);
-			        }
-		        }
-		        return results;
-	        });
+	    mapAsync(listFiles("kvranges/", pathFilter),
+	             [=, self = Reference<BackupContainerFileSystem>::addRef(this)](
+	                 const FilesAndSizesT& files) -> Future<std::vector<RangeFile>> {
+		             return map(self->ensureEncryptionPropertiesLoaded(), [=](bool) {
+			             std::vector<RangeFile> results;
+			             RangeFile rf;
+			             for (auto& f : files) {
+				             if (BackupContainerFileSystemImpl::pathToRangeFile(rf, f.first, f.second) &&
+				                 rf.version >= beginVersion && rf.version <= endVersion) {
+					             if (self->usesEncryption() && self->encryptionFormatVersion != FormatVersion::V1) {
+						             rf.fileSize =
+						                 AsyncFileEncrypted::rawToLogicalSize(rf.fileSize, self->encryptionBlockSize);
+					             }
+					             results.push_back(rf);
+				             }
+			             }
+			             return results;
+		             });
+	             });
 
 	return map(success(oldFiles) && success(newFiles), [=](Void _) {
 		std::vector<RangeFile> results = newFiles.get();
@@ -1922,6 +1953,14 @@ bool BackupContainerFileSystem::usesEncryption() const {
 }
 Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
 	return encryptionSetupFuture;
+}
+
+Future<bool> BackupContainerFileSystem::ensureEncryptionPropertiesLoaded() {
+	if (!encryptionPropertiesLoadFuture.isValid()) {
+		encryptionPropertiesLoadFuture =
+		    BackupContainerFileSystemImpl::readEncryptionMetadata(Reference<BackupContainerFileSystem>::addRef(this));
+	}
+	return encryptionPropertiesLoadFuture;
 }
 
 Future<Void> BackupContainerFileSystem::writeEntireFileFallback(const std::string& fileName,
@@ -2198,6 +2237,76 @@ TEST_CASE("/backup/containers/localdir/encryptedDescribeWithoutBlockSize") {
 	ASSERT(desc.fileLevelEncryption);
 	ASSERT_EQ(desc.encryptionBlockSize, 4096);
 	ASSERT_EQ(c->getEncryptionBlockSize(), 4096);
+	co_await c->deleteContainer();
+}
+
+TEST_CASE("/backup/containers/localdir/encryptedV1FormatRestore") {
+	std::string containerPath = fmt::format("{}/fdb_backups/{:x}", params.getDataDir(), timer_int());
+	std::string url = fmt::format("file://{}", containerPath);
+	std::string keyFile = fmt::format("{}/test_encryption_key_legacy", params.getDataDir());
+	co_await BackupContainerFileSystem::createTestEncryptionKeyFile(keyFile);
+
+	int encryptionBlockSize = 4096;
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, keyFile, encryptionBlockSize);
+	co_await c->create();
+	Reference<BackupContainerFileSystem> bcfs = c.castTo<BackupContainerFileSystem>();
+
+	const int bytes = encryptionBlockSize + 100; // Spans two blocks; the second is partial.
+	std::vector<unsigned char> plaintext(bytes, 0);
+	deterministicRandom()->randomBytes(plaintext.data(), bytes);
+
+	Reference<IBackupFile> outFile = co_await c->writeLogFile(1, 2, encryptionBlockSize);
+	const std::string relPath = outFile->getFileName();
+	co_await outFile->append(plaintext.data(), bytes);
+	co_await outFile->finish();
+
+	// Remove each block's trailing GCM tag to convert the on-disk file into V1 format.
+	std::string fullPath = joinPath(containerPath, relPath);
+	int flags =
+	    IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
+	Reference<IAsyncFile> rawFile = co_await IAsyncFileSystem::filesystem()->open(fullPath, flags, 0644);
+	int64_t rawSize = co_await rawFile->size();
+	std::vector<unsigned char> rawBytes(rawSize, 0);
+	int r = co_await rawFile->read(rawBytes.data(), rawSize, 0);
+	ASSERT_EQ(r, rawSize);
+
+	const int rawBlockSize = encryptionBlockSize + GCM_TAG_LEN;
+	std::vector<unsigned char> v1FileBytes;
+	v1FileBytes.reserve(bytes);
+	int64_t offset = 0;
+	while (offset < rawSize) {
+		int64_t blockLen = std::min<int64_t>(rawBlockSize, rawSize - offset);
+		int64_t ciphertextLen = blockLen - GCM_TAG_LEN;
+		ASSERT(ciphertextLen > 0);
+		v1FileBytes.insert(v1FileBytes.end(), rawBytes.begin() + offset, rawBytes.begin() + offset + ciphertextLen);
+		offset += blockLen;
+	}
+	ASSERT_EQ(v1FileBytes.size(), bytes);
+
+	co_await rawFile->truncate(0);
+	co_await rawFile->write(v1FileBytes.data(), v1FileBytes.size(), 0);
+	co_await rawFile->sync();
+	rawFile.clear();
+
+	// Overwrite the encryption metadata to look like a pre-versioning container.
+	JsonBuilderObject doc;
+	doc.setKey("is_encryption_enabled", true);
+	doc.setKey("encryption_block_size", encryptionBlockSize);
+	co_await bcfs->writeEntireFile("properties/encryption_metadata", doc.getJson());
+
+	BackupDescription desc = co_await c->describeBackup(true);
+	ASSERT(desc.fileLevelEncryption);
+	ASSERT(desc.encryptionFormatVersion == FormatVersion::V1);
+	ASSERT(c->getEncryptionFormatVersion() == FormatVersion::V1);
+
+	Reference<IAsyncFile> file = co_await c->readFile(relPath);
+	int64_t fileSize = co_await file->size();
+	ASSERT_EQ(fileSize, bytes);
+	std::vector<unsigned char> readBuffer(bytes, 0);
+	int bytesRead = co_await file->read(readBuffer.data(), bytes, 0);
+	ASSERT_EQ(bytesRead, bytes);
+	ASSERT(plaintext == readBuffer);
+
 	co_await c->deleteContainer();
 }
 

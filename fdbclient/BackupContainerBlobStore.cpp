@@ -199,7 +199,10 @@ Future<Reference<IAsyncFile>> BackupContainerBlobStore::readFile(const std::stri
 	Reference<IAsyncFile> f = makeReference<AsyncFileBlobStoreRead>(m_bstore, m_bucket, dataPath(path));
 
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
+		co_await encryptionSetupComplete();
+		co_await ensureEncryptionPropertiesLoaded();
+		f = makeReference<AsyncFileEncrypted>(
+		    f, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize, encryptionFormatVersion);
 	}
 	if (m_bstore->knobs.enable_read_cache) {
 		f = makeReference<AsyncFileReadAheadCache>(f,
@@ -208,7 +211,7 @@ Future<Reference<IAsyncFile>> BackupContainerBlobStore::readFile(const std::stri
 		                                           m_bstore->knobs.concurrent_reads_per_file,
 		                                           m_bstore->knobs.read_cache_blocks_per_file);
 	}
-	return f;
+	co_return f;
 }
 
 Future<std::vector<std::string>> BackupContainerBlobStore::listURLs(Reference<IBlobStoreEndpoint> bstore,
@@ -219,9 +222,11 @@ Future<std::vector<std::string>> BackupContainerBlobStore::listURLs(Reference<IB
 Future<Reference<IBackupFile>> BackupContainerBlobStore::writeFile(const std::string& path) {
 	Reference<IAsyncFile> f = makeReference<AsyncFileBlobStoreWrite>(m_bstore, m_bucket, dataPath(path));
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize);
+		co_await encryptionSetupComplete();
+		f = makeReference<AsyncFileEncrypted>(
+		    f, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize, CURRENT_FORMAT_VERSION);
 	}
-	return Future<Reference<IBackupFile>>(makeReference<BackupContainerBlobStoreImpl::BackupFile>(path, f));
+	co_return makeReference<BackupContainerBlobStoreImpl::BackupFile>(path, f);
 }
 
 Future<Void> BackupContainerBlobStore::writeEntireFile(const std::string& path, const std::string& fileContents) {

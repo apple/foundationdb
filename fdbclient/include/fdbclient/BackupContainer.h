@@ -27,6 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "flow/EncryptionFormatVersion.h"
 #include <vector>
 
 FDB_BOOLEAN_PARAM(IncludeKeyRangeMap);
@@ -232,6 +233,8 @@ struct BackupDescription {
 	MutationLogType mutationLogType;
 	bool fileLevelEncryption; // If this backup contains encrypted files.
 	int encryptionBlockSize; // Block size used for file encryption, 0 if not encrypted.
+	// Format version of the encrypted backup.
+	FormatVersion encryptionFormatVersion = CURRENT_FORMAT_VERSION;
 
 	// Resolves the versions above to timestamps using a given database's TimeKeeper data.
 	// toString will use this information if present.
@@ -391,6 +394,9 @@ public:
 
 	virtual int getEncryptionBlockSize() const { return 0; }
 	virtual void setEncryptionBlockSize(int blockSize) {}
+
+	virtual FormatVersion getEncryptionFormatVersion() const { return CURRENT_FORMAT_VERSION; }
+	virtual void setEncryptionFormatVersion(FormatVersion v) {}
 
 	// TODO: change the following back to `private` once blob obj access is refactored
 protected:
