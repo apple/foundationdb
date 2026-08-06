@@ -21,6 +21,7 @@ type model struct {
 	clusterState      *ClusterState
 	width             int
 	height            int
+	layout            int // 0 = 2-column (topology + events), 1 = events only, 2 = topology only
 	timeInputMode     bool
 	timeInput         textinput.Model
 	configViewMode    bool
@@ -125,6 +126,7 @@ func newModel(traceData *TraceData) model {
 		currentTime:        0.0,
 		currentEventIndex:  0,
 		clusterState:       NewClusterState(),
+		layout:             0, // Default: 2-column layout (topology + events)
 		timeInputMode:      false,
 		timeInput:          ti,
 		configViewMode:     false,
@@ -775,6 +777,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "h":
 			// Enter help view mode
 			m.helpViewMode = true
+			return m, nil
+
+		case "l":
+			// Toggle layout: 0 = 2-column, 1 = events only, 2 = topology only
+			m.layout = (m.layout + 1) % 3
 			return m, nil
 
 		case "x":
@@ -2502,7 +2509,13 @@ func (m model) View() string {
 	}
 
 	// Calculate right pane width (rest of screen minus border)
-	rightPaneWidth := m.width - leftPaneWidth - 3 // 3 for " │ "
+	// In events-only layout, use full width
+	var rightPaneWidth int
+	if m.layout == 1 {
+		rightPaneWidth = m.width - 2 // Full width minus small margin
+	} else {
+		rightPaneWidth = m.width - leftPaneWidth - 3 // 3 for " │ "
+	}
 	if rightPaneWidth < 30 {
 		rightPaneWidth = 30
 	}
@@ -2544,33 +2557,59 @@ func (m model) View() string {
 		eventLines = append(eventLines, "")
 	}
 
-	// Build split view line by line with columnar topology
+	// Build split view line by line based on layout mode
 	var splitContent strings.Builder
 	borderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
-		// Render all topology columns for this line
-		for colIdx, column := range columns {
-			var line string
-			if lineIdx < len(column) {
-				line = column[lineIdx]
+		switch m.layout {
+		case 0: // 2-column layout (topology + events)
+			// Render all topology columns for this line
+			for colIdx, column := range columns {
+				var line string
+				if lineIdx < len(column) {
+					line = column[lineIdx]
+				}
+
+				// Pad to column width
+				lineWidth := lipgloss.Width(line)
+				targetWidth := columnWidths[colIdx]
+				if lineWidth < targetWidth {
+					line = line + strings.Repeat(" ", targetWidth-lineWidth)
+				}
+
+				splitContent.WriteString(line)
 			}
 
-			// Pad to column width
-			lineWidth := lipgloss.Width(line)
-			targetWidth := columnWidths[colIdx]
-			if lineWidth < targetWidth {
-				line = line + strings.Repeat(" ", targetWidth-lineWidth)
+			// Add border and event line
+			splitContent.WriteString(borderStyle.Render(" │ "))
+
+			if lineIdx < len(eventLines) {
+				splitContent.WriteString(eventLines[lineIdx])
 			}
 
-			splitContent.WriteString(line)
-		}
+		case 1: // Events only
+			if lineIdx < len(eventLines) {
+				splitContent.WriteString(eventLines[lineIdx])
+			}
 
-		// Add border and event line
-		splitContent.WriteString(borderStyle.Render(" │ "))
+		case 2: // Topology only
+			// Render all topology columns for this line
+			for colIdx, column := range columns {
+				var line string
+				if lineIdx < len(column) {
+					line = column[lineIdx]
+				}
 
-		if lineIdx < len(eventLines) {
-			splitContent.WriteString(eventLines[lineIdx])
+				// Pad to column width
+				lineWidth := lipgloss.Width(line)
+				targetWidth := columnWidths[colIdx]
+				if lineWidth < targetWidth {
+					line = line + strings.Repeat(" ", targetWidth-lineWidth)
+				}
+
+				splitContent.WriteString(line)
+			}
 		}
 
 		splitContent.WriteString("\n")
@@ -2706,12 +2745,22 @@ func (m model) View() string {
 	separatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	bottomSection.WriteString(separatorStyle.Render(strings.Repeat("─", 20)))
 	bottomSection.WriteString("\n")
-	scrubberContent := fmt.Sprintf("Time: %.6fs", m.currentTime)
+	// Layout label
+	var layoutLabel string
+	switch m.layout {
+	case 0:
+		layoutLabel = "2-column (topology + events)"
+	case 1:
+		layoutLabel = "events only"
+	case 2:
+		layoutLabel = "topology only"
+	}
+	scrubberContent := fmt.Sprintf("Time: %.6fs | Layout: %s", m.currentTime, layoutLabel)
 	bottomSection.WriteString(scrubberStyle.Render(scrubberContent))
 	bottomSection.WriteString("\n")
 
 	// Help text
-	help := helpStyle.Render("Ctrl+N/P: next/prev event | g/G: start/end | t: jump time | /?: search | n/N: next/prev match | f: filter | r/R: recovery | c: config | x: health | h: help | q: quit")
+	help := helpStyle.Render("Ctrl+N/P: next/prev event | g/G: start/end | t: jump time | /?: search | n/N: next/prev match | f: filter | r/R: recovery | c: config | x: health | l: layout | h: help | q: quit")
 	bottomSection.WriteString(help)
 
 	// Combine split view with bottom section
@@ -4101,6 +4150,8 @@ func (m model) renderHelpPopup(baseView string) string {
 	content.WriteString(commandStyle.Render("  c                  Show full DB config JSON (Ctrl+N/P to scroll)"))
 	content.WriteString("\n")
 	content.WriteString(commandStyle.Render("  x                  Show health metrics (network, degraded peers, connections)"))
+	content.WriteString("\n")
+	content.WriteString(commandStyle.Render("  l                  Toggle layout (2-column / events only / topology only)"))
 	content.WriteString("\n")
 	content.WriteString(commandStyle.Render("  h                  Show this help"))
 	content.WriteString("\n\n")
