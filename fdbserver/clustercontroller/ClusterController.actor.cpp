@@ -4429,6 +4429,51 @@ TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
 		ASSERT(slPids.contains(rs.locality.processId()));
 	}
 
+	// Verify that proxies and resolvers are distributed across different stateless processes,
+	// not all colocated on a single process. The WorkerUsage tracking via getWeight()
+	// should prefer less-loaded processes when all candidates have the same fitness.
+	{
+		std::set<Optional<Standalone<StringRef>>> distinctPids;
+		for (const auto& cp : reply.commitProxies) {
+			ASSERT(distinctPids.insert(cp.locality.processId()).second);
+		}
+		distinctPids.clear();
+		for (const auto& gp : reply.grvProxies) {
+			ASSERT(distinctPids.insert(gp.locality.processId()).second);
+		}
+		distinctPids.clear();
+		for (const auto& rs : reply.resolvers) {
+			ASSERT(distinctPids.insert(rs.locality.processId()).second);
+		}
+	}
+
+	// Verify determinism: a second call with the same inputs must produce the same result.
+	// The getUniqueHash() from WorkerUsage ensures stable ordering of candidates
+	// with equal fitness
+	{
+		auto reply2 = data.findWorkersForConfigurationDispatch(req, false);
+
+		ASSERT_EQ(reply.tLogs.size(), reply2.tLogs.size());
+		for (int i = 0; i < reply.tLogs.size(); ++i) {
+			ASSERT(reply.tLogs[i].locality.processId() == reply2.tLogs[i].locality.processId());
+		}
+
+		ASSERT_EQ(reply.commitProxies.size(), reply2.commitProxies.size());
+		for (int i = 0; i < reply.commitProxies.size(); ++i) {
+			ASSERT(reply.commitProxies[i].locality.processId() == reply2.commitProxies[i].locality.processId());
+		}
+
+		ASSERT_EQ(reply.grvProxies.size(), reply2.grvProxies.size());
+		for (int i = 0; i < reply.grvProxies.size(); ++i) {
+			ASSERT(reply.grvProxies[i].locality.processId() == reply2.grvProxies[i].locality.processId());
+		}
+
+		ASSERT_EQ(reply.resolvers.size(), reply2.resolvers.size());
+		for (int i = 0; i < reply.resolvers.size(); ++i) {
+			ASSERT(reply.resolvers[i].locality.processId() == reply2.resolvers[i].locality.processId());
+		}
+	}
+
 	return Void();
 }
 
