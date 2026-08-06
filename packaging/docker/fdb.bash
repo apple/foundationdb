@@ -27,7 +27,7 @@ function create_cluster_file() {
     if [[ -n "$FDB_CLUSTER_FILE_CONTENTS" ]]; then
         echo "$FDB_CLUSTER_FILE_CONTENTS" > "$FDB_CLUSTER_FILE"
         if [[ $? != 0 ]]; then
-            echo "FDB_CLUSTER_FILE_CONTENTS is defined, but cannot write to FDB_CLUSTER_FILE ($FDB_CLUSTER_FILE). Is something mounted read-only there?"
+            echo "FDB_CLUSTER_FILE_CONTENTS is defined, but cannot write to FDB_CLUSTER_FILE ($FDB_CLUSTER_FILE)." 1>&2
             exit 1
         fi
     elif [[ -n $FDB_COORDINATOR ]]; then
@@ -43,7 +43,7 @@ function create_cluster_file() {
         fi
         echo "docker:docker@$coordinator_ip:$FDB_COORDINATOR_PORT" > "$FDB_CLUSTER_FILE"
     elif [[ ! -r "$FDB_CLUSTER_FILE" ]]; then
-        echo "Neither FDB_CLUSTER_FILE_CONTENTS nor FDB_COORDINATOR are set, but no readable cluster file is at FDB_CLUSTER_FILE ($FDB_CLUSTER_FILE)."
+        echo "Neither FDB_CLUSTER_FILE_CONTENTS nor FDB_COORDINATOR are set, but no readable cluster file is at FDB_CLUSTER_FILE ($FDB_CLUSTER_FILE)." 1>&2
         exit 1
     else
         echo "Using existing FDB_CLUSTER_FILE at $FDB_CLUSTER_FILE"
