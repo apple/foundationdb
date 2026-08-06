@@ -5,9 +5,21 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func main() {
+	// Some terminals do not advertise 256-color support even though they have
+	// it, and lipgloss then degrades to 16 colors or to no color at all. Raise
+	// the profile when that happens, but never cap a terminal that can do
+	// better: in termenv a lower Profile value is the more capable one
+	// (TrueColor=0 < ANSI256=1 < ANSI=2 < Ascii=3).
+	if lipgloss.ColorProfile() > termenv.ANSI256 {
+		lipgloss.SetColorProfile(termenv.ANSI256)
+	}
+
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
