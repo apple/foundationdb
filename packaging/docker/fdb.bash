@@ -56,8 +56,10 @@ function create_server_environment() {
     elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
         public_ip=$(hostname -i | awk '{print $1}')
         public_ip_stack=4
+        listen_addr=0.0.0.0
         # IPv6 addresses need to be enclosed in brackets
         if [[ $public_ip == *":"* ]]; then
+            listen_addr='[::]'
             public_ip_stack=6
             public_ip="[$public_ip]"
         fi
@@ -69,6 +71,7 @@ function create_server_environment() {
     fi
 
     export PUBLIC_IP=$public_ip
+    export LISTEN_ADDR=$listen_addr
     # Set default cluster file contents only if no configuration exists already.
     if [[ (! -s "$FDB_CLUSTER_FILE") && -z $FDB_COORDINATOR && -z "$FDB_CLUSTER_FILE_CONTENTS" ]]; then
         FDB_CLUSTER_FILE_CONTENTS="docker:docker@$public_ip:$FDB_PORT"
@@ -78,8 +81,8 @@ function create_server_environment() {
 }
 
 create_server_environment
-echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT"
-fdbserver --listen-address 0.0.0.0:"$FDB_PORT" --public-address "$PUBLIC_IP:$FDB_PORT" \
+echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT, listening on $LISTEN_ADDR:$FDB_PORT"
+fdbserver --listen-address $LISTEN_ADDR:"$FDB_PORT" --public-address "$PUBLIC_IP:$FDB_PORT" \
     --datadir /var/fdb/data --logdir /var/fdb/logs \
     --locality-zoneid="$(hostname)" --locality-machineid="$(hostname)" --class "$FDB_PROCESS_CLASS" --knob_disable_posix_kernel_aio=1 \
     $@
