@@ -21,6 +21,7 @@
 #pragma once
 
 #include <algorithm>
+#include <compare>
 #include <utility>
 
 #include "fdbclient/DatabaseContext.h"
@@ -28,6 +29,8 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
+#include "fdbrpc/simulator.h"
 #include "ClusterHealthMonitor.h"
 #include "RatekeeperMonitor.h"
 #include "fdbserver/core/Knobs.h"
@@ -1507,7 +1510,17 @@ public:
 	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
 	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
 	    bool checkStable = false) {
-		std::map<std::tuple<recruitment::Fitness, int, bool, int>, std::vector<WorkerDetails>> fitness_workers;
+		struct WorkerFitnessKey {
+			recruitment::Fitness fitness;
+			int used;
+			bool unreliableBackup;
+			bool longLivedStateless;
+			int sharing;
+
+			std::strong_ordering operator<=>(WorkerFitnessKey const&) const = default;
+		};
+
+		std::map<WorkerFitnessKey, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		if (minWorker.present()) {
 			results.push_back(minWorker.get().worker);
@@ -1527,10 +1540,13 @@ public:
 			      (fitness < minWorker.get().fitness ||
 			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
 				auto sharing = preferredSharing.find(it.first);
-				fitness_workers[std::make_tuple(fitness,
-				                                id_used[it.first],
-				                                isLongLivedStateless(it.first),
-				                                sharing != preferredSharing.end() ? sharing->second : 1e6)]
+				fitness_workers[{ fitness,
+				                  id_used[it.first],
+				                  role == recruitment::Backup && g_network->isSimulated() &&
+				                      !g_simulator->getProcessByAddress(it.second.details.interf.address())
+				                           ->isReliable(),
+				                  isLongLivedStateless(it.first),
+				                  sharing != preferredSharing.end() ? sharing->second : 1'000'000 }]
 				    .push_back(it.second.details);
 			}
 		}
@@ -1674,6 +1690,14 @@ public:
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 
 		updateKnownIds(&id_used);
+		// Primary and satellite TLogs can share the remote DC. Account for their workers when placing log routers so
+		// recovery makes the same colocation choice that betterMasterExists() projects.
+		for (const auto& [processId, worker] : id_worker) {
+			if (std::find(req.exclusionWorkerIds.begin(), req.exclusionWorkerIds.end(), worker.details.interf.id()) !=
+			    req.exclusionWorkerIds.end()) {
+				id_used[processId]++;
+			}
+		}
 
 		if (req.dbgId.present()) {
 			TraceEvent(SevDebug, "FindRemoteWorkersForConf", req.dbgId.get())

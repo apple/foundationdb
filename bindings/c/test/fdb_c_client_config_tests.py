@@ -432,7 +432,8 @@ class ClientConfigTests(unittest.TestCase):
         )
         test.check_current_client(CURRENT_VERSION)
 
-    def test_no_external_client_support_api_version_ignore(self):
+    @unittest.skip("API functions are present in the two supported previous releases")
+    def test_no_external_client_support_api_version(self):
         # Multiple external clients, API version supported by none of them
         # Note: Ignored because API function won't be missing in last 2 releases.
         test = ClientConfigTest(self)
@@ -452,7 +453,8 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2124  # All external clients failed
         test.exec()
 
-    def test_one_external_client_wrong_api_version_ignore(self):
+    @unittest.skip("API functions are present in the two supported previous releases")
+    def test_one_external_client_wrong_api_version(self):
         # Multiple external clients, API version unsupported by one of them.
         # Note: Ignored because API function won't be missing in last 2 releases.
         test = ClientConfigTest(self)

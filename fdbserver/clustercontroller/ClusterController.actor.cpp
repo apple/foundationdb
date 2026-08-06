@@ -1677,7 +1677,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
 	} else {
-		CODE_PROBE(true, "Received an old worker registration request.", probe::decoration::rare);
+		CODE_PROBE(true, "Received an old worker registration request.");
 	}
 
 	// For each singleton
@@ -2263,7 +2263,7 @@ Future<Void> monitorCDCProxyAssignmentsPass(ClusterControllerData* self) {
 					tr.clear(cdcProxyRangeFor(streamId));
 					tr.set(cdcProxyKeyFor(streamId, resolvedProxyId), Value());
 					repairedAssignment = true;
-					CODE_PROBE(true, "CDC stream assignment is repaired after missing owner");
+					CODE_PROBE(true, "CDC stream assignment is repaired after missing owner", probe::decoration::rare);
 					TraceEvent("CDCProxyAssignmentMissingRepaired")
 					    .detail("StreamId", streamId)
 					    .detail("CDCProxyID", resolvedProxyId)
@@ -3600,6 +3600,56 @@ TEST_CASE("/fdbserver/clustercontroller/recoverForLowDiskCurrentTLog") {
 	data.db.serverInfo->set(dbInfo);
 
 	ASSERT(data.betterMasterExists());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/avoidSatelliteTLogRouterColocation") {
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	data.goodRemoteRecruitmentTime = Void();
+
+	DatabaseConfiguration configuration;
+	configuration.tLogReplicationFactor = 1;
+	configuration.tLogPolicy = makeReference<PolicyAcross>(1, "zoneid", makeReference<PolicyOne>());
+	configuration.remoteTLogReplicationFactor = 1;
+	configuration.remoteDesiredTLogCount = 1;
+	configuration.remoteTLogPolicy = makeReference<PolicyAcross>(1, "zoneid", makeReference<PolicyOne>());
+
+	const Key remoteDcId = "remote"_sr;
+	auto addWorker = [&](std::string const& processId, ProcessClass::ClassType classType) {
+		LocalityData locality;
+		locality.set(LocalityData::keyProcessId, Standalone<StringRef>(processId));
+		locality.set(LocalityData::keyZoneId, Standalone<StringRef>(processId));
+		locality.set(LocalityData::keyDcId, remoteDcId);
+		WorkerInterface worker(locality);
+		worker.initEndpoints();
+		auto& workerInfo = data.id_worker[locality.processId()];
+		workerInfo.details.interf = worker;
+		workerInfo.details.processClass = ProcessClass(classType, ProcessClass::CommandLineSource);
+		workerInfo.details.recoveredDiskFiles = true;
+		return worker.id();
+	};
+
+	const UID satelliteA = addWorker("satellite-a", ProcessClass::UnsetClass);
+	const UID satelliteB = addWorker("satellite-b", ProcessClass::UnsetClass);
+	const UID remoteLog = addWorker("remote-log", ProcessClass::LogClass);
+	addWorker("router-a", ProcessClass::UnsetClass);
+	addWorker("router-b", ProcessClass::UnsetClass);
+	const std::vector<UID> satelliteWorkers{ satelliteA, satelliteB };
+
+	for (int attempt = 0; attempt < 16; ++attempt) {
+		RecruitRemoteFromConfigurationRequest req(configuration, remoteDcId, 2, satelliteWorkers);
+		auto result = data.findRemoteWorkersForConfiguration(req);
+		ASSERT_EQ(result.remoteTLogs.size(), 1);
+		ASSERT(result.remoteTLogs[0].id() == remoteLog);
+		ASSERT_EQ(result.logRouters.size(), 2);
+		for (const auto& router : result.logRouters) {
+			ASSERT(std::find(satelliteWorkers.begin(), satelliteWorkers.end(), router.id()) == satelliteWorkers.end());
+		}
+	}
 	return Void();
 }
 

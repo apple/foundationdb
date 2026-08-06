@@ -3186,7 +3186,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 // from hitting asserts due to knob/path mismatch).
 Future<Void> monitorShardEncodeKnob(UID ddId) {
 	bool initial = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
-	loop {
+	while (true) {
 		co_await delay(5.0);
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA != initial) {
 			TraceEvent(SevInfo, "DDShardEncodeKnobChanged", ddId)
@@ -5359,7 +5359,9 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (ddSnapReqMap.contains(snapReq.snapUID)) {
-					CODE_PROBE(true, "Data distributor received a duplicate ongoing snapshot request");
+					CODE_PROBE(true,
+					           "Data distributor received a duplicate ongoing snapshot request",
+					           probe::decoration::rare);
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
 					// Discard the old request if a duplicate new request is received

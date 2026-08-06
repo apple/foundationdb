@@ -580,9 +580,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	void recordDurableAckProxyReplacement() {
-		CODE_PROBE(true,
-		           "Native CDC durable acknowledgement validation retries after proxy replacement",
-		           probe::decoration::rare);
+		CODE_PROBE(true, "Native CDC durable acknowledgement validation retries after proxy replacement");
 	}
 
 	Future<CDCProxyBufferStatus> getCurrentProxyStatus(Database cx,
@@ -700,7 +698,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		bool followedProxyReplacement = proxy->id() != initialProxyStatus.first.id();
 		updateObservedProxy(*proxy, initialProxyStatus.first);
 		const CDCProxyBufferStatus initial = initialProxyStatus.second;
-		Reference<AsyncVar<bool>> stopped = makeReference<AsyncVar<bool>>(false);
+		auto stopped = makeReference<AsyncVar<bool>>(false);
 		Future<Void> requester = requestPopsUntilStopped(cx, stopped);
 		const double deadline = now() + operationTimeout;
 		while (true) {
@@ -714,7 +712,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			ASSERT_LT(now(), deadline);
 			co_await delay(0.01);
 		}
-		CODE_PROBE(followedProxyReplacement, "Native CDC pop progress validation follows proxy replacement");
+		CODE_PROBE(followedProxyReplacement,
+		           "Native CDC pop progress validation follows proxy replacement",
+		           probe::decoration::rare);
 		stopped->set(true);
 		co_await timeoutError(requester, operationTimeout);
 	}
@@ -734,7 +734,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 
 		Promise<Void> releaseAcknowledgements;
-		Reference<AsyncVar<int>> completed = makeReference<AsyncVar<int>>(0);
+		auto completed = makeReference<AsyncVar<int>>(0);
 		std::vector<Future<Void>> consumers;
 		consumers.reserve(streams.size());
 		for (const auto& stream : streams) {
@@ -1018,8 +1018,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				if (status.popRequests != scanInitial.popRequests) {
 					unrelatedPopRequest = true;
 					CODE_PROBE(true,
-					           "Native CDC durable acknowledgement scan retries after an unrelated proxy pop wake",
-					           probe::decoration::rare);
+					           "Native CDC durable acknowledgement scan retries after an unrelated proxy pop wake");
 					break;
 				}
 				if (status.bufferedBytes < scanInitial.bufferedBytes &&
@@ -1167,11 +1166,11 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT(g_network->isSimulated());
 		const uint64_t recoveryCount = dbInfo->get().recoveryCount;
 		while (true) {
-			const auto masterZone = dbInfo->get().master.locality.zoneId();
-			if (g_simulator->killZone(masterZone, ISimulator::KillType::Reboot, true)) {
+			const auto masterMachine = dbInfo->get().master.locality.machineId();
+			if (g_simulator->killMachine(masterMachine, ISimulator::KillType::Reboot, true)) {
 				break;
 			}
-			co_await dbInfo->onChange();
+			co_await (dbInfo->onChange() || delay(1.0));
 		}
 		co_await timeoutError(waitForTransactionSystemRecoveryAfter(recoveryCount), operationTimeout);
 	}
@@ -1277,8 +1276,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 					ASSERT(found != stream->expected.end());
 					ASSERT_LE(versioned.version, found->second.committedVersion);
 					CODE_PROBE(versioned.version < found->second.committedVersion,
-					           "Native CDC validation accepts a committed retry before the returned commit version",
-					           probe::decoration::rare);
+					           "Native CDC validation accepts a committed retry before the returned commit version");
 					ASSERT(found->second.observedVersions.insert(versioned.version).second);
 				}
 			}

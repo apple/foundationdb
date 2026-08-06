@@ -86,100 +86,22 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 	}
 }
 
-AsyncResult<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
-	Reference<ITransaction> tr = db->createTransaction();
-	while (true) {
-		Error err;
-		try {
-			ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(fdb_cli::excludedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::vector<std::string> exclusions;
-			for (const auto& i : r) {
-				auto addr = i.key.removePrefix(fdb_cli::excludedServersSpecialKeyRange.begin).toString();
-				exclusions.push_back(addr);
-			}
-			co_return exclusions;
-		} catch (Error& e) {
-			err = e;
-		}
-		TraceEvent(SevWarn, "GetExcludedServersError").error(err);
-		co_await safeThreadFutureToFuture(tr->onError(err));
-	}
+Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
+	return getManagementApiSpecialKeyValues(db, fdb_cli::excludedServersSpecialKeyRange, "GetExcludedServersError");
 }
 
 // Get the list of excluded localities by reading the keys.
-AsyncResult<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) {
-	Reference<ITransaction> tr = db->createTransaction();
-	while (true) {
-		Error err;
-		try {
-			ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(fdb_cli::excludedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::vector<std::string> excludedLocalities;
-			for (const auto& i : r) {
-				auto locality = i.key.removePrefix(fdb_cli::excludedLocalitySpecialKeyRange.begin).toString();
-				excludedLocalities.push_back(locality);
-			}
-			co_return excludedLocalities;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await safeThreadFutureToFuture(tr->onError(err));
-	}
+Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) {
+	return getManagementApiSpecialKeyValues(db, fdb_cli::excludedLocalitySpecialKeyRange);
 }
 
-AsyncResult<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
-	Reference<ITransaction> tr = db->createTransaction();
-	while (true) {
-		Error err;
-		try {
-			ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(fdb_cli::failedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::vector<std::string> exclusions;
-			for (const auto& i : r) {
-				auto addr = i.key.removePrefix(fdb_cli::failedServersSpecialKeyRange.begin).toString();
-				exclusions.push_back(addr);
-			}
-			co_return exclusions;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await safeThreadFutureToFuture(tr->onError(err));
-	}
+Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
+	return getManagementApiSpecialKeyValues(db, fdb_cli::failedServersSpecialKeyRange);
 }
 
 // Get the list of failed localities by reading the keys.
-AsyncResult<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
-	Reference<ITransaction> tr = db->createTransaction();
-	while (true) {
-		Error err;
-		try {
-			ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(fdb_cli::failedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::vector<std::string> excludedLocalities;
-			for (const auto& i : r) {
-				auto locality = i.key.removePrefix(fdb_cli::failedLocalitySpecialKeyRange.begin).toString();
-				excludedLocalities.push_back(locality);
-			}
-			co_return excludedLocalities;
-		} catch (Error& e) {
-			err = e;
-		}
-		TraceEvent(SevWarn, "GetExcludedLocalitiesError").error(err);
-		co_await safeThreadFutureToFuture(tr->onError(err));
-	}
+Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
+	return getManagementApiSpecialKeyValues(db, fdb_cli::failedLocalitySpecialKeyRange, "GetExcludedLocalitiesError");
 }
 
 Future<std::set<NetworkAddress>> getInProgressExclusion(Reference<ITransaction> tr) {
@@ -285,20 +207,6 @@ Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<AddressExclu
 } // namespace
 
 namespace fdb_cli {
-
-const KeyRangeRef excludedServersSpecialKeyRange("\xff\xff/management/excluded/"_sr,
-                                                 "\xff\xff/management/excluded0"_sr);
-const KeyRangeRef failedServersSpecialKeyRange("\xff\xff/management/failed/"_sr, "\xff\xff/management/failed0"_sr);
-const KeyRangeRef excludedLocalitySpecialKeyRange("\xff\xff/management/excluded_locality/"_sr,
-                                                  "\xff\xff/management/excluded_locality0"_sr);
-const KeyRangeRef failedLocalitySpecialKeyRange("\xff\xff/management/failed_locality/"_sr,
-                                                "\xff\xff/management/failed_locality0"_sr);
-const KeyRef excludedForceOptionSpecialKey = "\xff\xff/management/options/excluded/force"_sr;
-const KeyRef failedForceOptionSpecialKey = "\xff\xff/management/options/failed/force"_sr;
-const KeyRef excludedLocalityForceOptionSpecialKey = "\xff\xff/management/options/excluded_locality/force"_sr;
-const KeyRef failedLocalityForceOptionSpecialKey = "\xff\xff/management/options/failed_locality/force"_sr;
-const KeyRangeRef exclusionInProgressSpecialKeyRange("\xff\xff/management/in_progress_exclusion/"_sr,
-                                                     "\xff\xff/management/in_progress_exclusion0"_sr);
 
 Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> _warn) {
 	auto warn = std::move(_warn);

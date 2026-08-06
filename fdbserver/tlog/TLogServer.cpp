@@ -183,7 +183,7 @@ private:
 
 			Standalone<StringRef> e = co_await self->queue->readNext(payloadSize + 1);
 			if (e.size() != payloadSize + 1) {
-				CODE_PROBE(true, "Zero fill within payload", probe::decoration::rare);
+				CODE_PROBE(true, "Zero fill within payload");
 				zeroFillSize = payloadSize + 1 - e.size();
 				break;
 			}
@@ -199,7 +199,7 @@ private:
 			}
 		}
 		if (zeroFillSize) {
-			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue", probe::decoration::rare);
+			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue");
 			for (int i = 0; i < zeroFillSize; i++)
 				self->queue->push(StringRef((const uint8_t*)"", 1));
 		}
@@ -2345,8 +2345,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				}
 				if (sequenceData.isSet()) {
 					if (sequenceData.getFuture().get().first != rep.end) {
-						CODE_PROBE(
-						    true, "tlog peek second attempt ended at a different version", probe::decoration::rare);
+						CODE_PROBE(true, "tlog peek second attempt ended at a different version");
 						replyPromise.sendError(operation_obsolete());
 						co_return;
 					}
@@ -3428,7 +3427,8 @@ static bool canTLogAcceptNewData(TLogData* self, Reference<LogData> logData, Ver
 		return true;
 	}
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
-		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpeedUpSimulation", logData->logId)
+		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSimulationBypass", logData->logId)
+		    .suppressFor(60.0)
 		    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
 		    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
 		    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
@@ -3436,10 +3436,8 @@ static bool canTLogAcceptNewData(TLogData* self, Reference<LogData> logData, Ver
 		    .detail("QueueDiskBytesAvailable", queueBytes.available)
 		    .detail("QueueDiskBytesTotal", queueBytes.total)
 		    .detail("Version", ver);
-		g_simulator->speedUpSimulation = true;
-		if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, effectiveTLogMinAvailableSpaceRatio())) {
-			return true;
-		}
+		// Bypass only this simulated pull; do not speed up the whole simulation.
+		return true;
 	}
 	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
 	const bool enteringLowDisk = !self->lowDiskTLogExclusion->get();

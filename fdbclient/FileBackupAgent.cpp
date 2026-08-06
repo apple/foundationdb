@@ -6396,7 +6396,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreVersion", restoreVersion)
 				    .detail("Dest", destVersion);
 				if (destVersion <= restoreVersion) {
-					CODE_PROBE(true, "Forcing restored cluster to higher version");
+					CODE_PROBE(true, "Forcing restored cluster to higher version", probe::decoration::rare);
 					tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion + 1, Unversioned()));
 					co_await tr->commit();
 					tr->reset();

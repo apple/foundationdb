@@ -2461,7 +2461,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 					throw error;
 				}
 			} else {
-				CODE_PROBE(true, "move keys failed -- removed server or exceeded retries", probe::decoration::rare);
+				CODE_PROBE(true, "move keys failed -- removed server or exceeded retries");
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
 				auto readLoad = metrics.readLoadKSecond();
 				auto& destinationRef = healthyDestinations;
@@ -3508,7 +3508,7 @@ TEST_CASE("/DataDistribution/DDQueue/RetryDestinationTeamFailure") {
 }
 
 TEST_CASE("/DataDistribution/DDQueue/SerializeRelocatorError") {
-	Reference<DDQueue> self = makeReference<DDQueue>();
+	auto self = makeReference<DDQueue>();
 	DDQueueImpl::RunState state(self);
 	Promise<Void> error;
 	Future<Void> propagated;
