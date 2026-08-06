@@ -3046,7 +3046,8 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    getUnhealthyRelocationCount,
 			    getAverageShardBytes,
 			    triggerStorageQueueRebalance,
-			    self->bulkLoadTaskCollection });
+			    self->bulkLoadTaskCollection,
+			    self->context->ddQueue->pipelineFull });
 			teamCollectionsPtrs.push_back(self->context->primaryTeamCollection.getPtr());
 			Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage =
 			    IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
@@ -3071,7 +3072,8 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                getUnhealthyRelocationCount,
 				                                getAverageShardBytes,
 				                                triggerStorageQueueRebalance,
-				                                self->bulkLoadTaskCollection });
+				                                self->bulkLoadTaskCollection,
+				                                self->context->ddQueue->pipelineFull });
 				teamCollectionsPtrs.push_back(self->context->remoteTeamCollection.getPtr());
 				self->context->remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->remoteTeamCollection,
