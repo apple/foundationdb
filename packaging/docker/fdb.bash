@@ -31,8 +31,13 @@ function create_cluster_file() {
             exit 1
         fi
     elif [[ -n $FDB_COORDINATOR ]]; then
-        coordinator_ip=$(dig +short "$FDB_COORDINATOR")
-        if [[ -z "$coordinator_ip" ]]; then
+        if (( $public_ip_stack == 4 )); then
+            coordinator_ip=$(getent ahostsv4 "$FDB_COORDINATOR" | awk 'END{ print $1 }')
+        else
+            coordinator_ip='['$(getent ahostsv6 "$FDB_COORDINATOR" | awk 'END{ print $1 }')']'
+        fi
+
+        if (( $? != 0 )); then
             echo "Failed to look up coordinator address for $FDB_COORDINATOR" 1>&2
             exit 1
         fi
@@ -50,11 +55,14 @@ function create_server_environment() {
         public_ip=127.0.0.1
     elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
         public_ip=$(hostname -i | awk '{print $1}')
-        
+        public_ip_stack=4
         # IPv6 addresses need to be enclosed in brackets
         if [[ $public_ip == *":"* ]]; then
+            public_ip_stack=6
             public_ip="[$public_ip]"
         fi
+
+        echo "The server is currently running on an IPv$public_ip_stack stack!"
     else
         echo "Unknown FDB Networking mode \"$FDB_NETWORKING_MODE\"" 1>&2
         exit 1
