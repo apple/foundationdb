@@ -2473,9 +2473,7 @@ public:
 		}
 	}
 
-	void updateIdUsed(const std::vector<WorkerDetails>& workers,
-	                  recruitment::ClusterRole role,
-	                  WorkerUsages& id_used) {
+	void updateIdUsed(const std::vector<WorkerDetails>& workers, recruitment::ClusterRole role, WorkerUsages& id_used) {
 		for (auto& it : workers) {
 			id_used[it.interf.locality.processId()].addRole(role);
 		}
