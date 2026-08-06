@@ -209,10 +209,10 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
 
 	template <typename T>
-	void addLog(const T& event) {
+	void addLog(const T& event, SpanContext spanContext) {
 		if (logLocation & TRACE_LOG) {
 			ASSERT(!identifier.empty());
-			event.logEvent(identifier, maxFieldLength);
+			event.logEvent(identifier, maxFieldLength, spanContext);
 		}
 
 		if (flushed) {
