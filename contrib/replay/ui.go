@@ -1042,18 +1042,61 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// formatRoleLabel formats a role label with ID and epoch (if applicable)
-// For TLog, LogRouter, BackupWorker: shows "RoleName [ID] (e=Epoch)"
+// formatRoleLabel formats a role label with ID, epoch, version, and buddy (if applicable)
+// For TLog, LogRouter, BackupWorker: shows "RoleName [ID] (e=Epoch v=Version)"
+// For StorageServer: shows "StorageServer [ID] (v=Version ←TL:buddy)"
+// For TLog with LogRouters: shows "TLog [ID] (e=Epoch v=Version ←LR:id1,id2,id3)"
+// Buddy references only shown if the buddy exists in current topology (no dangling refs)
 // For other roles: shows "RoleName [ID]" or just "RoleName"
 func formatRoleLabel(role RoleInfo) string {
 	roleLabel := role.Name
 	if role.ID != "" {
 		roleLabel = fmt.Sprintf("%s [%s]", role.Name, role.ID)
 	}
+
+	// Build the parenthetical info
+	var info []string
+
 	// Add epoch for TLog, LogRouter, and BackupWorker roles
 	if role.Epoch != "" && (role.Name == "TLog" || role.Name == "LogRouter" || role.Name == "BackupWorker") {
-		roleLabel = fmt.Sprintf("%s (e=%s)", roleLabel, role.Epoch)
+		info = append(info, fmt.Sprintf("e=%s", role.Epoch))
 	}
+
+	// Add version for roles that process versions
+	if role.Version > 0 {
+		// Format version with commas for readability
+		info = append(info, fmt.Sprintf("v=%s", formatNumberWithCommas(role.Version)))
+	}
+
+	// Add buddy info for StorageServer and LogRouter (who they peek from, 1:1)
+	// Arrow direction is ← to indicate "peeks from" / "receives from"
+	if role.BuddyID != "" {
+		// Truncate buddy ID to first 8 chars for display
+		buddyShort := role.BuddyID
+		if len(buddyShort) > 8 {
+			buddyShort = buddyShort[:8]
+		}
+		info = append(info, fmt.Sprintf("←TL:%s", buddyShort))
+	}
+
+	// Add LogRouter list for Remote TLogs (who they pull from, 1:N)
+	// Arrow direction is ← to indicate "receives from" vs → "peeks from"
+	if len(role.BuddyIDs) > 0 {
+		var lrShorts []string
+		for _, id := range role.BuddyIDs {
+			short := id
+			if len(short) > 8 {
+				short = short[:8]
+			}
+			lrShorts = append(lrShorts, short)
+		}
+		info = append(info, fmt.Sprintf("←LR:%s", strings.Join(lrShorts, ",")))
+	}
+
+	if len(info) > 0 {
+		roleLabel = fmt.Sprintf("%s (%s)", roleLabel, strings.Join(info, " "))
+	}
+
 	return roleLabel
 }
 
