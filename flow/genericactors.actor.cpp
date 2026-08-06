@@ -269,7 +269,7 @@ TEST_CASE("/flow/genericactors/AsyncListener") {
 TEST_CASE("/flow/genericactors/DelayedAsyncVarPreservesReentrantInputChange") {
 	state Reference<AsyncVar<bool>> input = makeReference<AsyncVar<bool>>(true);
 	state Reference<AsyncVar<bool>> output = makeReference<AsyncVar<bool>>(true);
-	state Future<Void> feedback = generic_coro::trigger(SetAsyncVarTrue{ input }, output->onChange());
+	state Future<Void> feedback = trigger(SetAsyncVarTrue{ input }, output->onChange());
 	state Future<Void> publisher = delayedAsyncVar(input, output, 0);
 
 	wait(delay(0));
