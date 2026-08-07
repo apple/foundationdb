@@ -324,7 +324,7 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	    db->recoveryData->remoteDcIds.size() ? db->recoveryData->remoteDcIds[0] : Optional<Key>();
 
 	// Use getWorkersForRoleInDatacenter to get workers for all log routers at once
-	std::map<Optional<Standalone<StringRef>>, int> id_used;
+	ClusterControllerData::WorkerUsages id_used;
 	cluster->updateKnownIds(&id_used);
 
 	std::vector<WorkerDetails> workers =
@@ -997,7 +997,7 @@ void checkOutstandingStorageRequests(ClusterControllerData* self) {
 // Finds and returns a new process for role
 WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
                                          const recruitment::ClusterRole role,
-                                         std::map<Optional<Standalone<StringRef>>, int>& id_used) {
+                                         ClusterControllerData::WorkerUsages& id_used) {
 	// find new process in cluster for role
 	WorkerDetails newWorker =
 	    self->getWorkerForRoleInDatacenter(
@@ -1010,7 +1010,7 @@ WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
 	}
 
 	// acknowledge that the pid is now potentially used by this role as well
-	id_used[newWorker.interf.locality.processId()]++;
+	id_used[newWorker.interf.locality.processId()].addRole(role);
 
 	return newWorker;
 }
@@ -1108,14 +1108,14 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	// note: this map doesn't consider pids used by existing singletons
-	std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+	ClusterControllerData::WorkerUsages id_used = self->getUsedIds();
 
 	// We prefer spreading out other roles more than separating singletons on their own process
 	// so we artificially amplify the pid count for the processes used by non-singleton roles.
 	// In other words, we make the processes used for other roles less desirable to be used
 	// by singletons as well.
 	for (auto& it : id_used) {
-		it.second *= PID_USED_AMP_FOR_NON_SINGLETON;
+		it.second.multiplier *= PID_USED_AMP_FOR_NON_SINGLETON;
 	}
 
 	// Try to find a new process for each singleton.
@@ -2752,7 +2752,7 @@ Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) 
 				co_return;
 			}
 
-			std::map<Optional<Standalone<StringRef>>, int> idUsed = self->getUsedIds();
+			auto idUsed = self->getUsedIds();
 			WorkerFitnessInfo ddWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
 			                                                                recruitment::DataDistributor,
 			                                                                recruitment::NeverAssign,
@@ -2852,7 +2852,7 @@ Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
 				co_return;
 			}
 
-			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+			ClusterControllerData::WorkerUsages id_used = self->getUsedIds();
 			WorkerFitnessInfo rkWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
 			                                                                recruitment::Ratekeeper,
 			                                                                recruitment::NeverAssign,
@@ -2940,7 +2940,7 @@ Future<Void> startConsistencyScan(ClusterControllerData* self) {
 				co_return;
 			}
 
-			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+			auto id_used = self->getUsedIds();
 			WorkerFitnessInfo csWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
 			                                                                recruitment::ConsistencyScan,
 			                                                                recruitment::NeverAssign,
@@ -4321,6 +4321,157 @@ TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
 		ASSERT(data.degradationInfo.degradedServers.contains(worker1));
 		ASSERT(data.degradationInfo.degradedServers.contains(worker2));
 		ASSERT(data.degradationInfo.degradedServers.contains(worker3));
+	}
+
+	return Void();
+}
+
+// Test for the fix described in PR #10411.
+// Verifies that in a small cluster (3 stateless, 3 transaction, 3 storage processes),
+// the role allocation correctly assigns all 3 commit_proxy roles to the stateless nodes.
+// Previously, only 1 commit_proxy would be recruited due to a bug in the candidate
+// selection logic within ClusterControllerData::getWorkersForRoleInDatacenter.
+// This test ensures that the desired number of proxies (3) is now fully recruited
+// when sufficient stateless processes exist.
+TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
+	ClusterControllerFullInterface cci;
+	cci.initEndpoints();
+
+	ClusterControllerData data(cci,
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+
+	constexpr int numWorkersPerClass = 3;
+
+	auto makeWorkers = [&](ProcessClass::ClassType classType, StringRef prefix, int count) {
+		std::vector<WorkerInterface> workers;
+		for (int i = 0; i < count; i++) {
+			auto pid = prefix.toString() + std::to_string(i);
+			WorkerInterface wi;
+			wi.initEndpoints();
+			wi.locality.set(LocalityData::keyZoneId, Standalone<StringRef>(pid + "_zone"));
+			wi.locality.set(LocalityData::keyProcessId, Standalone<StringRef>(pid));
+			data.id_worker[wi.locality.processId()] =
+			    WorkerInfo(Future<Void>(),
+			               ReplyPromise<RegisterWorkerReply>(),
+			               0,
+			               wi,
+			               ProcessClass(classType, ProcessClass::CommandLineSource),
+			               ProcessClass(classType, ProcessClass::CommandLineSource),
+			               ClusterControllerPriorityInfo(
+			                   recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown),
+			               false,
+			               true,
+			               Standalone<VectorRef<StringRef>>());
+			workers.push_back(wi);
+		}
+		return workers;
+	};
+
+	auto statelessWorkers = makeWorkers(ProcessClass::StatelessClass, "sl"_sr, numWorkersPerClass);
+	auto transactionWorkers = makeWorkers(ProcessClass::TransactionClass, "tx"_sr, numWorkersPerClass);
+	auto storageWorkers = makeWorkers(ProcessClass::StorageClass, "ss"_sr, numWorkersPerClass);
+
+	data.masterProcessId = statelessWorkers[0].locality.processId();
+	data.clusterControllerProcessId = statelessWorkers[1].locality.processId();
+	data.startTime = now();
+	data.gotFullyRecoveredConfig = true;
+	data.gotProcessClasses = true;
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+	config.tLogReplicationFactor = numWorkersPerClass;
+	config.desiredTLogCount = numWorkersPerClass;
+	config.commitProxyCount = numWorkersPerClass;
+	config.grvProxyCount = numWorkersPerClass;
+	config.resolverCount = numWorkersPerClass;
+	config.tLogPolicy = makeReference<PolicyOne>();
+	data.db.config = config;
+	data.db.fullyRecoveredConfig = config;
+
+	// Use findWorkersForConfigurationDispatch — the production code path
+	// that handles full recruitment: TLogs + two-level proxy/resolver recruiting
+	RecruitFromConfigurationRequest req;
+	req.configuration = config;
+	req.recruitSeedServers = false;
+	req.maxOldLogRouters = 0;
+
+	auto reply = data.findWorkersForConfigurationDispatch(req, false);
+
+	ASSERT(reply.tLogs.size() == numWorkersPerClass);
+	ASSERT(reply.commitProxies.size() == numWorkersPerClass);
+	ASSERT(reply.grvProxies.size() == numWorkersPerClass);
+	ASSERT(reply.resolvers.size() == numWorkersPerClass);
+
+	// TLogs are on transaction processes
+	std::set<Optional<Standalone<StringRef>>> txPids;
+	for (const auto& w : transactionWorkers) {
+		txPids.insert(w.locality.processId());
+	}
+	for (const auto& tlog : reply.tLogs) {
+		ASSERT(txPids.contains(tlog.locality.processId()));
+	}
+
+	// check if proxy/resolvers are on stateless
+	std::set<Optional<Standalone<StringRef>>> slPids;
+	for (const auto& w : statelessWorkers) {
+		slPids.insert(w.locality.processId());
+	}
+	for (const auto& cp : reply.commitProxies) {
+		ASSERT(slPids.contains(cp.locality.processId()));
+	}
+	for (const auto& gp : reply.grvProxies) {
+		ASSERT(slPids.contains(gp.locality.processId()));
+	}
+	for (const auto& rs : reply.resolvers) {
+		ASSERT(slPids.contains(rs.locality.processId()));
+	}
+
+	// Verify that proxies and resolvers are distributed across different stateless processes,
+	// not all colocated on a single process. The WorkerUsage tracking via getWeight()
+	// should prefer less-loaded processes when all candidates have the same fitness.
+	{
+		std::set<Optional<Standalone<StringRef>>> distinctPids;
+		for (const auto& cp : reply.commitProxies) {
+			ASSERT(distinctPids.insert(cp.locality.processId()).second);
+		}
+		distinctPids.clear();
+		for (const auto& gp : reply.grvProxies) {
+			ASSERT(distinctPids.insert(gp.locality.processId()).second);
+		}
+		distinctPids.clear();
+		for (const auto& rs : reply.resolvers) {
+			ASSERT(distinctPids.insert(rs.locality.processId()).second);
+		}
+	}
+
+	// Verify determinism: a second call with the same inputs must produce the same result.
+	// The getUniqueHash() from WorkerUsage ensures stable ordering of candidates
+	// with equal fitness
+	{
+		auto reply2 = data.findWorkersForConfigurationDispatch(req, false);
+
+		ASSERT_EQ(reply.tLogs.size(), reply2.tLogs.size());
+		for (int i = 0; i < reply.tLogs.size(); ++i) {
+			ASSERT(reply.tLogs[i].locality.processId() == reply2.tLogs[i].locality.processId());
+		}
+
+		ASSERT_EQ(reply.commitProxies.size(), reply2.commitProxies.size());
+		for (int i = 0; i < reply.commitProxies.size(); ++i) {
+			ASSERT(reply.commitProxies[i].locality.processId() == reply2.commitProxies[i].locality.processId());
+		}
+
+		ASSERT_EQ(reply.grvProxies.size(), reply2.grvProxies.size());
+		for (int i = 0; i < reply.grvProxies.size(); ++i) {
+			ASSERT(reply.grvProxies[i].locality.processId() == reply2.grvProxies[i].locality.processId());
+		}
+
+		ASSERT_EQ(reply.resolvers.size(), reply2.resolvers.size());
+		for (int i = 0; i < reply.resolvers.size(); ++i) {
+			ASSERT(reply.resolvers[i].locality.processId() == reply2.resolvers[i].locality.processId());
+		}
 	}
 
 	return Void();
