@@ -84,9 +84,16 @@ Arguments:
 Options:
   -h, --help        Show this help message
 
+Environment:
+  REPLAY_THEME      Force the color palette for a light or dark terminal
+                    background: "light" or "dark". Unset means the background
+                    is detected by querying the terminal, which is unreliable
+                    through tmux and over ssh; detection falls back to dark.
+
 Examples:
   replay trace.xml              # Load specific trace file
   replay                        # Auto-load latest trace*.xml in current directory
+  REPLAY_THEME=light replay     # Force the light-background palette
 
 Tip:
   Create an alias for quick access: alias r=replay
