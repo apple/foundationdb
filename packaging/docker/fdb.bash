@@ -27,7 +27,12 @@ function create_cluster_file() {
     if [[ -n "$FDB_CLUSTER_FILE_CONTENTS" ]]; then
         echo "$FDB_CLUSTER_FILE_CONTENTS" > "$FDB_CLUSTER_FILE"
     elif [[ -n $FDB_COORDINATOR ]]; then
-        coordinator_ip=$(dig +short "$FDB_COORDINATOR")
+        if [[ "$FDB_IP_VERSION" == *'4'* ]]; then
+            coordinator_ip="$(getent ahostsv4 $FDB_COORDINATOR | awk 'END{ print $1 }')"
+        elif [[ "$FDB_IP_VERSION" == *'6'* ]]; then
+            coordinator_ip="[$(getent ahostsv6 $FDB_COORDINATOR | awk 'END{ print $1 }')]"
+        fi
+        
         if [[ -z "$coordinator_ip" ]]; then
             echo "Failed to look up coordinator address for $FDB_COORDINATOR" 1>&2
             exit 1
