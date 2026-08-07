@@ -81,22 +81,33 @@ alias r=replay
 
 ### Colors on a light terminal
 
-The palette has a light and a dark variant, and by default the right one is
-picked by asking the terminal what its background is. That query does not
-survive every environment - notably it is unreliable through `tmux` and over
-`ssh` - and when it fails the assumption is a dark background, which renders
-poorly on a light terminal.
+The palette has a light and a dark variant. Which one gets used is normally
+worked out by asking the terminal what its background is.
 
-If the colors look washed out, invisible, or overly contrasty, say what the
-background actually is:
+**That question cannot be answered inside `tmux` or `screen`**, so the dark
+variant is always assumed there. The query is an OSC escape sequence, and a
+multiplexer can be attached from several terminals at once with different
+backgrounds, so it is deliberately never sent when `TERM` starts with `screen`
+or `tmux`. `$COLORFGBG` is consulted next, and when that is unset the
+background is assumed to be black. Picking a different `default-terminal` for
+tmux does not help, since both prefixes are treated the same way.
+
+So if you run inside tmux on a light terminal, say what the background is:
 
 ```bash
 REPLAY_THEME=light replay    # force the light-background palette
 REPLAY_THEME=dark replay     # force the dark-background palette
 ```
 
-Setting `REPLAY_THEME` also skips the terminal query altogether, which is
-useful because that query can hang in environments with nothing to answer it.
+Set it once in your shell config and forget it:
+
+```bash
+set -gx REPLAY_THEME light   # fish
+export REPLAY_THEME=light    # bash/zsh
+```
+
+`replay` prints a hint on startup when it is assuming dark because detection
+was impossible. Setting `REPLAY_THEME` also skips the query altogether.
 
 ## Why
 

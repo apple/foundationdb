@@ -160,3 +160,26 @@ func TestRenderedViewChangesWithTheme(t *testing.T) {
 		t.Errorf("near-white 252 still used on light background")
 	}
 }
+
+// backgroundIsAGuess mirrors termenv's conditions, so pin them down.
+func TestBackgroundIsAGuess(t *testing.T) {
+	for _, tc := range []struct {
+		term, colorFGBG string
+		want            bool
+		why             string
+	}{
+		{"screen-256color", "", true, "inside tmux with no COLORFGBG, dark is assumed"},
+		{"tmux-256color", "", true, "the tmux prefix is refused just like screen"},
+		{"screen", "", true, "bare screen is refused too"},
+		{"xterm-256color", "", false, "outside a multiplexer the query is actually sent"},
+		{"screen-256color", "15;0", false, "COLORFGBG gives a real answer inside tmux"},
+		{"", "", false, "no TERM is not a multiplexer"},
+	} {
+		t.Setenv("TERM", tc.term)
+		t.Setenv("COLORFGBG", tc.colorFGBG)
+		if got := backgroundIsAGuess(); got != tc.want {
+			t.Errorf("TERM=%q COLORFGBG=%q: got %v, want %v (%s)",
+				tc.term, tc.colorFGBG, got, tc.want, tc.why)
+		}
+	}
+}

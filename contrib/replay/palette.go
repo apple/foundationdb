@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -51,16 +52,43 @@ var (
 
 // applyTheme honors an explicit REPLAY_THEME=light|dark, overriding detection.
 //
-// lipgloss works out the background by querying the terminal (OSC 11). That
-// query is unreliable through tmux and over ssh, and when it fails lipgloss
-// assumes a dark background - which is precisely the case that renders
-// unreadably on a light terminal. So detection is the default, but there has to
-// be a way to say what the background actually is.
+// Detection is what happens otherwise, and inside a terminal multiplexer it
+// cannot work at all. lipgloss asks termenv for the background, and termenv
+// refuses to send the OSC 11 query when TERM starts with "screen" or "tmux",
+// because a multiplexer can be attached from several terminals at once with
+// different backgrounds. It then falls back to $COLORFGBG, and failing that
+// assumes black - a dark background. So inside tmux the answer is always dark
+// no matter what the terminal actually looks like, and a light terminal ends up
+// rendering the dark palette.
+//
+// Setting REPLAY_THEME also marks the background explicit, which skips the
+// query entirely.
 func applyTheme() {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("REPLAY_THEME"))) {
 	case "light":
 		lipgloss.SetHasDarkBackground(false)
+		return
 	case "dark":
 		lipgloss.SetHasDarkBackground(true)
+		return
 	}
+
+	// Nothing explicit, so the dark palette may be about to be used purely
+	// because detection was impossible. Say so, rather than letting a light
+	// terminal look broken for no visible reason.
+	if backgroundIsAGuess() {
+		fmt.Fprintln(os.Stderr, "replay: cannot detect the terminal background inside screen/tmux, assuming dark.")
+		fmt.Fprintln(os.Stderr, "        If the colors look wrong, set REPLAY_THEME=light (or dark).")
+	}
+}
+
+// backgroundIsAGuess reports whether the background is about to be assumed
+// rather than determined. It mirrors the conditions termenv uses: the OSC query
+// is skipped for screen and tmux, and $COLORFGBG is the only other source.
+func backgroundIsAGuess() bool {
+	term := os.Getenv("TERM")
+	if !strings.HasPrefix(term, "screen") && !strings.HasPrefix(term, "tmux") {
+		return false
+	}
+	return os.Getenv("COLORFGBG") == ""
 }

@@ -19,7 +19,6 @@ func main() {
 	if lipgloss.ColorProfile() > termenv.ANSI256 {
 		lipgloss.SetColorProfile(termenv.ANSI256)
 	}
-	applyTheme()
 
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -35,6 +34,9 @@ func run() error {
 		printHelp()
 		return nil
 	}
+
+	// After the help check, since this can print a hint about the background.
+	applyTheme()
 
 	// Check command-line arguments
 	if len(os.Args) == 2 {
@@ -87,8 +89,9 @@ Options:
 Environment:
   REPLAY_THEME      Force the color palette for a light or dark terminal
                     background: "light" or "dark". Unset means the background
-                    is detected by querying the terminal, which is unreliable
-                    through tmux and over ssh; detection falls back to dark.
+                    is detected, which is impossible inside screen/tmux - the
+                    dark palette is assumed there, so set this if your terminal
+                    is light.
 
 Examples:
   replay trace.xml              # Load specific trace file
