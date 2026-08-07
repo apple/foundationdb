@@ -79,6 +79,25 @@ replay -h | --help         # Show help
 alias r=replay
 ```
 
+### Colors on a light terminal
+
+The palette has a light and a dark variant, and by default the right one is
+picked by asking the terminal what its background is. That query does not
+survive every environment - notably it is unreliable through `tmux` and over
+`ssh` - and when it fails the assumption is a dark background, which renders
+poorly on a light terminal.
+
+If the colors look washed out, invisible, or overly contrasty, say what the
+background actually is:
+
+```bash
+REPLAY_THEME=light replay    # force the light-background palette
+REPLAY_THEME=dark replay     # force the dark-background palette
+```
+
+Setting `REPLAY_THEME` also skips the terminal query altogether, which is
+useful because that query can hang in environments with nothing to answer it.
+
 ## Why
 
 The main motivation is to be **fast in debugging simulation issues**, as well as **understanding how FDB works**.
