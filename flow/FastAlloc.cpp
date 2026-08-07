@@ -20,6 +20,7 @@
 
 #include "flow/FastAlloc.h"
 
+#include "flow/MemoryTracker.h"
 #include "flow/ThreadPrimitives.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
@@ -432,6 +433,7 @@ void* FastAllocator<Size>::allocate() {
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
 	recordAllocation(p, Size);
 #endif
+	memTrackerOnAlloc(p, Size);
 	return p;
 }
 
@@ -509,6 +511,7 @@ void FastAllocator<Size>::release(void* ptr) {
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
 	recordDeallocation(ptr);
 #endif
+	memTrackerOnFree(ptr);
 }
 
 template <int Size>
