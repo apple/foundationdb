@@ -158,6 +158,19 @@ struct Traceable<Counter> : std::true_type {
 	}
 };
 
+// Increments one counter at construction, and another at destruction;
+// intended to be used to mark the beginning and end of some scope, without
+// the possibility of forgetting to increment the exit counter on exceptions.
+class CountedSection final : public NonCopyable {
+public:
+	CountedSection() : end(nullptr) {}
+	CountedSection(Counter &start, Counter &end) : end(&end) { ++start; }
+	CountedSection &operator=(CountedSection &&other)  { std::swap(end, other.end); return *this; }
+	~CountedSection() { if (end) ++*end; }
+private:
+	Counter *end;
+};
+
 template <class F>
 struct SpecialCounter final : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable {
 	SpecialCounter(CounterCollection& collection, std::string const& name, F&& f) : name(name), f(f) {
