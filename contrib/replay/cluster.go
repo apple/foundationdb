@@ -6,6 +6,26 @@ import (
 	"strings"
 )
 
+// isSetID reports whether a UID-valued trace detail actually holds an ID.
+//
+// fdbserver has two ways of saying "no ID here", and neither is an all-ffs
+// sentinel:
+//
+//   - "[not set]" for an Optional<UID> passed straight to detail(), which is what
+//     Traceable<Optional<T>> renders when the value is absent. This is the case
+//     for LogRouterMetrics.PrimaryPeekLocation and LogRouterPeekLocation.LogID,
+//     both of which come from IReplayPeekCursor::getPrimaryPeekLocation() and are
+//     absent whenever the cursor has no chosen best server.
+//   - "unknown", written explicitly by StorageServerSourceTLogID when the storage
+//     server has no source TLog yet.
+//
+// Note also that a UID reaching a trace via Traceable<UID> is only the first 16
+// hex digits, while one written with UID::toString() is the full 32; callers
+// truncate to 16 to match the Role event's ID format.
+func isSetID(v string) bool {
+	return v != "" && v != "[not set]" && v != "unknown"
+}
+
 // RoleInfo represents a role with its ID
 type RoleInfo struct {
 	Name     string   // e.g., "StorageServer", "Coordinator"
@@ -143,7 +163,7 @@ func BuildClusterState(events []TraceEvent) *ClusterState {
 			}
 			// LogRouter buddy from metrics (PrimaryPeekLocation)
 			if peekLocation, ok := event.Attrs["PrimaryPeekLocation"]; ok && event.ID != "" {
-				if peekLocation != "" && peekLocation != "ffffffffffffffff" {
+				if isSetID(peekLocation) {
 					buddyByID[event.ID] = peekLocation
 				}
 			}
@@ -157,14 +177,16 @@ func BuildClusterState(events []TraceEvent) *ClusterState {
 		case "StorageServerSourceTLogID":
 			// StorageServer buddy - which TLog it peeks from
 			if sourceTLogID, ok := event.Attrs["SourceTLogID"]; ok && event.ID != "" {
-				if sourceTLogID != "unknown" {
+				if isSetID(sourceTLogID) {
 					buddyByID[event.ID] = sourceTLogID
 				}
 			}
 		case "LogRouterPeekLocation":
 			// LogRouter buddy - which TLog it peeks from
 			if logID, ok := event.Attrs["LogID"]; ok && event.ID != "" {
-				buddyByID[event.ID] = logID
+				if isSetID(logID) {
+					buddyByID[event.ID] = logID
+				}
 			}
 		case "TLogPeekRemoteBestOnly":
 			// Remote TLog - list of LogRouters it pulls from (1:N relationship)
