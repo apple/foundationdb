@@ -19,6 +19,7 @@ func main() {
 	if lipgloss.ColorProfile() > termenv.ANSI256 {
 		lipgloss.SetColorProfile(termenv.ANSI256)
 	}
+	applyTheme()
 
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
