@@ -520,6 +520,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SS_BULKLOAD_GETRANGE_BATCH_SIZE,                     10000 ); if (isSimulated) SS_BULKLOAD_GETRANGE_BATCH_SIZE = deterministicRandom()->randomInt(1, 10);
 	init( BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE,            1024*1024 ); if (isSimulated) BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE = deterministicRandom()->randomInt(1024, 10240);
 	init( MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK,                   10 ); if (isSimulated) MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK = deterministicRandom()->randomInt(1, 11);
+	init( DD_BULKLOAD_TASK_TARGET_RATIO,                         0.6 ); if (isSimulated) DD_BULKLOAD_TASK_TARGET_RATIO = deterministicRandom()->coinflip() ? 0.0 : deterministicRandom()->random01();
 	init( BULKLOAD_SIM_FAILURE_INJECTION,                      false ); if (isSimulated) BULKLOAD_SIM_FAILURE_INJECTION = true;
 	init( DD_BULKLOAD_POWER_OF_D_RATIO,                          2.0 ); if (isSimulated) DD_BULKLOAD_POWER_OF_D_RATIO = deterministicRandom()->randomInt(1, 11);
 	init( DD_BULKLOAD_TASK_SUBMISSION_INTERVAL_SEC,             0.01 );

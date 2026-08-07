@@ -44,6 +44,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.h"
+#include "fdbserver/core/ShardSizing.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/core/WorkloadKeys.h"
@@ -2041,6 +2042,24 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 	std::vector<Future<Void>> actors;
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
+	// Byte-based coalescing target, computed once from the FINAL dataset size (sum of all manifest bytes),
+	// sized to DD's adaptive shard band via getMaxShardSize. Using the dataset size (not the live, growing
+	// dbSizeEstimate) keeps the target stable so restored shards are born near target at any scale. The
+	// ratio (<1) biases below maxShardSize so the one-manifest overshoot stays under the split ceiling.
+	// Ratio 0 disables byte-based coalescing (pure count-based, legacy behavior).
+	int64_t bulkLoadTaskTargetBytes = 0;
+	if (SERVER_KNOBS->DD_BULKLOAD_TASK_TARGET_RATIO > 0) {
+		int64_t datasetBytes = 0;
+		for (const auto& manifestEntryPair : *self->bulkLoadJobManager.get().manifestEntryMap) {
+			datasetBytes += manifestEntryPair.second.getBytes();
+		}
+		bulkLoadTaskTargetBytes = static_cast<int64_t>(getMaxShardSize(static_cast<double>(datasetBytes)) *
+		                                               SERVER_KNOBS->DD_BULKLOAD_TASK_TARGET_RATIO);
+		TraceEvent(SevInfo, "DDBulkLoadJobManagerTaskTargetBytes", self->ddId)
+		    .detail("DatasetBytes", datasetBytes)
+		    .detail("TargetBytes", bulkLoadTaskTargetBytes)
+		    .detail("Ratio", SERVER_KNOBS->DD_BULKLOAD_TASK_TARGET_RATIO);
+	}
 	// We load the bulkload task from the job manifest.
 	// The job manifest is organized in a sorted map. The key is the beginKey of the manifest.
 	// The value is the manifest. For details, please see comments in getBulkLoadJobManifestData.
@@ -2103,13 +2122,28 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 				ASSERT(beginKey == res[i].key);
 				while (beginKey < res[i + 1].key) {
 					std::vector<BulkLoadJobFileManifestEntry> manifestEntries;
-					while (manifestEntries.size() < SERVER_KNOBS->MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK &&
-					       beginKey < res[i + 1].key) {
+					// Coalesce consecutive (adjacent) manifests into one task until we accumulate roughly
+					// bulkLoadTaskTargetBytes (derived from getMaxShardSize(dataset) * DD_BULKLOAD_TASK_TARGET_RATIO)
+					// of data, so the restored shard is born near DD's target
+					// shard size (avoids the post-restore merge storm from sub-floor shards and the split
+					// storm from oversized ones). MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK remains a hard upper
+					// bound so a run of empty (0-byte) manifests can't create an unbounded task. This is the
+					// same left-to-right adjacent sweep as before (beginKey -> endKey); only the cut
+					// condition changes from count-based to byte-based.
+					int64_t accumulatedBytes = 0;
+					while (beginKey < res[i + 1].key) {
 						auto it = self->bulkLoadJobManager.get().manifestEntryMap->find(beginKey);
 						ASSERT(it != self->bulkLoadJobManager.get().manifestEntryMap->end());
 						manifestEntry = it->second;
 						manifestEntries.push_back(manifestEntry);
+						accumulatedBytes += manifestEntry.getBytes();
 						beginKey = manifestEntry.getEndKey();
+						if (bulkLoadTaskTargetBytes > 0 && accumulatedBytes >= bulkLoadTaskTargetBytes) {
+							break; // reached ~target shard size; cut the task here
+						}
+						if (manifestEntries.size() >= SERVER_KNOBS->MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK) {
+							break; // hard safety cap on manifests per task
+						}
 					}
 					ASSERT(!manifestEntries.empty());
 					actors.push_back(bulkLoadJobNewTask(self,

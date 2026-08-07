@@ -433,6 +433,13 @@ public:
 	int SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST; // the max number of batch count per bulkdump request to a SS
 	int BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE; // the block size when performing async read/write for bulkload
 	int MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK; // the max number of manifest that a bulkload task can process
+	double DD_BULKLOAD_TASK_TARGET_RATIO; // coalesce consecutive manifests into one bulkload task until accumulated
+	                                      // bytes reach this fraction of getMaxShardSize(dataset size), so restored
+	                                      // shards are born near DD's adaptive target shard band at any scale
+	                                      // (<1 leaves headroom under the split ceiling; 0 disables → count-based
+	                                      // only). MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK still caps manifests/task, so
+	                                      // for dumps whose manifests are smaller than ~target/that-cap the coalesced
+	                                      // shard can still land below DD's merge floor.
 	bool BULKLOAD_SIM_FAILURE_INJECTION; // Set to true to inject failure in bulkload simulation
 	double DD_BULKLOAD_POWER_OF_D_RATIO; // When selecting the dest team, DD randomly chooses 1/D portion of all valid
 	                                     // teams as the candidates and the DD selects the team with the minimal number
