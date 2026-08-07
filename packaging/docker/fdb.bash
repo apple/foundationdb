@@ -54,32 +54,67 @@ function create_cluster_file() {
     fi
 }
 
-function create_server_environment() {
-    env_file=/var/fdb/.fdbenv
-
+function discover_network_environment() {
     if [[ "$FDB_NETWORKING_MODE" == "host" ]]; then
-        public_ip=127.0.0.1
+        export PUBLIC_IP4=127.0.0.1
+        export PUBLIC_IP6="[::1]"
     elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
-        public_ip=$(hostname -i | awk '{print $1}')
+        my_hostname=$(hostname -i)
+        if [[ "$my_hostname" == *'.'* ]]; then
+            export PUBLIC_IP4="$my_hostname"
+        elif [[ "$my_hostname" == *':'* ]]; then
+            export PUBLIC_IP6="[$my_hostname]"
+        fi
+
+        for addr in $(hostname -I); do
+            if [[ -z "$PUBLIC_IP4" && $addr == *'.'* ]]; then
+                export PUBLIC_IP4="$addr"
+            elif [[ -z "$PUBLIC_IP6" && $addr == *':'* ]]; then
+                export PUBLIC_IP6="[$addr]"
+            elif [[ (! -z "$PUBLIC_IP4") && (! -z "$PUBLIC_IP6") ]]; then
+                break
+            fi
+        done
     else
         echo "Unknown FDB Networking mode \"$FDB_NETWORKING_MODE\"" 1>&2
         exit 1
     fi
+}
 
-    echo "export PUBLIC_IP=$public_ip" > $env_file
+function create_server_environment() {
+    FDB_IP_VERSION=${FDB_IP_VERSION:-v4}
+
+    discover_network_environment
+
+    if [[ "$FDB_IP_VERSION" == *'4'* ]]; then
+        export LISTEN_IP='0.0.0.0'
+        export PUBLIC_IP="$PUBLIC_IP4"
+    elif [[ "$FDB_IP_VERSION" == *'6'* ]]; then
+        export LISTEN_IP='[::]'
+        export PUBLIC_IP="$PUBLIC_IP6"
+    else
+        echo "Unknown FDB IP version \"$FDB_IP_VERSION\"" 1>&2
+        exit 1
+    fi
+
+    if [[ -z $PUBLIC_IP ]]; then
+        echo "No valid IP for IP version \"$FDB_IP_VERSION\"" 1>&2
+        exit 1
+    fi
+    
+
     # Set default cluster file contents only if no other configuration is specified.
     if [[ (! -s "$FDB_CLUSTER_FILE") && -z "$FDB_CLUSTER_FILE_CONTENTS" && -z "$FDB_COORDINATOR" ]]; then
         echo "Warning: No configuration available, falling back to self-coordinated." 1>&2
-        FDB_CLUSTER_FILE_CONTENTS="docker:docker@$public_ip:$FDB_PORT"
+        FDB_CLUSTER_FILE_CONTENTS="docker:docker@$PUBLIC_IP:$FDB_PORT"
     fi
 
     create_cluster_file
 }
 
 create_server_environment
-source /var/fdb/.fdbenv
-echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT"
-fdbserver --listen-address 0.0.0.0:"$FDB_PORT" --public-address "$PUBLIC_IP:$FDB_PORT" \
+echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT, listening on $LISTEN_IP:$FDB_PORT"
+fdbserver --listen-address $LISTEN_IP:"$FDB_PORT" --public-address "$PUBLIC_IP:$FDB_PORT" \
     --datadir /var/fdb/data --logdir /var/fdb/logs \
     --locality-zoneid="$(hostname)" --locality-machineid="$(hostname)" --class "$FDB_PROCESS_CLASS" --knob_disable_posix_kernel_aio=1 \
     "$@"
