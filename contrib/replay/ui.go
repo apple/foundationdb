@@ -4156,6 +4156,25 @@ func (m model) renderHelpPopup(baseView string) string {
 	content.WriteString(commandStyle.Render("  h                  Show this help"))
 	content.WriteString("\n\n")
 
+	// Topology label legend. The annotations on a role are not self-explanatory,
+	// and this popup is where someone looking at them goes to ask.
+	content.WriteString(sectionStyle.Render("Topology labels:"))
+	content.WriteString("\n")
+	content.WriteString(commandStyle.Render("  [id]               Role interface ID"))
+	content.WriteString("\n")
+	content.WriteString(commandStyle.Render("  e=N                Epoch/generation (TLog, LogRouter, BackupWorker)"))
+	content.WriteString("\n")
+	content.WriteString(commandStyle.Render("  v=N                Latest version this role has processed"))
+	content.WriteString("\n")
+	content.WriteString(commandStyle.Render("  ←TL:id            Peeks from this TLog (StorageServer, LogRouter)"))
+	content.WriteString("\n")
+	content.WriteString(commandStyle.Render("  ←LR:id,id         Remote TLog pulls from these LogRouters"))
+	content.WriteString("\n")
+	content.WriteString(commandStyle.Render("                     Arrows point where data is received FROM."))
+	content.WriteString("\n")
+	content.WriteString(commandStyle.Render("                     Only shown while the referenced role still exists."))
+	content.WriteString("\n\n")
+
 	// General section
 	content.WriteString(sectionStyle.Render("General:"))
 	content.WriteString("\n")
