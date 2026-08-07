@@ -89,9 +89,9 @@ Options:
 Environment:
   REPLAY_THEME      Force the color palette for a light or dark terminal
                     background: "light" or "dark". Unset means the background
-                    is detected, which is impossible inside screen/tmux - the
-                    dark palette is assumed there, so set this if your terminal
-                    is light.
+                    is detected by asking the terminal, including through tmux.
+                    Set this if your terminal does not answer and the colors
+                    come out wrong.
 
 Examples:
   replay trace.xml              # Load specific trace file

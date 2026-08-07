@@ -50,19 +50,15 @@ var (
 	colOnNetwork = lipgloss.AdaptiveColor{Light: "0", Dark: "0"}
 )
 
-// applyTheme honors an explicit REPLAY_THEME=light|dark, overriding detection.
+// applyTheme decides which palette variant to use.
 //
-// Detection is what happens otherwise, and inside a terminal multiplexer it
-// cannot work at all. lipgloss asks termenv for the background, and termenv
-// refuses to send the OSC 11 query when TERM starts with "screen" or "tmux",
-// because a multiplexer can be attached from several terminals at once with
-// different backgrounds. It then falls back to $COLORFGBG, and failing that
-// assumes black - a dark background. So inside tmux the answer is always dark
-// no matter what the terminal actually looks like, and a light terminal ends up
-// rendering the dark palette.
+// An explicit REPLAY_THEME=light|dark wins. Otherwise, inside tmux the outer
+// terminal is asked directly, because termenv will not ask on our behalf there -
+// see queryBackgroundThroughMultiplexer. Outside tmux, termenv's own detection
+// works and is left alone.
 //
-// Setting REPLAY_THEME also marks the background explicit, which skips the
-// query entirely.
+// Setting REPLAY_THEME, or answering from the query below, marks the background
+// explicit, which also stops lipgloss from querying later.
 func applyTheme() {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("REPLAY_THEME"))) {
 	case "light":
@@ -73,11 +69,16 @@ func applyTheme() {
 		return
 	}
 
-	// Nothing explicit, so the dark palette may be about to be used purely
-	// because detection was impossible. Say so, rather than letting a light
-	// terminal look broken for no visible reason.
+	if r, g, b, ok := queryBackgroundThroughMultiplexer(); ok {
+		lipgloss.SetHasDarkBackground(backgroundIsDark(r, g, b))
+		return
+	}
+
+	// Nothing explicit and nobody answered, so the dark palette may be about to
+	// be used purely because there was no way to find out. Say so, rather than
+	// letting a light terminal look broken for no visible reason.
 	if backgroundIsAGuess() {
-		fmt.Fprintln(os.Stderr, "replay: cannot detect the terminal background inside screen/tmux, assuming dark.")
+		fmt.Fprintln(os.Stderr, "replay: cannot detect the terminal background, assuming dark.")
 		fmt.Fprintln(os.Stderr, "        If the colors look wrong, set REPLAY_THEME=light (or dark).")
 	}
 }

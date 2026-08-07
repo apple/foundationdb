@@ -81,33 +81,35 @@ alias r=replay
 
 ### Colors on a light terminal
 
-The palette has a light and a dark variant. Which one gets used is normally
-worked out by asking the terminal what its background is.
+The palette has a light and a dark variant, and which one gets used is worked
+out by asking the terminal what its background color is.
 
-**That question cannot be answered inside `tmux` or `screen`**, so the dark
-variant is always assumed there. The query is an OSC escape sequence, and a
+Inside `tmux` that takes some care. The question is an OSC escape sequence, and
+`termenv` never sends it when `TERM` starts with `screen` or `tmux`, because a
 multiplexer can be attached from several terminals at once with different
-backgrounds, so it is deliberately never sent when `TERM` starts with `screen`
-or `tmux`. `$COLORFGBG` is consulted next, and when that is unset the
-background is assumed to be black. Picking a different `default-terminal` for
-tmux does not help, since both prefixes are treated the same way.
+backgrounds. So `replay` asks the outer terminal directly instead, wrapping the
+query in tmux's DCS passthrough, which tmux forwards verbatim to the terminal it
+is attached to. Terminals that answer it (iTerm2 does) get the right palette
+inside tmux with nothing to configure.
 
-So if you run inside tmux on a light terminal, say what the background is:
+If your terminal does not answer, the background cannot be determined and dark
+is assumed. `replay` prints a hint when that happens, and you can say what the
+background is:
 
 ```bash
 REPLAY_THEME=light replay    # force the light-background palette
 REPLAY_THEME=dark replay     # force the dark-background palette
 ```
 
-Set it once in your shell config and forget it:
+Set it once in your shell config to stop thinking about it:
 
 ```bash
 set -gx REPLAY_THEME light   # fish
 export REPLAY_THEME=light    # bash/zsh
 ```
 
-`replay` prints a hint on startup when it is assuming dark because detection
-was impossible. Setting `REPLAY_THEME` also skips the query altogether.
+`REPLAY_THEME` always wins, and setting it skips the query entirely.
+`$COLORFGBG` is also honored, since `termenv` consults it.
 
 ## Why
 
