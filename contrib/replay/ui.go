@@ -1091,10 +1091,10 @@ func formatTraceEvent(event *TraceEvent, isCurrent bool, searchPattern string) s
 	}
 
 	// Color styles
-	fieldNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")) // Dim
-	fieldValueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("46"))  // Green
-	currentLineStyle := lipgloss.NewStyle().Background(lipgloss.Color("58")) // Dark yellowish highlight
-	searchHighlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("58")) // Same as current line highlight
+	fieldNameStyle := lipgloss.NewStyle().Foreground(colTextDim) // Dim
+	fieldValueStyle := lipgloss.NewStyle().Foreground(colOk)  // Green
+	currentLineStyle := lipgloss.NewStyle().Background(colHighlightBg) // Dark yellowish highlight
+	searchHighlightStyle := lipgloss.NewStyle().Background(colHighlightBg) // Same as current line highlight
 
 	var parts []string
 
@@ -1219,7 +1219,7 @@ func formatTraceEvent(event *TraceEvent, isCurrent bool, searchPattern string) s
 
 	for _, key := range attrKeys {
 		value := event.Attrs[key]
-		parts = append(parts, fieldNameStyle.Render(key+"=")+lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render(applySearchHighlight(value)))
+		parts = append(parts, fieldNameStyle.Render(key+"=")+lipgloss.NewStyle().Foreground(colText).Render(applySearchHighlight(value)))
 	}
 
 	line := strings.Join(parts, " ")
@@ -1894,7 +1894,7 @@ func (m model) buildEventListPane(availableHeight int, paneWidth int, searchPatt
 	lines = append(lines, linesAbove...)
 
 	// Add current event with highlight (only first line)
-	highlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("58"))
+	highlightStyle := lipgloss.NewStyle().Background(colHighlightBg)
 	for i, line := range currentWrappedLines {
 		if i == 0 {
 			// Highlight only the first line (where Time= appears)
@@ -1976,47 +1976,47 @@ func (m model) View() string {
 	// Styles
 	dcHeaderStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("33")).
+		Foreground(colDCHeader).
 		Underline(true).
 		MarginTop(0).
 		MarginBottom(0)
 
 	testerHeaderStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("135")).
+		Foreground(colTester).
 		Underline(true).
 		MarginTop(0).
 		MarginBottom(0)
 
 	workerStyleGray := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
+		Foreground(colTextDim).
 		PaddingLeft(2)
 
 	workerStyleGreen := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("46")).
+		Foreground(colOk).
 		Bold(true).
 		PaddingLeft(2)
 
 	// Style for current machine (event source) - cyan with arrow
 	workerStyleCurrent := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("51")).
+		Foreground(colCurrent).
 		Bold(true).
 		PaddingLeft(0)
 
 	roleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252")) // Normal gray color
+		Foreground(colText) // Normal gray color
 
 	// Style for current role (when ID matches)
 	roleStyleCurrent := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("51")).
+		Foreground(colCurrent).
 		Bold(true)
 
 	scrubberStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+		Foreground(colTextMuted).
 		PaddingLeft(1)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241"))
+		Foreground(colTextMuted)
 
 	// Get workers grouped by DC and testers
 	dcWorkers := m.clusterState.GetWorkersByDC()
@@ -2144,12 +2144,12 @@ func (m model) View() string {
 						// Highlight network message src/dst with yellow background and directional arrow
 						if isNetworkSrc {
 							// Source: yellow background with →→→ at end
-							networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+							networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 							workerLine = fmt.Sprintf("● %s →→→", worker.Machine)
 							allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 						} else if isNetworkDst {
 							// Destination: yellow background with ←←← at end
-							networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+							networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 							workerLine = fmt.Sprintf("● %s ←←←", worker.Machine)
 							allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 						} else if worker.HasNonWorkerRoles() {
@@ -2174,11 +2174,11 @@ func (m model) View() string {
 
 						// Network message highlighting takes precedence
 						if isNetworkSrc {
-							networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+							networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 							workerLine = fmt.Sprintf("● %s →→→", worker.Machine)
 							allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 						} else if isNetworkDst {
-							networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+							networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 							workerLine = fmt.Sprintf("● %s ←←←", worker.Machine)
 							allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 						} else {
@@ -2195,11 +2195,11 @@ func (m model) View() string {
 						workerLine := fmt.Sprintf("● %s", worker.Machine)
 
 						if isNetworkSrc {
-							networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+							networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 							workerLine = fmt.Sprintf("● %s →→→", worker.Machine)
 							allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 						} else if isNetworkDst {
-							networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+							networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 							workerLine = fmt.Sprintf("● %s ←←←", worker.Machine)
 							allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 						} else {
@@ -2215,11 +2215,11 @@ func (m model) View() string {
 						workerLine := fmt.Sprintf("● %s", worker.Machine)
 
 						if isNetworkSrc {
-							networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+							networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 							workerLine = fmt.Sprintf("● %s →→→", worker.Machine)
 							allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 						} else if isNetworkDst {
-							networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+							networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 							workerLine = fmt.Sprintf("● %s ←←←", worker.Machine)
 							allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 						} else {
@@ -2270,12 +2270,12 @@ func (m model) View() string {
 					// Highlight network message src/dst with yellow background and directional arrow
 					if isNetworkSrc {
 						// Source: yellow background with →→→ at end
-						networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+						networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 						workerLine = fmt.Sprintf("● %s →→→", worker.Machine)
 						allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 					} else if isNetworkDst {
 						// Destination: yellow background with ←←← at end
-						networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+						networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 						workerLine = fmt.Sprintf("● %s ←←←", worker.Machine)
 						allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 					} else if worker.HasNonWorkerRoles() {
@@ -2300,11 +2300,11 @@ func (m model) View() string {
 
 					// Network message highlighting takes precedence
 					if isNetworkSrc {
-						networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+						networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 						workerLine = fmt.Sprintf("● %s →→→", worker.Machine)
 						allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 					} else if isNetworkDst {
-						networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+						networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 						workerLine = fmt.Sprintf("● %s ←←←", worker.Machine)
 						allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 					} else {
@@ -2321,11 +2321,11 @@ func (m model) View() string {
 					workerLine := fmt.Sprintf("● %s", worker.Machine)
 
 					if isNetworkSrc {
-						networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+						networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 						workerLine = fmt.Sprintf("● %s →→→", worker.Machine)
 						allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 					} else if isNetworkDst {
-						networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+						networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 						workerLine = fmt.Sprintf("● %s ←←←", worker.Machine)
 						allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 					} else {
@@ -2341,11 +2341,11 @@ func (m model) View() string {
 					workerLine := fmt.Sprintf("● %s", worker.Machine)
 
 					if isNetworkSrc {
-						networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+						networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 						workerLine = fmt.Sprintf("● %s →→→", worker.Machine)
 						allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 					} else if isNetworkDst {
-						networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+						networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 						workerLine = fmt.Sprintf("● %s ←←←", worker.Machine)
 						allTopologyLines = append(allTopologyLines, networkStyle.Render(workerLine))
 					} else {
@@ -2366,7 +2366,7 @@ func (m model) View() string {
 	if networkMsg != nil && !networkMsg.SrcExists {
 		// Source not found, show with yellow highlight and →→→ arrow
 		allTopologyLines = append(allTopologyLines, "")
-		networkStyle := lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")).Bold(true)
+		networkStyle := lipgloss.NewStyle().Background(colNetworkBg).Foreground(colOnNetwork).Bold(true)
 		allTopologyLines = append(allTopologyLines, networkStyle.Render(fmt.Sprintf("● %s →→→", networkMsg.SrcAddr)))
 	}
 
@@ -2374,7 +2374,7 @@ func (m model) View() string {
 	if networkMsg != nil && networkMsg.StrippedRPC != "" {
 		allTopologyLines = append(allTopologyLines, "")
 		rpcStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("220")).
+			Foreground(colRPC).
 			Bold(true).
 			Underline(true)
 		allTopologyLines = append(allTopologyLines, rpcStyle.Render(fmt.Sprintf("  RPC: %s", networkMsg.StrippedRPC)))
@@ -2480,7 +2480,7 @@ func (m model) View() string {
 
 	// If in search mode, add search bar as last line
 	if m.searchMode {
-		searchBarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+		searchBarStyle := lipgloss.NewStyle().Foreground(colText)
 		var searchBar string
 		if m.searchDirection == "forward" {
 			searchBar = "/" + m.searchInput.View()
@@ -2503,7 +2503,7 @@ func (m model) View() string {
 
 	// Build split view line by line with columnar topology
 	var splitContent strings.Builder
-	borderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	borderStyle := lipgloss.NewStyle().Foreground(colTextDim)
 
 	for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
 		// Render all topology columns for this line
@@ -2538,22 +2538,22 @@ func (m model) View() string {
 
 	// Add separator
 	separator := strings.Repeat("─", m.width)
-	bottomSection.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(separator))
+	bottomSection.WriteString(lipgloss.NewStyle().Foreground(colTextDim).Render(separator))
 	bottomSection.WriteString("\n")
 
 	// DB Configuration section
 	config := m.traceData.GetLatestConfigAtTime(m.currentTime)
 	if config != nil {
 		configStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243")).
+			Foreground(colTextSecondary).
 			PaddingLeft(1)
 
 		configTitleStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("39")).
+			Foreground(colAccent).
 			Bold(true)
 
 		configValueStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252"))
+			Foreground(colText)
 
 		configContent := configTitleStyle.Render(fmt.Sprintf("DB Config (t=%.2fs)", config.Time)) + " "
 
@@ -2596,11 +2596,11 @@ func (m model) View() string {
 	recoveryState := m.traceData.GetLatestRecoveryStateAtIndex(m.currentEventIndex)
 	if recoveryState != nil {
 		recoveryStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243")).
+			Foreground(colTextSecondary).
 			PaddingLeft(1)
 
 		recoveryTitleStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("39")).
+			Foreground(colAccent).
 			Bold(true)
 
 		// Color code based on StatusCode value
@@ -2608,20 +2608,20 @@ func (m model) View() string {
 		if statusCode, err := strconv.Atoi(recoveryState.StatusCode); err == nil {
 			if statusCode < 11 {
 				// Red for < 11
-				recoveryValueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+				recoveryValueStyle = lipgloss.NewStyle().Foreground(colError)
 			} else if statusCode >= 11 && statusCode < 14 {
 				// Blue for 11 <= statusCode < 14
-				recoveryValueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+				recoveryValueStyle = lipgloss.NewStyle().Foreground(colAccent)
 			} else if statusCode == 14 {
 				// Green for = 14
-				recoveryValueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("46"))
+				recoveryValueStyle = lipgloss.NewStyle().Foreground(colOk)
 			} else {
 				// Default gray for > 14
-				recoveryValueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+				recoveryValueStyle = lipgloss.NewStyle().Foreground(colText)
 			}
 		} else {
 			// Default gray if can't parse
-			recoveryValueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+			recoveryValueStyle = lipgloss.NewStyle().Foreground(colText)
 		}
 
 		recoveryContent := recoveryTitleStyle.Render(fmt.Sprintf("Recovery State (t=%.6fs)", recoveryState.Time)) + " "
@@ -2635,15 +2635,15 @@ func (m model) View() string {
 	epochInfo := m.traceData.GetLatestEpochVersionAtIndex(m.currentEventIndex)
 	if epochInfo != nil {
 		epochStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243")).
+			Foreground(colTextSecondary).
 			PaddingLeft(1)
 
 		epochTitleStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("39")).
+			Foreground(colAccent).
 			Bold(true)
 
 		epochValueStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")) // Same gray/white as config values
+			Foreground(colText) // Same gray/white as config values
 
 		// Format KCV - show "n/a" if not available
 		kcvStr := "n/a"
@@ -2660,7 +2660,7 @@ func (m model) View() string {
 	}
 
 	// Time scrubber
-	separatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	separatorStyle := lipgloss.NewStyle().Foreground(colTextDim)
 	bottomSection.WriteString(separatorStyle.Render(strings.Repeat("─", 20)))
 	bottomSection.WriteString("\n")
 	scrubberContent := fmt.Sprintf("Time: %.6fs", m.currentTime)
@@ -2725,31 +2725,31 @@ func (m model) View() string {
 func (m model) renderFilterPopup(baseView string) string {
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("39")).
+		BorderForeground(colAccent).
 		Padding(1, 2).
 		Width(90)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("39")).
+		Foreground(colAccent).
 		Underline(true)
 
 	categoryStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("46"))
+		Foreground(colOk)
 
 	categorySelectedStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("226"))
+		Foreground(colSelected)
 
 	normalStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+		Foreground(colText)
 
 	grayedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+		Foreground(colTextDim)
 
 	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("226")).
+		Foreground(colSelected).
 		Bold(true)
 
 	var content strings.Builder
@@ -2840,7 +2840,7 @@ func (m model) renderFilterPopup(baseView string) string {
 					if i == m.filterRawSelectedIndex && !m.filterRawInputActive {
 						if m.filterRawDisabled[i] {
 							// Selected but disabled - show in grayed selected style
-							filterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Bold(true)
+							filterStyle = lipgloss.NewStyle().Foreground(colTextDim).Bold(true)
 						} else {
 							filterStyle = selectedStyle
 						}
@@ -3001,27 +3001,27 @@ func (m model) renderFilterPopup(baseView string) string {
 func (m model) renderFilterTimeRangePopup(baseView string) string {
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("39")).
+		BorderForeground(colAccent).
 		Padding(1, 2).
 		Width(60)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("39"))
+		Foreground(colAccent)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+		Foreground(colText)
 
 	selectedLabelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("226")).
+		Foreground(colSelected).
 		Bold(true)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+		Foreground(colTextMuted).
 		MarginTop(1)
 
 	rangeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("243")).
+		Foreground(colTextSecondary).
 		Italic(true)
 
 	var content strings.Builder
@@ -3063,36 +3063,36 @@ func (m model) renderFilterTimeRangePopup(baseView string) string {
 func (m model) renderMachineSelectionPopup(baseView string) string {
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("39")).
+		BorderForeground(colAccent).
 		Padding(1, 2).
 		Width(90).
 		MaxHeight(m.height - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("39")).
+		Foreground(colAccent).
 		Underline(true)
 
 	dcHeaderStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("33"))
+		Foreground(colDCHeader)
 
 	testerHeaderStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("135"))
+		Foreground(colTester)
 
 	normalStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+		Foreground(colText)
 
 	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("226")).
+		Foreground(colSelected).
 		Bold(true)
 
 	checkedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("46"))
+		Foreground(colOk)
 
 	roleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+		Foreground(colTextDim)
 
 	var content strings.Builder
 	content.WriteString(titleStyle.Render("Select Machines"))
@@ -3250,21 +3250,21 @@ func (m model) renderMachineSelectionPopup(baseView string) string {
 func (m model) renderTypeSearchPopup(baseView string) string {
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("39")).
+		BorderForeground(colAccent).
 		Padding(1, 2).
 		Width(70).
 		MaxHeight(m.height - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("39")).
+		Foreground(colAccent).
 		Underline(true)
 
 	normalStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+		Foreground(colText)
 
 	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("226")).
+		Foreground(colSelected).
 		Bold(true)
 
 	var content strings.Builder
@@ -3669,34 +3669,34 @@ func (m *model) collectConnectionMetrics() []ConnectionMetric {
 func (m model) renderHealthPopup(baseView string) string {
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("39")).
+		BorderForeground(colAccent).
 		Padding(1, 2).
 		MaxWidth(m.width - 4).
 		MaxHeight(m.height - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("39")).
+		Foreground(colAccent).
 		Underline(true)
 
 	sectionStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("46")).
+		Foreground(colOk).
 		MarginTop(1)
 
 	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("33")).
+		Foreground(colDCHeader).
 		Bold(true)
 
 	normalStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+		Foreground(colText)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+		Foreground(colTextMuted).
 		MarginTop(1)
 
 	scrollIndicatorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
+		Foreground(colTextDim).
 		Italic(true)
 
 	var content strings.Builder
@@ -3927,25 +3927,25 @@ func truncateAddr(addr string, maxLen int) string {
 func (m model) renderHelpPopup(baseView string) string {
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("39")).
+		BorderForeground(colAccent).
 		Padding(1, 2).
 		Width(80)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("39")).
+		Foreground(colAccent).
 		Underline(true)
 
 	sectionStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("46")).
+		Foreground(colOk).
 		MarginTop(1)
 
 	commandStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+		Foreground(colText)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+		Foreground(colTextMuted).
 		MarginTop(1)
 
 	var content strings.Builder
@@ -4080,20 +4080,20 @@ func (m model) renderHelpPopup(baseView string) string {
 func (m model) renderNoConfigPopup(baseView string) string {
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("39")).
+		BorderForeground(colAccent).
 		Padding(1, 2).
 		Width(50)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("39"))
+		Foreground(colAccent)
 
 	messageStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("243")).
+		Foreground(colTextSecondary).
 		MarginTop(1)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+		Foreground(colTextMuted).
 		MarginTop(1)
 
 	popupContent := titleStyle.Render("DB Config") + "\n" +
@@ -4110,24 +4110,24 @@ func (m model) renderNoConfigPopup(baseView string) string {
 func (m model) renderConfigPopup(baseView string, config *DBConfig) string {
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("39")).
+		BorderForeground(colAccent).
 		Padding(1, 2).
 		MaxWidth(m.width - 10).
 		MaxHeight(m.height - 4)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("39"))
+		Foreground(colAccent)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+		Foreground(colTextMuted).
 		MarginTop(1)
 
 	jsonStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+		Foreground(colText)
 
 	scrollIndicatorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
+		Foreground(colTextDim).
 		Italic(true)
 
 	// Pretty-print the JSON
@@ -4208,24 +4208,24 @@ func (m model) renderConfigPopup(baseView string, config *DBConfig) string {
 func (m model) renderTimeInputPopup(baseView string) string {
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("39")).
+		BorderForeground(colAccent).
 		Padding(1, 2).
 		Width(50)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("39"))
+		Foreground(colAccent)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+		Foreground(colTextMuted).
 		MarginTop(1)
 
 	errorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("196")).
+		Foreground(colError).
 		MarginTop(1)
 
 	rangeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("243")).
+		Foreground(colTextSecondary).
 		Italic(true)
 
 	// Validate the current input
@@ -4238,7 +4238,7 @@ func (m model) renderTimeInputPopup(baseView string) string {
 		} else if targetTime > m.traceData.MaxTime {
 			validationMsg = errorStyle.Render(fmt.Sprintf("✗ Time must be <= %.2f", m.traceData.MaxTime))
 		} else {
-			validationMsg = lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Render("✓ Valid")
+			validationMsg = lipgloss.NewStyle().Foreground(colOk).Render("✓ Valid")
 		}
 	}
 

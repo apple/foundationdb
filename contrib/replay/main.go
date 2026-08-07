@@ -15,6 +15,8 @@ func main() {
 }
 
 func run() error {
+	applyTheme()
+
 	var traceFile string
 
 	// Check for help flag
