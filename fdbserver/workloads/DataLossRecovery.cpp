@@ -331,6 +331,10 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			TraceEvent("DataLossRecovery").error(err).detail("Phase", "MoveRangeError");
 			if (err.code() == error_code_movekeys_conflict) {
 				// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+				// Deliberately not folded into the bounded branch below: this error means the move never
+				// started, so retrying is cheap, and the workload has to keep trying until DD notices it
+				// has been disabled and stops taking the lock. Bounding it would fail the test whenever
+				// DD is merely slow to notice.
 				tr.reset();
 			} else if (retryableDataMoveError(err) && moveReissues < MOVE_MAX_REISSUES) {
 				// The move did not happen; reissue it rather than letting tr.onError() rethrow.
