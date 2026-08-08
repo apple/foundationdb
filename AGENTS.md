@@ -140,6 +140,22 @@ Edit `.actor.cpp` and `.actor.h` sources, not actorcompiler-generated output und
 
 Every new `.cpp` / `.h` / `.actor.cpp` / `.actor.h` file starts with the standard Apache 2.0 license block, with the filename on line 2 and the current year on the copyright line. Copy from any existing file in the tree (e.g. `flow/Knobs.cpp`). Add file-purpose comments *after* the license block, not in place of it.
 
+## Code Comments
+
+General guidance: comments should maximize clarity. They should be clear without being verbose. They should be concise without being cryptic.
+
+Scope: the guidance here mainly governs inline and implementation comments. Comments on public-facing APIs are contract statements and must be clear, precise, and complete.
+
+Audience: assume the readers of FDB are senior engineers fluent in asynchronous and concurrent programming, distributed systems, and stateful complex systems generally. Calibrate "non-obvious" to that reader — do not explain the language, the standard library, Flow/actor idioms, or established patterns they already know. Reserve comments for what such a reader could not quickly infer from the code itself.
+
+Implementation comments should focus on important, non-obvious fundamental rationale, motivation, and explanation of extremely subtle phenomena. Writing down important invariants — and the preconditions a piece of code requires of its caller (e.g. a lock that must be held, or a version that must already be durable) — is also a good idea.
+
+Do not write comments about mundane day-to-day development refactorings — junk like `// This used to be part of xyzFunc in Foo.cpp but we moved it here so that aaaFunc could also call it`.
+
+Do not write caller-location / "happening elsewhere" comments — narration of who invokes this code or where it is used ("called from X", "used by Y"). They duplicate what a search answers instantly and rot when callers change; describe what the code requires and guarantees on its own terms. Stating a real invariant is fine — "recovery is the only path that repairs" — naming the callers that happen to exist today is not.
+
+After writing or changing a bunch of code, make a pass over it one last time to review the comments. Ask yourself: am I rambling? Am I repeating what the code is showing? Am I just telling stories here? Is the information I'm writing going to be relevant and important a week from now, a month from now, a year from now? Is it genuinely essential and **non-obvious from the code itself**?
+
 ## Code Review
 
 Unless you have specific instructions to the contrary, when asked to review code (named files or a diff), address all of these explicitly:
