@@ -1,7 +1,7 @@
 # Exercises the Data Distribution relocation pipeline back-pressure gate
 # (DD_MAX_PIPELINE_MOVES). Forces many small shards and then a burst of
 # failure-recovery relocations (machine kills) so that pipelineSize()
-# exceeds the limit, tripping the "DD Pipeline Full" code probe in
+# reaches the limit, tripping the "DD Pipeline Full" code probe in
 # DDRelocationQueue.cpp. The limit is pinned to 20 -- the realistic
 # low end of the knob's range -- rather than an unrealistically small value
 # that would destabilize unrelated simulations.
@@ -19,13 +19,29 @@
 [configuration]
 storageEngineExcludeTypes = [5]
 
+[configuration]
+config = 'triple usable_regions=1 storage_engine=ssd-redwood-1'
+singleRegion = true
+generateFearless = false
+datacenters = 1
+machineCount = 12
+processesPerMachine = 1
+storageEngineType = 3
+
 [[knobs]]
 dd_max_pipeline_moves = 20
+data_distribution_failure_reaction_time = 1.0
+allow_large_shard = false
 min_shard_bytes = 10000
 shard_bytes_per_sqrt_bytes = 0
+storage_metrics_polling_delay = 1.0
+dd_shard_size_granularity_sim = 0
 
 [[test]]
 testTitle = 'DDPipelineSaturation'
+# Initial quiescence permanently disables pipeline control in simulation.
+waitForQuiescenceBegin = false
+waitForQuiescenceEnd = true
 
     [[test.workload]]
     testName = 'Cycle'
@@ -35,14 +51,18 @@ testTitle = 'DDPipelineSaturation'
 
     [[test.workload]]
     testName = 'Attrition'
-    machinesToKill = 2
+    machinesToKill = 4
     machinesToLeave = 5
     reboot = true
+    killDc = false
+    replacement = false
     testDuration = 30.0
 
     [[test.workload]]
     testName = 'Attrition'
-    machinesToKill = 2
+    machinesToKill = 4
     machinesToLeave = 5
     reboot = true
+    killDc = false
+    replacement = false
     testDuration = 30.0
