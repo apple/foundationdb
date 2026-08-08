@@ -24,6 +24,16 @@ function create_cluster_file() {
     FDB_CLUSTER_FILE=${FDB_CLUSTER_FILE:-/etc/foundationdb/fdb.cluster}
     mkdir -p "$(dirname $FDB_CLUSTER_FILE)"
 
+
+    if [[ -n "$FDB_CLUSTER_FILE_CONTENTS" || -n "$FDB_COORDINATOR" ]]; then
+        if [[ ! -w  "$FDB_CLUSTER_FILE" ]]; then
+            echo "Clusterfile to be overwritten at \"$FDB_CLUSTER_FILE\" already exists but is read-only."
+            exit 1
+        elif [[ -r "$FDB_CLUSTER_FILE" ]]; then
+            echo "Overwriting existing clusterfile."
+        fi
+    fi
+
     if [[ -n "$FDB_CLUSTER_FILE_CONTENTS" ]]; then
         echo "$FDB_CLUSTER_FILE_CONTENTS" > "$FDB_CLUSTER_FILE"
     elif [[ -n $FDB_COORDINATOR ]]; then
@@ -34,8 +44,15 @@ function create_cluster_file() {
         fi
         coordinator_port=${FDB_COORDINATOR_PORT:-4500}
         echo "docker:docker@$coordinator_ip:$coordinator_port" > "$FDB_CLUSTER_FILE"
+    elif [[ ! -r "$FDB_CLUSTER_FILE" ]]; then
+        echo "FDB_CLUSTER_FILE_CONTENTS and FDB_COORDINATOR are not set, and no clusterfile at \"$FDB_CLUSTER_FILE\"." 1>&2
+        exit 1
     else
-        echo "FDB_COORDINATOR environment variable not defined" 1>&2
+        echo "Using existing clusterfile at \"$FDB_CLUSTER_FILE\"."
+    fi
+
+    if (( $? != 0 )); then
+        echo "An unexpected error occurred while setting configuration." 1>&2
         exit 1
     fi
 }
@@ -53,7 +70,9 @@ function create_server_environment() {
     fi
 
     echo "export PUBLIC_IP=$public_ip" > $env_file
-    if [[ -z $FDB_COORDINATOR && -z "$FDB_CLUSTER_FILE_CONTENTS" ]]; then
+    # Set default cluster file contents only if no other configuration is specified.
+    if [[ (! -s "$FDB_CLUSTER_FILE") && -z "$FDB_CLUSTER_FILE_CONTENTS" && -z "$FDB_COORDINATOR" ]]; then
+        echo "Warning: No configuration available, falling back to self-coordinated."
         FDB_CLUSTER_FILE_CONTENTS="docker:docker@$public_ip:$FDB_PORT"
     fi
 
