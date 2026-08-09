@@ -455,7 +455,7 @@ Future<B> operator+(Future<A> a, Future<B> b) {
 }
 
 // Returns if the future returns true, otherwise waits forever.
-Future<Void> returnIfTrue(Future<bool> const& f);
+Future<Void> returnIfTrue(Future<bool> f);
 
 // Returns if the future, when waited on and then evaluated with the predicate, returns true, otherwise waits forever
 template <class T, class F>
@@ -860,21 +860,18 @@ Future<Void> lowPriorityDelay(double waitTime);
 
 // Delay after condition is cleared (i.e. equal to false).
 // If during delay, condition changes to true, wait till condition become false again, and repeat.
-Future<Void> delayAfterCleared(Reference<AsyncVar<bool>> const& condition,
-                               double const& time,
-                               TaskPriority const& taskID = TaskPriority::DefaultDelay);
+Future<Void> delayAfterCleared(Reference<AsyncVar<bool>> condition,
+                               double time,
+                               TaskPriority taskID = TaskPriority::DefaultDelay);
 
 // Same as delayAfterCleared, but use lowPriorityDelay.
-Future<Void> lowPriorityDelayAfterCleared(Reference<AsyncVar<bool>> const& condition, double const& time);
+Future<Void> lowPriorityDelayAfterCleared(Reference<AsyncVar<bool>> condition, double time);
 
 Future<bool> allTrue(std::vector<Future<bool>> all);
-Future<Void> anyTrue(std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output);
+Future<Void> anyTrue(std::vector<Reference<AsyncVar<bool>>> input, Reference<AsyncVar<bool>> output);
 Future<Void> cancelOnly(std::vector<Future<Void>> futures);
-Future<Void> timeoutWarningCollector(FutureStream<Void> const& input,
-                                     double const& logDelay,
-                                     const char* const& context,
-                                     UID const& id);
-Future<bool> quorumEqualsTrue(std::vector<Future<bool>> const& futures, int const& required);
+Future<Void> timeoutWarningCollector(FutureStream<Void> input, double logDelay, const char* context, UID id);
+Future<bool> quorumEqualsTrue(std::vector<Future<bool>> futures, int required);
 
 template <class T>
 Future<Void> streamHelper(PromiseStream<T> output, PromiseStream<Error> errors, Future<T> input, ExplicitVoid = {}) {
@@ -1476,7 +1473,7 @@ Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
                          Error e,
                          double waitMultiplierForSlowFutures = 1.0);
 
-Future<bool> shortCircuitAny(std::vector<Future<bool>> const& f);
+Future<bool> shortCircuitAny(std::vector<Future<bool>> f);
 
 template <class T>
 Future<std::vector<T>> getAll(std::vector<Future<T>> input) {
