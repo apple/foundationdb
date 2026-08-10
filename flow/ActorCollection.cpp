@@ -101,10 +101,12 @@ public:
 	}
 
 	~ActorCollectionRuntime() {
+		finished = true;
 		if (addCallbackRegistered) {
 			addActorCallback.remove();
 			addCallbackRegistered = false;
 		}
+		runners.clear_and_dispose([](Runner* runner) { delete runner; });
 	}
 
 	Future<Void> getResult() { return done.getFuture(); }
@@ -460,6 +462,21 @@ static Future<Void> recordActorCancellation(Future<Void> pending, std::vector<in
 	}
 }
 
+static Future<Void> signalSiblingOnActorCancellation(Future<Void> pending, Promise<Void> sibling, bool sendError) {
+	try {
+		co_await pending;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			if (sendError) {
+				sibling.sendError(operation_failed());
+			} else {
+				sibling.send(Void());
+			}
+		}
+		throw;
+	}
+}
+
 // test contract that actors are cancelled when the actor collection is cleared
 TEST_CASE("/flow/actorCollection/testCancel") {
 	ActorCollection actorCollection(false);
@@ -484,6 +501,22 @@ TEST_CASE("/flow/actorCollection/testCancelOrder") {
 		ASSERT_EQ(cancelled.size(), pending.size());
 		for (int index = 0; index < actorCount; ++index) {
 			ASSERT_EQ(cancelled[index], index);
+		}
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/actorCollection/testCancelReentrantSiblingCompletion") {
+	for (bool returnWhenEmptied : { false, true }) {
+		for (bool sendError : { false, true }) {
+			ActorCollection collection(returnWhenEmptied);
+			Promise<Void> pending;
+			Promise<Void> sibling;
+			collection.add(signalSiblingOnActorCancellation(pending.getFuture(), sibling, sendError));
+			collection.add(sibling.getFuture());
+			collection.clear(returnWhenEmptied);
+			ASSERT(sibling.isSet());
+			ASSERT_EQ(sibling.isError(), sendError);
 		}
 	}
 	return Void();
