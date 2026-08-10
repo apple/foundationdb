@@ -3098,7 +3098,8 @@ Future<Void> pipelineGateActor(Reference<DDQueue> self,
 
 		if (relocation.cancelled) {
 			forwardRelocation(std::move(relocation));
-		} else if (int priority = failureRecoveryPriority(relocation); priority >= 0) {
+		} else if (int priority = failureRecoveryPriority(relocation);
+		           priority >= 0 || relocation.retryIntent.present()) {
 			if (deferredFailureRecoveries.empty() && hasPipelineCapacity(true)) {
 				forwardFailureRecovery(std::move(relocation));
 			} else {
@@ -3468,6 +3469,7 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 	const KeyRange explicitlyFailedRetryRange = KeyRangeRef("e"_sr, "f"_sr);
 	const KeyRange retryRange = KeyRangeRef("f"_sr, "g"_sr);
 	const KeyRange cancelledRange = KeyRangeRef("g"_sr, "h"_sr);
+	const KeyRange splitDestinationFailureRange = KeyRangeRef("h"_sr, "i"_sr);
 
 	input.send(RelocateShard(firstSplitRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT));
 	input.send(RelocateShard(secondSplitRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT));
@@ -3500,6 +3502,11 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 	    explicitlyFailedRetryRange, SERVER_KNOBS->PRIORITY_TEAM_FAILED, RelocateReason::OTHER);
 	explicitlyFailedRetry.retryIntent = RelocateShard::RetryRelocationIntent{ -1, -1, false };
 	input.send(std::move(explicitlyFailedRetry));
+	RelocateShard splitDestinationFailure(
+	    splitDestinationFailureRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT);
+	splitDestinationFailure.retryIntent =
+	    RelocateShard::RetryRelocationIntent{ SERVER_KNOBS->PRIORITY_SPLIT_SHARD, -1, true };
+	input.send(std::move(splitDestinationFailure));
 	RelocateShard retry(retryRange, DataMovementReason::SPLIT_SHARD, RelocateReason::SIZE_SPLIT);
 	retry.retryIntent = RelocateShard::RetryRelocationIntent{ SERVER_KNOBS->PRIORITY_SPLIT_SHARD,
 		                                                      SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY,
@@ -3551,6 +3558,19 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 	ASSERT_EQ(retriedFailure.priority, SERVER_KNOBS->PRIORITY_SPLIT_SHARD);
 	ASSERT(retriedFailure.retryIntent.present());
 	ASSERT_EQ(retriedFailure.retryIntent.get().healthPriority, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
+	ASSERT_EQ(self->pendingGateRelocations, 1);
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+	ASSERT(!forwarded.isReady());
+
+	--self->pendingGateRelocations;
+	self->updatePipelineFull();
+	ASSERT(forwarded.isReady());
+	RelocateShard retriedSplitFailure = forwarded.pop();
+	ASSERT(retriedSplitFailure.keys == splitDestinationFailureRange);
+	ASSERT_EQ(retriedSplitFailure.priority, SERVER_KNOBS->PRIORITY_SPLIT_SHARD);
+	ASSERT(retriedSplitFailure.retryIntent.present());
+	ASSERT_EQ(retriedSplitFailure.retryIntent.get().healthPriority, -1);
+	ASSERT(retriedSplitFailure.retryIntent.get().wantsNewServers);
 	ASSERT_EQ(self->pendingGateRelocations, 1);
 	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
 	ASSERT(!forwarded.isReady());
