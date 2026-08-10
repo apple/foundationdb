@@ -46,7 +46,7 @@
 #include "flow/Knobs.h"
 #include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 namespace {
 

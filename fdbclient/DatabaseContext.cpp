@@ -56,7 +56,7 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Platform.h"
 #include "fdbclient/Tracing.h"
 #include "flow/network.h"

@@ -25,7 +25,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "flow/TxnCounters.h"
 #include "flow/CoroUtils.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 static void updateServersAndCompleteSources(std::set<UID>& servers,
                                             std::vector<UID>& completeSources,

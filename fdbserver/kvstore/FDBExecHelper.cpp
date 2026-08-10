@@ -36,7 +36,7 @@
 #include "flow/Trace.h"
 #include "flow/Platform.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
 #include "fdbclient/IClosable.h"
 #include "fdbclient/versions.h"

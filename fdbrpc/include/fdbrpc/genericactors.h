@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/CodeProbe.h"
 #include "flow/Hostname.h"
 

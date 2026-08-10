@@ -26,7 +26,7 @@ I * Licensed under the Apache License, Version 2.0 (the "License");
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fmt/format.h"
 #include <boost/algorithm/string.hpp>
 

@@ -44,7 +44,7 @@
 #include "DDRelocationQueue.h"
 #include "TCInfo.h"
 #include "flow/CoroUtils.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/SimpleCounter.h"
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!

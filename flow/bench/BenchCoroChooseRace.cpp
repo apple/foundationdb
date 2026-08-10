@@ -20,7 +20,7 @@
 
 #include "benchmark/benchmark.h"
 
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/ThreadHelper.h"
 
 namespace {
