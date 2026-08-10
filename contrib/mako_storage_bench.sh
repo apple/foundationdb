@@ -56,6 +56,13 @@ readonly BUILD_PROCS="${BUILD_PROCS:-4}"
 readonly RUN_PROCS="${RUN_PROCS:-7}"
 readonly RUN_THREADS="${RUN_THREADS:-4}"
 readonly ASYNC_XACTS="${ASYNC_XACTS:-128}"
+# Optional target throughput. When set (>0), mako is throttled to a constant
+# TPSMAX transactions/sec. mako's --tpsmax throttle is only honored in SYNC mode
+# (it errors under --async_xacts), so setting TPSMAX forces async off and uses
+# RUN_THREADS sync threads instead. Use this to measure latency at a
+# sub-saturation operating point rather than at max throughput. Default empty
+# (unset) preserves the original saturating async behavior.
+readonly TPSMAX="${TPSMAX:-}"
 readonly TRANSACTION="${TRANSACTION:-g18ui}"   # 18 GETs + 1 update + 1 insert
 readonly WARMUP_SECONDS="${WARMUP_SECONDS:-300}"
 readonly SECONDS_RUN="${SECONDS_RUN:-600}"
@@ -183,11 +190,19 @@ function bench_engine {
   echo "--- ${label}: mako run ---"
   # Also emit structured JSON alongside the teed report: per-second samples +
   # final stats (--json_report) and the raw latency sketch (--stats_export_path).
+  # Throughput mode: when TPSMAX is set, throttle to a constant rate in SYNC mode
+  # (mako rejects --tpsmax under --async_xacts); otherwise saturate in async mode.
+  local rate_opts=()
+  if [[ -n "${TPSMAX}" && "${TPSMAX}" != "0" ]]; then
+    rate_opts=(--async_xacts 0 --tpsmax "${TPSMAX}" --tpsmin "${TPSMAX}")
+  else
+    rate_opts=(--async_xacts "${ASYNC_XACTS}")
+  fi
   "${MAKO}" --mode run --cluster "${cluster_file}" \
     --rows "${ROWS}" -x "${TRANSACTION}" \
-    -p "${RUN_PROCS}" -t "${RUN_THREADS}" --async_xacts "${ASYNC_XACTS}" \
+    -p "${RUN_PROCS}" -t "${RUN_THREADS}" "${rate_opts[@]}" \
     --keylen "${KEYLEN}" --vallen "${VALLEN}" \
-    --warmup_seconds "${WARMUP_SECONDS}" --seconds "${SECONDS_RUN}" \
+    --seconds "${SECONDS_RUN}" \
     --json_report "${engine_dir}/mako.json" \
     --stats_export_path "${engine_dir}/mako-sketch.json" \
     2>&1 | tee "${engine_dir}/mako-run.txt"
