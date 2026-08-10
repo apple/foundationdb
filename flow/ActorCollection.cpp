@@ -36,6 +36,7 @@ static LineageReference actorCollectionLineage(LineageReference const& parent) {
 
 class ActorCollectionRuntime;
 
+// Owns a child callback and preserves its intrusive-list membership until completion or cancellation.
 class Runner final : public boost::intrusive::list_base_hook<>,
                      public Callback<Void>,
                      public FastAllocated<Runner>,
@@ -70,6 +71,7 @@ private:
 // An intrusive list of Runners, which are FastAllocated.
 using RunnerList = boost::intrusive::list<Runner, boost::intrusive::constant_time_size<false>>;
 
+// Disposes remaining runners in insertion order before their intrusive list is destroyed.
 class RunnerListDestroyer final : NonCopyable {
 public:
 	explicit RunnerListDestroyer(RunnerList* list) : list(list) {}
@@ -82,7 +84,9 @@ private:
 	RunnerList* list;
 };
 
+// Coordinates queued additions, child completion, and reentrant-safe collection teardown.
 class ActorCollectionRuntime final : NonCopyable {
+	// Keeps the add stream's single callback registered for the runtime's active lifetime.
 	class AddActorCallback final : public SingleCallback<Future<Void>> {
 	public:
 		explicit AddActorCallback(ActorCollectionRuntime* owner) : owner(owner) {}
@@ -576,6 +580,7 @@ TEST_CASE("/flow/actorCollection/testCancelReentrantCollection") {
 }
 
 #ifdef ENABLE_SAMPLING
+// Captures the active actor lineage when a collection result is delivered synchronously.
 class ActorCollectionLineageObserver final : public Callback<Void>, NonCopyable {
 public:
 	void fire(Void const&) override { observe(); }
