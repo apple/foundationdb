@@ -26,7 +26,7 @@ function create_cluster_file() {
 
 
     if [[ -n "$FDB_CLUSTER_FILE_CONTENTS" || -n "$FDB_COORDINATOR" ]]; then
-        if [[ ! -w  "$FDB_CLUSTER_FILE" ]]; then
+        if [[ -f "$FDB_CLUSTER_FILE" && (! -w  "$FDB_CLUSTER_FILE") ]]; then
             echo "Clusterfile to be overwritten at \"$FDB_CLUSTER_FILE\" already exists but is read-only." 1>&2
             exit 1
         elif [[ -r "$FDB_CLUSTER_FILE" ]]; then
