@@ -42,6 +42,11 @@ function create_cluster_file() {
     elif [[ ! -r "$FDB_CLUSTER_FILE" ]]; then
         echo "FDB_CLUSTER_FILE_CONTENTS and FDB_COORDINATOR are not set, and no clusterfile at \"$FDB_CLUSTER_FILE\"." 1>&2
         exit 1
+    elif [[ ! -w "$FDB_CLUSTER_FILE" ]]; then
+        # fdbserver requires write permissions to clusterfile, or it may *eventually* fail due to cluster migrations.
+        # https://apple.github.io/foundationdb/administration.html#required-permissions
+        echo "Clusterfile at \"$FDB_CLUSTER_FILE\" is not writable." 1>&2
+        exit 1
     else
         echo "Using existing clusterfile at \"$FDB_CLUSTER_FILE\"." 1>&2
     fi
