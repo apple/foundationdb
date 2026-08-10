@@ -74,7 +74,11 @@ public:
 	void add(Future<Void> a) { m_add.send(a); }
 	Future<Void> getResult() const { return m_out; }
 	void clear(bool returnWhenEmptied) {
-		m_out.cancel();
+		Future<Void> previous = m_out;
+		previous.cancel();
+		if (m_out != previous) {
+			return;
+		}
 		m_out = actorCollection(m_add.getFuture(), nullptr, nullptr, nullptr, nullptr, returnWhenEmptied);
 	}
 };

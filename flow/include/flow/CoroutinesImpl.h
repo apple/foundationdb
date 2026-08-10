@@ -231,9 +231,12 @@ struct NoThrowOnCancelCoroActor final : Actor<std::conditional_t<std::is_void_v<
 	}
 
 	void cancel() override {
-		if (!SAV<ValType>::canBeSet()) {
+		if (!SAV<ValType>::canBeSet() || actorWaitStateIsCancelled(Actor<ValType>::actor_wait_state)) {
 			return;
 		}
+
+		// Detaching a waiter or destroying the frame can synchronously reenter cancellation.
+		Actor<ValType>::actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
 
 		if (cancelHandler) {
 			// The handler object is stored in the coroutine frame, so unregister

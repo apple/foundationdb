@@ -23,7 +23,16 @@
 #include "flow/IndexedSet.h"
 #include "flow/UnitTest.h"
 #include <boost/intrusive/list.hpp>
+#include <string>
 #include <vector>
+
+#ifdef ENABLE_SAMPLING
+static LineageReference actorCollectionLineage(LineageReference const& parent) {
+	LineageReference lineage = parent;
+	lineage.setActorName("actorCollection");
+	return lineage;
+}
+#endif
 
 class ActorCollectionRuntime;
 
@@ -52,7 +61,7 @@ private:
 	Runner* nextCompleted = nullptr;
 	bool registered = false;
 #ifdef ENABLE_SAMPLING
-	LineageReference lineage = *currentLineage;
+	LineageReference lineage = actorCollectionLineage(*currentLineage);
 #endif
 
 	friend class ActorCollectionRuntime;
@@ -110,7 +119,13 @@ public:
 	}
 
 	Future<Void> getResult() { return done.getFuture(); }
-	void start() { drain(); }
+	void start() {
+#ifdef ENABLE_SAMPLING
+		LineageReference callbackLineage = actorCollectionLineage(lineage);
+		LineageScope scope(&callbackLineage);
+#endif
+		drain();
+	}
 
 private:
 	void onAdded(Future<Void> actor) {
@@ -319,7 +334,7 @@ private:
 	bool terminalRequested = false;
 	bool finished = false;
 #ifdef ENABLE_SAMPLING
-	LineageReference lineage = *currentLineage;
+	LineageReference lineage = actorCollectionLineage(*currentLineage);
 #endif
 
 	friend class Runner;
@@ -340,7 +355,7 @@ void Runner::start(Future<Void> task) {
 
 void Runner::fire(Void const&) {
 #ifdef ENABLE_SAMPLING
-	LineageReference callbackLineage = lineage;
+	LineageReference callbackLineage = actorCollectionLineage(lineage);
 	LineageScope scope(&callbackLineage);
 #endif
 	ActorCollectionRuntime* runtime = owner;
@@ -350,7 +365,7 @@ void Runner::fire(Void const&) {
 
 void Runner::error(Error e) {
 #ifdef ENABLE_SAMPLING
-	LineageReference callbackLineage = lineage;
+	LineageReference callbackLineage = actorCollectionLineage(lineage);
 	LineageScope scope(&callbackLineage);
 #endif
 	ActorCollectionRuntime* runtime = owner;
@@ -362,7 +377,7 @@ void Runner::error(Error e) {
 
 void ActorCollectionRuntime::AddActorCallback::fire(Future<Void> const& actor) {
 #ifdef ENABLE_SAMPLING
-	LineageReference callbackLineage = owner->lineage;
+	LineageReference callbackLineage = actorCollectionLineage(owner->lineage);
 	LineageScope scope(&callbackLineage);
 #endif
 	owner->onAdded(actor);
@@ -370,7 +385,7 @@ void ActorCollectionRuntime::AddActorCallback::fire(Future<Void> const& actor) {
 
 void ActorCollectionRuntime::AddActorCallback::fire(Future<Void>&& actor) {
 #ifdef ENABLE_SAMPLING
-	LineageReference callbackLineage = owner->lineage;
+	LineageReference callbackLineage = actorCollectionLineage(owner->lineage);
 	LineageScope scope(&callbackLineage);
 #endif
 	owner->onAdded(std::move(actor));
@@ -378,7 +393,7 @@ void ActorCollectionRuntime::AddActorCallback::fire(Future<Void>&& actor) {
 
 void ActorCollectionRuntime::AddActorCallback::error(Error e) {
 #ifdef ENABLE_SAMPLING
-	LineageReference callbackLineage = owner->lineage;
+	LineageReference callbackLineage = actorCollectionLineage(owner->lineage);
 	LineageScope scope(&callbackLineage);
 #endif
 	owner->onAddError(e);
@@ -441,9 +456,11 @@ void forceLinkActorCollectionTests() {}
 
 TEST_CASE("/flow/actorCollection/chooseWhen") {
 	Promise<Void> promise;
-	auto result = co_await race(delay(0), promise.getFuture());
-	ASSERT_EQ(result.index(), 0);
-	promise.send(Void());
+	co_await Choose()
+	    .When(delay(0), [&promise](Void const&) { promise.send(Void()); })
+	    .When(promise.getFuture(), [](Void const&) { ASSERT(false); })
+	    .run();
+	ASSERT(promise.isSet());
 }
 
 Future<Void> failIfNotCancelled() {
@@ -471,6 +488,26 @@ static Future<Void> signalSiblingOnActorCancellation(Future<Void> pending, Promi
 				sibling.sendError(operation_failed());
 			} else {
 				sibling.send(Void());
+			}
+		}
+		throw;
+	}
+}
+
+static Future<Void> recancelCollectionOnActorCancellation(Future<Void> pending,
+                                                          ActorCollection* collection,
+                                                          bool returnWhenEmptied,
+                                                          bool clearCollection,
+                                                          int* cancellationCount) {
+	try {
+		co_await pending;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			++*cancellationCount;
+			if (clearCollection) {
+				collection->clear(returnWhenEmptied);
+			} else {
+				collection->getResult().cancel();
 			}
 		}
 		throw;
@@ -521,6 +558,79 @@ TEST_CASE("/flow/actorCollection/testCancelReentrantSiblingCompletion") {
 	}
 	return Void();
 }
+
+TEST_CASE("/flow/actorCollection/testCancelReentrantCollection") {
+	for (bool returnWhenEmptied : { false, true }) {
+		for (bool clearCollection : { false, true }) {
+			ActorCollection collection(returnWhenEmptied);
+			Promise<Void> pending;
+			int cancellationCount = 0;
+			collection.add(recancelCollectionOnActorCancellation(
+			    pending.getFuture(), &collection, returnWhenEmptied, clearCollection, &cancellationCount));
+			collection.clear(returnWhenEmptied);
+			ASSERT_EQ(cancellationCount, 1);
+			ASSERT(!collection.getResult().isReady());
+		}
+	}
+	return Void();
+}
+
+#ifdef ENABLE_SAMPLING
+class ActorCollectionLineageObserver final : public Callback<Void>, NonCopyable {
+public:
+	void fire(Void const&) override { observe(); }
+
+	void error(Error e) override {
+		observedError = e;
+		observe();
+	}
+
+	void assertObserved(bool expectError) const {
+		ASSERT_EQ(actorName, std::string("actorCollection"));
+		ASSERT_EQ(observedError.present(), expectError);
+	}
+
+private:
+	void observe() {
+		actorName = currentLineage->actorName();
+		Callback<Void>::remove();
+	}
+
+	std::string actorName;
+	Optional<Error> observedError;
+};
+
+TEST_CASE("/flow/actorCollection/testSamplingLineage") {
+	for (bool readyActor : { false, true }) {
+		PromiseStream<Future<Void>> addActor;
+		ActorCollectionRuntime collection(addActor.getFuture(), nullptr, nullptr, nullptr, nullptr, true);
+		collection.start();
+
+		ActorCollectionLineageObserver observer;
+		Future<Void> result = collection.getResult();
+		result.addCallbackAndClear(&observer);
+
+		if (readyActor) {
+			addActor.send(Future<Void>(Void()));
+		} else {
+			Promise<Void> pending;
+			addActor.send(pending.getFuture());
+			pending.send(Void());
+		}
+		observer.assertObserved(false);
+	}
+
+	PromiseStream<Future<Void>> addActor;
+	ActorCollectionRuntime collection(addActor.getFuture(), nullptr, nullptr, nullptr, nullptr, false);
+	collection.start();
+	ActorCollectionLineageObserver observer;
+	Future<Void> result = collection.getResult();
+	result.addCallbackAndClear(&observer);
+	addActor.sendError(operation_failed());
+	observer.assertObserved(true);
+	return Void();
+}
+#endif
 
 Future<Void> failedActor() {
 	return operation_failed();
