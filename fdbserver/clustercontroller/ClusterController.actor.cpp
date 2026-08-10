@@ -3935,6 +3935,7 @@ TEST_CASE("/fdbserver/clustercontroller/avoidSatelliteTLogRouterColocation") {
 		WorkerInterface worker(locality);
 		worker.initEndpoints();
 		auto& workerInfo = data.id_worker[locality.processId()];
+		workerInfo.verified = true;
 		workerInfo.details.interf = worker;
 		workerInfo.details.processClass = ProcessClass(classType, ProcessClass::CommandLineSource);
 		workerInfo.details.recoveredDiskFiles = true;
