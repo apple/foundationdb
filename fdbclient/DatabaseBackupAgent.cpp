@@ -29,7 +29,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/IAsyncFile.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Hash3.h"
 #include <numeric>
 #include "fdbclient/ManagementAPI.h"

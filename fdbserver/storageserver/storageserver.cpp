@@ -100,7 +100,7 @@
 #include "StorageServerUtils.h"
 #include "flow/CoroUtils.h"
 #include "flow/TDMetric.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 #ifndef __INTEL_COMPILER
 #pragma region Data Structures

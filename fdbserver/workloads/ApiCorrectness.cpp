@@ -28,7 +28,7 @@
 #include "ApiWorkload.h"
 #include "MemoryKeyValueStore.h"
 #include "flow/IRandom.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 // An enum of API operation types used in the random test
 enum OperationType { SET, GET, GET_RANGE, GET_RANGE_SELECTOR, GET_KEY, CLEAR, CLEAR_RANGE, UNINITIALIZED };

@@ -85,7 +85,7 @@
 #include "flow/Trace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"

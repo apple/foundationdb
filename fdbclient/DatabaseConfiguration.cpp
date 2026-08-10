@@ -25,7 +25,7 @@
 #include "flow/ITrace.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/UnitTest.h"
 
 DatabaseConfiguration::DatabaseConfiguration() {

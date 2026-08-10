@@ -24,7 +24,7 @@
 
 #include <regex>
 #include "flow/network.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 struct Hostname {
 	std::string host;

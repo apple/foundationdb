@@ -28,7 +28,7 @@
 #include <unordered_set>
 
 #include "fdbrpc/DDSketch.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
 #include "flow/ProtocolVersion.h"

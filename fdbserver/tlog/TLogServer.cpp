@@ -48,7 +48,7 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/Histogram.h"
 #include "flow/DebugTrace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
 #include "flow/CoroUtils.h"
 
