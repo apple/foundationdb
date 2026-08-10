@@ -396,7 +396,7 @@ Future<Void> mapAsync(FutureStream<T> input, F actorFunc, PromiseStream<U> outpu
 		}
 	}
 
-	while (futures.size()) {
+	while (!futures.empty()) {
 		U nextOutput = co_await futures.front();
 		output.send(nextOutput);
 		futures.pop_front();
@@ -432,8 +432,8 @@ Future<Void> map(FutureStream<T> input, F func, PromiseStream<std::invoke_result
 		} catch (Error& e) {
 			if (e.code() == error_code_end_of_stream) {
 				break;
-			} else
-				throw;
+			}
+			throw;
 		}
 	}
 
@@ -723,7 +723,7 @@ private:
 
 class AsyncTrigger : NonCopyable {
 public:
-	AsyncTrigger() {}
+	AsyncTrigger() = default;
 	explicit(false) AsyncTrigger(AsyncTrigger&& at) : v(std::move(at.v)) {}
 	void operator=(AsyncTrigger&& at) { v = std::move(at.v); }
 	Future<Void> onTrigger() const { return v.onChange(); }
@@ -774,13 +774,14 @@ template <class T>
 Future<Void> asyncDeserialize(Reference<AsyncVar<Standalone<StringRef>>> input,
                               Reference<AsyncVar<Optional<T>>> output) {
 	while (true) {
-		if (input->get().size()) {
+		if (!input->get().empty()) {
 			ObjectReader reader(input->get().begin(), IncludeVersion());
 			T res;
 			reader.deserialize(res);
 			output->set(res);
-		} else
+		} else {
 			output->set(Optional<T>());
+		}
 		co_await input->onChange();
 	}
 }
@@ -995,8 +996,9 @@ Future<Void> quorum(const Future<T>* pItems, int itemCount, int n) {
 				q->oneError(r.getError());
 			else
 				q->oneSuccess();
-		} else
+		} else {
 			new (nextCallback) QuorumCallback<T>(r, q);
+		}
 		++nextCallback;
 	}
 	return Future<Void>(q);
@@ -1153,7 +1155,7 @@ Future<Void> quorum(AsyncResult<T>* pItems, int itemCount, int n) {
 	ASSERT(n >= 0 && n <= itemCount);
 
 	int size = QuorumAsyncResult<T>::sizeFor(itemCount);
-	QuorumAsyncResult<T>* q = new (allocateFast(size)) QuorumAsyncResult<T>(n, itemCount);
+	auto* q = new (allocateFast(size)) QuorumAsyncResult<T>(n, itemCount);
 
 	coro::QuorumAsyncResultCallback<T>* nextCallback = q->callbacks();
 	for (int i = 0; i < itemCount; ++i) {
@@ -1165,8 +1167,9 @@ Future<Void> quorum(AsyncResult<T>* pItems, int itemCount, int n) {
 			else
 				q->oneSuccess();
 			r = AsyncResult<T>();
-		} else
+		} else {
 			new (nextCallback) coro::QuorumAsyncResultCallback<T>(r, q);
+		}
 		++nextCallback;
 	}
 	return Future<Void>(q);
@@ -1242,8 +1245,9 @@ struct GetAllAsyncResult final : SAV<std::vector<T>> {
 			this->sendErrorAndDelPromiseRef(err);
 			for (int i = 0; i < cancelledCallbacks; ++i)
 				this->delPromiseRef();
-		} else
+		} else {
 			this->delPromiseRef();
+		}
 	}
 
 	coro::GetAllAsyncResultCallback<T>* callbacks() { return (coro::GetAllAsyncResultCallback<T>*)(this + 1); }
@@ -1532,7 +1536,7 @@ Future<std::vector<T>> getAll(std::vector<AsyncResult<T>>&& input) {
 		return std::vector<T>();
 
 	int size = GetAllAsyncResult<T>::sizeFor(input.size());
-	GetAllAsyncResult<T>* result = new (allocateFast(size)) GetAllAsyncResult<T>(input.size());
+	auto* result = new (allocateFast(size)) GetAllAsyncResult<T>(input.size());
 
 	coro::GetAllAsyncResultCallback<T>* nextCallback = result->callbacks();
 	for (int i = 0; i < input.size(); ++i) {
@@ -1681,12 +1685,12 @@ Future<T> detach(Future<T> f, ExplicitVoid = {}) {
 template <class T>
 Future<T> orYield(Future<T> f) {
 	if (f.isReady()) {
-		if (f.isError())
+		if (f.isError()) {
 			return tagError<T>(yield(), f.getError());
-		else
-			return tag(yield(), f.get());
-	} else
-		return f;
+		}
+		return tag(yield(), f.get());
+	}
+	return f;
 }
 
 Future<Void> orYield(Future<Void> f);
@@ -2168,8 +2172,8 @@ struct NotifiedInt {
 			val = v;
 
 			std::vector<Promise<Void>> toSend;
-			while (waiting.size() && v >= waiting.top().first) {
-				Promise<Void> p = std::move(waiting.top().second);
+			while (!waiting.empty() && v >= waiting.top().first) {
+				Promise<Void> p = waiting.top().second;
 				waiting.pop();
 				toSend.push_back(p);
 			}
@@ -2188,7 +2192,7 @@ struct NotifiedInt {
 	}
 
 private:
-	typedef std::pair<int64_t, Promise<Void>> Item;
+	using Item = std::pair<int64_t, Promise<Void>>;
 	struct ItemCompare {
 		bool operator()(const Item& a, const Item& b) { return a.first > b.first; }
 	};
@@ -2283,7 +2287,7 @@ struct YieldedFutureActor final : SAV<Void>,
                                   FastAllocated<YieldedFutureActor> {
 	Error in_error_state;
 
-	typedef ActorCallback<YieldedFutureActor, 1, Void> CB1;
+	using CB1 = ActorCallback<YieldedFutureActor, 1, Void>;
 
 	using FastAllocated<YieldedFutureActor>::operator new;
 	using FastAllocated<YieldedFutureActor>::operator delete;
@@ -2574,7 +2578,7 @@ Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<Async
 template <class T>
 class UnsafeWeakFutureReference {
 public:
-	UnsafeWeakFutureReference() {}
+	UnsafeWeakFutureReference() = default;
 	explicit UnsafeWeakFutureReference(Future<Reference<T>> future) : data(new UnsafeWeakFutureReferenceData(future)) {}
 
 	// Returns a future to obtain a normal reference handle

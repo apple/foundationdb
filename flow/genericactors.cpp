@@ -35,7 +35,7 @@ Future<Void> anyTrue(std::vector<Reference<AsyncVar<bool>>> input, Reference<Asy
 	while (true) {
 		bool oneTrue = false;
 		std::vector<Future<Void>> changes;
-		for (auto it : input) {
+		for (const auto& it : input) {
 			if (it->get())
 				oneTrue = true;
 			changes.push_back(it->onChange());
@@ -101,7 +101,7 @@ Future<bool> quorumEqualsTrue(std::vector<Future<bool>> futures, int required) {
 Future<bool> shortCircuitAny(std::vector<Future<bool>> f) {
 	std::vector<Future<Void>> sc;
 	sc.reserve(f.size());
-	for (Future<bool> fut : f) {
+	for (const Future<bool>& fut : f) {
 		sc.push_back(returnIfTrue(fut));
 	}
 
@@ -122,12 +122,12 @@ Future<bool> shortCircuitAny(std::vector<Future<bool>> f) {
 
 Future<Void> orYield(Future<Void> f) {
 	if (f.isReady()) {
-		if (f.isError())
+		if (f.isError()) {
 			return tagError<Void>(yield(), f.getError());
-		else
-			return yield();
-	} else
-		return f;
+		}
+		return yield();
+	}
+	return f;
 }
 
 Future<Void> returnIfTrue(Future<bool> f) {
