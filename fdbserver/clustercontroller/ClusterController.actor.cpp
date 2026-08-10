@@ -38,6 +38,7 @@
 #include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
+#include "flow/BooleanParam.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/BackupInterface.h"
@@ -1180,7 +1181,9 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 }
 
-static bool shouldDeferBetterMasterRecovery(Optional<Version> lastEpochEnd, bool hasStorageServers) {
+FDB_BOOLEAN_PARAM(HasStorageServers);
+
+static bool shouldDeferBetterMasterRecovery(Optional<Version> lastEpochEnd, HasStorageServers hasStorageServers) {
 	return lastEpochEnd.present() && lastEpochEnd.get() == 0 && !hasStorageServers;
 }
 
@@ -1206,7 +1209,7 @@ Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 		const Optional<Version> lastEpochEnd = self->db.recoveryData.isValid()
 		                                           ? Optional<Version>(self->db.recoveryData->lastEpochEnd)
 		                                           : Optional<Version>();
-		if (!shouldDeferBetterMasterRecovery(lastEpochEnd, !self->storageStatusInfos.empty()) &&
+		if (!shouldDeferBetterMasterRecovery(lastEpochEnd, HasStorageServers(!self->storageStatusInfos.empty())) &&
 		    self->betterMasterExists()) {
 			self->db.forceMasterFailure.trigger();
 			TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().master.id());
@@ -3846,10 +3849,10 @@ TEST_CASE("/fdbserver/clustercontroller/ignoreStaleWorkerRegistration") {
 }
 
 TEST_CASE("/fdbserver/clustercontroller/deferBetterMasterRecoveryUntilInitialStorage") {
-	ASSERT(!shouldDeferBetterMasterRecovery(Optional<Version>(), false));
-	ASSERT(shouldDeferBetterMasterRecovery(Optional<Version>(0), false));
-	ASSERT(!shouldDeferBetterMasterRecovery(Optional<Version>(0), true));
-	ASSERT(!shouldDeferBetterMasterRecovery(Optional<Version>(1), false));
+	ASSERT(!shouldDeferBetterMasterRecovery(Optional<Version>(), HasStorageServers::False));
+	ASSERT(shouldDeferBetterMasterRecovery(Optional<Version>(0), HasStorageServers::False));
+	ASSERT(!shouldDeferBetterMasterRecovery(Optional<Version>(0), HasStorageServers::True));
+	ASSERT(!shouldDeferBetterMasterRecovery(Optional<Version>(1), HasStorageServers::False));
 	return Void();
 }
 
