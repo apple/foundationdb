@@ -508,8 +508,6 @@ Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
 				TraceEvent((std::string(workerName) + "ReRecruitmentSuccess").c_str(), self->id)
 				    .detail("RecoveryCount", recoveryCount);
 				recruitment = Never();
-			} else {
-				UNREACHABLE();
 			}
 		} catch (Error& e) {
 			if (strcmp(workerName, "LogRouter") == 0) {
@@ -1362,8 +1360,6 @@ Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 			// remove workers that have failed
 			removeFailedWorker(worker, cluster);
 			co_return;
-		} else {
-			UNREACHABLE();
 		}
 	}
 }
@@ -3502,8 +3498,6 @@ Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		// We are no longer the leader if this has changed.
 		endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Leader Replaced", true);
 		CODE_PROBE(true, "Leader replaced");
-	} else {
-		UNREACHABLE();
 	}
 }
 
