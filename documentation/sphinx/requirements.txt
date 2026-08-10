@@ -1,4 +1,4 @@
-setuptools==78.1.1
+setuptools==83.0.0
 sphinx==5.1.1
 sphinx-bootstrap-theme==0.8.1
 docutils==0.19

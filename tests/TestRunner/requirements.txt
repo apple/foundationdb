@@ -1,4 +1,4 @@
 Authlib==1.6.12
-cryptography==48.0.1
+cryptography==50.0.0
 pycparser==2.21
 toml==0.10.2
