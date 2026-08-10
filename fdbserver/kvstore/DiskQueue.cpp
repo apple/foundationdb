@@ -23,7 +23,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "crc32/crc32c.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/UnitTest.h"
 #include "flow/xxhash.h"
 

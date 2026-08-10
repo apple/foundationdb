@@ -54,7 +54,7 @@
 #include <ctime>
 #include <climits>
 #include "flow/IAsyncFile.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Hash3.h"
 #include "flow/xxhash.h"
 

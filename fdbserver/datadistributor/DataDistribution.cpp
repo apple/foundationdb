@@ -56,7 +56,7 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/serialize.h"
 #include "flow/CoroUtils.h"
 

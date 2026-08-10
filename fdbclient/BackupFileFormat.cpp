@@ -25,7 +25,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
 
 namespace fileBackup {
