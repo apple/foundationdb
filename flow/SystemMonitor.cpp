@@ -22,6 +22,8 @@
 #include "flow/Platform.h"
 #include "flow/TDMetric.h"
 #include "flow/SystemMonitor.h"
+#include "flow/Knobs.h"
+#include "flow/MemoryTracker.h"
 
 #if defined(ALLOC_INSTRUMENTATION) && defined(__linux__)
 #include <cxxabi.h>
@@ -489,6 +491,20 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 #endif
 	statState->networkMetricsState = g_network->networkInfo.metrics;
 	statState->networkState = netData;
+
+	// Periodic dump of the per-call-site memory tracker; cadence from the
+	// MEMORY_TRACKING_REPORT_INTERVAL knob (<=0 disables). In simulation the
+	// tracker's tables and this static are shared across all simulated
+	// processes, so one dump fires per interval cluster-wide and its site
+	// numbers blend every process — correct only in a real single-process server.
+	if (FLOW_KNOBS && FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL > 0) {
+		static double lastMemTrackerDump = 0;
+		if (now() - lastMemTrackerDump >= FLOW_KNOBS->MEMORY_TRACKING_REPORT_INTERVAL) {
+			memTrackerDump(FLOW_KNOBS->MEMORY_TRACKING_REPORT_BYTES_THRESHOLD);
+			lastMemTrackerDump = now();
+		}
+	}
+
 	return currentStats;
 }
 

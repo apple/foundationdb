@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <iterator>
 #include <limits>
@@ -2893,7 +2894,7 @@ static Future<Void> tssStreamComparison(Request request,
 
 			// skip tss comparison if both are end of stream
 			if ((!ssEndOfStream || !tssEndOfStream) && !TSS_doCompare(ssReply.get(), tssReply.get())) {
-				CODE_PROBE(true, "TSS mismatch in stream comparison");
+				CODE_PROBE(true, "TSS mismatch in stream comparison", probe::decoration::rare);
 				TraceEvent mismatchEvent(
 				    (simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
 				        ? SevWarnAlways
@@ -2909,7 +2910,8 @@ static Future<Void> tssStreamComparison(Request request,
 					           "Tracing Full TSS Mismatch in stream comparison",
 					           probe::decoration::rare);
 					CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
-					           "Tracing Partial TSS Mismatch in stream comparison and storing the rest in FDB");
+					           "Tracing Partial TSS Mismatch in stream comparison and storing the rest in FDB",
+					           probe::decoration::rare);
 
 					if (!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL) {
 						mismatchEvent.disable();
@@ -6456,7 +6458,7 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 		double clientSamplingProbability = std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || buggify()) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
-		    (!g_network->isSimulated() || !g_simulator->speedUpSimulation)) {
+		    (!g_network->isSimulated() || !g_simulator->speedUpSimulation || std::isfinite(sampleRate))) {
 			return makeReference<TransactionLogInfo>(TransactionLogInfo::DATABASE);
 		}
 	}

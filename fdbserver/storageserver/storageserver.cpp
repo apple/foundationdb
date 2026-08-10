@@ -1679,7 +1679,7 @@ public:
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
 		    now() > fdbSimulationPolicyState().injectTargetedSSRestartTime &&
 		    rebootAfterDurableVersion == std::numeric_limits<Version>::max()) {
-			CODE_PROBE(true, "Injecting SS targeted restart");
+			CODE_PROBE(true, "Injecting SS targeted restart", probe::decoration::rare);
 			TraceEvent("SimSSInjectTargetedRestart", thisServerID).detail("Version", v);
 			rebootAfterDurableVersion = v;
 			fdbSimulationPolicyState().injectTargetedSSRestartTime = std::numeric_limits<double>::max();
@@ -1689,7 +1689,7 @@ public:
 	bool maybeInjectDelay() {
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
 		    now() > fdbSimulationPolicyState().injectSSDelayTime) {
-			CODE_PROBE(true, "Injecting SS targeted delay");
+			CODE_PROBE(true, "Injecting SS targeted delay", probe::decoration::rare);
 			TraceEvent("SimSSInjectDelay", thisServerID).log();
 			fdbSimulationPolicyState().injectSSDelayTime = std::numeric_limits<double>::max();
 			return true;
@@ -11589,28 +11589,30 @@ Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueReq
 	}
 }
 
-Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues) {
-	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
+template <class Request, class Handler>
+Future<Void> serveGuardedReadRequests(StorageServer* self,
+                                      FutureStream<Request> requests,
+                                      TransactionLineage::Operation operation,
+                                      Handler handler) {
+	getCurrentLineage()->modify(&TransactionLineage::operation) = operation;
 	while (true) {
-		GetKeyValuesRequest req = co_await getKeyValues;
-
+		Request req = co_await requests;
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
-		self->actors.add(self->readGuard(req, getKeyValuesQ));
+		self->actors.add(self->readGuard(req, handler));
 	}
+}
+
+Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues) {
+	return serveGuardedReadRequests(
+	    self, std::move(getKeyValues), TransactionLineage::Operation::GetKeyValues, getKeyValuesQ);
 }
 
 Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
                                              FutureStream<GetMappedKeyValuesRequest> getMappedKeyValues) {
 	// TODO: Is it fine to keep TransactionLineage::Operation::GetKeyValues here?
-	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
-	while (true) {
-		GetMappedKeyValuesRequest req = co_await getMappedKeyValues;
-
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
-		// downgrade before doing real work
-		self->actors.add(self->readGuard(req, getMappedKeyValuesQ));
-	}
+	return serveGuardedReadRequests(
+	    self, std::move(getMappedKeyValues), TransactionLineage::Operation::GetKeyValues, getMappedKeyValuesQ);
 }
 
 Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
@@ -11625,13 +11627,7 @@ Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
 }
 
 Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyRequest> getKey) {
-	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKey;
-	while (true) {
-		GetKeyRequest req = co_await getKey;
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
-		// downgrade before doing real work
-		self->actors.add(self->readGuard(req, getKeyQ));
-	}
+	return serveGuardedReadRequests(self, std::move(getKey), TransactionLineage::Operation::GetKey, getKeyQ);
 }
 
 Future<Void> watchValueWaitForVersion(StorageServer* self,

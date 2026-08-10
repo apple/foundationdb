@@ -68,7 +68,8 @@ struct TxnTimeout : TestWorkload {
 			return Void();
 		}
 
-		return timeout(reportErrors(workload(this, db), "TxnTimeoutError"), testDuration, Void());
+		// Let in-flight transactions drain so the final success count includes every attempted transaction.
+		return reportErrors(workload(this, db), "TxnTimeoutError");
 	}
 
 	Future<bool> check(const Database& db) override {

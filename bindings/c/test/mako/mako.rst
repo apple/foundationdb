@@ -179,6 +179,7 @@ Format
 ------
 | One operation type is defined as ``<Type><Count>`` or ``<Type><Count>:<Range>``.
 | When Count is omitted, it's equivalent to setting it to 1.  (e.g. ``g`` is equivalent to ``g1``)
+| For ``gr`` and ``sgr``, a negative Range scans the specified number of keys in reverse order.
 | Multiple operation types within the same transaction can be concatenated.  (e.g. ``g9u1`` = 9 GETs and 1 update)
 
 Transaction Specification Examples
@@ -188,6 +189,9 @@ Transaction Specification Examples
 
 - | 10 GET RANGE with Range of 50 (Non-commited)
   | ``gr10:50``
+
+- | 10 snapshot GET RANGE operations with Range of 50 in reverse order (Non-commited)
+  | ``sgr10:-50``
 
 - | 90 GETs and 10 Updates (Committed)
   | ``g90u10``

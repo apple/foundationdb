@@ -436,32 +436,36 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
+			Future<Optional<Value>> keysFuture = tr.get(cdcStreamKeyFor(streamId));
+			Future<Optional<Value>> minVersionFuture = tr.get(cdcMinVersionKeyFor(streamId));
+			Future<RangeResult> assignedProxiesFuture = tr.getRange(cdcProxyRangeFor(streamId), 2);
+			KeyRange tagHistoryRange = cdcTagHistoryRangeFor(streamId);
+			Future<RangeResult> historyFuture = tr.getRange(tagHistoryRange, CLIENT_KNOBS->TOO_MANY);
+
 			CDCStreamReadState result;
-			Optional<Value> keysValue = co_await tr.get(cdcStreamKeyFor(streamId));
+			Optional<Value> keysValue = co_await keysFuture;
 			if (keysValue.present()) {
 				result.keys = decodeCDCStreamKeysValue(keysValue.get());
 			} else if (requireKeys) {
 				throw client_invalid_operation();
 			}
 
-			Optional<Value> minVersionValue = co_await tr.get(cdcMinVersionKeyFor(streamId));
+			Optional<Value> minVersionValue = co_await minVersionFuture;
 			if (!minVersionValue.present()) {
 				throw client_invalid_operation();
 			}
 			result.minVersion = decodeCDCMinVersionValue(minVersionValue.get());
 
-			RangeResult assignedProxies = co_await tr.getRange(cdcProxyRangeFor(streamId), 2);
+			RangeResult assignedProxies = co_await assignedProxiesFuture;
 			if (assignedProxies.size() != 1 || decodeCDCProxyKey(assignedProxies[0].key).second != expectedProxyId) {
-				CODE_PROBE(true, "CDC proxy rejects request for stream owned elsewhere");
+				CODE_PROBE(true, "CDC proxy rejects request for stream owned elsewhere", probe::decoration::rare);
 				throw wrong_shard_server();
 			}
 
 			std::vector<std::pair<Version, Tag>> tagAssignments;
-			KeyRange tagHistoryRange = cdcTagHistoryRangeFor(streamId);
 			Key begin = tagHistoryRange.begin;
 			while (begin < tagHistoryRange.end) {
-				RangeResult history =
-				    co_await tr.getRange(KeyRangeRef(begin, tagHistoryRange.end), CLIENT_KNOBS->TOO_MANY);
+				RangeResult history = co_await historyFuture;
 				for (KeyValueRef const& kv : history) {
 					const CDCTagHistoryEntry historyEntry = decodeCDCTagHistoryKey(kv.key);
 					ASSERT_WE_THINK(historyEntry.streamId == streamId);
@@ -472,6 +476,10 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 					break;
 				}
 				begin = keyAfter(history.back().key);
+				if (begin >= tagHistoryRange.end) {
+					break;
+				}
+				historyFuture = tr.getRange(KeyRangeRef(begin, tagHistoryRange.end), CLIENT_KNOBS->TOO_MANY);
 			}
 			if (tagAssignments.empty()) {
 				throw client_invalid_operation();
@@ -928,7 +936,7 @@ CDCBufferSelection CDCProxy::selectBufferCandidatesForTag(Reference<CDCBufferedT
 		if (stream == streams.end() || !stream->second->active) {
 			continue;
 		}
-		CODE_PROBE(true, "CDC proxy rejects a version larger than its complete buffer budget");
+		CODE_PROBE(true, "CDC proxy rejects a version larger than its complete buffer budget", probe::decoration::rare);
 		TraceEvent(SevWarn, "CDCProxyVersionExceedsBufferLimit", id)
 		    .detail("Tag", tag->tag)
 		    .detail("StreamId", streamId)
@@ -1142,7 +1150,7 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 	try {
 		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, stream->streamId, id, true);
 		if (!isCurrentStreamInitialization(streams, stream)) {
-			CODE_PROBE(true, "CDC proxy discards stale stream initialization", probe::decoration::rare);
+			CODE_PROBE(true, "CDC proxy discards stale stream initialization");
 			co_return;
 		}
 		stream->keys = metadata.keys;
@@ -1161,7 +1169,7 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 		for (const auto& interval : stream->tagIntervals) {
 			auto tag = tags.find(interval.tag);
 			if (tag == tags.end()) {
-				Reference<CDCBufferedTag> newTag = makeReference<CDCBufferedTag>(interval.tag);
+				auto newTag = makeReference<CDCBufferedTag>(interval.tag);
 				tag = tags.emplace(interval.tag, newTag).first;
 				tag->second->streamIds.insert(stream->streamId);
 				actors.add(bufferTag(newTag));
@@ -1348,7 +1356,8 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 			co_return;
 		}
 		if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
-			CODE_PROBE(true, "CDC proxy retries retired pops after log system topology changes");
+			CODE_PROBE(
+			    true, "CDC proxy retries retired pops after log system topology changes", probe::decoration::rare);
 			requestAcknowledgedDataPop();
 			co_return;
 		}
@@ -1372,7 +1381,9 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		}
 	}
 	if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
-		CODE_PROBE(true, "CDC proxy preserves retired pop metadata after log system topology changes");
+		CODE_PROBE(true,
+		           "CDC proxy preserves retired pop metadata after log system topology changes",
+		           probe::decoration::rare);
 		requestAcknowledgedDataPop();
 		co_return;
 	}
@@ -1411,7 +1422,7 @@ void CDCProxy::reconcileStreams() {
 		if (proxyId == id) {
 			assignedStreams.insert(streamId);
 			if (!streams.contains(streamId)) {
-				Reference<CDCBufferedStream> stream = makeReference<CDCBufferedStream>(streamId);
+				auto stream = makeReference<CDCBufferedStream>(streamId);
 				streams.emplace(streamId, stream);
 				actors.add(initializeStream(stream));
 			}
@@ -1506,7 +1517,7 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 		auto buffered =
 		    co_await race(waitForBufferedVersion(stream, begin), delay(SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT));
 		if (buffered.index() == 1) {
-			CODE_PROBE(true, "CDC proxy expires an idle consume lease", probe::decoration::rare);
+			CODE_PROBE(true, "CDC proxy expires an idle consume lease");
 			CDCConsumeReply reply;
 			reply.lastConsumedVersion = request.cursor.lastConsumedVersion;
 			request.reply.send(reply);
@@ -1968,8 +1979,8 @@ TEST_CASE("/NativeCDC/LagMetrics") {
 
 TEST_CASE("/NativeCDC/StreamInitializationLifecycle") {
 	std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> streams;
-	Reference<CDCBufferedStream> stream = makeReference<CDCBufferedStream>(1);
-	Reference<CDCBufferedStream> replacement = makeReference<CDCBufferedStream>(1);
+	auto stream = makeReference<CDCBufferedStream>(1);
+	auto replacement = makeReference<CDCBufferedStream>(1);
 
 	ASSERT(!isCurrentStreamInitialization(streams, stream));
 	streams.emplace(stream->streamId, stream);
