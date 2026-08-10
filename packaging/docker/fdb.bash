@@ -39,9 +39,6 @@ function create_cluster_file() {
             echo "Overwriting existing clusterfile." 1>&2
         fi
         echo "$FDB_CLUSTER_FILE_CONTENTS" > "$FDB_CLUSTER_FILE"
-    elif [[ ! -r "$FDB_CLUSTER_FILE" ]]; then
-        echo "FDB_CLUSTER_FILE_CONTENTS and FDB_COORDINATOR are not set, and no clusterfile at \"$FDB_CLUSTER_FILE\"." 1>&2
-        exit 1
     elif [[ ! -w "$FDB_CLUSTER_FILE" ]]; then
         # fdbserver requires write permissions to clusterfile, or it may *eventually* fail due to cluster migrations.
         # https://apple.github.io/foundationdb/administration.html#required-permissions
