@@ -58,13 +58,11 @@ Future<Void> timeoutWarningCollector(FutureStream<Void> input, double logDelay, 
 		auto res = co_await race(input, end);
 		if (res.index() == 0) {
 			counter++;
-		} else if (res.index() == 1) {
+		} else {
 			if (counter)
 				TraceEvent(SevWarn, context, id).detail("LateProcessCount", counter).detail("LoggingDelay", logDelay);
 			end = delay(logDelay);
 			counter = 0;
-		} else {
-			UNREACHABLE();
 		}
 	}
 }
@@ -97,13 +95,7 @@ Future<bool> quorumEqualsTrue(std::vector<Future<bool>> futures, int required) {
 	}
 
 	auto res = co_await race(quorum(true_futures, required), quorum(false_futures, futures.size() - required + 1));
-	if (res.index() == 0) {
-		co_return true;
-	}
-	if (res.index() == 1) {
-		co_return false;
-	}
-	UNREACHABLE();
+	co_return res.index() == 0;
 }
 
 Future<bool> shortCircuitAny(std::vector<Future<bool>> f) {
@@ -125,10 +117,7 @@ Future<bool> shortCircuitAny(std::vector<Future<bool>> f) {
 		}
 		co_return false;
 	}
-	if (res.index() == 1) {
-		co_return true;
-	}
-	UNREACHABLE();
+	co_return true;
 }
 
 Future<Void> orYield(Future<Void> f) {
@@ -165,14 +154,11 @@ Future<Void> delayAfterCleared(Reference<AsyncVar<bool>> condition, double time,
 		auto res = co_await race(timer, condition->onChange());
 		if (res.index() == 0) {
 			co_return;
-		} else if (res.index() == 1) {
-			bool currentState = condition->get();
-			if (currentState != previousState) {
-				timer = currentState ? Never() : delay(time, taskID);
-				previousState = currentState;
-			}
-		} else {
-			UNREACHABLE();
+		}
+		bool currentState = condition->get();
+		if (currentState != previousState) {
+			timer = currentState ? Never() : delay(time, taskID);
+			previousState = currentState;
 		}
 	}
 }
@@ -185,14 +171,11 @@ Future<Void> lowPriorityDelayAfterCleared(Reference<AsyncVar<bool>> condition, d
 		auto res = co_await race(timer, condition->onChange());
 		if (res.index() == 0) {
 			co_return;
-		} else if (res.index() == 1) {
-			bool currentState = condition->get();
-			if (currentState != previousState) {
-				timer = currentState ? Never() : lowPriorityDelay(time);
-				previousState = currentState;
-			}
-		} else {
-			UNREACHABLE();
+		}
+		bool currentState = condition->get();
+		if (currentState != previousState) {
+			timer = currentState ? Never() : lowPriorityDelay(time);
+			previousState = currentState;
 		}
 	}
 }
