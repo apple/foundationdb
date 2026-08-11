@@ -30,7 +30,7 @@ void validateOptionValuePresent(Optional<StringRef> value) {
 }
 
 void validateOptionValueNotPresent(Optional<StringRef> value) {
-	if (value.present() && value.get().size() > 0) {
+	if (value.present() && !value.get().empty()) {
 		throw invalid_option_value();
 	}
 }
