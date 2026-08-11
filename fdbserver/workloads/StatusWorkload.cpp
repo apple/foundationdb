@@ -102,39 +102,6 @@ struct StatusWorkload : TestWorkload {
 			return false;
 		}
 
-		constexpr std::array removedRoles{
-			std::string_view(".cluster.processes.$map.roles[0].role.$enum.blob_manager"),
-			std::string_view(".cluster.processes.$map.roles[0].role.$enum.blob_worker"),
-		};
-		for (auto removedRole : removedRoles) {
-			if (path == removedRole) {
-				return false;
-			}
-		}
-
-		constexpr std::string_view enumSeparator = ".$enum.";
-		const auto enumPosition = path.rfind(enumSeparator);
-		if (enumPosition != std::string_view::npos) {
-			const auto enumPath = path.substr(0, enumPosition);
-			constexpr std::array storageEnginePaths{
-				std::string_view(".cluster.configuration.log_engine"),
-				std::string_view(".cluster.configuration.storage_engine"),
-				std::string_view(".cluster.configuration.tss_storage_engine"),
-				std::string_view(".cluster.configuration.perpetual_storage_wiggle_engine"),
-				std::string_view(".cluster.processes.$map.roles[0].storage_metadata.storage_engine"),
-			};
-			for (auto storageEnginePath : storageEnginePaths) {
-				if (enumPath == storageEnginePath) {
-					const auto enumValue = path.substr(enumPosition + enumSeparator.size());
-					if (enumValue == "ssd" || enumValue == "memory-1" || enumValue == "memory-2" ||
-					    enumValue == "memory-radixtree-beta") {
-						return false;
-					}
-					break;
-				}
-			}
-		}
-
 		if (!simulated) {
 			return true;
 		}
@@ -143,7 +110,7 @@ struct StatusWorkload : TestWorkload {
 			return false;
 		}
 
-		constexpr std::array simulationOnlyPaths{
+		constexpr std::array productionOnlyPaths{
 			std::string_view(".cluster.processes.$map.cpu"),
 			std::string_view(".cluster.processes.$map.disk"),
 			std::string_view(".cluster.processes.$map.network"),
@@ -161,9 +128,9 @@ struct StatusWorkload : TestWorkload {
 			std::string_view(".cluster.processes.$map.memory.unused_allocated_memory"),
 			std::string_view(".cluster.processes.$map.memory.used_bytes"),
 		};
-		for (auto simulationOnlyPath : simulationOnlyPaths) {
-			if (path == simulationOnlyPath ||
-			    (path.starts_with(simulationOnlyPath) && path[simulationOnlyPath.size()] == '.')) {
+		for (auto productionOnlyPath : productionOnlyPaths) {
+			if (path == productionOnlyPath ||
+			    (path.starts_with(productionOnlyPath) && path[productionOnlyPath.size()] == '.')) {
 				return false;
 			}
 		}
@@ -187,10 +154,7 @@ struct StatusWorkload : TestWorkload {
 				} else if (skv.second.type() == json_spirit::obj_type) {
 					if (skv.second.get_obj().contains("$enum")) {
 						for (auto& enum_item : skv.second.get_obj().at("$enum").get_array()) {
-							std::string enumPath = spath + ".$enum." + enum_item.get_str();
-							if (shouldTrackSchemaCoverage(enumPath, g_network->isSimulated())) {
-								schemaCoverage(enumPath, false);
-							}
+							schemaCoverage(spath + ".$enum." + enum_item.get_str(), false);
 						}
 					} else {
 						schemaCoverageRequirements(skv.second.get_obj(), spath);
@@ -310,25 +274,10 @@ WorkloadFactory<StatusWorkload> StatusWorkloadFactory;
 
 TEST_CASE("/fdbserver/status/schema/coverage") {
 	for (bool simulated : { false, true }) {
-		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.roles[0].role.$enum.blob_manager",
-		                                                  simulated));
-		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.roles[0].role.$enum.blob_worker",
-		                                                  simulated));
 		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.roles[0].role.$enum.storage",
 		                                                 simulated));
 		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.class_type.$enum.blob_worker",
 		                                                 simulated));
-
-		ASSERT(
-		    !StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.storage_engine.$enum.ssd", simulated));
-		ASSERT(
-		    !StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.log_engine.$enum.memory-1", simulated));
-		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.tss_storage_engine.$enum.memory-2",
-		                                                  simulated));
-		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(
-		    ".cluster.configuration.perpetual_storage_wiggle_engine.$enum.memory-radixtree-beta", simulated));
-		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(
-		    ".cluster.processes.$map.roles[0].storage_metadata.storage_engine.$enum.ssd", simulated));
 		ASSERT(
 		    StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.storage_engine.$enum.ssd-1", simulated));
 		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.storage_engine.$enum.memory-radixtree",
@@ -360,6 +309,50 @@ TEST_CASE("/fdbserver/status/schema/coverage") {
 	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.memory", true));
 	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.cpu_limit", true));
 	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.clients.supported_versions", true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/status/schema/canonical_outputs") {
+	json_spirit::mValue schema = readJSONStrictly(JSONSchemas::statusSchema.toString());
+	auto check = [&schema](bool expectOk, std::string const& response) {
+		json_spirit::mValue result = readJSONStrictly(response);
+		std::string errorStr;
+		ASSERT(expectOk == schemaMatch(schema, result, errorStr, expectOk ? SevError : SevInfo));
+	};
+	auto checkConfigurationEngine = [&check](bool expectOk, std::string const& field, std::string const& engine) {
+		check(expectOk, R"({"cluster":{"configuration":{")" + field + R"(":")" + engine + R"("}}})");
+	};
+
+	check(false, R"({"cluster":{"processes":{"process1":{"roles":[{"role":"blob_manager"}]}}}})");
+	check(false, R"({"cluster":{"processes":{"process1":{"roles":[{"role":"blob_worker"}]}}}})");
+	check(true, R"({"cluster":{"processes":{"process1":{"roles":[{"role":"storage"}]}}}})");
+	check(true, R"({"cluster":{"processes":{"process1":{"class_type":"blob_worker"}}}})");
+
+	for (auto const& field :
+	     { "log_engine", "storage_engine", "tss_storage_engine", "perpetual_storage_wiggle_engine" }) {
+		checkConfigurationEngine(true, field, "ssd-1");
+		checkConfigurationEngine(false, field, "ssd");
+		checkConfigurationEngine(false, field, "memory-1");
+		checkConfigurationEngine(false, field, "memory-2");
+	}
+	checkConfigurationEngine(true, "storage_engine", "memory-radixtree");
+	checkConfigurationEngine(true, "tss_storage_engine", "memory-radixtree");
+	checkConfigurationEngine(true, "perpetual_storage_wiggle_engine", "memory-radixtree");
+	checkConfigurationEngine(true, "perpetual_storage_wiggle_engine", "none");
+	checkConfigurationEngine(false, "perpetual_storage_wiggle_engine", "memory-radixtree-beta");
+
+	check(false, R"({"cluster":{"processes":{"process1":{"roles":[{"storage_metadata":{"storage_engine":"ssd"}}]}}}})");
+	check(true,
+	      R"({"cluster":{"processes":{"process1":{"roles":[{"storage_metadata":{"storage_engine":"ssd-1"}}]}}}})");
+	check(
+	    true,
+	    R"({"cluster":{"processes":{"process1":{"roles":[{"storage_metadata":{"storage_engine":"memory-radixtree"}}]}}}})");
+
+	json_spirit::mValue configurationSchema = readJSONStrictly(JSONSchemas::clusterConfigurationSchema.toString());
+	json_spirit::mValue configuration = readJSONStrictly(R"({"storage_engine":"ssd"})");
+	std::string errorStr;
+	ASSERT(schemaMatch(configurationSchema, configuration, errorStr));
 
 	return Void();
 }

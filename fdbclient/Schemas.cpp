@@ -133,8 +133,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
-                        "blob_manager",
-                        "blob_worker",
                         "consistency_scan",
                         "router",
                         "coordinator"
@@ -146,15 +144,12 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                      "created_time_timestamp": 0,
                      "storage_engine":{
                      "$enum":[
-                     "ssd",
                      "ssd-1",
                      "ssd-2",
                      "ssd-redwood-1",
                      "ssd-rocksdb-v1",
                      "ssd-sharded-rocksdb",
                      "memory",
-                     "memory-1",
-                     "memory-2",
                      "memory-radixtree",
                      "unknown"
                      ]}
@@ -814,43 +809,32 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "log_version":2,
          "log_engine":{
          "$enum":[
-             "ssd",
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1",
              "ssd-rocksdb-v1",
-             "ssd-sharded-rocksdb",
-             "memory",
-             "memory-1",
-             "memory-2",
-             "memory-radixtree"
+             "ssd-sharded-rocksdb"
          ]},
          "log_spill":1,
          "storage_engine":{
          "$enum":[
-             "ssd",
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
-             "memory-1",
-             "memory-2",
              "memory-radixtree"
          ]},
          "tss_count":1,
          "tss_storage_engine":{
          "$enum":[
-             "ssd",
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
-             "memory-1",
-             "memory-2",
              "memory-radixtree"
          ]},
          "coordinators_count":1,
@@ -874,16 +858,13 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "perpetual_storage_wiggle_locality":"0",
          "perpetual_storage_wiggle_engine":{
          "$enum":[
-             "ssd",
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
-             "memory-1",
-             "memory-2",
-             "memory-radixtree-beta",
+             "memory-radixtree",
              "none"
          ]},
          "storage_migration_type": {
