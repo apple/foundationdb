@@ -30,6 +30,7 @@
 #include "flow/WipedString.h"
 #include "flow/TDMetric.h"
 #include "flow/IRandom.h"
+#include "fdbclient/ClientOptionValidation.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ProcessClass.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -59,9 +60,6 @@ template <>
 void addref(DatabaseContext* ptr);
 template <>
 void delref(DatabaseContext* ptr);
-
-void validateOptionValuePresent(Optional<StringRef> value);
-void validateOptionValueNotPresent(Optional<StringRef> value);
 
 void enableClientInfoLogging();
 
@@ -545,10 +543,6 @@ Future<Void> Database::run(Fun fun) {
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext);
 Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys, int shardLimit);
-
-int64_t extractIntOption(Optional<StringRef> value,
-                         int64_t minValue = std::numeric_limits<int64_t>::min(),
-                         int64_t maxValue = std::numeric_limits<int64_t>::max());
 
 // Takes a snapshot of the cluster, specifically the following persistent
 // states: coordinator, TLog and storage state

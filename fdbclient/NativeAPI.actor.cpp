@@ -275,32 +275,6 @@ bool DatabaseContext::sampleOnCost(uint64_t cost) const {
 	return deterministicRandom()->random01() <= (double)cost / sampleCost;
 }
 
-void validateOptionValuePresent(Optional<StringRef> value) {
-	if (!value.present()) {
-		throw invalid_option_value();
-	}
-}
-
-void validateOptionValueNotPresent(Optional<StringRef> value) {
-	if (value.present() && value.get().size() > 0) {
-		throw invalid_option_value();
-	}
-}
-
-int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
-	validateOptionValuePresent(value);
-	if (value.get().size() != 8) {
-		throw invalid_option_value();
-	}
-
-	int64_t passed = *((int64_t*)(value.get().begin()));
-	if (passed > maxValue || passed < minValue) {
-		throw invalid_option_value();
-	}
-
-	return passed;
-}
-
 void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	int defaultFor = FDBDatabaseOptions::optionInfo.getMustExist(option).defaultFor;
 	if (defaultFor >= 0) {
