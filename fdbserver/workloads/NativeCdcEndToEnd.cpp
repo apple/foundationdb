@@ -462,6 +462,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
+	// Remove a stream after its metadata read to verify that its paused initializer cannot revive removed state.
 	Future<Void> validateStaleStreamInitialization(Database cx) {
 		const Key name = "native-cdc-e2e/stale-initialization"_sr;
 		const KeyRange keys(
