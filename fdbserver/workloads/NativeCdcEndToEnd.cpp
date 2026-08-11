@@ -462,6 +462,40 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
+	Future<Void> validateStaleStreamInitialization(Database cx) {
+		const Key name = "native-cdc-e2e/stale-initialization"_sr;
+		const KeyRange keys(
+		    KeyRangeRef("native-cdc-e2e/stale-initialization/"_sr, "native-cdc-e2e/stale-initialization0"_sr));
+
+		co_await timeoutError(setAllProxyPopsPaused(cx, true), operationTimeout);
+		const CDCStreamId streamId =
+		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+		CDCProxyInterface proxy = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
+		const CDCCursor cursor(streamId, invalidVersion);
+		Future<ErrorOr<CDCConsumeReply>> pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
+		const double deadline = now() + operationTimeout;
+		while (true) {
+			const CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
+			ASSERT(status.popsPaused);
+			if (pendingConsume.isReady()) {
+				const ErrorOr<CDCConsumeReply> result = co_await pendingConsume;
+				ASSERT(!result.present());
+				ASSERT_EQ(result.getError().code(), error_code_wrong_shard_server);
+				pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
+			} else if (status.activeConsumeRequests > 0) {
+				break;
+			}
+			ASSERT_LT(now(), deadline);
+			co_await delay(0.01);
+		}
+
+		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+		const ErrorOr<CDCConsumeReply> result = co_await timeoutError(pendingConsume, operationTimeout);
+		ASSERT(!result.present());
+		ASSERT_EQ(result.getError().code(), error_code_wrong_shard_server);
+		co_await timeoutError(setAllProxyPopsPaused(cx, false), operationTimeout);
+	}
+
 	Future<Void> validateProxyReplacement(Database cx) {
 		const Key name = "native-cdc-e2e/proxy-replacement"_sr;
 		const KeyRange keys(
@@ -1342,6 +1376,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await validateClearClipping(cx);
 		co_await validateAssignmentPublication(cx);
 		if (testProxyReplacement) {
+			co_await validateStaleStreamInitialization(cx);
 			co_await validateProxyReplacement(cx);
 		}
 		if (testMemoryBound) {

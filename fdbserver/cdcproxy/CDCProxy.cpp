@@ -317,6 +317,8 @@ class CDCProxy {
 	bool popsPausedAfterSnapshotForTesting = false;
 	int64_t popSnapshotsPausedForTesting = 0;
 	AsyncTrigger popPauseChangedForTesting;
+	std::unordered_set<CDCStreamId> pausedStreamInitializationsForTesting;
+	AsyncTrigger streamInitializationPauseChangedForTesting;
 	bool logSystemInitialized = false;
 	bool lastLogSystemHasTLogs = false;
 	uint64_t lastLogSystemRecoveryCount = 0;
@@ -1149,6 +1151,17 @@ Future<Void> CDCProxy::bufferTag(Reference<CDCBufferedTag> tag) {
 Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 	try {
 		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, stream->streamId, id, true);
+		if (popsPausedForTesting) {
+			pausedStreamInitializationsForTesting.insert(stream->streamId);
+			ScopeExit releaseInitializationPause([this, stream]() {
+				pausedStreamInitializationsForTesting.erase(stream->streamId);
+				streamInitializationPauseChangedForTesting.trigger();
+			});
+			streamInitializationPauseChangedForTesting.trigger();
+			while (popsPausedForTesting) {
+				co_await popPauseChangedForTesting.onTrigger();
+			}
+		}
 		if (!isCurrentStreamInitialization(streams, stream)) {
 			CODE_PROBE(true, "CDC proxy discards stale stream initialization");
 			co_return;
@@ -1684,6 +1697,22 @@ Future<Void> CDCProxy::serveBufferStatusForTestingRequests(FutureStream<GetCDCPr
 		if (!g_network->isSimulated()) {
 			request.reply.sendError(client_invalid_operation());
 			continue;
+		}
+		while (popsPausedForTesting) {
+			Reference<CDCBufferedStream> pendingInitialization;
+			for (const auto& [streamId, stream] : streams) {
+				if (stream->active && !stream->initialized &&
+				    !pausedStreamInitializationsForTesting.contains(streamId)) {
+					pendingInitialization = stream;
+					break;
+				}
+			}
+			if (!pendingInitialization) {
+				break;
+			}
+			co_await race(streamInitializationPauseChangedForTesting.onTrigger(),
+			              popPauseChangedForTesting.onTrigger(),
+			              pendingInitialization->changed.onTrigger());
 		}
 		CDCProxyBufferStatus status;
 		status.bufferedBytes = bufferedBytes;
