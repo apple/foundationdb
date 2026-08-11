@@ -467,34 +467,43 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Key name = "native-cdc-e2e/stale-initialization"_sr;
 		const KeyRange keys(
 		    KeyRangeRef("native-cdc-e2e/stale-initialization/"_sr, "native-cdc-e2e/stale-initialization0"_sr));
-
-		co_await timeoutError(setAllProxyPopsPaused(cx, true), operationTimeout);
-		const CDCStreamId streamId =
-		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
-		CDCProxyInterface proxy = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
-		const CDCCursor cursor(streamId, invalidVersion);
-		Future<ErrorOr<CDCConsumeReply>> pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
 		const double deadline = now() + operationTimeout;
-		while (true) {
-			const CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
-			ASSERT(status.popsPaused);
-			if (pendingConsume.isReady()) {
-				const ErrorOr<CDCConsumeReply> result = co_await pendingConsume;
-				ASSERT(!result.present());
-				ASSERT_EQ(result.getError().code(), error_code_wrong_shard_server);
-				pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
-			} else if (status.activeConsumeRequests > 0) {
-				break;
-			}
-			ASSERT_LT(now(), deadline);
-			co_await delay(0.01);
-		}
 
-		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
-		const ErrorOr<CDCConsumeReply> result = co_await timeoutError(pendingConsume, operationTimeout);
-		ASSERT(!result.present());
-		ASSERT_EQ(result.getError().code(), error_code_wrong_shard_server);
-		co_await timeoutError(setAllProxyPopsPaused(cx, false), operationTimeout);
+		while (true) {
+			co_await timeoutError(setAllProxyPopsPaused(cx, true), operationTimeout);
+			const CDCStreamId streamId =
+			    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+			CDCProxyInterface proxy = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
+			const CDCCursor cursor(streamId, invalidVersion);
+			Future<ErrorOr<CDCConsumeReply>> pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
+			while (true) {
+				const CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
+				ASSERT(status.popsPaused);
+				if (pendingConsume.isReady()) {
+					const ErrorOr<CDCConsumeReply> result = co_await pendingConsume;
+					ASSERT(!result.present());
+					ASSERT_EQ(result.getError().code(), error_code_wrong_shard_server);
+					pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
+				} else if (status.activeConsumeRequests > 0) {
+					break;
+				}
+				ASSERT_LT(now(), deadline);
+				co_await delay(0.01);
+			}
+
+			co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+			const ErrorOr<CDCConsumeReply> result = co_await timeoutError(pendingConsume, operationTimeout);
+			ASSERT(!result.present());
+			const int errorCode = result.getError().code();
+			if (errorCode == error_code_wrong_shard_server) {
+				co_await timeoutError(setAllProxyPopsPaused(cx, false), operationTimeout);
+				co_return;
+			}
+			ASSERT(errorCode == error_code_request_maybe_delivered || errorCode == error_code_connection_failed ||
+			       errorCode == error_code_broken_promise);
+			co_await timeoutError(setAllProxyPopsPaused(cx, false), operationTimeout);
+			ASSERT_LT(now(), deadline);
+		}
 	}
 
 	Future<Void> validateProxyReplacement(Database cx) {
@@ -680,6 +689,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Version idleStartVersion = idleConsumer->position().lastConsumedVersion;
 		Future<CDCConsumeReply> idleConsume;
 		co_await startBlockedConsume(cx, streamId, idleConsumer, *proxy, &idleConsume);
+		Future<CDCConsumeReply> overlappingConsume = idleConsumer->consume();
+		ASSERT(overlappingConsume.isReady() && overlappingConsume.isError());
+		ASSERT_EQ(overlappingConsume.getError().code(), error_code_client_invalid_operation);
+		Future<Void> overlappingAcknowledgement = idleConsumer->acknowledge();
+		ASSERT(overlappingAcknowledgement.isReady() && overlappingAcknowledgement.isError());
+		ASSERT_EQ(overlappingAcknowledgement.getError().code(), error_code_client_invalid_operation);
 
 		// Assignment publications for unrelated streams used to abandon the client reply without canceling the
 		// corresponding server actor. The active request and read demand must remain bounded at one.
