@@ -20,6 +20,8 @@
 
 #include "fdbclient/ClientOptionValidation.h"
 
+#include <cstring>
+
 #include "flow/Error.h"
 #include "flow/UnitTest.h"
 
@@ -55,10 +57,11 @@ template <class Validate>
 void expectInvalidOptionValue(Validate&& validate) {
 	try {
 		validate();
-		ASSERT(false);
 	} catch (Error& error) {
 		ASSERT_EQ(error.code(), error_code_invalid_option_value);
+		return;
 	}
+	ASSERT(false);
 }
 
 } // namespace
@@ -80,8 +83,13 @@ TEST_CASE("/fdbclient/ClientOptionValidation/Presence") {
 }
 
 TEST_CASE("/fdbclient/ClientOptionValidation/Integer") {
-	int64_t encodedValue = -123;
-	const Optional<StringRef> value = StringRef(reinterpret_cast<const uint8_t*>(&encodedValue), sizeof(encodedValue));
+	const auto encode = [](int64_t value) {
+		Standalone<StringRef> encoded = makeAlignedString(alignof(int64_t), sizeof(value));
+		std::memcpy(mutateString(encoded), &value, sizeof(value));
+		return encoded;
+	};
+	const int64_t encodedValue = -123;
+	const Standalone<StringRef> value = encode(encodedValue);
 	const Optional<StringRef> missing;
 	const Optional<StringRef> empty = StringRef();
 	const uint8_t oversized[sizeof(encodedValue) + 1] = {};
@@ -90,17 +98,13 @@ TEST_CASE("/fdbclient/ClientOptionValidation/Integer") {
 	ASSERT_EQ(extractIntOption(value, encodedValue, encodedValue), encodedValue);
 	expectInvalidOptionValue([&] { extractIntOption(missing); });
 	expectInvalidOptionValue([&] { extractIntOption(empty); });
-	expectInvalidOptionValue([&] {
-		extractIntOption(StringRef(reinterpret_cast<const uint8_t*>(&encodedValue), sizeof(encodedValue) - 1));
-	});
+	expectInvalidOptionValue([&] { extractIntOption(StringRef(value.begin(), value.size() - 1)); });
 	expectInvalidOptionValue([&] { extractIntOption(StringRef(oversized, sizeof(oversized))); });
 	expectInvalidOptionValue([&] { extractIntOption(value, encodedValue + 1); });
 	expectInvalidOptionValue([&] { extractIntOption(value, std::numeric_limits<int64_t>::min(), encodedValue - 1); });
 
-	encodedValue = std::numeric_limits<int64_t>::min();
-	ASSERT_EQ(extractIntOption(value), encodedValue);
-	encodedValue = std::numeric_limits<int64_t>::max();
-	ASSERT_EQ(extractIntOption(value), encodedValue);
+	ASSERT_EQ(extractIntOption(encode(std::numeric_limits<int64_t>::min())), std::numeric_limits<int64_t>::min());
+	ASSERT_EQ(extractIntOption(encode(std::numeric_limits<int64_t>::max())), std::numeric_limits<int64_t>::max());
 
 	return Void();
 }

@@ -30,7 +30,6 @@
 #include "flow/WipedString.h"
 #include "flow/TDMetric.h"
 #include "flow/IRandom.h"
-#include "fdbclient/ClientOptionValidation.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ProcessClass.h"
 #include "fdbclient/CommitProxyInterface.h"
