@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#include <array>
+#include <string_view>
+
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
@@ -92,10 +95,89 @@ struct StatusWorkload : TestWorkload {
 		m.emplace_back("Worst Latency", worstLatency, Averaged::True);
 	}
 
+	static bool shouldTrackSchemaCoverage(std::string_view path,
+	                                      bool simulated,
+	                                      json_spirit::Value_type schemaType = json_spirit::obj_type) {
+		if (path.ends_with(".$map") && schemaType != json_spirit::obj_type) {
+			return false;
+		}
+
+		constexpr std::array removedRoles{
+			std::string_view(".cluster.processes.$map.roles[0].role.$enum.blob_manager"),
+			std::string_view(".cluster.processes.$map.roles[0].role.$enum.blob_worker"),
+		};
+		for (auto removedRole : removedRoles) {
+			if (path == removedRole) {
+				return false;
+			}
+		}
+
+		constexpr std::string_view enumSeparator = ".$enum.";
+		const auto enumPosition = path.rfind(enumSeparator);
+		if (enumPosition != std::string_view::npos) {
+			const auto enumPath = path.substr(0, enumPosition);
+			constexpr std::array storageEnginePaths{
+				std::string_view(".cluster.configuration.log_engine"),
+				std::string_view(".cluster.configuration.storage_engine"),
+				std::string_view(".cluster.configuration.tss_storage_engine"),
+				std::string_view(".cluster.configuration.perpetual_storage_wiggle_engine"),
+				std::string_view(".cluster.processes.$map.roles[0].storage_metadata.storage_engine"),
+			};
+			for (auto storageEnginePath : storageEnginePaths) {
+				if (enumPath == storageEnginePath) {
+					const auto enumValue = path.substr(enumPosition + enumSeparator.size());
+					if (enumValue == "ssd" || enumValue == "memory-1" || enumValue == "memory-2" ||
+					    enumValue == "memory-radixtree-beta") {
+						return false;
+					}
+					break;
+				}
+			}
+		}
+
+		if (!simulated) {
+			return true;
+		}
+
+		if (path.starts_with(".cluster.machines.$map.")) {
+			return false;
+		}
+
+		constexpr std::array simulationOnlyPaths{
+			std::string_view(".cluster.processes.$map.cpu"),
+			std::string_view(".cluster.processes.$map.disk"),
+			std::string_view(".cluster.processes.$map.network"),
+			std::string_view(".cluster.processes.$map.locality"),
+			std::string_view(".cluster.processes.$map.command_line"),
+			std::string_view(".cluster.processes.$map.fault_domain"),
+			std::string_view(".cluster.processes.$map.machine_id"),
+			std::string_view(".cluster.processes.$map.run_loop_busy"),
+			std::string_view(".cluster.processes.$map.under_maintenance"),
+			std::string_view(".cluster.processes.$map.uptime_seconds"),
+			std::string_view(".cluster.processes.$map.version"),
+			std::string_view(".cluster.processes.$map.memory.available_bytes"),
+			std::string_view(".cluster.processes.$map.memory.limit_bytes"),
+			std::string_view(".cluster.processes.$map.memory.rss_bytes"),
+			std::string_view(".cluster.processes.$map.memory.unused_allocated_memory"),
+			std::string_view(".cluster.processes.$map.memory.used_bytes"),
+		};
+		for (auto simulationOnlyPath : simulationOnlyPaths) {
+			if (path == simulationOnlyPath ||
+			    (path.starts_with(simulationOnlyPath) && path[simulationOnlyPath.size()] == '.')) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	static void schemaCoverageRequirements(StatusObject const& schema, std::string schema_path = std::string()) {
 		try {
 			for (auto& skv : schema) {
 				std::string spath = schema_path + "." + skv.first;
+				if (!shouldTrackSchemaCoverage(spath, g_network->isSimulated(), skv.second.type())) {
+					continue;
+				}
 
 				schemaCoverage(spath, false);
 
@@ -104,8 +186,12 @@ struct StatusWorkload : TestWorkload {
 						schemaCoverageRequirements(skv.second.get_array()[0].get_obj(), spath + "[0]");
 				} else if (skv.second.type() == json_spirit::obj_type) {
 					if (skv.second.get_obj().contains("$enum")) {
-						for (auto& enum_item : skv.second.get_obj().at("$enum").get_array())
-							schemaCoverage(spath + ".$enum." + enum_item.get_str(), false);
+						for (auto& enum_item : skv.second.get_obj().at("$enum").get_array()) {
+							std::string enumPath = spath + ".$enum." + enum_item.get_str();
+							if (shouldTrackSchemaCoverage(enumPath, g_network->isSimulated())) {
+								schemaCoverage(enumPath, false);
+							}
+						}
 					} else {
 						schemaCoverageRequirements(skv.second.get_obj(), spath);
 					}
@@ -221,6 +307,62 @@ struct StatusWorkload : TestWorkload {
 };
 
 WorkloadFactory<StatusWorkload> StatusWorkloadFactory;
+
+TEST_CASE("/fdbserver/status/schema/coverage") {
+	for (bool simulated : { false, true }) {
+		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.roles[0].role.$enum.blob_manager",
+		                                                  simulated));
+		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.roles[0].role.$enum.blob_worker",
+		                                                  simulated));
+		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.roles[0].role.$enum.storage",
+		                                                 simulated));
+		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.class_type.$enum.blob_worker",
+		                                                 simulated));
+
+		ASSERT(
+		    !StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.storage_engine.$enum.ssd", simulated));
+		ASSERT(
+		    !StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.log_engine.$enum.memory-1", simulated));
+		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.tss_storage_engine.$enum.memory-2",
+		                                                  simulated));
+		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(
+		    ".cluster.configuration.perpetual_storage_wiggle_engine.$enum.memory-radixtree-beta", simulated));
+		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(
+		    ".cluster.processes.$map.roles[0].storage_metadata.storage_engine.$enum.ssd", simulated));
+		ASSERT(
+		    StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.storage_engine.$enum.ssd-1", simulated));
+		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.storage_engine.$enum.memory-radixtree",
+		                                                 simulated));
+		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.other_engine.$enum.ssd", simulated));
+		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(
+		    ".cluster.processes.$map.roles[0].commit_latency_bands.$map", simulated, json_spirit::int_type));
+		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(
+		    ".cluster.processes.$map.roles[0].commit_latency_bands.$map", simulated, json_spirit::obj_type));
+		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(
+		    ".cluster.processes.$map.roles[0].commit_latency_bands", simulated, json_spirit::int_type));
+	}
+
+	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.machines", true));
+	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.machines.$map", true));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.machines.$map.memory.total_bytes", true));
+	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.machines.$map.memory.total_bytes", false));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.cpu", true));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.disk.reads.counter", true));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.network.megabits_sent.hz", true));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.locality.$map", true));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.memory.used_bytes", true));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.memory.limit_bytes", true));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.command_line", true));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.under_maintenance", true));
+	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.cpu", false));
+	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.memory.used_bytes", false));
+	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.command_line", false));
+	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.memory", true));
+	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.cpu_limit", true));
+	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.clients.supported_versions", true));
+
+	return Void();
+}
 
 TEST_CASE("/fdbserver/status/schema/basic") {
 	json_spirit::mValue schema =
