@@ -1,9 +1,9 @@
 [configuration]
-config = 'single ssd-1 perpetual_storage_wiggle=0'
+config = 'single memory-radixtree perpetual_storage_wiggle_engine=memory-radixtree perpetual_storage_wiggle=0'
 singleRegion = true
 
 [[test]]
-testTitle = 'StatusStorageEngine'
+testTitle = 'StatusPerpetualWiggleEngine'
 useDB = true
 
     [[test.workload]]
