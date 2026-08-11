@@ -487,7 +487,8 @@ Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
 	Future<Void> newRecovery = self->db.serverInfo->onChange();
 	while (true) {
 		try {
-			auto res = co_await race(newRecovery, monitor(), recruitment);
+			auto res = co_await race(
+			    newRecovery, newRecovery.isReady() ? Future<std::vector<int>>(Never()) : monitor(), recruitment);
 			if (res.index() == 0) {
 				if (self->db.recoveryData.isValid() &&
 				    self->db.recoveryData->cstate.myDBState.recoveryCount == recoveryCount) {
@@ -3555,6 +3556,39 @@ void addProcessesToSameDC(ClusterControllerData& self, const std::vector<Network
 		const bool added = self.addr_locality.insert({ process, locality }).second;
 		ASSERT(added);
 	}
+}
+
+TEST_CASE("/fdbserver/clustercontroller/stopWorkerMonitoringAfterRecoveryChange") {
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+
+	int monitorCalls = 0;
+	std::function<Future<std::vector<int>>()> monitor = [&monitorCalls]() -> Future<std::vector<int>> {
+		++monitorCalls;
+		if (monitorCalls == 1) {
+			return std::vector<int>{ 0 };
+		}
+		return Never();
+	};
+	std::function<Future<Void>(std::vector<int>)> recruit = [](std::vector<int> failedWorkers) {
+		ASSERT_EQ(failedWorkers.size(), 1);
+		return Future<Void>(Void());
+	};
+
+	Future<Void> monitoring = monitorAndRecruitWorkerSet(&data, 1, "LogRouter", monitor, recruit);
+	ASSERT_EQ(monitorCalls, 1);
+	ASSERT(!monitoring.isReady());
+
+	ServerDBInfo changedInfo = data.db.serverInfo->get();
+	ASSERT(changedInfo.id != UID(1, 1));
+	changedInfo.id = UID(1, 1);
+	data.db.serverInfo->set(changedInfo);
+
+	co_await monitoring;
+	ASSERT_EQ(monitorCalls, 1);
 }
 
 TEST_CASE("/fdbserver/clustercontroller/rejectUnverifiedWorkerRegistration") {
