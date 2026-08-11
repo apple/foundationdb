@@ -33,7 +33,7 @@
 #include "fdbrpc/AsyncFileNonDurable.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TLSConfig.h"
-#include "fdbrpc/grpc/AsyncTaskExecutor.h"
+#include "flow/AsyncTaskExecutor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 void forceLinkFlowTests() {}

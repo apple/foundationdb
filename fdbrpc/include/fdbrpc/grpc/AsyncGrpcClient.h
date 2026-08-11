@@ -28,7 +28,7 @@
 
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
-#include "fdbrpc/grpc/AsyncTaskExecutor.h"
+#include "flow/AsyncTaskExecutor.h"
 #include "fdbrpc/grpc/Credentials.h"
 
 template <class ServiceType>

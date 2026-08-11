@@ -28,7 +28,7 @@
 #include "flow/NetworkAddress.h"
 #include "flow/TLSConfig.h"
 #include "fdbrpc/grpc/AsyncGrpcClient.h"
-#include "fdbrpc/grpc/AsyncTaskExecutor.h"
+#include "flow/AsyncTaskExecutor.h"
 #include "fdbrpc/grpc/Credentials.h"
 
 class GrpcServer;
