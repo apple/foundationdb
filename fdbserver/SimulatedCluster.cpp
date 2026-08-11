@@ -96,6 +96,63 @@ struct BasicSimulationConfig {
 
 	DatabaseConfiguration db;
 };
+
+constexpr int64_t simulatedMemoryLimit = 500'000'000;
+
+void emitSimulatedStatusMetrics(LocalityData const& localities) {
+	const std::string machineId = printable(localities.machineId());
+	const std::string zoneId = printable(localities.zoneId());
+
+	TraceEvent("ProcessMetrics")
+	    .detail("Elapsed", 1.0)
+	    .detail("CPUSeconds", 0.0)
+	    .detail("UptimeSeconds", 1.0)
+	    .detail("Memory", simulatedMemoryLimit / 2)
+	    .detail("ResidentMemory", simulatedMemoryLimit / 4)
+	    .detail("UnusedAllocatedMemory", 0)
+	    .detail("MbpsSent", 0.0)
+	    .detail("MbpsReceived", 0.0)
+	    .detail("DiskTotalBytes", simulatedMemoryLimit * 4)
+	    .detail("DiskFreeBytes", simulatedMemoryLimit * 2)
+	    .detail("DiskIdleSeconds", 1.0)
+	    .detail("DiskReads", 0)
+	    .detail("DiskWrites", 0)
+	    .detail("DiskReadsCount", 0)
+	    .detail("DiskWritesCount", 0)
+	    .detail("DiskReadSectors", 0)
+	    .detail("DiskWriteSectors", 0)
+	    .detail("CacheHits", 0)
+	    .detail("CacheMisses", 0)
+	    .detail("ZoneID", zoneId)
+	    .detail("MachineID", machineId)
+	    .detail("CurrentConnections", 0)
+	    .detail("ConnectionsEstablished", 0.0)
+	    .detail("ConnectionsClosed", 0.0)
+	    .detail("ConnectionErrors", 0.0)
+	    .detail("TLSPolicyFailures", 0.0)
+	    .trackLatest("ProcessMetrics");
+
+	TraceEvent("MachineMetrics")
+	    .detail("Elapsed", 1.0)
+	    .detail("MbpsSent", 0.0)
+	    .detail("MbpsReceived", 0.0)
+	    .detail("RetransSegs", 0)
+	    .detail("CPUSeconds", 0.0)
+	    .detail("TotalMemory", simulatedMemoryLimit * 2)
+	    .detail("CommittedMemory", simulatedMemoryLimit)
+	    .detail("AvailableMemory", simulatedMemoryLimit)
+	    .detail("ZoneID", zoneId)
+	    .detail("MachineID", machineId)
+	    .trackLatest("MachineMetrics");
+
+	TraceEvent("NetworkMetrics")
+	    .detail("Elapsed", 1.0)
+	    .detail("PriorityStarvedBelow1", 0.0)
+	    .detail("ZoneID", zoneId)
+	    .detail("MachineID", machineId)
+	    .trackLatest("NetworkMetrics");
+}
+
 constexpr bool hasRocksDB =
 #ifdef WITH_ROCKSDB
     true
@@ -786,20 +843,6 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 			    .detail("Excluded", process->excluded)
 			    .detail("UsingSSL", sslEnabled)
 			    .detail("ProcessMode", processMode);
-			TraceEvent("ProgramStart")
-			    .detail("Cycles", cycles)
-			    .detail("RandomId", randomId)
-			    .detail("SourceVersion", getSourceVersion())
-			    .detail("Version", FDB_VT_VERSION)
-			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-			    .detail("DataFolder", *dataFolder)
-			    .detail("TLogSpillFolder", tLogSpillFolder)
-			    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "")
-			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
-			    .detail("CommandLine", "fdbserver -r simulation")
-			    .detail("BuggifyEnabled", isGeneralBuggifyEnabled())
-			    .detail("Simulated", true)
-			    .trackLatest("ProgramStart");
 
 			try {
 				// SOMEDAY: test lower memory limits, without making them too small and causing the database to stop
@@ -817,14 +860,31 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 					NetworkAddress n(ip, listenPort, true, sslEnabled && listenPort == port);
 					futures.push_back(FlowTransport::transport().bind(n, n));
 				}
+				TraceEvent("ProgramStart")
+				    .detail("Cycles", cycles)
+				    .detail("RandomId", randomId)
+				    .detail("SourceVersion", getSourceVersion())
+				    .detail("Version", FDB_VT_VERSION)
+				    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+				    .detail("DataFolder", *dataFolder)
+				    .detail("TLogSpillFolder", tLogSpillFolder)
+				    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "")
+				    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
+				    .detail("CommandLine", "fdbserver -r simulation")
+				    .detail("MemoryLimit", simulatedMemoryLimit)
+				    .detail("BuggifyEnabled", isGeneralBuggifyEnabled())
+				    .detail("Simulated", true)
+				    .trackLatest("ProgramStart");
+
 				if (processRunFDBD(processMode)) {
+					emitSimulatedStatusMetrics(localities);
 					futures.push_back(fdbd(connRecord,
 					                       localities,
 					                       processClass,
 					                       *dataFolder,
 					                       tLogSpillFolder,
 					                       *coordFolder,
-					                       500e6,
+					                       simulatedMemoryLimit,
 					                       "",
 					                       "",
 					                       -1,

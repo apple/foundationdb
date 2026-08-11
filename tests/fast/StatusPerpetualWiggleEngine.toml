@@ -5,9 +5,11 @@ singleRegion = true
 [[test]]
 testTitle = 'StatusPerpetualWiggleEngine'
 useDB = true
+disabledFailureInjectionWorkloads = 'Attrition'
 
     [[test.workload]]
     testName = 'Status'
     testDuration = 10.0
     requestsPerSecond = 2.0
     enableLatencyBands = false
+    requireSimulationTelemetry = true

@@ -22,6 +22,7 @@
 #include <string_view>
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/Status.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbclient/StatusClient.h"
@@ -33,7 +34,9 @@ struct StatusWorkload : TestWorkload {
 	static constexpr auto NAME = "Status";
 
 	double testDuration, requestsPerSecond, maxAcceptableStatusLatency;
-	bool enableLatencyBands;
+	bool enableLatencyBands, requireSimulationTelemetry;
+	bool observedSimulationTelemetry = false;
+	std::string missingSimulationTelemetry = "No status response received";
 
 	Future<Void> latencyBandActor;
 
@@ -48,6 +51,7 @@ struct StatusWorkload : TestWorkload {
 		requestsPerSecond = getOption(options, "requestsPerSecond"_sr, 0.5);
 		maxAcceptableStatusLatency = getOption(options, "maxAcceptableStatusLatency"_sr, 0.0);
 		enableLatencyBands = getOption(options, "enableLatencyBands"_sr, deterministicRandom()->random01() < 0.5);
+		requireSimulationTelemetry = getOption(options, "requireSimulationTelemetry"_sr, false);
 		auto statusSchemaStr = getOption(options, "schema"_sr, JSONSchemas::statusSchema);
 		if (!statusSchemaStr.empty()) {
 			json_spirit::mValue schema = readJSONStrictly(statusSchemaStr.toString());
@@ -80,6 +84,12 @@ struct StatusWorkload : TestWorkload {
 			    .detail("MaxAcceptable", maxAcceptableStatusLatency);
 			return false;
 		}
+		if (clientId == 0 && requireSimulationTelemetry && !observedSimulationTelemetry) {
+			TraceEvent(SevError, "StatusWorkloadMissingSimulationTelemetry")
+			    .detail("Replies", replies.getValue())
+			    .detail("Reason", missingSimulationTelemetry);
+			return false;
+		}
 		return true;
 	}
 
@@ -96,53 +106,136 @@ struct StatusWorkload : TestWorkload {
 	}
 
 	static bool shouldTrackSchemaCoverage(std::string_view path,
-	                                      bool simulated,
 	                                      json_spirit::Value_type schemaType = json_spirit::obj_type) {
-		if (path.ends_with(".$map") && schemaType != json_spirit::obj_type) {
+		return !path.ends_with(".$map") || schemaType == json_spirit::obj_type;
+	}
+
+	static bool hasSimulationTelemetry(StatusObject const& status, std::string& missingField) {
+		constexpr std::array processFields{ "cpu.usage_cores",
+			                                "disk.busy",
+			                                "disk.free_bytes",
+			                                "disk.total_bytes",
+			                                "disk.reads.counter",
+			                                "disk.reads.hz",
+			                                "disk.reads.sectors",
+			                                "disk.writes.counter",
+			                                "disk.writes.hz",
+			                                "disk.writes.sectors",
+			                                "network.current_connections",
+			                                "network.connections_established.hz",
+			                                "network.connections_closed.hz",
+			                                "network.connection_errors.hz",
+			                                "network.megabits_sent.hz",
+			                                "network.megabits_received.hz",
+			                                "network.tls_policy_failures.hz",
+			                                "locality",
+			                                "command_line",
+			                                "fault_domain",
+			                                "machine_id",
+			                                "run_loop_busy",
+			                                "uptime_seconds",
+			                                "version",
+			                                "memory" };
+		constexpr std::array processMemoryFields{
+			"available_bytes", "limit_bytes", "rss_bytes", "unused_allocated_memory", "used_bytes"
+		};
+		constexpr std::array machineFields{ "cpu.logical_core_utilization",
+			                                "memory.free_bytes",
+			                                "memory.committed_bytes",
+			                                "memory.total_bytes",
+			                                "network.megabits_sent.hz",
+			                                "network.megabits_received.hz",
+			                                "network.tcp_segments_retransmitted.hz",
+			                                "machine_id",
+			                                "locality",
+			                                "contributing_workers" };
+
+		auto hasFields = [&missingField](StatusObjectReader& object, auto const& fields, char const* prefix) {
+			for (auto field : fields) {
+				if (!object.has(field)) {
+					missingField = format("%s.%s", prefix, field);
+					return false;
+				}
+			}
+			return true;
+		};
+
+		StatusObjectReader root(status), cluster, processes, machines;
+		if (!root.tryGet("cluster", cluster)) {
+			missingField = "cluster";
+			return false;
+		}
+		if (!cluster.tryGet("processes", processes)) {
+			missingField = "cluster.processes";
+			return false;
+		}
+		if (!cluster.tryGet("machines", machines)) {
+			missingField = "cluster.machines";
 			return false;
 		}
 
-		if (!simulated) {
+		missingField = "cluster.processes is empty";
+		for (auto const& processEntry : processes.obj()) {
+			auto const& processValue = processEntry.second;
+			if (processValue.type() != json_spirit::obj_type) {
+				missingField = "process is not an object";
+				continue;
+			}
+
+			StatusObjectReader process(processValue), processMemory, machine;
+			if (!hasFields(process, processFields, "process")) {
+				continue;
+			}
+			if (!process.tryGet("memory", processMemory) ||
+			    !hasFields(processMemory, processMemoryFields, "process.memory")) {
+				if (!processMemory.valid()) {
+					missingField = "process.memory is not an object";
+				}
+				continue;
+			}
+
+			int64_t memoryLimit = 0, availableMemory = 0;
+			if (!processMemory.tryGet("limit_bytes", memoryLimit) || memoryLimit != 500'000'000 ||
+			    !processMemory.tryGet("available_bytes", availableMemory) || availableMemory < 0 ||
+			    availableMemory > memoryLimit) {
+				missingField = "process.memory limits are inconsistent";
+				continue;
+			}
+
+			std::string processMachineId, reportedMachineId;
+			if (!process.tryGet("machine_id", processMachineId)) {
+				missingField = "process.machine_id is not a string";
+				continue;
+			}
+			if (!machines.tryGet(processMachineId, machine, false)) {
+				missingField = "process.machine_id has no matching machine";
+				continue;
+			}
+			if (!hasFields(machine, machineFields, "machine")) {
+				continue;
+			}
+			if (!machine.tryGet("machine_id", reportedMachineId) || reportedMachineId != processMachineId) {
+				missingField = "machine.machine_id does not match process.machine_id";
+				continue;
+			}
+
+			int64_t contributingWorkers = 0;
+			if (!machine.tryGet("contributing_workers", contributingWorkers) || contributingWorkers <= 0) {
+				missingField = "machine.contributing_workers is not positive";
+				continue;
+			}
+
 			return true;
 		}
 
-		if (path.starts_with(".cluster.machines.$map.")) {
-			return false;
-		}
-
-		constexpr std::array productionOnlyPaths{
-			std::string_view(".cluster.processes.$map.cpu"),
-			std::string_view(".cluster.processes.$map.disk"),
-			std::string_view(".cluster.processes.$map.network"),
-			std::string_view(".cluster.processes.$map.locality"),
-			std::string_view(".cluster.processes.$map.command_line"),
-			std::string_view(".cluster.processes.$map.fault_domain"),
-			std::string_view(".cluster.processes.$map.machine_id"),
-			std::string_view(".cluster.processes.$map.run_loop_busy"),
-			std::string_view(".cluster.processes.$map.under_maintenance"),
-			std::string_view(".cluster.processes.$map.uptime_seconds"),
-			std::string_view(".cluster.processes.$map.version"),
-			std::string_view(".cluster.processes.$map.memory.available_bytes"),
-			std::string_view(".cluster.processes.$map.memory.limit_bytes"),
-			std::string_view(".cluster.processes.$map.memory.rss_bytes"),
-			std::string_view(".cluster.processes.$map.memory.unused_allocated_memory"),
-			std::string_view(".cluster.processes.$map.memory.used_bytes"),
-		};
-		for (auto productionOnlyPath : productionOnlyPaths) {
-			if (path == productionOnlyPath ||
-			    (path.starts_with(productionOnlyPath) && path[productionOnlyPath.size()] == '.')) {
-				return false;
-			}
-		}
-
-		return true;
+		return false;
 	}
 
 	static void schemaCoverageRequirements(StatusObject const& schema, std::string schema_path = std::string()) {
 		try {
 			for (auto& skv : schema) {
 				std::string spath = schema_path + "." + skv.first;
-				if (!shouldTrackSchemaCoverage(spath, g_network->isSimulated(), skv.second.type())) {
+				if (!shouldTrackSchemaCoverage(spath, skv.second.type())) {
 					continue;
 				}
 
@@ -252,6 +345,10 @@ struct StatusWorkload : TestWorkload {
 				double latency = now() - issued;
 				self->worstLatency = std::max(self->worstLatency, latency);
 				TraceEvent("StatusWorkloadReply").detail("ReplySize", br.getLength()).detail("Latency", latency);
+				if (self->requireSimulationTelemetry && !self->observedSimulationTelemetry) {
+					self->observedSimulationTelemetry =
+					    hasSimulationTelemetry(result, self->missingSimulationTelemetry);
+				}
 				std::string errorStr;
 				if (self->parsedSchema.present() &&
 				    !schemaMatch(self->parsedSchema.get(), result, errorStr, SevError, true)) {
@@ -273,42 +370,52 @@ struct StatusWorkload : TestWorkload {
 WorkloadFactory<StatusWorkload> StatusWorkloadFactory;
 
 TEST_CASE("/fdbserver/status/schema/coverage") {
-	for (bool simulated : { false, true }) {
-		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.roles[0].role.$enum.storage",
-		                                                 simulated));
-		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.class_type.$enum.blob_worker",
-		                                                 simulated));
-		ASSERT(
-		    StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.storage_engine.$enum.ssd-1", simulated));
-		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.configuration.storage_engine.$enum.memory-radixtree",
-		                                                 simulated));
-		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.other_engine.$enum.ssd", simulated));
-		ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(
-		    ".cluster.processes.$map.roles[0].commit_latency_bands.$map", simulated, json_spirit::int_type));
-		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(
-		    ".cluster.processes.$map.roles[0].commit_latency_bands.$map", simulated, json_spirit::obj_type));
-		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(
-		    ".cluster.processes.$map.roles[0].commit_latency_bands", simulated, json_spirit::int_type));
+	constexpr std::array coveredPaths{
+		std::string_view(".cluster.processes.$map.roles[0].role.$enum.storage"),
+		std::string_view(".cluster.processes.$map.class_type.$enum.blob_worker"),
+		std::string_view(".cluster.configuration.storage_engine.$enum.ssd-1"),
+		std::string_view(".cluster.configuration.storage_engine.$enum.memory-radixtree"),
+		std::string_view(".cluster.other_engine.$enum.ssd"),
+		std::string_view(".cluster.machines"),
+		std::string_view(".cluster.machines.$map"),
+		std::string_view(".cluster.machines.$map.cpu.logical_core_utilization"),
+		std::string_view(".cluster.machines.$map.memory.total_bytes"),
+		std::string_view(".cluster.machines.$map.network.megabits_sent.hz"),
+		std::string_view(".cluster.machines.$map.machine_id"),
+		std::string_view(".cluster.machines.$map.locality"),
+		std::string_view(".cluster.machines.$map.datacenter_id"),
+		std::string_view(".cluster.machines.$map.contributing_workers"),
+		std::string_view(".cluster.processes.$map.cpu"),
+		std::string_view(".cluster.processes.$map.disk.reads.counter"),
+		std::string_view(".cluster.processes.$map.network.megabits_sent.hz"),
+		std::string_view(".cluster.processes.$map.locality"),
+		std::string_view(".cluster.processes.$map.command_line"),
+		std::string_view(".cluster.processes.$map.fault_domain"),
+		std::string_view(".cluster.processes.$map.machine_id"),
+		std::string_view(".cluster.processes.$map.run_loop_busy"),
+		std::string_view(".cluster.processes.$map.under_maintenance"),
+		std::string_view(".cluster.processes.$map.uptime_seconds"),
+		std::string_view(".cluster.processes.$map.version"),
+		std::string_view(".cluster.processes.$map.memory"),
+		std::string_view(".cluster.processes.$map.memory.available_bytes"),
+		std::string_view(".cluster.processes.$map.memory.limit_bytes"),
+		std::string_view(".cluster.processes.$map.memory.rss_bytes"),
+		std::string_view(".cluster.processes.$map.memory.unused_allocated_memory"),
+		std::string_view(".cluster.processes.$map.memory.used_bytes"),
+		std::string_view(".cluster.processes.$map.cpu_limit"),
+		std::string_view(".cluster.clients.supported_versions"),
+	};
+	for (auto path : coveredPaths) {
+		ASSERT(StatusWorkload::shouldTrackSchemaCoverage(path));
 	}
-
-	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.machines", true));
-	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.machines.$map", true));
-	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.machines.$map.memory.total_bytes", true));
-	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.machines.$map.memory.total_bytes", false));
-	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.cpu", true));
-	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.disk.reads.counter", true));
-	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.network.megabits_sent.hz", true));
-	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.locality.$map", true));
-	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.memory.used_bytes", true));
-	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.memory.limit_bytes", true));
-	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.command_line", true));
-	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.under_maintenance", true));
-	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.cpu", false));
-	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.memory.used_bytes", false));
-	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.command_line", false));
-	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.memory", true));
-	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.cpu_limit", true));
-	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.clients.supported_versions", true));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.roles[0].commit_latency_bands.$map",
+	                                                  json_spirit::int_type));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.locality.$map", json_spirit::str_type));
+	ASSERT(!StatusWorkload::shouldTrackSchemaCoverage(".cluster.machines.$map.locality.$map", json_spirit::str_type));
+	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.roles[0].commit_latency_bands.$map",
+	                                                 json_spirit::obj_type));
+	ASSERT(StatusWorkload::shouldTrackSchemaCoverage(".cluster.processes.$map.roles[0].commit_latency_bands",
+	                                                 json_spirit::int_type));
 
 	return Void();
 }
