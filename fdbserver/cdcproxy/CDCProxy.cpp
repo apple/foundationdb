@@ -77,6 +77,7 @@ struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	Optional<KeyRange> keys;
 	bool active = true;
 	bool initialized = false;
+	bool initializationPausedForTesting = false;
 	bool tooOld = false;
 	bool bufferLimitExceeded = false;
 	Version minVersion = invalidVersion;
@@ -317,8 +318,6 @@ class CDCProxy {
 	bool popsPausedAfterSnapshotForTesting = false;
 	int64_t popSnapshotsPausedForTesting = 0;
 	AsyncTrigger popPauseChangedForTesting;
-	std::unordered_set<CDCStreamId> pausedStreamInitializationsForTesting;
-	AsyncTrigger streamInitializationPauseChangedForTesting;
 	bool logSystemInitialized = false;
 	bool lastLogSystemHasTLogs = false;
 	uint64_t lastLogSystemRecoveryCount = 0;
@@ -1152,15 +1151,12 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 	try {
 		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, stream->streamId, id, true);
 		if (popsPausedForTesting) {
-			pausedStreamInitializationsForTesting.insert(stream->streamId);
-			ScopeExit releaseInitializationPause([this, stream]() {
-				pausedStreamInitializationsForTesting.erase(stream->streamId);
-				streamInitializationPauseChangedForTesting.trigger();
-			});
-			streamInitializationPauseChangedForTesting.trigger();
+			stream->initializationPausedForTesting = true;
+			stream->changed.trigger();
 			while (popsPausedForTesting) {
 				co_await popPauseChangedForTesting.onTrigger();
 			}
+			stream->initializationPausedForTesting = false;
 		}
 		if (!isCurrentStreamInitialization(streams, stream)) {
 			CODE_PROBE(true, "CDC proxy discards stale stream initialization");
@@ -1701,8 +1697,7 @@ Future<Void> CDCProxy::serveBufferStatusForTestingRequests(FutureStream<GetCDCPr
 		while (popsPausedForTesting) {
 			Reference<CDCBufferedStream> pendingInitialization;
 			for (const auto& [streamId, stream] : streams) {
-				if (stream->active && !stream->initialized &&
-				    !pausedStreamInitializationsForTesting.contains(streamId)) {
+				if (stream->active && !stream->initialized && !stream->initializationPausedForTesting) {
 					pendingInitialization = stream;
 					break;
 				}
@@ -1710,9 +1705,7 @@ Future<Void> CDCProxy::serveBufferStatusForTestingRequests(FutureStream<GetCDCPr
 			if (!pendingInitialization) {
 				break;
 			}
-			co_await race(streamInitializationPauseChangedForTesting.onTrigger(),
-			              popPauseChangedForTesting.onTrigger(),
-			              pendingInitialization->changed.onTrigger());
+			co_await race(popPauseChangedForTesting.onTrigger(), pendingInitialization->changed.onTrigger());
 		}
 		CDCProxyBufferStatus status;
 		status.bufferedBytes = bufferedBytes;
