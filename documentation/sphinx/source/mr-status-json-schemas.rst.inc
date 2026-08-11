@@ -91,7 +91,7 @@
             "version":"3.0.0", // a process version will not be reported if it is not protocol-compatible; it will be absent from status
             "machine_id":"0ccb4e0feddb5583010f6b77d9d10ece",
             "locality":{ // This will contain any locality fields that are provided on the command line
-                "$map_key=localityName":"value"
+                "$map_key=localityName":"value" // A locality value can also be null when unset.
             },
             "class_source":{
                "$enum":[
@@ -110,7 +110,8 @@
                   "commit_proxy",
                   "grv_proxy",
                   "master",
-                  "test"
+                  "test",
+                  "blob_worker"
                ]
             },
             "degraded":true,
@@ -151,6 +152,8 @@
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
+                        "consistency_scan",
+                        "backupworker",
                         "router",
                         "coordinator"
                      ]
@@ -970,7 +973,7 @@
             "address":"1.2.3.4",
             "machine_id":"6344abf1813eb05b",
             "locality":{ // This will contain any locality fields that are provided on the command line
-                "$map_key=localityName":"value"
+                "$map_key=localityName":"value" // A locality value can also be null when unset.
             },
             "cpu":{
                "logical_core_utilization":0.4 // computed as cpu_seconds / elapsed_seconds; value may be capped at 0.5 due to hyper-threading

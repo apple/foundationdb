@@ -183,6 +183,38 @@ struct StatusWorkload : TestWorkload {
 			}
 
 			StatusObjectReader process(processValue), processMemory, machine;
+			std::string processClass;
+			if (!process.tryGet("class_type", processClass)) {
+				missingField = "process.class_type is not a string";
+				continue;
+			}
+			if (processClass == "test") {
+				missingField = "process is a tester";
+				continue;
+			}
+			if (!process.has("roles") || process["roles"].type() != json_spirit::array_type) {
+				missingField = "process.roles is not an array";
+				continue;
+			}
+
+			bool hasStorageRole = false;
+			for (auto const& roleValue : process["roles"].get_array()) {
+				if (roleValue.type() != json_spirit::obj_type) {
+					continue;
+				}
+
+				StatusObjectReader role(roleValue);
+				std::string roleName;
+				if (role.tryGet("role", roleName) && roleName == "storage") {
+					hasStorageRole = true;
+					break;
+				}
+			}
+			if (!hasStorageRole) {
+				missingField = "process.roles has no storage role";
+				continue;
+			}
+
 			if (!hasFields(process, processFields, "process")) {
 				continue;
 			}
@@ -372,6 +404,7 @@ WorkloadFactory<StatusWorkload> StatusWorkloadFactory;
 TEST_CASE("/fdbserver/status/schema/coverage") {
 	constexpr std::array coveredPaths{
 		std::string_view(".cluster.processes.$map.roles[0].role.$enum.storage"),
+		std::string_view(".cluster.processes.$map.roles[0].role.$enum.backupworker"),
 		std::string_view(".cluster.processes.$map.class_type.$enum.blob_worker"),
 		std::string_view(".cluster.configuration.storage_engine.$enum.ssd-1"),
 		std::string_view(".cluster.configuration.storage_engine.$enum.memory-radixtree"),
@@ -420,6 +453,87 @@ TEST_CASE("/fdbserver/status/schema/coverage") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/status/simulation_telemetry/storage_worker") {
+	json_spirit::mValue parsed = readJSONStrictly(R"({
+		"cluster": {
+			"processes": {
+				"process1": {
+					"class_type": "test",
+					"roles": [],
+					"cpu": { "usage_cores": 0 },
+					"disk": {
+						"busy": 0,
+						"free_bytes": 1,
+						"total_bytes": 1,
+						"reads": { "counter": 0, "hz": 0, "sectors": 0 },
+						"writes": { "counter": 0, "hz": 0, "sectors": 0 }
+					},
+					"network": {
+						"current_connections": 0,
+						"connections_established": { "hz": 0 },
+						"connections_closed": { "hz": 0 },
+						"connection_errors": { "hz": 0 },
+						"megabits_sent": { "hz": 0 },
+						"megabits_received": { "hz": 0 },
+						"tls_policy_failures": { "hz": 0 }
+					},
+					"locality": {},
+					"command_line": "fdbserver",
+					"fault_domain": "zone1",
+					"machine_id": "machine1",
+					"run_loop_busy": 0,
+					"uptime_seconds": 1,
+					"version": "test",
+					"memory": {
+						"available_bytes": 100,
+						"limit_bytes": 500000000,
+						"rss_bytes": 100,
+						"unused_allocated_memory": 0,
+						"used_bytes": 100
+					}
+				}
+			},
+			"machines": {
+				"machine1": {
+					"cpu": { "logical_core_utilization": 0 },
+					"memory": { "free_bytes": 100, "committed_bytes": 100, "total_bytes": 200 },
+					"network": {
+						"megabits_sent": { "hz": 0 },
+						"megabits_received": { "hz": 0 },
+						"tcp_segments_retransmitted": { "hz": 0 }
+					},
+					"machine_id": "machine1",
+					"locality": {},
+					"contributing_workers": 1
+				}
+			}
+		}
+	})");
+	StatusObject status(parsed.get_obj());
+	json_spirit::mObject& process = status["cluster"].get_obj()["processes"].get_obj()["process1"].get_obj();
+	std::string missingField;
+
+	ASSERT(!StatusWorkload::hasSimulationTelemetry(status, missingField));
+	ASSERT(missingField == "process is a tester");
+
+	process["class_type"] = std::string("storage");
+	ASSERT(!StatusWorkload::hasSimulationTelemetry(status, missingField));
+	ASSERT(missingField == "process.roles has no storage role");
+
+	process["roles"].get_array().push_back(readJSONStrictly(R"({"role":"master"})"));
+	ASSERT(!StatusWorkload::hasSimulationTelemetry(status, missingField));
+	ASSERT(missingField == "process.roles has no storage role");
+
+	process["roles"].get_array().push_back(readJSONStrictly(R"({"role":"storage"})"));
+	ASSERT(StatusWorkload::hasSimulationTelemetry(status, missingField));
+
+	process["class_type"] = std::string("test");
+	ASSERT(!StatusWorkload::hasSimulationTelemetry(status, missingField));
+	ASSERT(missingField == "process is a tester");
+
+	return Void();
+}
+
 TEST_CASE("/fdbserver/status/schema/canonical_outputs") {
 	json_spirit::mValue schema = readJSONStrictly(JSONSchemas::statusSchema.toString());
 	auto check = [&schema](bool expectOk, std::string const& response) {
@@ -433,6 +547,7 @@ TEST_CASE("/fdbserver/status/schema/canonical_outputs") {
 
 	check(false, R"({"cluster":{"processes":{"process1":{"roles":[{"role":"blob_manager"}]}}}})");
 	check(false, R"({"cluster":{"processes":{"process1":{"roles":[{"role":"blob_worker"}]}}}})");
+	check(true, R"({"cluster":{"processes":{"process1":{"roles":[{"role":"backupworker"}]}}}})");
 	check(true, R"({"cluster":{"processes":{"process1":{"roles":[{"role":"storage"}]}}}})");
 	check(true, R"({"cluster":{"processes":{"process1":{"class_type":"blob_worker"}}}})");
 

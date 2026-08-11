@@ -134,6 +134,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                         "data_distributor",
                         "ratekeeper",
                         "consistency_scan",
+                        "backupworker",
                         "router",
                         "coordinator"
                      ]
