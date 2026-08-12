@@ -52,9 +52,16 @@ class MaintenanceStartVersionState {
 public:
 	enum class Action { Preserve, Record, Clear };
 
-	explicit MaintenanceStartVersionState(Optional<Key> observedZone) : observedZone_(std::move(observedZone)) {}
+	explicit MaintenanceStartVersionState(Optional<Key> observedZone, bool primary = true)
+	  : primary_(primary), observedZone_(std::move(observedZone)) {}
 
 	Action reconcile(const Optional<Key>& zone, const Optional<Version>& durableStart, Version readVersion) {
+		if (!primary_) {
+			observedZone_ = zone;
+			startVersion_ = zone.present() && durableStart.present() ? durableStart.get() : invalidVersion;
+			return Action::Preserve;
+		}
+
 		if (zone != observedZone_) {
 			observedZone_ = zone;
 			startVersion_ = invalidVersion;
@@ -103,6 +110,7 @@ public:
 	Version startVersion() const { return startVersion_; }
 
 private:
+	const bool primary_;
 	Optional<Key> observedZone_;
 	Optional<Version> originalDurableStart_;
 	Version startVersion_ = invalidVersion;
@@ -2729,7 +2737,7 @@ public:
 	static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
 		auto* counters = waitHealthyZoneChangeCounters();
 		ReadYourWritesTransaction tr(self->dbContext());
-		MaintenanceStartVersionState maintenanceStart(self->healthyZone.get());
+		MaintenanceStartVersionState maintenanceStart(self->healthyZone.get(), self->primary);
 		while (true) {
 			counters->started->increment(1);
 			Error err;
@@ -2802,6 +2810,9 @@ public:
 				}
 
 				Future<Void> watchFuture = tr.watch(healthyZoneKey);
+				if (!self->primary) {
+					watchFuture = watchFuture || tr.watch(healthyZoneStartVersionKey);
+				}
 				co_await tr.commit();
 				maintenanceStart.committed();
 				counters->committed->increment(1);
@@ -7669,6 +7680,64 @@ TEST_CASE("/DataDistribution/Maintenance/ConcurrentWriterPreservesCommittedStart
 	ASSERT_EQ(maintenanceState.startVersion(), 100);
 	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(125), 300) == State::Action::Preserve);
 	ASSERT_EQ(maintenanceState.startVersion(), 125);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionAdoptsCommittedStart") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State primaryState(Optional<Key>{}, true);
+	State remoteState(Optional<Key>{}, false);
+
+	ASSERT(primaryState.reconcile(zone, Optional<Version>{}, 100) == State::Action::Record);
+	primaryState.committed();
+	ASSERT(remoteState.reconcile(zone, Optional<Version>(100), 200) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 100);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionWaitsForPrimaryStart") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State primaryState(Optional<Key>{}, true);
+	State remoteState(Optional<Key>{}, false);
+
+	ASSERT(remoteState.reconcile(zone, Optional<Version>{}, 100) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT(primaryState.reconcile(zone, Optional<Version>{}, 200) == State::Action::Record);
+	primaryState.committed();
+	ASSERT(remoteState.reconcile(zone, Optional<Version>(200), 300) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 200);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionAdoptsReplacedStart") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> oldZone(Key("zone-a"_sr));
+	const Optional<Key> newZone(Key("zone-b"_sr));
+	State primaryState(oldZone, true);
+	State remoteState(oldZone, false);
+
+	ASSERT(remoteState.reconcile(oldZone, Optional<Version>(100), 200) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 100);
+	ASSERT(remoteState.reconcile(newZone, Optional<Version>(100), 250) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 100);
+	ASSERT(primaryState.reconcile(newZone, Optional<Version>(100), 300) == State::Action::Record);
+	primaryState.committed();
+	ASSERT(remoteState.reconcile(newZone, Optional<Version>(300), 400) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 300);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionNeverClearsDurableStart") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State remoteState(zone, false);
+
+	ASSERT(remoteState.reconcile(zone, Optional<Version>(100), 200) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 100);
+	ASSERT(remoteState.reconcile(Optional<Key>{}, Optional<Version>(100), 300) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
 	return Void();
 }
 
