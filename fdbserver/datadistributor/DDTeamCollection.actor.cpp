@@ -48,6 +48,15 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 	return it->second;
 }
 
+bool ownsMaintenanceLock(const MoveKeysLock& lock, const Optional<Value>& durableOwner) {
+	return durableOwner.present() &&
+	       BinaryReader::fromStringRef<UID>(durableOwner.get(), Unversioned()) == lock.myOwner;
+}
+
+} // namespace
+
+namespace data_distribution {
+
 class MaintenanceStartVersionState {
 public:
 	enum class Action { Preserve, Record, Clear };
@@ -108,6 +117,12 @@ public:
 
 	void committed() { pendingRecord_ = false; }
 	Version startVersion() const { return startVersion_; }
+	Version endingStartVersion(const Optional<Key>& localZone, const Optional<Version>& durableStart) const {
+		if (startVersion_ != invalidVersion || !localZone.present() || !durableStart.present()) {
+			return startVersion_;
+		}
+		return durableStart.get();
+	}
 
 private:
 	const bool primary_;
@@ -117,14 +132,6 @@ private:
 	bool pendingRecord_ = false;
 };
 
-bool ownsMaintenanceLock(const MoveKeysLock& lock, const Optional<Value>& durableOwner) {
-	return durableOwner.present() &&
-	       BinaryReader::fromStringRef<UID>(durableOwner.get(), Unversioned()) == lock.myOwner;
-}
-
-} // namespace
-
-namespace data_distribution {
 int EligibilityCounter::fromGetTeamRequest(GetTeamRequest const& req) {
 	// equivalent to bit set operation
 	return req.preferLowerDiskUtil * EligibilityCounter::LOW_DISK_UTIL +
@@ -152,6 +159,8 @@ int EligibilityCounter::getCount(int combinedType) const {
 }
 
 } // namespace data_distribution
+
+using data_distribution::MaintenanceStartVersionState;
 
 static TxnCounters* updateNextWigglingStorageIDCounters() {
 	static auto* c = makeCounters("/dd/updateNextWigglingStorageID");
@@ -2766,7 +2775,8 @@ public:
 					}
 				}
 
-				Version previousStartVersion = maintenanceStart.startVersion();
+				Version previousStartVersion =
+				    maintenanceStart.endingStartVersion(self->healthyZone.get(), durableStart);
 				auto action = maintenanceStart.reconcile(activeZone, durableStart, tr.getReadVersion().get());
 				if (action != MaintenanceStartVersionState::Action::Preserve) {
 					Optional<Value> durableOwner = co_await tr.get(moveKeysLockOwnerKey);
@@ -7773,6 +7783,37 @@ TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionNeverClearsDurableStart
 	ASSERT_EQ(remoteState.startVersion(), 100);
 	ASSERT(remoteState.reconcile(Optional<Key>{}, Optional<Version>(100), 300) == State::Action::Preserve);
 	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionRecoversDurableStartBeforeWindowEnds") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State remoteState(Optional<Key>{}, false);
+
+	ASSERT(remoteState.reconcile(zone, Optional<Version>{}, 100) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(zone, Optional<Version>{}), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(Optional<Key>{}, Optional<Version>(200)), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(zone, Optional<Version>(200)), 200);
+	ASSERT(remoteState.reconcile(Optional<Key>{}, Optional<Version>(200), 300) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.endingStartVersion(Optional<Key>{}, Optional<Version>(200)), invalidVersion);
+
+	ASSERT(remoteState.reconcile(zone, Optional<Version>(400), 500) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.endingStartVersion(zone, Optional<Version>(200)), 400);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/PrimaryCollectionRecoversDurableStartAfterFailedEndRetry") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State primaryState(zone, true);
+
+	ASSERT_EQ(primaryState.endingStartVersion(zone, Optional<Version>(100)), 100);
+	ASSERT(primaryState.reconcile(Optional<Key>{}, Optional<Version>(100), 200) == State::Action::Clear);
+	ASSERT_EQ(primaryState.startVersion(), invalidVersion);
+	ASSERT_EQ(primaryState.endingStartVersion(zone, Optional<Version>(100)), 100);
+	ASSERT(primaryState.reconcile(Optional<Key>{}, Optional<Version>(100), 300) == State::Action::Clear);
 	return Void();
 }
 
