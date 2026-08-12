@@ -76,6 +76,18 @@ struct StatusWorkload : TestWorkload {
 		return success(timeout(fetcher(cx, this), testDuration));
 	}
 	Future<bool> check(Database const& cx) override {
+		if (clientId == 0 && requireSimulationTelemetry && !observedSimulationTelemetry && errors.getValue() == 0) {
+			return checkSimulationTelemetry(cx);
+		}
+		return checkResult();
+	}
+
+	Future<bool> checkSimulationTelemetry(Database cx) {
+		co_await timeout(fetcher(cx, this, true), 2 * CLIENT_KNOBS->STATUS_TIMEOUT, Void());
+		co_return checkResult();
+	}
+
+	bool checkResult() {
 		if (errors.getValue() != 0)
 			return false;
 		if (maxAcceptableStatusLatency > 0 && worstLatency > maxAcceptableStatusLatency) {
@@ -360,7 +372,7 @@ struct StatusWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> fetcher(Database cx, StatusWorkload* self) {
+	Future<Void> fetcher(Database cx, StatusWorkload* self, bool stopOnSimulationTelemetry = false) {
 		double lastTime = now();
 
 		while (true) {
@@ -387,6 +399,9 @@ struct StatusWorkload : TestWorkload {
 					std::cout << errorStr << std::endl;
 					TraceEvent(SevError, "StatusWorkloadValidationFailed")
 					    .detail("JSON", json_spirit::write_string(json_spirit::mValue(result)));
+				}
+				if (stopOnSimulationTelemetry && self->observedSimulationTelemetry) {
+					co_return;
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
@@ -525,6 +540,11 @@ TEST_CASE("/fdbserver/status/simulation_telemetry/storage_worker") {
 	ASSERT(missingField == "process.roles has no storage role");
 
 	process["roles"].get_array().push_back(readJSONStrictly(R"({"role":"storage"})"));
+	ASSERT(StatusWorkload::hasSimulationTelemetry(status, missingField));
+
+	StatusObject incompleteStatus(readJSONStrictly(R"({"cluster":{"layers":{"_valid":false}}})").get_obj());
+	ASSERT(!StatusWorkload::hasSimulationTelemetry(incompleteStatus, missingField));
+	ASSERT(missingField == "cluster.processes");
 	ASSERT(StatusWorkload::hasSimulationTelemetry(status, missingField));
 
 	process["class_type"] = std::string("test");
