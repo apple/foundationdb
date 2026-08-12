@@ -499,7 +499,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
 	}
 
-	Future<Void> setUnpublishedStreamOwner(Database cx,
+	Future<bool> setUnpublishedStreamOwner(Database cx,
 	                                       Key name,
 	                                       CDCStreamId streamId,
 	                                       UID expectedOwner,
@@ -523,11 +523,13 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				const auto [assignedStreamId, assignedOwner] = decodeCDCProxyKey(assignments[0].key);
 				ASSERT_EQ(assignedStreamId, streamId);
 				if (assignedOwner == newOwner && !publishAssignment) {
-					co_return;
+					co_return true;
 				}
-				if (assignedOwner != newOwner) {
-					ASSERT_EQ(assignedOwner, expectedOwner);
-
+				const bool unexpectedOwner = assignedOwner != newOwner && assignedOwner != expectedOwner;
+				if (unexpectedOwner && !publishAssignment) {
+					co_return false;
+				}
+				if (!unexpectedOwner && assignedOwner != newOwner) {
 					tr.clear(assignmentRange);
 					tr.set(cdcProxyKeyFor(streamId, newOwner), Value());
 				}
@@ -537,7 +539,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 					                             IncludeVersion(ProtocolVersion::withNativeCdc())));
 				}
 				co_await tr.commit();
-				co_return;
+				co_return !unexpectedOwner;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -598,8 +600,11 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			}
 
 			// Keep published ownership and initialized local state unchanged while durable ownership differs.
-			co_await timeoutError(setUnpublishedStreamOwner(cx, name, streamId, owner.id(), wrongOwner.get().id()),
-			                      operationTimeout);
+			const bool swappedOwner = co_await timeoutError(
+			    setUnpublishedStreamOwner(cx, name, streamId, owner.id(), wrongOwner.get().id()), operationTimeout);
+			if (!swappedOwner) {
+				continue;
+			}
 			ErrorOr<Void> acknowledgement = request_maybe_delivered();
 			Optional<Error> acknowledgementError;
 			bool retainedPublishedOwner = false;
@@ -616,11 +621,14 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				}
 				acknowledgementError = e;
 			}
-			co_await timeoutError(
+			const bool restoredOwner = co_await timeoutError(
 			    setUnpublishedStreamOwner(cx, name, streamId, wrongOwner.get().id(), owner.id(), true),
 			    operationTimeout);
 			if (acknowledgementError.present()) {
 				throw acknowledgementError.get();
+			}
+			if (!restoredOwner) {
+				continue;
 			}
 			if (!retainedPublishedOwner) {
 				co_await timeoutError(waitForAssignedProxy(cx, streamId, wrongOwner.get().id()), operationTimeout);
