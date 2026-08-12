@@ -503,7 +503,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	                                       Key name,
 	                                       CDCStreamId streamId,
 	                                       UID expectedOwner,
-	                                       UID newOwner) {
+	                                       UID newOwner,
+	                                       bool publishAssignment = false) {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
@@ -521,13 +522,20 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				ASSERT_EQ(assignments.size(), 1);
 				const auto [assignedStreamId, assignedOwner] = decodeCDCProxyKey(assignments[0].key);
 				ASSERT_EQ(assignedStreamId, streamId);
-				if (assignedOwner == newOwner) {
+				if (assignedOwner == newOwner && !publishAssignment) {
 					co_return;
 				}
-				ASSERT_EQ(assignedOwner, expectedOwner);
+				if (assignedOwner != newOwner) {
+					ASSERT_EQ(assignedOwner, expectedOwner);
 
-				tr.clear(assignmentRange);
-				tr.set(cdcProxyKeyFor(streamId, newOwner), Value());
+					tr.clear(assignmentRange);
+					tr.set(cdcProxyKeyFor(streamId, newOwner), Value());
+				}
+				if (publishAssignment) {
+					tr.set(cdcProxyAssignmentChangeKey,
+					       BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),
+					                             IncludeVersion(ProtocolVersion::withNativeCdc())));
+				}
 				co_await tr.commit();
 				co_return;
 			} catch (Error& e) {
@@ -608,12 +616,16 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				}
 				acknowledgementError = e;
 			}
-			co_await timeoutError(setUnpublishedStreamOwner(cx, name, streamId, wrongOwner.get().id(), owner.id()),
-			                      operationTimeout);
+			co_await timeoutError(
+			    setUnpublishedStreamOwner(cx, name, streamId, wrongOwner.get().id(), owner.id(), true),
+			    operationTimeout);
 			if (acknowledgementError.present()) {
 				throw acknowledgementError.get();
 			}
-			ASSERT(retainedPublishedOwner);
+			if (!retainedPublishedOwner) {
+				co_await timeoutError(waitForAssignedProxy(cx, streamId, wrongOwner.get().id()), operationTimeout);
+				continue;
+			}
 			if (!rejectedWrongOwner(acknowledgement)) {
 				existing = co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
 				ASSERT_EQ(existing->position().streamId, expectedStreamId);
