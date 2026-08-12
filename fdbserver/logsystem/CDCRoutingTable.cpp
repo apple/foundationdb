@@ -139,7 +139,7 @@ TEST_CASE("/NativeCDC/RoutingTable/MetadataOrdering") {
 	table.setTag(1, 99, staleTag);
 	ASSERT_EQ(table.tagsForKey("b"_sr), std::set<Tag>{ rangeFirstTag });
 
-	table.setTag(1, 100, replacementTag);
+	table.setTag(1, 101, replacementTag);
 	ASSERT_EQ(table.tagsForKey("b"_sr), std::set<Tag>{ replacementTag });
 
 	return Void();
