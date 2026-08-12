@@ -506,6 +506,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Key key = "native-cdc-e2e/stale-ownership/value"_sr;
 		const Value value = "replacement-survives-stale-removal"_sr;
 		const double deadline = now() + operationTimeout;
+		CDCStreamId expectedStreamId =
+		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
 
 		const auto rejectedWrongOwner = [](ErrorOr<Void> const& result) {
 			ASSERT(!result.present());
@@ -520,8 +522,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 		while (true) {
 			ASSERT_LT(now(), deadline);
-			const CDCStreamId streamId =
-			    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+			Reference<NativeCdcConsumer> existing =
+			    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+			ASSERT_EQ(existing->position().streamId, expectedStreamId);
+			const CDCStreamId streamId = expectedStreamId;
 			CDCProxyInterface owner = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
 			Optional<CDCProxyInterface> wrongOwner;
 			for (const auto& proxy : cx->clientInfo->get().cdcProxies) {
@@ -538,27 +542,29 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			const ErrorOr<Void> acknowledgement =
 			    co_await timeoutError(wrongOwner.get().ack.tryGetReply(CDCAckRequest(streamId, 0)), operationTimeout);
 			if (!rejectedWrongOwner(acknowledgement)) {
-				ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout),
-				          streamId);
+				existing = co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+				ASSERT_EQ(existing->position().streamId, expectedStreamId);
 				continue;
 			}
 			const ErrorOr<Void> removal = co_await timeoutError(
 			    wrongOwner.get().removeStream.tryGetReply(CDCRemoveStreamRequest(name, streamId)), operationTimeout);
 			if (!rejectedWrongOwner(removal)) {
-				ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout),
-				          streamId);
+				existing = co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+				ASSERT_EQ(existing->position().streamId, expectedStreamId);
 				continue;
 			}
-			ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout), streamId);
+			existing = co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+			ASSERT_EQ(existing->position().streamId, expectedStreamId);
 
 			co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
 			const CDCStreamId replacementId =
 			    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
 			ASSERT_NE(replacementId, streamId);
+			expectedStreamId = replacementId;
 			const ErrorOr<Void> staleRemoval = co_await timeoutError(
 			    owner.removeStream.tryGetReply(CDCRemoveStreamRequest(name, streamId)), operationTimeout);
-			ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout),
-			          replacementId);
+			existing = co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+			ASSERT_EQ(existing->position().streamId, expectedStreamId);
 			if (!staleRemoval.present()) {
 				const int errorCode = staleRemoval.getError().code();
 				ASSERT(errorCode == error_code_request_maybe_delivered || errorCode == error_code_connection_failed ||
