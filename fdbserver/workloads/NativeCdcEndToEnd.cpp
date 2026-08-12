@@ -604,15 +604,18 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		if (std::find(proxies.begin(), proxies.end(), proxy) == proxies.end()) {
 			throw wrong_shard_server();
 		}
-		auto result = co_await race(getProxyStatus(proxy), changed);
-		if (result.index() != 0) {
-			throw wrong_shard_server();
+		Future<CDCProxyBufferStatus> status = getProxyStatus(proxy);
+		while (true) {
+			auto result = co_await race(status, changed);
+			changed = cx->clientInfo->onChange();
+			const auto& currentProxies = cx->clientInfo->get().cdcProxies;
+			if (std::find(currentProxies.begin(), currentProxies.end(), proxy) == currentProxies.end()) {
+				throw wrong_shard_server();
+			}
+			if (result.index() == 0) {
+				co_return std::get<0>(result);
+			}
 		}
-		const auto& currentProxies = cx->clientInfo->get().cdcProxies;
-		if (std::find(currentProxies.begin(), currentProxies.end(), proxy) == currentProxies.end()) {
-			throw wrong_shard_server();
-		}
-		co_return std::get<0>(result);
 	}
 
 	Future<std::pair<CDCProxyInterface, CDCProxyBufferStatus>> getAssignedProxyStatus(Database cx,
