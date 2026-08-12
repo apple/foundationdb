@@ -31,7 +31,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/LoadBalance.actor.h"
+#include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 #include "fdbrpc/TSSComparison.h"

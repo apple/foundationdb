@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/LoadBalance.actor.h"
+#include "fdbrpc/LoadBalance.h"
 #include "flow/CoroUtils.h"
 #include "flow/flow.h"
 
