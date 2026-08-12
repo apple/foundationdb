@@ -647,15 +647,18 @@ struct RequestData : NonCopyable {
 // If compareReplicas is set, does a consistency check by fetching and comparing results from storage
 // replicas (as many as specified by "requiredReplicas") and throws an exception if an inconsistency is found.
 template <class Interface, class Request, class Multi, bool P>
-Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alternatives,
+Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alternativesInput,
                                             RequestStream<Request, P> Interface::* channel,
-                                            Request request,
+                                            Request requestInput,
                                             TaskPriority taskID,
                                             AtMostOnce atMostOnce,
                                             QueueModel* model,
                                             bool compareReplicas,
                                             int requiredReplicas,
                                             ExplicitVoid = {}) {
+	// Release owned request resources and server references before publishing completion.
+	Reference<MultiInterface<Multi>> alternatives(std::move(alternativesInput));
+	Request request(std::move(requestInput));
 	RequestData<Request, Interface, Multi, P> firstRequestData(compareReplicas);
 	RequestData<Request, Interface, Multi, P> secondRequestData(compareReplicas);
 
@@ -841,7 +844,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alt
 			numAttempts = 0; // now that we've got a server back, reset the backoff
 		} else if (!stream) {
 			// Only the first location is available.
-			co_await success(firstRequestData.response);
+			co_await firstRequestData.response;
 			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 				// Do consistency check, if requested.
 				co_await firstRequestData.maybeDoReplicaComparison(
@@ -872,9 +875,8 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alt
 			bool secondRequestSuccessful = false;
 
 			while (true) {
-				auto res =
-				    co_await race(success(firstRequestData.response.isValid() ? firstRequestData.response : Never()),
-				                  success(secondRequestData.response));
+				auto res = co_await race(firstRequestData.response.isValid() ? firstRequestData.response : Never(),
+				                         secondRequestData.response);
 				if (res.index() == 0) {
 					if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 						firstRequestSuccessful = true;
@@ -924,7 +926,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alt
 			firstRequestEndpoint = stream->getEndpoint().token.first();
 
 			while (true) {
-				auto res = co_await race(success(firstRequestData.response), secondDelay);
+				auto res = co_await race(firstRequestData.response, secondDelay);
 				if (res.index() == 0) {
 					if (model) {
 						model->secondMultiplier =
@@ -1009,13 +1011,16 @@ Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const void*);
 // then *alternativeChosen will be the alternative to which the message was sent. *alternativeChosen must outlive the
 // returned future.
 template <class Interface, class Request, class Multi, bool P>
-Future<REPLY_TYPE(Request)> basicLoadBalanceImpl(Reference<ModelInterface<Multi>> alternatives,
+Future<REPLY_TYPE(Request)> basicLoadBalanceImpl(Reference<ModelInterface<Multi>> alternativesInput,
                                                  RequestStream<Request, P> Interface::* channel,
-                                                 Request request,
+                                                 Request requestInput,
                                                  TaskPriority taskID,
                                                  AtMostOnce atMostOnce,
                                                  int* alternativeChosen,
                                                  ExplicitVoid = {}) {
+	// Release owned request resources and server references before publishing completion.
+	Reference<ModelInterface<Multi>> alternatives(std::move(alternativesInput));
+	Request request(std::move(requestInput));
 	ASSERT(alternatives->size() && alternatives->alwaysFresh());
 
 	int bestAlt = alternatives->getBest();
