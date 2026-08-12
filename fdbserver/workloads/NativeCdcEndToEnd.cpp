@@ -631,7 +631,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				continue;
 			}
 			if (!retainedPublishedOwner) {
-				co_await timeoutError(waitForAssignedProxy(cx, streamId, wrongOwner.get().id()), operationTimeout);
+				co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
 				continue;
 			}
 			if (!rejectedWrongOwner(acknowledgement)) {
