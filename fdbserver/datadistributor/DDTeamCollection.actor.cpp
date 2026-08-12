@@ -48,6 +48,67 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 	return it->second;
 }
 
+class MaintenanceStartVersionState {
+public:
+	enum class Action { Preserve, Record, Clear };
+
+	explicit MaintenanceStartVersionState(Optional<Key> observedZone) : observedZone_(std::move(observedZone)) {}
+
+	Action reconcile(const Optional<Key>& zone, const Optional<Version>& durableStart, Version readVersion) {
+		if (zone != observedZone_) {
+			observedZone_ = zone;
+			startVersion_ = invalidVersion;
+			pendingRecord_ = false;
+			if (zone.present()) {
+				startVersion_ = readVersion;
+				originalDurableStart_ = durableStart;
+				pendingRecord_ = true;
+				return Action::Record;
+			}
+		}
+
+		if (!zone.present()) {
+			startVersion_ = invalidVersion;
+			pendingRecord_ = false;
+			return durableStart.present() ? Action::Clear : Action::Preserve;
+		}
+
+		if (pendingRecord_) {
+			if (durableStart.present() && durableStart.get() == startVersion_) {
+				pendingRecord_ = false;
+				return Action::Preserve;
+			}
+
+			// A different newly durable value belongs to the DD collection that won the transaction conflict.
+			if (durableStart.present() && durableStart != originalDurableStart_) {
+				startVersion_ = durableStart.get();
+				pendingRecord_ = false;
+				return Action::Preserve;
+			}
+			return Action::Record;
+		}
+
+		if (durableStart.present()) {
+			startVersion_ = durableStart.get();
+			return Action::Preserve;
+		}
+
+		startVersion_ = readVersion;
+		originalDurableStart_ = durableStart;
+		pendingRecord_ = true;
+		return Action::Record;
+	}
+
+	void committed() { pendingRecord_ = false; }
+	Version startVersion() const { return startVersion_; }
+
+private:
+	Optional<Key> observedZone_;
+	Optional<Version> originalDurableStart_;
+	Version startVersion_ = invalidVersion;
+	bool pendingRecord_ = false;
+};
+
 } // namespace
 
 namespace data_distribution {
@@ -2649,67 +2710,6 @@ public:
 			}
 		}
 	}
-
-	class MaintenanceStartVersionState {
-	public:
-		enum class Action { Preserve, Record, Clear };
-
-		explicit MaintenanceStartVersionState(Optional<Key> observedZone) : observedZone_(std::move(observedZone)) {}
-
-		Action reconcile(const Optional<Key>& zone, const Optional<Version>& durableStart, Version readVersion) {
-			if (zone != observedZone_) {
-				observedZone_ = zone;
-				startVersion_ = invalidVersion;
-				pendingRecord_ = false;
-				if (zone.present()) {
-					startVersion_ = readVersion;
-					originalDurableStart_ = durableStart;
-					pendingRecord_ = true;
-					return Action::Record;
-				}
-			}
-
-			if (!zone.present()) {
-				startVersion_ = invalidVersion;
-				pendingRecord_ = false;
-				return durableStart.present() ? Action::Clear : Action::Preserve;
-			}
-
-			if (pendingRecord_) {
-				if (durableStart.present() && durableStart.get() == startVersion_) {
-					pendingRecord_ = false;
-					return Action::Preserve;
-				}
-
-				// A different newly durable value belongs to the DD collection that won the transaction conflict.
-				if (durableStart.present() && durableStart != originalDurableStart_) {
-					startVersion_ = durableStart.get();
-					pendingRecord_ = false;
-					return Action::Preserve;
-				}
-				return Action::Record;
-			}
-
-			if (durableStart.present()) {
-				startVersion_ = durableStart.get();
-				return Action::Preserve;
-			}
-
-			startVersion_ = readVersion;
-			originalDurableStart_ = durableStart;
-			pendingRecord_ = true;
-			return Action::Record;
-		}
-
-		void committed() { pendingRecord_ = false; }
-		Version startVersion() const { return startVersion_; }
-
-	private:
-		Optional<Key> observedZone_;
-		Optional<Version> originalDurableStart_;
-		Version startVersion_ = invalidVersion;
-		bool pendingRecord_ = false;
-	};
 
 	static void recordMaintenanceStart(ReadYourWritesTransaction* tr, Version version) {
 		BinaryWriter bw(Unversioned());
@@ -7633,7 +7633,7 @@ TEST_CASE("/DataDistribution/TeamTracker/RechecksHealthyZone") {
 }
 
 TEST_CASE("/DataDistribution/Maintenance/FailedStartRetriesOriginalVersion") {
-	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	using State = MaintenanceStartVersionState;
 	const Optional<Key> zone(Key("zone-a"_sr));
 	State maintenanceState(Optional<Key>{});
 
@@ -7648,7 +7648,7 @@ TEST_CASE("/DataDistribution/Maintenance/FailedStartRetriesOriginalVersion") {
 }
 
 TEST_CASE("/DataDistribution/Maintenance/AmbiguousCommitPreservesDurableStart") {
-	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	using State = MaintenanceStartVersionState;
 	const Optional<Key> zone(Key("zone-a"_sr));
 	State maintenanceState(Optional<Key>{});
 
@@ -7659,7 +7659,7 @@ TEST_CASE("/DataDistribution/Maintenance/AmbiguousCommitPreservesDurableStart") 
 }
 
 TEST_CASE("/DataDistribution/Maintenance/ConcurrentWriterPreservesCommittedStart") {
-	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	using State = MaintenanceStartVersionState;
 	const Optional<Key> oldZone(Key("zone-a"_sr));
 	const Optional<Key> newZone(Key("zone-b"_sr));
 	State maintenanceState(oldZone);
@@ -7673,7 +7673,7 @@ TEST_CASE("/DataDistribution/Maintenance/ConcurrentWriterPreservesCommittedStart
 }
 
 TEST_CASE("/DataDistribution/Maintenance/FailedClearRetriesWithoutLocalZone") {
-	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	using State = MaintenanceStartVersionState;
 	const Optional<Key> zone(Key("zone-a"_sr));
 	State maintenanceState(zone);
 
@@ -7686,7 +7686,7 @@ TEST_CASE("/DataDistribution/Maintenance/FailedClearRetriesWithoutLocalZone") {
 }
 
 TEST_CASE("/DataDistribution/Maintenance/ExternallyClearedZoneRemovesStaleStart") {
-	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	using State = MaintenanceStartVersionState;
 	State maintenanceState(Optional<Key>{});
 
 	ASSERT(maintenanceState.reconcile(Optional<Key>{}, Optional<Version>(100), 200) == State::Action::Clear);
@@ -7696,7 +7696,7 @@ TEST_CASE("/DataDistribution/Maintenance/ExternallyClearedZoneRemovesStaleStart"
 }
 
 TEST_CASE("/DataDistribution/Maintenance/ZoneChangeReplacesStaleStart") {
-	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	using State = MaintenanceStartVersionState;
 	const Optional<Key> oldZone(Key("zone-a"_sr));
 	const Optional<Key> newZone(Key("zone-b"_sr));
 	State maintenanceState(oldZone);
@@ -7712,7 +7712,7 @@ TEST_CASE("/DataDistribution/Maintenance/ZoneChangeReplacesStaleStart") {
 }
 
 TEST_CASE("/DataDistribution/Maintenance/SameZoneRestartAfterFailedClear") {
-	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	using State = MaintenanceStartVersionState;
 	const Optional<Key> zone(Key("zone-a"_sr));
 	State maintenanceState(zone);
 
@@ -7724,7 +7724,7 @@ TEST_CASE("/DataDistribution/Maintenance/SameZoneRestartAfterFailedClear") {
 }
 
 TEST_CASE("/DataDistribution/Maintenance/RecruitmentAdoptsDurableStart") {
-	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	using State = MaintenanceStartVersionState;
 	const Optional<Key> zone(Key("zone-a"_sr));
 	State maintenanceState(zone);
 
@@ -7734,7 +7734,7 @@ TEST_CASE("/DataDistribution/Maintenance/RecruitmentAdoptsDurableStart") {
 }
 
 TEST_CASE("/DataDistribution/Maintenance/RecruitmentRepairsMissingStart") {
-	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	using State = MaintenanceStartVersionState;
 	const Optional<Key> zone(Key("zone-a"_sr));
 	State maintenanceState(zone);
 
