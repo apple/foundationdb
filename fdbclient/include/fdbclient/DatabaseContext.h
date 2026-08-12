@@ -27,7 +27,7 @@
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/IRandom.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include <compare>
 #include <vector>
 #include <unordered_map>

@@ -27,7 +27,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/WorkerEvents.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 #include "ClusterHealthIFactor.h"
 #include "ClusterHealthMonitor.h"

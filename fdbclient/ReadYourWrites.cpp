@@ -20,6 +20,7 @@
 
 #include "fdbclient/ReadYourWrites.h"
 #include "RYWIterator.h"
+#include "fdbclient/ClientOptionValidation.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
@@ -1769,7 +1770,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
-			CODE_PROBE(true, "Special key space get range (getMappedRange)", probe::decoration::rare);
+			CODE_PROBE(true, "Special key space get range (getMappedRange)");
 			throw client_invalid_operation(); // Not support special keys.
 		}
 	} else {
@@ -1791,7 +1792,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
-		CODE_PROBE(true, "RYW range read limit 0 (getMappedRange)", probe::decoration::rare);
+		CODE_PROBE(true, "RYW range read limit 0 (getMappedRange)");
 		return MappedRangeResult();
 	}
 
@@ -1805,7 +1806,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 		end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		CODE_PROBE(true, "RYW range inverted (getMappedRange)", probe::decoration::rare);
+		CODE_PROBE(true, "RYW range inverted (getMappedRange)");
 		return MappedRangeResult();
 	}
 

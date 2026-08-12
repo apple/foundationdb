@@ -54,7 +54,7 @@
 #include <ctime>
 #include <climits>
 #include "flow/IAsyncFile.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Hash3.h"
 #include "flow/xxhash.h"
 
@@ -6396,7 +6396,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreVersion", restoreVersion)
 				    .detail("Dest", destVersion);
 				if (destVersion <= restoreVersion) {
-					CODE_PROBE(true, "Forcing restored cluster to higher version");
+					CODE_PROBE(true, "Forcing restored cluster to higher version", probe::decoration::rare);
 					tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion + 1, Unversioned()));
 					co_await tr->commit();
 					tr->reset();

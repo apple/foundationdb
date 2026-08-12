@@ -102,7 +102,7 @@ private:
 TEST_CASE("/flow/Deque/grow_exception_safety") {
 	Deque<RandomlyThrows> q;
 	for (int i = 0; i < 100; ++i) {
-		loop {
+		while (true) {
 			try {
 				q.push_back(RandomlyThrows{ i });
 				break;
