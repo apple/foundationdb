@@ -409,7 +409,7 @@ FDB_BOOLEAN_PARAM(TriedAllOptions);
 // Stores state for a request made by the load balancer
 template <class Request, class Interface, class Multi, bool P>
 struct RequestData : NonCopyable {
-	typedef ErrorOr<REPLY_TYPE(Request)> Reply;
+	using Reply = ErrorOr<REPLY_TYPE(Request)>;
 
 	Future<Reply> response;
 	Reference<ModelHolder> modelHolder;
