@@ -463,6 +463,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> validateProxyReplacement(Database cx) {
+		co_await validateStaleStreamOwnership(cx);
 		const Key name = "native-cdc-e2e/proxy-replacement"_sr;
 		const KeyRange keys(
 		    KeyRangeRef("native-cdc-e2e/proxy-replacement/"_sr, "native-cdc-e2e/proxy-replacement0"_sr));
@@ -496,6 +497,83 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Version committed = co_await writeValue(cx, key, value);
 		co_await consumeThroughValue(consumer, committed, key, value);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+	}
+
+	// Stale proxy ownership and old stream IDs must not modify a live replacement stream.
+	Future<Void> validateStaleStreamOwnership(Database cx) {
+		const Key name = "native-cdc-e2e/stale-ownership"_sr;
+		const KeyRange keys(KeyRangeRef("native-cdc-e2e/stale-ownership/"_sr, "native-cdc-e2e/stale-ownership0"_sr));
+		const Key key = "native-cdc-e2e/stale-ownership/value"_sr;
+		const Value value = "replacement-survives-stale-removal"_sr;
+		const double deadline = now() + operationTimeout;
+
+		const auto rejectedWrongOwner = [](ErrorOr<Void> const& result) {
+			ASSERT(!result.present());
+			const int errorCode = result.getError().code();
+			if (errorCode == error_code_wrong_shard_server) {
+				return true;
+			}
+			ASSERT(errorCode == error_code_request_maybe_delivered || errorCode == error_code_connection_failed ||
+			       errorCode == error_code_broken_promise);
+			return false;
+		};
+
+		while (true) {
+			ASSERT_LT(now(), deadline);
+			const CDCStreamId streamId =
+			    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+			CDCProxyInterface owner = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
+			Optional<CDCProxyInterface> wrongOwner;
+			for (const auto& proxy : cx->clientInfo->get().cdcProxies) {
+				if (proxy.id() != owner.id()) {
+					wrongOwner = proxy;
+					break;
+				}
+			}
+			if (!wrongOwner.present()) {
+				co_await delay(0.01);
+				continue;
+			}
+
+			const ErrorOr<Void> acknowledgement =
+			    co_await timeoutError(wrongOwner.get().ack.tryGetReply(CDCAckRequest(streamId, 0)), operationTimeout);
+			if (!rejectedWrongOwner(acknowledgement)) {
+				ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout),
+				          streamId);
+				continue;
+			}
+			const ErrorOr<Void> removal = co_await timeoutError(
+			    wrongOwner.get().removeStream.tryGetReply(CDCRemoveStreamRequest(name, streamId)), operationTimeout);
+			if (!rejectedWrongOwner(removal)) {
+				ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout),
+				          streamId);
+				continue;
+			}
+			ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout), streamId);
+
+			co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+			const CDCStreamId replacementId =
+			    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+			ASSERT_NE(replacementId, streamId);
+			const ErrorOr<Void> staleRemoval = co_await timeoutError(
+			    owner.removeStream.tryGetReply(CDCRemoveStreamRequest(name, streamId)), operationTimeout);
+			ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout),
+			          replacementId);
+			if (!staleRemoval.present()) {
+				const int errorCode = staleRemoval.getError().code();
+				ASSERT(errorCode == error_code_request_maybe_delivered || errorCode == error_code_connection_failed ||
+				       errorCode == error_code_broken_promise);
+				continue;
+			}
+
+			Reference<NativeCdcConsumer> consumer =
+			    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+			ASSERT_EQ(consumer->position().streamId, replacementId);
+			const Version committed = co_await writeValue(cx, key, value);
+			co_await consumeThroughValue(consumer, committed, key, value);
+			co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+			co_return;
+		}
 	}
 
 	Future<Void> consumeMemoryMarker(Reference<NativeCdcConsumer> consumer,
