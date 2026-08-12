@@ -287,8 +287,3 @@ C
 Earlier release notes
 ---------------------
 * :doc:`1.0 (API Version 100) <release-notes-100>`
-* :doc:`Beta 3 (API Version 23) <release-notes-023>`
-* :doc:`Beta 2 (API Version 22) <release-notes-022>`
-* :doc:`Beta 1 (API Version 21) <release-notes-021>`
-* :doc:`Alpha 6 (API Version 16) <release-notes-016>`
-* :doc:`Alpha 5 (API Version 14) <release-notes-014>`
