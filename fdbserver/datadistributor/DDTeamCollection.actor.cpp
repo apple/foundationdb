@@ -2650,25 +2650,71 @@ public:
 		}
 	}
 
-	// Persists the version at which the current maintenance mode was started, so that a DD
-	// recruited mid-maintenance (see getOrRecordMaintenanceStart) can recover the true start.
-	static Version recordNewMaintenanceStart(ReadYourWritesTransaction* tr) {
-		Version version = tr->getReadVersion().get();
+	class MaintenanceStartVersionState {
+	public:
+		enum class Action { Preserve, Record, Clear };
+
+		explicit MaintenanceStartVersionState(Optional<Key> observedZone) : observedZone_(std::move(observedZone)) {}
+
+		Action reconcile(const Optional<Key>& zone, const Optional<Version>& durableStart, Version readVersion) {
+			if (zone != observedZone_) {
+				observedZone_ = zone;
+				startVersion_ = invalidVersion;
+				pendingRecord_ = false;
+				if (zone.present()) {
+					startVersion_ = readVersion;
+					originalDurableStart_ = durableStart;
+					pendingRecord_ = true;
+					return Action::Record;
+				}
+			}
+
+			if (!zone.present()) {
+				startVersion_ = invalidVersion;
+				pendingRecord_ = false;
+				return durableStart.present() ? Action::Clear : Action::Preserve;
+			}
+
+			if (pendingRecord_) {
+				if (durableStart.present() && durableStart.get() == startVersion_) {
+					pendingRecord_ = false;
+					return Action::Preserve;
+				}
+
+				// A different newly durable value belongs to the DD collection that won the transaction conflict.
+				if (durableStart.present() && durableStart != originalDurableStart_) {
+					startVersion_ = durableStart.get();
+					pendingRecord_ = false;
+					return Action::Preserve;
+				}
+				return Action::Record;
+			}
+
+			if (durableStart.present()) {
+				startVersion_ = durableStart.get();
+				return Action::Preserve;
+			}
+
+			startVersion_ = readVersion;
+			originalDurableStart_ = durableStart;
+			pendingRecord_ = true;
+			return Action::Record;
+		}
+
+		void committed() { pendingRecord_ = false; }
+		Version startVersion() const { return startVersion_; }
+
+	private:
+		Optional<Key> observedZone_;
+		Optional<Version> originalDurableStart_;
+		Version startVersion_ = invalidVersion;
+		bool pendingRecord_ = false;
+	};
+
+	static void recordMaintenanceStart(ReadYourWritesTransaction* tr, Version version) {
 		BinaryWriter bw(Unversioned());
 		bw << version;
 		tr->set(healthyZoneStartVersionKey, bw.toValue());
-		return version;
-	}
-
-	// Adopts the start version persisted by whichever DD instance first observed the current
-	// maintenance mode, for the case where this DD was (re)recruited while the maintenance was active.
-	// Falls back to recording a fresh start now if the key was never written.
-	static Future<Version> getOrRecordMaintenanceStart(ReadYourWritesTransaction* tr) {
-		Optional<Value> startVal = co_await tr->get(healthyZoneStartVersionKey);
-		if (startVal.present()) {
-			co_return BinaryReader::fromStringRef<Version>(startVal.get(), Unversioned());
-		}
-		co_return recordNewMaintenanceStart(tr);
 	}
 
 	// -1.0 if the start version was never established (should only happen if this DD instance
@@ -2683,11 +2729,7 @@ public:
 	static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
 		auto* counters = waitHealthyZoneChangeCounters();
 		ReadYourWritesTransaction tr(self->dbContext());
-		// maintenanceStartVersion tracks the version at which the current maintenance/disable-DD
-		// window began, durably persisted via healthyZoneStartVersionKey, so that
-		// MaintenanceZoneEnd*/DataDistributionDisabledForStorageServerFailuresEnd can report an
-		// accurate Duration even if this DD instance was recruited mid-window.
-		Version maintenanceStartVersion = invalidVersion;
+		MaintenanceStartVersionState maintenanceStart(self->healthyZone.get());
 		while (true) {
 			counters->started->increment(1);
 			Error err;
@@ -2696,6 +2738,29 @@ public:
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = co_await tr.get(healthyZoneKey);
+				Optional<Value> startVal = co_await tr.get(healthyZoneStartVersionKey);
+				Optional<Version> durableStart;
+				if (startVal.present()) {
+					durableStart = BinaryReader::fromStringRef<Version>(startVal.get(), Unversioned());
+				}
+
+				Optional<Key> activeZone;
+				if (val.present()) {
+					auto configuredZone = decodeHealthyZoneValue(val.get());
+					if (configuredZone.first == ignoreSSFailuresZoneString ||
+					    configuredZone.second > tr.getReadVersion().get()) {
+						activeZone = configuredZone.first;
+					}
+				}
+
+				Version previousStartVersion = maintenanceStart.startVersion();
+				auto action = maintenanceStart.reconcile(activeZone, durableStart, tr.getReadVersion().get());
+				if (action == MaintenanceStartVersionState::Action::Record) {
+					recordMaintenanceStart(&tr, maintenanceStart.startVersion());
+				} else if (action == MaintenanceStartVersionState::Action::Clear) {
+					tr.clear(healthyZoneStartVersionKey);
+				}
+
 				Future<Void> healthyZoneTimeout = Never();
 				if (val.present()) {
 					auto p = decodeHealthyZoneValue(val.get());
@@ -2704,9 +2769,6 @@ public:
 						if (self->healthyZone.get() != p.first) {
 							TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId)
 							    .log();
-							maintenanceStartVersion = recordNewMaintenanceStart(&tr);
-						} else if (maintenanceStartVersion == invalidVersion) {
-							maintenanceStartVersion = co_await getOrRecordMaintenanceStart(&tr);
 						}
 						healthyZoneTimeout = Never();
 						self->healthyZone.set(p.first);
@@ -2720,21 +2782,16 @@ public:
 							    .detail("EndVersion", p.second)
 							    .detail("Duration", timeoutSeconds);
 							self->healthyZone.set(p.first);
-							maintenanceStartVersion = recordNewMaintenanceStart(&tr);
-						} else if (maintenanceStartVersion == invalidVersion) {
-							maintenanceStartVersion = co_await getOrRecordMaintenanceStart(&tr);
 						}
 					} else if (self->healthyZone.get().present()) {
 						// maintenance hits timeout
 						TraceEvent("MaintenanceZoneEndTimeout", self->distributorId)
-						    .detail("Duration", maintenanceDurationSeconds(&tr, maintenanceStartVersion));
+						    .detail("Duration", maintenanceDurationSeconds(&tr, previousStartVersion));
 						self->healthyZone.set(Optional<Key>());
-						tr.clear(healthyZoneStartVersionKey);
-						maintenanceStartVersion = invalidVersion;
 					}
 				} else if (self->healthyZone.get().present()) {
 					// `healthyZone` has been cleared
-					double duration = maintenanceDurationSeconds(&tr, maintenanceStartVersion);
+					double duration = maintenanceDurationSeconds(&tr, previousStartVersion);
 					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
 						TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId)
 						    .detail("Duration", duration);
@@ -2742,12 +2799,11 @@ public:
 						TraceEvent("MaintenanceZoneEndManualClear", self->distributorId).detail("Duration", duration);
 					}
 					self->healthyZone.set(Optional<Key>());
-					tr.clear(healthyZoneStartVersionKey);
-					maintenanceStartVersion = invalidVersion;
 				}
 
 				Future<Void> watchFuture = tr.watch(healthyZoneKey);
 				co_await tr.commit();
+				maintenanceStart.committed();
 				counters->committed->increment(1);
 				co_await (watchFuture || healthyZoneTimeout);
 				tr.reset();
@@ -7573,5 +7629,118 @@ TEST_CASE("/DataDistribution/TeamTracker/RetriesMergedShardForUndesiredServer") 
 
 TEST_CASE("/DataDistribution/TeamTracker/RechecksHealthyZone") {
 	wait(DDTeamCollectionUnitTest::TeamTracker_RechecksHealthyZone());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/FailedStartRetriesOriginalVersion") {
+	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State maintenanceState(Optional<Key>{});
+
+	ASSERT(maintenanceState.reconcile(zone, Optional<Version>{}, 100) == State::Action::Record);
+	ASSERT_EQ(maintenanceState.startVersion(), 100);
+	ASSERT(maintenanceState.reconcile(zone, Optional<Version>{}, 200) == State::Action::Record);
+	ASSERT_EQ(maintenanceState.startVersion(), 100);
+	maintenanceState.committed();
+	ASSERT(maintenanceState.reconcile(zone, Optional<Version>(100), 300) == State::Action::Preserve);
+	ASSERT_EQ(maintenanceState.startVersion(), 100);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/AmbiguousCommitPreservesDurableStart") {
+	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State maintenanceState(Optional<Key>{});
+
+	ASSERT(maintenanceState.reconcile(zone, Optional<Version>{}, 100) == State::Action::Record);
+	ASSERT(maintenanceState.reconcile(zone, Optional<Version>(100), 200) == State::Action::Preserve);
+	ASSERT_EQ(maintenanceState.startVersion(), 100);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/ConcurrentWriterPreservesCommittedStart") {
+	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	const Optional<Key> oldZone(Key("zone-a"_sr));
+	const Optional<Key> newZone(Key("zone-b"_sr));
+	State maintenanceState(oldZone);
+
+	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(50), 100) == State::Action::Record);
+	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(50), 200) == State::Action::Record);
+	ASSERT_EQ(maintenanceState.startVersion(), 100);
+	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(125), 300) == State::Action::Preserve);
+	ASSERT_EQ(maintenanceState.startVersion(), 125);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/FailedClearRetriesWithoutLocalZone") {
+	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State maintenanceState(zone);
+
+	ASSERT(maintenanceState.reconcile(zone, Optional<Version>(100), 200) == State::Action::Preserve);
+	ASSERT(maintenanceState.reconcile(Optional<Key>{}, Optional<Version>(100), 300) == State::Action::Clear);
+	ASSERT_EQ(maintenanceState.startVersion(), invalidVersion);
+	ASSERT(maintenanceState.reconcile(Optional<Key>{}, Optional<Version>(100), 400) == State::Action::Clear);
+	ASSERT(maintenanceState.reconcile(Optional<Key>{}, Optional<Version>{}, 500) == State::Action::Preserve);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/ExternallyClearedZoneRemovesStaleStart") {
+	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	State maintenanceState(Optional<Key>{});
+
+	ASSERT(maintenanceState.reconcile(Optional<Key>{}, Optional<Version>(100), 200) == State::Action::Clear);
+	ASSERT(maintenanceState.reconcile(Optional<Key>{}, Optional<Version>(100), 300) == State::Action::Clear);
+	ASSERT(maintenanceState.reconcile(Optional<Key>{}, Optional<Version>{}, 400) == State::Action::Preserve);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/ZoneChangeReplacesStaleStart") {
+	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	const Optional<Key> oldZone(Key("zone-a"_sr));
+	const Optional<Key> newZone(Key("zone-b"_sr));
+	State maintenanceState(oldZone);
+
+	ASSERT(maintenanceState.reconcile(oldZone, Optional<Version>(100), 200) == State::Action::Preserve);
+	maintenanceState.committed();
+	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(100), 300) == State::Action::Record);
+	ASSERT_EQ(maintenanceState.startVersion(), 300);
+	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(100), 400) == State::Action::Record);
+	ASSERT_EQ(maintenanceState.startVersion(), 300);
+	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(300), 500) == State::Action::Preserve);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/SameZoneRestartAfterFailedClear") {
+	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State maintenanceState(zone);
+
+	ASSERT(maintenanceState.reconcile(zone, Optional<Version>(100), 200) == State::Action::Preserve);
+	ASSERT(maintenanceState.reconcile(Optional<Key>{}, Optional<Version>(100), 300) == State::Action::Clear);
+	ASSERT(maintenanceState.reconcile(zone, Optional<Version>(100), 400) == State::Action::Record);
+	ASSERT_EQ(maintenanceState.startVersion(), 400);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RecruitmentAdoptsDurableStart") {
+	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State maintenanceState(zone);
+
+	ASSERT(maintenanceState.reconcile(zone, Optional<Version>(100), 500) == State::Action::Preserve);
+	ASSERT_EQ(maintenanceState.startVersion(), 100);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RecruitmentRepairsMissingStart") {
+	using State = DDTeamCollectionImpl::MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State maintenanceState(zone);
+
+	ASSERT(maintenanceState.reconcile(zone, Optional<Version>{}, 500) == State::Action::Record);
+	ASSERT_EQ(maintenanceState.startVersion(), 500);
+	ASSERT(maintenanceState.reconcile(zone, Optional<Version>{}, 600) == State::Action::Record);
+	ASSERT_EQ(maintenanceState.startVersion(), 500);
 	return Void();
 }
