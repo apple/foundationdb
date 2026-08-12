@@ -48,6 +48,7 @@
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
+#include "fdbclient/ClientOptionValidation.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -273,32 +274,6 @@ bool DatabaseContext::sampleOnCost(uint64_t cost) const {
 	if (sampleCost <= 0)
 		return false;
 	return deterministicRandom()->random01() <= (double)cost / sampleCost;
-}
-
-void validateOptionValuePresent(Optional<StringRef> value) {
-	if (!value.present()) {
-		throw invalid_option_value();
-	}
-}
-
-void validateOptionValueNotPresent(Optional<StringRef> value) {
-	if (value.present() && value.get().size() > 0) {
-		throw invalid_option_value();
-	}
-}
-
-int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
-	validateOptionValuePresent(value);
-	if (value.get().size() != 8) {
-		throw invalid_option_value();
-	}
-
-	int64_t passed = *((int64_t*)(value.get().begin()));
-	if (passed > maxValue || passed < minValue) {
-		throw invalid_option_value();
-	}
-
-	return passed;
 }
 
 void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
