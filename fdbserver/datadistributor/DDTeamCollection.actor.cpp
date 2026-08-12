@@ -117,6 +117,11 @@ private:
 	bool pendingRecord_ = false;
 };
 
+bool ownsMaintenanceLock(const MoveKeysLock& lock, const Optional<Value>& durableOwner) {
+	return durableOwner.present() &&
+	       BinaryReader::fromStringRef<UID>(durableOwner.get(), Unversioned()) == lock.myOwner;
+}
+
 } // namespace
 
 namespace data_distribution {
@@ -2763,10 +2768,17 @@ public:
 
 				Version previousStartVersion = maintenanceStart.startVersion();
 				auto action = maintenanceStart.reconcile(activeZone, durableStart, tr.getReadVersion().get());
-				if (action == MaintenanceStartVersionState::Action::Record) {
-					recordMaintenanceStart(&tr, maintenanceStart.startVersion());
-				} else if (action == MaintenanceStartVersionState::Action::Clear) {
-					tr.clear(healthyZoneStartVersionKey);
+				if (action != MaintenanceStartVersionState::Action::Preserve) {
+					Optional<Value> durableOwner = co_await tr.get(moveKeysLockOwnerKey);
+					if (!ownsMaintenanceLock(self->lock, durableOwner)) {
+						throw movekeys_conflict();
+					}
+					if (action == MaintenanceStartVersionState::Action::Record) {
+						recordMaintenanceStart(&tr, maintenanceStart.startVersion());
+					} else {
+						ASSERT(action == MaintenanceStartVersionState::Action::Clear);
+						tr.clear(healthyZoneStartVersionKey);
+					}
 				}
 
 				Future<Void> healthyZoneTimeout = Never();
@@ -7680,6 +7692,29 @@ TEST_CASE("/DataDistribution/Maintenance/ConcurrentWriterPreservesCommittedStart
 	ASSERT_EQ(maintenanceState.startVersion(), 100);
 	ASSERT(maintenanceState.reconcile(newZone, Optional<Version>(125), 300) == State::Action::Preserve);
 	ASSERT_EQ(maintenanceState.startVersion(), 125);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/SupersededPrimaryCannotMutateMaintenanceStart") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	MoveKeysLock previousLock;
+	MoveKeysLock currentLock;
+	previousLock.myOwner = UID(1, 1);
+	currentLock.myOwner = UID(2, 2);
+	const Optional<Value> durableOwner(BinaryWriter::toValue(currentLock.myOwner, Unversioned()));
+	State currentPrimary(zone, true);
+	State previousPrimary(Optional<Key>{}, true);
+
+	ASSERT(currentPrimary.reconcile(zone, Optional<Version>(100), 150) == State::Action::Preserve);
+	ASSERT_EQ(currentPrimary.startVersion(), 100);
+	ASSERT(previousPrimary.reconcile(zone, Optional<Version>(100), 200) == State::Action::Record);
+	ASSERT_EQ(previousPrimary.startVersion(), 200);
+	ASSERT(ownsMaintenanceLock(currentLock, durableOwner));
+	ASSERT(!ownsMaintenanceLock(previousLock, durableOwner));
+	ASSERT(!ownsMaintenanceLock(currentLock, Optional<Value>{}));
+	ASSERT(previousPrimary.reconcile(Optional<Key>{}, Optional<Version>(100), 300) == State::Action::Clear);
+	ASSERT(!ownsMaintenanceLock(previousLock, durableOwner));
 	return Void();
 }
 
