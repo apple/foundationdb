@@ -286,6 +286,16 @@ bool isCurrentStreamInitialization(std::unordered_map<CDCStreamId, Reference<CDC
 	return stream->active && current != streams.end() && current->second.getPtr() == stream.getPtr();
 }
 
+bool isCurrentTagOwner(std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> const& streams,
+                       Tag const& tag,
+                       CDCStreamId streamId) {
+	const auto stream = streams.find(streamId);
+	return stream != streams.end() && stream->second->active &&
+	       std::any_of(stream->second->tagIntervals.begin(),
+	                   stream->second->tagIntervals.end(),
+	                   [&tag](CDCTagInterval const& interval) { return interval.tag == tag; });
+}
+
 // New TLogs retain every recovered tag until it is popped past the recovery boundary. An unshared retired tag has no
 // active consumer to advance it, so stopping at its pre-recovery removal version can keep the old generation forever.
 Version retiredTagPopTarget(Version retiredVersion, Optional<Version> safePopVersion, Optional<Version> recoveryEnd) {
@@ -1707,6 +1717,11 @@ Future<Void> CDCProxy::serveBufferStatusForTestingRequests(FutureStream<GetCDCPr
 			}
 			co_await race(popPauseChangedForTesting.onTrigger(), pendingInitialization->changed.onTrigger());
 		}
+		for (const auto& [tag, bufferedTag] : tags) {
+			for (const CDCStreamId streamId : bufferedTag->streamIds) {
+				ASSERT(isCurrentTagOwner(streams, tag, streamId));
+			}
+		}
 		CDCProxyBufferStatus status;
 		status.bufferedBytes = bufferedBytes;
 		status.activePermits = bufferLock.activePermits();
@@ -2003,16 +2018,29 @@ TEST_CASE("/NativeCDC/StreamInitializationLifecycle") {
 	std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> streams;
 	auto stream = makeReference<CDCBufferedStream>(1);
 	auto replacement = makeReference<CDCBufferedStream>(1);
+	const Tag assignedTag(tagLocalityCDC, 1);
+	const Tag anotherTag(tagLocalityCDC, 2);
 
 	ASSERT(!isCurrentStreamInitialization(streams, stream));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
 	streams.emplace(stream->streamId, stream);
 	ASSERT(isCurrentStreamInitialization(streams, stream));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
+	stream->tagIntervals.emplace_back(assignedTag, 100, 200);
+	ASSERT(isCurrentTagOwner(streams, assignedTag, stream->streamId));
+	ASSERT(!isCurrentTagOwner(streams, anotherTag, stream->streamId));
 	stream->active = false;
 	ASSERT(!isCurrentStreamInitialization(streams, stream));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
 	stream->active = true;
 	streams.at(stream->streamId) = replacement;
 	ASSERT(!isCurrentStreamInitialization(streams, stream));
 	ASSERT(isCurrentStreamInitialization(streams, replacement));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
+	replacement->tagIntervals.emplace_back(assignedTag, 200, 300);
+	ASSERT(isCurrentTagOwner(streams, assignedTag, replacement->streamId));
+	streams.erase(replacement->streamId);
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, replacement->streamId));
 	return Void();
 }
 

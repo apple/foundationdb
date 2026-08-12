@@ -468,41 +468,65 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const KeyRange keys(
 		    KeyRangeRef("native-cdc-e2e/stale-initialization/"_sr, "native-cdc-e2e/stale-initialization0"_sr));
 		const double deadline = now() + operationTimeout;
+		bool recovering = false;
+		bool streamRegistered = false;
 
 		while (true) {
-			co_await timeoutError(setAllProxyPopsPaused(cx, true), operationTimeout);
-			const CDCStreamId streamId =
-			    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
-			CDCProxyInterface proxy = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
-			const CDCCursor cursor(streamId, invalidVersion);
-			Future<ErrorOr<CDCConsumeReply>> pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
-			while (true) {
-				const CDCProxyBufferStatus status = co_await getProxyStatus(proxy);
-				ASSERT(status.popsPaused);
-				if (pendingConsume.isReady()) {
-					const ErrorOr<CDCConsumeReply> result = co_await pendingConsume;
-					ASSERT(!result.present());
-					ASSERT_EQ(result.getError().code(), error_code_wrong_shard_server);
-					pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
-				} else if (status.activeConsumeRequests > 0) {
-					break;
-				}
-				ASSERT_LT(now(), deadline);
-				co_await delay(0.01);
-			}
-
-			co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
-			const ErrorOr<CDCConsumeReply> result = co_await timeoutError(pendingConsume, operationTimeout);
-			ASSERT(!result.present());
-			const int errorCode = result.getError().code();
-			if (errorCode == error_code_wrong_shard_server) {
-				co_await timeoutError(setAllProxyPopsPaused(cx, false), operationTimeout);
-				co_return;
-			}
-			ASSERT(errorCode == error_code_request_maybe_delivered || errorCode == error_code_connection_failed ||
-			       errorCode == error_code_broken_promise);
-			co_await timeoutError(setAllProxyPopsPaused(cx, false), operationTimeout);
 			ASSERT_LT(now(), deadline);
+			try {
+				if (recovering) {
+					co_await timeoutError(setAllProxyPopsPaused(cx, false), operationTimeout);
+					if (streamRegistered) {
+						co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+						streamRegistered = false;
+					}
+					recovering = false;
+				}
+
+				co_await timeoutError(setAllProxyPopsPaused(cx, true), operationTimeout);
+				streamRegistered = true;
+				const CDCStreamId streamId =
+				    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+				CDCProxyInterface proxy = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
+				const CDCCursor cursor(streamId, invalidVersion);
+				Future<ErrorOr<CDCConsumeReply>> pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
+				while (true) {
+					const CDCProxyBufferStatus status = co_await getPublishedProxyStatus(cx, proxy);
+					if (!status.popsPaused) {
+						throw wrong_shard_server();
+					}
+					if (pendingConsume.isReady()) {
+						const ErrorOr<CDCConsumeReply> result = co_await pendingConsume;
+						ASSERT(!result.present());
+						if (result.getError().code() != error_code_wrong_shard_server) {
+							throw result.getError();
+						}
+						pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
+					} else if (status.activeConsumeRequests > 0) {
+						break;
+					}
+					ASSERT_LT(now(), deadline);
+					co_await delay(0.01);
+				}
+
+				co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+				streamRegistered = false;
+				const ErrorOr<CDCConsumeReply> result = co_await timeoutError(pendingConsume, operationTimeout);
+				ASSERT(!result.present());
+				if (result.getError().code() != error_code_wrong_shard_server) {
+					throw result.getError();
+				}
+				co_await timeoutError(setAllProxyPopsPaused(cx, false), operationTimeout);
+				co_await getPublishedProxyStatus(cx, proxy);
+				co_return;
+			} catch (Error& e) {
+				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_broken_promise &&
+				    e.code() != error_code_connection_failed && e.code() != error_code_request_maybe_delivered) {
+					throw;
+				}
+				recovering = true;
+			}
+			co_await delay(0);
 		}
 	}
 
@@ -572,6 +596,23 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	Future<CDCProxyBufferStatus> getProxyStatus(CDCProxyInterface proxy) {
 		co_return co_await timeoutError(proxy.getBufferStatusForTesting.getReply(GetCDCProxyBufferStatusRequest()),
 		                                operationTimeout);
+	}
+
+	Future<CDCProxyBufferStatus> getPublishedProxyStatus(Database cx, CDCProxyInterface proxy) {
+		Future<Void> changed = cx->clientInfo->onChange();
+		const auto& proxies = cx->clientInfo->get().cdcProxies;
+		if (std::find(proxies.begin(), proxies.end(), proxy) == proxies.end()) {
+			throw wrong_shard_server();
+		}
+		auto result = co_await race(getProxyStatus(proxy), changed);
+		if (result.index() != 0) {
+			throw wrong_shard_server();
+		}
+		const auto& currentProxies = cx->clientInfo->get().cdcProxies;
+		if (std::find(currentProxies.begin(), currentProxies.end(), proxy) == currentProxies.end()) {
+			throw wrong_shard_server();
+		}
+		co_return std::get<0>(result);
 	}
 
 	Future<std::pair<CDCProxyInterface, CDCProxyBufferStatus>> getAssignedProxyStatus(Database cx,
