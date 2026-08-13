@@ -49,7 +49,7 @@
 #include "flow/flow.h"
 #include "flow/swift.h"
 #include "flow/swift/ABI/Task.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
 #include "flow/TLSConfig.h"
 #include "fdbrpc/Net2FileSystem.h"

@@ -36,7 +36,7 @@
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Histogram.h"
 #include "flow/IAsyncFile.h"
 #include "flow/IRandom.h"

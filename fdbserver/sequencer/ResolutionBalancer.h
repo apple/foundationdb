@@ -28,7 +28,7 @@
 #include "fdbserver/core/ResolverInterface.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 struct ResolutionBalancer {
 	AsyncVar<Standalone<VectorRef<ResolverMoveRef>>> resolverChanges;
