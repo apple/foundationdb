@@ -608,26 +608,30 @@ void CDCProxy::clearBufferedMutations(Reference<CDCBufferedStream> stream) {
 	stream->mutations.clear();
 }
 
+bool hasBufferedVersion(Reference<CDCBufferedStream> const& stream, Version version) {
+	const auto buffered = std::lower_bound(
+	    stream->mutations.begin(), stream->mutations.end(), version, [](const auto& mutation, Version version) {
+		    return mutation.version < version;
+	    });
+	return buffered != stream->mutations.end() && buffered->version == version;
+}
+
 void addMutationToBatch(Reference<CDCBufferedStream> stream,
                         CDCBufferedBatch* batch,
                         Version version,
                         MutationRef const& mutation) {
-	auto batchVersion = std::find_if(batch->mutations.begin(), batch->mutations.end(), [version](const auto& buffered) {
-		return buffered.version == version;
-	});
-	if (batchVersion == batch->mutations.end()) {
+	if (!batch->mutations.empty()) {
+		ASSERT_GE(version, batch->mutations.back().version);
+	}
+	if (batch->mutations.empty() || batch->mutations.back().version != version) {
 		batch->mutations.emplace_back();
-		batchVersion = std::prev(batch->mutations.end());
-		batchVersion->version = version;
-		const bool alreadyBuffered =
-		    std::any_of(stream->mutations.begin(), stream->mutations.end(), [version](const auto& buffered) {
-			    return buffered.version == version;
-		    });
-		if (!alreadyBuffered) {
+		batch->mutations.back().version = version;
+		if (!hasBufferedVersion(stream, version)) {
 			batch->bufferedBytes += sizeof(VersionedMutationsRef);
 		}
 	}
-	batchVersion->mutations.push_back_deep(batchVersion->arena(), mutation);
+	auto& batchVersion = batch->mutations.back();
+	batchVersion.mutations.push_back_deep(batchVersion.arena(), mutation);
 	batch->bufferedBytes += mutation.expectedSize() + sizeof(MutationRef);
 }
 
@@ -937,14 +941,8 @@ Version CDCProxy::committedBufferedPrefixThrough(Reference<CDCBufferedTag> tag,
 		    nullptr,
 		    [&versionBytes](Reference<CDCBufferedStream> stream, Version messageVersion, MutationRef const& mutation) {
 			    auto [found, inserted] = versionBytes.try_emplace(stream->streamId, 0);
-			    if (inserted) {
-				    const bool alreadyBuffered = std::any_of(
-				        stream->mutations.begin(), stream->mutations.end(), [messageVersion](const auto& buffered) {
-					        return buffered.version == messageVersion;
-				        });
-				    if (!alreadyBuffered) {
-					    found->second += sizeof(VersionedMutationsRef);
-				    }
+			    if (inserted && !hasBufferedVersion(stream, messageVersion)) {
+				    found->second += sizeof(VersionedMutationsRef);
 			    }
 			    found->second += mutation.expectedSize() + sizeof(MutationRef);
 		    });
@@ -962,26 +960,21 @@ std::unordered_map<CDCStreamId, int64_t> CDCProxy::estimateBufferedBytes(Referen
                                                                          Version throughVersion) {
 	std::unordered_map<CDCStreamId, Version> lastMutationVersion;
 	std::unordered_map<CDCStreamId, int64_t> estimatedBytes;
-	visitBufferedMutations(
-	    tag,
-	    cursor,
-	    throughVersion,
-	    nullptr,
-	    [&lastMutationVersion,
-	     &estimatedBytes](Reference<CDCBufferedStream> stream, Version version, MutationRef const& mutation) {
-		    auto [lastVersion, inserted] = lastMutationVersion.emplace(stream->streamId, version);
-		    if (inserted || lastVersion->second != version) {
-			    lastVersion->second = version;
-			    const bool alreadyBuffered =
-			        std::any_of(stream->mutations.begin(), stream->mutations.end(), [version](const auto& buffered) {
-				        return buffered.version == version;
-			        });
-			    if (!alreadyBuffered) {
-				    estimatedBytes[stream->streamId] += sizeof(VersionedMutationsRef);
-			    }
-		    }
-		    estimatedBytes[stream->streamId] += mutation.expectedSize() + sizeof(MutationRef);
-	    });
+	visitBufferedMutations(tag,
+	                       cursor,
+	                       throughVersion,
+	                       nullptr,
+	                       [&lastMutationVersion, &estimatedBytes](
+	                           Reference<CDCBufferedStream> stream, Version version, MutationRef const& mutation) {
+		                       auto [lastVersion, inserted] = lastMutationVersion.emplace(stream->streamId, version);
+		                       if (inserted || lastVersion->second != version) {
+			                       lastVersion->second = version;
+			                       if (!hasBufferedVersion(stream, version)) {
+				                       estimatedBytes[stream->streamId] += sizeof(VersionedMutationsRef);
+			                       }
+		                       }
+		                       estimatedBytes[stream->streamId] += mutation.expectedSize() + sizeof(MutationRef);
+	                       });
 	return estimatedBytes;
 }
 
@@ -2029,6 +2022,53 @@ TEST_CASE("/NativeCDC/ProxyBufferPassLimits") {
 	ASSERT(!calculateBufferPassLimits(300, 100, 3).present());
 	ASSERT(!calculateBufferPassLimits(std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max(), 2)
 	            .present());
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ProxyBufferedBatch") {
+	const Version firstVersion = 100;
+	const Version retainedVersion = firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS / 2;
+	auto stream = makeReference<CDCBufferedStream>(1);
+	for (const Version version :
+	     { firstVersion - 1, retainedVersion, firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS }) {
+		stream->mutations.emplace_back();
+		stream->mutations.back().version = version;
+	}
+
+	ASSERT(hasBufferedVersion(stream, firstVersion - 1));
+	ASSERT(hasBufferedVersion(stream, retainedVersion));
+	ASSERT(hasBufferedVersion(stream, firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS));
+	ASSERT(!hasBufferedVersion(stream, firstVersion - 2));
+	ASSERT(!hasBufferedVersion(stream, firstVersion));
+	ASSERT(!hasBufferedVersion(stream, firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS + 1));
+
+	const MutationRef firstMutation(MutationRef::SetValue, "cdc/a"_sr, "first"_sr);
+	const MutationRef secondMutation(MutationRef::SetValue, "cdc/b"_sr, "second"_sr);
+	CDCBufferedBatch batch;
+	for (int offset = 0; offset < CDC_PROXY_BUFFERED_PREFIX_VERSIONS; ++offset) {
+		const Version version = firstVersion + offset;
+		addMutationToBatch(stream, &batch, version, firstMutation);
+		addMutationToBatch(stream, &batch, version, secondMutation);
+	}
+
+	ASSERT_EQ(batch.mutations.size(), CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
+	const int64_t mutationBytes =
+	    static_cast<int64_t>(firstMutation.expectedSize() + secondMutation.expectedSize() + 2 * sizeof(MutationRef));
+	const int64_t versionBytes =
+	    static_cast<int64_t>(CDC_PROXY_BUFFERED_PREFIX_VERSIONS - 1) * sizeof(VersionedMutationsRef);
+	ASSERT_EQ(batch.bufferedBytes, CDC_PROXY_BUFFERED_PREFIX_VERSIONS * mutationBytes + versionBytes);
+	for (int offset = 0; offset < CDC_PROXY_BUFFERED_PREFIX_VERSIONS; ++offset) {
+		const auto& versioned = batch.mutations[offset];
+		ASSERT_EQ(versioned.version, firstVersion + offset);
+		ASSERT_EQ(versioned.mutations.size(), 2);
+		ASSERT_EQ(versioned.mutations[0].param1, firstMutation.param1);
+		ASSERT_EQ(versioned.mutations[0].param2, firstMutation.param2);
+		ASSERT_EQ(versioned.mutations[1].param1, secondMutation.param1);
+		ASSERT_EQ(versioned.mutations[1].param2, secondMutation.param2);
+		ASSERT(versioned.mutations[0].param1.begin() != firstMutation.param1.begin());
+		ASSERT(versioned.mutations[1].param1.begin() != secondMutation.param1.begin());
+	}
+	ASSERT_EQ(stream->mutations.size(), 3);
 	return Void();
 }
 
