@@ -19,6 +19,7 @@
  */
 
 #include <climits>
+#include <cstdlib>
 #include <unordered_set>
 
 #include "fdbclient/SystemData.h"
@@ -31,6 +32,8 @@
 #include "TCInfo.h"
 #include "ExclusionTracker.h"
 #include "flow/IRandom.h"
+#include "flow/ProcessEvents.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
 #include "flow/TxnCounters.h"
@@ -66,8 +69,37 @@ public:
 
 	Action reconcile(const Optional<Key>& zone, const Optional<Version>& durableStart, Version readVersion) {
 		if (!primary_) {
+			bool replacedZone = zone.present() && observedZone_.present() && zone != observedZone_;
+			bool changedStart = zone.present() && observedZone_.present() && zone == observedZone_ &&
+			                    startVersion_ != invalidVersion && durableStart.present() &&
+			                    durableStart.get() != startVersion_;
+			if (replacedZone || changedStart) {
+				Version replacementFloor = std::max(minimumReplacementStart_.orDefault(invalidVersion), startVersion_);
+				if (durableStart.present()) {
+					replacementFloor = std::max(replacementFloor, durableStart.get());
+				}
+				if (replacementFloor != invalidVersion) {
+					minimumReplacementStart_ = replacementFloor;
+				}
+			}
+
 			observedZone_ = zone;
-			startVersion_ = zone.present() && durableStart.present() ? durableStart.get() : invalidVersion;
+			if (!zone.present()) {
+				if (durableStart.present()) {
+					minimumReplacementStart_ =
+					    std::max(std::max(minimumReplacementStart_.orDefault(invalidVersion), startVersion_),
+					             durableStart.get());
+				} else {
+					minimumReplacementStart_ = Optional<Version>{};
+				}
+				startVersion_ = invalidVersion;
+			} else if (durableStart.present() &&
+			           (!minimumReplacementStart_.present() || durableStart.get() > minimumReplacementStart_.get())) {
+				startVersion_ = durableStart.get();
+				minimumReplacementStart_ = Optional<Version>{};
+			} else {
+				startVersion_ = invalidVersion;
+			}
 			return Action::Preserve;
 		}
 
@@ -121,6 +153,9 @@ public:
 		if (startVersion_ != invalidVersion || !localZone.present() || !durableStart.present()) {
 			return startVersion_;
 		}
+		if (minimumReplacementStart_.present()) {
+			return invalidVersion;
+		}
 		return durableStart.get();
 	}
 
@@ -128,6 +163,7 @@ private:
 	const bool primary_;
 	Optional<Key> observedZone_;
 	Optional<Version> originalDurableStart_;
+	Optional<Version> minimumReplacementStart_;
 	Version startVersion_ = invalidVersion;
 	bool pendingRecord_ = false;
 };
@@ -2739,13 +2775,28 @@ public:
 		tr->set(healthyZoneStartVersionKey, bw.toValue());
 	}
 
-	// -1.0 if the start version was never established (should only happen if this DD instance
-	// raced a commit failure with a window's start/end); otherwise the elapsed window duration.
+	// -1.0 if a committed start cannot be attributed to this window after a failed commit or
+	// coalesced window transition; otherwise the elapsed window duration.
 	static double maintenanceDurationSeconds(ReadYourWritesTransaction* tr, Version startVersion) {
 		if (startVersion == invalidVersion) {
 			return -1.0;
 		}
 		return (tr->getReadVersion().get() - startVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+	}
+
+	static void traceMaintenanceEnd(DDTeamCollection* self,
+	                                ReadYourWritesTransaction* tr,
+	                                Version startVersion,
+	                                bool timedOut) {
+		double duration = maintenanceDurationSeconds(tr, startVersion);
+		if (timedOut) {
+			TraceEvent("MaintenanceZoneEndTimeout", self->distributorId).detail("Duration", duration);
+		} else if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
+			TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId)
+			    .detail("Duration", duration);
+		} else {
+			TraceEvent("MaintenanceZoneEndManualClear", self->distributorId).detail("Duration", duration);
+		}
 	}
 
 	static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
@@ -2781,6 +2832,10 @@ public:
 				if (action != MaintenanceStartVersionState::Action::Preserve) {
 					Optional<Value> durableOwner = co_await tr.get(moveKeysLockOwnerKey);
 					if (!ownsMaintenanceLock(self->lock, durableOwner)) {
+						if (action == MaintenanceStartVersionState::Action::Clear &&
+						    self->healthyZone.get().present()) {
+							traceMaintenanceEnd(self, &tr, previousStartVersion, val.present());
+						}
 						throw movekeys_conflict();
 					}
 					if (action == MaintenanceStartVersionState::Action::Record) {
@@ -2815,19 +2870,12 @@ public:
 						}
 					} else if (self->healthyZone.get().present()) {
 						// maintenance hits timeout
-						TraceEvent("MaintenanceZoneEndTimeout", self->distributorId)
-						    .detail("Duration", maintenanceDurationSeconds(&tr, previousStartVersion));
+						traceMaintenanceEnd(self, &tr, previousStartVersion, true);
 						self->healthyZone.set(Optional<Key>());
 					}
 				} else if (self->healthyZone.get().present()) {
 					// `healthyZone` has been cleared
-					double duration = maintenanceDurationSeconds(&tr, previousStartVersion);
-					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
-						TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId)
-						    .detail("Duration", duration);
-					} else {
-						TraceEvent("MaintenanceZoneEndManualClear", self->distributorId).detail("Duration", duration);
-					}
+					traceMaintenanceEnd(self, &tr, previousStartVersion, false);
 					self->healthyZone.set(Optional<Key>());
 				}
 
@@ -6436,6 +6484,10 @@ Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection
 
 class DDTeamCollectionUnitTest {
 public:
+	static void setHealthyZoneForTest(DDTeamCollection* collection, Optional<Key> zone) {
+		collection->healthyZone.set(std::move(zone));
+	}
+
 	static void setTestEndpoint(StorageServerInterface& interface, int id) {
 		// These unit tests do not run storage server actors, but team tracking still logs each
 		// interface's address. Give every fixture interface a synthetic, unregistered endpoint.
@@ -7725,6 +7777,68 @@ TEST_CASE("/DataDistribution/Maintenance/SupersededPrimaryCannotMutateMaintenanc
 	ASSERT(!ownsMaintenanceLock(currentLock, Optional<Value>{}));
 	ASSERT(previousPrimary.reconcile(Optional<Key>{}, Optional<Version>(100), 300) == State::Action::Clear);
 	ASSERT(!ownsMaintenanceLock(previousLock, durableOwner));
+
+	const Optional<Key> disabledZone{ Key(ignoreSSFailuresZoneString) };
+	State supersededDisabledPrimary(disabledZone, true);
+	ASSERT(supersededDisabledPrimary.reconcile(disabledZone, Optional<Version>(100), 150) == State::Action::Preserve);
+	ASSERT_EQ(supersededDisabledPrimary.endingStartVersion(disabledZone, Optional<Version>(100)), 100);
+	ASSERT(supersededDisabledPrimary.reconcile(Optional<Key>{}, Optional<Version>(100), 300) == State::Action::Clear);
+	ASSERT(!ownsMaintenanceLock(previousLock, durableOwner));
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/WindowEndEventsPreserveDuration") {
+	auto collection = DDTeamCollectionUnitTest::testTeamCollection(1, makeReference<PolicyOne>(), 0);
+	ReadYourWritesTransaction tr(collection->dbContext());
+	tr.setVersion(SERVER_KNOBS->VERSIONS_PER_SECOND + 100);
+
+	int observedEvents[3] = {};
+	double observedDurations[3] = {};
+	bool malformedEvent = false;
+	ProcessEvents::Event capture({ "TraceEvent::DataDistributionDisabledForStorageServerFailuresEnd"_sr,
+	                               "TraceEvent::MaintenanceZoneEndManualClear"_sr,
+	                               "TraceEvent::MaintenanceZoneEndTimeout"_sr },
+	                             [&](StringRef name, std::any const& data, Error const&) noexcept {
+		                             auto* trace = std::any_cast<BaseTraceEvent*>(&data);
+		                             if (trace == nullptr || *trace == nullptr) {
+			                             malformedEvent = true;
+			                             return;
+		                             }
+
+		                             int index =
+		                                 name == "TraceEvent::DataDistributionDisabledForStorageServerFailuresEnd"_sr
+		                                     ? 0
+		                                 : name == "TraceEvent::MaintenanceZoneEndManualClear"_sr ? 1
+		                                                                                          : 2;
+		                             ++observedEvents[index];
+		                             bool foundDuration = false;
+		                             for (const auto& field : (*trace)->getFields()) {
+			                             if (field.first == "Duration") {
+				                             char* end = nullptr;
+				                             observedDurations[index] = std::strtod(field.second.c_str(), &end);
+				                             foundDuration = end != field.second.c_str() && *end == '\0';
+				                             break;
+			                             }
+		                             }
+		                             malformedEvent = malformedEvent || !foundDuration;
+	                             });
+
+	const bool previouslyTracingEvents = g_traceProcessEvents;
+	g_traceProcessEvents = true;
+	ScopeExit restoreTraceProcessEvents(
+	    [previouslyTracingEvents]() { g_traceProcessEvents = previouslyTracingEvents; });
+
+	DDTeamCollectionUnitTest::setHealthyZoneForTest(collection.get(), Key(ignoreSSFailuresZoneString));
+	DDTeamCollectionImpl::traceMaintenanceEnd(collection.get(), &tr, 100, false);
+	DDTeamCollectionUnitTest::setHealthyZoneForTest(collection.get(), Key("zone-a"_sr));
+	DDTeamCollectionImpl::traceMaintenanceEnd(collection.get(), &tr, 100, false);
+	DDTeamCollectionImpl::traceMaintenanceEnd(collection.get(), &tr, 100, true);
+
+	ASSERT(!malformedEvent);
+	for (int i = 0; i < 3; ++i) {
+		ASSERT_EQ(observedEvents[i], 1);
+		ASSERT_EQ(observedDurations[i], 1.0);
+	}
 	return Void();
 }
 
@@ -7766,11 +7880,153 @@ TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionAdoptsReplacedStart") {
 	ASSERT(remoteState.reconcile(oldZone, Optional<Version>(100), 200) == State::Action::Preserve);
 	ASSERT_EQ(remoteState.startVersion(), 100);
 	ASSERT(remoteState.reconcile(newZone, Optional<Version>(100), 250) == State::Action::Preserve);
-	ASSERT_EQ(remoteState.startVersion(), 100);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
 	ASSERT(primaryState.reconcile(newZone, Optional<Version>(100), 300) == State::Action::Record);
 	primaryState.committed();
 	ASSERT(remoteState.reconcile(newZone, Optional<Version>(300), 400) == State::Action::Preserve);
 	ASSERT_EQ(remoteState.startVersion(), 300);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionRejectsPreviousWindowStartOnReplacement") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> oldZone(Key("zone-a"_sr));
+	const Optional<Key> newZone(Key("zone-b"_sr));
+	const Optional<Key> thirdZone(Key("zone-c"_sr));
+	State remoteState(oldZone, false);
+
+	ASSERT(remoteState.reconcile(oldZone, Optional<Version>(100), 200) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 100);
+	ASSERT_EQ(remoteState.endingStartVersion(oldZone, Optional<Version>(300)), 100);
+	ASSERT(remoteState.reconcile(newZone, Optional<Version>(100), 250) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(newZone, Optional<Version>(100)), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(newZone, Optional<Version>{}), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(Optional<Key>{}, Optional<Version>(300)), invalidVersion);
+	ASSERT(remoteState.reconcile(newZone, Optional<Version>(100), 260) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT(remoteState.reconcile(newZone, Optional<Version>{}, 270) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT(remoteState.reconcile(newZone, Optional<Version>(100), 280) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(newZone, Optional<Version>(300)), invalidVersion);
+	ASSERT(remoteState.reconcile(thirdZone, Optional<Version>(300), 350) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(thirdZone, Optional<Version>(300)), invalidVersion);
+	ASSERT(remoteState.reconcile(thirdZone, Optional<Version>(300), 360) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(thirdZone, Optional<Version>(400)), invalidVersion);
+	ASSERT(remoteState.reconcile(Optional<Key>{}, Optional<Version>(300), 450) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+
+	ASSERT(remoteState.reconcile(oldZone, Optional<Version>(500), 600) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 500);
+	ASSERT(remoteState.reconcile(newZone, Optional<Version>(700), 800) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(newZone, Optional<Version>(700)), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(newZone, Optional<Version>{}), invalidVersion);
+	ASSERT(remoteState.reconcile(newZone, Optional<Version>(700), 900) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT(remoteState.reconcile(newZone, Optional<Version>(750), 950) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 750);
+	ASSERT_EQ(remoteState.endingStartVersion(newZone, Optional<Version>(650)), 750);
+	ASSERT(remoteState.reconcile(oldZone, Optional<Version>(650), 1000) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(oldZone, Optional<Version>(650)), invalidVersion);
+	ASSERT(remoteState.reconcile(Optional<Key>{}, Optional<Version>(650), 1100) == State::Action::Preserve);
+	ASSERT(remoteState.reconcile(thirdZone, Optional<Version>(650), 1200) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(thirdZone, Optional<Version>(650)), invalidVersion);
+	ASSERT(remoteState.reconcile(thirdZone, Optional<Version>(900), 1250) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 900);
+
+	State unknownStart(oldZone, false);
+	ASSERT(unknownStart.reconcile(oldZone, Optional<Version>{}, 1300) == State::Action::Preserve);
+	ASSERT(unknownStart.reconcile(newZone, Optional<Version>(1400), 1500) == State::Action::Preserve);
+	ASSERT_EQ(unknownStart.startVersion(), invalidVersion);
+	ASSERT(unknownStart.reconcile(newZone, Optional<Version>(1400), 1600) == State::Action::Preserve);
+	ASSERT_EQ(unknownStart.startVersion(), invalidVersion);
+	ASSERT(unknownStart.reconcile(newZone, Optional<Version>(1700), 1800) == State::Action::Preserve);
+	ASSERT_EQ(unknownStart.startVersion(), 1700);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionRejectsStaleStartAfterWindowClears") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> oldZone(Key("zone-a"_sr));
+	const Optional<Key> newZone(Key("zone-b"_sr));
+	const Optional<Key> thirdZone(Key("zone-c"_sr));
+	State restartedWindow(oldZone, false);
+
+	ASSERT(restartedWindow.reconcile(oldZone, Optional<Version>(100), 200) == State::Action::Preserve);
+	ASSERT_EQ(restartedWindow.endingStartVersion(oldZone, Optional<Version>(100)), 100);
+	ASSERT(restartedWindow.reconcile(Optional<Key>{}, Optional<Version>(100), 300) == State::Action::Preserve);
+	ASSERT(restartedWindow.reconcile(Optional<Key>{}, Optional<Version>(100), 400) == State::Action::Preserve);
+	ASSERT(restartedWindow.reconcile(newZone, Optional<Version>(100), 500) == State::Action::Preserve);
+	ASSERT_EQ(restartedWindow.startVersion(), invalidVersion);
+	ASSERT_EQ(restartedWindow.endingStartVersion(newZone, Optional<Version>(100)), invalidVersion);
+	ASSERT_EQ(restartedWindow.endingStartVersion(newZone, Optional<Version>(600)), invalidVersion);
+	ASSERT(restartedWindow.reconcile(newZone, Optional<Version>(600), 700) == State::Action::Preserve);
+	ASSERT_EQ(restartedWindow.startVersion(), 600);
+
+	ASSERT_EQ(restartedWindow.endingStartVersion(newZone, Optional<Version>(800)), 600);
+	ASSERT(restartedWindow.reconcile(Optional<Key>{}, Optional<Version>(800), 900) == State::Action::Preserve);
+	ASSERT(restartedWindow.reconcile(thirdZone, Optional<Version>(800), 1000) == State::Action::Preserve);
+	ASSERT_EQ(restartedWindow.startVersion(), invalidVersion);
+	ASSERT_EQ(restartedWindow.endingStartVersion(thirdZone, Optional<Version>(800)), invalidVersion);
+	ASSERT(restartedWindow.reconcile(Optional<Key>{}, Optional<Version>{}, 1100) == State::Action::Preserve);
+	ASSERT(restartedWindow.reconcile(oldZone, Optional<Version>(800), 1200) == State::Action::Preserve);
+	ASSERT_EQ(restartedWindow.startVersion(), 800);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionRejectsSkippedIntermediateWindowStart") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> oldZone(Key("zone-a"_sr));
+	const Optional<Key> latestZone(Key("zone-c"_sr));
+	State remoteState(oldZone, false);
+
+	ASSERT(remoteState.reconcile(oldZone, Optional<Version>(100), 200) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 100);
+	ASSERT(remoteState.reconcile(latestZone, Optional<Version>(300), 400) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(latestZone, Optional<Version>(300)), invalidVersion);
+	ASSERT(remoteState.reconcile(latestZone, Optional<Version>(300), 450) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(latestZone, Optional<Version>(500)), invalidVersion);
+	ASSERT(remoteState.reconcile(latestZone, Optional<Version>(500), 600) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 500);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionRejectsUnattributedEndAfterReplacement") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> oldZone(Key("zone-a"_sr));
+	const Optional<Key> newZone(Key("zone-b"_sr));
+	State remoteState(oldZone, false);
+
+	ASSERT(remoteState.reconcile(oldZone, Optional<Version>(100), 200) == State::Action::Preserve);
+	ASSERT(remoteState.reconcile(newZone, Optional<Version>(100), 250) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.endingStartVersion(newZone, Optional<Version>(300)), invalidVersion);
+	ASSERT(remoteState.reconcile(newZone, Optional<Version>(300), 350) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.endingStartVersion(newZone, Optional<Version>(300)), 300);
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Maintenance/RemoteCollectionRejectsChangedStartForSameZone") {
+	using State = MaintenanceStartVersionState;
+	const Optional<Key> zone(Key("zone-a"_sr));
+	State remoteState(zone, false);
+
+	ASSERT(remoteState.reconcile(zone, Optional<Version>(100), 200) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 100);
+	ASSERT(remoteState.reconcile(zone, Optional<Version>(300), 400) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT_EQ(remoteState.endingStartVersion(zone, Optional<Version>(300)), invalidVersion);
+	ASSERT(remoteState.reconcile(zone, Optional<Version>(300), 450) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), invalidVersion);
+	ASSERT(remoteState.reconcile(zone, Optional<Version>(500), 600) == State::Action::Preserve);
+	ASSERT_EQ(remoteState.startVersion(), 500);
 	return Void();
 }
 
