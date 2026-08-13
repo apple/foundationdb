@@ -2650,6 +2650,8 @@ public:
 		}
 	}
 
+	// Preserves a maintenance window's original start version across transaction retries.
+	// A competing durable start version takes precedence over an uncommitted local version.
 	class MaintenanceStartVersionState {
 	public:
 		enum class Action { Preserve, Record, Clear };
