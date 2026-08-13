@@ -485,6 +485,10 @@ public:
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 	int extraMachineCountDC = 0;
 	int extraStorageMachineCountPerDC = 0;
+	// Number of storage cache machines to allocate in dc0. If unset, falls
+	// back to the historical default of 1 (in dc0 only). Set to 0 in tests
+	// that don't exercise storage caching to remove a source of variance.
+	Optional<int> storageCacheMachinesInDC0;
 
 	Optional<bool> generateFearless, buggify;
 	Optional<std::string> config;
@@ -576,6 +580,7 @@ public:
 		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
 		    .add("extraStorageMachineCountPerDC", &extraStorageMachineCountPerDC)
+		    .add("storageCacheMachinesInDC0", &storageCacheMachinesInDC0)
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
@@ -2654,7 +2659,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 		// FIXME: we hardcode some machines to specifically test storage cache and blob workers
 		// TODO: caching disabled for this merge
-		int storageCacheMachines = dc == 0 ? 1 : 0;
+		int storageCacheMachines = dc == 0 ? testConfig.storageCacheMachinesInDC0.orDefault(1) : 0;
 		int blobWorkerMachines = 0;
 		int simHTTPMachines = 0;
 		if (testConfig.blobGranulesEnabled) {
