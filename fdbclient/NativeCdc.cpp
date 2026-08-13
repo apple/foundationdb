@@ -441,9 +441,7 @@ Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, 
 			const Key nameKey = cdcStreamNameKeyFor(name);
 			Optional<Value> currentId = co_await tr.get(nameKey);
 			if (!nativeCdcNameMatchesStream(currentId, streamId)) {
-				CODE_PROBE(currentId.present(),
-				           "Native CDC preserves a replacement stream during removal retry",
-				           probe::decoration::rare);
+				CODE_PROBE(currentId.present(), "Native CDC preserves a replacement stream during removal retry");
 				if (currentId.present()) {
 					TraceEvent("NativeCdcRemovalPreservesReplacement")
 					    .detail("RemovedStreamId", streamId)
@@ -454,7 +452,7 @@ Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, 
 
 			Optional<UID> assignedProxy = co_await getNativeCdcProxyAssignment(&tr, streamId);
 			if (!assignedProxy.present() || assignedProxy.get() != proxyId) {
-				CODE_PROBE(true, "Native CDC rejects removal through a stale owner", probe::decoration::rare);
+				CODE_PROBE(true, "Native CDC rejects removal through a stale owner");
 				throw wrong_shard_server();
 			}
 

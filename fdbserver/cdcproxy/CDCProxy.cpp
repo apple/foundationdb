@@ -469,7 +469,7 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 
 			RangeResult assignedProxies = co_await assignedProxiesFuture;
 			if (assignedProxies.size() != 1 || decodeCDCProxyKey(assignedProxies[0].key).second != expectedProxyId) {
-				CODE_PROBE(true, "CDC proxy rejects request for stream owned elsewhere", probe::decoration::rare);
+				CODE_PROBE(true, "CDC proxy rejects request for stream owned elsewhere");
 				throw wrong_shard_server();
 			}
 
