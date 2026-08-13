@@ -795,7 +795,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 
 Future<CDCConsumeReply> NativeCdcConsumer::consume() {
 	if (operationOutstanding) {
-		CODE_PROBE(true, "Native CDC consumer rejects overlapping operations", probe::decoration::rare);
+		CODE_PROBE(true, "Native CDC consumer rejects overlapping operations");
 		return Future<CDCConsumeReply>(client_invalid_operation());
 	}
 	operationOutstanding = true;
@@ -842,7 +842,7 @@ Future<Void> NativeCdcConsumer::acknowledgeImpl(Reference<NativeCdcConsumer> sel
 
 Future<Void> NativeCdcConsumer::acknowledge() {
 	if (operationOutstanding) {
-		CODE_PROBE(true, "Native CDC consumer rejects overlapping operations", probe::decoration::rare);
+		CODE_PROBE(true, "Native CDC consumer rejects overlapping operations");
 		return Future<Void>(client_invalid_operation());
 	}
 	operationOutstanding = true;

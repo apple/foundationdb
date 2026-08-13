@@ -462,6 +462,74 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
+	// Remove a stream after its metadata read to verify that its paused initializer cannot revive removed state.
+	Future<Void> validateStaleStreamInitialization(Database cx) {
+		const Key name = "native-cdc-e2e/stale-initialization"_sr;
+		const KeyRange keys(
+		    KeyRangeRef("native-cdc-e2e/stale-initialization/"_sr, "native-cdc-e2e/stale-initialization0"_sr));
+		const double deadline = now() + operationTimeout;
+		bool recovering = false;
+		bool streamRegistered = false;
+
+		while (true) {
+			ASSERT_LT(now(), deadline);
+			try {
+				if (recovering) {
+					co_await timeoutError(setAllProxyPopsPaused(cx, false), operationTimeout);
+					if (streamRegistered) {
+						co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+						streamRegistered = false;
+					}
+					recovering = false;
+				}
+
+				co_await timeoutError(setAllProxyPopsPaused(cx, true), operationTimeout);
+				streamRegistered = true;
+				const CDCStreamId streamId =
+				    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+				CDCProxyInterface proxy = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
+				const CDCCursor cursor(streamId, invalidVersion);
+				Future<ErrorOr<CDCConsumeReply>> pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
+				while (true) {
+					const CDCProxyBufferStatus status = co_await getPublishedProxyStatus(cx, proxy);
+					if (!status.popsPaused) {
+						throw wrong_shard_server();
+					}
+					if (pendingConsume.isReady()) {
+						const ErrorOr<CDCConsumeReply> result = co_await pendingConsume;
+						ASSERT(!result.present());
+						if (result.getError().code() != error_code_wrong_shard_server) {
+							throw result.getError();
+						}
+						pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
+					} else if (status.activeConsumeRequests > 0) {
+						break;
+					}
+					ASSERT_LT(now(), deadline);
+					co_await delay(0.01);
+				}
+
+				co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+				streamRegistered = false;
+				const ErrorOr<CDCConsumeReply> result = co_await timeoutError(pendingConsume, operationTimeout);
+				ASSERT(!result.present());
+				if (result.getError().code() != error_code_wrong_shard_server) {
+					throw result.getError();
+				}
+				co_await timeoutError(setAllProxyPopsPaused(cx, false), operationTimeout);
+				co_await getPublishedProxyStatus(cx, proxy);
+				co_return;
+			} catch (Error& e) {
+				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_broken_promise &&
+				    e.code() != error_code_connection_failed && e.code() != error_code_request_maybe_delivered) {
+					throw;
+				}
+				recovering = true;
+			}
+			co_await delay(0);
+		}
+	}
+
 	Future<Void> validateProxyReplacement(Database cx) {
 		const Key name = "native-cdc-e2e/proxy-replacement"_sr;
 		const KeyRange keys(
@@ -528,6 +596,26 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	Future<CDCProxyBufferStatus> getProxyStatus(CDCProxyInterface proxy) {
 		co_return co_await timeoutError(proxy.getBufferStatusForTesting.getReply(GetCDCProxyBufferStatusRequest()),
 		                                operationTimeout);
+	}
+
+	Future<CDCProxyBufferStatus> getPublishedProxyStatus(Database cx, CDCProxyInterface proxy) {
+		Future<Void> changed = cx->clientInfo->onChange();
+		const auto& proxies = cx->clientInfo->get().cdcProxies;
+		if (std::find(proxies.begin(), proxies.end(), proxy) == proxies.end()) {
+			throw wrong_shard_server();
+		}
+		Future<CDCProxyBufferStatus> status = getProxyStatus(proxy);
+		while (true) {
+			auto result = co_await race(status, changed);
+			changed = cx->clientInfo->onChange();
+			const auto& currentProxies = cx->clientInfo->get().cdcProxies;
+			if (std::find(currentProxies.begin(), currentProxies.end(), proxy) == currentProxies.end()) {
+				throw wrong_shard_server();
+			}
+			if (result.index() == 0) {
+				co_return std::get<0>(result);
+			}
+		}
 	}
 
 	Future<std::pair<CDCProxyInterface, CDCProxyBufferStatus>> getAssignedProxyStatus(Database cx,
@@ -645,6 +733,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Version idleStartVersion = idleConsumer->position().lastConsumedVersion;
 		Future<CDCConsumeReply> idleConsume;
 		co_await startBlockedConsume(cx, streamId, idleConsumer, *proxy, &idleConsume);
+		Future<CDCConsumeReply> overlappingConsume = idleConsumer->consume();
+		ASSERT(overlappingConsume.isReady() && overlappingConsume.isError());
+		ASSERT_EQ(overlappingConsume.getError().code(), error_code_client_invalid_operation);
+		Future<Void> overlappingAcknowledgement = idleConsumer->acknowledge();
+		ASSERT(overlappingAcknowledgement.isReady() && overlappingAcknowledgement.isError());
+		ASSERT_EQ(overlappingAcknowledgement.getError().code(), error_code_client_invalid_operation);
 
 		// Assignment publications for unrelated streams used to abandon the client reply without canceling the
 		// corresponding server actor. The active request and read demand must remain bounded at one.
@@ -1342,6 +1436,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await validateClearClipping(cx);
 		co_await validateAssignmentPublication(cx);
 		if (testProxyReplacement) {
+			co_await validateStaleStreamInitialization(cx);
 			co_await validateProxyReplacement(cx);
 		}
 		if (testMemoryBound) {
