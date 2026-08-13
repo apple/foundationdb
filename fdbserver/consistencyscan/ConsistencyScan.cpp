@@ -1746,10 +1746,20 @@ Future<Void> checkDataConsistency(Database cx,
 		std::vector<UID> sourceStorageServers;
 		std::vector<UID> destStorageServers;
 		Transaction tr(cx);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		int bytesReadInRange = 0;
 
-		RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+		RangeResult UIDtoTagMap;
+		while (true) {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Error err;
+			try {
+				UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
 		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 		decodeKeyServersValue(UIDtoTagMap, keyLocations[shard].value, sourceStorageServers, destStorageServers, false);
 
