@@ -3058,7 +3058,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							}
 						}
 
-						const UID shardId = newDataMoveId(deterministicRandom()->randomUInt64(),
+						state UID shardId = newDataMoveId(deterministicRandom()->randomUInt64(),
 						                                  AssignEmptyRange::True,
 						                                  DataMoveType::LOGICAL,
 						                                  DataMovementReason::ASSIGN_EMPTY_RANGE);
@@ -3077,20 +3077,22 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							actors.push_back(
 							    krmSetRangeCoalescing(&tr, serverKeysPrefixFor(id), range, allKeys, serverKeysFalse));
 						}
+						wait(waitForAll(actors));
 
 						// Assign the shard to the new team as an empty range.
 						// Note, there could be data loss.
+						std::vector<Future<Void>> emptyRangeActors;
 						for (const UID& id : teamForDroppedRange) {
 							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-								actors.push_back(krmSetRangeCoalescing(
+								emptyRangeActors.push_back(krmSetRangeCoalescing(
 								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysValue(shardId)));
 							} else {
-								actors.push_back(krmSetRangeCoalescing(
+								emptyRangeActors.push_back(krmSetRangeCoalescing(
 								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysTrueEmptyRange));
 							}
 						}
 
-						wait(waitForAll(actors));
+						wait(waitForAll(emptyRangeActors));
 
 						TraceEvent trace(SevWarnAlways, "ShardLossAllReplicasDropShard", serverID);
 						trace.detail("Begin", it.key);
