@@ -35,6 +35,31 @@
 
 #define SevDebugMemory SevVerbose
 
+namespace {
+enum class RangePartitionedBackupWorkerRegistrationState { Pending, Registered, Removed };
+
+RangePartitionedBackupWorkerRegistrationState rangePartitionedBackupWorkerRegistrationState(ServerDBInfo const& info,
+                                                                                            LogEpoch recruitedEpoch,
+                                                                                            LogEpoch backupEpoch,
+                                                                                            UID workerId,
+                                                                                            bool wasRegistered) {
+	if (info.recoveryCount > recruitedEpoch && info.recoveryState != RecoveryState::UNINITIALIZED) {
+		return RangePartitionedBackupWorkerRegistrationState::Removed;
+	}
+	if (backupEpoch == recruitedEpoch) {
+		return RangePartitionedBackupWorkerRegistrationState::Registered;
+	}
+	if (info.recoveryCount != recruitedEpoch) {
+		return RangePartitionedBackupWorkerRegistrationState::Pending;
+	}
+	if (info.logSystemConfig.hasBackupWorker(workerId)) {
+		return RangePartitionedBackupWorkerRegistrationState::Registered;
+	}
+	return wasRegistered ? RangePartitionedBackupWorkerRegistrationState::Removed
+	                     : RangePartitionedBackupWorkerRegistrationState::Pending;
+}
+} // namespace
+
 struct RangePartitionedVersionedMessage {
 	LogMessageVersion version;
 	StringRef message;
@@ -73,6 +98,9 @@ struct RangePartitionedBackupData {
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
+	Reference<AsyncVar<ServerDBInfo> const> serverDBInfo;
+	bool registrationPublished = false;
+	AsyncTrigger registrationChanged;
 	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	// Minimumum known committed version in StorageServers.
 	Version minKnownCommittedVersion;
@@ -126,8 +154,9 @@ struct RangePartitionedBackupData {
 	                                    Reference<AsyncVar<ServerDBInfo> const> db,
 	                                    const InitializeRangePartitionedBackupRequest& req)
 	  : myId(id), tag(req.tag), totalTags(req.totalTags), startVersion(req.startVersion), endVersion(req.endVersion),
-	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), minKnownCommittedVersion(invalidVersion),
-	    savedVersion(req.startVersion - 1), pulledVersion(0), logFolderBaseVersion(invalidVersion), paused(false),
+	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), serverDBInfo(db),
+	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), pulledVersion(0),
+	    logFolderBaseVersion(invalidVersion), paused(false),
 	    lock(new FlowLock(SERVER_KNOBS->BACKUP_WORKER_LOCK_BYTES)) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
@@ -137,6 +166,23 @@ struct RangePartitionedBackupData {
 	Version maxPopVersion() const { return endVersion.present() ? endVersion.get() : minKnownCommittedVersion; }
 
 	bool allMessageSaved() const { return (endVersion.present() && savedVersion >= endVersion.get()) || stopped; }
+
+	bool requiresPublishedRegistration() const { return backupEpoch != recruitedEpoch; }
+
+	void requirePublishedRegistration() const {
+		if (!requiresPublishedRegistration()) {
+			return;
+		}
+		const auto& info = serverDBInfo->get();
+		if (!registrationPublished ||
+		    rangePartitionedBackupWorkerRegistrationState(info, recruitedEpoch, backupEpoch, myId, true) !=
+		        RangePartitionedBackupWorkerRegistrationState::Registered ||
+		    IFailureMonitor::failureMonitor()
+		        .getState(info.clusterInterface.clientInterface.openDatabase.getEndpoint())
+		        .isFailed()) {
+			throw worker_removed();
+		}
+	}
 
 	// Tells uploadData to exit: sets stopped (read by allMessageSaved) and wakes it up via doneTrigger.
 	void stop() {
@@ -234,6 +280,7 @@ struct RangePartitionedBackupData {
 			return;
 		}
 		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
+		requirePublishedRegistration();
 		logSystem.get()->pop(savedVersion, tag);
 	}
 
@@ -329,15 +376,27 @@ Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                           LogEpoch recoveryCount,
                           RangePartitionedBackupData* self) {
 	while (true) {
-		bool isDisplaced =
-		    db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED;
+		const auto& info = db->get();
+		bool isDisplaced = rangePartitionedBackupWorkerRegistrationState(
+		                       info, recoveryCount, self->backupEpoch, self->myId, self->registrationPublished) ==
+		                   RangePartitionedBackupWorkerRegistrationState::Removed;
+		if (!isDisplaced && self->registrationPublished) {
+			isDisplaced = IFailureMonitor::failureMonitor()
+			                  .getState(info.clusterInterface.clientInterface.openDatabase.getEndpoint())
+			                  .isFailed();
+		}
 		if (isDisplaced) {
 			TraceEvent("RangePartitionedBWDisplaced", self->myId)
 			    .detail("RecoveryCount", recoveryCount)
 			    .detail("RecoveryState", (int)db->get().recoveryState);
 			throw worker_removed();
 		}
-		co_await db->onChange();
+		Future<Void> controllerFailed =
+		    self->registrationPublished
+		        ? IFailureMonitor::failureMonitor().onStateEqual(
+		              info.clusterInterface.clientInterface.openDatabase.getEndpoint(), FailureStatus(true))
+		        : Never();
+		co_await (db->onChange() || controllerFailed || self->registrationChanged.onTrigger());
 	}
 }
 
@@ -789,10 +848,12 @@ static Future<Void> updateLogBytesWritten(RangePartitionedBackupData* self, std:
 }
 
 Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastVersionInFile, int numMsg) {
+	self->requirePublishedRegistration();
 	// Make sure all backups are ready, otherwise mutations will be lost.
 	while (!self->isAllBackupsReady()) {
 		co_await self->waitAllBackupsReady();
 	}
+	self->requirePublishedRegistration();
 
 	std::vector<RangePartitionedLogFileInfo> activeFiles;
 	// Map of (backupUid, partitionId) -> index into activeFiles.
@@ -840,6 +901,7 @@ Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastV
 		co_return;
 	}
 	co_await waitForAll(fileFutures);
+	self->requirePublishedRegistration();
 
 	std::vector<Future<Void>> headerWrites;
 	int i;
@@ -908,6 +970,7 @@ Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastV
 
 	// Finish files
 	// TODO akanksha: Add FileLevel checksum.
+	self->requirePublishedRegistration();
 	std::vector<Future<Void>> finished;
 	for (auto& lf : activeFiles) {
 		finished.push_back(lf.file->finish());
@@ -950,6 +1013,11 @@ static Future<bool> shouldBackupWorkerExitEarly(RangePartitionedBackupData* self
 						if (shouldExit && version < self->endVersion.get()) {
 							shouldExit = false;
 						}
+					}
+					if (shouldExit) {
+						tr.addWriteConflictRange(singleKeyRange(backupStartedKey));
+						tr.set(backupStartedKey, value.get());
+						co_await tr.commit();
 					}
 					co_await onBackupChanges(self, uidVersions);
 					co_return shouldExit;
@@ -1121,6 +1189,7 @@ Future<Void> monitorRangePartitionedBackupProgress(RangePartitionedBackupData* s
 }
 
 Future<Void> saveProgress(RangePartitionedBackupData* self, Version backupVersion) {
+	self->requirePublishedRegistration();
 	Transaction tr(self->cx);
 	Key key = backupProgressKeyFor(self->myId);
 
@@ -1141,6 +1210,7 @@ Future<Void> saveProgress(RangePartitionedBackupData* self, Version backupVersio
 			}
 
 			WorkerBackupStatus status(self->backupEpoch, backupVersion, self->tag, self->totalTags);
+			self->requirePublishedRegistration();
 			tr.set(key, backupProgressValue(status));
 			tr.addReadConflictRange(singleKeyRange(key));
 			co_await tr.commit();
@@ -1285,11 +1355,52 @@ static Future<Void> monitorLogSystemFromDbInfo(Reference<AsyncVar<ServerDBInfo> 
 	}
 }
 
+static Future<Void> waitForPublishedRangePartitionedBackupWorker(Reference<AsyncVar<ServerDBInfo> const> db,
+                                                                 LogEpoch recruitedEpoch,
+                                                                 LogEpoch backupEpoch,
+                                                                 UID workerId,
+                                                                 double deadline) {
+	if (backupEpoch == recruitedEpoch) {
+		co_return;
+	}
+	while (true) {
+		auto state =
+		    rangePartitionedBackupWorkerRegistrationState(db->get(), recruitedEpoch, backupEpoch, workerId, false);
+		if (state == RangePartitionedBackupWorkerRegistrationState::Registered) {
+			co_return;
+		}
+		if (state == RangePartitionedBackupWorkerRegistrationState::Removed || now() >= deadline) {
+			TraceEvent("RangePartitionedBWRegistrationNotPublished", workerId)
+			    .detail("RecoveryCount", recruitedEpoch)
+			    .detail("BackupEpoch", backupEpoch);
+			throw worker_removed();
+		}
+		co_await (db->onChange() || delay(deadline - now()));
+	}
+}
+
+Future<Void> waitForPublishedBackupWorker(RangePartitionedBackupData* self) {
+	if (!self->requiresPublishedRegistration()) {
+		co_return;
+	}
+	co_await waitForPublishedRangePartitionedBackupWorker(self->serverDBInfo,
+	                                                      self->recruitedEpoch,
+	                                                      self->backupEpoch,
+	                                                      self->myId,
+	                                                      now() + SERVER_KNOBS->LOG_ROUTER_REPLACEMENT_GRACE_PERIOD);
+	self->registrationPublished = true;
+	self->registrationChanged.trigger();
+	self->requirePublishedRegistration();
+}
+
 Future<Void> rangePartitionedBackupWorker(BackupInterface interf,
                                           InitializeRangePartitionedBackupRequest req,
                                           Reference<AsyncVar<ServerDBInfo> const> db) {
 	RangePartitionedBackupData self(interf.id(), db, req);
 	PromiseStream<Future<Void>> addActor;
+	// Keep the role's failure endpoint alive until shutdown has finished draining mutation-file uploads.
+	// In particular, actorCollection cancels its children as soon as checkRemoved reports displacement.
+	Future<Void> failureServer;
 	Future<Void> error = actorCollection(addActor.getFuture());
 	Future<Void> pull;
 	Future<Void> done;
@@ -1304,8 +1415,9 @@ Future<Void> rangePartitionedBackupWorker(BackupInterface interf,
 	    .detail("BackupEpoch", req.backupEpoch);
 
 	try {
+		failureServer = waitFailureServer(interf.waitFailure.getFuture());
 		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
-		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
+		co_await waitForPublishedBackupWorker(&self);
 
 		if (req.recruitedEpoch == req.backupEpoch && req.tag.id == 0) {
 			addActor.send(monitorRangePartitionedBackupProgress(&self));
@@ -1331,7 +1443,7 @@ Future<Void> rangePartitionedBackupWorker(BackupInterface interf,
 		done = exitEarly ? Void() : uploadData(&self);
 
 		while (true) {
-			auto res = co_await race(done, error);
+			auto res = co_await race(done, error, failureServer);
 			if (res.index() == 0) {
 				TraceEvent("RangePartitionedBWDone", self.myId).detail("BackupEpoch", self.backupEpoch);
 				// Notify master so that this worker can be removed from log system, then this
@@ -1339,6 +1451,8 @@ Future<Void> rangePartitionedBackupWorker(BackupInterface interf,
 				co_await brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
 				    BackupWorkerDoneRequest(self.myId, self.backupEpoch)));
 				break;
+			} else if (res.index() == 2) {
+				throw internal_error();
 			}
 		}
 		co_return;
@@ -1350,7 +1464,9 @@ Future<Void> rangePartitionedBackupWorker(BackupInterface interf,
 		pull = Void(); // cancels pulling
 		self.stop(); // lets uploadData finish its current upload and exit
 		try {
-			co_await done;
+			if (done.isValid()) {
+				co_await done;
+			}
 		} catch (Error& shutdownErr) {
 			TraceEvent("RangePartitionedBWShutdownError", self.myId).errorUnsuppressed(shutdownErr);
 		}
@@ -1438,6 +1554,94 @@ TEST_CASE("/RangePartitionedBackupWorker/PartitionMapMessage/IsNextInLeadingByte
 	Arena arena;
 	ArenaReader otherReader(arena, otherBytes, AssumeVersion(g_network->protocolVersion()));
 	ASSERT(!PartitionMapMessage::isNextIn(otherReader));
+	return Void();
+}
+
+TEST_CASE("/RangePartitionedBackupWorker/Registration/OldGenerationFencedUntilPublished") {
+	constexpr LogEpoch currentEpoch = 52;
+	constexpr LogEpoch oldEpoch = 51;
+	UID originalId(51, 1);
+	UID replacementId(51, 2);
+	BackupInterface original(LocalityData{});
+	original.waitFailure =
+	    RequestStream<ReplyPromise<Void>>(Endpoint({ NetworkAddress(IPAddress(0x03030303), 1) }, originalId));
+	BackupInterface replacement(LocalityData{});
+	replacement.waitFailure =
+	    RequestStream<ReplyPromise<Void>>(Endpoint({ NetworkAddress(IPAddress(0x04040404), 1) }, replacementId));
+
+	ServerDBInfo info;
+	info.id = UID(52, 1);
+	info.recoveryCount = currentEpoch;
+	info.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	info.logSystemConfig = LogSystemConfig(currentEpoch);
+	OldTLogConf old;
+	old.epoch = oldEpoch;
+	old.rangePartitionedBackupWorkerTags = 1;
+	TLogSet logSet;
+	logSet.backupWorkers.emplace_back(original);
+	old.tLogs.push_back(logSet);
+	info.logSystemConfig.oldTLogs.push_back(old);
+
+	auto db = makeReference<AsyncVar<ServerDBInfo>>(info);
+	ASSERT(rangePartitionedBackupWorkerRegistrationState(db->get(), currentEpoch, oldEpoch, replacementId, false) ==
+	       RangePartitionedBackupWorkerRegistrationState::Pending);
+	ASSERT(rangePartitionedBackupWorkerRegistrationState(db->get(), currentEpoch, currentEpoch, replacementId, false) ==
+	       RangePartitionedBackupWorkerRegistrationState::Registered);
+	Future<Void> pending =
+	    waitForPublishedRangePartitionedBackupWorker(db, currentEpoch, oldEpoch, replacementId, now() + 60.0);
+	ASSERT(!pending.isReady());
+
+	ServerDBInfo updated = db->get();
+	updated.id = UID(52, 2);
+	updated.logSystemConfig.oldTLogs[0].tLogs[0].backupWorkers[0] = OptionalInterface<BackupInterface>(replacement);
+	db->set(updated);
+	ASSERT(pending.isReady());
+	ASSERT(!pending.isError());
+	ASSERT(rangePartitionedBackupWorkerRegistrationState(db->get(), currentEpoch, oldEpoch, originalId, true) ==
+	       RangePartitionedBackupWorkerRegistrationState::Removed);
+	ASSERT(rangePartitionedBackupWorkerRegistrationState(db->get(), currentEpoch, oldEpoch, replacementId, true) ==
+	       RangePartitionedBackupWorkerRegistrationState::Registered);
+
+	Future<Void> orphan = waitForPublishedRangePartitionedBackupWorker(db, currentEpoch, oldEpoch, UID(51, 3), now());
+	ASSERT(orphan.isError());
+	ASSERT_EQ(orphan.getError().code(), error_code_worker_removed);
+
+	updated = db->get();
+	updated.recoveryCount = currentEpoch + 1;
+	updated.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	ASSERT(rangePartitionedBackupWorkerRegistrationState(updated, currentEpoch, oldEpoch, replacementId, true) ==
+	       RangePartitionedBackupWorkerRegistrationState::Removed);
+	return Void();
+}
+
+TEST_CASE("/RangePartitionedBackupWorker/Registration/FailureEndpointOutlivesUploadShutdown") {
+	PromiseStream<Future<Void>> roleActors;
+	Future<Void> roleError = actorCollection(roleActors.getFuture());
+	PromiseStream<ReplyPromise<Void>> failureRequests;
+	Future<Void> failureServer = waitFailureServer(failureRequests.getFuture());
+
+	ReplyPromise<Void> failureRequest;
+	Future<Void> observedFailure = failureRequest.getFuture();
+	failureRequests.send(std::move(failureRequest));
+
+	Promise<Void> displaced;
+	roleActors.send(displaced.getFuture());
+	displaced.sendError(worker_removed());
+	ASSERT(roleError.isError());
+	ASSERT_EQ(roleError.getError().code(), error_code_worker_removed);
+	ASSERT(!observedFailure.isReady());
+
+	Promise<Void> uploadsDrained;
+	Future<Void> shutdown = uploadsDrained.getFuture();
+	ASSERT(!shutdown.isReady());
+	ASSERT(!observedFailure.isReady());
+	uploadsDrained.send(Void());
+	ASSERT(shutdown.isReady());
+	ASSERT(!observedFailure.isReady());
+
+	failureServer = Void();
+	ASSERT(observedFailure.isError());
+	ASSERT_EQ(observedFailure.getError().code(), error_code_broken_promise);
 	return Void();
 }
 

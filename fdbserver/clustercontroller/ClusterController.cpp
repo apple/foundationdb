@@ -702,6 +702,36 @@ struct OldBackupWorkerProgress {
 	std::map<UID, WorkerBackupStatus> workers;
 };
 
+bool oldBackupWorkerHandoffProgressMatches(OldBackupWorkerProgress const& expected,
+                                           OldBackupWorkerProgress const& observed,
+                                           UID workerId) {
+	if (expected.started != observed.started) {
+		return false;
+	}
+	auto previous = expected.workers.find(workerId);
+	auto current = observed.workers.find(workerId);
+	if (previous == expected.workers.end() || current == observed.workers.end()) {
+		return previous == expected.workers.end() && current == observed.workers.end();
+	}
+	return previous->second.epoch == current->second.epoch && previous->second.version == current->second.version &&
+	       previous->second.tag == current->second.tag && previous->second.totalTags == current->second.totalTags;
+}
+
+Optional<Version> getOldestBackupStartVersion(Optional<Value> const& started) {
+	Optional<Version> oldest;
+	if (started.present()) {
+		for (const auto& [backupId, version] : decodeBackupStartedValue(started.get())) {
+			(void)backupId;
+			oldest = oldest.present() ? std::min(oldest.get(), version) : version;
+		}
+	}
+	return oldest;
+}
+
+bool oldBackupRetirementSnapshotMatches(Optional<Value> const& expected, Optional<Value> const& observed) {
+	return expected == observed;
+}
+
 Future<OldBackupWorkerProgress> getOldBackupWorkerProgress(ClusterControllerData* self) {
 	Transaction tr(self->cx);
 	while (true) {
@@ -720,6 +750,35 @@ Future<OldBackupWorkerProgress> getOldBackupWorkerProgress(ClusterControllerData
 				progress.workers.emplace(decodeBackupProgressKey(entry.key), decodeBackupProgressValue(entry.value));
 			}
 			co_return progress;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+Future<bool> fenceOldBackupWorkerRetirement(ClusterControllerData* self, Optional<Value> expectedStarted) {
+	Transaction tr(self->cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> started = co_await tr.get(backupStartedKey);
+			if (!oldBackupRetirementSnapshotMatches(expectedStarted, started)) {
+				co_return false;
+			}
+
+			// A real write conflict forces unpublished starts to retry with a read version after this retention fence.
+			tr.addWriteConflictRange(singleKeyRange(backupStartedKey));
+			if (started.present()) {
+				tr.set(backupStartedKey, started.get());
+			} else {
+				tr.clear(backupStartedKey);
+			}
+			co_await tr.commit();
+			co_return true;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -787,6 +846,180 @@ bool removeFinishedOldBackupWorker(ClusterControllerData* self,
 	return true;
 }
 
+Future<Void> removeFinishedOldBackupWorkerAfterFence(ClusterControllerData* self,
+                                                     Reference<LogSystem> logSystem,
+                                                     LogEpoch recoveryCount,
+                                                     OldBackupWorkerInfo worker,
+                                                     Optional<Value> expectedStarted) {
+	if (!co_await fenceOldBackupWorkerRetirement(self, expectedStarted)) {
+		TraceEvent("OldBackupWorkerRetirementSnapshotChanged", self->id)
+		    .detail("Epoch", worker.backupEpoch)
+		    .detail("WorkerID", worker.interf.id());
+		throw recruitment_failed();
+	}
+	if (!isCurrentOldBackupRecovery(self, logSystem, recoveryCount)) {
+		co_return;
+	}
+
+	std::vector<OldBackupWorkerInfo> workers = collectOldBackupWorkers(logSystem->getLogSystemConfig());
+	auto current = std::find_if(workers.begin(), workers.end(), [&worker](const auto& candidate) {
+		return candidate.backupEpoch == worker.backupEpoch && candidate.interf.id() == worker.interf.id();
+	});
+	if (current != workers.end()) {
+		removeFinishedOldBackupWorker(self, logSystem, *current);
+	}
+}
+
+bool stageOldBackupWorkerReplacement(LogSystemConfig& config,
+                                     LogEpoch backupEpoch,
+                                     UID failedWorkerId,
+                                     BackupInterface const& replacement) {
+	for (auto& old : config.oldTLogs) {
+		if (old.epoch != backupEpoch) {
+			continue;
+		}
+		for (auto& logSet : old.tLogs) {
+			for (auto& worker : logSet.backupWorkers) {
+				if (worker.present() && worker.interf().id() == failedWorkerId) {
+					worker = OptionalInterface<BackupInterface>(replacement);
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+void forceRecoveryForUncertainOldBackupWorkerHandoff(ClusterControllerData* self,
+                                                     Reference<LogSystem> const& logSystem,
+                                                     LogEpoch recoveryCount,
+                                                     OldBackupWorkerInfo const& failedWorker,
+                                                     BackupInterface const& replacement,
+                                                     const char* reason) {
+	if (!isCurrentOldBackupRecovery(self, logSystem, recoveryCount)) {
+		return;
+	}
+	TraceEvent(SevWarnAlways, "OldBackupWorkerHandoffRequiresRecovery", self->id)
+	    .detail("Epoch", failedWorker.backupEpoch)
+	    .detail("FailedWorkerID", failedWorker.interf.id())
+	    .detail("ReplacementWorkerID", replacement.id())
+	    .detail("Reason", reason);
+	self->db.forceMasterFailure.trigger();
+}
+
+bool oldBackupWorkerEndpointStopped(bool permanentlyFailed, bool unauthorized) {
+	return permanentlyFailed && !unauthorized;
+}
+
+bool oldBackupWorkerEndpointStopped(Endpoint const& endpoint) {
+	auto& monitor = IFailureMonitor::failureMonitor();
+	return oldBackupWorkerEndpointStopped(monitor.permanentlyFailed(endpoint), monitor.knownUnauthorized(endpoint));
+}
+
+Future<bool> handoffOldBackupWorker(ClusterControllerData* self,
+                                    Reference<LogSystem> logSystem,
+                                    LogEpoch recoveryCount,
+                                    OldBackupWorkerInfo failedWorker,
+                                    BackupInterface replacement,
+                                    double deadline) {
+	if (now() >= deadline) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacement, "ReplacementRegistrationExpired");
+		co_return false;
+	}
+	const Endpoint failedEndpoint = failedWorker.interf.waitFailure.getEndpoint();
+	if (IFailureMonitor::failureMonitor().knownUnauthorized(failedEndpoint)) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacement, "OriginalWorkerEndpointUnauthorized");
+		co_return false;
+	}
+	if (oldBackupWorkerEndpointStopped(failedEndpoint)) {
+		co_return true;
+	}
+
+	auto process = self->id_worker.find(failedWorker.interf.locality.processId());
+	if (process == self->id_worker.end() || process->second.details.interf.address() != failedWorker.interf.address()) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacement, "OriginalProcessUnavailable");
+		co_return false;
+	}
+	WorkerInterface originalProcess = process->second.details.interf;
+
+	const auto originalInfoGeneration = self->db.serverInfo->get().infoGeneration;
+	ServerDBInfo handoffInfo = self->db.serverInfo->get();
+	handoffInfo.logSystemConfig = logSystem->getLogSystemConfig();
+	if (!stageOldBackupWorkerReplacement(
+	        handoffInfo.logSystemConfig, failedWorker.backupEpoch, failedWorker.interf.id(), replacement)) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacement, "OriginalWorkerNotRegistered");
+		co_return false;
+	}
+	handoffInfo.id = deterministicRandom()->randomUniqueID();
+	handoffInfo.infoGeneration = ++self->db.dbInfoCount;
+
+	UpdateServerDBInfoRequest request;
+	request.serializedDbInfo = BinaryWriter::toValue(handoffInfo, AssumeVersion(g_network->protocolVersion()));
+	Optional<ErrorOr<std::vector<Endpoint>>> acknowledgement =
+	    co_await timeout(originalProcess.updateServerDBInfo.getReplyUnlessFailedFor(
+	                         request, SERVER_KNOBS->DBINFO_FAILED_DELAY, /* sustainedFailureSlope */ 0),
+	                     std::min(SERVER_KNOBS->DBINFO_FAILED_DELAY, deadline - now()));
+	if (!acknowledgement.present() || !acknowledgement.get().present() || !acknowledgement.get().get().empty()) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacement, "OriginalProcessDidNotAcknowledge");
+		co_return false;
+	}
+	if (!isCurrentOldBackupRecovery(self, logSystem, recoveryCount) ||
+	    self->db.serverInfo->get().infoGeneration != originalInfoGeneration) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacement, "RegistrationChangedDuringHandoff");
+		co_return false;
+	}
+
+	// The worker keeps this endpoint alive until all in-flight uploads have finished and its role has exited.
+	while (!oldBackupWorkerEndpointStopped(failedEndpoint)) {
+		if (IFailureMonitor::failureMonitor().knownUnauthorized(failedEndpoint)) {
+			forceRecoveryForUncertainOldBackupWorkerHandoff(
+			    self, logSystem, recoveryCount, failedWorker, replacement, "OriginalWorkerEndpointUnauthorized");
+			co_return false;
+		}
+		const double remaining = deadline - now();
+		if (remaining <= 0) {
+			forceRecoveryForUncertainOldBackupWorkerHandoff(
+			    self, logSystem, recoveryCount, failedWorker, replacement, "OriginalWorkerDidNotTerminate");
+			co_return false;
+		}
+		Optional<ErrorOr<Void>> stopped = co_await timeout(
+		    failedWorker.interf.waitFailure.getReplyUnlessFailedFor(
+		        ReplyPromise<Void>(), SERVER_KNOBS->DBINFO_FAILED_DELAY, /* sustainedFailureSlope */ 0),
+		    remaining);
+		if (!stopped.present() || (!stopped.get().present() && !oldBackupWorkerEndpointStopped(failedEndpoint))) {
+			forceRecoveryForUncertainOldBackupWorkerHandoff(
+			    self,
+			    logSystem,
+			    recoveryCount,
+			    failedWorker,
+			    replacement,
+			    IFailureMonitor::failureMonitor().knownUnauthorized(failedEndpoint)
+			        ? "OriginalWorkerEndpointUnauthorized"
+			        : "OriginalWorkerTerminationUnconfirmed");
+			co_return false;
+		}
+		if (!isCurrentOldBackupRecovery(self, logSystem, recoveryCount) ||
+		    self->db.serverInfo->get().infoGeneration != originalInfoGeneration) {
+			forceRecoveryForUncertainOldBackupWorkerHandoff(
+			    self, logSystem, recoveryCount, failedWorker, replacement, "RegistrationChangedBeforeTermination");
+			co_return false;
+		}
+	}
+
+	TraceEvent("OldBackupWorkerHandoffAcknowledged", self->id)
+	    .detail("Epoch", failedWorker.backupEpoch)
+	    .detail("FailedWorkerID", failedWorker.interf.id())
+	    .detail("ReplacementWorkerID", replacement.id())
+	    .detail("HandoffInfoGeneration", handoffInfo.infoGeneration);
+	co_return true;
+}
+
 Future<Void> rerecruitFailedOldBackupWorker(ClusterControllerData* self,
                                             Reference<LogSystem> logSystem,
                                             LogEpoch recoveryCount,
@@ -824,15 +1057,10 @@ Future<Void> rerecruitFailedOldBackupWorker(ClusterControllerData* self,
 		throw recruitment_failed();
 	}
 
-	Optional<Version> minBackupVersion;
-	if (persisted.started.present()) {
-		for (const auto& [backupId, version] : decodeBackupStartedValue(persisted.started.get())) {
-			(void)backupId;
-			minBackupVersion = minBackupVersion.present() ? std::min(minBackupVersion.get(), version) : version;
-		}
-	}
+	Optional<Version> minBackupVersion = getOldestBackupStartVersion(persisted.started);
 	if (!minBackupVersion.present() || minBackupVersion.get() + 1 >= failedWorker.epochEnd) {
-		removeFinishedOldBackupWorker(self, logSystem, failedWorker);
+		co_await removeFinishedOldBackupWorkerAfterFence(
+		    self, logSystem, recoveryCount, failedWorker, persisted.started);
 		co_return;
 	}
 
@@ -861,14 +1089,16 @@ Future<Void> rerecruitFailedOldBackupWorker(ClusterControllerData* self,
 		return std::get<0>(entry.first) == failedWorker.backupEpoch;
 	});
 	if (unfinishedEpoch == unfinished.end()) {
-		removeFinishedOldBackupWorker(self, logSystem, failedWorker);
+		co_await removeFinishedOldBackupWorkerAfterFence(
+		    self, logSystem, recoveryCount, failedWorker, persisted.started);
 		co_return;
 	}
 
 	Optional<Tag> tag = resolveOldBackupWorkerTag(failedWorker, oldWorkers, persisted.workers, unfinishedEpoch->second);
 	if (!tag.present()) {
 		if (status != persisted.workers.end() && !unfinishedEpoch->second.contains(status->second.tag)) {
-			removeFinishedOldBackupWorker(self, logSystem, failedWorker);
+			co_await removeFinishedOldBackupWorkerAfterFence(
+			    self, logSystem, recoveryCount, failedWorker, persisted.started);
 			co_return;
 		}
 		TraceEvent(SevWarn, "OldBackupWorkerTagUnknown", self->id)
@@ -900,6 +1130,9 @@ Future<Void> rerecruitFailedOldBackupWorker(ClusterControllerData* self,
 	}
 
 	const Version endVersion = std::get<1>(unfinishedEpoch->first) - 1;
+	// Start this bound before recruitment so the replacement cannot time out while waiting for its registration.
+	const double handoffDeadline =
+	    now() + std::max(0.0, SERVER_KNOBS->LOG_ROUTER_REPLACEMENT_GRACE_PERIOD - SERVER_KNOBS->DBINFO_FAILED_DELAY);
 	BackupInterface replacementInterface;
 	if (failedWorker.rangePartitioned) {
 		InitializeRangePartitionedBackupRequest request(deterministicRandom()->randomUniqueID());
@@ -929,6 +1162,84 @@ Future<Void> rerecruitFailedOldBackupWorker(ClusterControllerData* self,
 	if (!isCurrentOldBackupRecovery(self, logSystem, recoveryCount)) {
 		co_return;
 	}
+	if (!co_await handoffOldBackupWorker(
+	        self, logSystem, recoveryCount, failedWorker, replacementInterface, handoffDeadline)) {
+		co_return;
+	}
+	if (!isCurrentOldBackupRecovery(self, logSystem, recoveryCount)) {
+		co_return;
+	}
+	const auto originalInfoGeneration = self->db.serverInfo->get().infoGeneration;
+	const double remaining = handoffDeadline - now();
+	if (remaining <= 0) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacementInterface, "FinalProgressReadExpired");
+		co_return;
+	}
+	Optional<OldBackupWorkerProgress> finalProgress;
+	try {
+		finalProgress = co_await timeout(getOldBackupWorkerProgress(self), remaining);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacementInterface, "FinalProgressReadFailed");
+		co_return;
+	}
+	if (!finalProgress.present() ||
+	    !oldBackupWorkerHandoffProgressMatches(persisted, finalProgress.get(), failedWorker.interf.id())) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacementInterface, "OriginalWorkerProgressChanged");
+		co_return;
+	}
+	if (!isCurrentOldBackupRecovery(self, logSystem, recoveryCount) ||
+	    self->db.serverInfo->get().infoGeneration != originalInfoGeneration || now() >= handoffDeadline ||
+	    !oldBackupWorkerEndpointStopped(failedWorker.interf.waitFailure.getEndpoint())) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(self,
+		                                                logSystem,
+		                                                recoveryCount,
+		                                                failedWorker,
+		                                                replacementInterface,
+		                                                "RegistrationChangedDuringFinalProgress");
+		co_return;
+	}
+	std::vector<OldBackupWorkerInfo> finalWorkers = collectOldBackupWorkers(logSystem->getLogSystemConfig());
+	auto originalWorker = std::find_if(finalWorkers.begin(), finalWorkers.end(), [&failedWorker](const auto& worker) {
+		return worker.backupEpoch == failedWorker.backupEpoch && worker.interf.id() == failedWorker.interf.id();
+	});
+	if (originalWorker == finalWorkers.end()) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacementInterface, "OriginalWorkerRegistrationChanged");
+		co_return;
+	}
+	if (!validateOldBackupWorkerProgress(failedWorker, finalWorkers, finalProgress.get().workers)) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacementInterface, "FinalWorkerProgressInvalid");
+		co_return;
+	}
+	std::map<LogEpoch, int32_t> finalProgressTagCounts;
+	Reference<BackupProgress> finalBackupProgress(new BackupProgress(self->id, epochInfos));
+	finalBackupProgress->setBackupStartedValue(finalProgress.get().started);
+	for (const auto& [workerId, workerStatus] : finalProgress.get().workers) {
+		(void)workerId;
+		auto [epochTagCount, inserted] = finalProgressTagCounts.emplace(workerStatus.epoch, workerStatus.totalTags);
+		if (!inserted && epochTagCount->second != workerStatus.totalTags) {
+			forceRecoveryForUncertainOldBackupWorkerHandoff(
+			    self, logSystem, recoveryCount, failedWorker, replacementInterface, "FinalProgressTagCountChanged");
+			co_return;
+		}
+		finalBackupProgress->addBackupStatus(workerStatus);
+	}
+	auto finalUnfinished = failedWorker.rangePartitioned ? finalBackupProgress->getUnfinishedRangePartitionedBackup()
+	                                                     : finalBackupProgress->getUnfinishedPartitionedBackup();
+	auto finalEpoch = finalUnfinished.find(unfinishedEpoch->first);
+	if (finalEpoch == finalUnfinished.end() || !finalEpoch->second.contains(tag.get()) ||
+	    finalEpoch->second.at(tag.get()) != start->second) {
+		forceRecoveryForUncertainOldBackupWorkerHandoff(
+		    self, logSystem, recoveryCount, failedWorker, replacementInterface, "ReplacementStartVersionChanged");
+		co_return;
+	}
 	const bool replaced =
 	    logSystem->replaceBackupWorker(failedWorker.backupEpoch, failedWorker.interf.id(), replacementInterface);
 	if (replaced) {
@@ -942,6 +1253,10 @@ Future<Void> rerecruitFailedOldBackupWorker(ClusterControllerData* self,
 		    .detail("EndVersion", endVersion)
 		    .detail("RangePartitioned", failedWorker.rangePartitioned);
 	} else {
+		TraceEvent("OldBackupWorkerReplacementNotInstalled", self->id)
+		    .detail("Epoch", failedWorker.backupEpoch)
+		    .detail("FailedWorkerID", failedWorker.interf.id())
+		    .detail("ReplacementWorkerID", replacementInterface.id());
 		self->db.recoveryData->registrationTrigger.trigger();
 	}
 }
@@ -4062,6 +4377,109 @@ TEST_CASE("/fdbserver/clustercontroller/oldBackupWorker/preservesFailureDeadline
 	    shouldRestartOldBackupWorkerMonitor(RecoveryState::WRITING_CSTATE, monitoredRecovery, monitoredRecovery, true));
 	ASSERT(shouldRestartOldBackupWorkerMonitor(
 	    RecoveryState::ACCEPTING_COMMITS, monitoredRecovery, monitoredRecovery, false));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/oldBackupWorker/retirementFenceDetectsConcurrentBackupPublication") {
+	constexpr Version oldEpochEnd = 500;
+	const Optional<Value> absent;
+	const Optional<Value> newer(
+	    encodeBackupStartedValue(std::vector<std::pair<UID, Version>>{ { UID(31, 1), oldEpochEnd } }));
+	const Optional<Value> older(
+	    encodeBackupStartedValue(std::vector<std::pair<UID, Version>>{ { UID(31, 2), oldEpochEnd - 2 } }));
+	const Optional<Value> newerAndOlder(encodeBackupStartedValue(
+	    std::vector<std::pair<UID, Version>>{ { UID(31, 1), oldEpochEnd }, { UID(31, 2), oldEpochEnd - 2 } }));
+
+	ASSERT(oldBackupRetirementSnapshotMatches(absent, Optional<Value>()));
+	ASSERT(oldBackupRetirementSnapshotMatches(newer, Optional<Value>(newer.get())));
+	ASSERT(!oldBackupRetirementSnapshotMatches(absent, older));
+	ASSERT(!oldBackupRetirementSnapshotMatches(newer, newerAndOlder));
+
+	ASSERT(!getOldestBackupStartVersion(absent).present());
+	ASSERT(getOldestBackupStartVersion(newer).get() + 1 >= oldEpochEnd);
+	ASSERT(getOldestBackupStartVersion(older).get() + 1 < oldEpochEnd);
+	ASSERT_EQ(getOldestBackupStartVersion(newerAndOlder).get(), oldEpochEnd - 2);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/oldBackupWorker/handoffStagesOnlyOriginalWorker") {
+	constexpr LogEpoch currentEpoch = 32;
+	constexpr LogEpoch oldEpoch = 31;
+	BackupInterface currentWorker =
+	    makeOldBackupWorker(NetworkAddress(IPAddress(0x01010101), 1), UID(32, 1), "current-process");
+	BackupInterface failedWorker =
+	    makeOldBackupWorker(NetworkAddress(IPAddress(0x02020202), 1), UID(31, 1), "failed-process");
+	BackupInterface siblingWorker =
+	    makeOldBackupWorker(NetworkAddress(IPAddress(0x03030303), 1), UID(31, 2), "sibling-process");
+	BackupInterface replacement =
+	    makeOldBackupWorker(NetworkAddress(IPAddress(0x04040404), 1), UID(31, 3), "replacement-process");
+	LogSystemConfig original = makeOldBackupWorkerConfiguration(
+	    currentEpoch, oldEpoch, 500, 2, 0, currentWorker, { failedWorker, siblingWorker });
+	LogSystemConfig staged = original;
+
+	ASSERT(stageOldBackupWorkerReplacement(staged, oldEpoch, failedWorker.id(), replacement));
+	ASSERT(original.hasBackupWorker(failedWorker.id()));
+	ASSERT(!original.hasBackupWorker(replacement.id()));
+	ASSERT(!staged.hasBackupWorker(failedWorker.id()));
+	ASSERT(staged.hasBackupWorker(replacement.id()));
+	ASSERT(staged.hasBackupWorker(currentWorker.id()));
+	ASSERT(staged.hasBackupWorker(siblingWorker.id()));
+	ASSERT_EQ(staged.oldestBackupEpoch, original.oldestBackupEpoch);
+	ASSERT(!stageOldBackupWorkerReplacement(staged, currentEpoch, currentWorker.id(), failedWorker));
+	ASSERT(!stageOldBackupWorkerReplacement(staged, oldEpoch, UID(31, 4), failedWorker));
+
+	ServerDBInfo currentInfo;
+	currentInfo.infoGeneration = 7;
+	auto nextGeneration = currentInfo.infoGeneration;
+	ServerDBInfo handoffInfo = currentInfo;
+	handoffInfo.infoGeneration = ++nextGeneration;
+	ServerDBInfo globalInfo = currentInfo;
+	globalInfo.infoGeneration = ++nextGeneration;
+	ASSERT(handoffInfo.infoGeneration > currentInfo.infoGeneration);
+	ASSERT(globalInfo.infoGeneration > handoffInfo.infoGeneration);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/oldBackupWorker/handoffRejectsUnauthorizedEndpoint") {
+	ASSERT(!oldBackupWorkerEndpointStopped(false, false));
+	ASSERT(!oldBackupWorkerEndpointStopped(false, true));
+	ASSERT(!oldBackupWorkerEndpointStopped(true, true));
+	ASSERT(oldBackupWorkerEndpointStopped(true, false));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/oldBackupWorker/handoffRejectsAdvancedOriginalProgress") {
+	constexpr LogEpoch oldEpoch = 31;
+	const UID failedWorker(31, 1);
+	const UID healthySibling(31, 2);
+	OldBackupWorkerProgress initial;
+	initial.started = encodeBackupStartedValue(std::vector<std::pair<UID, Version>>{ { UID(31, 3), 100 } });
+	initial.workers.emplace(failedWorker, WorkerBackupStatus(oldEpoch, 200, Tag(tagLocalityLogRouter, 0), 2));
+	initial.workers.emplace(healthySibling, WorkerBackupStatus(oldEpoch, 250, Tag(tagLocalityLogRouter, 1), 2));
+	OldBackupWorkerProgress observed = initial;
+
+	ASSERT(oldBackupWorkerHandoffProgressMatches(initial, observed, failedWorker));
+	observed.workers.at(healthySibling).version++;
+	ASSERT(oldBackupWorkerHandoffProgressMatches(initial, observed, failedWorker));
+
+	observed.workers.at(failedWorker).version++;
+	ASSERT(!oldBackupWorkerHandoffProgressMatches(initial, observed, failedWorker));
+	observed = initial;
+	observed.workers.at(failedWorker).epoch++;
+	ASSERT(!oldBackupWorkerHandoffProgressMatches(initial, observed, failedWorker));
+	observed = initial;
+	observed.workers.at(failedWorker).tag = Tag(tagLocalityRangePartitionedBackup, 0);
+	ASSERT(!oldBackupWorkerHandoffProgressMatches(initial, observed, failedWorker));
+	observed = initial;
+	observed.workers.at(failedWorker).totalTags++;
+	ASSERT(!oldBackupWorkerHandoffProgressMatches(initial, observed, failedWorker));
+	observed = initial;
+	observed.workers.erase(failedWorker);
+	ASSERT(!oldBackupWorkerHandoffProgressMatches(initial, observed, failedWorker));
+	ASSERT(!oldBackupWorkerHandoffProgressMatches(observed, initial, failedWorker));
+	observed = initial;
+	observed.started = encodeBackupStartedValue(std::vector<std::pair<UID, Version>>{ { UID(31, 3), 101 } });
+	ASSERT(!oldBackupWorkerHandoffProgressMatches(initial, observed, failedWorker));
 	return Void();
 }
 

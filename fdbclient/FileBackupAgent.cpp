@@ -3896,24 +3896,6 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			}
 		}
 
-		// Get start version after backup worker are enabled
-		while (true) {
-			Error err;
-			try {
-				tr->reset();
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				Future<Version> startVersionFuture = tr->getReadVersion();
-				co_await startVersionFuture;
-				Params.beginVersion().set(task, startVersionFuture.get());
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr->onError(err);
-		}
-
 		// Set the "backupStartedKey" and wait for all backup worker started
 		tr->reset();
 		while (true) {
@@ -3924,10 +3906,14 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				Future<Void> keepRunning = taskBucket->keepRunning(tr, task);
 
+				// Couple the start version to publication so old-log retirement conflicts with unpublished starts.
+				Future<Version> startVersion = tr->getReadVersion();
 				Future<Optional<Value>> started = tr->get(backupStartedKey);
 				Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
 				mutationLogType = config.mutationLogType().get(tr);
-				co_await (success(started) && success(taskStarted) && success(mutationLogType));
+				co_await (success(startVersion) && success(started) && success(taskStarted) &&
+				          success(mutationLogType));
+				Params.beginVersion().set(task, startVersion.get());
 
 				if (!mutationLogType.get().present() || mutationLogType.get().get() == MutationLogType::DEFAULT) {
 					co_return; // Skip if not using partitioned or range partitioned logs

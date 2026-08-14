@@ -40,8 +40,34 @@
 #include "flow/IRandom.h"
 #include "fdbclient/Tracing.h"
 #include "flow/CoroUtils.h"
+#include "flow/UnitTest.h"
 
 #define SevDebugMemory SevVerbose
+
+namespace {
+enum class ClassicBackupWorkerRegistrationState { Pending, Registered, Removed };
+
+ClassicBackupWorkerRegistrationState classicBackupWorkerRegistrationState(ServerDBInfo const& info,
+                                                                          LogEpoch recruitedEpoch,
+                                                                          LogEpoch backupEpoch,
+                                                                          UID workerId,
+                                                                          bool wasRegistered) {
+	if (info.recoveryCount > recruitedEpoch && info.recoveryState != RecoveryState::UNINITIALIZED) {
+		return ClassicBackupWorkerRegistrationState::Removed;
+	}
+	if (backupEpoch == recruitedEpoch) {
+		return ClassicBackupWorkerRegistrationState::Registered;
+	}
+	if (info.recoveryCount != recruitedEpoch) {
+		return ClassicBackupWorkerRegistrationState::Pending;
+	}
+	if (info.logSystemConfig.hasBackupWorker(workerId)) {
+		return ClassicBackupWorkerRegistrationState::Registered;
+	}
+	return wasRegistered ? ClassicBackupWorkerRegistrationState::Removed
+	                     : ClassicBackupWorkerRegistrationState::Pending;
+}
+} // namespace
 
 struct VersionedMessage {
 	LogMessageVersion version;
@@ -110,6 +136,9 @@ struct BackupData {
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
+	Reference<AsyncVar<ServerDBInfo> const> serverDBInfo;
+	bool registrationPublished = false;
+	AsyncTrigger registrationChanged;
 	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
@@ -265,8 +294,8 @@ struct BackupData {
 
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo> const> db, const InitializeBackupRequest& req)
 	  : myId(id), tag(req.tag), totalTags(req.totalTags), startVersion(req.startVersion), endVersion(req.endVersion),
-	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), minKnownCommittedVersion(invalidVersion),
-	    savedVersion(req.startVersion - 1), pulledVersion(0), paused(false),
+	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), serverDBInfo(db),
+	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), pulledVersion(0), paused(false),
 	    lock(new FlowLock(SERVER_KNOBS->BACKUP_WORKER_LOCK_BYTES)), cc("BackupWorker", myId.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 
@@ -284,6 +313,23 @@ struct BackupData {
 	bool allMessageSaved() const { return (endVersion.present() && savedVersion >= endVersion.get()) || stopped; }
 
 	Version maxPopVersion() const { return endVersion.present() ? endVersion.get() : minKnownCommittedVersion; }
+
+	bool requiresPublishedRegistration() const { return backupEpoch != recruitedEpoch; }
+
+	void requirePublishedRegistration() const {
+		if (!requiresPublishedRegistration()) {
+			return;
+		}
+		const auto& info = serverDBInfo->get();
+		if (!registrationPublished ||
+		    classicBackupWorkerRegistrationState(info, recruitedEpoch, backupEpoch, myId, true) !=
+		        ClassicBackupWorkerRegistrationState::Registered ||
+		    IFailureMonitor::failureMonitor()
+		        .getState(info.clusterInterface.clientInterface.openDatabase.getEndpoint())
+		        .isFailed()) {
+			throw worker_removed();
+		}
+	}
 
 	// Inserts a backup's single range into rangeMap.
 	template <class T>
@@ -327,6 +373,7 @@ struct BackupData {
 			return;
 		}
 		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
+		requirePublishedRegistration();
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
 		DisabledTraceEvent("BackupWorkerPop", myId).detail("Tag", popTag).detail("SavedVersion", savedVersion);
 		logSystem.get()->pop(savedVersion, popTag);
@@ -467,12 +514,20 @@ static Future<bool> shouldBackupWorkerExitEarly(BackupData* self) {
 							shouldExit = false;
 						}
 					}
+					if (shouldExit) {
+						tr.addWriteConflictRange(singleKeyRange(backupStartedKey));
+						tr.set(backupStartedKey, value.get());
+						co_await tr.commit();
+					}
 					self->onBackupChanges(uidVersions);
 					co_return shouldExit;
 				}
 
 				TraceEvent("BackupWorkerEmptyStartKey", self->myId);
 				if (self->endVersion.present()) {
+					tr.addWriteConflictRange(singleKeyRange(backupStartedKey));
+					tr.clear(backupStartedKey);
+					co_await tr.commit();
 					co_return true;
 				}
 				Future<Void> watchFuture = tr.watch(backupStartedKey);
@@ -617,6 +672,7 @@ Future<Void> monitorBackupProgress(BackupData* self) {
 }
 
 Future<Void> saveProgress(BackupData* self, Version backupVersion) {
+	self->requirePublishedRegistration();
 	Transaction tr(self->cx);
 	Key key = backupProgressKeyFor(self->myId);
 
@@ -637,6 +693,7 @@ Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 			}
 
 			WorkerBackupStatus status(self->backupEpoch, backupVersion, self->tag, self->totalTags);
+			self->requirePublishedRegistration();
 			tr.set(key, backupProgressValue(status));
 			tr.addReadConflictRange(singleKeyRange(key));
 			co_await tr.commit();
@@ -714,6 +771,7 @@ static Future<Void> updateLogBytesWritten(BackupData* self,
 // messages. The file content format is a sequence of (Version, sub#, msgSize, message).
 // Note only ready backups are saved.
 Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
+	self->requirePublishedRegistration();
 	int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
 	std::vector<Future<Reference<IBackupFile>>> logFileFutures;
 	std::vector<Reference<IBackupFile>> logFiles;
@@ -728,6 +786,7 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 	while (!self->isAllInfoReady()) {
 		co_await self->waitAllInfoReady();
 	}
+	self->requirePublishedRegistration();
 
 	for (auto it = self->backups.begin(); it != self->backups.end();) {
 		if (it->second.stopped || !it->second.container.get().present()) {
@@ -759,6 +818,7 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 
 	keyRangeMap.coalesce(allKeys);
 	co_await waitForAll(logFileFutures);
+	self->requirePublishedRegistration();
 
 	std::transform(logFileFutures.begin(),
 	               logFileFutures.end(),
@@ -818,6 +878,7 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 	}
 
 	std::vector<Future<Void>> finished;
+	self->requirePublishedRegistration();
 	std::transform(logFiles.begin(), logFiles.end(), std::back_inserter(finished), [](const Reference<IBackupFile>& f) {
 		return f->finish();
 	});
@@ -996,10 +1057,54 @@ Future<Void> pullAsyncData(BackupData* self) {
 	}
 }
 
+static Future<Void> waitForPublishedClassicBackupWorker(Reference<AsyncVar<ServerDBInfo> const> db,
+                                                        LogEpoch recruitedEpoch,
+                                                        LogEpoch backupEpoch,
+                                                        UID workerId,
+                                                        double deadline) {
+	if (backupEpoch == recruitedEpoch) {
+		co_return;
+	}
+	while (true) {
+		auto state = classicBackupWorkerRegistrationState(db->get(), recruitedEpoch, backupEpoch, workerId, false);
+		if (state == ClassicBackupWorkerRegistrationState::Registered) {
+			co_return;
+		}
+		if (state == ClassicBackupWorkerRegistrationState::Removed || now() >= deadline) {
+			TraceEvent("BackupWorkerRegistrationNotPublished", workerId)
+			    .detail("RecoveryCount", recruitedEpoch)
+			    .detail("BackupEpoch", backupEpoch);
+			throw worker_removed();
+		}
+		co_await (db->onChange() || delay(deadline - now()));
+	}
+}
+
+Future<Void> waitForPublishedBackupWorker(BackupData* self) {
+	if (!self->requiresPublishedRegistration()) {
+		co_return;
+	}
+	co_await waitForPublishedClassicBackupWorker(self->serverDBInfo,
+	                                             self->recruitedEpoch,
+	                                             self->backupEpoch,
+	                                             self->myId,
+	                                             now() + SERVER_KNOBS->LOG_ROUTER_REPLACEMENT_GRACE_PERIOD);
+	self->registrationPublished = true;
+	self->registrationChanged.trigger();
+	self->requirePublishedRegistration();
+}
+
 Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogEpoch recoveryCount, BackupData* self) {
 	while (true) {
-		bool isDisplaced =
-		    db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED;
+		const auto& info = db->get();
+		bool isDisplaced = classicBackupWorkerRegistrationState(
+		                       info, recoveryCount, self->backupEpoch, self->myId, self->registrationPublished) ==
+		                   ClassicBackupWorkerRegistrationState::Removed;
+		if (!isDisplaced && self->registrationPublished) {
+			isDisplaced = IFailureMonitor::failureMonitor()
+			                  .getState(info.clusterInterface.clientInterface.openDatabase.getEndpoint())
+			                  .isFailed();
+		}
 		if (isDisplaced) {
 			TraceEvent("BackupWorkerDisplaced", self->myId)
 			    .detail("RecoveryCount", recoveryCount)
@@ -1009,7 +1114,12 @@ Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogEpoch r
 			    .detail("RecoveryState", (int)db->get().recoveryState);
 			throw worker_removed();
 		}
-		co_await db->onChange();
+		Future<Void> controllerFailed =
+		    self->registrationPublished
+		        ? IFailureMonitor::failureMonitor().onStateEqual(
+		              info.clusterInterface.clientInterface.openDatabase.getEndpoint(), FailureStatus(true))
+		        : Never();
+		co_await (db->onChange() || controllerFailed || self->registrationChanged.onTrigger());
 	}
 }
 
@@ -1048,6 +1158,9 @@ Future<Void> backupWorker(BackupInterface interf,
                           Reference<AsyncVar<ServerDBInfo> const> db) {
 	BackupData self(interf.id(), db, req);
 	PromiseStream<Future<Void>> addActor;
+	// Keep the role's failure endpoint alive until shutdown has finished draining mutation-file uploads.
+	// In particular, actorCollection cancels its children as soon as checkRemoved reports displacement.
+	Future<Void> failureServer;
 	Future<Void> error = actorCollection(addActor.getFuture());
 	Future<Void> dbInfoChange = Void();
 	Future<Void> pull;
@@ -1062,8 +1175,9 @@ Future<Void> backupWorker(BackupInterface interf,
 	    .detail("LogEpoch", req.recruitedEpoch)
 	    .detail("BackupEpoch", req.backupEpoch);
 	try {
+		failureServer = waitFailureServer(interf.waitFailure.getFuture());
 		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
-		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
+		co_await waitForPublishedBackupWorker(&self);
 		if (req.recruitedEpoch == req.backupEpoch && req.tag.id == 0) {
 			addActor.send(monitorBackupProgress(&self));
 		}
@@ -1081,7 +1195,7 @@ Future<Void> backupWorker(BackupInterface interf,
 		done = exitEarly ? Void() : uploadData(&self);
 
 		while (true) {
-			auto res = co_await race(dbInfoChange, done, error);
+			auto res = co_await race(dbInfoChange, done, error, failureServer);
 			if (res.index() == 0) {
 				dbInfoChange = db->onChange();
 				Reference<LogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
@@ -1101,6 +1215,8 @@ Future<Void> backupWorker(BackupInterface interf,
 				co_await brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
 				    BackupWorkerDoneRequest(self.myId, self.backupEpoch)));
 				break;
+			} else if (res.index() == 3) {
+				throw internal_error();
 			}
 		}
 		co_return;
@@ -1112,7 +1228,9 @@ Future<Void> backupWorker(BackupInterface interf,
 		pull = Void(); // cancels pulling
 		self.stop();
 		try {
-			co_await done;
+			if (done.isValid()) {
+				co_await done;
+			}
 		} catch (Error& shutdownErr) {
 			TraceEvent("BackupWorkerShutdownError", self.myId).errorUnsuppressed(shutdownErr);
 		}
@@ -1121,4 +1239,90 @@ Future<Void> backupWorker(BackupInterface interf,
 	if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
 		throw err;
 	}
+}
+
+TEST_CASE("/BackupWorker/Registration/OldGenerationFencedUntilPublished") {
+	constexpr LogEpoch currentEpoch = 42;
+	constexpr LogEpoch oldEpoch = 41;
+	UID originalId(41, 1);
+	UID replacementId(41, 2);
+	BackupInterface original(LocalityData{});
+	original.waitFailure =
+	    RequestStream<ReplyPromise<Void>>(Endpoint({ NetworkAddress(IPAddress(0x01010101), 1) }, originalId));
+	BackupInterface replacement(LocalityData{});
+	replacement.waitFailure =
+	    RequestStream<ReplyPromise<Void>>(Endpoint({ NetworkAddress(IPAddress(0x02020202), 1) }, replacementId));
+
+	ServerDBInfo info;
+	info.id = UID(42, 1);
+	info.recoveryCount = currentEpoch;
+	info.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	info.logSystemConfig = LogSystemConfig(currentEpoch);
+	OldTLogConf old;
+	old.epoch = oldEpoch;
+	TLogSet logSet;
+	logSet.backupWorkers.emplace_back(original);
+	old.tLogs.push_back(logSet);
+	info.logSystemConfig.oldTLogs.push_back(old);
+
+	auto db = makeReference<AsyncVar<ServerDBInfo>>(info);
+	ASSERT(classicBackupWorkerRegistrationState(db->get(), currentEpoch, oldEpoch, replacementId, false) ==
+	       ClassicBackupWorkerRegistrationState::Pending);
+	ASSERT(classicBackupWorkerRegistrationState(db->get(), currentEpoch, currentEpoch, replacementId, false) ==
+	       ClassicBackupWorkerRegistrationState::Registered);
+	Future<Void> pending = waitForPublishedClassicBackupWorker(db, currentEpoch, oldEpoch, replacementId, now() + 60.0);
+	ASSERT(!pending.isReady());
+
+	ServerDBInfo updated = db->get();
+	updated.id = UID(42, 2);
+	updated.logSystemConfig.oldTLogs[0].tLogs[0].backupWorkers[0] = OptionalInterface<BackupInterface>(replacement);
+	db->set(updated);
+	ASSERT(pending.isReady());
+	ASSERT(!pending.isError());
+	ASSERT(classicBackupWorkerRegistrationState(db->get(), currentEpoch, oldEpoch, originalId, true) ==
+	       ClassicBackupWorkerRegistrationState::Removed);
+	ASSERT(classicBackupWorkerRegistrationState(db->get(), currentEpoch, oldEpoch, replacementId, true) ==
+	       ClassicBackupWorkerRegistrationState::Registered);
+
+	Future<Void> orphan = waitForPublishedClassicBackupWorker(db, currentEpoch, oldEpoch, UID(41, 3), now());
+	ASSERT(orphan.isError());
+	ASSERT_EQ(orphan.getError().code(), error_code_worker_removed);
+
+	updated = db->get();
+	updated.recoveryCount = currentEpoch + 1;
+	updated.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	ASSERT(classicBackupWorkerRegistrationState(updated, currentEpoch, oldEpoch, replacementId, true) ==
+	       ClassicBackupWorkerRegistrationState::Removed);
+	return Void();
+}
+
+TEST_CASE("/BackupWorker/Registration/FailureEndpointOutlivesUploadShutdown") {
+	PromiseStream<Future<Void>> roleActors;
+	Future<Void> roleError = actorCollection(roleActors.getFuture());
+	PromiseStream<ReplyPromise<Void>> failureRequests;
+	Future<Void> failureServer = waitFailureServer(failureRequests.getFuture());
+
+	ReplyPromise<Void> failureRequest;
+	Future<Void> observedFailure = failureRequest.getFuture();
+	failureRequests.send(std::move(failureRequest));
+
+	Promise<Void> displaced;
+	roleActors.send(displaced.getFuture());
+	displaced.sendError(worker_removed());
+	ASSERT(roleError.isError());
+	ASSERT_EQ(roleError.getError().code(), error_code_worker_removed);
+	ASSERT(!observedFailure.isReady());
+
+	Promise<Void> uploadsDrained;
+	Future<Void> shutdown = uploadsDrained.getFuture();
+	ASSERT(!shutdown.isReady());
+	ASSERT(!observedFailure.isReady());
+	uploadsDrained.send(Void());
+	ASSERT(shutdown.isReady());
+	ASSERT(!observedFailure.isReady());
+
+	failureServer = Void();
+	ASSERT(observedFailure.isError());
+	ASSERT_EQ(observedFailure.getError().code(), error_code_broken_promise);
+	return Void();
 }

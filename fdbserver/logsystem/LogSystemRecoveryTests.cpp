@@ -159,6 +159,8 @@ TEST_CASE("/LogSystem/ReplaceBackupWorker/OldOnlyWorkerWithMoreRetainedTags") {
 	auto observedOldWorker = oldSet->backupWorkers[1];
 	Future<Void> interfaceChanged = observedOldWorker->onChange();
 	Future<Void> backupChanged = logSystem->backupWorkerChanged.onTrigger();
+	ASSERT(logSystem->getLogSystemConfig().hasBackupWorker(oldOnlyWorker.id()));
+	ASSERT(!logSystem->getLogSystemConfig().hasBackupWorker(replacement.id()));
 	ASSERT(logSystem->replaceBackupWorker(oldEpoch, oldOnlyWorker.id(), replacement));
 	ASSERT(interfaceChanged.isReady());
 	ASSERT(backupChanged.isReady());
@@ -172,6 +174,8 @@ TEST_CASE("/LogSystem/ReplaceBackupWorker/OldOnlyWorkerWithMoreRetainedTags") {
 	ASSERT(oldSet->backupWorkers[0]->get().interf() == firstOldWorker);
 	ASSERT(oldSet->backupWorkers[1] == observedOldWorker);
 	ASSERT(oldSet->backupWorkers[1]->get().interf() == replacement);
+	ASSERT(!logSystem->getLogSystemConfig().hasBackupWorker(oldOnlyWorker.id()));
+	ASSERT(logSystem->getLogSystemConfig().hasBackupWorker(replacement.id()));
 	return Void();
 }
 
@@ -319,6 +323,8 @@ TEST_CASE("/LogSystem/ReplaceBackupWorker/CompletedReplacementIsNotInstalled") {
 	ASSERT(backupChanged.isReady());
 	ASSERT(!logSystem->removedBackupWorkers.contains(completedReplacement.id()));
 	ASSERT(oldSet->backupWorkers.empty());
+	ASSERT(!logSystem->getLogSystemConfig().hasBackupWorker(oldWorker.id()));
+	ASSERT(!logSystem->getLogSystemConfig().hasBackupWorker(completedReplacement.id()));
 	ASSERT_EQ(logSystem->epoch, currentEpoch);
 	ASSERT_EQ(logSystem->getOldestBackupEpoch(), currentEpoch);
 	ASSERT_EQ(currentSet->backupWorkers.size(), 1);
