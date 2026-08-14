@@ -18,10 +18,9 @@
 #
 FROM rockylinux/rockylinux:9.8-minimal AS base
 
-# Disable the faulty mirror list for RockyLinux for now. Since all the other images use the base image
-# as base we don't have to repeat this step.
-RUN sed -i.bak 's/^#baseurl=/baseurl=/; s/^mirrorlist=/#mirrorlist=/' /etc/yum.repos.d/rocky.repo && \ 
-    microdnf install -y \
+# It seems mirrorlist can be less reliable, just use original baseurl for package repo.
+RUN sed -i.bak 's/^#baseurl=/baseurl=/; s/^mirrorlist=/#mirrorlist=/' /etc/yum.repos.d/rocky.repo
+RUN microdnf install -y \
     bind-utils \
     binutils \
     curl \
@@ -85,7 +84,7 @@ COPY --from=go-credentials-fetcher-build /fdb-aws-s3-credentials-fetcher /usr/bi
 ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
 
 FROM base AS foundationdb-base
-ARG FDB_VERSION=7.3.63
+ARG FDB_VERSION=7.3.79
 ARG FDB_LIBRARY_VERSIONS="${FDB_VERSION}"
 ARG FDB_WEBSITE=https://github.com/apple/foundationdb/releases/download
 
@@ -204,7 +203,7 @@ ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/var/fdb/scripts/fdb.bash"]
 
 FROM foundationdb-base AS mako
 
-ARG FDB_VERSION=7.3.63
+ARG FDB_VERSION=7.3.79
 ARG TARGETARCH
 COPY website/${FDB_VERSION}/mako.* /tmp/
 RUN if [ "$TARGETARCH" = "amd64" ]; then \

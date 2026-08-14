@@ -234,7 +234,13 @@ struct ClientMetricWorkload : TestWorkload {
 		}
 	}
 
-	Future<bool> check(Database const& cx) override { return clientId != 0 || observedAdvancingMetrics; }
+	Future<bool> check(Database const& cx) override {
+		if (clientId != 0 || observedAdvancingMetrics) {
+			return true;
+		}
+		TraceEvent(SevError, "ClientMetricCheckFailed").detail("Reason", "WorkloadDidNotComplete");
+		return false;
+	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };

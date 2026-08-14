@@ -25,6 +25,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/logsystem/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/CDCRoutingTable.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"

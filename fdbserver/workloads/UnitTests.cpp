@@ -35,6 +35,7 @@ void forceLinkJsonWebKeySetTests();
 void forceLinkVersionVectorTests();
 void forceLinkRESTClientTests();
 void forceLinkRESTUtilsTests();
+void forceLinkMemoryTrackerTests();
 void forceLinkCompressedIntTests();
 void forceLinkAtomicTests();
 void forceLinkIdempotencyIdTests();
@@ -115,6 +116,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionVectorTests();
 		forceLinkRESTClientTests();
 		forceLinkRESTUtilsTests();
+		forceLinkMemoryTrackerTests();
 		forceLinkCompressedIntTests();
 		forceLinkAtomicTests();
 		forceLinkIdempotencyIdTests();

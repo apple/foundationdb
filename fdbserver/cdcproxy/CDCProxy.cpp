@@ -46,7 +46,7 @@
 #include "flow/Knobs.h"
 #include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 namespace {
 
@@ -77,6 +77,7 @@ struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	Optional<KeyRange> keys;
 	bool active = true;
 	bool initialized = false;
+	bool initializationPausedForTesting = false;
 	bool tooOld = false;
 	bool bufferLimitExceeded = false;
 	Version minVersion = invalidVersion;
@@ -285,6 +286,16 @@ bool isCurrentStreamInitialization(std::unordered_map<CDCStreamId, Reference<CDC
 	return stream->active && current != streams.end() && current->second.getPtr() == stream.getPtr();
 }
 
+bool isCurrentTagOwner(std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> const& streams,
+                       Tag const& tag,
+                       CDCStreamId streamId) {
+	const auto stream = streams.find(streamId);
+	return stream != streams.end() && stream->second->active &&
+	       std::any_of(stream->second->tagIntervals.begin(),
+	                   stream->second->tagIntervals.end(),
+	                   [&tag](CDCTagInterval const& interval) { return interval.tag == tag; });
+}
+
 // New TLogs retain every recovered tag until it is popped past the recovery boundary. An unshared retired tag has no
 // active consumer to advance it, so stopping at its pre-recovery removal version can keep the old generation forever.
 Version retiredTagPopTarget(Version retiredVersion, Optional<Version> safePopVersion, Optional<Version> recoveryEnd) {
@@ -436,32 +447,36 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
+			Future<Optional<Value>> keysFuture = tr.get(cdcStreamKeyFor(streamId));
+			Future<Optional<Value>> minVersionFuture = tr.get(cdcMinVersionKeyFor(streamId));
+			Future<RangeResult> assignedProxiesFuture = tr.getRange(cdcProxyRangeFor(streamId), 2);
+			KeyRange tagHistoryRange = cdcTagHistoryRangeFor(streamId);
+			Future<RangeResult> historyFuture = tr.getRange(tagHistoryRange, CLIENT_KNOBS->TOO_MANY);
+
 			CDCStreamReadState result;
-			Optional<Value> keysValue = co_await tr.get(cdcStreamKeyFor(streamId));
+			Optional<Value> keysValue = co_await keysFuture;
 			if (keysValue.present()) {
 				result.keys = decodeCDCStreamKeysValue(keysValue.get());
 			} else if (requireKeys) {
 				throw client_invalid_operation();
 			}
 
-			Optional<Value> minVersionValue = co_await tr.get(cdcMinVersionKeyFor(streamId));
+			Optional<Value> minVersionValue = co_await minVersionFuture;
 			if (!minVersionValue.present()) {
 				throw client_invalid_operation();
 			}
 			result.minVersion = decodeCDCMinVersionValue(minVersionValue.get());
 
-			RangeResult assignedProxies = co_await tr.getRange(cdcProxyRangeFor(streamId), 2);
+			RangeResult assignedProxies = co_await assignedProxiesFuture;
 			if (assignedProxies.size() != 1 || decodeCDCProxyKey(assignedProxies[0].key).second != expectedProxyId) {
-				CODE_PROBE(true, "CDC proxy rejects request for stream owned elsewhere", probe::decoration::rare);
+				CODE_PROBE(true, "CDC proxy rejects request for stream owned elsewhere");
 				throw wrong_shard_server();
 			}
 
 			std::vector<std::pair<Version, Tag>> tagAssignments;
-			KeyRange tagHistoryRange = cdcTagHistoryRangeFor(streamId);
 			Key begin = tagHistoryRange.begin;
 			while (begin < tagHistoryRange.end) {
-				RangeResult history =
-				    co_await tr.getRange(KeyRangeRef(begin, tagHistoryRange.end), CLIENT_KNOBS->TOO_MANY);
+				RangeResult history = co_await historyFuture;
 				for (KeyValueRef const& kv : history) {
 					const CDCTagHistoryEntry historyEntry = decodeCDCTagHistoryKey(kv.key);
 					ASSERT_WE_THINK(historyEntry.streamId == streamId);
@@ -472,6 +487,10 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 					break;
 				}
 				begin = keyAfter(history.back().key);
+				if (begin >= tagHistoryRange.end) {
+					break;
+				}
+				historyFuture = tr.getRange(KeyRangeRef(begin, tagHistoryRange.end), CLIENT_KNOBS->TOO_MANY);
 			}
 			if (tagAssignments.empty()) {
 				throw client_invalid_operation();
@@ -1141,6 +1160,14 @@ Future<Void> CDCProxy::bufferTag(Reference<CDCBufferedTag> tag) {
 Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 	try {
 		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, stream->streamId, id, true);
+		if (popsPausedForTesting) {
+			stream->initializationPausedForTesting = true;
+			stream->changed.trigger();
+			while (popsPausedForTesting) {
+				co_await popPauseChangedForTesting.onTrigger();
+			}
+			stream->initializationPausedForTesting = false;
+		}
 		if (!isCurrentStreamInitialization(streams, stream)) {
 			CODE_PROBE(true, "CDC proxy discards stale stream initialization");
 			co_return;
@@ -1677,6 +1704,24 @@ Future<Void> CDCProxy::serveBufferStatusForTestingRequests(FutureStream<GetCDCPr
 			request.reply.sendError(client_invalid_operation());
 			continue;
 		}
+		while (popsPausedForTesting) {
+			Reference<CDCBufferedStream> pendingInitialization;
+			for (const auto& [streamId, stream] : streams) {
+				if (stream->active && !stream->initialized && !stream->initializationPausedForTesting) {
+					pendingInitialization = stream;
+					break;
+				}
+			}
+			if (!pendingInitialization) {
+				break;
+			}
+			co_await race(popPauseChangedForTesting.onTrigger(), pendingInitialization->changed.onTrigger());
+		}
+		for (const auto& [tag, bufferedTag] : tags) {
+			for (const CDCStreamId streamId : bufferedTag->streamIds) {
+				ASSERT(isCurrentTagOwner(streams, tag, streamId));
+			}
+		}
 		CDCProxyBufferStatus status;
 		status.bufferedBytes = bufferedBytes;
 		status.activePermits = bufferLock.activePermits();
@@ -1973,16 +2018,29 @@ TEST_CASE("/NativeCDC/StreamInitializationLifecycle") {
 	std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> streams;
 	auto stream = makeReference<CDCBufferedStream>(1);
 	auto replacement = makeReference<CDCBufferedStream>(1);
+	const Tag assignedTag(tagLocalityCDC, 1);
+	const Tag anotherTag(tagLocalityCDC, 2);
 
 	ASSERT(!isCurrentStreamInitialization(streams, stream));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
 	streams.emplace(stream->streamId, stream);
 	ASSERT(isCurrentStreamInitialization(streams, stream));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
+	stream->tagIntervals.emplace_back(assignedTag, 100, 200);
+	ASSERT(isCurrentTagOwner(streams, assignedTag, stream->streamId));
+	ASSERT(!isCurrentTagOwner(streams, anotherTag, stream->streamId));
 	stream->active = false;
 	ASSERT(!isCurrentStreamInitialization(streams, stream));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
 	stream->active = true;
 	streams.at(stream->streamId) = replacement;
 	ASSERT(!isCurrentStreamInitialization(streams, stream));
 	ASSERT(isCurrentStreamInitialization(streams, replacement));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
+	replacement->tagIntervals.emplace_back(assignedTag, 200, 300);
+	ASSERT(isCurrentTagOwner(streams, assignedTag, replacement->streamId));
+	streams.erase(replacement->streamId);
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, replacement->streamId));
 	return Void();
 }
 

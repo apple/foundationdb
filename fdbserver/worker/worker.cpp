@@ -83,7 +83,7 @@
 #include "flow/ThreadHelper.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
 #include "flow/ChaosMetrics.h"

@@ -1603,5 +1603,5 @@ void bindDeterministicRandomToOpenssl();
 #endif
 
 #include "flow/Coroutines.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #endif

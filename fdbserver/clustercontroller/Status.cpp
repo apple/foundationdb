@@ -20,7 +20,7 @@
 
 #include <cinttypes>
 #include "fdbclient/json_spirit/json_spirit_value.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/KeyBackedTypes.h"

@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include <cstdint>
-#include <limits>
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.h"
@@ -44,6 +42,42 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 
 struct DataLossRecoveryWorkload : TestWorkload {
 	static constexpr auto NAME = "DataLossRecovery";
+
+	// Per-attempt timeout for the reads this workload performs, so that the test fails fast if
+	// something goes wrong instead of hanging until the test timeout. The phase that kills the only
+	// team holding the key relies on this to produce the timed_out it expects.
+	static constexpr double READ_TIMEOUT = 90.0;
+
+	// A read that is expected to return a value can also time out for reasons that have nothing to do
+	// with data loss: the cluster can be transiently unable to serve the key, for example when data
+	// distribution reboots every storage server at once (rebootWhenDurableKey) and some of them are
+	// slow to re-register. That is not what this workload is testing, so keep retrying such a read for
+	// this long before giving up. If the key is still unreadable after that, the read error is
+	// propagated and the test fails exactly as it did before.
+	static constexpr double READ_RETRY_DEADLINE = 300.0;
+
+	// The setup move below can also fail for reasons that mean "that move did not happen, issue it
+	// again" rather than "the cluster is broken". FDB's own data distributor treats exactly this set as
+	// normal and simply reissues the relocation -- see normalDDQueueErrors() in
+	// DataDistribution.actor.cpp, and the matching suppression in DDRelocationQueue.actor.cpp. None of
+	// them are retryable transaction errors, so tr.onError() would rethrow and kill the workload during
+	// start(). Reissue the move instead, at most this many times, after which the error propagates so a
+	// cluster that genuinely cannot move a shard is still reported. This is a bounded count and not a
+	// wall-clock budget because one moveKeys() call can spend minutes inside finishMoveKeys()
+	// exhausting FINISH_MOVE_KEYS_MAX_RETRIES, which blows any sane deadline before the first reissue.
+	static constexpr int MOVE_MAX_REISSUES = 3;
+
+	static bool retryableDataMoveError(const Error& e) {
+		switch (e.code()) {
+		case error_code_finish_move_keys_too_many_retries:
+		case error_code_data_move_cancelled:
+		case error_code_data_move_dest_team_not_found:
+			return true;
+		default:
+			return false;
+		}
+	}
+
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	const bool enabled;
@@ -113,12 +147,13 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	                           Key key,
 	                           ErrorOr<Optional<Value>> expectedValue) {
 		Transaction tr(cx);
+		double startTime = now();
 
 		while (true) {
 			Error err;
 			try {
 				// add timeout to read so test fails faster if something goes wrong
-				Optional<Value> res = co_await timeoutError(tr.get(key), 90.0);
+				Optional<Value> res = co_await timeoutError(tr.get(key), READ_TIMEOUT);
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
 					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
@@ -130,7 +165,20 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			if (expectedValue.isError() && expectedValue.getError().code() == err.code()) {
 				break;
 			}
-			co_await tr.onError(err);
+			// This read is supposed to succeed, so a timeout means the key was transiently
+			// unreadable rather than lost. Retry with a fresh read version instead of failing the
+			// test, until READ_RETRY_DEADLINE is exhausted. timed_out is not retryable, so without
+			// this tr.onError() below would rethrow it and abort the workload.
+			if (err.code() == error_code_timed_out && !expectedValue.isError() &&
+			    now() - startTime < READ_RETRY_DEADLINE) {
+				TraceEvent(SevWarn, "DataLossRecoveryReadTimedOutRetrying")
+				    .detail("Key", key)
+				    .detail("Elapsed", now() - startTime)
+				    .detail("Deadline", READ_RETRY_DEADLINE);
+				tr.reset();
+			} else {
+				co_await tr.onError(err);
+			}
 		}
 	}
 
@@ -217,6 +265,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		DDEnabledState ddEnabledState;
 
 		Transaction tr(cx);
+		int moveReissues = 0;
 
 		while (true) {
 			Error err;
@@ -280,10 +329,20 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				err = e;
 			}
 			TraceEvent("DataLossRecovery").error(err).detail("Phase", "MoveRangeError");
-			if (err.code() == error_code_movekeys_conflict ||
-			    err.code() == error_code_finish_move_keys_too_many_retries) {
-				// Conflicts on moveKeysLocks with the current running DD and finishMoveKeys retry exhaustion are both
-				// expected transient move outcomes, so retry the move from a fresh transaction.
+			if (err.code() == error_code_movekeys_conflict) {
+				// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+				// Deliberately not folded into the bounded branch below: this error means the move never
+				// started, so retrying is cheap, and the workload has to keep trying until DD notices it
+				// has been disabled and stops taking the lock. Bounding it would fail the test whenever
+				// DD is merely slow to notice.
+				tr.reset();
+			} else if (retryableDataMoveError(err) && moveReissues < MOVE_MAX_REISSUES) {
+				// The move did not happen; reissue it rather than letting tr.onError() rethrow.
+				++moveReissues;
+				TraceEvent(SevWarn, "DataLossRecoveryMoveReissuing")
+				    .error(err)
+				    .detail("Reissue", moveReissues)
+				    .detail("Limit", MOVE_MAX_REISSUES);
 				tr.reset();
 			} else {
 				co_await tr.onError(err);

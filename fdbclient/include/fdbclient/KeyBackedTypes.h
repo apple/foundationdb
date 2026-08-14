@@ -35,7 +35,7 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/CoroUtils.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/serialize.h"
 #include "flow/ThreadHelper.h"
 
