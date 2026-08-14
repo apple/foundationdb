@@ -61,15 +61,15 @@ function create_cluster_file() {
 
 function discover_network_environment() {
     if [[ "$FDB_NETWORKING_MODE" == "host" ]]; then
-        export PUBLIC_IP4=127.0.0.1
-        export PUBLIC_IP6="[::1]"
+        export FDB_PUBLIC_IP4=127.0.0.1
+        export FDB_PUBLIC_IP6="[::1]"
     elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
         for addr in $(hostname -I); do
-            if [[ -z "$PUBLIC_IP4" && $addr == *'.'* ]]; then
-                export PUBLIC_IP4="$addr"
-            elif [[ -z "$PUBLIC_IP6" && $addr == *':'* ]]; then
-                export PUBLIC_IP6="[$addr]"
-            elif [[ (! -z "$PUBLIC_IP4") && (! -z "$PUBLIC_IP6") ]]; then
+            if [[ -z "$FDB_PUBLIC_IP4" && $addr == *'.'* ]]; then
+                export FDB_PUBLIC_IP4="$addr"
+            elif [[ -z "$FDB_PUBLIC_IP6" && $addr == *':'* ]]; then
+                export FDB_PUBLIC_IP6="[$addr]"
+            elif [[ (! -z "$FDB_PUBLIC_IP4") && (! -z "$FDB_PUBLIC_IP6") ]]; then
                 break
             fi
         done
@@ -82,22 +82,22 @@ function discover_network_environment() {
 function create_server_environment() {
     FDB_IP_VERSION=${FDB_IP_VERSION:-v4}
 
-    if [[ -z "$PUBLIC_IP" ]]; then
+    if [[ -z "$FDB_PUBLIC_IP" ]]; then
         discover_network_environment
     fi
 
     if [[ "$FDB_IP_VERSION" == *'4'* ]]; then
-        export LISTEN_IP=${LISTEN_IP:-'0.0.0.0'}
-        export PUBLIC_IP=${PUBLIC_IP:-$PUBLIC_IP4}
+        export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'0.0.0.0'}
+        export FDB_PUBLIC_IP=${FDB_PUBLIC_IP:-$FDB_PUBLIC_IP4}
     elif [[ "$FDB_IP_VERSION" == *'6'* ]]; then
-        export LISTEN_IP=${LISTEN_IP:-'[::]'}
-        export PUBLIC_IP=${PUBLIC_IP:-$PUBLIC_IP6}
+        export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'[::]'}
+        export FDB_PUBLIC_IP=${FDB_PUBLIC_IP:-$FDB_PUBLIC_IP6}
     else
         echo "Unknown FDB IP version \"$FDB_IP_VERSION\"" 1>&2
         exit 1
     fi
 
-    if [[ -z $PUBLIC_IP ]]; then
+    if [[ -z $FDB_PUBLIC_IP ]]; then
         echo "No valid IP for IP version \"$FDB_IP_VERSION\"" 1>&2
         exit 1
     fi
@@ -106,15 +106,15 @@ function create_server_environment() {
     # Set default cluster file contents only if no other configuration is specified.
     if [[ (! -s "$FDB_CLUSTER_FILE") && -z "$FDB_CLUSTER_FILE_CONTENTS" && -z "$FDB_COORDINATOR" ]]; then
         echo "Warning: No configuration available, falling back to self-coordinated." 1>&2
-        FDB_CLUSTER_FILE_CONTENTS="docker:docker@$PUBLIC_IP:$FDB_PORT"
+        FDB_CLUSTER_FILE_CONTENTS="docker:docker@$FDB_PUBLIC_IP:$FDB_PORT"
     fi
 
     create_cluster_file
 }
 
 create_server_environment
-echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT, listening on $LISTEN_IP:$FDB_PORT"
-fdbserver --listen-address "$LISTEN_IP:$FDB_PORT" --public-address "$PUBLIC_IP:$FDB_PORT" \
+echo "Starting FDB server on $FDB_PUBLIC_IP:$FDB_PORT, listening on $FDB_LISTEN_IP:$FDB_PORT"
+fdbserver --listen-address "$FDB_LISTEN_IP:$FDB_PORT" --public-address "$FDB_PUBLIC_IP:$FDB_PORT" \
     --datadir /var/fdb/data --logdir /var/fdb/logs \
     --locality-zoneid="$(hostname)" --locality-machineid="$(hostname)" --class "$FDB_PROCESS_CLASS" --knob_disable_posix_kernel_aio=1 \
     "$@"
