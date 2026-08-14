@@ -754,7 +754,7 @@ Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alterna
                                         bool compareReplicas = false,
                                         int requiredReplicas = 0) {
 	return loadBalanceImpl<Interface, Request, Multi, P, Model>(
-	    alternatives, channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
+	    alternatives, channel, std::move(request), taskID, atMostOnce, model, compareReplicas, requiredReplicas);
 }
 
 #include "flow/unactorcompiler.h"
