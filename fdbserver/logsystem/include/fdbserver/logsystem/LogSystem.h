@@ -472,6 +472,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies);
 	void setRangePartitionedBackupWorkers(const std::vector<InitializeRangePartitionedBackupReply>& replies);
+	bool replaceBackupWorker(LogEpoch backupEpoch, UID failedWorkerId, BackupInterface const& replacement);
 
 	bool removeBackupWorker(const BackupWorkerDoneRequest& req);
 

@@ -225,7 +225,63 @@ Future<Void> deregisterGrpcService(UID id) {
 	return Void();
 }
 
-Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
+class WorkerStorageRoleHistory {
+	bool hostedStorageServer = false;
+
+public:
+	void recordStartedStorageRole(Role role) {
+		if (role == Role::STORAGE_SERVER) {
+			hostedStorageServer = true;
+		}
+	}
+
+	bool allowsBackupRestartOnIOTimeout(bool rebootStorageServerOnIOTimeout) const {
+		return !hostedStorageServer || rebootStorageServerOnIOTimeout;
+	}
+};
+
+bool shouldRestartWorkerOnRoleError(ErrorInfo const& err,
+                                    WorkerStorageRoleHistory const& storageRoleHistory,
+                                    bool rebootStorageServerOnIOTimeout) {
+	return err.error.code() == error_code_please_reboot ||
+	       (err.role == Role::SHARED_TRANSACTION_LOG &&
+	        (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)) ||
+	       (err.role == Role::BACKUP && err.error.code() == error_code_io_timeout &&
+	        storageRoleHistory.allowsBackupRestartOnIOTimeout(rebootStorageServerOnIOTimeout)) ||
+	       (rebootStorageServerOnIOTimeout && err.role == Role::STORAGE_SERVER &&
+	        err.error.code() == error_code_io_timeout);
+}
+
+TEST_CASE("/fdbserver/worker/backupIOTimeoutRespectsStorageRestartPolicy") {
+	WorkerStorageRoleHistory storageRoleHistory;
+	ErrorInfo backupTimeout(io_timeout(), Role::BACKUP, UID());
+	ErrorInfo backupIOError(io_error(), Role::BACKUP, UID());
+	ErrorInfo storageTimeout(io_timeout(), Role::STORAGE_SERVER, UID());
+	ErrorInfo requestedReboot(please_reboot(), Role::BACKUP, UID());
+	ErrorInfo sharedTLogIOError(io_error(), Role::SHARED_TRANSACTION_LOG, UID());
+	ErrorInfo sharedTLogIOTimeout(io_timeout(), Role::SHARED_TRANSACTION_LOG, UID());
+
+	ASSERT(shouldRestartWorkerOnRoleError(backupTimeout, storageRoleHistory, false));
+	ASSERT(!shouldRestartWorkerOnRoleError(backupIOError, storageRoleHistory, false));
+
+	storageRoleHistory.recordStartedStorageRole(Role::TESTING_STORAGE_SERVER);
+	ASSERT(shouldRestartWorkerOnRoleError(backupTimeout, storageRoleHistory, false));
+
+	storageRoleHistory.recordStartedStorageRole(Role::STORAGE_SERVER);
+	// The storage role can end before its queued backup timeout is handled.
+	ASSERT(!shouldRestartWorkerOnRoleError(storageTimeout, storageRoleHistory, false));
+	ASSERT(!shouldRestartWorkerOnRoleError(backupTimeout, storageRoleHistory, false));
+	ASSERT(shouldRestartWorkerOnRoleError(backupTimeout, storageRoleHistory, true));
+	ASSERT(!shouldRestartWorkerOnRoleError(backupIOError, storageRoleHistory, true));
+	ASSERT(shouldRestartWorkerOnRoleError(storageTimeout, storageRoleHistory, true));
+	ASSERT(shouldRestartWorkerOnRoleError(requestedReboot, storageRoleHistory, false));
+	ASSERT(shouldRestartWorkerOnRoleError(sharedTLogIOError, storageRoleHistory, false));
+	ASSERT(shouldRestartWorkerOnRoleError(sharedTLogIOTimeout, storageRoleHistory, false));
+
+	return Void();
+}
+
+Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors, WorkerStorageRoleHistory const& storageRoleHistory) {
 	while (true) {
 		ErrorInfo err = co_await errors;
 		const bool ok = err.error.code() == error_code_success || err.error.code() == error_code_please_reboot ||
@@ -239,12 +295,8 @@ Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 		}
 
 		endRole(err.role, err.id, "Error", ok, err.error);
-		if (err.error.code() == error_code_please_reboot ||
-		    (err.role == Role::SHARED_TRANSACTION_LOG &&
-		     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)) ||
-		    (err.role == Role::BACKUP && err.error.code() == error_code_io_timeout) ||
-		    (SERVER_KNOBS->STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT && err.role == Role::STORAGE_SERVER &&
-		     err.error.code() == error_code_io_timeout)) {
+		if (shouldRestartWorkerOnRoleError(
+		        err, storageRoleHistory, SERVER_KNOBS->STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT)) {
 			throw err.error;
 		}
 	}
@@ -2018,6 +2070,7 @@ class WorkerServerCore {
 	WorkerCache<InitializeBackupReply>& backupWorkerCache;
 	WorkerCache<InitializeRangePartitionedBackupReply>& rangePartitionedBackupWorkerCache;
 	WorkerCache<TLogInterface>& logRouterCache;
+	WorkerStorageRoleHistory& storageRoleHistory;
 	std::set<std::pair<UID, KeyValueStoreType>>& runningStorages;
 	std::unordered_map<UID, StorageDiskCleaner>& storageCleaners;
 	Promise<Void>& rebootKVSPromise2;
@@ -2442,6 +2495,7 @@ class WorkerServerCore {
 				details["StorageEngine"] = req.storeType.toString();
 				details["IsTSS"] = std::to_string(isTss);
 				Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
+				storageRoleHistory.recordStartedStorageRole(ssRole);
 				startRole(ssRole, recruited.id(), interf.id(), details);
 				TraceEvent("StorageServerInitProgress", recruited.id())
 				    .detail("ReqID", req.reqId)
@@ -2859,6 +2913,7 @@ public:
 	                 WorkerCache<InitializeBackupReply>& backupWorkerCache,
 	                 WorkerCache<InitializeRangePartitionedBackupReply>& rangePartitionedBackupWorkerCache,
 	                 WorkerCache<TLogInterface>& logRouterCache,
+	                 WorkerStorageRoleHistory& storageRoleHistory,
 	                 std::set<std::pair<UID, KeyValueStoreType>>& runningStorages,
 	                 std::unordered_map<UID, StorageDiskCleaner>& storageCleaners,
 	                 Promise<Void>& rebootKVSPromise2,
@@ -2877,10 +2932,10 @@ public:
 	    activeSharedTLog(activeSharedTLog), enablePrimaryTxnSystemHealthCheck(enablePrimaryTxnSystemHealthCheck),
 	    sharedLogs(sharedLogs), backupWorkerCache(backupWorkerCache),
 	    rangePartitionedBackupWorkerCache(rangePartitionedBackupWorkerCache), logRouterCache(logRouterCache),
-	    runningStorages(runningStorages), storageCleaners(storageCleaners), rebootKVSPromise2(rebootKVSPromise2),
-	    updateClusterIdFuture(updateClusterIdFuture), loggingTrigger(loggingTrigger), loggingDelay(loggingDelay),
-	    lastSnapReq(lastSnapReq), snapReqMap(snapReqMap), snapReqResultMap(snapReqResultMap),
-	    lastSnapTime(lastSnapTime) {}
+	    storageRoleHistory(storageRoleHistory), runningStorages(runningStorages), storageCleaners(storageCleaners),
+	    rebootKVSPromise2(rebootKVSPromise2), updateClusterIdFuture(updateClusterIdFuture),
+	    loggingTrigger(loggingTrigger), loggingDelay(loggingDelay), lastSnapReq(lastSnapReq), snapReqMap(snapReqMap),
+	    snapReqResultMap(snapReqResultMap), lastSnapTime(lastSnapTime) {}
 
 	Future<Void> run(Future<Void> const& handleErrors) {
 		auto res = co_await race(interf.clientInterface.reboot.getFuture(),
@@ -2933,7 +2988,8 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	auto ddInterf = makeReference<AsyncVar<Optional<DataDistributorInterface>>>();
 	auto rkInterf = makeReference<AsyncVar<Optional<RatekeeperInterface>>>();
 	auto csInterf = makeReference<AsyncVar<Optional<ConsistencyScanInterface>>>();
-	Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
+	WorkerStorageRoleHistory storageRoleHistory;
+	Future<Void> handleErrors = workerHandleErrors(errors.getFuture(), storageRoleHistory); // Needs to be stopped last
 	ActorCollection errorForwarders(false);
 	Future<Void> loggingTrigger = Void();
 	double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
@@ -3119,6 +3175,7 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				details["StorageEngine"] = s.storeType.toString();
 				details["IsTSS"] = isTss ? "Yes" : "No";
 
+				storageRoleHistory.recordStartedStorageRole(ssRole);
 				startRole(ssRole, recruited.id(), interf.id(), details, "Restored");
 
 				DUMPTOKEN(recruited.getValue);
@@ -3298,6 +3355,7 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                  backupWorkerCache,
 		                                  rangePartitionedBackupWorkerCache,
 		                                  logRouterCache,
+		                                  storageRoleHistory,
 		                                  runningStorages,
 		                                  storageCleaners,
 		                                  rebootKVSPromise2,

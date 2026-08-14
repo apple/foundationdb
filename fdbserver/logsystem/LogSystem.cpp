@@ -1355,6 +1355,45 @@ void LogSystem::setRangePartitionedBackupWorkers(const std::vector<InitializeRan
 	backupWorkerChanged.trigger();
 }
 
+bool LogSystem::replaceBackupWorker(LogEpoch backupEpoch, UID failedWorkerId, BackupInterface const& replacement) {
+	Reference<LogSet> logset = getEpochLogSet(backupEpoch);
+	if (!logset.isValid()) {
+		return false;
+	}
+
+	for (auto worker = logset->backupWorkers.begin(); worker != logset->backupWorkers.end(); ++worker) {
+		if ((*worker)->get().id() != failedWorkerId) {
+			continue;
+		}
+
+		if (removedBackupWorkers.erase(replacement.id()) != 0) {
+			logset->backupWorkers.erase(worker);
+			oldestBackupEpoch = epoch;
+			for (const auto& old : oldLogData) {
+				if (old.epoch < oldestBackupEpoch && !old.tLogs[0]->backupWorkers.empty()) {
+					oldestBackupEpoch = old.epoch;
+				}
+			}
+			backupWorkerChanged.trigger();
+			TraceEvent("OldBackupWorkerReplacementAlreadyDone", dbgid)
+			    .detail("Epoch", backupEpoch)
+			    .detail("FailedWorkerID", failedWorkerId)
+			    .detail("ReplacementWorkerID", replacement.id());
+			return false;
+		}
+
+		(*worker)->set(OptionalInterface<BackupInterface>(replacement));
+		backupWorkerChanged.trigger();
+		TraceEvent("OldBackupWorkerReplaced", dbgid)
+		    .detail("Epoch", backupEpoch)
+		    .detail("FailedWorkerID", failedWorkerId)
+		    .detail("ReplacementWorkerID", replacement.id());
+		return true;
+	}
+
+	return false;
+}
+
 bool LogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
 	bool removed = false;
 	Reference<LogSet> logset = getEpochLogSet(req.backupEpoch);

@@ -435,6 +435,124 @@ Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	TraceEvent("LogRoutersRecruitmentComplete", cluster->id).detail("Count", tagIds.size());
 }
 
+std::vector<OldBackupWorkerInfo> collectOldBackupWorkers(LogSystemConfig const& config) {
+	std::vector<OldBackupWorkerInfo> workers;
+	for (const auto& old : config.oldTLogs) {
+		const bool rangePartitioned = old.rangePartitionedBackupWorkerTags > 0;
+		const int totalTags = rangePartitioned ? old.rangePartitionedBackupWorkerTags : old.logRouterTags;
+		if (totalTags <= 0) {
+			continue;
+		}
+		for (const auto& logSet : old.tLogs) {
+			for (const auto& worker : logSet.backupWorkers) {
+				if (worker.present()) {
+					workers.push_back({ old.epoch, old.epochEnd, totalTags, rangePartitioned, worker.interf() });
+				}
+			}
+		}
+	}
+	return workers;
+}
+
+bool canMonitorOldBackupWorkers(RecoveryState recoveryState) {
+	return recoveryState >= RecoveryState::ACCEPTING_COMMITS;
+}
+
+bool shouldRestartOldBackupWorkerMonitor(RecoveryState recoveryState,
+                                         LogEpoch monitoredRecoveryCount,
+                                         LogEpoch currentRecoveryCount,
+                                         bool sameLogSystem) {
+	return !canMonitorOldBackupWorkers(recoveryState) || monitoredRecoveryCount != currentRecoveryCount ||
+	       !sameLogSystem;
+}
+
+bool validateOldBackupWorkerProgress(OldBackupWorkerInfo const& failedWorker,
+                                     std::vector<OldBackupWorkerInfo> const& oldWorkers,
+                                     std::map<UID, WorkerBackupStatus> const& workerProgress) {
+	const int8_t locality = failedWorker.rangePartitioned ? tagLocalityRangePartitionedBackup : tagLocalityLogRouter;
+	std::set<Tag> claimedTags;
+	for (const auto& worker : oldWorkers) {
+		if (worker.backupEpoch != failedWorker.backupEpoch) {
+			continue;
+		}
+		if (worker.rangePartitioned != failedWorker.rangePartitioned || worker.totalTags != failedWorker.totalTags) {
+			return false;
+		}
+		auto progress = workerProgress.find(worker.interf.id());
+		if (progress == workerProgress.end()) {
+			continue;
+		}
+		const auto& status = progress->second;
+		if (status.epoch != failedWorker.backupEpoch || status.tag.locality != locality ||
+		    status.totalTags != failedWorker.totalTags || status.tag.id >= failedWorker.totalTags ||
+		    !claimedTags.insert(status.tag).second) {
+			return false;
+		}
+	}
+	return true;
+}
+
+Optional<Tag> resolveOldBackupWorkerTag(OldBackupWorkerInfo const& failedWorker,
+                                        std::vector<OldBackupWorkerInfo> const& oldWorkers,
+                                        std::map<UID, WorkerBackupStatus> const& workerProgress,
+                                        std::map<Tag, Version> const& unfinishedTags) {
+	if (!validateOldBackupWorkerProgress(failedWorker, oldWorkers, workerProgress)) {
+		return Optional<Tag>();
+	}
+	const int8_t locality = failedWorker.rangePartitioned ? tagLocalityRangePartitionedBackup : tagLocalityLogRouter;
+	auto failedProgress = workerProgress.find(failedWorker.interf.id());
+	if (failedProgress != workerProgress.end()) {
+		const auto& status = failedProgress->second;
+		if (status.epoch != failedWorker.backupEpoch || status.tag.locality != locality ||
+		    status.totalTags != failedWorker.totalTags || !unfinishedTags.contains(status.tag)) {
+			return Optional<Tag>();
+		}
+	}
+
+	std::set<Tag> claimedTags;
+	std::vector<UID> unknownWorkers;
+	for (const auto& worker : oldWorkers) {
+		if (worker.backupEpoch != failedWorker.backupEpoch ||
+		    worker.rangePartitioned != failedWorker.rangePartitioned) {
+			continue;
+		}
+
+		auto progress = workerProgress.find(worker.interf.id());
+		if (progress != workerProgress.end()) {
+			if (progress->second.epoch != failedWorker.backupEpoch || progress->second.tag.locality != locality ||
+			    progress->second.totalTags != failedWorker.totalTags) {
+				return Optional<Tag>();
+			}
+			if (!claimedTags.insert(progress->second.tag).second) {
+				return Optional<Tag>();
+			}
+		} else {
+			unknownWorkers.push_back(worker.interf.id());
+		}
+	}
+
+	if (failedProgress != workerProgress.end()) {
+		return failedProgress->second.tag;
+	}
+
+	auto unknown = std::find(unknownWorkers.begin(), unknownWorkers.end(), failedWorker.interf.id());
+	if (unknown == unknownWorkers.end()) {
+		return Optional<Tag>();
+	}
+	const auto unknownIndex = static_cast<size_t>(std::distance(unknownWorkers.begin(), unknown));
+	std::vector<Tag> unclaimedTags;
+	for (const auto& [tag, version] : unfinishedTags) {
+		(void)version;
+		if (tag.locality == locality && !claimedTags.contains(tag)) {
+			unclaimedTags.push_back(tag);
+		}
+	}
+	if (unknownIndex >= unclaimedTags.size()) {
+		return Optional<Tag>();
+	}
+	return unclaimedTags[unknownIndex];
+}
+
 Future<std::vector<int>> monitorLogRouters(Reference<LogSystem> logSystem, int logSetIndex) {
 	std::vector<Future<Void>> failures;
 	LogSystemConfig config = logSystem->getLogSystemConfig();
@@ -577,6 +695,290 @@ Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 		    };
 
 		co_await monitorAndRecruitWorkerSet(self, recoveryCount, "LogRouter", monitor, recruit);
+	}
+}
+
+struct OldBackupWorkerProgress {
+	Optional<Value> started;
+	std::map<UID, WorkerBackupStatus> workers;
+};
+
+Future<OldBackupWorkerProgress> getOldBackupWorkerProgress(ClusterControllerData* self) {
+	Transaction tr(self->cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Future<Optional<Value>> started = tr.get(backupStartedKey);
+			RangeResult entries = co_await tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!entries.more && entries.size() < CLIENT_KNOBS->TOO_MANY);
+
+			OldBackupWorkerProgress progress;
+			progress.started = co_await started;
+			for (const auto& entry : entries) {
+				progress.workers.emplace(decodeBackupProgressKey(entry.key), decodeBackupProgressValue(entry.value));
+			}
+			co_return progress;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+Future<Optional<OldBackupWorkerInfo>> waitForFailedOldBackupWorker(ClusterControllerData* self,
+                                                                   Reference<LogSystem> logSystem) {
+	const LogEpoch recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
+	std::vector<OldBackupWorkerInfo> workers = collectOldBackupWorkers(logSystem->getLogSystemConfig());
+	std::vector<Future<Void>> failures;
+	failures.reserve(workers.size());
+	for (const auto& worker : workers) {
+		failures.push_back(
+		    waitFailureClient(worker.interf.waitFailure,
+		                      SERVER_KNOBS->BACKUP_TIMEOUT,
+		                      -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+		                      /* trace */ true,
+		                      /* traceMsg */ "OldBackupWorkerFailed"_sr));
+	}
+
+	Future<Void> workerFailed = failures.empty() ? Never() : quorum(failures, 1);
+	Future<Void> workersChanged = logSystem->backupWorkerChanged.onTrigger();
+	Future<Void> serverInfoChanged = self->db.serverInfo->onChange();
+	while (true) {
+		auto result = co_await race(workerFailed, workersChanged, serverInfoChanged);
+		if (result.index() == 0) {
+			for (int i = 0; i < failures.size(); ++i) {
+				if (failures[i].isReady() || failures[i].isError()) {
+					co_return Optional<OldBackupWorkerInfo>(workers[i]);
+				}
+			}
+			co_return Optional<OldBackupWorkerInfo>();
+		}
+		if (result.index() == 1 || !self->db.recoveryData.isValid() ||
+		    shouldRestartOldBackupWorkerMonitor(self->db.serverInfo->get().recoveryState,
+		                                        recoveryCount,
+		                                        self->db.recoveryData->cstate.myDBState.recoveryCount,
+		                                        self->db.recoveryData->logSystem.getPtr() == logSystem.getPtr())) {
+			co_return Optional<OldBackupWorkerInfo>();
+		}
+		serverInfoChanged = self->db.serverInfo->onChange();
+	}
+}
+
+bool isCurrentOldBackupRecovery(ClusterControllerData* self,
+                                Reference<LogSystem> const& logSystem,
+                                LogEpoch recoveryCount) {
+	return self->db.recoveryData.isValid() && self->db.recoveryData->cstate.myDBState.recoveryCount == recoveryCount &&
+	       self->db.recoveryData->logSystem.getPtr() == logSystem.getPtr() &&
+	       canMonitorOldBackupWorkers(self->db.serverInfo->get().recoveryState);
+}
+
+bool removeFinishedOldBackupWorker(ClusterControllerData* self,
+                                   Reference<LogSystem> const& logSystem,
+                                   OldBackupWorkerInfo const& worker) {
+	if (!logSystem->removeBackupWorker(BackupWorkerDoneRequest(worker.interf.id(), worker.backupEpoch))) {
+		return false;
+	}
+	self->db.recoveryData->registrationTrigger.trigger();
+	TraceEvent("OldBackupWorkerNoWorkRemaining", self->id)
+	    .detail("Epoch", worker.backupEpoch)
+	    .detail("WorkerID", worker.interf.id());
+	return true;
+}
+
+Future<Void> rerecruitFailedOldBackupWorker(ClusterControllerData* self,
+                                            Reference<LogSystem> logSystem,
+                                            LogEpoch recoveryCount,
+                                            OldBackupWorkerInfo failedWorker) {
+	OldBackupWorkerProgress persisted = co_await getOldBackupWorkerProgress(self);
+	if (!isCurrentOldBackupRecovery(self, logSystem, recoveryCount)) {
+		co_return;
+	}
+
+	std::vector<OldBackupWorkerInfo> oldWorkers = collectOldBackupWorkers(logSystem->getLogSystemConfig());
+	auto failed = std::find_if(oldWorkers.begin(), oldWorkers.end(), [&failedWorker](const auto& worker) {
+		return worker.backupEpoch == failedWorker.backupEpoch && worker.interf.id() == failedWorker.interf.id();
+	});
+	if (failed == oldWorkers.end()) {
+		co_return;
+	}
+	failedWorker = *failed;
+
+	auto status = persisted.workers.find(failedWorker.interf.id());
+	if (status != persisted.workers.end()) {
+		const int8_t expectedLocality =
+		    failedWorker.rangePartitioned ? tagLocalityRangePartitionedBackup : tagLocalityLogRouter;
+		if (status->second.epoch != failedWorker.backupEpoch || status->second.tag.locality != expectedLocality ||
+		    status->second.totalTags != failedWorker.totalTags) {
+			TraceEvent(SevWarn, "OldBackupWorkerInvalidProgress", self->id)
+			    .detail("Epoch", failedWorker.backupEpoch)
+			    .detail("WorkerID", failedWorker.interf.id());
+			throw recruitment_failed();
+		}
+	}
+	if (!validateOldBackupWorkerProgress(failedWorker, oldWorkers, persisted.workers)) {
+		TraceEvent(SevWarn, "OldBackupWorkerInvalidSiblingProgress", self->id)
+		    .detail("Epoch", failedWorker.backupEpoch)
+		    .detail("WorkerID", failedWorker.interf.id());
+		throw recruitment_failed();
+	}
+
+	Optional<Version> minBackupVersion;
+	if (persisted.started.present()) {
+		for (const auto& [backupId, version] : decodeBackupStartedValue(persisted.started.get())) {
+			(void)backupId;
+			minBackupVersion = minBackupVersion.present() ? std::min(minBackupVersion.get(), version) : version;
+		}
+	}
+	if (!minBackupVersion.present() || minBackupVersion.get() + 1 >= failedWorker.epochEnd) {
+		removeFinishedOldBackupWorker(self, logSystem, failedWorker);
+		co_return;
+	}
+
+	auto epochInfos = failedWorker.rangePartitioned ? logSystem->getOldEpochRangePartitionedBackupTagsInfo()
+	                                                : logSystem->getOldEpochLogRouterTagsInfo();
+	std::map<LogEpoch, int32_t> progressTagCounts;
+	for (const auto& [workerId, workerStatus] : persisted.workers) {
+		(void)workerId;
+		auto [epochTagCount, inserted] = progressTagCounts.emplace(workerStatus.epoch, workerStatus.totalTags);
+		if (!inserted && epochTagCount->second != workerStatus.totalTags) {
+			TraceEvent(SevWarn, "OldBackupWorkerInconsistentProgress", self->id)
+			    .detail("Epoch", workerStatus.epoch)
+			    .detail("WorkerID", failedWorker.interf.id());
+			throw recruitment_failed();
+		}
+	}
+	Reference<BackupProgress> progress(new BackupProgress(self->id, epochInfos));
+	progress->setBackupStartedValue(persisted.started);
+	for (const auto& [workerId, workerStatus] : persisted.workers) {
+		(void)workerId;
+		progress->addBackupStatus(workerStatus);
+	}
+	auto unfinished = failedWorker.rangePartitioned ? progress->getUnfinishedRangePartitionedBackup()
+	                                                : progress->getUnfinishedPartitionedBackup();
+	auto unfinishedEpoch = std::find_if(unfinished.begin(), unfinished.end(), [&failedWorker](const auto& entry) {
+		return std::get<0>(entry.first) == failedWorker.backupEpoch;
+	});
+	if (unfinishedEpoch == unfinished.end()) {
+		removeFinishedOldBackupWorker(self, logSystem, failedWorker);
+		co_return;
+	}
+
+	Optional<Tag> tag = resolveOldBackupWorkerTag(failedWorker, oldWorkers, persisted.workers, unfinishedEpoch->second);
+	if (!tag.present()) {
+		if (status != persisted.workers.end() && !unfinishedEpoch->second.contains(status->second.tag)) {
+			removeFinishedOldBackupWorker(self, logSystem, failedWorker);
+			co_return;
+		}
+		TraceEvent(SevWarn, "OldBackupWorkerTagUnknown", self->id)
+		    .detail("Epoch", failedWorker.backupEpoch)
+		    .detail("WorkerID", failedWorker.interf.id());
+		throw recruitment_failed();
+	}
+	auto start = unfinishedEpoch->second.find(tag.get());
+	if (start == unfinishedEpoch->second.end()) {
+		throw recruitment_failed();
+	}
+
+	std::map<Optional<Standalone<StringRef>>, int> workersUsed;
+	self->updateKnownIds(&workersUsed);
+	auto candidates = self->getWorkersForRoleInDatacenter(failedWorker.interf.locality.dcId(),
+	                                                      recruitment::Backup,
+	                                                      static_cast<int>(self->id_worker.size()),
+	                                                      self->db.config,
+	                                                      workersUsed);
+	auto replacement = std::find_if(candidates.begin(), candidates.end(), [&failedWorker](const auto& candidate) {
+		return candidate.interf.locality.processId() != failedWorker.interf.locality.processId() &&
+		       candidate.interf.address() != failedWorker.interf.address();
+	});
+	if (replacement == candidates.end()) {
+		TraceEvent(SevWarn, "OldBackupWorkerNoReplacement", self->id)
+		    .detail("Epoch", failedWorker.backupEpoch)
+		    .detail("FailedWorkerID", failedWorker.interf.id());
+		throw recruitment_failed();
+	}
+
+	const Version endVersion = std::get<1>(unfinishedEpoch->first) - 1;
+	BackupInterface replacementInterface;
+	if (failedWorker.rangePartitioned) {
+		InitializeRangePartitionedBackupRequest request(deterministicRandom()->randomUniqueID());
+		request.recruitedEpoch = recoveryCount;
+		request.backupEpoch = failedWorker.backupEpoch;
+		request.tag = tag.get();
+		request.totalTags = std::get<2>(unfinishedEpoch->first);
+		request.startVersion = start->second;
+		request.endVersion = endVersion;
+		InitializeRangePartitionedBackupReply reply =
+		    co_await throwErrorOr(replacement->interf.rangePartitionedBackup.getReplyUnlessFailedFor(
+		        request, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY));
+		replacementInterface = reply.interf;
+	} else {
+		InitializeBackupRequest request(deterministicRandom()->randomUniqueID());
+		request.recruitedEpoch = recoveryCount;
+		request.backupEpoch = failedWorker.backupEpoch;
+		request.tag = tag.get();
+		request.totalTags = std::get<2>(unfinishedEpoch->first);
+		request.startVersion = start->second;
+		request.endVersion = endVersion;
+		InitializeBackupReply reply = co_await throwErrorOr(replacement->interf.backup.getReplyUnlessFailedFor(
+		    request, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY));
+		replacementInterface = reply.interf;
+	}
+
+	if (!isCurrentOldBackupRecovery(self, logSystem, recoveryCount)) {
+		co_return;
+	}
+	const bool replaced =
+	    logSystem->replaceBackupWorker(failedWorker.backupEpoch, failedWorker.interf.id(), replacementInterface);
+	if (replaced) {
+		self->db.recoveryData->registrationTrigger.trigger();
+		TraceEvent("OldBackupWorkerRecruited", self->id)
+		    .detail("Epoch", failedWorker.backupEpoch)
+		    .detail("FailedWorkerID", failedWorker.interf.id())
+		    .detail("ReplacementWorkerID", replacementInterface.id())
+		    .detail("Tag", tag.get().toString())
+		    .detail("StartVersion", start->second)
+		    .detail("EndVersion", endVersion)
+		    .detail("RangePartitioned", failedWorker.rangePartitioned);
+	} else {
+		self->db.recoveryData->registrationTrigger.trigger();
+	}
+}
+
+Future<Void> monitorAndRecruitOldBackupWorkers(ClusterControllerData* self) {
+	double failedRecruitDelay = 1.0;
+	while (true) {
+		while (!self->db.recoveryData.isValid() || !self->db.recoveryData->logSystem.isValid() ||
+		       !canMonitorOldBackupWorkers(self->db.serverInfo->get().recoveryState)) {
+			co_await self->db.serverInfo->onChange();
+		}
+
+		Reference<LogSystem> logSystem = self->db.recoveryData->logSystem;
+		const LogEpoch recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
+		Error recruitmentError;
+		try {
+			Optional<OldBackupWorkerInfo> failed = co_await waitForFailedOldBackupWorker(self, logSystem);
+			if (!failed.present() || !isCurrentOldBackupRecovery(self, logSystem, recoveryCount)) {
+				continue;
+			}
+			co_await rerecruitFailedOldBackupWorker(self, logSystem, recoveryCount, failed.get());
+			failedRecruitDelay = 1.0;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			recruitmentError = e;
+			TraceEvent(SevWarnAlways, "OldBackupWorkerRecruitmentFailed", self->id)
+			    .error(e)
+			    .detail("RecoveryCount", recoveryCount)
+			    .detail("RetryDelay", failedRecruitDelay);
+		}
+		if (recruitmentError.code() != invalid_error_code) {
+			co_await delay(failedRecruitDelay);
+			failedRecruitDelay = std::min(failedRecruitDelay * 2, 60.0);
+		}
 	}
 }
 
@@ -3266,6 +3668,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	// These actors also drain durable CDC state when new stream registration is disabled.
 	self.addActor.send(monitorCDCProxyAssignments(&self));
 	self.addActor.send(monitorAndRecruitCDCProxies(&self));
+	self.addActor.send(monitorAndRecruitOldBackupWorkers(&self));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));
@@ -3461,6 +3864,205 @@ Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
 }
 
 namespace {
+
+BackupInterface makeOldBackupWorker(NetworkAddress const& address, UID id, std::string const& processId) {
+	LocalityData locality;
+	locality.set(LocalityData::keyProcessId, Standalone<StringRef>(processId));
+	BackupInterface worker(locality);
+	worker.waitFailure = RequestStream<ReplyPromise<Void>>(Endpoint({ address }, id));
+	return worker;
+}
+
+LogSystemConfig makeOldBackupWorkerConfiguration(LogEpoch currentEpoch,
+                                                 LogEpoch oldEpoch,
+                                                 Version oldEndVersion,
+                                                 int oldClassicTags,
+                                                 int oldRangePartitionedTags,
+                                                 BackupInterface const& currentWorker,
+                                                 std::vector<BackupInterface> const& oldWorkers) {
+	LogSystemConfig config(currentEpoch);
+	config.logRouterTags = 1;
+	config.rangePartitionedBackupWorkerTags = oldRangePartitionedTags > 0 ? 1 : 0;
+	config.oldestBackupEpoch = oldEpoch;
+
+	TLogSet currentSet;
+	currentSet.backupWorkers.emplace_back(currentWorker);
+	config.tLogs.push_back(currentSet);
+
+	TLogSet oldSet;
+	for (auto const& worker : oldWorkers) {
+		oldSet.backupWorkers.emplace_back(worker);
+	}
+	OldTLogConf old;
+	old.epoch = oldEpoch;
+	old.epochBegin = 100;
+	old.epochEnd = oldEndVersion;
+	old.logRouterTags = oldClassicTags;
+	old.rangePartitionedBackupWorkerTags = oldRangePartitionedTags;
+	old.tLogs.push_back(oldSet);
+	config.oldTLogs.push_back(old);
+	return config;
+}
+
+TEST_CASE("/fdbserver/clustercontroller/oldBackupWorker/preservesFailureDeadlineAcrossRecoveryUpdates") {
+	constexpr LogEpoch monitoredRecovery = 17;
+	ASSERT(!canMonitorOldBackupWorkers(RecoveryState::WRITING_CSTATE));
+	ASSERT(canMonitorOldBackupWorkers(RecoveryState::ACCEPTING_COMMITS));
+	ASSERT(canMonitorOldBackupWorkers(RecoveryState::FULLY_RECOVERED));
+
+	for (int update = 0; update < 100; ++update) {
+		ASSERT(!shouldRestartOldBackupWorkerMonitor(
+		    RecoveryState::ACCEPTING_COMMITS, monitoredRecovery, monitoredRecovery, true));
+	}
+	ASSERT(!shouldRestartOldBackupWorkerMonitor(
+	    RecoveryState::FULLY_RECOVERED, monitoredRecovery, monitoredRecovery, true));
+	ASSERT(shouldRestartOldBackupWorkerMonitor(
+	    RecoveryState::ACCEPTING_COMMITS, monitoredRecovery, monitoredRecovery + 1, true));
+	ASSERT(
+	    shouldRestartOldBackupWorkerMonitor(RecoveryState::WRITING_CSTATE, monitoredRecovery, monitoredRecovery, true));
+	ASSERT(shouldRestartOldBackupWorkerMonitor(
+	    RecoveryState::ACCEPTING_COMMITS, monitoredRecovery, monitoredRecovery, false));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/oldBackupWorker/collectsClassicAndRangePartitionedGenerations") {
+	constexpr LogEpoch currentEpoch = 20;
+	constexpr LogEpoch oldEpoch = 19;
+	NetworkAddress sharedAddress(IPAddress(0x01010101), 1);
+	BackupInterface currentWorker = makeOldBackupWorker(sharedAddress, UID(1, 1), "shared-process");
+	BackupInterface colocatedOldWorker = makeOldBackupWorker(sharedAddress, UID(1, 2), "shared-process");
+	BackupInterface oldOnlyWorker =
+	    makeOldBackupWorker(NetworkAddress(IPAddress(0x02020202), 1), UID(2, 1), "old-only-process");
+	LogSystemConfig classic = makeOldBackupWorkerConfiguration(
+	    currentEpoch, oldEpoch, 500, 2, 0, currentWorker, { colocatedOldWorker, oldOnlyWorker });
+
+	std::vector<OldBackupWorkerInfo> workers = collectOldBackupWorkers(classic);
+	ASSERT_EQ(workers.size(), 2);
+	ASSERT(workers[0].interf == colocatedOldWorker);
+	ASSERT(workers[1].interf == oldOnlyWorker);
+	ASSERT(workers[0].interf.address() == currentWorker.address());
+	ASSERT(workers[0].interf.id() != currentWorker.id());
+	ASSERT_EQ(workers[0].backupEpoch, oldEpoch);
+	ASSERT_EQ(workers[0].epochEnd, 500);
+	ASSERT_EQ(workers[0].totalTags, 2);
+	ASSERT(!workers[0].rangePartitioned);
+
+	LogSystemConfig rangePartitioned =
+	    makeOldBackupWorkerConfiguration(currentEpoch, oldEpoch, 800, 0, 3, currentWorker, { oldOnlyWorker });
+	workers = collectOldBackupWorkers(rangePartitioned);
+	ASSERT_EQ(workers.size(), 1);
+	ASSERT(workers[0].interf == oldOnlyWorker);
+	ASSERT(workers[0].rangePartitioned);
+	ASSERT_EQ(workers[0].totalTags, 3);
+	ASSERT_EQ(workers[0].epochEnd, 800);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/oldBackupWorker/resolvesPersistedAndFirstSaveClassicTags") {
+	constexpr LogEpoch oldEpoch = 59;
+	BackupInterface currentWorker = makeOldBackupWorker(NetworkAddress(IPAddress(0x03030303), 1), UID(3, 1), "current");
+	BackupInterface knownWorker = makeOldBackupWorker(NetworkAddress(IPAddress(0x04040404), 1), UID(4, 1), "known");
+	BackupInterface firstUnsavedWorker =
+	    makeOldBackupWorker(NetworkAddress(IPAddress(0x05050505), 1), UID(5, 1), "first-unsaved");
+	BackupInterface secondUnsavedWorker =
+	    makeOldBackupWorker(NetworkAddress(IPAddress(0x06060606), 1), UID(6, 1), "second-unsaved");
+	LogSystemConfig config = makeOldBackupWorkerConfiguration(
+	    oldEpoch + 1, oldEpoch, 700, 3, 0, currentWorker, { knownWorker, firstUnsavedWorker, secondUnsavedWorker });
+	std::vector<OldBackupWorkerInfo> oldWorkers = collectOldBackupWorkers(config);
+	Tag knownTag(tagLocalityLogRouter, 0);
+	Tag firstUnsavedTag(tagLocalityLogRouter, 1);
+	Tag secondUnsavedTag(tagLocalityLogRouter, 2);
+	std::map<UID, WorkerBackupStatus> progress;
+	progress.emplace(knownWorker.id(), WorkerBackupStatus(oldEpoch, 150, knownTag, 3));
+	std::map<Tag, Version> unfinished{ { knownTag, 151 }, { firstUnsavedTag, 100 }, { secondUnsavedTag, 100 } };
+
+	Optional<Tag> firstResolved = resolveOldBackupWorkerTag(oldWorkers[1], oldWorkers, progress, unfinished);
+	Optional<Tag> secondResolved = resolveOldBackupWorkerTag(oldWorkers[2], oldWorkers, progress, unfinished);
+	ASSERT(firstResolved.present());
+	ASSERT(secondResolved.present());
+	ASSERT(firstResolved.get() == firstUnsavedTag);
+	ASSERT(secondResolved.get() == secondUnsavedTag);
+
+	progress.emplace(secondUnsavedWorker.id(), WorkerBackupStatus(oldEpoch, 349, secondUnsavedTag, 3));
+	secondResolved = resolveOldBackupWorkerTag(oldWorkers[2], oldWorkers, progress, unfinished);
+	ASSERT(secondResolved.present());
+	ASSERT(secondResolved.get() == secondUnsavedTag);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/oldBackupWorker/resolvesPersistedRangePartitionedTag") {
+	constexpr LogEpoch oldEpoch = 49;
+	BackupInterface currentWorker = makeOldBackupWorker(NetworkAddress(IPAddress(0x07070707), 1), UID(7, 1), "current");
+	BackupInterface failedWorker = makeOldBackupWorker(NetworkAddress(IPAddress(0x08080808), 1), UID(8, 1), "failed");
+	LogSystemConfig config =
+	    makeOldBackupWorkerConfiguration(oldEpoch + 1, oldEpoch, 900, 0, 2, currentWorker, { failedWorker });
+	std::vector<OldBackupWorkerInfo> oldWorkers = collectOldBackupWorkers(config);
+	Tag failedTag(tagLocalityRangePartitionedBackup, 1);
+	std::map<UID, WorkerBackupStatus> progress;
+	progress.emplace(failedWorker.id(), WorkerBackupStatus(oldEpoch, 450, failedTag, 2));
+	std::map<Tag, Version> unfinished{ { Tag(tagLocalityRangePartitionedBackup, 0), 100 }, { failedTag, 451 } };
+
+	Optional<Tag> resolved = resolveOldBackupWorkerTag(oldWorkers[0], oldWorkers, progress, unfinished);
+	ASSERT(resolved.present());
+	ASSERT(resolved.get() == failedTag);
+
+	progress[failedWorker.id()] = WorkerBackupStatus(oldEpoch, 450, Tag(tagLocalityRangePartitionedBackup, 2), 2);
+	ASSERT(!validateOldBackupWorkerProgress(oldWorkers[0], oldWorkers, progress));
+	ASSERT(!resolveOldBackupWorkerTag(oldWorkers[0], oldWorkers, progress, unfinished).present());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/oldBackupWorker/rejectsAmbiguousAndMalformedPersistedProgress") {
+	constexpr LogEpoch oldEpoch = 99;
+	BackupInterface currentWorker = makeOldBackupWorker(NetworkAddress(IPAddress(0x09090909), 1), UID(9, 1), "current");
+	BackupInterface firstSibling = makeOldBackupWorker(NetworkAddress(IPAddress(0x0a0a0a0a), 1), UID(10, 1), "first");
+	BackupInterface secondSibling = makeOldBackupWorker(NetworkAddress(IPAddress(0x0b0b0b0b), 1), UID(11, 1), "second");
+	BackupInterface failedWorker = makeOldBackupWorker(NetworkAddress(IPAddress(0x0c0c0c0c), 1), UID(12, 1), "failed");
+	LogSystemConfig config = makeOldBackupWorkerConfiguration(
+	    oldEpoch + 1, oldEpoch, 900, 3, 0, currentWorker, { firstSibling, secondSibling, failedWorker });
+	std::vector<OldBackupWorkerInfo> oldWorkers = collectOldBackupWorkers(config);
+	Tag firstTag(tagLocalityLogRouter, 0);
+	Tag secondTag(tagLocalityLogRouter, 1);
+	Tag failedTag(tagLocalityLogRouter, 2);
+	std::map<Tag, Version> unfinished{ { firstTag, 200 }, { secondTag, 300 }, { failedTag, 400 } };
+	std::map<UID, WorkerBackupStatus> progress;
+	progress.emplace(firstSibling.id(), WorkerBackupStatus(oldEpoch, 199, firstTag, 3));
+	progress.emplace(secondSibling.id(), WorkerBackupStatus(oldEpoch, 299, secondTag, 3));
+	progress.emplace(failedWorker.id(), WorkerBackupStatus(oldEpoch, 399, failedTag, 3));
+	ASSERT(validateOldBackupWorkerProgress(oldWorkers[2], oldWorkers, progress));
+
+	progress[firstSibling.id()] = WorkerBackupStatus(oldEpoch, 199, Tag(tagLocalityLogRouter, 3), 3);
+	ASSERT(!validateOldBackupWorkerProgress(oldWorkers[2], oldWorkers, progress));
+	ASSERT(!resolveOldBackupWorkerTag(oldWorkers[2], oldWorkers, progress, unfinished).present());
+
+	progress[firstSibling.id()] = WorkerBackupStatus(oldEpoch, 199, firstTag, 3);
+	progress[failedWorker.id()] = WorkerBackupStatus(oldEpoch, 399, Tag(tagLocalityLogRouter, 3), 3);
+	ASSERT(!validateOldBackupWorkerProgress(oldWorkers[2], oldWorkers, progress));
+	ASSERT(!resolveOldBackupWorkerTag(oldWorkers[2], oldWorkers, progress, unfinished).present());
+	progress[failedWorker.id()] = WorkerBackupStatus(oldEpoch, 399, failedTag, 3);
+
+	progress[firstSibling.id()] = WorkerBackupStatus(oldEpoch - 1, 199, firstTag, 3);
+	ASSERT(!validateOldBackupWorkerProgress(oldWorkers[2], oldWorkers, progress));
+	ASSERT(!resolveOldBackupWorkerTag(oldWorkers[2], oldWorkers, progress, unfinished).present());
+
+	progress[firstSibling.id()] = WorkerBackupStatus(oldEpoch, 199, Tag(tagLocalityRangePartitionedBackup, 0), 3);
+	ASSERT(!validateOldBackupWorkerProgress(oldWorkers[2], oldWorkers, progress));
+	ASSERT(!resolveOldBackupWorkerTag(oldWorkers[2], oldWorkers, progress, unfinished).present());
+
+	progress[firstSibling.id()] = WorkerBackupStatus(oldEpoch, 199, firstTag, 4);
+	ASSERT(!validateOldBackupWorkerProgress(oldWorkers[2], oldWorkers, progress));
+	ASSERT(!resolveOldBackupWorkerTag(oldWorkers[2], oldWorkers, progress, unfinished).present());
+
+	progress[firstSibling.id()] = WorkerBackupStatus(oldEpoch, 199, secondTag, 3);
+	ASSERT(!validateOldBackupWorkerProgress(oldWorkers[2], oldWorkers, progress));
+	ASSERT(!resolveOldBackupWorkerTag(oldWorkers[2], oldWorkers, progress, unfinished).present());
+
+	progress.clear();
+	ASSERT(!resolveOldBackupWorkerTag(oldWorkers[2], oldWorkers, progress, std::map<Tag, Version>{ { failedTag, 400 } })
+	            .present());
+	ASSERT(!resolveOldBackupWorkerTag(oldWorkers[2], oldWorkers, progress, {}).present());
+	return Void();
+}
 
 void addProcessesToSameDC(ClusterControllerData& self, const std::vector<NetworkAddress>&& processes) {
 	LocalityData locality;
