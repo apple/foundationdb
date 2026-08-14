@@ -675,11 +675,24 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 					continue;
 				}
 				if (job.getPhase() == BulkLoadJobPhase::Error) {
-					TraceEvent(SevError, "BulkLoadRestoreJobEndedInError")
+					// A task that could not be loaded is a property of this restore, not a defect in
+					// the code, so this is not SevError: the restore failing is the signal, and a
+					// SevError would additionally fail any simulation that provokes the condition.
+					TraceEvent(SevWarnAlways, "BulkLoadRestoreJobEndedInError")
 					    .detail("RestoreUID", restoreUid)
 					    .detail("BulkLoadJobId", jobId)
 					    .detail("JobRange", job.getJobRange())
 					    .detail("JobPhase", convertBulkLoadJobPhaseToString(job.getPhase()));
+					// Terminal, and it has to be said in the restore's own state: retrying re-reads the
+					// same finished job, finds the same Error, and gets here again -- observed as eleven
+					// attempts before the test's timeout. Abort the way an incompatible backup does.
+					co_await restore.logError(
+					    cx, restore_bulkload_failed(), "BulkLoad restore failed: a bulkload task ended in error");
+					Reference<ReadYourWritesTransaction> abortTr(new ReadYourWritesTransaction(cx));
+					abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					abortTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					restore.stateEnum().set(abortTr, ERestoreState::ABORTED);
+					co_await abortTr->commit();
 					throw restore_bulkload_failed();
 				}
 				break;
