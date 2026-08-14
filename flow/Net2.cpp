@@ -51,7 +51,7 @@
 #include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include "flow/TaskQueue.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/ChaosMetrics.h"
 #include "flow/TDMetric.h"
 #include "flow/AsioReactor.h"
@@ -60,7 +60,7 @@
 #include "flow/SendBufferIterator.h"
 #include "flow/TLSConfig.h"
 #include "flow/WatchFile.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Util.h"
 #include "flow/UnitTest.h"
 #include "flow/ScopeExit.h"
@@ -206,7 +206,7 @@ public:
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
+			onMainThreadVoid([this, fn = std::move(fn)]() mutable { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
 	bool isSimulated() const override { return false; }
@@ -302,8 +302,14 @@ public:
 	void trackAtPriority(TaskPriority priority, double now);
 	void stopImmediately() {
 #ifdef ADDRESS_SANITIZER
-		// Do leak check before intentionally leaking a bunch of memory
-		__lsan_do_leak_check();
+		// Intentionally NOT calling __lsan_do_leak_check() here.
+		// LSAN will still run at process exit. Calling it explicitly causes
+		// timeouts in CI because the symbolizer (llvm-addr2line) can take
+		// 45+ seconds to resolve stacks from dynamically loaded external
+		// client libraries (libfdb_c_external.so), exceeding the ctest timeout.
+		// The original deadlock (multiple threads calling __lsan_do_leak_check()
+		// concurrently) was fixed in #13224 but the single-thread symbolizer
+		// slowness remains.
 #endif
 		stopped = true;
 		taskQueue.clear();
@@ -414,8 +420,9 @@ public:
 				}
 
 				p.sendError(connection_failed());
-			} else
+			} else {
 				p.send(Void());
+			}
 		} catch (Error& e) {
 			p.sendError(e);
 		} catch (...) {
@@ -519,11 +526,12 @@ public:
 			// positive so check explicitly.
 			ASSERT(limit > 0);
 			bool notEmpty = false;
-			for (auto p = data; p; p = p->next)
+			for (auto p = data; p; p = p->next) {
 				if (p->bytes_written - p->bytes_sent > 0) {
 					notEmpty = true;
 					break;
 				}
+			}
 			ASSERT(notEmpty);
 
 			if (err == boost::asio::error::would_block) {
@@ -571,13 +579,14 @@ private:
 	void closeSocket() {
 		boost::system::error_code error;
 		socket.close(error);
-		if (error)
+		if (error) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("PeerAddr", peer_address)
 			    .detail("PeerAddress", peer_address)
 			    .detail("ErrorCode", error.value())
 			    .detail("Message", error.message());
+		}
 	}
 
 	void onReadError(const boost::system::error_code& error) {
@@ -751,11 +760,12 @@ private:
 	void closeSocket() {
 		boost::system::error_code error;
 		socket.close(error);
-		if (error)
+		if (error) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("ErrorCode", error.value())
 			    .detail("Message", error.message());
+		}
 	}
 
 	void onReadError(const boost::system::error_code& error) {
@@ -912,7 +922,8 @@ public:
 	static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
 	                                              Reference<ReferencedObject<boost::asio::ssl::context>> context,
 	                                              NetworkAddress addr,
-	                                              tcp::socket* existingSocket = nullptr) {
+	                                              tcp::socket* existingSocket = nullptr,
+	                                              std::string hostname = {}) {
 		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
@@ -939,6 +950,7 @@ public:
 
 		Reference<SSLConnection> self(new SSLConnection(*ios, context));
 		self->peer_address = addr;
+		self->sni_hostname = std::move(hostname);
 		try {
 			auto to = tcpEndpoint(self->peer_address);
 			BindPromise p("N2_ConnectError", self->id, self->peer_address);
@@ -946,51 +958,6 @@ public:
 			self->socket.async_connect(to, std::move(p));
 
 			co_await onConnected;
-			self->init();
-			co_return self;
-		} catch (Error&) {
-			// Either the connection failed, or was cancelled by the caller
-			self->closeSocket();
-			throw;
-		}
-	}
-
-	// Connect with hostname for SNI (Server Name Indication) support
-	static Future<Reference<IConnection>> connectWithHostname(
-	    boost::asio::io_service* ios,
-	    Reference<ReferencedObject<boost::asio::ssl::context>> context,
-	    NetworkAddress addr,
-	    std::string hostname) {
-		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
-		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-			if (now() < iter->second.second) {
-				if (iter->second.first >= FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS) {
-					TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", addr);
-					co_await delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
-					throw connection_failed();
-				}
-			} else {
-				g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
-			}
-		}
-
-		Reference<SSLConnection> self(new SSLConnection(*ios, context));
-		self->peer_address = addr;
-		self->sni_hostname = hostname; // Store hostname for SNI during handshake
-
-		// Store hostname for SNI use during handshake
-
-		try {
-			auto to = tcpEndpoint(self->peer_address);
-			BindPromise p("N2_ConnectError", self->id, self->peer_address);
-			Future<Void> onConnected = p.getFuture();
-			self->socket.async_connect(to, std::move(p));
-
-			co_await onConnected;
-
-			// SNI will be set later in doConnectHandshake before SSL handshake
-
 			self->init();
 			co_return self;
 		} catch (Error&) {
@@ -1268,11 +1235,12 @@ public:
 			// positive so check explicitly.
 			ASSERT(limit > 0);
 			bool notEmpty = false;
-			for (auto p = data; p; p = p->next)
+			for (auto p = data; p; p = p->next) {
 				if (p->bytes_written - p->bytes_sent > 0) {
 					notEmpty = true;
 					break;
 				}
+			}
 			ASSERT(notEmpty);
 
 			if (err == boost::asio::error::would_block) {
@@ -1886,13 +1854,14 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, T
 			sampleRate = 1; // Always include slow task events that could show up in our slow task profiling.
 		}
 
-		if (!DEBUG_DETERMINISM && (nondeterministicRandom()->random01() < sampleRate))
+		if (!DEBUG_DETERMINISM && (nondeterministicRandom()->random01() < sampleRate)) {
 			TraceEvent(elapsed > warnThreshold ? SevWarnAlways : SevInfo, "SlowTask")
 			    .detail("TaskID", priority)
 			    .detail("MClocks", elapsed / 1e6)
 			    .detail("Duration", duration)
 			    .detail("SampleRate", sampleRate)
 			    .detail("NumYields", numYields);
+		}
 	}
 }
 
@@ -2008,7 +1977,7 @@ Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr) {
 Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr, const std::string& hostname) {
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
-		return SSLConnection::connectWithHostname(&this->reactor.ios, this->sslContextVar.get(), toAddr, hostname);
+		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, nullptr, hostname);
 	}
 	return connect(toAddr);
 }
@@ -2070,7 +2039,7 @@ static Future<Void> coordinatorDNSCacheRefresh(Net2* self) {
 	if (!FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
 		co_return;
 	}
-	loop {
+	while (true) {
 		co_await delay(FLOW_KNOBS->COORDINATOR_DNS_CACHE_REFRESH_INTERVAL);
 		std::vector<std::string> keys = self->dnsCache.getKeys();
 		for (int i = 0; i < keys.size(); i++) {
@@ -2191,9 +2160,9 @@ Reference<IListener> Net2::listen(NetworkAddress localAddr) {
 	try {
 		if (localAddr.isTLS()) {
 			initTLS(ETLSInitState::LISTEN);
-			return Reference<IListener>(new SSLListener(reactor.ios, &this->sslContextVar, localAddr));
+			return makeReference<SSLListener>(reactor.ios, &this->sslContextVar, localAddr);
 		}
-		return Reference<IListener>(new Listener(reactor.ios, localAddr));
+		return makeReference<Listener>(reactor.ios, localAddr);
 	} catch (boost::system::system_error const& e) {
 		Error x;
 		if (e.code().value() == EADDRINUSE)

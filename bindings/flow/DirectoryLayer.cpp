@@ -95,8 +95,7 @@ Reference<DirectorySubspace> DirectoryLayer::contentsOfNode(Subspace const& node
 	Standalone<StringRef> prefix = nodeSubspace.unpack(node.key()).getString(0);
 
 	if (layer == PARTITION_LAYER) {
-		return Reference<DirectorySubspace>(
-		    new DirectoryPartition(toAbsolutePath(path), prefix, Reference<DirectoryLayer>::addRef(this)));
+		return makeReference<DirectoryPartition>(toAbsolutePath(path), prefix, Reference<DirectoryLayer>::addRef(this));
 	} else {
 		return makeReference<DirectorySubspace>(
 		    toAbsolutePath(path), prefix, Reference<DirectoryLayer>::addRef(this), layer);
@@ -532,11 +531,11 @@ Reference<DirectoryLayer> DirectoryLayer::getDirectoryLayer() {
 	return Reference<DirectoryLayer>::addRef(this);
 }
 
-const Standalone<StringRef> DirectoryLayer::getLayer() const {
+Standalone<StringRef> DirectoryLayer::getLayer() const {
 	return StringRef();
 }
 
-const IDirectory::Path DirectoryLayer::getPath() const {
+IDirectory::Path DirectoryLayer::getPath() const {
 	return path;
 }
 } // namespace FDB

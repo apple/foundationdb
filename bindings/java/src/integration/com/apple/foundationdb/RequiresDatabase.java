@@ -20,7 +20,7 @@
 package com.apple.foundationdb;
 
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
@@ -63,16 +63,23 @@ public class RequiresDatabase implements ExecutionCondition, BeforeAllCallback {
 		}
 	}
 
+	private static final int HEALTH_CHECK_TIMEOUT_MS = 5000;
+	private static final int HEALTH_CHECK_MAX_ATTEMPTS = 10;
+	private static final int HEALTH_CHECK_BACKOFF_MS = 500;
+
 	@Override
 	public void beforeAll(ExtensionContext context) throws Exception {
 		/*
 		 * This is in place to validate that a database is actually running. If it can't connect
-		 * within a pretty short timeout, then the tests automatically fail.
+		 * within a reasonable time, then the tests automatically fail.
 		 *
 		 * This is in place mainly to fail-fast in the event of bad configurations; specifically, if the env flag
 		 * is set to true (or absent), but a backing server isn't actually running. When that happens, this check avoids
 		 * a long hang-time while waiting for the first database connection to finally timeout (which could take a
 		 * while, based on empirical observation)
+		 *
+		 * We retry the health check several times because on heavily loaded CI infrastructure,
+		 * the single-node cluster may still be bootstrapping when tests start.
 		 *
 		 * Note that JUnit will only call this method _after_ calling evaluateExecutionCondition(), so we can safely
 		 * assume that if we are here, then canRunIntegrationTest() is returning true and we don't have to bother
@@ -90,19 +97,22 @@ public class RequiresDatabase implements ExecutionCondition, BeforeAllCallback {
 		}
 
 		try (Database db = fdb.open()) {
-			db.run(tr -> {
-				tr.options().setTimeout(100);
-				CompletableFuture<byte[]> future = tr.get("test".getBytes());
+			for (int attempt = 1; attempt <= HEALTH_CHECK_MAX_ATTEMPTS; attempt++) {
 				try {
-					return future.join();
-				} catch (FDBException e) {
-					if (e.getCode() == 1031) {
+					db.run(tr -> {
+						tr.options().setTimeout(HEALTH_CHECK_TIMEOUT_MS);
+						return tr.get("test".getBytes()).join();
+					});
+					return; // success
+				} catch (CompletionException e) {
+					if (attempt == HEALTH_CHECK_MAX_ATTEMPTS) {
 						Assertions.fail("Test " + context.getDisplayName() +
-						                " failed to start: cannot to database within timeout");
+						                " failed to start: cannot connect to database after " +
+						                HEALTH_CHECK_MAX_ATTEMPTS + " attempts: " + e.getMessage());
 					}
-					throw e;
+					Thread.sleep(HEALTH_CHECK_BACKOFF_MS);
 				}
-			});
+			}
 		}
 	}
 }

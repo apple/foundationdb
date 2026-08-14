@@ -125,7 +125,7 @@ public:
 		setKind(kind);
 		setPriority(priority);
 	}
-	constexpr JobFlags() {}
+	constexpr JobFlags() = default;
 
 	FLAGSET_DEFINE_FIELD_ACCESSORS(Kind, Kind_width, JobKind, getKind, setKind)
 
@@ -181,7 +181,7 @@ public:
 	};
 
 	explicit AccessibleFunctionFlags(uint32_t bits) : FlagSet(bits) {}
-	constexpr AccessibleFunctionFlags() {}
+	constexpr AccessibleFunctionFlags() = default;
 
 	/// Whether the this is a "distributed" actor function.
 	FLAGSET_DEFINE_FLAG_ACCESSORS(Distributed, isDistributed, setDistributed)

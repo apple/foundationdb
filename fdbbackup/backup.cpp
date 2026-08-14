@@ -36,7 +36,7 @@
 #include "flow/FastAlloc.h"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/TLSConfig.h"
 
 #include "fdbclient/DatabaseContext.h"
@@ -45,7 +45,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/ClusterConnectionFile.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/IBlobStore.h"
@@ -199,6 +199,37 @@ enum {
 	OPT_TRACE_FORMAT,
 };
 
+#define BACKUP_LOG_OPTIONS                                                                                             \
+	{ OPT_TRACE, "--log", SO_NONE }, { OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },                                        \
+	    { OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP }, {                                                          \
+		OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP                                                                  \
+	}
+
+#define BACKUP_QUIET_OPTIONS                                                                                           \
+	{ OPT_QUIET, "-q", SO_NONE }, {                                                                                    \
+		OPT_QUIET, "--quiet", SO_NONE                                                                                  \
+	}
+
+#define BACKUP_MEMORY_OPTIONS                                                                                          \
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP }, { OPT_MEMLIMIT, "--memory", SO_REQ_SEP }, {                                    \
+		OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP                                                                    \
+	}
+
+#define BACKUP_HELP_OPTIONS                                                                                            \
+	{ OPT_HELP, "-?", SO_NONE }, { OPT_HELP, "-h", SO_NONE }, { OPT_HELP, "--help", SO_NONE }, {                       \
+		OPT_DEVHELP, "--dev-help", SO_NONE                                                                             \
+	}
+
+#define BACKUP_CLUSTER_FILE_OPTIONS                                                                                    \
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP }, {                                                                           \
+		OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP                                                                  \
+	}
+
+#define BACKUP_TAG_OPTIONS                                                                                             \
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP }, {                                                                               \
+		OPT_TAGNAME, "--tagname", SO_REQ_SEP                                                                           \
+	}
+
 // Top level binary commands.
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_VERSION, "-v", SO_NONE },
 	                                  { OPT_VERSION, "--version", SO_NONE },
@@ -213,27 +244,17 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
+	BACKUP_CLUSTER_FILE_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_VERSION, "--version", SO_NONE },
 	{ OPT_VERSION, "-v", SO_NONE },
 	{ OPT_BUILD_FLAGS, "--build-flags", SO_NONE },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	BACKUP_QUIET_OPTIONS,
+	BACKUP_LOG_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_LOCALITY, "--locality-", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
@@ -244,8 +265,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
+	BACKUP_CLUSTER_FILE_OPTIONS,
 	{ OPT_WAITFORDONE, "-w", SO_NONE },
 	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
 	{ OPT_NOSTOPWHENDONE, "-z", SO_NONE },
@@ -257,27 +277,17 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot-interval", SO_REQ_SEP },
 	{ OPT_INITIAL_SNAPSHOT_INTERVAL, "--initial-snapshot-interval", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	BACKUP_TAG_OPTIONS,
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_DRYRUN, "-n", SO_NONE },
 	{ OPT_DRYRUN, "--dryrun", SO_NONE },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
@@ -292,26 +302,15 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	BACKUP_CLUSTER_FILE_OPTIONS,
+	BACKUP_TAG_OPTIONS,
 	{ OPT_MOD_VERIFY_UID, "--verify-uid", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
@@ -328,26 +327,15 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
+	BACKUP_CLUSTER_FILE_OPTIONS,
 	{ OPT_ERRORLIMIT, "-e", SO_REQ_SEP },
 	{ OPT_ERRORLIMIT, "--errorlimit", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_TAG_OPTIONS,
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_JSON, "--json", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
@@ -358,24 +346,13 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_CLUSTER_FILE_OPTIONS,
+	BACKUP_TAG_OPTIONS,
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -385,22 +362,12 @@ CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_CLUSTER_FILE_OPTIONS,
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_DELETE_DATA, "--delete-data", SO_NONE },
 	{ OPT_MIN_CLEANUP_SECONDS, "--min-cleanup-seconds", SO_REQ_SEP },
@@ -412,26 +379,15 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	BACKUP_CLUSTER_FILE_OPTIONS,
+	BACKUP_TAG_OPTIONS,
 	{ OPT_WAITFORDONE, "-w", SO_NONE },
 	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -441,26 +397,15 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	BACKUP_CLUSTER_FILE_OPTIONS,
+	BACKUP_TAG_OPTIONS,
 	{ OPT_NOSTOPWHENDONE, "-z", SO_NONE },
 	{ OPT_NOSTOPWHENDONE, "--no-stop-when-done", SO_NONE },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -470,22 +415,12 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_CLUSTER_FILE_OPTIONS,
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -495,25 +430,15 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
+	BACKUP_CLUSTER_FILE_OPTIONS,
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_FORCE, "-f", SO_NONE },
@@ -535,20 +460,11 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
@@ -559,25 +475,15 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
+	BACKUP_CLUSTER_FILE_OPTIONS,
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_DESCRIBE_DEEP, "--deep", SO_NONE },
@@ -591,24 +497,17 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
+	BACKUP_CLUSTER_FILE_OPTIONS,
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_DUMP_BEGIN, "--begin", SO_REQ_SEP },
@@ -621,14 +520,9 @@ CSimpleOpt::SOption g_rgBackupTagsOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_CLUSTER_FILE_OPTIONS,
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -640,20 +534,11 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_BASEURL, "-b", SO_REQ_SEP },
 	{ OPT_BASEURL, "--base-url", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
@@ -665,6 +550,7 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_RESTORE_TIMESTAMP, "--query-restore-timestamp", SO_REQ_SEP },
+	BACKUP_CLUSTER_FILE_OPTIONS,
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
@@ -673,22 +559,13 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	{ OPT_RESTORE_SNAPSHOT_VERSION, "--query-restore-snapshot-version", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS_FILTER, "-k", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS_FILTER, "--keys", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_VERSION, "-v", SO_NONE },
 	{ OPT_VERSION, "--version", SO_NONE },
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
@@ -700,6 +577,8 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
+	{ OPT_RESTORE_CLUSTERFILE_DEST, "-C", SO_REQ_SEP },
+	{ OPT_RESTORE_CLUSTERFILE_DEST, "--cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_CLUSTERFILE_DEST, "--dest-cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_CLUSTERFILE_ORIG, "--orig-cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_TIMESTAMP, "--timestamp", SO_REQ_SEP },
@@ -708,8 +587,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
 	{ OPT_PREFIX_ADD, "--add-prefix", SO_REQ_SEP },
 	{ OPT_PREFIX_REMOVE, "--remove-prefix", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	BACKUP_TAG_OPTIONS,
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
@@ -720,23 +598,14 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_MODE, "--mode", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "--version", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-v", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_DRYRUN, "-n", SO_NONE },
 	{ OPT_DRYRUN, "--dryrun", SO_NONE },
 	{ OPT_FORCE, "-f", SO_NONE },
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin-version", SO_REQ_SEP },
@@ -758,21 +627,12 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_VERSION, "--version", SO_NONE },
 	{ OPT_VERSION, "-v", SO_NONE },
 	{ OPT_BUILD_FLAGS, "--build-flags", SO_NONE },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	BACKUP_QUIET_OPTIONS,
+	BACKUP_LOG_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_LOCALITY, "--locality-", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -785,25 +645,15 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	BACKUP_TAG_OPTIONS,
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -819,22 +669,12 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
 	{ OPT_ERRORLIMIT, "-e", SO_REQ_SEP },
 	{ OPT_ERRORLIMIT, "--errorlimit", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_TAG_OPTIONS,
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -848,23 +688,13 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_TAG_OPTIONS,
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_FORCE, "-f", SO_NONE },
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -880,22 +710,12 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
 	{ OPT_CLEANUP, "--cleanup", SO_NONE },
 	{ OPT_DSTONLY, "--dstonly", SO_NONE },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_TAG_OPTIONS,
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -909,24 +729,22 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_QUIET, "-q", SO_NONE },
-	{ OPT_QUIET, "--quiet", SO_NONE },
+	BACKUP_LOG_OPTIONS,
+	BACKUP_QUIET_OPTIONS,
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
-	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
-	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
-	{ OPT_HELP, "-?", SO_NONE },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	BACKUP_MEMORY_OPTIONS,
+	BACKUP_HELP_OPTIONS,
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
+
+#undef BACKUP_LOG_OPTIONS
+#undef BACKUP_QUIET_OPTIONS
+#undef BACKUP_MEMORY_OPTIONS
+#undef BACKUP_HELP_OPTIONS
+#undef BACKUP_CLUSTER_FILE_OPTIONS
+#undef BACKUP_TAG_OPTIONS
 
 const KeyRef exeAgent = "backup_agent"_sr;
 const KeyRef exeBackup = "fdbbackup"_sr;
@@ -1078,7 +896,9 @@ static void printBackupUsage(bool devhelp) {
 	    "                 For query operations, instead of a numeric version, use this to specify a timestamp in %s\n",
 	    BackupAgentBase::timeFormat().c_str());
 	printf(
-	    "                 and it will be converted to a version from that time using metadata in the cluster file.\n");
+	    "                 and it will be converted to a version from that time using metadata in the cluster file\n");
+	printf("                 specified with -C/--cluster-file. A cluster file is required when\n");
+	printf("                 --query-restore-timestamp is specified.\n");
 	printf("  --restorable-after-timestamp DATETIME\n"
 	       "                 For expire operations, set minimum acceptable restorability to the version equivalent of "
 	       "DATETIME and later.\n");
@@ -1097,6 +917,10 @@ static void printBackupUsage(bool devhelp) {
 	       "                 For start or modify operations, specifies the backup's default target snapshot interval "
 	       "as DURATION seconds.  Defaults to %d for start operations.\n",
 	       CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
+	printf(
+	    "  --initial-snapshot-interval DURATION\n"
+	    "                 For start operations, specifies the duration of the first inconsistent snapshot as DURATION "
+	    "seconds. Defaults to 0, meaning as fast as possible.\n");
 	printf("  --mode MODE    Snapshot mechanism to use: bulkdump, rangefile (default, legacy), or both.\n"
 	       "                 bulkdump: Uses BulkDump SST files for faster restore performance\n"
 	       "                 rangefile: Traditional range files for backward compatibility\n"
@@ -1183,7 +1007,7 @@ static void printRestoreUsage(bool devhelp) {
 	printf(" ACTION OPTIONS:\n");
 	// printf("  FOLDERS        Paths to folders containing the backup files.\n");
 	printf("  Options for all commands:\n\n");
-	printf("  --dest-cluster-file CONNFILE\n");
+	printf("  -C, --cluster-file, --dest-cluster-file CONNFILE\n");
 	printf("                 The cluster file to restore data into.\n");
 	printf("  -t, --tagname TAGNAME\n");
 	printf("                 The restore tag to act on.  Default is 'default'\n");
@@ -2590,22 +2414,40 @@ Future<Void> expireBackupData(const char* name,
 		int spaces = lastProgress.size() - p.size();
 		printf("\r%s%s\n", p.c_str(), (spaces > 0 ? std::string(spaces, ' ').c_str() : ""));
 
-		if (endVersion < 0)
+		if (endVersion < 0) {
 			fmt::print("All data before {0} versions ({1}"
 			           " days) prior to latest backup log has been deleted.\n",
 			           -endVersion,
 			           -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
-		else
+		} else {
 			fmt::print("All data before version {} has been deleted.\n", endVersion);
+		}
+
+		if (progress.requestedEndVersion != invalidVersion && progress.actualEndVersion != invalidVersion &&
+		    progress.actualEndVersion != progress.requestedEndVersion) {
+			if (progress.actualEndVersion < progress.requestedEndVersion) {
+				fmt::print("NOTE: The requested expiration point (version {0}) fell in the middle of a log "
+				           "file, so it was moved back to version {1} to avoid splitting the file. "
+				           "Data is only guaranteed deleted up to version {1}.\n",
+				           progress.requestedEndVersion,
+				           progress.actualEndVersion);
+			} else {
+				fmt::print("NOTE: Data was already expired up to version {0}, which is at or after the "
+				           "requested version {1}. No additional data was deleted.\n",
+				           progress.actualEndVersion,
+				           progress.requestedEndVersion);
+			}
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
-		if (e.code() == error_code_backup_cannot_expire)
+		if (e.code() == error_code_backup_cannot_expire) {
 			fprintf(stderr,
 			        "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum restorability.  Use "
 			        "--force to delete data anyway.\n");
-		else
+		} else {
 			fprintf(stderr, "ERROR: %s\n", e.what());
+		}
 		throw;
 	}
 }
@@ -2717,7 +2559,7 @@ Future<Void> queryBackup(const char* name,
 			reportBackupQueryError(
 			    operationId,
 			    result,
-			    format("an original cluster file must be given in order to resolve restore target timestamp '%s'",
+			    format("a cluster file must be given in order to resolve restore target timestamp '%s'",
 			           restoreTimestamp.c_str()));
 			co_return;
 		}
@@ -3811,7 +3653,7 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_BACKUPKEYS_FILE:
 				try {
-					std::string line = readFileBytes(args->OptionArg(), 64 * 1024 * 1024);
+					std::string line = readFileBytes(args->OptionArg(), 64ULL * 1024 * 1024);
 					addKeyRange(line, backupKeys);
 				} catch (Error&) {
 					printHelpTeaser(newArgV[0]);
@@ -4442,7 +4284,7 @@ int main(int argc, char* argv[]) {
 				                          backupKeysFilter,
 				                          restoreVersion,
 				                          snapshotVersion,
-				                          restoreClusterFileOrig,
+				                          clusterFile,
 				                          restoreTimestamp,
 				                          Verbose{ !quietDisplay },
 				                          db));
@@ -4671,7 +4513,9 @@ int main() {
 	                            const std::vector<std::string>& expectedOptions = {},
 	                            bool shouldSucceed = true,
 	                            const char* testName = "",
-	                            bool expectCSimpleOptions = false) -> bool {
+	                            bool expectCSimpleOptions = false,
+	                            const CSimpleOpt::SOption* simpleOptions = g_rgOptions,
+	                            int simpleOptionsArgOffset = 0) -> bool {
 		printf("\n--- Test: %s ---\n", testName);
 		static std::vector<std::string> persistentArgs;
 		persistentArgs.clear();
@@ -4735,8 +4579,11 @@ int main() {
 		// Test with actual CSimpleOpt if expected
 		if (expectCSimpleOptions && !expectedOptions.empty()) {
 			try {
-				std::unique_ptr<CSimpleOpt> simpleOpt = std::make_unique<CSimpleOpt>(
-				    argcNew, const_cast<char**>(argvNew), g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+				std::unique_ptr<CSimpleOpt> simpleOpt =
+				    std::make_unique<CSimpleOpt>(argcNew - simpleOptionsArgOffset,
+				                                 &argvNew[simpleOptionsArgOffset],
+				                                 simpleOptions,
+				                                 SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 
 				ESOError lastError = SO_SUCCESS;
 				bool foundExpectedOptions = true;
@@ -4825,6 +4672,48 @@ int main() {
 	printf("\n6) Global flag options and CSimpleOpt Tests:\n");
 	allPassed &=
 	    testOptionParsing({ "fdbbackup", "--version", "-h" }, { "--version", "-h" }, true, "6.1 Version flag", true);
+
+	printf("\n6b) Query Option Table Tests:\n");
+	allPassed &= testOptionParsing({ "fdbbackup",
+	                                 "query",
+	                                 "-d",
+	                                 "file:///tmp/backup",
+	                                 "-C",
+	                                 "/tmp/fdb.cluster",
+	                                 "--query-restore-timestamp",
+	                                 "2026/06/02.11:06:50+0800" },
+	                               { "query",
+	                                 "-d",
+	                                 "file:///tmp/backup",
+	                                 "-C",
+	                                 "/tmp/fdb.cluster",
+	                                 "--query-restore-timestamp",
+	                                 "2026/06/02.11:06:50+0800" },
+	                               true,
+	                               "6b.1 Query accepts short cluster file option",
+	                               true,
+	                               g_rgBackupQueryOptions,
+	                               1);
+	allPassed &= testOptionParsing({ "fdbbackup",
+	                                 "query",
+	                                 "-d",
+	                                 "file:///tmp/backup",
+	                                 "--cluster-file",
+	                                 "/tmp/fdb.cluster",
+	                                 "--query-restore-timestamp",
+	                                 "2026/06/02.11:06:50+0800" },
+	                               { "query",
+	                                 "-d",
+	                                 "file:///tmp/backup",
+	                                 "--cluster-file",
+	                                 "/tmp/fdb.cluster",
+	                                 "--query-restore-timestamp",
+	                                 "2026/06/02.11:06:50+0800" },
+	                               true,
+	                               "6b.2 Query accepts long cluster file option",
+	                               true,
+	                               g_rgBackupQueryOptions,
+	                               1);
 
 	printf("\n7) Error Tests:\n");
 	allPassed &= testOptionParsing({ "fdbbackup", "start", "--unknown-option" }, {}, false, "7.1 Unknown option");

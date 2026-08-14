@@ -36,7 +36,7 @@ ERROR( end_of_stream, 1, "End of stream" )
 ERROR( operation_failed, 1000, "Operation failed")
 ERROR( wrong_shard_server, 1001, "Shard is not available from this server")
 ERROR( operation_obsolete, 1002, "Operation result no longer necessary")
-ERROR( cold_cache_server, 1003, "Cache server is not warm for this range")
+// 1003 removed
 ERROR( timed_out, 1004, "Operation timed out" )
 ERROR( coordinated_state_conflict, 1005, "Conflict occurred while changing coordination information" )
 ERROR( all_alternatives_failed, 1006, "All alternatives failed" )
@@ -139,7 +139,7 @@ ERROR( please_reboot_kv_store, 1219, "Need to reboot the storage engine")
 ERROR( incompatible_software_version, 1220, "Current software does not support database format" )
 ERROR( audit_storage_failed, 1221, "Validate storage consistency operation failed" )
 ERROR( audit_storage_exceeded_request_limit, 1222, "Exceeded the max number of allowed concurrent audit storage requests" )
-ERROR( proxy_tag_throttled, 1223, "Exceeded maximum proxy tag throttling duration" )
+// 1223 removed
 ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed to read or write.")
 // 1225 has been removed
 ERROR( audit_storage_error, 1226, "Found data corruption" )
@@ -168,6 +168,9 @@ ERROR( bulkload_dataset_not_cover_required_range, 1249, "Bulkload dataset does n
 ERROR( bulkload_invalid_configuration, 1250, "BulkLoad requires cluster configuration with both shard_encode_location_metadata=1 and enable_read_lock_on_range=1" )
 ERROR( transaction_grv_queue_rejected, 1251, "GRV request rejected because estimated queue wait exceeds transaction limit" )
 ERROR( finish_move_keys_too_many_retries, 1252, "finishMoveKeys exceeded retry limit" )
+ERROR( start_move_keys_too_many_retries, 1253, "startMoveKeys exceeded retry limit" )
+ERROR( cdc_proxy_failed, 1254, "Cluster recovery terminating because a CDCProxy failed" )
+ERROR( cdc_tlog_peek_reply_too_large, 1255, "TLog CDC peek reply exceeds configured byte limit" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -243,7 +246,7 @@ ERROR( key_not_tuple, 2041, "The key cannot be parsed as a tuple" );
 ERROR( value_not_tuple, 2042, "The value cannot be parsed as a tuple" );
 ERROR( mapper_not_tuple, 2043, "The mapper cannot be parsed as a tuple" );
 ERROR( invalid_checkpoint_format, 2044, "Invalid checkpoint format" )
-ERROR( invalid_throttle_quota_value, 2045, "Invalid quota value. Note that reserved_throughput cannot exceed total_throughput" )
+// 2045 removed
 ERROR( failed_to_create_checkpoint, 2046, "Failed to create a checkpoint" )
 ERROR( failed_to_restore_checkpoint, 2047, "Failed to restore a checkpoint" )
 ERROR( failed_to_create_checkpoint_shard_metadata, 2048, "Failed to dump shard metadata for a checkpoint to a sst file" )
@@ -266,7 +269,7 @@ ERROR( special_keys_no_module_found, 2113, "Special key space range read does no
 ERROR( special_keys_write_disabled, 2114, "Special Key space is not allowed to write by default. Refer to the `special_key_space_enable_writes` transaction option for more details." )
 ERROR( special_keys_no_write_module_found, 2115, "Special key space key or keyrange in set or clear does not intersect a module" )
 ERROR( special_keys_cross_module_clear, 2116, "Special key space clear crosses modules" )
-ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get on special key 0xff0xff/error_message to get a json string of the error message." )
+ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get - within the same transaction - on special key 0xff0xff/error_message to get a json string of the error message." )
 ERROR( client_lib_invalid_metadata, 2118, "Invalid client library metadata." )
 ERROR( client_lib_already_exists, 2119, "Client library with same identifier already exists on the cluster." )
 ERROR( client_lib_not_found, 2120, "Client library for the given identifier not found." )

@@ -49,21 +49,23 @@ struct InventoryTestWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (clientId)
 			return Void();
-		for (int c = 0; c < actorCount; c++)
+		for (int c = 0; c < actorCount; c++) {
 			clients.push_back(timeout(
 			    inventoryTestClient(
 			        cx->clone(), this, actorCount / transactionsPerSecond, fractionWriteTransactions, productsPerWrite),
 			    testDuration,
 			    Void()));
+		}
 		return waitForAll(clients);
 	}
 
 	int failures() const {
 		int failures = 0;
-		for (int c = 0; c < clients.size(); c++)
+		for (int c = 0; c < clients.size(); c++) {
 			if (clients[c].isReady() && clients[c].isError()) {
 				++failures;
 			}
+		}
 		return failures;
 	}
 
@@ -123,7 +125,7 @@ struct InventoryTestWorkload : TestWorkload {
 				for (auto i = self->minExpectedResults.begin(); i != self->minExpectedResults.end(); ++i)
 					actualResults[i->first];
 				bool error = false;
-				for (auto i = actualResults.begin(); i != actualResults.end(); ++i)
+				for (auto i = actualResults.begin(); i != actualResults.end(); ++i) {
 					if (i->second < self->minExpectedResults[i->first] ||
 					    i->second > self->maxExpectedResults[i->first]) {
 						if (!error)
@@ -140,6 +142,7 @@ struct InventoryTestWorkload : TestWorkload {
 						    .detail("MinExpected", self->minExpectedResults[i->first])
 						    .detail("MaxExpected", self->maxExpectedResults[i->first]);
 					}
+				}
 				if (error)
 					co_return false;
 				co_return true;

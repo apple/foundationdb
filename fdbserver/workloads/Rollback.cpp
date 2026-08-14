@@ -56,10 +56,11 @@ struct RollbackWorkload : FailureInjectionWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
-		if (g_simulator == g_network && enabled)
+		if (g_simulator == g_network && enabled) {
 			return timeout(reportErrors(rollbackFailureWorker(cx, this, meanDelay), "RollbackFailureWorkerError"),
 			               testDuration,
 			               Void());
+		}
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
@@ -79,12 +80,14 @@ struct RollbackWorkload : FailureInjectionWorkload {
 		int utIndex = deterministicRandom()->randomInt(0, tlogs.size());
 		NetworkAddress uncloggedTLog = tlogs[utIndex].address();
 
-		for (int t = 0; t < tlogs.size(); t++)
-			if (t != utIndex)
+		for (int t = 0; t < tlogs.size(); t++) {
+			if (t != utIndex) {
 				if (tlogs[t].address().ip == proxy.address().ip) {
 					TraceEvent(SevInfo, "UnableToTriggerRollback").detail("Reason", "proxy-clogged tLog shared IPs");
 					co_return;
 				}
+			}
+		}
 
 		TraceEvent("AttemptingToTriggerRollback")
 		    .detail("CommitProxy", proxy.address())

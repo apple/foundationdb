@@ -433,7 +433,7 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	span2.addEvent(StringRef(span2.arena, "commit_succeed"_sr), 1234567.100);
 	ASSERT(span2.events[0].name.toString() == "commit_succeed");
 	ASSERT(span2.events[0].time == 1234567.100);
-	ASSERT(span2.events[0].attributes.size() == 0);
+	ASSERT(span2.events[0].attributes.empty());
 
 	// Add fully constructed OTELEventRef to OTELSpan passed by value.
 	Span span3("span_with_event"_loc);

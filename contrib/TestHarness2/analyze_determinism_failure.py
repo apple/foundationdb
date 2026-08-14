@@ -11,7 +11,6 @@ Usage: python3 analyze_determinism_failure.py <initial_run_dir> <determinism_che
 
 import json
 import sys
-import os
 import re
 from pathlib import Path
 from collections import defaultdict

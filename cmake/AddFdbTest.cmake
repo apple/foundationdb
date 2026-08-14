@@ -428,6 +428,7 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
     add_dependencies(${target_name} fdb_go_tester fdb_go)
     add_custom_command(
       TARGET ${target_name}
+      POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/go/bin/_stacktester ${build_directory}/tests/go/build/bin/_stacktester
       COMMAND ${CMAKE_COMMAND} -E make_directory ${build_directory}/tests/go/src/fdb/
       COMMAND ${CMAKE_COMMAND} -E copy

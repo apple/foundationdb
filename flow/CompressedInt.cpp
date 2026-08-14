@@ -66,8 +66,9 @@ void testCompressedInt(IntType n, StringRef rep = StringRef()) {
 		printf("    expected:         ");
 		printBitsBig(rep.size(), rep.begin());
 		puts("");
-	} else
+	} else {
 		rep = w.toValue();
+	}
 
 	cn.value = 0;
 	BinaryReader r(rep, AssumeVersion(g_network->protocolVersion()));

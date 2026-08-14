@@ -2,6 +2,11 @@
 # [[ knobs ]]
 # http_request_id_header=1
 
+[[knobs]]
+# Dropping a log-router init reply can repeatedly restart recovery and exhaust
+# this test's timeout under remote-double Attrition.
+cc_recovery_init_req_allow_drop_in_sim = false
+
 [[test]]
 testTitle = 'HTTPKeyValueStoreTest'
 timeout = 1000
@@ -27,4 +32,3 @@ timeout = 1000
     machinesToLeave = 3
     reboot = true
     testDuration = 30.0
-

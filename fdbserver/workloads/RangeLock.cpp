@@ -21,7 +21,6 @@
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
@@ -272,7 +271,7 @@ struct RangeLocking : TestWorkload {
 			rangeToCheck = singleKeyRange(std::get<KeyValue>(kvOperation.params).key);
 		}
 		for (auto lockRange : self->lockedRangeMap.intersectingRanges(rangeToCheck)) {
-			if (lockRange.value() == true) {
+			if (lockRange.value()) {
 				return true;
 			}
 		}
@@ -353,7 +352,7 @@ struct RangeLocking : TestWorkload {
 	std::vector<KeyRange> getLockedRangesFromMemory(RangeLocking* self) {
 		std::vector<KeyRange> res;
 		for (auto range : self->lockedRangeMap.ranges()) {
-			if (range.value() == true) {
+			if (range.value()) {
 				res.push_back(range.range());
 			}
 		}

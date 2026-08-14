@@ -56,6 +56,19 @@ std::string getErrorReason(rocksdb::BackgroundErrorReason reason) {
 	}
 }
 
+RocksDBBackgroundError getBackgroundError(rocksdb::BackgroundErrorReason reason, const rocksdb::Status& status) {
+	int errorCode;
+	if (status.IsIOError()) {
+		errorCode = error_code_io_error;
+	} else if (status.IsCorruption()) {
+		errorCode = error_code_file_corrupt;
+	} else {
+		errorCode = error_code_unknown_error;
+	}
+
+	return RocksDBBackgroundError{ reason, static_cast<int>(status.severity()), status.ToString(), errorCode };
+}
+
 rocksdb::WALRecoveryMode getWalRecoveryModeFromKnob(int knobValue) {
 	switch (knobValue) {
 	case 0:

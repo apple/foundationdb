@@ -170,8 +170,9 @@ void JSONDoc::cleanOps(json_spirit::mObject& obj) {
 						++kv;
 						obj.erase(tmp);
 					}
-				} else // For others just move the value to replace the operator object
+				} else { // For others just move the value to replace the operator object
 					kv->second = o.at(op);
+				}
 				// Don't advance kv because the new value could also be an operator
 				continue;
 			} else {
@@ -200,7 +201,7 @@ void JSONDoc::mergeValueInto(json_spirit::mValue& dst, const json_spirit::mValue
 	}
 
 	// Do nothing if d is already an error
-	if (dst.type() == json_spirit::obj_type && dst.get_obj().count("ERROR"))
+	if (dst.type() == json_spirit::obj_type && dst.get_obj().contains("ERROR"))
 		return;
 
 	if (dst.type() != src.type()) {
@@ -368,7 +369,10 @@ AsyncResult<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<IC
 
 		*coordinatorsFaultTolerance = (leaderServers.size() - 1) / 2 - coordinatorsUnavailable;
 		co_return statusObj;
-	} catch (Error&) {
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		*quorum_reachable = false;
 		co_return Optional<StatusObject>();
 	}
@@ -391,9 +395,10 @@ AsyncResult<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecord
 		if (!*quorum_reachable)
 			messages->push_back(
 			    makeMessage(MessageType::QUORUM_NOT_REACHABLE, "Unable to reach a quorum of coordinators."));
-	} else
+	} else {
 		messages->push_back(
 		    makeMessage(MessageType::STATUS_INCOMPLETE_COORDINATORS, "Could not fetch coordinator info."));
+	}
 
 	StatusObject statusObjClusterFile;
 	statusObjClusterFile["path"] = connRecord->getLocation();
@@ -421,9 +426,10 @@ AsyncResult<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecord
 // Cluster section of json output
 AsyncResult<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
                                                          StatusArray* messages,
-                                                         std::string statusField) {
+                                                         std::string statusField,
+                                                         double timeoutSeconds) {
 	StatusRequest req(statusField);
-	Future<Void> clusterTimeout = delay(CLIENT_KNOBS->STATUS_TIMEOUT);
+	Future<Void> clusterTimeout = delay(timeoutSeconds);
 	Optional<StatusObject> oStatusObj;
 
 	co_await delay(0.0); // make sure the cluster controller is marked as not failed
@@ -433,18 +439,19 @@ AsyncResult<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
 	if (res.index() == 0) {
 		ErrorOr<StatusReply> result = std::get<0>(std::move(res));
 		if (result.isError()) {
-			if (result.getError().code() == error_code_request_maybe_delivered)
+			if (result.getError().code() == error_code_request_maybe_delivered) {
 				messages->push_back(makeMessage(MessageType::UNREACHABLE_CLUSTER_CONTROLLER,
 				                                ("Unable to communicate with the cluster controller at " +
 				                                 cI.address().toString() + " to get status.")
 				                                    .c_str()));
-			else if (result.getError().code() == error_code_server_overloaded)
+			} else if (result.getError().code() == error_code_server_overloaded) {
 				messages->push_back(makeMessage(MessageType::SERVER_OVERLOADED,
 				                                "The cluster controller is currently processing too many "
 				                                "status requests and is unable to respond"));
-			else
+			} else {
 				messages->push_back(
 				    makeMessage(MessageType::STATUS_INCOMPLETE_ERROR, "Cluster encountered an error fetching status."));
+			}
 		} else {
 			oStatusObj = result.get().statusObj;
 		}
@@ -477,7 +484,7 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 			// OK to throw if processes doesn't exist, can't have an available database without processes
 			for (auto p : cluster.at("processes").get_obj()) {
 				StatusObjectReader proc(p.second);
-				if (proc.has("messages") && proc.last().get_array().size()) {
+				if (proc.has("messages") && !proc.last().get_array().empty()) {
 					procMessagesPresent = true;
 					break;
 				}
@@ -511,6 +518,9 @@ AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> 
 	if (!g_network)
 		throw network_not_setup();
 
+	// Keep the overall status request within STATUS_TIMEOUT, including the client-side coordinator probe that runs
+	// before we ask the cluster controller for its status payload.
+	double statusDeadline = now() + CLIENT_KNOBS->STATUS_TIMEOUT;
 	StatusObject statusObj;
 	StatusObject statusObjClient;
 	StatusArray clientMessages;
@@ -542,11 +552,14 @@ AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> 
 
 	if (quorum_reachable) {
 		try {
-			Future<Void> interfaceTimeout = delay(2.0);
+			Future<Void> interfaceTimeout = delay(std::min(2.0, std::max(0.0, statusDeadline - now())));
 			while (true) {
 				if (clusterInterface->get().present()) {
 					Optional<StatusObject> _statusObjCluster =
-					    co_await clusterStatusFetcher(clusterInterface->get().get(), &clientMessages, statusField);
+					    co_await clusterStatusFetcher(clusterInterface->get().get(),
+					                                  &clientMessages,
+					                                  statusField,
+					                                  std::max(0.0, statusDeadline - now()));
 					if (_statusObjCluster.present()) {
 						statusObjCluster = std::move(_statusObjCluster).get();
 						// TODO: this is a temporary fix, getting the number of available coordinators should move to
@@ -581,6 +594,9 @@ AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> 
 
 			statusObj["cluster"] = statusObjCluster;
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent(e.code() == error_code_all_alternatives_failed ? SevInfo : SevError, "ClusterStatusFetchError")
 			    .error(e);
 			// Set client.messages to an array of one message

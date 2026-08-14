@@ -28,7 +28,7 @@
 #include "ApiWorkload.h"
 #include "MemoryKeyValueStore.h"
 #include "flow/IRandom.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 // An enum of API operation types used in the random test
 enum OperationType { SET, GET, GET_RANGE, GET_RANGE_SELECTOR, GET_KEY, CLEAR, CLEAR_RANGE, UNINITIALIZED };
@@ -351,10 +351,11 @@ public:
 
 					co_await transaction->commit();
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, data.size());
-					     i++)
+					     i++) {
 						DEBUG_MUTATION("ApiCorrectnessSet",
 						               transaction->getCommittedVersion(),
 						               MutationRef(MutationRef::DebugKey, data[i].key, data[i].value));
+					}
 
 					currentIndex += self->maxKeysPerTransaction;
 					break;
@@ -563,8 +564,9 @@ public:
 					if (reverse && dbResults.size() < storeResults.size()) {
 						storeResults.resize(storeResults.arena(), dbResults.size());
 					}
-				} else
+				} else {
 					dbResults = range;
+				}
 
 				break;
 			} catch (Error& e) {
@@ -660,11 +662,12 @@ public:
 					}
 
 					if (!(storeKey == self->store.startKey() && dbKey < StringRef(self->clientPrefix)) &&
-					    !(storeKey == self->store.endKey() && dbKey > StringRef(self->clientPrefix + "\xff")))
+					    !(storeKey == self->store.endKey() && dbKey > StringRef(self->clientPrefix + "\xff"))) {
 						printf("Offset %d: db=%s, mem=%s\n",
 						       j * dir,
 						       printable(dbKey).c_str(),
 						       printable(storeKey).c_str());
+					}
 				}
 
 				break;
@@ -702,10 +705,11 @@ public:
 
 					co_await transaction->commit();
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
-					     i++)
+					     i++) {
 						DEBUG_MUTATION("ApiCorrectnessClear",
 						               transaction->getCommittedVersion(),
 						               MutationRef(MutationRef::DebugKey, keys[i], StringRef()));
+					}
 
 					currentIndex += self->maxKeysPerTransaction;
 					break;

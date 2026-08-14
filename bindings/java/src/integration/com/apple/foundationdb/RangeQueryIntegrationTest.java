@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Random;
 import java.util.TreeMap;
+import java.util.concurrent.CompletionException;
 
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncIterator;
@@ -47,13 +48,24 @@ class RangeQueryIntegrationTest {
 	@AfterEach
 	void clearDatabase() throws Exception {
 		/*
-		 * Empty the database before and after each run, just in case
+		 * Empty the database before and after each run, just in case.
+		 * Retry the clear operation since on heavily loaded CI the transaction
+		 * may time out during cluster bootstrap or under resource contention.
 		 */
-		try (Database db = fdb.open()) {
-			db.run(tr -> {
-				tr.clear(new byte[0], new byte[] { (byte) 0xff });
-				return null;
-			});
+		int maxAttempts = 5;
+		for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+			try (Database db = fdb.open()) {
+				db.run(tr -> {
+					tr.clear(new byte[0], new byte[] { (byte)0xff });
+					return null;
+				});
+				return; // success
+			} catch (CompletionException e) {
+				if (attempt == maxAttempts) {
+					throw e;
+				}
+				Thread.sleep(1000);
+			}
 		}
 	}
 

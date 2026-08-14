@@ -17,6 +17,13 @@ Quickstart
 =============
 Below we run a simple bulkdump, a clear of the cluster, and then a bulkload to repopulate the cluster.
 
+.. note::
+   The ``clearrange`` step below is illustrative — it shows that the cluster starts
+   empty before the bulkload populates it. It is **not required**. BulkLoad clears
+   each shard internally before ingesting SST files (see "Per-Task Range Clear" in
+   :doc:`bulkload`), and ``fdbrestore start --mode bulkload`` is permitted against
+   a non-empty destination.
+
 Start a cluster::
 
     <FDB_SRC_FOLDER>/tests/loopback_cluster/run_custom_cluster.sh . --storage_count 8 \

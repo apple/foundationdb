@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.h"
-#include "fdbclient/KeyBackedTypes.actor.h" // for key backed map codecs for tss mapping
+#include "fdbclient/KeyBackedTypes.h" // for key backed map codecs for tss mapping
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -28,6 +28,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/logsystem/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/CDCRoutingTable.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
@@ -47,6 +48,7 @@ Reference<StorageInfo> getStorageInfo(UID id,
 	}
 	return storageInfo;
 }
+
 namespace {
 
 // It is incredibly important that any modifications to txnStateStore are done in such a way that the same operations
@@ -67,7 +69,7 @@ public:
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
 	                           const ApplyMetadataProxyContext& proxyMetadata_,
-	                           Reference<LogSystem> logSystem_,
+	                           Reference<LogSystemConsumer> logSystemConsumer_,
 	                           LogPushData* toCommit_,
 	                           bool& confChange_,
 	                           Version version,
@@ -76,7 +78,8 @@ public:
 	                           bool provisionalCommitProxy_)
 	  : spanContext(spanContext_), dbgid(proxyMetadata_.dbgid), arena(arena_), mutations(mutations_),
 	    txnStateStore(proxyMetadata_.txnStateStore), toCommit(toCommit_), confChange(confChange_),
-	    logSystem(logSystem_), version(version), popVersion(popVersion_), vecBackupKeys(proxyMetadata_.vecBackupKeys),
+	    logSystemConsumer(logSystemConsumer_), version(version), popVersion(popVersion_),
+	    vecBackupKeys(proxyMetadata_.vecBackupKeys), cdcRouting(proxyMetadata_.cdcRouting),
 	    keyInfo(proxyMetadata_.keyInfo), uid_applyMutationsData(proxyMetadata_.uid_applyMutationsData),
 	    commit(proxyMetadata_.commit), cx(proxyMetadata_.cx), committedVersion(proxyMetadata_.committedVersion),
 	    storageCache(proxyMetadata_.storageCache), tag_popped(proxyMetadata_.tag_popped),
@@ -94,8 +97,8 @@ public:
 	                           const VectorRef<MutationRef>& mutations_)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
 	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
-	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
-	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
+	    confChange(resolverData_.confChanges), logSystemConsumer(resolverData_.logSystemConsumer),
+	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    initialCommit(resolverData_.initialCommit), forResolver(true),
 	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex), epoch(Optional<LogEpoch>()) {}
 
@@ -119,10 +122,11 @@ private:
 	// Flag indicates if the configure is changed
 	bool& confChange;
 
-	Reference<LogSystem> logSystem = Reference<LogSystem>();
+	Reference<LogSystemConsumer> logSystemConsumer = Reference<LogSystemConsumer>();
 	Version version = invalidVersion;
 	Version popVersion = 0;
 	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
+	CDCRoutingTable* cdcRouting = nullptr;
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
 	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
 	PublicRequestStream<CommitTransactionRequest> commit = PublicRequestStream<CommitTransactionRequest>();
@@ -551,6 +555,31 @@ private:
 		    .detail("LogRangeEnd", logRangeEnd);
 	}
 
+	void checkSetCDCMetadata(MutationRef m) {
+		if (!cdcStreamNameKeys.contains(m.param1) && !cdcStreamKeys.contains(m.param1) &&
+		    !cdcTagHistoryKeys.contains(m.param1) && !cdcRetiredTagPopKeys.contains(m.param1) &&
+		    !cdcProxyKeys.contains(m.param1) && m.param1 != cdcMaxStreamIdKey &&
+		    m.param1 != cdcProxyAssignmentChangeKey) {
+			return;
+		}
+		if (!initialCommit) {
+			txnStateStore->set(KeyValueRef(m.param1, m.param2));
+		}
+		if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
+		    (cdcStreamKeys.contains(m.param1) || cdcTagHistoryKeys.contains(m.param1))) {
+			toCommit->setLogsChanged();
+		}
+		if (!cdcRouting) {
+			return;
+		}
+		if (cdcStreamKeys.contains(m.param1)) {
+			cdcRouting->setRange(decodeCDCStreamKey(m.param1), decodeCDCStreamKeysValue(m.param2));
+		} else if (cdcTagHistoryKeys.contains(m.param1)) {
+			const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(m.param1);
+			cdcRouting->setTag(history.streamId, history.version, history.tag);
+		}
+	}
+
 	void checkSetGlobalKeys(MutationRef m) {
 		if (!m.param1.startsWith(globalKeysPrefix)) {
 			return;
@@ -758,7 +787,7 @@ private:
 		// Storage server removal always happens in a separate version from any prior writes (or any subsequent
 		// reuse of the tag) so we can safely destroy the tag here without any concern about intra-batch
 		// ordering
-		if (logSystem && popVersion) {
+		if (logSystemConsumer && popVersion) {
 			auto serverKeysCleared =
 			    txnStateStore->readRange(range & serverTagKeys).get(); // read is expected to be immediately available
 			for (auto& kv : serverKeysCleared) {
@@ -768,7 +797,7 @@ private:
 				    .detail("Tag", tag.toString())
 				    .detail("Server", decodeServerTagKey(kv.key));
 				if (!forResolver) {
-					logSystem->pop(popVersion, tag);
+					logSystemConsumer->pop(popVersion, tag);
 					(*tag_popped)[tag] = popVersion;
 				}
 				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
@@ -845,7 +874,7 @@ private:
 		}
 		// Once a tag has been removed from history we should pop it, since we no longer have a record of the
 		// tag once it has been removed from history
-		if (logSystem && popVersion) {
+		if (logSystemConsumer && popVersion) {
 			auto serverKeysCleared = txnStateStore->readRange(range & serverTagHistoryKeys)
 			                             .get(); // read is expected to be immediately available
 			for (auto& kv : serverKeysCleared) {
@@ -855,7 +884,7 @@ private:
 				    .detail("Tag", tag.toString())
 				    .detail("Version", decodeServerTagHistoryKey(kv.key));
 				if (!forResolver) {
-					logSystem->pop(popVersion, tag);
+					logSystemConsumer->pop(popVersion, tag);
 					(*tag_popped)[tag] = popVersion;
 				}
 				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
@@ -991,6 +1020,34 @@ private:
 
 		if (!initialCommit)
 			txnStateStore->clear(commonLogRange);
+	}
+
+	void checkClearCDCMetadata(KeyRangeRef range) {
+		if (!cdcStreamNameKeys.intersects(range) && !cdcStreamKeys.intersects(range) &&
+		    !cdcTagHistoryKeys.intersects(range) && !cdcRetiredTagPopKeys.intersects(range) &&
+		    !cdcProxyKeys.intersects(range) && !range.contains(cdcMaxStreamIdKey)) {
+			return;
+		}
+		// CDC tags may be shared and acknowledgement minima are stored outside transaction state.
+		// A durable retired-tag watermark lets any CDC proxy finish pops after stream removal.
+		if (!initialCommit) {
+			for (const KeyRangeRef cdcRange :
+			     { cdcStreamNameKeys, cdcStreamKeys, cdcTagHistoryKeys, cdcRetiredTagPopKeys, cdcProxyKeys }) {
+				if (cdcRange.intersects(range)) {
+					txnStateStore->clear(cdcRange & range);
+				}
+			}
+			if (range.contains(cdcMaxStreamIdKey)) {
+				txnStateStore->clear(singleKeyRange(cdcMaxStreamIdKey));
+			}
+		}
+		if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
+		    (cdcStreamKeys.intersects(range) || cdcTagHistoryKeys.intersects(range))) {
+			toCommit->setLogsChanged();
+		}
+		if (cdcRouting && (cdcStreamKeys.intersects(range) || cdcTagHistoryKeys.intersects(range))) {
+			cdcRouting->reload(txnStateStore);
+		}
 	}
 
 	void checkClearTssMappingKeys(MutationRef m, KeyRangeRef range) {
@@ -1130,6 +1187,7 @@ public:
 				checkSetApplyMutationsEndRange(m);
 				checkSetApplyMutationsKeyVersionMapRange(m);
 				checkSetLogRangesRange(m);
+				checkSetCDCMetadata(m);
 				checkSetGlobalKeys(m);
 				checkSetWriteRecoverKey(m);
 				checkSetMinRequiredCommitVersionKey(m);
@@ -1148,6 +1206,7 @@ public:
 				checkClearApplyMutationsEndRange(m, range);
 				checkClearApplyMutationKeyVersionMapRange(m, range);
 				checkClearLogRangesRange(range);
+				checkClearCDCMetadata(range);
 				checkClearTssMappingKeys(m, range);
 				checkClearTssQuarantineKeys(m, range);
 				checkClearVersionEpochKeys(m, range);
@@ -1173,7 +1232,7 @@ public:
 void applyMetadataMutations(SpanContext const& spanContext,
                             const ApplyMetadataProxyContext& proxyMetadata,
                             Arena& arena,
-                            Reference<LogSystem> logSystem,
+                            Reference<LogSystemConsumer> logSystemConsumer,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* toCommit,
                             bool& confChange,
@@ -1185,7 +1244,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
 	                           arena,
 	                           mutations,
 	                           proxyMetadata,
-	                           logSystem,
+	                           logSystemConsumer,
 	                           toCommit,
 	                           confChange,
 	                           version,
@@ -1218,7 +1277,10 @@ bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 			    (m.param1.startsWith(applyMutationsEndRange.begin)) ||
 			    (m.param1.startsWith(applyMutationsKeyVersionMapRange.begin)) ||
 			    (m.param1.startsWith(logRangesRange.begin)) || (m.param1.startsWith(serverKeysPrefix)) ||
-			    (m.param1.startsWith(keyServersPrefix))) {
+			    (m.param1.startsWith(keyServersPrefix)) || cdcStreamNameKeys.contains(m.param1) ||
+			    cdcStreamKeys.contains(m.param1) || cdcTagHistoryKeys.contains(m.param1) ||
+			    cdcRetiredTagPopKeys.contains(m.param1) || cdcProxyKeys.contains(m.param1) ||
+			    m.param1 == cdcMaxStreamIdKey || m.param1 == cdcProxyAssignmentChangeKey) {
 				return true;
 			}
 		} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
@@ -1231,7 +1293,10 @@ bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 			    (tssQuarantineKeys.intersects(range)) || (range.contains(previousCoordinatorsKey)) ||
 			    (range.contains(coordinatorsKey)) || (range.contains(databaseLockedKey)) ||
 			    (range.contains(metadataVersionKey)) || (range.contains(mustContainSystemMutationsKey)) ||
-			    (range.contains(writeRecoveryKey)) || (range.intersects(testOnlyTxnStateStorePrefixRange))) {
+			    (range.contains(writeRecoveryKey)) || (range.intersects(testOnlyTxnStateStorePrefixRange)) ||
+			    cdcStreamNameKeys.intersects(range) || cdcStreamKeys.intersects(range) ||
+			    cdcTagHistoryKeys.intersects(range) || cdcRetiredTagPopKeys.intersects(range) ||
+			    cdcProxyKeys.intersects(range) || range.contains(cdcMaxStreamIdKey)) {
 				return true;
 			}
 		}

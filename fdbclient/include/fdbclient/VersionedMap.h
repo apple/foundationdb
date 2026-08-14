@@ -136,7 +136,7 @@ class PTreeFinger {
 	size_t bound_sz_ = 0;
 
 public:
-	PTreeFinger() {}
+	PTreeFinger() = default;
 
 	// Explicit copy constructors ensure we copy the live values in entries_.
 	explicit(false) PTreeFinger(PTreeFinger const& f) { *this = f; }
@@ -627,11 +627,12 @@ void printTreeDetails(const Reference<PTree<T>>& p, int depth = 0) {
 	printf("  Left: %p\n", p->pointer[0].getPtr());
 	printf("  Right: %p\n", p->pointer[1].getPtr());
 	// if (p->pointer[2])
-	if (p->updated)
+	if (p->updated) {
 		printf("  Version %lld %s: %p\n",
 		       p->lastUpdateVersion,
 		       p->replacedPointer ? "Right" : "Left",
 		       p->pointer[2].getPtr());
+	}
 	for (int i = 0; i < 3; i++)
 		if (p->pointer[i])
 			printTreeDetails(p->pointer[i], depth + 1);
@@ -738,9 +739,9 @@ template <class K, class T>
 class VersionedMap : NonCopyable {
 	// private:
 public:
-	typedef PTreeImpl::PTree<MapPair<K, std::pair<T, Version>>> PTreeT;
-	typedef PTreeImpl::PTreeFinger<MapPair<K, std::pair<T, Version>>> PTreeFingerT;
-	typedef Reference<PTreeT> Tree;
+	using PTreeT = PTreeImpl::PTree<MapPair<K, std::pair<T, Version>>>;
+	using PTreeFingerT = PTreeImpl::PTreeFinger<MapPair<K, std::pair<T, Version>>>;
+	using Tree = Reference<PTreeT>;
 
 	Version oldestVersion, latestVersion;
 	Reference<IRandom> priorityRandom;
@@ -751,8 +752,8 @@ public:
 	std::deque<std::pair<Version, Tree>> roots;
 
 	struct rootsComparator {
-		bool operator()(const std::pair<Version, Tree>& value, const Version& key) { return (value.first < key); }
-		bool operator()(const Version& key, const std::pair<Version, Tree>& value) { return (key < value.first); }
+		bool operator()(const std::pair<Version, Tree>& value, const Version& key) const { return (value.first < key); }
+		bool operator()(const Version& key, const std::pair<Version, Tree>& value) const { return (key < value.first); }
 	};
 
 	Tree const& getRoot(Version v) const {
@@ -841,8 +842,9 @@ public:
 			latestVersion = version;
 			Tree r = getRoot(version);
 			roots.emplace_back(version, r);
-		} else
+		} else {
 			ASSERT(version == latestVersion);
+		}
 	}
 
 	// insert() and erase() invalidate atLatest() and all iterators into it

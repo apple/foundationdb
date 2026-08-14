@@ -22,13 +22,13 @@
 #define FDB_FLOW_LOANER_TYPES_H
 
 namespace FDB {
-typedef StringRef KeyRef;
-typedef StringRef ValueRef;
+using KeyRef = StringRef;
+using ValueRef = StringRef;
 
-typedef int64_t Version;
+using Version = int64_t;
 
-typedef Standalone<KeyRef> Key;
-typedef Standalone<ValueRef> Value;
+using Key = Standalone<KeyRef>;
+using Value = Standalone<ValueRef>;
 
 inline Key keyAfter(const KeyRef& key) {
 	if (key == "\xff\xff"_sr)
@@ -55,7 +55,7 @@ struct KeySelectorRef {
 	KeyRef key; // Find the last item less than key
 	bool orEqual; // (or equal to key, if this is true)
 	int offset; // and then move forward this many items (or backward if negative)
-	KeySelectorRef() {}
+	KeySelectorRef() = default;
 	KeySelectorRef(const KeyRef& key, bool orEqual, int offset) : key(key), orEqual(orEqual), offset(offset) {}
 
 	KeySelectorRef(Arena& arena, const KeySelectorRef& copyFrom)
@@ -111,12 +111,12 @@ inline KeySelectorRef operator-(const KeySelectorRef& s, int off) {
 	return KeySelectorRef(s.key, s.orEqual, s.offset - off);
 }
 
-typedef Standalone<KeySelectorRef> KeySelector;
+using KeySelector = Standalone<KeySelectorRef>;
 
 struct KeyValueRef {
 	KeyRef key;
 	ValueRef value;
-	KeyValueRef() {}
+	KeyValueRef() = default;
 	KeyValueRef(const KeyRef& key, const ValueRef& value) : key(key), value(value) {}
 	KeyValueRef(Arena& a, const KeyValueRef& copyFrom) : key(a, copyFrom.key), value(a, copyFrom.value) {}
 	bool operator==(const KeyValueRef& r) const { return key == r.key && value == r.value; }
@@ -153,7 +153,7 @@ struct KeyValueRef {
 	};
 };
 
-typedef Standalone<KeyValueRef> KeyValue;
+using KeyValue = Standalone<KeyValueRef>;
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
 	// True if the range may have more keys in it (possibly beyond the specified limits).
@@ -264,7 +264,7 @@ struct GetRangeLimits {
 
 struct KeyRangeRef {
 	const KeyRef begin, end;
-	KeyRangeRef() {}
+	KeyRangeRef() = default;
 	KeyRangeRef(const KeyRef& begin, const KeyRef& end) : begin(begin), end(end) {
 		if (begin > end) {
 			throw inverted_range();
@@ -316,7 +316,7 @@ inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	return KeyRangeRef(b, e);
 }
 
-typedef Standalone<KeyRangeRef> KeyRange;
+using KeyRange = Standalone<KeyRangeRef>;
 
 template <class T>
 static std::string describe(T const& item) {

@@ -92,17 +92,22 @@ struct OldTLogCoreData {
 	Version recoverAt;
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
+	int32_t rangePartitionedBackupWorkerTags;
 
-	OldTLogCoreData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0) {}
+	OldTLogCoreData()
+	  : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0),
+	    rangePartitionedBackupWorkerTags(0) {}
 	bool operator==(const OldTLogCoreData& rhs) const {
 		if (SERVER_KNOBS->RECORD_RECOVER_AT_IN_CSTATE) {
 			return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
 			       epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd && recoverAt == rhs.recoverAt &&
-			       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
+			       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch &&
+			       rangePartitionedBackupWorkerTags == rhs.rangePartitionedBackupWorkerTags;
 		} else {
 			return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
 			       epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd &&
-			       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
+			       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch &&
+			       rangePartitionedBackupWorkerTags == rhs.rangePartitionedBackupWorkerTags;
 		}
 	}
 
@@ -121,6 +126,9 @@ struct OldTLogCoreData {
 		if (ar.protocolVersion().hasGcTxnGenerations()) {
 			serializer(ar, recoverAt); // since 7.3
 		}
+		if (ar.protocolVersion().hasRangePartitionedBackupWorker()) {
+			serializer(ar, rangePartitionedBackupWorkerTags); // since 8.0
+		}
 	}
 };
 
@@ -128,6 +136,7 @@ struct DBCoreState {
 	std::vector<CoreTLogSet> tLogs;
 	int32_t logRouterTags;
 	int32_t txsTags;
+	int32_t rangePartitionedBackupWorkerTags;
 	std::vector<OldTLogCoreData> oldTLogData;
 	DBRecoveryCount recoveryCount; // Increases with sequential successful recoveries.
 	LogSystemType logSystemType;
@@ -150,8 +159,8 @@ struct DBCoreState {
 	EncryptionAtRestModeDeprecated encryptionAtRestModeDeprecated;
 
 	DBCoreState()
-	  : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty),
-	    newestProtocolVersion(ProtocolVersion::invalidProtocolVersion),
+	  : logRouterTags(0), txsTags(0), rangePartitionedBackupWorkerTags(0), recoveryCount(0),
+	    logSystemType(LogSystemType::empty), newestProtocolVersion(ProtocolVersion::invalidProtocolVersion),
 	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion) {}
 
 	std::vector<UID> getPriorCommittedLogServers() {
@@ -174,7 +183,8 @@ struct DBCoreState {
 	bool isEqual(const DBCoreState& r) const {
 		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs &&
 		       oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
-		       pseudoLocalities == r.pseudoLocalities;
+		       pseudoLocalities == r.pseudoLocalities &&
+		       rangePartitionedBackupWorkerTags == r.rangePartitionedBackupWorkerTags;
 	}
 	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
 	bool operator!=(const DBCoreState& rhs) const { return !isEqual(rhs); }
@@ -196,6 +206,9 @@ struct DBCoreState {
 		}
 		if (ar.protocolVersion().hasEncryptionAtRest()) {
 			serializer(ar, encryptionAtRestModeDeprecated); // 7.2
+		}
+		if (ar.protocolVersion().hasRangePartitionedBackupWorker()) {
+			serializer(ar, rangePartitionedBackupWorkerTags); // since 8.0
 		}
 	}
 };

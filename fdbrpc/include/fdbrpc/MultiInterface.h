@@ -34,7 +34,7 @@ struct KVPair {
 	// KVPair<K,V> is ordered only by K and described by V
 	K k;
 	V v;
-	KVPair() {}
+	KVPair() = default;
 	KVPair(K const& k, V const& v) : k(k), v(v) {}
 	KVPair(K&& k, V&& v) : k(std::move(k)), v(std::move(v)) {}
 };
@@ -67,7 +67,7 @@ struct ReferencedInterface : public ReferenceCounted<ReferencedInterface<T>> {
 		                                                            LBLocalityData<T>::getAddress(interf))
 		                                      : LBDistance::DISTANT;
 	}
-	virtual ~ReferencedInterface() {}
+	virtual ~ReferencedInterface() = default;
 
 	static bool sort_by_distance(Reference<ReferencedInterface<T>> r1, Reference<ReferencedInterface<T>> r2) {
 		return r1->distance < r2->distance;
@@ -172,7 +172,7 @@ public:
 	T const& getInterface(int index) { return alternatives[index].interf; }
 	UID getId(int index) const { return alternatives[index].interf.id(); }
 
-	virtual ~ModelInterface() {}
+	virtual ~ModelInterface() = default;
 
 	std::string description() { return describe(alternatives); }
 
@@ -189,7 +189,7 @@ class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
 		ASSERT(false);
 	}
 
-	virtual ~MultiInterface() {}
+	virtual ~MultiInterface() = default;
 };
 
 template <class T>
@@ -241,7 +241,7 @@ public:
 
 	const Reference<ReferencedInterface<T>>& operator[](int i) const { return alternatives[i]; }
 
-	virtual ~MultiInterface() {}
+	virtual ~MultiInterface() = default;
 
 	std::string description() { return describe(alternatives); }
 

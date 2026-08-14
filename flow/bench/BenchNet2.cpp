@@ -27,7 +27,7 @@
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/network.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 
 static Future<Void> increment(TaskPriority priority, uint32_t* sum) {
 	co_await delay(0, priority);

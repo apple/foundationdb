@@ -20,9 +20,9 @@
 
 #include <boost/lexical_cast.hpp>
 
-#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
+#include "fdbclient/StatusSchema.h"
 #include "fdbserver/tester/workloads.h"
 
 struct TokenBucket {
@@ -37,10 +37,11 @@ struct TokenBucket {
 	Future<Void> tokenAdder() {
 		while (true) {
 			bucketSize = std::min(bucketSize + transactionRate * addTokensInterval, maxBurst);
-			if (deterministicRandom()->randomInt(0, 100) == 0)
+			if (deterministicRandom()->randomInt(0, 100) == 0) {
 				TraceEvent("AddingTokensx100")
 				    .detail("BucketSize", bucketSize)
 				    .detail("TransactionRate", transactionRate);
+			}
 			co_await delay(addTokensInterval);
 		}
 	}

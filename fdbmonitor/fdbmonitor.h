@@ -49,9 +49,9 @@ constexpr uint64_t DEFAULT_MEMORY_LIMIT = 8LL << 30;
 constexpr double MEMORY_CHECK_INTERVAL = 2.0; // seconds
 
 #ifdef __linux__
-typedef fd_set* fdb_fd_set;
+using fdb_fd_set = fd_set*;
 #elif defined(__APPLE__) || defined(__FreeBSD__)
-typedef int fdb_fd_set;
+using fdb_fd_set = int;
 #endif
 
 #define CANONICAL_PATH_SEPARATOR '/'
@@ -63,7 +63,7 @@ enum Severity { SevDebug = 5, SevInfo = 10, SevWarn = 20, SevWarnAlways = 30, Se
 extern bool daemonize;
 extern std::string logGroup;
 
-typedef std::string ProcessID;
+using ProcessID = std::string;
 
 int severity_to_priority(Severity severity);
 double timer();
@@ -268,7 +268,7 @@ public:
 
 		const char* kocc =
 		    get_value_multi(ini, "kill-on-configuration-change", ssection.c_str(), section.c_str(), "general", nullptr);
-		if (kocc && strcmp(kocc, "true")) {
+		if (kocc && strcmp(kocc, "true") != 0) {
 			kill_on_configuration_change = false;
 		}
 
@@ -305,7 +305,7 @@ public:
 
 		const std::string pid_s = std::to_string(getpid());
 
-		for (auto i : keys) {
+		for (const auto& i : keys) {
 			// For "memory" option, despite they are handled by fdbmonitor, we still
 			// pass it to fdbserver.
 			if (isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
@@ -339,13 +339,14 @@ public:
 					        opt.c_str());
 					return;
 				}
-			} else
+			} else {
 				commands.push_back(std::string("--").append(i.pItem).append("=").append(opt));
+			}
 		}
 
 		argv = new char*[commands.size() + 1];
 		int i = 0;
-		for (auto itr : commands) {
+		for (const auto& itr : commands) {
 			argv[i++] = strdup(itr.c_str());
 		}
 		argv[i] = nullptr;

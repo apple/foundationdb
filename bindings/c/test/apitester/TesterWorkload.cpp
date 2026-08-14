@@ -243,6 +243,7 @@ void WorkloadManager::workloadDone(IWorkload* workload, bool failed) {
 	bool done = workloads.empty();
 	lock.unlock();
 	if (done) {
+		statsStopped.store(true);
 		if (statsTimer) {
 			statsTimer->cancel();
 		}
@@ -273,7 +274,7 @@ void WorkloadManager::readControlInput(std::string pipeName) {
 			return;
 		}
 		if (ch != '\n') {
-			line += ch;
+			line += static_cast<char>(ch);
 			continue;
 		}
 		if (line.empty()) {
@@ -291,6 +292,9 @@ void WorkloadManager::readControlInput(std::string pipeName) {
 
 void WorkloadManager::schedulePrintStatistics(int timeIntervalMs) {
 	statsTimer = scheduler->scheduleWithDelay(timeIntervalMs, [this, timeIntervalMs]() {
+		if (statsStopped.load()) {
+			return;
+		}
 		for (const auto& workload : getActiveWorkloads()) {
 			workload->printStats();
 		}

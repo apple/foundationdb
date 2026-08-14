@@ -54,7 +54,7 @@ StringRef radix_join(const StringRef& key1, const StringRef& key2, Arena& arena)
 	uint8_t* s = new (arena) uint8_t[rsize];
 
 	memcpy(s, key1.begin(), key1.size());
-	if (key2.size() > 0) {
+	if (!key2.empty()) {
 		memcpy(s + key1.size(), key2.begin(), key2.size());
 	}
 
@@ -74,7 +74,7 @@ StringRef radix_constructStr(const StringRef& key, int begin, int num, Arena& ar
 
 class radix_tree {
 public:
-	typedef std::size_t size_type;
+	using size_type = std::size_t;
 
 private:
 	// union used inside both base node and leaf node
@@ -131,7 +131,7 @@ private:
 			if (m_is_inline) {
 				return m_inline_length == 0 ? LEAF_BYTE : key.inlineData[0];
 			} else {
-				return key.data.size() == 0 ? LEAF_BYTE : key.data[0];
+				return key.data.empty() ? LEAF_BYTE : key.data[0];
 			}
 		}
 
@@ -260,7 +260,7 @@ public:
 
 	explicit radix_tree() : m_size(0), m_node(0), inline_keys(0), total_bytes(0), m_root(nullptr) {}
 
-	~radix_tree() {}
+	~radix_tree() = default;
 
 	radix_tree(const radix_tree& other) = delete; // delete
 	radix_tree& operator=(const radix_tree other) = delete; // delete
@@ -374,7 +374,7 @@ void radix_tree::add_child(node* parent, node* child) {
 
 void radix_tree::add_child4(node* parent, node* child) {
 	int16_t ch = child->getFirstByte();
-	internalNode4* parent_ref = (internalNode4*)parent;
+	auto* parent_ref = (internalNode4*)parent;
 	int i = 0;
 
 	for (; i < parent_ref->num_children; ++i) {
@@ -410,7 +410,7 @@ void radix_tree::add_child4(node* parent, node* child) {
 	} else {
 		ASSERT(parent_ref->num_children >= 3);
 
-		internalNode* new_node = new radix_tree::internalNode();
+		auto* new_node = new radix_tree::internalNode();
 		new_node->base = parent_ref->base; // equal operator
 		for (int index = 0; index < parent_ref->num_children; index++) {
 			new_node->m_children.emplace_back(parent_ref->keys[index], parent_ref->m_children[index]);
@@ -430,7 +430,7 @@ void radix_tree::add_child4(node* parent, node* child) {
 
 void radix_tree::add_child_vector(node* parent, node* child) {
 	int16_t ch = child->getFirstByte();
-	internalNode* parent_ref = (internalNode*)parent;
+	auto* parent_ref = (internalNode*)parent;
 	int i = 0;
 
 	for (; i < parent_ref->m_children.size(); ++i) {
@@ -462,7 +462,7 @@ void radix_tree::delete_child(radix_tree::node* parent, radix_tree::node* child)
 
 void radix_tree::delete_child4(radix_tree::node* parent, radix_tree::node* child) {
 	int16_t ch = child->getFirstByte();
-	internalNode4* parent_ref = (internalNode4*)parent;
+	auto* parent_ref = (internalNode4*)parent;
 	int i = 0;
 
 	for (; i < parent_ref->num_children; i++) {
@@ -479,7 +479,7 @@ void radix_tree::delete_child4(radix_tree::node* parent, radix_tree::node* child
 
 void radix_tree::delete_child_vector(radix_tree::node* parent, radix_tree::node* child) {
 	int16_t ch = child->getFirstByte();
-	internalNode* parent_ref = (internalNode*)parent;
+	auto* parent_ref = (internalNode*)parent;
 	int i = 0;
 
 	for (; i < parent_ref->m_children.size(); i++) {
@@ -489,20 +489,20 @@ void radix_tree::delete_child_vector(radix_tree::node* parent, radix_tree::node*
 	ASSERT(i != parent_ref->m_children.size());
 	parent_ref->m_children.erase(parent_ref->m_children.begin() + i);
 	total_bytes -= (getElementBytes(child) + child->getArenaSize() + sizeof(std::pair<int16_t, void*>));
-	if (parent_ref->m_children.size() && parent_ref->m_children.size() <= parent_ref->m_children.capacity() / 4)
+	if (!parent_ref->m_children.empty() && parent_ref->m_children.size() <= parent_ref->m_children.capacity() / 4)
 		parent_ref->m_children.shrink_to_fit();
 }
 
 int radix_tree::find_child(radix_tree::node* parent, int16_t ch) {
 	int i = 0;
 	if (parent->m_is_fixed) {
-		internalNode4* parent_ref = (internalNode4*)parent;
+		auto* parent_ref = (internalNode4*)parent;
 		for (; i < parent_ref->num_children; ++i) {
 			if (parent_ref->keys[i] == ch)
 				return i;
 		}
 	} else {
-		internalNode* parent_ref = (internalNode*)parent;
+		auto* parent_ref = (internalNode*)parent;
 		for (; i != parent_ref->m_children.size(); ++i) {
 			if (parent_ref->m_children[i].first == ch)
 				return i;
@@ -768,7 +768,7 @@ radix_tree::node* radix_tree::append(node* parent, const StringRef& key, const S
 	int depth = parent->m_depth + parent->getKeySize();
 	int len = key.size() - depth;
 
-	radix_tree::node* node_c = (node*)new radix_tree::leafNode(val);
+	auto* node_c = (node*)new radix_tree::leafNode(val);
 	node_c->m_depth = depth;
 	node_c->m_parent = parent;
 

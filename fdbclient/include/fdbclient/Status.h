@@ -30,10 +30,10 @@
 json_spirit::mValue readJSONStrictly(const std::string& s);
 
 struct StatusObject : json_spirit::mObject {
-	typedef json_spirit::mObject Map;
-	typedef json_spirit::mArray Array;
+	using Map = json_spirit::mObject;
+	using Array = json_spirit::mArray;
 
-	StatusObject() {}
+	StatusObject() = default;
 	explicit(false) StatusObject(json_spirit::mObject const& o) : json_spirit::mObject(o) {}
 };
 
@@ -60,12 +60,12 @@ void save(Ar& ar, StatusObject const& statusObj) {
 }
 
 struct StatusArray : json_spirit::mArray {
-	StatusArray() {}
+	StatusArray() = default;
 	explicit(false) StatusArray(json_spirit::mArray const& o) : json_spirit::mArray(o.begin(), o.end()) {}
 };
 
 struct StatusValue : json_spirit::mValue {
-	StatusValue() {}
+	StatusValue() = default;
 	explicit(false) StatusValue(json_spirit::mValue const& o) : json_spirit::mValue(o) {}
 };
 
@@ -103,7 +103,7 @@ inline StatusObject makeMessage(const MessageType messageType, const char* descr
 }
 
 // Typedef to cover older code that was written when this class was only a reader and called StatusObjectReader
-typedef JSONDoc StatusObjectReader;
+using StatusObjectReader = JSONDoc;
 
 // Template specialization for get<JSONDoc> because is convenient to get() an
 // element from an object directly into a JSONDoc to have a handle to that sub-doc.
@@ -130,7 +130,7 @@ inline bool findMessagesByName(StatusObjectReader object, std::set<std::string> 
 		// Since we are looking for a positive match, any exceptions thrown when trying to read
 		// the object in the messages array will be perceived as not-a-match and therefore ignored.
 		try {
-			if (to_find.count(i.get_obj().at("name").get_str()))
+			if (to_find.contains(i.get_obj().at("name").get_str()))
 				return true;
 		} catch (std::exception&) {
 		}

@@ -105,7 +105,7 @@ enum class SpanKind : uint8_t { INTERNAL = 0, CLIENT = 1, SERVER = 2, PRODUCER =
 enum class SpanStatus : uint8_t { UNSET = 0, OK = 1, ERR = 2 };
 
 struct SpanEventRef {
-	SpanEventRef() {}
+	SpanEventRef() = default;
 	SpanEventRef(const StringRef& name,
 	             const double& time,
 	             const SmallVectorRef<KeyValueRef>& attributes = SmallVectorRef<KeyValueRef>())
@@ -164,12 +164,12 @@ public:
 		arena = std::move(o.arena);
 		context = o.context;
 		location = o.location;
-		parentContext = std::move(o.parentContext);
+		parentContext = o.parentContext;
 		kind = o.kind;
 		begin = o.begin;
 		end = o.end;
-		links = std::move(o.links);
-		events = std::move(o.events);
+		links = o.links;
+		events = o.events;
 		status = o.status;
 		o.context = SpanContext();
 		o.parentContext = SpanContext();
@@ -178,7 +178,7 @@ public:
 		o.end = 0.0;
 		o.status = SpanStatus::UNSET;
 	}
-	Span() {}
+	Span() = default;
 	~Span();
 	Span& operator=(Span&& o);
 	Span& operator=(const Span&) = delete;

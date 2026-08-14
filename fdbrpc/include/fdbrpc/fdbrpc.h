@@ -280,7 +280,7 @@ void setReplyPriority(const ReplyPromise<Reply>& p, TaskPriority taskID) {
 struct ReplyPromiseStreamReply {
 	Optional<UID> acknowledgeToken;
 	uint16_t sequence;
-	ReplyPromiseStreamReply() {}
+	ReplyPromiseStreamReply() = default;
 };
 
 struct AcknowledgementReply {
@@ -736,8 +736,9 @@ public:
 	void send(U&& value) const {
 		if (queue->isRemoteEndpoint()) {
 			FlowTransport::transport().sendUnreliable(SerializeSource<T>(std::forward<U>(value)), getEndpoint(), true);
-		} else
+		} else {
 			queue->send(std::forward<U>(value));
+		}
 	}
 
 	/*void sendError(const Error& error) const {
@@ -840,8 +841,7 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			if (disc.isReady() ||
-			    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01))) {
+			if (disc.isReady() || (g_network->isSimulated() && !g_simulator->speedUpSimulation && buggify(0.01))) {
 				if (disc.isReady() && IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint())) {
 					p.sendError(unauthorized_attempt());
 				} else {

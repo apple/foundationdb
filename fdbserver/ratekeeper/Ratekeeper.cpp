@@ -21,6 +21,7 @@
 #include <algorithm>
 
 #include "fdbclient/Knobs.h"
+#include "fdbserver/core/BusyTagCollector.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
@@ -309,6 +310,9 @@ Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const
 				}
 			}
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent(SevWarn, "CannotMonitorHotShardForSS").detail("SS", ssi);
 			continue;
 		}
@@ -386,20 +390,9 @@ Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
 			p.lastThrottledTagChangeId = tagThrottler->getThrottledTagChangeId();
 			p.lastTagPushTime = now();
 
-			bool returningTagsToProxy{ false };
-			if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
-				auto proxyThrottledTags = tagThrottler->getProxyRates(grvProxyInfo.size());
-				if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-					returningTagsToProxy = !proxyThrottledTags.empty();
-					reply.proxyThrottledTags = std::move(proxyThrottledTags);
-				}
-			} else {
-				auto clientThrottledTags = tagThrottler->getClientRates();
-				if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-					returningTagsToProxy = !clientThrottledTags.empty();
-					reply.clientThrottledTags = std::move(clientThrottledTags);
-				}
-			}
+			auto clientThrottledTags = tagThrottler->getClientRates();
+			bool returningTagsToProxy = !clientThrottledTags.empty();
+			reply.clientThrottledTags = std::move(clientThrottledTags);
 			CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 		}
 
@@ -555,6 +548,9 @@ Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<Se
 		req.reply.send(Void());
 		TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
 	} catch (Error& err) {
+		if (err.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		TraceEvent("RatekeeperDied", rkInterf.id()).errorUnsuppressed(err);
 	}
 }
@@ -604,12 +600,7 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
     maxVersion(0), unblockedAssignmentTime(now()) {
-	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
-		tagThrottler = std::make_unique<GlobalTagThrottler>(
-		    db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND, SERVER_KNOBS->GLOBAL_TAG_THROTTLING_LIMITING_THRESHOLD);
-	} else {
-		tagThrottler = std::make_unique<TagThrottler>(db, id);
-	}
+	tagThrottler = std::make_unique<TagThrottler>(db, id);
 }
 
 void Ratekeeper::updateCommitCostEstimation(
@@ -672,7 +663,18 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	// ratio
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC)) {
+		if (!ss.valid || !ss.acceptingRequests) {
+			continue;
+		}
+
+		int64_t storageQueue = ss.getStorageQueueBytes();
+		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
+
+		int64_t storageDurabilityLag = ss.getDurabilityLag();
+		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
+
+		// Remote storage is reported in health metrics but is not used to rate-limit the primary region.
+		if (remoteDC.present() && ss.locality.dcId() == remoteDC) {
 			continue;
 		}
 		++sscount;
@@ -706,12 +708,6 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 				    .detail("MinFreeSpace", minFreeSpace);
 			}
 		}
-
-		int64_t storageQueue = ss.getStorageQueueBytes();
-		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
-
-		int64_t storageDurabilityLag = ss.getDurabilityLag();
-		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
 
 		storageDurabilityLagReverseIndex.insert(std::make_pair(-1 * storageDurabilityLag, &ss));
 
@@ -1168,15 +1164,40 @@ Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerD
 	co_await Ratekeeper::run(rkInterf, dbInfo);
 }
 
-StorageQueueInfo::StorageQueueInfo(const UID& ratekeeperID_, const UID& id_, const LocalityData& locality_)
-  : valid(false), ratekeeperID(ratekeeperID_), id(id_), locality(locality_), acceptingRequests(false),
-    smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited) {
-	// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
-	lastReply.instanceID = -1;
+QueueMetricsSmoother::QueueMetricsSmoother()
+  : smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {}
+
+bool QueueMetricsSmoother::update(int64_t newInstanceID,
+                                  int64_t newDurableBytes,
+                                  int64_t inputBytes,
+                                  const StorageBytes& storageBytes,
+                                  Smoother& smoothTotalDurableBytes) {
+	const bool reset = !instanceID.present() || instanceID.get() != newInstanceID;
+	if (reset) {
+		smoothDurableBytes.reset(newDurableBytes);
+		verySmoothDurableBytes.reset(newDurableBytes);
+		smoothInputBytes.reset(inputBytes);
+		smoothFreeSpace.reset(storageBytes.available);
+		smoothTotalSpace.reset(storageBytes.total);
+	} else {
+		smoothTotalDurableBytes.addDelta(newDurableBytes - durableBytes);
+		smoothDurableBytes.setTotal(newDurableBytes);
+		verySmoothDurableBytes.setTotal(newDurableBytes);
+		smoothInputBytes.setTotal(inputBytes);
+		smoothFreeSpace.setTotal(storageBytes.available);
+		smoothTotalSpace.setTotal(storageBytes.total);
+	}
+	instanceID = newInstanceID;
+	durableBytes = newDurableBytes;
+	return reset;
 }
+
+StorageQueueInfo::StorageQueueInfo(const UID& ratekeeperID_, const UID& id_, const LocalityData& locality_)
+  : ratekeeperID(ratekeeperID_), smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), valid(false), id(id_), locality(locality_),
+    acceptingRequests(false), limitReason(limitReason_t::unlimited) {}
 
 StorageQueueInfo::StorageQueueInfo(const UID& id_, const LocalityData& locality_)
   : StorageQueueInfo(UID(), id_, locality_) {}
@@ -1189,23 +1210,12 @@ void StorageQueueInfo::addCommitCost(TransactionTagRef tagName, TransactionCommi
 
 void StorageQueueInfo::update(StorageQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
 	valid = true;
-	auto prevReply = std::move(lastReply);
 	lastReply = reply;
-	if (prevReply.instanceID != reply.instanceID) {
-		smoothDurableBytes.reset(reply.bytesDurable);
-		verySmoothDurableBytes.reset(reply.bytesDurable);
-		smoothInputBytes.reset(reply.bytesInput);
-		smoothFreeSpace.reset(reply.storageBytes.available);
-		smoothTotalSpace.reset(reply.storageBytes.total);
+	if (queueMetrics.update(
+	        reply.instanceID, reply.bytesDurable, reply.bytesInput, reply.storageBytes, smoothTotalDurableBytes)) {
 		smoothDurableVersion.reset(reply.durableVersion);
 		smoothLatestVersion.reset(reply.version);
 	} else {
-		smoothTotalDurableBytes.addDelta(reply.bytesDurable - prevReply.bytesDurable);
-		smoothDurableBytes.setTotal(reply.bytesDurable);
-		verySmoothDurableBytes.setTotal(reply.bytesDurable);
-		smoothInputBytes.setTotal(reply.bytesInput);
-		smoothFreeSpace.setTotal(reply.storageBytes.available);
-		smoothTotalSpace.setTotal(reply.storageBytes.total);
 		smoothDurableVersion.setTotal(reply.durableVersion);
 		smoothLatestVersion.setTotal(reply.version);
 	}
@@ -1218,18 +1228,13 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	TransactionTag busiestTag;
 	TransactionCommitCostEstimation maxCost;
 	double maxRate = 0;
-	std::priority_queue<BusyTagInfo, std::vector<BusyTagInfo>, std::greater<BusyTagInfo>> topKWriters;
+	BusyTagCollector busiestWriters(SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED,
+	                                SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 	for (const auto& [tag, cost] : tagCostEst) {
 		double rate = cost.getCostSum() / elapsed;
 		double busyness = static_cast<double>(maxCost.getCostSum()) / totalWriteCosts;
-		if (rate < SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
+		if (!busiestWriters.add(tag, rate, busyness)) {
 			continue;
-		}
-		if (topKWriters.size() < SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED) {
-			topKWriters.emplace(tag, rate, busyness);
-		} else if (topKWriters.top().rate < rate) {
-			topKWriters.pop();
-			topKWriters.emplace(tag, rate, busyness);
 		}
 
 		if (rate > maxRate) {
@@ -1239,10 +1244,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 		}
 	}
 
-	while (!topKWriters.empty()) {
-		busiestWriteTags.push_back(std::move(topKWriters.top()));
-		topKWriters.pop();
-	}
+	busiestWriters.drainInto(busiestWriteTags);
 
 	UpdateCommitCostRequest updateCommitCostRequest{ ratekeeperID,
 		                                             now(),
@@ -1262,43 +1264,11 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	return updateCommitCostRequest;
 }
 
-Optional<double> StorageQueueInfo::getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const {
-	auto const storageQueue = getStorageQueueBytes();
-	// TODO: Remove duplicate calculation from Ratekeeper::updateRate
-	double inverseResult = std::min(
-	    2.0, (storageQueue - storageTargetBytes + storageSpringBytes) / static_cast<double>(storageSpringBytes));
-	if (inverseResult > 0) {
-		return 1.0 / inverseResult;
-	} else {
-		return {};
-	}
-}
-
-TLogQueueInfo::TLogQueueInfo(UID id)
-  : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
-	// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied
-	// from storageQueueInfO)
-	lastReply.instanceID = -1;
-}
+TLogQueueInfo::TLogQueueInfo(UID id) : valid(false), id(id) {}
 
 void TLogQueueInfo::update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
 	valid = true;
-	auto prevReply = std::move(lastReply);
 	lastReply = reply;
-	if (prevReply.instanceID != reply.instanceID) {
-		smoothDurableBytes.reset(reply.bytesDurable);
-		verySmoothDurableBytes.reset(reply.bytesDurable);
-		smoothInputBytes.reset(reply.bytesInput);
-		smoothFreeSpace.reset(reply.storageBytes.available);
-		smoothTotalSpace.reset(reply.storageBytes.total);
-	} else {
-		smoothTotalDurableBytes.addDelta(reply.bytesDurable - prevReply.bytesDurable);
-		smoothDurableBytes.setTotal(reply.bytesDurable);
-		verySmoothDurableBytes.setTotal(reply.bytesDurable);
-		smoothInputBytes.setTotal(reply.bytesInput);
-		smoothFreeSpace.setTotal(reply.storageBytes.available);
-		smoothTotalSpace.setTotal(reply.storageBytes.total);
-	}
+	queueMetrics.update(
+	    reply.instanceID, reply.bytesDurable, reply.bytesInput, reply.storageBytes, smoothTotalDurableBytes);
 }

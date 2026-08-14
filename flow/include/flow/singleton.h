@@ -187,11 +187,11 @@ template <typename Type,
           typename Mutex = MUTEX_TYPE>
 class singleton {
 public:
-	typedef Type value_type;
-	typedef Type* pointer;
-	typedef const Type* const_pointer;
-	typedef const Type& const_reference;
-	typedef Type& reference;
+	using value_type = Type;
+	using pointer = Type*;
+	using const_pointer = const Type*;
+	using const_reference = const Type&;
+	using reference = Type&;
 
 private:
 	static bool destroyed_;

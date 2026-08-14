@@ -123,12 +123,13 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 			//  then unclog in a different order over the course of t seconds
 			std::vector<ISimulator::ProcessInfo*> swizzled;
 			std::vector<double> starts, ends;
-			for (int m = 0; m < g_simulator->getAllProcesses().size(); m++)
+			for (int m = 0; m < g_simulator->getAllProcesses().size(); m++) {
 				if (deterministicRandom()->random01() < 0.5) {
 					swizzled.push_back(g_simulator->getAllProcesses()[m]);
 					starts.push_back(deterministicRandom()->random01() * t / 2);
 					ends.push_back(deterministicRandom()->random01() * t / 2 + t / 2);
 				}
+			}
 			for (int i = 0; i < 10; i++)
 				clogRandomPair(t);
 

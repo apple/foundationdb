@@ -29,7 +29,7 @@
 
 #include "eio.h"
 #include "flow/flow.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TDMetric.h"
 
@@ -104,7 +104,7 @@ public:
 			throw lock_file_failure();
 		}
 
-		co_return Reference<IAsyncFile>(new AsyncFileEIO(r->result, flags, filename));
+		co_return Reference<IAsyncFile>(makeReference<AsyncFileEIO>(r->result, flags, filename));
 	}
 	static Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
 		::deleteFile(filename);
@@ -130,8 +130,16 @@ public:
 		try {
 			int result = r->result;
 			if (result == -1) {
-				TraceEvent(SevError, "FileRenameError").detail("Errno", r->errorno);
-				throw internal_error();
+				errno = r->errorno;
+				bool notFound = errno == ENOENT;
+				Error e = notFound ? file_not_found() : io_error();
+				TraceEvent(notFound ? SevWarn : SevWarnAlways, "FileRenameError")
+				    .error(e)
+				    .GetLastError()
+				    .detail("Errno", r->errorno)
+				    .detail("From", from)
+				    .detail("To", to);
+				throw e;
 			}
 		} catch (Error& e) {
 			err = e;
@@ -234,6 +242,9 @@ public:
 	~AsyncFileEIO() override { close_impl(Uncancellable(), fd); }
 
 private:
+	template <class P, class... Args>
+	friend Reference<P> makeReference(Args&&... args);
+
 	struct ErrorInfo : ReferenceCounted<ErrorInfo>, FastAllocated<ErrorInfo> {
 		Error err;
 		void set(const Error& e) {

@@ -91,7 +91,8 @@ class SerializableClassMemberVariableCollector
 	SerializableClassInfo& classInfo;
 
 public:
-	SerializableClassMemberVariableCollector(SerializableClassInfo& classInfo_) : Base_t(), classInfo(classInfo_) {}
+	explicit SerializableClassMemberVariableCollector(SerializableClassInfo& classInfo_)
+	  : Base_t(), classInfo(classInfo_) {}
 
 	bool VisitFieldDecl(clang::FieldDecl* fieldDecl) {
 		std::string variableName = fieldDecl->getDeclName().getAsString();

@@ -35,36 +35,36 @@ public:
 	                  StringRef const& prefix,
 	                  Reference<DirectoryLayer> directorLayer,
 	                  Standalone<StringRef> const& layer = Standalone<StringRef>());
-	virtual ~DirectorySubspace() {}
+	~DirectorySubspace() override = default;
 
-	virtual Future<Reference<DirectorySubspace>> create(
+	Future<Reference<DirectorySubspace>> create(
 	    Reference<Transaction> const& tr,
 	    Path const& path,
 	    Standalone<StringRef> const& layer = Standalone<StringRef>(),
-	    Optional<Standalone<StringRef>> const& prefix = Optional<Standalone<StringRef>>());
+	    Optional<Standalone<StringRef>> const& prefix = Optional<Standalone<StringRef>>()) override;
 
-	virtual Future<Reference<DirectorySubspace>> open(Reference<Transaction> const& tr,
-	                                                  Path const& path,
-	                                                  Standalone<StringRef> const& layer = Standalone<StringRef>());
-	virtual Future<Reference<DirectorySubspace>> createOrOpen(
+	Future<Reference<DirectorySubspace>> open(Reference<Transaction> const& tr,
+	                                          Path const& path,
+	                                          Standalone<StringRef> const& layer = Standalone<StringRef>()) override;
+	Future<Reference<DirectorySubspace>> createOrOpen(
 	    Reference<Transaction> const& tr,
 	    Path const& path,
-	    Standalone<StringRef> const& layer = Standalone<StringRef>());
+	    Standalone<StringRef> const& layer = Standalone<StringRef>()) override;
 
-	virtual Future<bool> exists(Reference<Transaction> const& tr, Path const& path = Path());
-	virtual Future<Standalone<VectorRef<StringRef>>> list(Reference<Transaction> const& tr, Path const& path = Path());
+	Future<bool> exists(Reference<Transaction> const& tr, Path const& path = Path()) override;
+	Future<Standalone<VectorRef<StringRef>>> list(Reference<Transaction> const& tr, Path const& path = Path()) override;
 
-	virtual Future<Reference<DirectorySubspace>> move(Reference<Transaction> const& tr,
-	                                                  Path const& oldPath,
-	                                                  Path const& newPath);
-	virtual Future<Reference<DirectorySubspace>> moveTo(Reference<Transaction> const& tr, Path const& newAbsolutePath);
+	Future<Reference<DirectorySubspace>> move(Reference<Transaction> const& tr,
+	                                          Path const& oldPath,
+	                                          Path const& newPath) override;
+	Future<Reference<DirectorySubspace>> moveTo(Reference<Transaction> const& tr, Path const& newAbsolutePath) override;
 
-	virtual Future<Void> remove(Reference<Transaction> const& tr, Path const& path = Path());
-	virtual Future<bool> removeIfExists(Reference<Transaction> const& tr, Path const& path = Path());
+	Future<Void> remove(Reference<Transaction> const& tr, Path const& path = Path()) override;
+	Future<bool> removeIfExists(Reference<Transaction> const& tr, Path const& path = Path()) override;
 
-	virtual Reference<DirectoryLayer> getDirectoryLayer();
-	virtual const Standalone<StringRef> getLayer() const;
-	virtual const Path getPath() const;
+	Reference<DirectoryLayer> getDirectoryLayer() override;
+	Standalone<StringRef> getLayer() const override;
+	Path getPath() const override;
 
 protected:
 	Reference<DirectoryLayer> directoryLayer;

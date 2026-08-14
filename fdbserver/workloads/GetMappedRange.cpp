@@ -533,6 +533,116 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
+	Future<Void> checkEmptyMappedRangeDoesNotConflict(Database cx,
+	                                                  KeySelector begin,
+	                                                  KeySelector end,
+	                                                  Key mapper,
+	                                                  GetRangeLimits limits) {
+		while (true) {
+			ReadYourWritesTransaction reader(cx);
+			Transaction writer(cx);
+			Error err;
+			try {
+				co_await reader.getReadVersion();
+				MappedRangeResult result =
+				    co_await reader.getMappedRange(begin, end, mapper, limits, Snapshot::False, Reverse::False);
+				ASSERT(result.empty());
+				ASSERT(!result.more);
+
+				writer.set(indexEntryKey(15), EMPTY);
+				co_await writer.commit();
+				reader.set("mapped-range-empty-no-conflict"_sr, "written"_sr);
+				co_await reader.commit();
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			ASSERT_NE(err.code(), error_code_not_committed);
+			co_await reader.onError(err);
+		}
+	}
+
+	Future<Void> checkMappedSelectorBoundaries(Database cx, Key mapper, GetMappedRangeWorkload* self) {
+		Key begin = indexEntryKey(10);
+		Key end = indexEntryKey(20);
+		co_await checkMappedSelectorRange(cx,
+		                                  KeySelector(firstGreaterThan(begin), begin.arena()),
+		                                  KeySelector(firstGreaterThan(end), end.arena()),
+		                                  mapper,
+		                                  /*expectedBeginId=*/11,
+		                                  /*expectedEndId=*/21,
+		                                  self);
+		co_await checkMappedSelectorRange(cx,
+		                                  KeySelector(firstGreaterOrEqual(begin) + 2, begin.arena()),
+		                                  KeySelector(firstGreaterOrEqual(end) - 2, end.arena()),
+		                                  mapper,
+		                                  /*expectedBeginId=*/12,
+		                                  /*expectedEndId=*/18,
+		                                  self);
+
+		co_await checkEmptyMappedRangeDoesNotConflict(cx,
+		                                              KeySelector(firstGreaterOrEqual(begin), begin.arena()),
+		                                              KeySelector(firstGreaterOrEqual(end), end.arena()),
+		                                              mapper,
+		                                              GetRangeLimits(/*rowLimit=*/0, /*byteLimit=*/1000));
+		co_await checkEmptyMappedRangeDoesNotConflict(cx,
+		                                              KeySelector(firstGreaterThan(end), end.arena()),
+		                                              KeySelector(firstGreaterOrEqual(begin), begin.arena()),
+		                                              mapper,
+		                                              GetRangeLimits(/*rowLimit=*/100, /*byteLimit=*/100000));
+
+		bool specialKeyRejected = false;
+		try {
+			ReadYourWritesTransaction tr(cx);
+			co_await tr.getMappedRange(KeySelector(firstGreaterOrEqual(specialKeys.begin)),
+			                           KeySelector(firstGreaterOrEqual(specialKeys.end)),
+			                           mapper,
+			                           GetRangeLimits(/*rowLimit=*/100, /*byteLimit=*/100000),
+			                           Snapshot::False,
+			                           Reverse::False);
+		} catch (Error& e) {
+			if (e.code() != error_code_client_invalid_operation) {
+				throw;
+			}
+			specialKeyRejected = true;
+		}
+		ASSERT(specialKeyRejected);
+		co_return;
+	}
+
+	Future<Void> checkMappedSelectorRange(Database cx,
+	                                      KeySelector begin,
+	                                      KeySelector end,
+	                                      Key mapper,
+	                                      int expectedBeginId,
+	                                      int expectedEndId,
+	                                      GetMappedRangeWorkload* self) {
+		int expectedId = expectedBeginId;
+		while (true) {
+			MappedRangeResult result = co_await scanMappedRangeWithLimits(cx,
+			                                                              begin,
+			                                                              end,
+			                                                              mapper,
+			                                                              /*limit=*/100,
+			                                                              /*byteLimit=*/100000,
+			                                                              expectedId,
+			                                                              self,
+			                                                              /*allMissing=*/false);
+			expectedId += result.size();
+			ASSERT_LE(expectedId, expectedEndId);
+			if (!result.more) {
+				break;
+			}
+			if (result.readThrough.present()) {
+				begin = KeySelector(firstGreaterOrEqual(result.readThrough.get()), result.arena());
+			} else {
+				ASSERT(!result.empty());
+				begin = KeySelector(firstGreaterThan(result.back().key), result.arena());
+			}
+		}
+		ASSERT_EQ(expectedId, expectedEndId);
+	}
+
 	Future<Void> _start(Database cx, GetMappedRangeWorkload* self) {
 		TraceEvent("GetMappedRangeWorkloadConfig").detail("BadMapper", self->BAD_MAPPER);
 
@@ -543,6 +653,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			self->snapshot = Snapshot::True;
 		} else if (self->transactionType == READ_YOUR_WRITES) {
 			self->snapshot = Snapshot::False;
+			co_await self->checkMappedSelectorBoundaries(cx, getMapper(false), self);
 			const double rand = deterministicRandom()->random01();
 			if (rand < 0.1) {
 				co_await self->testSerializableConflicts(self);
@@ -555,6 +666,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			}
 		} else {
 			UNREACHABLE();
+		}
+		if (self->transactionType == NATIVE) {
+			co_await self->checkMappedSelectorBoundaries(cx, getMapper(false), self);
 		}
 
 		std::cout << "Test configuration: transactionType:" << self->transactionType << " snapshot:" << self->snapshot

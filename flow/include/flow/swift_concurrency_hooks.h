@@ -235,6 +235,9 @@
 
 // typedef struct _Job* JobRef;
 
+// The Swift calling-convention macro is only valid in this typedef spelling.
+// NOLINTBEGIN(modernize-use-using)
+
 /// A hook to take over global enqueuing.
 typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobal_original)(swift::Job* _Nonnull job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
@@ -274,6 +277,8 @@ SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift)
 void (*_Nonnull swift_task_enqueueMainExecutor_hook)(swift::Job* _Nonnull job,
                                                      swift_task_enqueueMainExecutor_original _Nonnull original);
+
+// NOLINTEND(modernize-use-using)
 
 SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift) void swift_job_run(swift::Job* _Nonnull job, ExecutorRef executor);

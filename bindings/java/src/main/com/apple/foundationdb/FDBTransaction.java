@@ -88,8 +88,18 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 
 		@Override
+		public CompletableFuture<KeyArrayResult> getRangeSplitPoints(byte[] begin, byte[] end, long chunkSize, int limit) {
+			return FDBTransaction.this.getRangeSplitPoints(begin, end, chunkSize, limit);
+		}
+
+		@Override
 		public CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize) {
 			return FDBTransaction.this.getRangeSplitPoints(range, chunkSize);
+		}
+
+		@Override
+		public CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize, int limit) {
+			return FDBTransaction.this.getRangeSplitPoints(range, chunkSize, limit);
 		}
 
 		@Override
@@ -342,8 +352,23 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
+	public CompletableFuture<KeyArrayResult> getRangeSplitPoints(byte[] begin, byte[] end, long chunkSize, int limit) {
+		pointerReadLock.lock();
+		try {
+			return new FutureKeyArray(Transaction_getRangeSplitPointsWithLimit(getPtr(), begin, end, chunkSize, limit), executor);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
 	public CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize) {
 		return this.getRangeSplitPoints(range.begin, range.end, chunkSize);
+	}
+
+	@Override
+	public CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize, int limit) {
+		return this.getRangeSplitPoints(range.begin, range.end, chunkSize, limit);
 	}
 
 	@Override
@@ -842,4 +867,5 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private native long Transaction_getKeyLocations(long cPtr, byte[] key);
 	private native long Transaction_getEstimatedRangeSizeBytes(long cPtr, byte[] keyBegin, byte[] keyEnd);
 	private native long Transaction_getRangeSplitPoints(long cPtr, byte[] keyBegin, byte[] keyEnd, long chunkSize);
+	private native long Transaction_getRangeSplitPointsWithLimit(long cPtr, byte[] keyBegin, byte[] keyEnd, long chunkSize, int limit);
 }

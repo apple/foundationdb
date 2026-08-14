@@ -148,7 +148,10 @@ struct StorageServerMetrics {
 
 	int64_t getHotShards(const KeyRange& range) const;
 
-	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<KeyRef> prefixToRemove) const;
+	std::vector<KeyRef> getSplitPoints(KeyRangeRef range,
+	                                   int64_t chunkSize,
+	                                   Optional<KeyRef> prefixToRemove,
+	                                   int limit = -1) const;
 
 	void getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) const;
 

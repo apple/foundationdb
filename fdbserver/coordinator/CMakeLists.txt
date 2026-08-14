@@ -5,12 +5,15 @@ add_fdbserver_link_test(fdbserver_coordinatorlinktest
   fdbserver_coordinator
   fdbserver_kvstore
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_coordinator_test coordinator
+  fdbserver_coordinator
+  fdbserver_kvstore
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_coordinator)
 target_include_directories(fdbserver_coordinator
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR})
+    ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(fdbserver_coordinator PRIVATE fdbserver_core fdbserver_kvstore)

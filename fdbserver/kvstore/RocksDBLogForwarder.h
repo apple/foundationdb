@@ -27,7 +27,7 @@
 #ifdef WITH_ROCKSDB
 #include <rocksdb/env.h>
 
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 
@@ -86,13 +86,13 @@ public:
 	                             const rocksdb::InfoLogLevel log_level = rocksdb::InfoLogLevel::INFO_LEVEL);
 
 	// Destructor
-	virtual ~RocksDBLogForwarder();
+	~RocksDBLogForwarder() override;
 
 	// Writes an entry to the log file
-	virtual void Logv(const char* format, va_list ap);
+	void Logv(const char* format, va_list ap) override;
 
 	// Writes an entry to the log file, with a specified log level
-	virtual void Logv(const rocksdb::InfoLogLevel log_level, const char* format, va_list ap);
+	void Logv(const rocksdb::InfoLogLevel log_level, const char* format, va_list ap) override;
 };
 
 #endif // WITH_ROCKSDB

@@ -40,6 +40,14 @@ foreach(src ${SRCS})
 endforeach()
 add_custom_target(python_binding ALL DEPENDS ${out_files})
 
+if(FDB_RELEASE)
+  set(FDB_PY_VERSION ${PROJECT_VERSION})
+elseif(FDB_RELEASE_CANDIDATE)
+  set(FDB_PY_VERSION "${PROJECT_VERSION}rc${FDB_RELEASE_CANDIDATE_VERSION}")
+else()
+  set(FDB_PY_VERSION "${PROJECT_VERSION}a1")
+endif()
+
 file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/bindings/python/fdb)
 set(options_file ${PROJECT_BINARY_DIR}/bindings/python/fdb/fdboptions.py)
 vexillographer_compile(TARGET fdb_python_options LANG python OUT ${options_file}
@@ -70,26 +78,24 @@ if (pycodestyle)
 else()
   add_custom_target(fdb_python_check COMMAND ${CMAKE_COMMAND} -E echo "Skipped Python style check! Missing: pycodestyle")
 endif()
-if(NOT FDB_RELEASE)
-  set(not_fdb_release_string "a1")
-else()
-  set(not_fdb_release_string "")
-endif()
 
 
-set(setup_file_name foundationdb-${FDB_VERSION}.tar.gz)
-set(wheel_file_name foundationdb-${FDB_VERSION}-py3-none-any.whl)
-set(package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}${not_fdb_release_string}.tar.gz)
-set(wheel_package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}${not_fdb_release_string}-py3-none-any.whl)
+set(setup_file_name foundationdb-${FDB_PY_VERSION}.tar.gz)
+set(wheel_file_name foundationdb-${FDB_PY_VERSION}-py3-none-any.whl)
+set(package_file       ${CMAKE_BINARY_DIR}/packages/${setup_file_name})
+set(wheel_package_file ${CMAKE_BINARY_DIR}/packages/${wheel_file_name})
 
 # Build both source distribution and wheel
 # Note: foundationdb is a pure Python package (uses ctypes), so wheel is py3-none-any
+set(PYPKG_VENV_DIR "${CMAKE_BINARY_DIR}/pypkg-venv")
+set(PYPKG_PY3      "${PYPKG_VENV_DIR}/bin/python3")
 add_custom_command(OUTPUT ${package_file} ${wheel_package_file}
-  COMMAND $<TARGET_FILE:Python3::Interpreter> -m ensurepip
-  COMMAND $<TARGET_FILE:Python3::Interpreter> -m pip install --upgrade build
-  COMMAND $<TARGET_FILE:Python3::Interpreter> -m build
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different dist/${setup_file_name} ${package_file}
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different dist/${wheel_file_name} ${wheel_package_file}
+  COMMAND $<TARGET_FILE:Python3::Interpreter> -m venv "${PYPKG_VENV_DIR}"
+  COMMAND ${PYPKG_PY3} -m ensurepip
+  COMMAND ${PYPKG_PY3} -m pip install --upgrade build
+  COMMAND ${PYPKG_PY3} -m build --sdist --wheel
+  COMMAND ${CMAKE_COMMAND} -E copy dist/${setup_file_name} ${package_file}
+  COMMAND ${CMAKE_COMMAND} -E copy dist/${wheel_file_name} ${wheel_package_file}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   COMMENT "Create Python source distribution and wheel")
 add_custom_target(python_package DEPENDS ${package_file} ${wheel_package_file})
@@ -103,4 +109,24 @@ if(NOT OPEN_FOR_IDE AND NOT USE_SANITIZER)
             --cluster-file @CLUSTER_FILE@ --verbose
     DISABLE_LOG_DUMP
   )
+
+  # FIXME Windows support
+  set(PYPKG_TEST_DIR "${CMAKE_BINARY_DIR}/pypkg-test-venv")
+  set(PYPKG_TEST_PY3 "${PYPKG_TEST_DIR}/bin/python3")
+  add_test(
+    NAME python_package_test
+    COMMAND sh -c "
+      set -e
+      if ! [ -f '${package_file}' ]; then
+        exit 66
+      fi
+      $<TARGET_FILE:Python3::Interpreter> -m venv ${PYPKG_TEST_DIR}
+      ${PYPKG_TEST_PY3} -m ensurepip   # probably not needed, but for consistency
+      ${PYPKG_TEST_PY3} -m pip install '${package_file}'
+      ${PYPKG_TEST_PY3} -c 'import fdb'
+      ${PYPKG_TEST_PY3} -m pip install '${wheel_package_file}'
+      ${PYPKG_TEST_PY3} -c 'import fdb'
+    "
+  )
+  set_tests_properties(python_package_test PROPERTIES SKIP_RETURN_CODE 66)
 endif() # NOT OPEN_FOR_IDE AND NOT USE_SANITIZER

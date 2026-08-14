@@ -30,6 +30,12 @@ Reference<LogSystem> makeLogSystemFromServerDBInfo(
     bool useRecoveredAt = false,
     Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>());
 
+Reference<LogSystemConsumer> makeLogSystemConsumerFromServerDBInfo(
+    UID const& dbgid,
+    ServerDBInfo const& db,
+    bool useRecoveredAt = false,
+    Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>());
+
 Reference<LogSystem> makeLogSystemFromLogSystemConfig(
     UID const& dbgid,
     LocalityData const& locality,

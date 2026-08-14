@@ -65,11 +65,12 @@ struct StorefrontWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override {
 		int errors = 0;
-		for (int c = 0; c < clients.size(); c++)
+		for (int c = 0; c < clients.size(); c++) {
 			if (clients[c].isError()) {
 				errors++;
 				TraceEvent(SevError, "TestFailure").error(clients[c].getError()).detail("Reason", "ClientError");
 			}
+		}
 		clients.clear();
 		return inventoryCheck(cx->clone(), this, !errors);
 	}

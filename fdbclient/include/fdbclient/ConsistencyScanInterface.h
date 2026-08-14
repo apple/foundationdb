@@ -31,8 +31,8 @@
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbclient/KeyBackedRangeMap.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedRangeMap.h"
 
 struct ConsistencyScanInterface {
 	constexpr static FileIdentifier file_identifier = 4983265;
@@ -41,7 +41,7 @@ struct ConsistencyScanInterface {
 	struct LocalityData locality;
 	UID myId;
 
-	ConsistencyScanInterface() {}
+	ConsistencyScanInterface() = default;
 	explicit ConsistencyScanInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
 
 	void initEndpoints() {}
@@ -61,7 +61,7 @@ struct HaltConsistencyScanRequest {
 	UID requesterID;
 	ReplyPromise<Void> reply;
 
-	HaltConsistencyScanRequest() {}
+	HaltConsistencyScanRequest() = default;
 	explicit HaltConsistencyScanRequest(UID uid) : requesterID(uid) {}
 
 	template <class Ar>
@@ -277,11 +277,11 @@ struct ConsistencyScanState : public KeyBackedClass {
 	};
 
 	// Range map for configuring key range options.  By default, all ranges are scanned.
-	typedef KeyBackedRangeMap<Key, RangeConfig, TupleCodec<Key>, ObjectCodec<RangeConfig, _IncludeVersion>>
-	    RangeConfigMap;
+	using RangeConfigMap =
+	    KeyBackedRangeMap<Key, RangeConfig, TupleCodec<Key>, ObjectCodec<RangeConfig, _IncludeVersion>>;
 
 	// Map of scan start version to its stats so a history can be maintained.
-	typedef KeyBackedObjectMap<Version, RoundStats, _IncludeVersion> StatsHistoryMap;
+	using StatsHistoryMap = KeyBackedObjectMap<Version, RoundStats, _IncludeVersion>;
 
 	RangeConfigMap rangeConfig() {
 		// Updating rangeConfig updates the class trigger

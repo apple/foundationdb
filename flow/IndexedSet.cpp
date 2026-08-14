@@ -287,7 +287,7 @@ TEST_CASE("performance/flow/IndexedSet/integers") {
 	double start = timer();
 	for (int i = 0; i < x.size(); i++) {
 		int t = x[i];
-		is.insert(std::move(t), 3);
+		is.insert(t, 3);
 	}
 	double end = timer();
 	double kps = x.size() / 1000.0 / (end - start);

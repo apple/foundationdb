@@ -127,6 +127,17 @@ public:
 
 	double MEMORY_USAGE_CHECK_INTERVAL;
 
+	// Per-call-site sampled memory tracker. See design/memory-tracker.md and flow/MemoryTracker.h.
+	// All of these are startup-only: they are read once and not meant to change at runtime
+	// (dynamic enable/disable is a Non-requirement -- edit the config and restart).
+	int MEMORY_TRACKING_SAMPLE_INVERSE; // 0=off, N=1-in-N
+	int64_t MEMORY_TRACKING_FORCE_SAMPLE_BYTES; // always sample allocations >= this many bytes; -1 disables
+	bool MEMORY_TRACKING_LIVE_TRACKING; // when false, skip the pointer-keyed live-block table
+	double MEMORY_TRACKING_REPORT_INTERVAL; // seconds between dumps; 0 disables reporting
+	int64_t MEMORY_TRACKING_REPORT_BYTES_THRESHOLD; // sites with live bytes >= this are reported each dump (~1% of an 8
+	                                                // GB target RSS)
+	int MEMORY_TRACKING_FRAMES; // captured stack depth (1..MEMORY_TRACKER_MAX_FRAMES)
+
 	// Chaos testing
 	bool ENABLE_CHAOS_FEATURES;
 	double CHAOS_LOGGING_INTERVAL;
@@ -296,6 +307,7 @@ public:
 	double MAX_BUGGIFIED_DELAY;
 	double MAX_RUNLOOP_SLEEP_DELAY;
 	int SIM_CONNECT_ERROR_MODE;
+	double SIM_DNS_REMOVAL_MAX_DELAY;
 	double SIM_SPEEDUP_AFTER_SECONDS;
 	int MAX_TRACE_LINES;
 
@@ -397,5 +409,6 @@ public:
 // Flow knobs are needed before the knob collections are available, so a global FlowKnobs object is used to bootstrap
 extern FlowKnobs bootstrapGlobalFlowKnobs;
 extern FlowKnobs const* FLOW_KNOBS;
+void resetFlowKnobs(class Randomize randomize, class IsSimulated isSimulated);
 
 #endif

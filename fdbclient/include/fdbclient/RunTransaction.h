@@ -88,7 +88,7 @@ Future<Void> runTransactionVoid(Reference<DB> db, Function func) {
 // All options are false by default.
 template <typename DB>
 struct SystemTransactionGenerator : ReferenceCounted<SystemTransactionGenerator<DB>> {
-	typedef typename DB::TransactionT TransactionT;
+	using TransactionT = typename DB::TransactionT;
 
 	SystemTransactionGenerator(Reference<DB> db, bool write, bool lockAware, bool immediate)
 	  : db(db), write(write), lockAware(lockAware), immediate(immediate) {}

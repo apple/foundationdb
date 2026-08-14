@@ -35,8 +35,8 @@ public:
 	static Reference<IThreadPool> createThreadPool();
 
 protected:
-	CoroThreadPool() {}
-	~CoroThreadPool() {}
+	CoroThreadPool() = default;
+	~CoroThreadPool() = default;
 };
 
 template <class T>

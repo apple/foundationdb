@@ -30,36 +30,37 @@
 namespace FDB {
 class DirectoryLayer : public IDirectory {
 public:
-	DirectoryLayer(Subspace nodeSubspace = DEFAULT_NODE_SUBSPACE,
-	               Subspace contentSubspace = DEFAULT_CONTENT_SUBSPACE,
-	               bool allowManualPrefixes = false);
+	explicit DirectoryLayer(Subspace nodeSubspace = DEFAULT_NODE_SUBSPACE,
+	                        Subspace contentSubspace = DEFAULT_CONTENT_SUBSPACE,
+	                        bool allowManualPrefixes = false);
 
 	Future<Reference<DirectorySubspace>> create(
 	    Reference<Transaction> const& tr,
 	    Path const& path,
 	    Standalone<StringRef> const& layer = Standalone<StringRef>(),
-	    Optional<Standalone<StringRef>> const& prefix = Optional<Standalone<StringRef>>());
+	    Optional<Standalone<StringRef>> const& prefix = Optional<Standalone<StringRef>>()) override;
 	Future<Reference<DirectorySubspace>> open(Reference<Transaction> const& tr,
 	                                          Path const& path,
-	                                          Standalone<StringRef> const& layer = Standalone<StringRef>());
-	Future<Reference<DirectorySubspace>> createOrOpen(Reference<Transaction> const& tr,
-	                                                  Path const& path,
-	                                                  Standalone<StringRef> const& layer = Standalone<StringRef>());
+	                                          Standalone<StringRef> const& layer = Standalone<StringRef>()) override;
+	Future<Reference<DirectorySubspace>> createOrOpen(
+	    Reference<Transaction> const& tr,
+	    Path const& path,
+	    Standalone<StringRef> const& layer = Standalone<StringRef>()) override;
 
-	Future<bool> exists(Reference<Transaction> const& tr, Path const& path = Path());
-	Future<Standalone<VectorRef<StringRef>>> list(Reference<Transaction> const& tr, Path const& path = Path());
+	Future<bool> exists(Reference<Transaction> const& tr, Path const& path = Path()) override;
+	Future<Standalone<VectorRef<StringRef>>> list(Reference<Transaction> const& tr, Path const& path = Path()) override;
 
 	Future<Reference<DirectorySubspace>> move(Reference<Transaction> const& tr,
 	                                          Path const& oldPath,
-	                                          Path const& newPath);
-	Future<Reference<DirectorySubspace>> moveTo(Reference<Transaction> const& tr, Path const& newAbsolutePath);
+	                                          Path const& newPath) override;
+	Future<Reference<DirectorySubspace>> moveTo(Reference<Transaction> const& tr, Path const& newAbsolutePath) override;
 
-	Future<Void> remove(Reference<Transaction> const& tr, Path const& path = Path());
-	Future<bool> removeIfExists(Reference<Transaction> const& tr, Path const& path = Path());
+	Future<Void> remove(Reference<Transaction> const& tr, Path const& path = Path()) override;
+	Future<bool> removeIfExists(Reference<Transaction> const& tr, Path const& path = Path()) override;
 
-	Reference<DirectoryLayer> getDirectoryLayer();
-	const Standalone<StringRef> getLayer() const;
-	const Path getPath() const;
+	Reference<DirectoryLayer> getDirectoryLayer() override;
+	Standalone<StringRef> getLayer() const override;
+	Path getPath() const override;
 
 	static const Subspace DEFAULT_NODE_SUBSPACE;
 	static const Subspace DEFAULT_CONTENT_SUBSPACE;
@@ -75,7 +76,7 @@ public:
 	static const StringRef DEFAULT_NODE_SUBSPACE_PREFIX;
 
 	struct Node {
-		Node() {}
+		Node() = default;
 		Node(Reference<DirectoryLayer> const& directoryLayer,
 		     Optional<Subspace> const& subspace,
 		     Path const& path,

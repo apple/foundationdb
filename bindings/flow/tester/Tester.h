@@ -126,7 +126,7 @@ struct DirectoryOrSubspace {
 	Optional<Reference<FDB::IDirectory>> directory;
 	Optional<FDB::Subspace*> subspace;
 
-	DirectoryOrSubspace() {}
+	DirectoryOrSubspace() = default;
 	explicit DirectoryOrSubspace(Reference<FDB::IDirectory> directory) : directory(directory) {}
 	explicit DirectoryOrSubspace(FDB::Subspace* subspace) : subspace(subspace) {}
 	explicit DirectoryOrSubspace(Reference<FDB::DirectorySubspace> dirSubspace)
@@ -165,7 +165,7 @@ struct DirectoryTesterData {
 	}
 
 	DirectoryTesterData() : directoryListIndex(0), directoryErrorIndex(0) {
-		directoryList.push_back(DirectoryOrSubspace(Reference<FDB::IDirectory>(new FDB::DirectoryLayer())));
+		directoryList.push_back(DirectoryOrSubspace(Reference<FDB::IDirectory>(makeReference<FDB::DirectoryLayer>())));
 	}
 
 	template <class T>

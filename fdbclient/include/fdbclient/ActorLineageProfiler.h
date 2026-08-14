@@ -47,7 +47,7 @@ struct IALPCollector : IALPCollectorBase {
 
 struct Sample : std::enable_shared_from_this<Sample> {
 	double time = 0.0;
-	Sample() {}
+	Sample() = default;
 	Sample(Sample const&) = delete;
 	Sample& operator=(Sample const&) = delete;
 	std::unordered_map<WaitState, std::pair<char*, unsigned>> data;
@@ -86,7 +86,7 @@ public: // interface
 	void ingest(std::shared_ptr<Sample> const& sample) override;
 	FluentDIngestor(Protocol protocol, NetworkAddress& endpoint);
 	void getConfig(std::map<std::string, std::string>& res) const override;
-	~FluentDIngestor();
+	~FluentDIngestor() override;
 };
 
 struct ConfigError {
@@ -102,7 +102,7 @@ private: // members
 	std::shared_ptr<SampleIngestor> ingestor = std::make_shared<NoneIngestor>();
 
 private: // construction
-	ProfilerConfigT() {}
+	ProfilerConfigT() = default;
 	ProfilerConfigT(ProfilerConfigT const&) = delete;
 	ProfilerConfigT& operator=(ProfilerConfigT const&) = delete;
 	void setBackend(std::shared_ptr<SampleIngestor> ingestor) { this->ingestor = ingestor; }
@@ -123,7 +123,7 @@ public: // Types
 private:
 	std::vector<IALPCollectorBase*> collectors;
 	std::map<WaitState, Getter> getSamples;
-	SampleCollectorT() {}
+	SampleCollectorT() = default;
 	std::map<std::string_view, std::any> collect(ActorLineage* lineage);
 
 public:
@@ -137,7 +137,7 @@ using SampleCollector = crossbow::singleton<SampleCollectorT>;
 class SampleCollection_t {
 	friend struct crossbow::create_static<SampleCollection_t>;
 	using Lock = std::unique_lock<std::mutex>;
-	SampleCollection_t() {}
+	SampleCollection_t() = default;
 
 	SampleCollector _collector;
 	mutable std::mutex mutex;

@@ -99,7 +99,7 @@ If no `QueueModel` is provided, the initial candidates are picked randomly. The 
 `QueueModel` holds information about each candidate related to future version, latency and penalty.
 
 * If the storage server is returning a future version error, it is marked as not available until some certain time.
-* Penalty is reported by storage server in each response (see `storageserver.actor.cpp:StorageServer::getPenalty`). It is determined by the write queue length and the durability lagging.
+* Penalty is reported by storage server in each response (see `storageserver.cpp:StorageServer::getPenalty`). It is determined by the write queue length and the durability lagging.
 
 If `QueueModel` exists, the candidates will be picked base on the penalty. Workers with high penalties will be avoided when picking the first two candidates.
 

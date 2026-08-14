@@ -47,9 +47,8 @@ class AsyncGrpcClient {
 public:
 	using Rpc = typename ServiceType::Stub;
 
-	AsyncGrpcClient() {
-		// Isn't necessary unless initialized mid-block using Flow actor compiler.
-	}
+	// Isn't necessary unless initialized mid-block using Flow actor compiler.
+	AsyncGrpcClient() = default;
 
 	AsyncGrpcClient(const std::string& endpoint, std::shared_ptr<AsyncTaskExecutor> pool)
 	  : pool_(pool), channel_(grpc::CreateChannel(endpoint, grpc::InsecureChannelCredentials())),

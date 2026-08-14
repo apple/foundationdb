@@ -1,0 +1,60 @@
+# Exclude sharded RocksDB (type 5) — it requires SHARD_ENCODE=true and
+# cannot operate after the knob flips to false.
+[configuration]
+storageEngineExcludeTypes=[3,4,5]
+
+# Top-level: SHARD_ENCODE=false is the "final" state.
+# Block 1 overrides to true temporarily.
+[[knobs]]
+shard_encode_location_metadata = false
+
+[[test]]
+testTitle = 'ShardEncodeRollbackSetup'
+
+    # Phase 1: Override to true. Create shard-encoded entries via data moves.
+    [[test.knobs]]
+    shard_encode_location_metadata = true
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    nodeCount = 2500
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 10.0
+
+[[test]]
+testTitle = 'ShardEncodeRollbackVerify'
+
+    # Phase 2: No per-test override — inherits top-level false.
+    # DD detects knob change, restarts, exercises rollback path.
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    nodeCount = 2500
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 1
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+    # Force TLog recovery to verify mixed-format metadata survives recovery.
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 15.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'CheckMetadataEncoding'
+    requireKnobFalse = true
+    allowMixedFormats = true

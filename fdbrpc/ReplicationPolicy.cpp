@@ -349,21 +349,14 @@ void testPolicySerialization(Reference<IReplicationPolicy>& policy) {
 }
 
 void testReplicationPolicy(int nTests) {
-	Reference<IReplicationPolicy> policy =
-	    Reference<IReplicationPolicy>(new PolicyAcross(1, "data_hall", Reference<IReplicationPolicy>(new PolicyOne())));
+	Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(1, "data_hall", makeReference<PolicyOne>());
 	testPolicySerialization(policy);
 
-	policy = Reference<IReplicationPolicy>(
-	    new PolicyAnd({ Reference<IReplicationPolicy>(
-	                        new PolicyAcross(2,
-	                                         "data_center",
-	                                         Reference<IReplicationPolicy>(new PolicyAcross(
-	                                             3, "rack", Reference<IReplicationPolicy>(new PolicyOne()))))),
-	                    Reference<IReplicationPolicy>(
-	                        new PolicyAcross(2,
-	                                         "data_center",
-	                                         Reference<IReplicationPolicy>(new PolicyAcross(
-	                                             2, "data_hall", Reference<IReplicationPolicy>(new PolicyOne()))))) }));
+	policy = Reference<IReplicationPolicy>(new PolicyAnd(
+	    { makeReference<PolicyAcross>(
+	          2, "data_center", makeReference<PolicyAcross>(3, "rack", makeReference<PolicyOne>())),
+	      makeReference<PolicyAcross>(
+	          2, "data_center", makeReference<PolicyAcross>(2, "data_hall", makeReference<PolicyOne>())) }));
 
 	testPolicySerialization(policy);
 }

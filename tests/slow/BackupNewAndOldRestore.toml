@@ -12,7 +12,6 @@ simBackupAgents = 'BackupToFile'
     nodeCount = 3000
     transactionsPerSecond = 2500.0
     testDuration = 30.0
-    expectedRate = 0
 
     [[test.workload]]
     testName = 'Backup'
@@ -34,7 +33,6 @@ simBackupAgents = 'BackupToFile'
     transactionsPerSecond = 2500.0
     testDuration = 30.0
     skipSetup = true
-    expectedRate = 0
 
     [[test.workload]]
     testName = 'Backup'
@@ -66,4 +64,3 @@ testTitle = 'CycleAfterRestore'
     transactionsPerSecond = 2500.0
     testDuration = 10.0
     skipSetup = true
-    expectedRate = 0

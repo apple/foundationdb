@@ -23,7 +23,7 @@
 #include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 // This workload validates the MAX_GRV_QUEUE_DELAY transaction option end-to-end.
 // The test file lowers GRV ratekeeper limits so a burst of uncached GRV requests
@@ -36,6 +36,8 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 	int minRejected;
 	int64_t maxQueueDelayMS;
 	int64_t permissiveMaxQueueDelayMS;
+	int warmupRequestCount;
+	double warmupDelay;
 	double startAfter;
 	double testTimeout;
 
@@ -46,13 +48,15 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 	PerfIntCounter rejected;
 	PerfIntCounter unexpectedErrors;
 
-	MaxGrvQueueDelayWorkload(WorkloadContext const& wcx)
+	explicit MaxGrvQueueDelayWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), requests("Requests"), successes("Successes"), rejected("Rejected"),
 	    unexpectedErrors("UnexpectedErrors") {
 		requestCount = getOption(options, "requestCount"_sr, 50);
 		minRejected = getOption(options, "minRejected"_sr, 1);
 		maxQueueDelayMS = getOption(options, "maxQueueDelayMS"_sr, int64_t{ 0 });
 		permissiveMaxQueueDelayMS = getOption(options, "permissiveMaxQueueDelayMS"_sr, int64_t{ 60000 });
+		warmupRequestCount = getOption(options, "warmupRequestCount"_sr, 0);
+		warmupDelay = getOption(options, "warmupDelay"_sr, 0.0);
 		startAfter = getOption(options, "startAfter"_sr, 5.0);
 		testTimeout = getOption(options, "testTimeout"_sr, 30.0);
 	}
@@ -67,6 +71,8 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 		    .detail("MinRejected", minRejected)
 		    .detail("MaxQueueDelayMS", maxQueueDelayMS)
 		    .detail("PermissiveMaxQueueDelayMS", permissiveMaxQueueDelayMS)
+		    .detail("WarmupRequestCount", warmupRequestCount)
+		    .detail("WarmupDelay", warmupDelay)
 		    .detail("StartAfter", startAfter)
 		    .detail("TestTimeout", testTimeout);
 		return Void();
@@ -114,29 +120,48 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 	}
 
 	Future<Void> verifyBaseline(Database cx) {
-		ErrorOr<Version> withoutOption = co_await errorOr(getReadVersion(cx, Optional<int64_t>()));
-		if (withoutOption.isError()) {
-			failed = true;
-			++unexpectedErrors;
-			TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
-			    .error(withoutOption.getError())
-			    .detail("HasOption", false);
-			co_return;
-		}
-		++successes;
+		// Retry baseline for transient GRV queue backlog after recovery.
+		// Keep backoff short (1s) to avoid consuming the 30s testTimeout budget.
+		static constexpr int maxBaselineAttempts = 5;
+		static constexpr double baselineRetryDelay = 1.0;
 
-		ErrorOr<Version> permissive =
-		    co_await errorOr(getReadVersion(cx, Optional<int64_t>(permissiveMaxQueueDelayMS)));
-		if (permissive.isError()) {
-			failed = true;
-			++unexpectedErrors;
-			TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
-			    .error(permissive.getError())
-			    .detail("HasOption", true)
-			    .detail("MaxQueueDelayMS", permissiveMaxQueueDelayMS);
-			co_return;
+		for (int attempt = 0; attempt < maxBaselineAttempts; ++attempt) {
+			if (attempt > 0) {
+				co_await delay(baselineRetryDelay);
+			}
+			bool lastAttempt = (attempt == maxBaselineAttempts - 1);
+
+			ErrorOr<Version> withoutOption = co_await errorOr(getReadVersion(cx, Optional<int64_t>()));
+			if (withoutOption.isError()) {
+				if (!lastAttempt && withoutOption.getError().code() == error_code_transaction_grv_queue_rejected) {
+					continue;
+				}
+				failed = true;
+				++unexpectedErrors;
+				TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
+				    .error(withoutOption.getError())
+				    .detail("HasOption", false);
+				co_return;
+			}
+			++successes;
+
+			ErrorOr<Version> permissive =
+			    co_await errorOr(getReadVersion(cx, Optional<int64_t>(permissiveMaxQueueDelayMS)));
+			if (permissive.isError()) {
+				if (!lastAttempt && permissive.getError().code() == error_code_transaction_grv_queue_rejected) {
+					continue;
+				}
+				failed = true;
+				++unexpectedErrors;
+				TraceEvent(SevError, "MaxGrvQueueDelayBaselineFailed")
+				    .error(permissive.getError())
+				    .detail("HasOption", true)
+				    .detail("MaxQueueDelayMS", permissiveMaxQueueDelayMS);
+				co_return;
+			}
+			++successes;
+			co_return; // baseline passed
 		}
-		++successes;
 	}
 
 	Future<Void> run(Database cx) {
@@ -145,6 +170,15 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 		if (failed) {
 			done = true;
 			co_return;
+		}
+
+		std::vector<Future<ErrorOr<Version>>> warmupFutures;
+		warmupFutures.reserve(warmupRequestCount);
+		for (int i = 0; i < warmupRequestCount; ++i) {
+			warmupFutures.push_back(errorOr(getReadVersion(cx, Optional<int64_t>())));
+		}
+		if (warmupDelay > 0.0) {
+			co_await delay(warmupDelay);
 		}
 
 		std::vector<Future<ErrorOr<Version>>> futures;

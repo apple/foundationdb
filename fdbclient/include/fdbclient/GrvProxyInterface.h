@@ -40,7 +40,6 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool rkBatchThrottled = false;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
-	double proxyTagThrottledDuration{ 0.0 };
 
 	VersionVector ssVersionVectorDelta;
 	UID proxyId; // GRV proxy ID to detect old GRV proxies at client side
@@ -59,8 +58,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           rkDefaultThrottled,
 		           rkBatchThrottled,
 		           ssVersionVectorDelta,
-		           proxyId,
-		           proxyTagThrottledDuration);
+		           proxyId);
 	}
 };
 
@@ -85,10 +83,6 @@ struct GetReadVersionRequest : TimedRequest {
 	TransactionPriority priority;
 
 	TransactionTagMap<uint32_t> tags;
-	// Not serialized, because this field does not need to be sent to master.
-	// It is used for reporting to clients the amount of time spent delayed by
-	// the TagQueue
-	double proxyTagThrottledDuration{ 0.0 };
 
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
@@ -144,6 +138,78 @@ struct GetReadVersionRequest : TimedRequest {
 				priority = TransactionPriority::DEFAULT;
 			}
 		}
+	}
+};
+
+struct GetHealthMetricsReply {
+	constexpr static FileIdentifier file_identifier = 11544290;
+	Standalone<StringRef> serialized;
+	HealthMetrics healthMetrics;
+
+	explicit GetHealthMetricsReply(const HealthMetrics& healthMetrics = HealthMetrics())
+	  : healthMetrics(healthMetrics) {
+		update(healthMetrics, true, true);
+	}
+
+	void update(const HealthMetrics& healthMetrics, bool detailedInput, bool detailedOutput) {
+		this->healthMetrics.update(healthMetrics, detailedInput, detailedOutput);
+		BinaryWriter bw(IncludeVersion());
+		bw << this->healthMetrics;
+		serialized = bw.toValue();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, serialized);
+		if (ar.isDeserializing) {
+			BinaryReader br(serialized, IncludeVersion());
+			br >> healthMetrics;
+		}
+	}
+};
+
+struct GetHealthMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 11403900;
+	ReplyPromise<struct GetHealthMetricsReply> reply;
+	bool detailed;
+
+	explicit GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, detailed);
+	}
+};
+
+struct GlobalConfigRefreshReply {
+	constexpr static FileIdentifier file_identifier = 12680327;
+	Arena arena;
+	Version version;
+	RangeResultRef result;
+
+	GlobalConfigRefreshReply() = default;
+	GlobalConfigRefreshReply(Arena const& arena, Version version, RangeResultRef result)
+	  : arena(arena), version(version), result(result) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, result, version, arena);
+	}
+};
+
+struct GlobalConfigRefreshRequest {
+	constexpr static FileIdentifier file_identifier = 2828131;
+	Version lastKnown;
+	ReplyPromise<GlobalConfigRefreshReply> reply;
+
+	GlobalConfigRefreshRequest() = default;
+	explicit GlobalConfigRefreshRequest(Version lastKnown) : lastKnown(lastKnown) {}
+
+	bool verify() const noexcept { return true; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, lastKnown, reply);
 	}
 };
 

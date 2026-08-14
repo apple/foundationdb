@@ -87,7 +87,7 @@ struct MoveKeysParams {
 
 	Optional<BulkLoadTaskState> bulkLoadTaskState;
 
-	MoveKeysParams() {}
+	MoveKeysParams() = default;
 
 	MoveKeysParams(UID dataMoveId,
 	               const KeyRange& keys,
@@ -197,5 +197,10 @@ Future<Void> checkMoveKeysLock(Transaction* tr,
                                MoveKeysLock const& lock,
                                const DDEnabledState* ddEnabledState,
                                bool isWrite = true);
+
+Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr,
+                                   Key prefix,
+                                   VectorRef<KeyRangeRef> shards,
+                                   KeyRangeRef currentKeys);
 
 #endif

@@ -37,7 +37,7 @@ extern const TTaskFct NO_OP_TASK;
  */
 class ITimer {
 public:
-	virtual ~ITimer() {}
+	virtual ~ITimer() = default;
 
 	virtual void cancel() = 0;
 };
@@ -47,7 +47,7 @@ public:
  */
 class IScheduler {
 public:
-	virtual ~IScheduler() {}
+	virtual ~IScheduler() = default;
 
 	// Create scheduler threads and begin accepting tasks
 	virtual void start() = 0;

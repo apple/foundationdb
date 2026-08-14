@@ -1,0 +1,16 @@
+[configuration]
+buggify = false
+
+[[test]]
+testTitle = 'MinimumThroughput'
+connectionFailuresDisableDuration = 100000
+# Restoring perpetual wiggle would force recovery and data movement immediately before this error-free throughput check.
+restorePerpetualWiggleSetting = false
+
+    [[test.workload]]
+    testName = 'MinimumThroughput'
+    testDuration = 30.0
+    transactionsPerSecond = 200.0
+    nodeCount = 100000
+    readFraction = 0.5
+    expectedRate = 0.5

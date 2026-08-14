@@ -21,7 +21,6 @@
 #include "fdbrpc/FlowGrpc.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #ifdef FLOW_GRPC_ENABLED
 
@@ -85,10 +84,10 @@ Future<Void> GrpcServer::runInternal() {
 	// ASSERT(g_network->isOnMainThread()); // Unit-tests are not on main-thread?
 
 	Future<Void> next = Void();
-	loop {
+	while (true) {
 		ASSERT(state_ != State::Shutdown);
 
-		loop {
+		while (true) {
 			co_await next;
 			co_await delay(CONFIG_STARTUP_DELAY_BETWEEN_RESTART);
 
@@ -200,7 +199,7 @@ void GrpcServer::registerRoleServices(const UID& owner_id, const ServiceList& se
 	on_services_changed_.trigger();
 }
 
-Future<Void> GrpcServer::deregisterRoleServices(const UID& owner_id) {
+Future<Void> GrpcServer::deregisterRoleServices(UID owner_id) {
 	ASSERT(g_network->isOnMainThread());
 	co_await stopServer();
 	registered_services_.erase(owner_id);

@@ -216,6 +216,11 @@ class Config:
         }
         self.print_coverage = False
         self.print_coverage_args = {"action": "store_true"}
+        self.disable_code_probes: bool = False
+        self.disable_code_probes_args = {
+            "action": "store_true",
+            "help": "Disable code probe collection and ensemble coverage checks",
+        }
         self.binary = Path("bin") / (
             "fdbserver.exe" if os.name == "nt" else "fdbserver"
         )
@@ -358,7 +363,23 @@ class Config:
                 # Use the env var to supply the default value, so that if the
                 # environment variable is set and the corresponding command line
                 # flag is not, the environment variable has an effect.
-                self._config_map[attr].kwargs["default"] = attr_type(e)
+                self._config_map[attr].kwargs["default"] = self._parse_env_value(
+                    attr_type, env_name, e
+                )
+
+    def _parse_env_value(self, attr_type: type, env_name: str, value: str):
+        if attr_type is bool:
+            normalized = value.lower()
+            if normalized in ("true", "1", "yes", "on"):
+                return True
+            if normalized in ("false", "0", "no", "off"):
+                return False
+            raise ValueError(
+                "Invalid boolean value {} for {} -- use true or false".format(
+                    value, env_name
+                )
+            )
+        return attr_type(value)
 
     def build_arguments(self, parser: argparse.ArgumentParser):
         for val in self._config_map.values():

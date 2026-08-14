@@ -76,7 +76,7 @@ public:
 	void addMutation(const MutationRef& mutation, Tag tag, LogEpoch epoch, UID commitProxyId, Version commitVersion);
 
 	// Return read-only ACS map
-	const std::unordered_map<Tag, AccumulativeChecksumState>& getAcsTable() { return acsTable; }
+	const std::unordered_map<Tag, AccumulativeChecksumState>& getAcsTable() const { return acsTable; }
 
 private:
 	uint16_t acsIndex; // Essentially, this is the ID of commit proxy
@@ -117,7 +117,7 @@ void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<Accumulativ
 // each version that has mutations
 class AccumulativeChecksumValidator {
 public:
-	AccumulativeChecksumValidator() {}
+	AccumulativeChecksumValidator() = default;
 
 	// Called when SS pulls a non-ACS mutation
 	// Add the mutation to the mutation buffer

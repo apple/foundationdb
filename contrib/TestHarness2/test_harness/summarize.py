@@ -390,7 +390,11 @@ class Summary:
             return
         self.summarize_files(trace_files[0])
         # Skip write_coverage for old binaries in restarting tests
-        if config.joshua_dir is not None and not self.is_old_binary:
+        if (
+            config.joshua_dir is not None
+            and not self.is_old_binary
+            and not config.disable_code_probes
+        ):
             import test_harness.fdb
 
             test_harness.fdb.write_coverage(
@@ -424,7 +428,7 @@ class Summary:
         return (not self.error) != self.is_negative_test
 
     def done(self):
-        if config.print_coverage:
+        if config.print_coverage and not config.disable_code_probes:
             for k, v in self.coverage.items():
                 child = SummaryTree("CodeCoverage")
                 child.attributes["File"] = k.file
@@ -702,6 +706,8 @@ class Summary:
         self.handler.add_handler(("Severity", "40"), parse_error)
 
         def coverage(attrs: Dict[str, str]):
+            if config.disable_code_probes:
+                return
             covered = True
             if "Covered" in attrs:
                 covered = int(attrs["Covered"]) != 0

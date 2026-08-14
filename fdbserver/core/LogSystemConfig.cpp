@@ -88,7 +88,8 @@ bool TLogSet::isEqualIds(TLogSet const& r) const {
 bool OldTLogConf::operator==(const OldTLogConf& rhs) const {
 	return tLogs == rhs.tLogs && epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd &&
 	       recoverAt == rhs.recoverAt && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
-	       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
+	       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch &&
+	       rangePartitionedBackupWorkerTags == rhs.rangePartitionedBackupWorkerTags;
 }
 
 bool OldTLogConf::isEqualIds(OldTLogConf const& r) const {
@@ -104,10 +105,11 @@ bool OldTLogConf::isEqualIds(OldTLogConf const& r) const {
 }
 
 std::string LogSystemConfig::toString() const {
-	return format("type: %d oldGenerations: %d tags: %d %s",
+	return format("type: %d oldGenerations: %d tags: %d rangePartitionedBackupWorkerTags: %d %s",
 	              logSystemType,
 	              oldTLogs.size(),
 	              logRouterTags,
+	              rangePartitionedBackupWorkerTags,
 	              describe(tLogs).c_str());
 }
 
@@ -145,7 +147,7 @@ std::vector<TLogInterface> LogSystemConfig::allLocalLogs(bool includeSatellite) 
 int LogSystemConfig::numLogs() const {
 	int numLogs = 0;
 	for (auto& tLogSet : tLogs) {
-		if (tLogSet.isLocal == true) {
+		if (tLogSet.isLocal) {
 			numLogs += tLogSet.tLogs.size();
 		}
 	}
@@ -256,7 +258,8 @@ bool LogSystemConfig::isEqual(LogSystemConfig const& r) const {
 	return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs &&
 	       expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
 	       recruitmentID == r.recruitmentID && stopped == r.stopped && recoveredAt == r.recoveredAt &&
-	       pseudoLocalities == r.pseudoLocalities && epoch == r.epoch && oldestBackupEpoch == r.oldestBackupEpoch;
+	       pseudoLocalities == r.pseudoLocalities && epoch == r.epoch && oldestBackupEpoch == r.oldestBackupEpoch &&
+	       rangePartitionedBackupWorkerTags == r.rangePartitionedBackupWorkerTags;
 }
 
 bool LogSystemConfig::isEqualIds(LogSystemConfig const& r) const {

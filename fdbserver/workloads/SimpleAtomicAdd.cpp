@@ -22,7 +22,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 struct SimpleAtomicAddWorkload : TestWorkload {
 	static constexpr auto NAME = "SimpleAtomicAdd";
@@ -108,7 +108,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 
 	Future<bool> _check(Database cx) {
 		ReadYourWritesTransaction tr(cx);
-		uint64_t expectedValue = addValue * iterations;
+		uint64_t expectedValue = static_cast<uint64_t>(addValue) * iterations;
 		if (initialize) {
 			expectedValue += initialValue;
 		}

@@ -185,7 +185,7 @@ struct ServerCacheInfo {
 	std::vector<Reference<StorageInfo>> dest_info;
 
 	void populateTags() {
-		if (tags.size())
+		if (!tags.empty())
 			return;
 
 		for (const auto& info : src_info) {
@@ -223,7 +223,7 @@ struct GetValueRequest : TimedRequest {
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
-	GetValueRequest() {}
+	GetValueRequest() = default;
 
 	bool verify() const { return true; }
 
@@ -266,7 +266,7 @@ struct WatchValueRequest {
 	Optional<UID> debugID;
 	ReplyPromise<WatchValueReply> reply;
 
-	WatchValueRequest() {}
+	WatchValueRequest() = default;
 
 	bool verify() const { return true; }
 
@@ -318,7 +318,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	                                      // serve the given key
 	Optional<TaskPriority> taskID; // includes the information about read purpose
 
-	GetKeyValuesRequest() {}
+	GetKeyValuesRequest() = default;
 
 	bool verify() const { return true; }
 
@@ -374,7 +374,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	                                      // serve the given key range
 	Optional<TaskPriority> taskID; // includes the information about read purpose
 
-	GetMappedKeyValuesRequest() {}
+	GetMappedKeyValuesRequest() = default;
 
 	bool verify() const { return true; }
 
@@ -438,7 +438,7 @@ struct GetKeyValuesStreamRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
 
-	GetKeyValuesStreamRequest() {}
+	GetKeyValuesStreamRequest() = default;
 
 	bool verify() const { return true; }
 
@@ -486,7 +486,7 @@ struct GetKeyRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	GetKeyRequest() {}
+	GetKeyRequest() = default;
 
 	bool verify() const { return true; }
 
@@ -641,7 +641,7 @@ struct WaitMetricsRequest {
 	// TODO(gglass): this was tenant related.  See about removing it.
 	Version legacyVersion;
 
-	WaitMetricsRequest() {}
+	WaitMetricsRequest() = default;
 
 	bool verify() const { return true; }
 
@@ -679,7 +679,7 @@ struct SplitMetricsRequest {
 
 	bool verify() const { return true; }
 
-	SplitMetricsRequest() {}
+	SplitMetricsRequest() = default;
 	SplitMetricsRequest(KeyRangeRef const& keys,
 	                    StorageMetrics const& limits,
 	                    StorageMetrics const& used,
@@ -751,7 +751,7 @@ struct ReadHotSubRangeRequest {
 	uint8_t type = SplitType::BYTES;
 	int chunkCount = 1;
 
-	ReadHotSubRangeRequest() {}
+	ReadHotSubRangeRequest() = default;
 	explicit ReadHotSubRangeRequest(KeyRangeRef const& keys, SplitType type = SplitType::BYTES, int chunkCount = 1)
 	  : keys(arena, keys), type(type), chunkCount(chunkCount) {}
 
@@ -779,14 +779,16 @@ struct SplitRangeRequest {
 	Arena arena;
 	KeyRangeRef keys;
 	int64_t chunkSize;
+	int limit = -1;
 	ReplyPromise<SplitRangeReply> reply;
 
-	SplitRangeRequest() {}
-	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize) : keys(arena, keys), chunkSize(chunkSize) {}
+	SplitRangeRequest() = default;
+	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize, int limit = -1)
+	  : keys(arena, keys), chunkSize(chunkSize), limit(limit) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, chunkSize, reply, arena);
+		serializer(ar, keys, chunkSize, reply, limit, arena);
 	}
 };
 
@@ -798,7 +800,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 	Version minStreamVersion = invalidVersion;
 	Version popVersion = invalidVersion;
 
-	ChangeFeedStreamReply() {}
+	ChangeFeedStreamReply() = default;
 
 	int expectedSize() const { return sizeof(ChangeFeedStreamReply) + mutations.expectedSize(); }
 
@@ -833,7 +835,7 @@ struct ChangeFeedStreamRequest {
 
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
-	ChangeFeedStreamRequest() {}
+	ChangeFeedStreamRequest() = default;
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -861,7 +863,7 @@ struct ChangeFeedPopRequest {
 	KeyRange range;
 	ReplyPromise<Void> reply;
 
-	ChangeFeedPopRequest() {}
+	ChangeFeedPopRequest() = default;
 	ChangeFeedPopRequest(Key const& rangeID, Version version, KeyRange const& range)
 	  : rangeID(rangeID), version(version), range(range) {}
 
@@ -882,7 +884,7 @@ struct GetCheckpointRequest {
 	Optional<UID> actionId;
 	ReplyPromise<CheckpointMetaData> reply;
 
-	GetCheckpointRequest() {}
+	GetCheckpointRequest() = default;
 	GetCheckpointRequest(std::vector<KeyRange> ranges,
 	                     Version version,
 	                     CheckpointFormat format,
@@ -901,7 +903,7 @@ struct FetchCheckpointReply : public ReplyPromiseStreamReply {
 	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
 	Standalone<StringRef> data;
 
-	FetchCheckpointReply() {}
+	FetchCheckpointReply() = default;
 	explicit FetchCheckpointReply(StringRef token) : token(token) {}
 
 	int expectedSize() const { return data.expectedSize(); }
@@ -973,7 +975,7 @@ struct OverlappingChangeFeedEntry {
 		       stopVersion == r.stopVersion && feedMetadataVersion == r.feedMetadataVersion;
 	}
 
-	OverlappingChangeFeedEntry() {}
+	OverlappingChangeFeedEntry() = default;
 	OverlappingChangeFeedEntry(KeyRef const& feedId,
 	                           KeyRangeRef const& range,
 	                           Version emptyVersion,
@@ -1020,7 +1022,7 @@ struct OverlappingChangeFeedsRequest {
 	Version minVersion;
 	ReplyPromise<OverlappingChangeFeedsReply> reply;
 
-	OverlappingChangeFeedsRequest() {}
+	OverlappingChangeFeedsRequest() = default;
 	explicit OverlappingChangeFeedsRequest(KeyRange const& range) : range(range) {}
 
 	template <class Ar>
@@ -1035,7 +1037,7 @@ struct ChangeFeedVersionUpdateReply {
 	constexpr static FileIdentifier file_identifier = 4246160;
 	Version version = 0;
 
-	ChangeFeedVersionUpdateReply() {}
+	ChangeFeedVersionUpdateReply() = default;
 	explicit ChangeFeedVersionUpdateReply(Version version) : version(version) {}
 
 	template <class Ar>
@@ -1051,7 +1053,7 @@ struct ChangeFeedVersionUpdateRequest {
 	Version minVersion;
 	ReplyPromise<ChangeFeedVersionUpdateReply> reply;
 
-	ChangeFeedVersionUpdateRequest() {}
+	ChangeFeedVersionUpdateRequest() = default;
 	explicit ChangeFeedVersionUpdateRequest(Version minVersion) : minVersion(minVersion) {}
 
 	template <class Ar>
@@ -1163,7 +1165,7 @@ struct GetHotShardsReply {
 	constexpr static FileIdentifier file_identifier = 3828140;
 	std::vector<KeyRange> hotShards;
 
-	GetHotShardsReply() {}
+	GetHotShardsReply() = default;
 	explicit GetHotShardsReply(std::vector<KeyRange> hotShards) : hotShards(hotShards) {}
 
 	template <class Ar>
@@ -1176,7 +1178,7 @@ struct GetHotShardsRequest {
 	constexpr static FileIdentifier file_identifier = 3828141;
 	ReplyPromise<GetHotShardsReply> reply;
 
-	GetHotShardsRequest() {}
+	GetHotShardsRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1194,7 +1196,7 @@ struct CheckSumMetaData {
 	Version version;
 	StringRef checkSumValue;
 
-	CheckSumMetaData() {}
+	CheckSumMetaData() = default;
 	CheckSumMetaData(KeyRange range, Version version, StringRef checkSumValue)
 	  : range(range), version(version), checkSumValue(checkSumValue) {}
 
@@ -1209,7 +1211,7 @@ struct GetStorageCheckSumReply {
 	std::vector<CheckSumMetaData> checkSums;
 	uint8_t checkSumMethod;
 
-	GetStorageCheckSumReply() {}
+	GetStorageCheckSumReply() = default;
 	GetStorageCheckSumReply(const std::vector<CheckSumMetaData>& checkSums, CheckSumMethod checkSumMethod)
 	  : checkSums(checkSums), checkSumMethod(static_cast<uint8_t>(checkSumMethod)) {}
 
@@ -1226,7 +1228,7 @@ struct GetStorageCheckSumRequest {
 	uint8_t checkSumMethod;
 	ReplyPromise<GetStorageCheckSumReply> reply;
 
-	GetStorageCheckSumRequest() {}
+	GetStorageCheckSumRequest() = default;
 	GetStorageCheckSumRequest(const std::vector<std::pair<KeyRange, Optional<Version>>>& ranges,
 	                          Optional<UID> actionId,
 	                          CheckSumMethod checkSumMethod)
@@ -1244,7 +1246,7 @@ struct BulkDumpRequest {
 	BulkDumpState bulkDumpState;
 	ReplyPromise<BulkDumpState> reply;
 
-	BulkDumpRequest() {}
+	BulkDumpRequest() = default;
 	BulkDumpRequest(const std::vector<UID>& checksumServers, const BulkDumpState& bulkDumpState)
 	  : checksumServers(checksumServers), bulkDumpState(bulkDumpState) {};
 

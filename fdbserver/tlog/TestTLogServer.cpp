@@ -30,7 +30,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/tlog/TLogServer.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/IRandom.h"
@@ -114,7 +114,7 @@ struct StorageResources {
 
 	StorageResources() = default;
 	StorageResources(std::string dq, std::string kv, TempStorageFiles files)
-	  : diskQueueFilename(std::move(dq)), kvStoreFilename(std::move(kv)), tempFiles(std::move(files)) {}
+	  : diskQueueFilename(std::move(dq)), kvStoreFilename(std::move(kv)), tempFiles(files) {}
 };
 
 StorageResources setupPersistentStorage(Reference<TLogContext> tLogContext,
@@ -134,7 +134,7 @@ StorageResources setupPersistentStorage(Reference<TLogContext> tLogContext,
 
 	TempStorageFiles tempFiles(
 	    diskQueueFilename, options.diskQueueExtension, kvStoreFilename, options.kvStoreExtension);
-	return StorageResources(diskQueueFilename, kvStoreFilename, std::move(tempFiles));
+	return StorageResources(diskQueueFilename, kvStoreFilename, tempFiles);
 }
 
 Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions,
@@ -234,7 +234,7 @@ Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContext,
 	// wait for either test completion or tLog failure.
 	auto choice = co_await race(tl, pTLogContext->TestTLogServerCompleted.getFuture());
 	if (choice.index() == 1) {
-		bool testCompleted = std::get<1>(std::move(choice));
+		bool testCompleted = std::get<1>(choice);
 		ASSERT_EQ(testCompleted, true);
 	}
 
@@ -247,7 +247,7 @@ Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestContext
 
 	TraceEvent("TestTLogServerEnterPush", pTLogTestContext->workerID);
 
-	for (uint16_t logID = 0; logID < pTLogTestContext->numLogServers; ++logID) {
+	for (uint32_t logID = 0; logID < pTLogTestContext->numLogServers; ++logID) {
 		Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[logID];
 		bool tLogReady = co_await pTLogContext->TLogStarted.getFuture();
 		ASSERT_EQ(tLogReady, true);
@@ -388,12 +388,12 @@ Future<Void> buildTLogSet(Reference<TLogTestContext> pTLogTestContext) {
 	TLogSet tLogSet;
 
 	tLogSet.tLogLocalities.push_back(LocalityData());
-	tLogSet.tLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
+	tLogSet.tLogPolicy = makeReference<PolicyOne>();
 	tLogSet.locality = pTLogTestContext->primaryLocality;
 	tLogSet.isLocal = true;
 	tLogSet.tLogVersion = TLogVersion::V6;
 	tLogSet.tLogReplicationFactor = 1;
-	for (uint16_t processID = 0; processID < pTLogTestContext->numLogServers; ++processID) {
+	for (uint32_t processID = 0; processID < pTLogTestContext->numLogServers; ++processID) {
 		Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[processID];
 		bool isCreated = co_await pTLogContext->TLogCreated.getFuture();
 		ASSERT_EQ(isCreated, true);
@@ -401,7 +401,7 @@ Future<Void> buildTLogSet(Reference<TLogTestContext> pTLogTestContext) {
 		tLogSet.tLogs.push_back(OptionalInterface<TLogInterface>(pTLogContext->TestTLogInterface));
 	}
 	pTLogTestContext->dbInfo.logSystemConfig.tLogs.push_back(tLogSet);
-	for (uint16_t processID = 0; processID < pTLogTestContext->numLogServers; ++processID) {
+	for (uint32_t processID = 0; processID < pTLogTestContext->numLogServers; ++processID) {
 		Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[processID];
 		// start transactions
 		pTLogContext->TLogStarted.send(true);
@@ -420,7 +420,7 @@ Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 
 	FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 
-	uint16_t tLogIdx = 0;
+	uint32_t tLogIdx = 0;
 
 	TraceEvent("TestTLogServerEnterRecoveryTest");
 

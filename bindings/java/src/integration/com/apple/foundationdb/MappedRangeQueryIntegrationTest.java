@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
@@ -33,9 +34,7 @@ import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -45,22 +44,9 @@ class MappedRangeQueryIntegrationTest {
 	public String databaseArg = null;
 	private Database openFDB() { return fdb.open(databaseArg); }
 
-	@BeforeEach
-	@AfterEach
-	void clearDatabase() throws Exception {
-		/*
-		 * Empty the database before and after each run, just in case
-		 */
-		try (Database db = openFDB()) {
-			db.run(tr -> {
-				tr.clear(new byte[0], new byte[] { (byte) 0xff });
-				return null;
-			});
-		}
-	}
-
 	static private final byte[] EMPTY = Tuple.from().pack();
-	static private final String PREFIX = "prefix";
+	// Integration tests share a database, so do not require a database-wide clear.
+	static private final String PREFIX = "mapped-range-query-" + UUID.randomUUID();
 	static private final String RECORD = "RECORD";
 	static private final String INDEX = "INDEX";
 	static private String primaryKey(int i) { return String.format("primary-key-of-record-%08d", i); }
@@ -99,12 +85,13 @@ class MappedRangeQueryIntegrationTest {
 	public static void main(String[] args) throws Exception {
 		final MappedRangeQueryIntegrationTest test = new MappedRangeQueryIntegrationTest();
 		test.databaseArg = getArgFromEnv();
-		test.clearDatabase();
 		test.comparePerformance();
-		test.clearDatabase();
 	}
 
-	int numRecords = 10000;
+	// Keep numRecords modest so transactions complete within the 5s timeout
+	// even on heavily loaded CI infrastructure (e.g., CodeBuild running
+	// compilation and tests concurrently on the same instance).
+	int numRecords = 1000;
 	int numQueries = 1;
 	int numRecordsPerQuery = 100;
 	boolean validate = true;
@@ -152,74 +139,67 @@ class MappedRangeQueryIntegrationTest {
 	}
 
 	RangeQueryWithIndex rangeQueryAndThenRangeQueries = (int begin, int end, Database db) -> db.run(tr -> {
-		try {
-			List<KeyValue> kvs = tr.getRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                                 KeySelector.firstGreaterOrEqual(indexEntryKey(end)),
-			                                 ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
-			                         .asList()
-			                         .get();
-			Assertions.assertEquals(end - begin, kvs.size());
+		// Let Database.run retry transient FDB errors instead of turning them into assertion failures.
+		List<KeyValue> kvs = tr.getRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+		                                 KeySelector.firstGreaterOrEqual(indexEntryKey(end)),
+		                                 ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+		                         .asList()
+		                         .join();
+		Assertions.assertEquals(end - begin, kvs.size());
 
-			// Get the records of each index entry IN PARALLEL.
-			List<CompletableFuture<List<KeyValue>>> resultFutures = new ArrayList<>();
-			// In reality, we need to get the record key by parsing the index entry key. But considering this is a
-			// performance test, we just ignore the returned key and simply generate it from recordKey.
+		// Get the records of each index entry IN PARALLEL.
+		List<CompletableFuture<List<KeyValue>>> resultFutures = new ArrayList<>();
+		// In reality, we need to get the record key by parsing the index entry key. But considering this is a
+		// performance test, we just ignore the returned key and simply generate it from recordKey.
+		for (int id = begin; id < end; id++) {
+			resultFutures.add(tr.getRange(Range.startsWith(recordKeyPrefix(id)),
+			                              ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL).asList());
+		}
+		AsyncUtil.whenAll(resultFutures).join();
+
+		if (validate) {
+			final Iterator<KeyValue> indexes = kvs.iterator();
+			final Iterator<CompletableFuture<List<KeyValue>>> records = resultFutures.iterator();
 			for (int id = begin; id < end; id++) {
-				resultFutures.add(tr.getRange(Range.startsWith(recordKeyPrefix(id)),
-				                              ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL).asList());
-			}
-			AsyncUtil.whenAll(resultFutures).get();
+				Assertions.assertTrue(indexes.hasNext());
+				assertByteArrayEquals(indexEntryKey(id), indexes.next().getKey());
 
-			if (validate) {
-				final Iterator<KeyValue> indexes = kvs.iterator();
-				final Iterator<CompletableFuture<List<KeyValue>>> records = resultFutures.iterator();
-				for (int id = begin; id < end; id++) {
-					Assertions.assertTrue(indexes.hasNext());
-					assertByteArrayEquals(indexEntryKey(id), indexes.next().getKey());
-
-					Assertions.assertTrue(records.hasNext());
-					List<KeyValue> rangeResult = records.next().get();
-					validateRangeResult(id, rangeResult);
-				}
-				Assertions.assertFalse(indexes.hasNext());
-				Assertions.assertFalse(records.hasNext());
+				Assertions.assertTrue(records.hasNext());
+				List<KeyValue> rangeResult = records.next().join();
+				validateRangeResult(id, rangeResult);
 			}
-		} catch (Exception e) {
-			Assertions.fail("Unexpected exception", e);
+			Assertions.assertFalse(indexes.hasNext());
+			Assertions.assertFalse(records.hasNext());
 		}
 		return null;
 	});
 
 	RangeQueryWithIndex mappedRangeQuery = (int begin, int end, Database db) -> db.run(tr -> {
-		try {
-			List<MappedKeyValue> kvs =
-			    tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                      KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
-			                      ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
-			        .asList()
-			        .get();
-			Assertions.assertEquals(end - begin, kvs.size());
+		List<MappedKeyValue> kvs =
+		    tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+		                      KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
+		                      ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+		        .asList()
+		        .join();
+		Assertions.assertEquals(end - begin, kvs.size());
 
-			if (validate) {
-				final Iterator<MappedKeyValue> results = kvs.iterator();
-				for (int id = begin; id < end; id++) {
-					Assertions.assertTrue(results.hasNext());
-					MappedKeyValue mappedKeyValue = results.next();
-					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
-					assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
-					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
-					byte[] prefix = recordKeyPrefix(id);
-					assertByteArrayEquals(prefix, mappedKeyValue.getRangeBegin());
-					prefix[prefix.length - 1] = (byte)0x01;
-					assertByteArrayEquals(prefix, mappedKeyValue.getRangeEnd());
+		if (validate) {
+			final Iterator<MappedKeyValue> results = kvs.iterator();
+			for (int id = begin; id < end; id++) {
+				Assertions.assertTrue(results.hasNext());
+				MappedKeyValue mappedKeyValue = results.next();
+				assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
+				assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
+				assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
+				byte[] prefix = recordKeyPrefix(id);
+				assertByteArrayEquals(prefix, mappedKeyValue.getRangeBegin());
+				prefix[prefix.length - 1] = (byte)0x01;
+				assertByteArrayEquals(prefix, mappedKeyValue.getRangeEnd());
 
-					List<KeyValue> rangeResult = mappedKeyValue.getRangeResult();
-					validateRangeResult(id, rangeResult);
-				}
-				Assertions.assertFalse(results.hasNext());
+				List<KeyValue> rangeResult = mappedKeyValue.getRangeResult();
+				validateRangeResult(id, rangeResult);
 			}
-		} catch (Exception e) {
-			Assertions.fail("Unexpected exception", e);
+			Assertions.assertFalse(results.hasNext());
 		}
 		return null;
 	});

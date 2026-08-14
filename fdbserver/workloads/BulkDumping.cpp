@@ -23,6 +23,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/RangeLock.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/mocks3/MockS3Server.h"
@@ -30,6 +31,7 @@
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
+#include "flow/UnitTest.h"
 #include "fdbrpc/simulator.h"
 
 const std::string simulationBulkDumpFolder = joinPath("simfdb", "bulkdump");
@@ -53,7 +55,6 @@ struct BulkDumping : TestWorkload {
 
 	// Timeout configuration
 	double jobCompletionTimeout = 1800.0; // Timeout for waiting on bulk dump/load job completion
-	double modeSetTimeout = 60.0; // Timeout for setBulkLoadMode/setBulkDumpMode operations
 	double jobSubmitTimeout = 60.0; // Timeout for submitBulkDumpJob/submitBulkLoadJob operations
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
@@ -61,7 +62,6 @@ struct BulkDumping : TestWorkload {
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		out.insert({ "RandomMoveKeys",
 		             "DataLossRecovery",
-		             "IDDTxnProcessorApiCorrectness",
 		             "PerpetualWiggleStatsWorkload",
 		             "PhysicalShardMove",
 		             "StorageCorruption",
@@ -89,7 +89,6 @@ struct BulkDumping : TestWorkload {
 
 		// Initialize timeout options
 		jobCompletionTimeout = getOption(options, "jobCompletionTimeout"_sr, 1800.0);
-		modeSetTimeout = getOption(options, "modeSetTimeout"_sr, 60.0);
 		jobSubmitTimeout = getOption(options, "jobSubmitTimeout"_sr, 60.0);
 	}
 
@@ -107,7 +106,8 @@ struct BulkDumping : TestWorkload {
 	}
 
 	KeyRange getRandomRange(BulkDumping* self, KeyRange maxRange) const {
-		while (true) {
+		constexpr int maxRandomRangeAttempts = 100;
+		for (int attempt = 0; attempt < maxRandomRangeAttempts; ++attempt) {
 			Standalone<StringRef> keyA = self->getRandomStringRef();
 			Standalone<StringRef> keyB = self->getRandomStringRef();
 			if (!maxRange.contains(keyA) || !maxRange.contains(keyB)) {
@@ -119,6 +119,16 @@ struct BulkDumping : TestWorkload {
 			}
 			return range;
 		}
+
+		// Sampling the whole keyspace can never finish for a sufficiently narrow range.
+		Key keyA = randomKeyBetween(maxRange);
+		Key keyB = randomKeyBetween(maxRange);
+		if (keyA == maxRange.end || keyB == maxRange.end || keyA == keyB) {
+			return maxRange;
+		}
+
+		KeyRange range = keyA < keyB ? KeyRangeRef(keyA, keyB) : KeyRangeRef(keyB, keyA);
+		return range.singleKeyRange() ? maxRange : range;
 	}
 
 	std::map<Key, Value> generateOrderedKVS(BulkDumping* self, KeyRange maxRange, size_t count) {
@@ -494,16 +504,12 @@ struct BulkDumping : TestWorkload {
 		int oldBulkDumpMode = 0;
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Setting BulkDump Mode");
 		try {
-			oldBulkDumpMode = co_await timeoutError(setBulkDumpMode(cx, 1), modeSetTimeout); // Enable bulkDump
-			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkDump Mode Set").detail("OldMode", oldBulkDumpMode);
+			oldBulkDumpMode = co_await setBulkDumpMode(cx, 1); // Enable bulkDump
 		} catch (Error& e) {
-			if (e.code() == error_code_timed_out) {
-				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetDumpModeTimeout")
-				    .detail("TimeoutSeconds", modeSetTimeout);
-				throw;
-			}
+			TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetDumpModeFailed").error(e);
 			throw;
 		}
+		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkDump Mode Set").detail("OldMode", oldBulkDumpMode);
 		std::string dumpFolder = jobRoot.empty() ? simulationBulkDumpFolder : jobRoot;
 		BulkDumpState bulkDumpJob =
 		    createBulkDumpJob(bulkDumpJobRange, dumpFolder, BulkLoadType::SST, bulkLoadTransportMethod);
@@ -529,17 +535,14 @@ struct BulkDumping : TestWorkload {
 		    .detail("Phase", "Setting BulkLoad Mode")
 		    .detail("Job", bulkDumpJob.toString());
 		try {
-			oldBulkLoadMode = co_await timeoutError(setBulkLoadMode(cx, 1), modeSetTimeout); // Enable bulkLoad
-			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkLoad Mode Set").detail("OldMode", oldBulkLoadMode);
+			oldBulkLoadMode = co_await setBulkLoadMode(cx, 1); // Enable bulkLoad
 		} catch (Error& e) {
-			if (e.code() == error_code_timed_out) {
-				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetModeTimeout")
-				    .detail("Job", bulkDumpJob.toString())
-				    .detail("TimeoutSeconds", modeSetTimeout);
-				throw;
-			}
+			TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetLoadModeFailed")
+			    .error(e)
+			    .detail("Job", bulkDumpJob.toString());
 			throw;
 		}
+		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkLoad Mode Set").detail("OldMode", oldBulkLoadMode);
 		while (true) {
 			// We randomly injects the job cancellation when waiting for the job completion to test the job
 			// cancellation. If the job is cancelled, we should re-submit the job.
@@ -682,5 +685,27 @@ struct BulkDumping : TestWorkload {
 		}
 	}
 };
+
+TEST_CASE("/fdbserver/workloads/BulkDumping/boundedNarrowRange") {
+	WorkloadContext context;
+	context.clientId = 0;
+	context.clientCount = 1;
+	context.sharedRandomNumber = 1;
+	TestWorkloadImpl<BulkDumping> workload(context);
+
+	KeyRange narrowRange = KeyRangeRef("aaaaaaaa\x01"_sr, "aaaaaaaa\x02"_sr);
+	KeyRange generatedRange = workload.getRandomRange(&workload, narrowRange);
+	ASSERT(narrowRange.contains(generatedRange));
+	ASSERT(!generatedRange.empty());
+	ASSERT(!generatedRange.singleKeyRange());
+
+	KeyRange singleSampleableKeyRange = KeyRangeRef("aaaaaaaaa"_sr, "aaaaaaaaa\x00\x00"_sr);
+	KeyRange fallbackRange = workload.getRandomRange(&workload, singleSampleableKeyRange);
+	ASSERT(fallbackRange == singleSampleableKeyRange);
+	ASSERT(!fallbackRange.empty());
+	ASSERT(!fallbackRange.singleKeyRange());
+
+	return Void();
+}
 
 WorkloadFactory<BulkDumping> BulkDumpingFactory;

@@ -37,7 +37,7 @@ struct ExclusionTracker {
 	Database db;
 	Future<Void> trackerFuture;
 
-	ExclusionTracker() {}
+	ExclusionTracker() = default;
 	explicit ExclusionTracker(Database db) : db(db) { trackerFuture = tracker(this); }
 
 	bool isFailedOrExcluded(NetworkAddress addr) {
@@ -166,7 +166,7 @@ struct ExclusionTracker {
 				Future<Void> watchFuture = tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey) ||
 				                           tr.watch(excludedLocalityVersionKey) || tr.watch(failedLocalityVersionKey);
 				co_await tr.commit();
-				if (excludedLocalityResults.size() > 0 || failedLocalityResults.size() > 0) {
+				if (!excludedLocalityResults.empty() || !failedLocalityResults.empty()) {
 					// when there are excluded localities we need to monitor for when the worker list changes, so we
 					// must poll
 					watchFuture = watchFuture || delay(10.0);

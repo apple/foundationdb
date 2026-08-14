@@ -132,7 +132,7 @@ struct RestoreWorkload : TestWorkload {
 		    .detail("PerformRestore", performRestore)
 		    .detail("AllowPauses", allowPauses);
 
-		if (allowPauses && BUGGIFY) {
+		if (allowPauses && buggify()) {
 			cp = changePaused(cx, &backupAgent);
 		} else {
 			cp = resumeAgent(cx, &backupAgent);

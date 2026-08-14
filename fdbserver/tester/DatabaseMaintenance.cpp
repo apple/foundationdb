@@ -233,11 +233,12 @@ std::vector<PerfMetric> aggregateMetrics(std::vector<std::vector<PerfMetric>> me
 }
 
 void logMetrics(std::vector<PerfMetric> metrics) {
-	for (int idx = 0; idx < metrics.size(); idx++)
+	for (int idx = 0; idx < metrics.size(); idx++) {
 		TraceEvent("Metric")
 		    .detail("Name", metrics[idx].name())
 		    .detail("Value", metrics[idx].value())
 		    .detail("Formatted", format(metrics[idx].format_code().c_str(), metrics[idx].value()));
+	}
 }
 
 Future<Void> checkConsistencyScanAfterTest(Database cx, TesterConsistencyScanState* csState) {

@@ -138,7 +138,7 @@ public:
 };
 
 Reference<IThreadPool> createGenericThreadPool(int stackSize, int pri) {
-	return Reference<IThreadPool>(new ThreadPool(stackSize, pri));
+	return makeReference<ThreadPool>(stackSize, pri);
 }
 
 thread_local IThreadPoolReceiver* ThreadPool::Thread::threadUserObject;

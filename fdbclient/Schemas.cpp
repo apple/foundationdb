@@ -328,7 +328,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "type":"x",
                   "name":{
                      "$enum":[
-                        "file_open_error",
                         "incorrect_cluster_file_contents",
                         "trace_log_file_write_error",
                         "trace_log_could_not_create_file",
@@ -869,6 +868,8 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "grv_proxies":1,
          "proxies":6,
          "backup_worker_enabled":1,
+         "range_partitioned_backup_worker_enabled":1,
+         "range_partitioned_backup_workers":0,
          "perpetual_storage_wiggle":0,
          "perpetual_storage_wiggle_locality":"0",
          "perpetual_storage_wiggle_engine":{
@@ -1159,7 +1160,10 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = R"configSchema(
     "auto_resolvers":1,
     "auto_logs":3,
     "commit_proxies":5,
-    "grv_proxies":1
+    "grv_proxies":1,
+    "backup_worker_enabled":1,
+    "range_partitioned_backup_worker_enabled":1,
+    "range_partitioned_backup_workers":0
 })configSchema"_sr;
 
 const KeyRef JSONSchemas::latencyBandConfigurationSchema = R"configSchema(

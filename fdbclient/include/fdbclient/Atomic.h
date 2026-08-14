@@ -28,9 +28,9 @@ inline ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptiona
                                   const ValueRef& otherOperand,
                                   Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!existingValue.size())
+	if (existingValue.empty())
 		return otherOperand;
-	if (!otherOperand.size())
+	if (otherOperand.empty())
 		return otherOperand;
 
 	uint8_t* buf = new (ar) uint8_t[otherOperand.size()];
@@ -53,7 +53,7 @@ inline ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptiona
 
 inline ValueRef doAnd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!otherOperand.size())
+	if (otherOperand.empty())
 		return otherOperand;
 
 	uint8_t* buf = new (ar) uint8_t[otherOperand.size()];
@@ -76,9 +76,9 @@ inline ValueRef doAndV2(const Optional<ValueRef>& existingValueOptional, const V
 
 inline ValueRef doOr(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!existingValue.size())
+	if (existingValue.empty())
 		return otherOperand;
-	if (!otherOperand.size())
+	if (otherOperand.empty())
 		return otherOperand;
 
 	uint8_t* buf = new (ar) uint8_t[otherOperand.size()];
@@ -94,9 +94,9 @@ inline ValueRef doOr(const Optional<ValueRef>& existingValueOptional, const Valu
 
 inline ValueRef doXor(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!existingValue.size())
+	if (existingValue.empty())
 		return otherOperand;
-	if (!otherOperand.size())
+	if (otherOperand.empty())
 		return otherOperand;
 
 	uint8_t* buf = new (ar) uint8_t[otherOperand.size()];
@@ -115,9 +115,9 @@ inline ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional,
                                const ValueRef& otherOperand,
                                Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!existingValue.size())
+	if (existingValue.empty())
 		return otherOperand;
-	if (!otherOperand.size())
+	if (otherOperand.empty())
 		return existingValue;
 	if (existingValue.size() + otherOperand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
 		CODE_PROBE(true, "AppendIfFits resulted in truncation");
@@ -138,9 +138,9 @@ inline ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional,
 
 inline ValueRef doMax(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
-	if (!existingValue.size())
+	if (existingValue.empty())
 		return otherOperand;
-	if (!otherOperand.size())
+	if (otherOperand.empty())
 		return otherOperand;
 
 	int i, j;
@@ -181,7 +181,7 @@ inline ValueRef doByteMax(const Optional<ValueRef>& existingValueOptional, const
 }
 
 inline ValueRef doMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
-	if (!otherOperand.size())
+	if (otherOperand.empty())
 		return otherOperand;
 
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();

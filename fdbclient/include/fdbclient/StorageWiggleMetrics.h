@@ -24,7 +24,7 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/serialize.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/RunTransaction.h"
 
 FDB_BOOLEAN_PARAM(PrimaryRegion);
@@ -95,7 +95,7 @@ struct StorageWiggleMetrics {
 		StorageWiggleMetrics newMetrics;
 		newMetrics.smoothed_round_duration.reset(smoothed_round_duration.getTotal());
 		newMetrics.smoothed_wiggle_duration.reset(smoothed_wiggle_duration.getTotal());
-		*this = std::move(newMetrics);
+		*this = newMetrics;
 	}
 };
 

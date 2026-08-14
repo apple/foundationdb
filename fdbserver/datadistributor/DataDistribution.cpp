@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/BulkDumping.h"
@@ -27,15 +29,17 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.h"
+#include "fdbclient/RangeLock.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/core/BackupPartitionMap.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
-#include "fdbserver/datadistributor/DDSharedContext.h"
-#include "fdbserver/datadistributor/DDTeamCollection.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
+#include "DDSharedContext.h"
+#include "DDTeamCollection.h"
+#include "DataDistribution.h"
 #include "DDRelocationQueue.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
@@ -43,7 +47,6 @@
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/core/WorkloadKeys.h"
-#include "fdbserver/datadistributor/MockDataDistributor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Buggify.h"
@@ -53,7 +56,7 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/serialize.h"
 #include "flow/CoroUtils.h"
 
@@ -84,8 +87,42 @@ std::set<int> const& normalDDQueueErrors() {
 		                    error_code_broken_promise,
 		                    error_code_data_move_cancelled,
 		                    error_code_data_move_dest_team_not_found,
-		                    error_code_finish_move_keys_too_many_retries };
+		                    error_code_dd_config_changed,
+		                    error_code_finish_move_keys_too_many_retries,
+		                    error_code_start_move_keys_too_many_retries };
 	return s;
+}
+
+struct DataDistributorDcIds {
+	std::vector<Optional<Key>> primary;
+	std::vector<Optional<Key>> remote;
+};
+
+// Selects the active primary DC and the first other configured DC, falling back to configuration order.
+DataDistributorDcIds getDataDistributorDcIds(const std::vector<RegionInfo>& regions, Optional<Key> activePrimaryDcId) {
+	DataDistributorDcIds dcIds;
+	if (regions.empty()) {
+		return dcIds;
+	}
+
+	auto primaryRegion = regions.begin();
+	if (activePrimaryDcId.present()) {
+		auto activeRegion = std::find_if(regions.begin(), regions.end(), [&](const RegionInfo& region) {
+			return region.dcId == activePrimaryDcId.get();
+		});
+		if (activeRegion != regions.end()) {
+			primaryRegion = activeRegion;
+		}
+	}
+
+	dcIds.primary.push_back(primaryRegion->dcId);
+	for (auto region = regions.begin(); region != regions.end(); ++region) {
+		if (region != primaryRegion) {
+			dcIds.remote.push_back(region->dcId);
+			break;
+		}
+	}
+	return dcIds;
 }
 
 } // anonymous namespace
@@ -205,99 +242,6 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 	}
 }
 
-Future<Void> StorageWiggler::onCheck() const {
-	return delay(MIN_ON_CHECK_DELAY_SEC);
-}
-
-// add server to wiggling queue
-void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
-	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "
-	//           << teamCollection->isPrimary() << std::endl;
-	ASSERT(!pq_handles.contains(serverId));
-	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
-}
-
-void StorageWiggler::removeServer(const UID& serverId) {
-	// std::cout << "size: " << pq_handles.size() << " remove " << serverId.toString() << " DC: "
-	//           << teamCollection->isPrimary() << std::endl;
-	if (contains(serverId)) { // server haven't been popped
-		auto handle = pq_handles.at(serverId);
-		pq_handles.erase(serverId);
-		wiggle_pq.erase(handle);
-	}
-}
-
-void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataType& metadata) {
-	//	std::cout << "size: " << pq_handles.size() << " update " << serverId.toString()
-	//	          << " DC: " << teamCollection->isPrimary() << std::endl;
-	auto handle = pq_handles.at(serverId);
-	if ((*handle).first == metadata) {
-		return;
-	}
-	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
-}
-
-bool StorageWiggler::necessary(const UID& serverId, const StorageMetadataType& metadata) const {
-	return metadata.wrongConfiguredForWiggle ||
-	       (now() - metadata.createdTime > SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
-}
-
-Optional<UID> StorageWiggler::getNextServerId(bool necessaryOnly) {
-	if (!wiggle_pq.empty()) {
-		auto [metadata, id] = wiggle_pq.top();
-		if (necessaryOnly && !necessary(id, metadata)) {
-			return {};
-		}
-		wiggle_pq.pop();
-		pq_handles.erase(id);
-		return Optional<UID>(id);
-	}
-	return Optional<UID>();
-}
-
-Future<Void> StorageWiggler::resetStats() {
-	metrics.reset();
-	return runRYWTransaction(
-	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
-	    });
-}
-
-Future<Void> StorageWiggler::restoreStats() {
-	auto readFuture = wiggleData.storageWiggleMetrics(PrimaryRegion(teamCollection->isPrimary()))
-	                      .getD(teamCollection->dbContext().getReference(), Snapshot::False, metrics);
-	return store(metrics, readFuture);
-}
-
-Future<Void> StorageWiggler::startWiggle() {
-	metrics.last_wiggle_start = StorageMetadataType::currentTime();
-	if (shouldStartNewRound()) {
-		metrics.last_round_start = metrics.last_wiggle_start;
-	}
-	return runRYWTransaction(
-	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
-	    });
-}
-
-Future<Void> StorageWiggler::finishWiggle() {
-	metrics.last_wiggle_finish = StorageMetadataType::currentTime();
-	metrics.finished_wiggle += 1;
-	auto duration = metrics.last_wiggle_finish - metrics.last_wiggle_start;
-	metrics.smoothed_wiggle_duration.setTotal((double)duration);
-
-	if (shouldFinishRound()) {
-		metrics.last_round_finish = metrics.last_wiggle_finish;
-		metrics.finished_round += 1;
-		duration = metrics.last_round_finish - metrics.last_round_start;
-		metrics.smoothed_round_duration.setTotal((double)duration);
-	}
-	return runRYWTransaction(
-	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
-	    });
-}
-
 Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 	TraceEvent("DDTrackerStarting").log();
 	while (db->get().recoveryState < RecoveryState::ALL_LOGS_RECRUITED) {
@@ -306,36 +250,76 @@ Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 	}
 }
 
-// Ensures that the serverKeys key space is properly coalesced
-// This method is only used for testing and is not implemented in a manner that is safe for large databases
-Future<Void> debugCheckCoalescing(Database cx) {
-	Transaction tr(cx);
+// Watches backupPartitionRequiredKey.
+// On value=1, computes the user keyspace partitions and writes them to backupPartitionListKey.
+// On value=2, clears backupPartitionListKey.
+// In both cases the request key is cleared in the same commit.
+Future<Void> monitorBackupPartitionRequired(Database cx, KeyRangeMap<ShardTrackedData>* shards, UID ddId) {
+	// The partition computation can wait arbitrarily long on shard-metrics tracking, so it runs OUTSIDE any
+	// transaction to avoid transaction_too_old. A short re-read in the write transaction protects against
+	// the race where a value=2 (cleanup) arrives while we are computing for a value=1.
 	while (true) {
-		Error err;
-		try {
-			RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-
-			int i{ 0 };
-			for (i = 0; i < serverList.size(); i++) {
-				UID id = decodeServerListValue(serverList[i].value).id();
-				RangeResult ranges = co_await krmGetRanges(&tr, serverKeysPrefixFor(id), allKeys);
-				ASSERT(ranges.end()[-1].key == allKeys.end);
-
-				for (int j = 0; j < ranges.size() - 2; j++)
-					if (ranges[j].value == ranges[j + 1].value)
-						TraceEvent(SevError, "UncoalescedValues", id)
-						    .detail("Key1", ranges[j].key)
-						    .detail("Key2", ranges[j + 1].key)
-						    .detail("Value", ranges[j].value);
+		// Phase 1: peek the request key in a loop. If nothing pending, park on watch and wait, then re-read.
+		int8_t requestType = 0;
+		while (requestType == 0) {
+			ReadYourWritesTransaction tr(cx);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> value = co_await tr.get(backupPartitionRequiredKey);
+				requestType = value.present() ? decodeBackupPartitionRequiredValue(value.get()) : 0;
+				if (requestType == 0) {
+					Future<Void> watchFuture = tr.watch(backupPartitionRequiredKey);
+					co_await tr.commit();
+					co_await watchFuture;
+				}
+				continue;
+			} catch (Error& e) {
+				err = e;
 			}
-
-			TraceEvent("DoneCheckingCoalescing").log();
-			co_return;
-		} catch (Error& e) {
-			err = e;
+			co_await tr.onError(err);
 		}
-		co_await tr.onError(err);
+
+		// Phase 2: compute outside any transaction (may wait long on shard metrics).
+		std::vector<KeyRange> partitions;
+		if (requestType == 1) {
+			partitions = co_await calculateBackupPartitionKeyRanges(shards);
+		}
+
+		// Phase 3: short txn to re-check the request value and write the result.
+		{
+			ReadYourWritesTransaction tr(cx);
+			while (true) {
+				Error err;
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					Optional<Value> value = co_await tr.get(backupPartitionRequiredKey);
+					int8_t currentType = value.present() ? decodeBackupPartitionRequiredValue(value.get()) : 0;
+					if (currentType != requestType) {
+						// Someone wrote a new request while we were computing partitions; restart the outer loop
+						// so the next iteration acts on the new value.
+						break;
+					}
+					if (requestType == 1) {
+						tr.set(backupPartitionListKey, encodeBackupPartitionListValue(partitions));
+						tr.clear(backupPartitionRequiredKey);
+						co_await tr.commit();
+						TraceEvent("DDBackupPartitionsComputed", ddId).detail("NumPartitions", partitions.size());
+					} else {
+						tr.clear(backupPartitionListKey);
+						tr.clear(backupPartitionRequiredKey);
+						co_await tr.commit();
+						TraceEvent("DDBackupPartitionsCleared", ddId);
+					}
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr.onError(err);
+			}
+		}
 	}
 }
 
@@ -352,6 +336,8 @@ Future<UID> launchAudit(Reference<DataDistributor> self,
                         AuditType auditType,
                         KeyValueStoreType auditStorageEngineType);
 Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
+Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self);
+Future<Void> monitorShardEncodeKnob(UID ddId);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
@@ -510,15 +496,10 @@ public:
 	}
 
 	void initDcInfo() {
-		primaryDcId.clear();
-		remoteDcIds.clear();
-		const std::vector<RegionInfo>& regions = configuration.regions;
-		if (!configuration.regions.empty()) {
-			primaryDcId.push_back(regions[0].dcId);
-		}
-		if (configuration.regions.size() > 1) {
-			remoteDcIds.push_back(regions[1].dcId);
-		}
+		Optional<Key> activePrimaryDcId = dbInfo->get().master.locality.dcId();
+		auto dcIds = getDataDistributorDcIds(configuration.regions, activePrimaryDcId);
+		primaryDcId = std::move(dcIds.primary);
+		remoteDcIds = std::move(dcIds.remote);
 	}
 
 	Future<Void> waitDataDistributorEnabled() const {
@@ -633,20 +614,14 @@ public:
 			// AuditStorage does not rely on DatabaseConfiguration
 			// AuditStorage read necessary info purely from system key space
 			if (!self->auditStorageInitStarted) {
-				// AuditStorage currently does not support DDMockTxnProcessor
-				if (!self->txnProcessor->isMocked()) {
-					// Avoid multiple initAuditStorages
-					self->addActor.send(self->initAuditStorage(self));
-				}
+				// Avoid multiple initAuditStorages
+				self->addActor.send(self->initAuditStorage(self));
 			}
 			// It is possible that an audit request arrives and then DDMode
 			// is set to 2 at this point
 			// No polling MoveKeyLock is running
 			// So, we need to check MoveKeyLock when waitUntilDataDistributorExitSecurityMode
-			if (!self->txnProcessor->isMocked()) {
-				// AuditStorage currently does not support DDMockTxnProcessor
-				co_await waitUntilDataDistributorExitSecurityMode(self); // Trap DDMode == 2
-			}
+			co_await waitUntilDataDistributorExitSecurityMode(self); // Trap DDMode == 2
 			// It is possible DDMode begins with 2 and passes
 			// waitDataDistributorEnabled and then set to 0 before
 			// waitUntilDataDistributorExitSecurityMode. For this case,
@@ -978,9 +953,7 @@ public:
 		    .detail("ElapsedSeconds", now() - resumeStart);
 
 		// Trigger background cleanup for datamove tombstones
-		if (!self->txnProcessor->isMocked()) {
-			self->addActor.send(self->removeDataMoveTombstoneBackground(self));
-		}
+		self->addActor.send(self->removeDataMoveTombstoneBackground(self));
 	}
 
 	// Resume inflight relocations from the previous DD
@@ -1014,10 +987,6 @@ public:
 };
 
 Future<Void> DataDistributor::initDDConfigWatch() {
-	if (txnProcessor->isMocked()) {
-		onConfigChange = Never();
-		return Void();
-	}
 	onConfigChange = map(DDConfiguration().trigger.onChange(
 	                         SystemDBWriteLockedNow(txnProcessor->context().getReference()), {}, configChangeWatching),
 	                     [](Version v) {
@@ -1175,6 +1144,49 @@ Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
 	}
 }
 
+// Polls the persisted bulkload task state every 60s and returns when the task
+// is no longer "ours" -- i.e. when its phase has left {Running, Complete} or
+// its restartCount has advanced past ours (meaning triggerBulkLoadTask ran
+// again and a different doBulkLoadTask now owns this task). Returning from
+// this Future is the signal that the in-flight data move has been abandoned
+// or supplanted, regardless of how long the data move itself has been running.
+// While the task is still ours -- including a multi-hour large-shard data
+// move -- this Future never returns, and the caller continues waiting on
+// completeAck.
+Future<Void> waitUntilTaskAbandoned(Reference<DataDistributor> self, KeyRange range, UID taskId, int ourRestartCount) {
+	while (true) {
+		co_await delay(60.0);
+		Transaction tr(self->txnProcessor->context());
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			BulkLoadTaskState current = co_await getBulkLoadTask(
+			    &tr, range, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running, BulkLoadPhase::Complete });
+			if (current.restartCount > ourRestartCount) {
+				// Someone re-triggered the task; a different doBulkLoadTask owns it.
+				co_return;
+			}
+			// Still ours; poll again. The window from triggerBulkLoadTask (phase=Triggered)
+			// through startMoveShards' transition to Running through finishMoveShards' atomic
+			// commit of phase=Complete is all expected here. Only a phase OUTSIDE that set
+			// (Acknowledged, Error, Invalid) or a higher restartCount means we've been
+			// supplanted.
+			continue;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.code() == error_code_actor_cancelled) {
+			throw err;
+		}
+		if (err.code() == error_code_bulkload_task_outdated) {
+			// Task is no longer in {Running, Complete} or has been overwritten.
+			co_return;
+		}
+		// Transient transaction error; retry on the next poll cycle.
+	}
+}
+
 // A bulk load task is guaranteed to be either complete or overwritten by another task
 Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId) {
 	Promise<BulkLoadAck> completeAck;
@@ -1208,7 +1220,35 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 		// The completion of the task relies on the fact that a data move on a range is either
 		// completed by itself or replaced by a data move on the overlapping range
 		self->triggerShardBulkLoading.send(BulkLoadShardRequest(triggeredBulkLoadTask));
-		BulkLoadAck ack = co_await completeAck.getFuture(); // proceed when a data move completes with this task
+		// Wait for completeAck (data move finished) or for the task to be abandoned
+		// or for an absolute timeout backstop.
+		//
+		// Abandoned-detection polls the persisted task state every 60s and fires
+		// when the task leaves {Running, Complete} or its restartCount advances
+		// past ours -- meaning a different code path (DD reinit, supplanting
+		// trigger, fail/error path, etc.) is now responsible for this task. While
+		// the task is still ours -- even a multi-hour large-shard data move --
+		// the abandoned Future never resolves and we keep waiting on completeAck.
+		//
+		// Backstop timeout fires after JOB_MONITOR_PERIOD_SEC * 240 (~2 hours in
+		// production). It is the safety net for the original deadlock where DD
+		// reinitializes but no fresh code path advances the task's state -- in
+		// that case neither completeAck nor abandoned will ever fire, but the
+		// backstop guarantees this actor exits within bounded time so
+		// scheduleBulkLoadTasks can re-scan and re-dispatch.
+		Future<Void> abandoned = waitUntilTaskAbandoned(self, range, taskId, triggeredBulkLoadTask.restartCount);
+		auto raceResult = co_await race(
+		    completeAck.getFuture(), abandoned, delay(SERVER_KNOBS->DD_BULKLOAD_JOB_MONITOR_PERIOD_SEC * 240));
+		BulkLoadAck ack;
+		if (raceResult.index() == 0) {
+			ack = std::get<0>(raceResult);
+		} else {
+			// Task was abandoned/supplanted, or backstop timeout fired. Throw
+			// timed_out so the existing catch block traces a SevWarn,
+			// decrements the parallelism counter, and lets scheduleBulkLoadTasks
+			// re-dispatch on the next scan.
+			throw timed_out();
+		}
 		if (ack.unretryableError) {
 			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
 			    .detail("Phase", "See unretryable error")
@@ -2733,18 +2773,45 @@ Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> readyToS
 	}
 }
 
+void addDataDistributionActors(Reference<DataDistributor> self, std::vector<Future<Void>>& actors) {
+	if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+		TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
+		    .detail("UsableRegions", self->configuration.usableRegions);
+		self->bulkLoadEnabled = true;
+		if (self->configuration.usableRegions > 1) {
+			// The core actor to handle bulkload tasks
+			actors.push_back(bulkLoadTaskCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+			// The core actor to convert a bulkload job to tasks which are executed by bulkLoadTaskCore
+			actors.push_back(bulkLoadJobCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+		} else {
+			actors.push_back(bulkLoadTaskCore(self, self->initialized.getFuture()));
+			actors.push_back(bulkLoadJobCore(self, self->initialized.getFuture()));
+		}
+	} else {
+		self->bulkLoadTaskCollection->removeBulkLoadJobRange();
+		// Monitor for bulkLoadMode changes and spawn actors dynamically.
+		// This is critical for restore operations which set bulkLoadMode=1 after DD starts.
+		actors.push_back(monitorBulkLoadModeAndSpawnActors(self, self->initialized.getFuture()));
+	}
+
+	// Always spawn bulkDumpCore for production DD - it will dynamically check the mode
+	// NOTE: BulkDump does NOT require remoteRecovered() in HA configurations.
+	// BulkDump is read-only: it reads from primary DC and writes to external storage (S3).
+	// Waiting for remoteRecovered() caused hangs when remote DC couldn't form teams.
+	TraceEvent(SevInfo, "DDBulkDumpCoreSpawned", self->ddId)
+	    .detail("UsableRegions", self->configuration.usableRegions)
+	    .detail("InitialMode", self->initData->bulkDumpMode);
+	actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
+
+	actors.push_back(periodicAuditLocationMetadata(self));
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 Future<Void> dataDistribution(Reference<DataDistributor> self,
-                              PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                              IsMocked isMocked) {
-
-	if (!isMocked) {
-		Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
-		cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
-		self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
-	} else {
-		ASSERT(self->txnProcessor.isValid() && self->txnProcessor->isMocked());
-	}
+                              PromiseStream<GetMetricsListRequest> getShardMetricsList) {
+	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
+	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
+	self->txnProcessor = makeReference<DDTxnProcessor>(cx);
 
 	TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Start");
 
@@ -2812,6 +2879,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(self->pollMoveKeysLock());
+			actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
@@ -2881,13 +2949,12 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    getUnhealthyRelocationCount,
 			    getAverageShardBytes,
 			    triggerStorageQueueRebalance,
-			    self->bulkLoadTaskCollection });
+			    self->bulkLoadTaskCollection,
+			    self->context->ddQueue->pipelineFull });
 			teamCollectionsPtrs.push_back(self->context->primaryTeamCollection.getPtr());
-			Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage;
-			if (!isMocked) {
-				recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
-				    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
-			}
+			Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage =
+			    IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
+			        self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
 			if (self->configuration.usableRegions > 1) {
 				self->context->remoteTeamCollection = makeReference<DDTeamCollection>(
 				    DDTeamCollectionInitParams{ self->txnProcessor,
@@ -2908,7 +2975,8 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                getUnhealthyRelocationCount,
 				                                getAverageShardBytes,
 				                                triggerStorageQueueRebalance,
-				                                self->bulkLoadTaskCollection });
+				                                self->bulkLoadTaskCollection,
+				                                self->context->ddQueue->pipelineFull });
 				teamCollectionsPtrs.push_back(self->context->remoteTeamCollection.getPtr());
 				self->context->remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->remoteTeamCollection,
@@ -2938,36 +3006,9 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 				actors.push_back(monitorPhysicalShardStatus(self->physicalShardCollection));
 			}
 
-			if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
-				TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
-				    .detail("UsableRegions", self->configuration.usableRegions);
-				self->bulkLoadEnabled = true;
-				if (self->configuration.usableRegions > 1) {
-					// The core actor to handle bulkload tasks
-					actors.push_back(
-					    bulkLoadTaskCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
-					// The core actor to convert a bulkload job to tasks which are executed by bulkLoadTaskCore
-					actors.push_back(
-					    bulkLoadJobCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
-				} else {
-					actors.push_back(bulkLoadTaskCore(self, self->initialized.getFuture()));
-					actors.push_back(bulkLoadJobCore(self, self->initialized.getFuture()));
-				}
-			} else {
-				self->bulkLoadTaskCollection->removeBulkLoadJobRange();
-				// Monitor for bulkLoadMode changes and spawn actors dynamically.
-				// This is critical for restore operations which set bulkLoadMode=1 after DD starts.
-				actors.push_back(monitorBulkLoadModeAndSpawnActors(self, self->initialized.getFuture()));
-			}
+			addDataDistributionActors(self, actors);
 
-			// Always spawn bulkDumpCore - it will dynamically check the mode
-			// NOTE: BulkDump does NOT require remoteRecovered() in HA configurations.
-			// BulkDump is read-only: it reads from primary DC and writes to external storage (S3).
-			// Waiting for remoteRecovered() caused hangs when remote DC couldn't form teams.
-			TraceEvent(SevInfo, "DDBulkDumpCoreSpawned", self->ddId)
-			    .detail("UsableRegions", self->configuration.usableRegions)
-			    .detail("InitialMode", self->initData->bulkDumpMode);
-			actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
+			actors.push_back(monitorShardEncodeKnob(self->ddId));
 
 			co_await waitForAll(actors);
 			ASSERT_WE_THINK(false);
@@ -3045,6 +3086,22 @@ static std::set<int> const& normalDataDistributorErrors() {
 	return s;
 }
 
+// Monitor SHARD_ENCODE_LOCATION_METADATA knob for changes. If flipped mid-run,
+// throw dd_config_changed to restart DD cleanly (preventing in-flight move actors
+// from hitting asserts due to knob/path mismatch).
+Future<Void> monitorShardEncodeKnob(UID ddId) {
+	bool initial = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+	while (true) {
+		co_await delay(5.0);
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA != initial) {
+			TraceEvent(SevInfo, "DDShardEncodeKnobChanged", ddId)
+			    .detail("OldValue", initial)
+			    .detail("NewValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+			throw dd_config_changed();
+		}
+	}
+}
+
 template <class Req>
 Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
 	ErrorOr<REPLY_TYPE(Req)> reply = co_await stream.tryGetReply(req);
@@ -3078,8 +3135,9 @@ Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, Wo
 				co_await delay(snapRetryBackoff);
 				snapRetryBackoff = snapRetryBackoff * 2;
 			}
-		} else
+		} else {
 			break;
+		}
 	}
 	co_return ErrorOr<Void>(Void());
 }
@@ -3380,6 +3438,9 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 				}
 				co_await waitForAll(enablePops);
 			} catch (Error& error) {
+				if (error.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				TraceEvent(SevDebug, "IgnoreEnableTLogPopFailure").log();
 			}
 		}
@@ -3766,6 +3827,9 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			    .detail("RetryCount", audit->retryCount)
 			    .detail("AuditState", audit->coreState.toString());
 		} catch (Error& err) {
+			if (err.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent(SevWarn, "DDAuditStorageCoreErrorWhenSetAuditFailed", self->ddId)
 			    .errorUnsuppressed(err)
 			    .detail("Context", audit->getDDAuditContext())
@@ -3991,6 +4055,33 @@ Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		    .detail("AuditID", req.id)
 		    .detail("AuditType", req.getType());
 		req.reply.sendError(cancel_audit_storage_failed());
+	}
+}
+
+Future<Void> periodicAuditLocationMetadata(Reference<DataDistributor> self) {
+	if (SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL <= 0) {
+		co_return;
+	}
+	co_await self->auditStorageInitialized.getFuture();
+	TraceEvent("DDAuditPeriodicAuditLocationMetadataEnabled", self->ddId)
+	    .detail("IntervalSeconds", SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL);
+	while (true) {
+		co_await delay(SERVER_KNOBS->AUDIT_LOCATION_METADATA_INTERVAL);
+		try {
+			TraceEvent("DDAuditPeriodicAuditLocationMetadata", self->ddId).detail("State", "Starting");
+			co_await self->auditStorageLocationMetadataLaunchingLock.take(TaskPriority::DefaultYield);
+			FlowLock::Releaser holder(self->auditStorageLocationMetadataLaunchingLock);
+			UID auditID =
+			    co_await launchAudit(self, allKeys, AuditType::ValidateLocationMetadata, KeyValueStoreType::END);
+			TraceEvent("DDAuditPeriodicAuditLocationMetadata", self->ddId)
+			    .detail("AuditID", auditID)
+			    .detail("State", "Finished");
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "DDAuditPeriodicAuditLocationMetadataError", self->ddId).error(e);
+		}
 	}
 }
 
@@ -4311,6 +4402,9 @@ Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
 					co_return;
 				}
 			} catch (Error& err) {
+				if (err.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				// retry
 			}
 		}
@@ -4921,8 +5015,7 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 	KeyRangeRef rangeToRead;
 	int64_t cumulatedValidatedServerKeysNum = 0;
 	int64_t cumulatedValidatedKeyServersNum = 0;
-	Reference<IRateControl> rateLimiter =
-	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
+	Reference<IRateControl> rateLimiter = makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
 	int64_t remoteReadBytes = 0;
 	double lastRateLimiterWaitTime = 0;
 	double rateLimiterBeforeWaitTime = 0;
@@ -5118,7 +5211,7 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 	}
 }
 
-Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDistributor> self, IsMocked isMocked) {
+Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDistributor> self) {
 	Future<Void> collection = actorCollection(self->addActor.getFuture());
 	PromiseStream<GetMetricsListRequest> getShardMetricsList;
 	Database cx;
@@ -5126,21 +5219,16 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 	std::map<UID, DistributorSnapRequest> ddSnapReqMap;
 	std::map<UID, ErrorOr<Void>> ddSnapReqResultMap;
 
-	TraceEvent("DataDistributorRunning", di.id()).detail("IsMocked", isMocked);
+	TraceEvent("DataDistributorRunning", di.id());
 	// DDInitRunning duplicates the above with DDInit* prefix so the full startup sequence
 	// can be queried with Type="DDInit*" in trace logs
 	TraceEvent("DDInitRunning", di.id());
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
 	self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
-	if (!isMocked) {
-		cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultDelay, LockAware::True);
-	}
-
-	Future<Void> distributor = reportErrorsExcept(dataDistribution(self, getShardMetricsList, isMocked),
-	                                              "DataDistribution",
-	                                              di.id(),
-	                                              &normalDataDistributorErrors());
+	cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultDelay, LockAware::True);
+	Future<Void> distributor = reportErrorsExcept(
+	    dataDistribution(self, getShardMetricsList), "DataDistribution", di.id(), &normalDataDistributorErrors());
 
 	try {
 		while (true) {
@@ -5176,7 +5264,9 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (ddSnapReqMap.contains(snapReq.snapUID)) {
-					CODE_PROBE(true, "Data distributor received a duplicate ongoing snapshot request");
+					CODE_PROBE(true,
+					           "Data distributor received a duplicate ongoing snapshot request",
+					           probe::decoration::rare);
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
 					// Discard the old request if a duplicate new request is received
@@ -5224,18 +5314,11 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 	}
 }
 
-Future<Void> MockDataDistributor::run(Reference<DDSharedContext> context, Reference<DDMockTxnProcessor> txnProcessor) {
-	auto dd =
-	    makeReference<DataDistributor>(Reference<AsyncVar<ServerDBInfo> const>(nullptr), context->ddId, context, "");
-	dd->txnProcessor = txnProcessor;
-	return dataDistributor_impl(context->interface, dd, IsMocked::True);
-}
-
 Future<Void> dataDistributor(DataDistributorInterface di,
                              Reference<AsyncVar<ServerDBInfo> const> db,
                              std::string folder) {
 	return dataDistributor_impl(
-	    di, makeReference<DataDistributor>(db, di.id(), makeReference<DDSharedContext>(di), folder), IsMocked::False);
+	    di, makeReference<DataDistributor>(db, di.id(), makeReference<DDSharedContext>(di), folder));
 }
 
 namespace data_distribution_test {
@@ -5260,21 +5343,25 @@ inline int getRandomShardCount() {
 
 } // namespace data_distribution_test
 
-TEST_CASE("/DataDistribution/StorageWiggler/Order") {
-	StorageWiggler wiggler(nullptr);
-	double startTime = now() - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - 0.4;
-	wiggler.addServer(UID(1, 0), StorageMetadataType(startTime, KeyValueStoreType::SSD_BTREE_V2));
-	wiggler.addServer(UID(2, 0), StorageMetadataType(startTime + 0.1, KeyValueStoreType::MEMORY, true));
-	wiggler.addServer(UID(3, 0), StorageMetadataType(startTime + 0.2, KeyValueStoreType::SSD_ROCKSDB_V1, true));
-	wiggler.addServer(UID(4, 0), StorageMetadataType(startTime + 0.3, KeyValueStoreType::SSD_BTREE_V2));
+TEST_CASE("/DataDistribution/Initialization/DcIds") {
+	RegionInfo configuredPrimary;
+	configuredPrimary.dcId = "primary"_sr;
+	RegionInfo configuredRemote;
+	configuredRemote.dcId = "remote"_sr;
+	std::vector<RegionInfo> regions{ configuredPrimary, configuredRemote };
 
-	std::vector<UID> correctOrder{ UID(2, 0), UID(3, 0), UID(1, 0), UID(4, 0) };
-	for (int i = 0; i < correctOrder.size(); ++i) {
-		auto id = wiggler.getNextServerId();
-		std::cout << "Get " << id.get().shortString() << "\n";
-		ASSERT(id == correctOrder[i]);
-	}
-	ASSERT(!wiggler.getNextServerId().present());
+	auto dcIds = getDataDistributorDcIds(regions, Optional<Key>("primary"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
+	dcIds = getDataDistributorDcIds(regions, Optional<Key>("remote"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+
+	dcIds = getDataDistributorDcIds(regions, Optional<Key>("unknown"_sr));
+	ASSERT(dcIds.primary == std::vector<Optional<Key>>{ Optional<Key>("primary"_sr) });
+	ASSERT(dcIds.remote == std::vector<Optional<Key>>{ Optional<Key>("remote"_sr) });
+
 	return Void();
 }
 

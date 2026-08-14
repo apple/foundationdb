@@ -86,10 +86,11 @@ struct CpuProfilerWorkload : TestWorkload {
 			co_await waitForAll(replies);
 
 			// Check that all workers succeeded if turning the profiler on
-			if (enabled)
+			if (enabled) {
 				for (i = 0; i < replies.size(); i++)
 					if (!replies[i].get().present())
 						self->success = false;
+			}
 
 			TraceEvent("DoneSignalingProfiler").log();
 		}

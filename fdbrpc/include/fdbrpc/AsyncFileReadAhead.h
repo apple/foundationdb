@@ -30,7 +30,7 @@ public:
 	void addref() override { ReferenceCounted<AsyncFileReadAheadCache>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileReadAheadCache>::delref(); }
 
-	virtual StringRef getClassName() override { return "AsyncFileReadAheadCache"_sr; }
+	StringRef getClassName() override { return "AsyncFileReadAheadCache"_sr; }
 
 	struct CacheBlock : ReferenceCounted<CacheBlock> {
 		explicit CacheBlock(int size = 0) : data(new uint8_t[size]), len(size) {}
@@ -95,10 +95,13 @@ public:
 			// If not found, start the read.
 			if (i == f->m_blocks.end() || (i->second.isValid() && i->second.isError())) {
 				// printf("starting read of %s block %d\n", f->getFilename().c_str(), blockNum);
-				fblock = readBlock(f.getPtr(), f->m_block_size, (int64_t)f->m_block_size * blockNum);
+				int64_t blockStart = (int64_t)blockNum * f->m_block_size;
+				int readLength = std::min<int64_t>(f->m_block_size, fileSize - blockStart);
+				fblock = readBlock(f.getPtr(), readLength, blockStart);
 				f->m_blocks[blockNum] = fblock;
-			} else
+			} else {
 				fblock = i->second;
+			}
 
 			// Only put blocks we actually need into our local cache
 			if (blockNum <= lastBlockNum)
@@ -154,8 +157,9 @@ public:
 					i = f->m_blocks.erase(i);
 					if (f->m_blocks.size() <= f->m_cache_block_limit)
 						break;
-				} else
+				} else {
 					++i;
+				}
 			}
 		}
 

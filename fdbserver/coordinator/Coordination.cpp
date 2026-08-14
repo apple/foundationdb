@@ -21,14 +21,15 @@
 #include <cstdint>
 
 #include "fdbserver/coordinator/CoordinationServer.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/Knobs.h"
 #include "OnDemandStore.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/network.h"
 #include "flow/CoroUtils.h"
@@ -210,7 +211,7 @@ Future<Void> openDatabase(ClientData* db,
 	++(*clientCount);
 	hasConnectedClients->set(true);
 
-	if (req.supportedVersions.size() > 0 && !req.internal) {
+	if (!req.supportedVersions.empty() && !req.internal) {
 		db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] =
 		    ClientStatusInfo(req.traceLogGroup, req.supportedVersions, req.issues);
 	}
@@ -238,7 +239,7 @@ Future<Void> openDatabase(ClientData* db,
 		}
 	}
 
-	if (req.supportedVersions.size() > 0 && !req.internal) {
+	if (!req.supportedVersions.empty() && !req.internal) {
 		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
 	}
 
@@ -451,7 +452,7 @@ class LeaderRegister : public ReferenceCounted<LeaderRegister>, NonCopyable {
 				UNREACHABLE();
 			}
 
-			if (!availableLeaders.size() && !availableCandidates.size() && !notify.size() &&
+			if (availableLeaders.empty() && availableCandidates.empty() && notify.empty() &&
 			    !currentNominee.present()) {
 				// Our state is back to the initial state, so we can safely stop this actor
 				TraceEvent("EndingLeaderNomination")
@@ -464,11 +465,11 @@ class LeaderRegister : public ReferenceCounted<LeaderRegister>, NonCopyable {
 				}
 			} else {
 				Optional<LeaderInfo> nextNominee;
-				if (availableCandidates.size() &&
-				    (!availableLeaders.size() ||
+				if (!availableCandidates.empty() &&
+				    (availableLeaders.empty() ||
 				     availableLeaders.begin()->leaderChangeRequired(*availableCandidates.begin()))) {
 					nextNominee = *availableCandidates.begin();
-				} else if (availableLeaders.size()) {
+				} else if (!availableLeaders.empty()) {
 					nextNominee = *availableLeaders.begin();
 				}
 
@@ -491,7 +492,7 @@ class LeaderRegister : public ReferenceCounted<LeaderRegister>, NonCopyable {
 
 				currentNominee = nextNominee;
 
-				if (availableLeaders.size()) {
+				if (!availableLeaders.empty()) {
 					setNextInterval(delay(SERVER_KNOBS->POLLING_FREQUENCY));
 					if (leaderIntervalCount++ > 5) {
 						candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
@@ -713,7 +714,7 @@ class LeaderServer {
 				info.forward = forward.get().serializedInfo;
 				req.reply.send(CachedSerialization<ClientDBInfo>(info));
 			} else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
 				    getClusterDescriptor(req.clusterKey).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
@@ -736,7 +737,7 @@ class LeaderServer {
 			if (forward.present()) {
 				req.reply.send(forward.get());
 			} else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "ElectionResultRequest")
@@ -759,7 +760,7 @@ class LeaderServer {
 			if (forward.present())
 				req.reply.send(forward.get());
 			else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "GetLeaderRequest")
@@ -781,7 +782,7 @@ class LeaderServer {
 			if (forward.present())
 				req.reply.send(forward.get());
 			else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "CandidacyRequest")
@@ -802,7 +803,7 @@ class LeaderServer {
 			if (forward.present())
 				req.reply.send(LeaderHeartbeatReply{ false });
 			else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "LeaderHeartbeatRequest")
@@ -823,7 +824,7 @@ class LeaderServer {
 			if (forward.present()) {
 				req.reply.send(Void());
 			} else {
-				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
+				Key clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "ForwardRequest")
@@ -874,7 +875,9 @@ Future<Void> leaderServer(LeaderElectionRegInterface interf,
 	co_await server.run();
 }
 
-Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
+static Future<Void> coordinationServerOnce(std::string dataFolder,
+                                           Reference<IClusterConnectionRecord> ccr,
+                                           bool* repairedIncompleteQueue) {
 	UID myID = deterministicRandom()->randomUniqueID();
 	LeaderElectionRegInterface myLeaderInterface(g_network);
 	GenerationRegInterface myInterface(g_network);
@@ -921,7 +924,8 @@ Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnec
 	// queue state on the coordinator. In the long term, we should either
 	// modify simulation to consider injected errors as fatal or allow the
 	// coordinator to manually fix disk queue state in real clusters.
-	if (g_network->isSimulated() && g_simulator->speedUpSimulation && err.code() == error_code_file_not_found) {
+	if (g_network->isSimulated() && (g_simulator->speedUpSimulation || fdbSimulationPolicyState().restarted) &&
+	    err.code() == error_code_file_not_found) {
 		std::vector<Future<Reference<IAsyncFile>>> fs;
 		fs.reserve(2);
 		for (int i = 0; i < 2; ++i) {
@@ -956,9 +960,36 @@ Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnec
 			co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "0.fdq"),
 			                                                    true);
 		}
+		if (repairedIncompleteQueue != nullptr) {
+			*repairedIncompleteQueue = true;
+		}
 	}
 
 	throw err;
+}
+
+static Future<Void> restartCoordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
+	while (true) {
+		bool repairedIncompleteQueue = false;
+		try {
+			co_await coordinationServerOnce(dataFolder, ccr, &repairedIncompleteQueue);
+			co_return;
+		} catch (Error& e) {
+			if (e.code() != error_code_file_not_found || !repairedIncompleteQueue) {
+				throw;
+			}
+		}
+
+		TraceEvent("CoordinatorRetryAfterIncompleteQueue").detail("Folder", dataFolder);
+		co_await delay(0);
+	}
+}
+
+Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
+	if (g_network->isSimulated() && fdbSimulationPolicyState().restarted) {
+		return restartCoordinationServer(dataFolder, ccr);
+	}
+	return coordinationServerOnce(dataFolder, ccr, nullptr);
 }
 
 Future<Void> changeClusterDescription(std::string datafolder, KeyRef newClusterKey, KeyRef oldClusterKey) {

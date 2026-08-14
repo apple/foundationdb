@@ -1,0 +1,32 @@
+[configuration]
+config = 'single'
+singleRegion = true
+storageEngineExcludeTypes = [3, 4, 5]
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 1
+
+[[test]]
+testTitle = 'NativeCdcDisableRestart'
+clearAfterTest = false
+runConsistencyCheck = false
+waitForQuiescenceEnd = false
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 1
+    minStreamCount = 1
+    maxStreamCount = 1
+    keyCount = 4
+    writesPerRound = 1
+    rounds = 0
+    prepareRestartDrain = true
+    operationTimeout = 120.0
+
+    [[test.workload]]
+    testName = 'SaveAndKill'
+    restartInfoLocation = 'simfdb/restartInfo.ini'
+    testDuration = 20.0

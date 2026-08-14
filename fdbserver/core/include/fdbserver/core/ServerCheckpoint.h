@@ -30,7 +30,7 @@ class ICheckpointIterator {
 public:
 	virtual Future<RangeResult> nextBatch(const int rowLimit, const int ByteLimit) = 0;
 
-	virtual ~ICheckpointIterator() {}
+	virtual ~ICheckpointIterator() = default;
 };
 
 // An ICheckpointReader can read the contents of a checkpoint created from a KV store,
@@ -54,7 +54,7 @@ public:
 	virtual bool inUse() const { return false; }
 
 protected:
-	virtual ~ICheckpointReader() {}
+	virtual ~ICheckpointReader() = default;
 };
 
 ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,

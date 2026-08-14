@@ -32,7 +32,7 @@
 #endif
 #include "boost/asio.hpp"
 
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 
 #if __unixish__
 #define HAVE_LINENOISE 1

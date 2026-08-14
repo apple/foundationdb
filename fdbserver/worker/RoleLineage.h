@@ -20,7 +20,9 @@
 
 #pragma once
 #include "fdbclient/ActorLineageProfiler.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbclient/ProcessClass.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
+#include "fdbserver/core/WorkerInterface.h"
 
 #include <any>
 #include <optional>
@@ -28,9 +30,9 @@
 
 struct RoleLineage : LineageProperties<RoleLineage> {
 	static std::string_view name;
-	ProcessClass::ClusterRole role = ProcessClass::NoRole;
+	recruitment::ClusterRole role = recruitment::NoRole;
 
-	bool isSet(ProcessClass::ClusterRole RoleLineage::* member) const { return this->*member != ProcessClass::NoRole; }
+	bool isSet(recruitment::ClusterRole RoleLineage::* member) const { return this->*member != recruitment::NoRole; }
 };
 
 struct RoleLineageCollector : IALPCollector<RoleLineage> {

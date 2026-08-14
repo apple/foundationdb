@@ -12,7 +12,6 @@ testTitle = 'DcLag'
     nodeCount = 3000
     transactionsPerSecond = 250.0
     testDuration = 200.0
-    expectedRate = 0
 
     [[test.workload]]
     testName = 'DcLag'

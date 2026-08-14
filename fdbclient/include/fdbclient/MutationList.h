@@ -59,7 +59,7 @@ public:
 		const MutationRef& operator*() { return item; }
 		const MutationRef* operator->() { return &item; }
 		void operator++() {
-			ASSERT(blob->data.size() > 0);
+			ASSERT(!blob->data.empty());
 			auto e = ptr->end(); // e points to the end of the current blob
 			if (e == blob->data.end()) { // the condition sanity checks e is at the end of current blob
 				blob = blob->next;
@@ -73,11 +73,11 @@ public:
 		bool operator!=(Iterator const& i) const { return ptr != i.ptr; }
 		explicit operator bool() const { return blob != nullptr; }
 
-		typedef std::forward_iterator_tag iterator_category;
-		typedef const MutationRef value_type;
-		typedef int64_t difference_type;
-		typedef const MutationRef* pointer;
-		typedef const MutationRef& reference;
+		using iterator_category = std::forward_iterator_tag;
+		using value_type = const MutationRef;
+		using difference_type = int64_t;
+		using pointer = const MutationRef*;
+		using reference = const MutationRef&;
 
 		Iterator(Blob* blob, const Header* ptr) : blob(blob), ptr(ptr) { decode(); }
 		Iterator() : blob(nullptr), ptr(nullptr) {}
@@ -172,8 +172,9 @@ private:
 		else if (!arena.hasFree(bytes, blob_end->data.end())) {
 			blob_end->next = new (arena) Blob;
 			blob_end = blob_end->next;
-		} else
+		} else {
 			useBlob = true;
+		}
 
 		uint8_t* b = new (arena) uint8_t[bytes];
 
@@ -191,7 +192,7 @@ private:
 	Blob* blob_end;
 	int totalBytes;
 };
-typedef Standalone<MutationListRef> MutationList;
+using MutationList = Standalone<MutationListRef>;
 
 template <class Ar>
 void load(Ar& ar, MutationListRef& r) {

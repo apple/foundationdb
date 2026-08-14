@@ -24,7 +24,7 @@
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 namespace fdb_cli {
 
 Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens) {

@@ -114,7 +114,7 @@ public:
 
 struct Counter final : public ICounter, NonCopyable {
 public:
-	typedef int64_t Value;
+	using Value = int64_t;
 
 	Counter(std::string const& name, CounterCollection& collection, bool skipTraceOnSilentInterval = false);
 

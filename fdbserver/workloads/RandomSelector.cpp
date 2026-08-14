@@ -601,7 +601,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							    .detail("Reason", "The final results did not match sizes");
 							self->fail = true;
 						}
-						for (int k = 0; k < finalTest1.size(); k++)
+						for (int k = 0; k < finalTest1.size(); k++) {
 							if (finalTest1[k].value != finalTest2[k].value) {
 								TraceEvent(SevError, "RanSelTestFailure")
 								    .detail("Reason", "The final results did not match contents")
@@ -612,6 +612,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								    .detail("Reverse", reverse);
 								self->fail = true;
 							}
+						}
 						break;
 					} catch (Error& e) {
 						err = e;

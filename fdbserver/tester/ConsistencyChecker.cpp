@@ -24,7 +24,7 @@
 
 #include "flow/DeterministicRandom.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
@@ -36,7 +36,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "ConsistencyChecker.h"
 #include "fdbserver/tester/workloads.h"
 
@@ -315,12 +315,12 @@ Future<std::vector<KeyRange>> getConsistencyCheckShards(Database cx, std::vector
 				Value valueToCheck = Standalone(readResult[i].value);
 				bool toAdd = false;
 				for (const auto& range : ranges) {
-					if (rangeToCheck.intersects(range) == true) {
+					if (rangeToCheck.intersects(range)) {
 						toAdd = true;
 						break;
 					}
 				}
-				if (toAdd == true) {
+				if (toAdd) {
 					res.push_back(rangeToCheck);
 				}
 				beginKeyToReadKeyServer = readResult[i + 1].key;
@@ -516,7 +516,7 @@ Optional<std::vector<KeyRange>> loadRangesToCheckFromKnob() {
 
 	std::vector<KeyRange> res;
 	for (auto rangeToCheck : rangeToCheckMap.ranges()) {
-		if (rangeToCheck.value() == true) {
+		if (rangeToCheck.value()) {
 			res.push_back(rangeToCheck.range());
 		}
 	}
@@ -544,8 +544,9 @@ std::unordered_map<int, std::vector<KeyRange>> makeTaskAssignment(Database cx,
 
 	int batchSize = CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_BATCH_SHARD_COUNT;
 	int startingPoint = 0;
-	if (shardsToCheck.size() > batchSize * testersCount) {
-		startingPoint = deterministicRandom()->randomInt(0, shardsToCheck.size() - batchSize * testersCount);
+	const size_t batchShardCount = static_cast<size_t>(batchSize) * testersCount;
+	if (shardsToCheck.size() > batchShardCount) {
+		startingPoint = deterministicRandom()->randomInt(0, shardsToCheck.size() - batchShardCount);
 		// We randomly pick a set of successive shards:
 		// (1) We want to retry for different shards to avoid repeated failure on the same shards
 		// (2) We want to check successive shards to avoid inefficiency incurred by fragments

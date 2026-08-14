@@ -24,6 +24,22 @@ storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] #FIXME: remove after allowin
 
 disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
 
+# DD's bulk-load team selection rejects any team that shares a server with the source team
+# (DDTeamCollection.actor.cpp:266-282). Under triple replication on a small machineCount
+# every candidate team overlaps with the source and DD never finds a valid team -- the
+# test then stalls on DDBulkLoadEngineTaskGetTeamFailedToFindValidTeam, the load produces
+# no data, and the workload's processCheck assertion fires (KVS=N NewKVS=0). Pin enough
+# machines for a disjoint team to exist. Matches the fast-test BulkLoading/BulkDumping
+# tomls and PhysicalShardMove / StorageServerCheckpointRestore which exercise similar
+# bulk-load paths.
+machineCount = 15
+
+# Without datacenters=1 the simulator picks randomInt(1,4) DCs (SimulatedCluster.cpp
+# line ~1610). When it picks 2, the 15 machines get split ~7-8 per DC, the primary
+# DC then has only 4-5 non-source servers under triple replication, and DD's bulk-load
+# team selection fails to find a disjoint candidate.
+datacenters = 1
+
 # This test suite runs 4 tests sequentially: Stable (350s) + Light (648s) + Medium + Heavy
 # Total runtime can exceed the default 5400s simulation timeout, so mark as longRunningTest
 longRunningTest = true

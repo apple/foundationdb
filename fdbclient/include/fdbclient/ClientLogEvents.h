@@ -30,8 +30,8 @@
 // will break upgrade simulation tests.
 
 // Local defines for removed types that linger on in metadata created in older systems.
-typedef StringRef LegacyTenantNameRef;
-typedef Standalone<LegacyTenantNameRef> LegacyTenantName;
+using LegacyTenantNameRef = StringRef;
+using LegacyTenantName = Standalone<LegacyTenantNameRef>;
 
 namespace FdbClientLogEvents {
 enum class EventType {
@@ -53,7 +53,7 @@ struct Event {
 		if (dc.present())
 			dcId = dc.get();
 	}
-	Event() {}
+	Event() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -69,7 +69,7 @@ struct Event {
 };
 
 struct EventGetVersion : public Event {
-	EventGetVersion() {}
+	EventGetVersion() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -89,7 +89,7 @@ struct EventGetVersion : public Event {
 
 // Version V2 of EventGetVersion starting at 6.2
 struct EventGetVersion_V2 : public Event {
-	EventGetVersion_V2() {}
+	EventGetVersion_V2() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -132,7 +132,7 @@ struct EventGetVersion_V3 : public Event {
 			ASSERT(false);
 		}
 	}
-	EventGetVersion_V3() {}
+	EventGetVersion_V3() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -158,7 +158,7 @@ struct EventGetVersion_V3 : public Event {
 struct EventGet : public Event {
 	EventGet(double ts, const Optional<Standalone<StringRef>>& dcId, double lat, int size, const KeyRef& in_key)
 	  : Event(EventType::GET_LATENCY, ts, dcId), latency(lat), valueSize(size), key(in_key) {}
-	EventGet() {}
+	EventGet() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -192,7 +192,7 @@ struct EventGetRange : public Event {
 	              const KeyRef& end_key)
 	  : Event(EventType::GET_RANGE_LATENCY, ts, dcId), latency(lat), rangeSize(size), startKey(start_key),
 	    endKey(end_key) {}
-	EventGetRange() {}
+	EventGetRange() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -220,7 +220,7 @@ struct EventGetRange : public Event {
 };
 
 struct EventCommit : public Event {
-	EventCommit() {}
+	EventCommit() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -282,15 +282,16 @@ struct EventCommit_V2 : public Event {
 	               const CommitTransactionRequest& commit_req)
 	  : Event(EventType::COMMIT_LATENCY, ts, dcId), latency(lat), numMutations(mut), commitBytes(bytes),
 	    commitVersion(version), req(commit_req) {}
-	EventCommit_V2() {}
+	EventCommit_V2() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
-		if (!ar.isDeserializing)
+		if (!ar.isDeserializing) {
 			return serializer(
 			    Event::serialize(ar), latency, numMutations, commitBytes, commitVersion, req.transaction, req.arena);
-		else
+		} else {
 			return serializer(ar, latency, numMutations, commitBytes, commitVersion, req.transaction, req.arena);
+		}
 	}
 
 	double latency;
@@ -339,7 +340,7 @@ struct EventCommit_V2 : public Event {
 struct EventGetError : public Event {
 	EventGetError(double ts, const Optional<Standalone<StringRef>>& dcId, int err_code, const KeyRef& in_key)
 	  : Event(EventType::ERROR_GET, ts, dcId), errCode(err_code), key(in_key) {}
-	EventGetError() {}
+	EventGetError() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -369,7 +370,7 @@ struct EventGetRangeError : public Event {
 	                   const KeyRef& start_key,
 	                   const KeyRef& end_key)
 	  : Event(EventType::ERROR_GET_RANGE, ts, dcId), errCode(err_code), startKey(start_key), endKey(end_key) {}
-	EventGetRangeError() {}
+	EventGetRangeError() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -400,7 +401,7 @@ struct EventCommitError : public Event {
 	                 int err_code,
 	                 const CommitTransactionRequest& commit_req)
 	  : Event(EventType::ERROR_COMMIT, ts, dcId), errCode(err_code), req(commit_req) {}
-	EventCommitError() {}
+	EventCommitError() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {

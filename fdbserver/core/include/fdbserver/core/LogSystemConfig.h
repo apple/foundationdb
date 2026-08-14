@@ -40,7 +40,7 @@ struct OptionalInterface {
 
 	explicit OptionalInterface(UID id) : ident(id) {}
 	explicit OptionalInterface(Interface const& i) : ident(i.id()), iface(i) {}
-	OptionalInterface() {}
+	OptionalInterface() = default;
 
 	std::string toString() const { return ident.toString(); }
 
@@ -141,10 +141,17 @@ struct OldTLogConf {
 	std::set<int8_t>
 	    pseudoLocalities; // Tracking pseudo localities, e.g., tagLocalityLogRouterMapped, used in the old epoch.
 	LogEpoch epoch;
+	int32_t rangePartitionedBackupWorkerTags;
 
-	OldTLogConf() : epochBegin(0), epochEnd(0), recoverAt(0), logRouterTags(0), txsTags(0), epoch(0) {}
+	OldTLogConf()
+	  : epochBegin(0), epochEnd(0), recoverAt(0), logRouterTags(0), txsTags(0), epoch(0),
+	    rangePartitionedBackupWorkerTags(0) {}
 	std::string toString() const {
-		return format("end: %d tags: %d %s", epochEnd, logRouterTags, describe(tLogs).c_str());
+		return format("end: %d tags: %d rangePartitionedBackupWorkerTags: %d %s",
+		              epochEnd,
+		              logRouterTags,
+		              rangePartitionedBackupWorkerTags,
+		              describe(tLogs).c_str());
 	}
 
 	bool operator==(const OldTLogConf& rhs) const;
@@ -153,7 +160,27 @@ struct OldTLogConf {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tLogs, epochBegin, epochEnd, logRouterTags, pseudoLocalities, txsTags, epoch, recoverAt);
+		// FlatBuffer serializers always include all fields regardless of protocol version, so
+		// rangePartitionedBackupWorkerTags is unconditionally serialized. Non-FlatBuffer (versioned binary) serializers
+		// must gate the field on hasRangePartitionedBackupWorker() to maintain wire compatibility with older peers that
+		// don't know about this field.
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar,
+			           tLogs,
+			           epochBegin,
+			           epochEnd,
+			           logRouterTags,
+			           pseudoLocalities,
+			           txsTags,
+			           epoch,
+			           recoverAt,
+			           rangePartitionedBackupWorkerTags);
+		} else {
+			serializer(ar, tLogs, epochBegin, epochEnd, logRouterTags, pseudoLocalities, txsTags, epoch, recoverAt);
+			if (ar.protocolVersion().hasRangePartitionedBackupWorker()) {
+				serializer(ar, rangePartitionedBackupWorkerTags);
+			}
+		}
 	}
 };
 
@@ -180,10 +207,11 @@ struct LogSystemConfig {
 	LogEpoch epoch;
 	LogEpoch oldestBackupEpoch;
 	std::map<uint8_t, std::vector<uint16_t>> knownLockedTLogIds;
+	int32_t rangePartitionedBackupWorkerTags;
 
 	explicit LogSystemConfig(LogEpoch e = 0)
 	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e),
-	    oldestBackupEpoch(e) {}
+	    oldestBackupEpoch(e), rangePartitionedBackupWorkerTags(0) {}
 
 	std::string toString() const;
 
@@ -221,20 +249,45 @@ struct LogSystemConfig {
 
 template <class Ar>
 void LogSystemConfig::serialize(Ar& ar) {
-	serializer(ar,
-	           logSystemType,
-	           tLogs,
-	           logRouterTags,
-	           oldTLogs,
-	           expectedLogSets,
-	           recruitmentID,
-	           stopped,
-	           recoveredAt,
-	           pseudoLocalities,
-	           txsTags,
-	           epoch,
-	           oldestBackupEpoch,
-	           knownLockedTLogIds);
+	// FlatBuffer serializers always include all fields regardless of protocol version, so
+	// rangePartitionedBackupWorkerTags is unconditionally serialized. Non-FlatBuffer (versioned binary) serializers
+	// must gate the field on hasRangePartitionedBackupWorker() to maintain wire compatibility with older peers that
+	// don't know about this field.
+	if constexpr (is_fb_function<Ar>) {
+		serializer(ar,
+		           logSystemType,
+		           tLogs,
+		           logRouterTags,
+		           oldTLogs,
+		           expectedLogSets,
+		           recruitmentID,
+		           stopped,
+		           recoveredAt,
+		           pseudoLocalities,
+		           txsTags,
+		           epoch,
+		           oldestBackupEpoch,
+		           knownLockedTLogIds,
+		           rangePartitionedBackupWorkerTags);
+	} else {
+		serializer(ar,
+		           logSystemType,
+		           tLogs,
+		           logRouterTags,
+		           oldTLogs,
+		           expectedLogSets,
+		           recruitmentID,
+		           stopped,
+		           recoveredAt,
+		           pseudoLocalities,
+		           txsTags,
+		           epoch,
+		           oldestBackupEpoch,
+		           knownLockedTLogIds);
+		if (ar.protocolVersion().hasRangePartitionedBackupWorker()) {
+			serializer(ar, rangePartitionedBackupWorkerTags);
+		}
+	}
 }
 
 #endif // FDBSERVER_LOGSYSTEMCONFIG_H

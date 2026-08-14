@@ -364,7 +364,7 @@ public:
 			FlowLock::Releaser releaser;
 
 			// Wait until we are half way to the timeout version of this task
-			co_await delay(0.8 * (BUGGIFY ? (2 * deterministicRandom()->random01()) : 1.0) *
+			co_await delay(0.8 * (buggify() ? (2 * deterministicRandom()->random01()) : 1.0) *
 			               (double)(task->timeoutVersion - (uint64_t)versionNow) /
 			               CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 
@@ -442,7 +442,7 @@ public:
 				co_await (taskFunc->execute(cx, taskBucket, futureBucket, task) ||
 				          extendTimeoutRepeatedly(cx, taskBucket, task));
 
-				if (BUGGIFY)
+				if (buggify())
 					co_await delay(10.0);
 				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 					return finishTaskRun(tr, taskBucket, futureBucket, task, taskFunc, verifyTask);
@@ -450,6 +450,9 @@ public:
 			}
 			co_return true;
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			err = e;
 		}
 		TraceEvent(SevWarn, "TaskBucketExecuteFailure")
@@ -460,6 +463,9 @@ public:
 		try {
 			co_await taskFunc->handleError(cx, task, err);
 		} catch (Error& handleErr) {
+			if (handleErr.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent(SevWarn, "TaskBucketExecuteFailureLogErrorFailed")
 			    .error(handleErr) // output handleError() error instead of original task error
 			    .detail("TaskUID", task->key.printable())
@@ -522,8 +528,9 @@ public:
 				if (done) {
 					getBatchSize = 1;
 					break;
-				} else
+				} else {
 					getBatchSize = std::min<unsigned int>(getBatchSize * 2, maxConcurrentTasks);
+				}
 			}
 			++taskBucket->dispatchSlotChecksComplete;
 

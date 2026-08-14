@@ -31,6 +31,7 @@
 #include "flow/TDMetric.h"
 #include "flow/IRandom.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBOptions.g.h"
@@ -43,8 +44,8 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 /*
-// CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like BUGGIFY but for client side testing)
-// Unlike BUGGIFY, CLIENT_BUGGIFY can be enabled and disabled at runtime.
+// CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like buggify() but for client side testing)
+// Unlike buggify(), CLIENT_BUGGIFY can be enabled and disabled at runtime.
 #define CLIENT_BUGGIFY_WITH_PROB(x)                                                                                    \
     (getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
@@ -58,9 +59,6 @@ template <>
 void addref(DatabaseContext* ptr);
 template <>
 void delref(DatabaseContext* ptr);
-
-void validateOptionValuePresent(Optional<StringRef> value);
-void validateOptionValueNotPresent(Optional<StringRef> value);
 
 void enableClientInfoLogging();
 
@@ -270,8 +268,6 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	// after rounding up to the nearest page size and applying a write penalty
 	int64_t totalCost = 0;
 
-	double proxyTagThrottledDuration = 0.0;
-
 	int numErrors = 0;
 	double startTime = 0;
 	Promise<Standalone<StringRef>> versionstampPromise;
@@ -426,7 +422,8 @@ public:
 
 	// Try to split the given range into equally sized chunks based on estimated size.
 	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
-	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
+	// A non-negative limit caps the number of interior split points, including shard boundaries.
+	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize, int limit = -1);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set(const KeyRef& key, const ValueRef& value, AddConflictRange = AddConflictRange::True);
@@ -546,10 +543,6 @@ Future<Void> Database::run(Fun fun) {
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext);
 Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys, int shardLimit);
 
-int64_t extractIntOption(Optional<StringRef> value,
-                         int64_t minValue = std::numeric_limits<int64_t>::min(),
-                         int64_t maxValue = std::numeric_limits<int64_t>::max());
-
 // Takes a snapshot of the cluster, specifically the following persistent
 // states: coordinator, TLog and storage state
 Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
@@ -586,9 +579,9 @@ Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> excl
 // because writes are more expensive than reads.
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	if (bytes == 0) {
-		return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+		return CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 	} else {
-		return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
+		return CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
 		       ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1);
 	}
 }

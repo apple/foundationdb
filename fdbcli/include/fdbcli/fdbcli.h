@@ -42,7 +42,7 @@ struct CommandHelp {
 	std::string usage;
 	std::string short_desc;
 	std::string long_desc;
-	CommandHelp() {}
+	CommandHelp() = default;
 	CommandHelp(const char* usage, const char* short_desc, const char* long_desc)
 	  : usage(usage), short_desc(short_desc), long_desc(long_desc) {}
 };
@@ -50,12 +50,12 @@ struct CommandHelp {
 void arrayGenerator(const char* text, const char* line, const char** options, std::vector<std::string>& lc);
 
 struct CommandFactory {
-	typedef void (*CompletionGeneratorFunc)(const char* text,
-	                                        const char* line,
-	                                        std::vector<std::string>& lc,
-	                                        std::vector<StringRef> const& tokens);
+	using CompletionGeneratorFunc = void (*)(const char* text,
+	                                         const char* line,
+	                                         std::vector<std::string>& lc,
+	                                         std::vector<StringRef> const& tokens);
 
-	typedef std::vector<const char*> (*HintGeneratorFunc)(std::vector<StringRef> const& tokens, bool inArgument);
+	using HintGeneratorFunc = std::vector<const char*> (*)(std::vector<StringRef> const& tokens, bool inArgument);
 
 	CommandFactory(const char* name,
 	               CommandHelp help,
@@ -98,15 +98,15 @@ extern const KeyRef coordinatorsProcessSpecialKey;
 extern const KeyRef ddModeSpecialKey;
 extern const KeyRef ddIgnoreRebalanceSpecialKey;
 
-extern const KeyRangeRef excludedServersSpecialKeyRange;
-extern const KeyRangeRef failedServersSpecialKeyRange;
-extern const KeyRangeRef excludedLocalitySpecialKeyRange;
-extern const KeyRangeRef failedLocalitySpecialKeyRange;
-extern const KeyRef excludedForceOptionSpecialKey;
-extern const KeyRef failedForceOptionSpecialKey;
-extern const KeyRef excludedLocalityForceOptionSpecialKey;
-extern const KeyRef failedLocalityForceOptionSpecialKey;
-extern const KeyRangeRef exclusionInProgressSpecialKeyRange;
+using management_api::excludedForceOptionSpecialKey;
+using management_api::excludedLocalityForceOptionSpecialKey;
+using management_api::excludedLocalitySpecialKeyRange;
+using management_api::excludedServersSpecialKeyRange;
+using management_api::exclusionInProgressSpecialKeyRange;
+using management_api::failedForceOptionSpecialKey;
+using management_api::failedLocalityForceOptionSpecialKey;
+using management_api::failedLocalitySpecialKeyRange;
+using management_api::failedServersSpecialKeyRange;
 
 extern const KeyRef lockSpecialKey;
 
@@ -274,10 +274,14 @@ Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> cluster
 Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
 // Retrieve shard information command
 Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> tokens);
+// Check metadata encoding format (old vs shard-encoded)
+Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRef> tokens);
 // Bulk loading command
 Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens);
 // Bulk dumping command
 Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens);
+// Range lock management command
+Future<bool> rangeLockCommandActor(Database cx, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens);
 // include command
@@ -305,8 +309,6 @@ Future<bool> clearHealthyZone(Reference<IDatabase> db,
 Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // profile command
 Future<bool> profileCommandActor(Database db, Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans);
-// quota command
-Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // setclass command
 Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command

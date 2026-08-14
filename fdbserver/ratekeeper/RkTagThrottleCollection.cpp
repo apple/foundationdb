@@ -289,7 +289,7 @@ PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::g
 			} else {
 				ASSERT(autoItr->second.limits.expiration <= now());
 				CODE_PROBE(true, "Auto throttle expired");
-				if (BUGGIFY) { // Temporarily extend the window between expiration and cleanup
+				if (buggify()) { // Temporarily extend the window between expiration and cleanup
 					tagPresent = true;
 				} else {
 					autoThrottledTags.erase(autoItr);

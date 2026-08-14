@@ -2,7 +2,6 @@
 
 import argparse
 import fdb
-import time
 from datetime import datetime
 
 fdb.api_version(730)

@@ -26,6 +26,17 @@ For a while, there was an informal competition within the engineering team to de
 
 Simulation's success has surpassed our expectation and has been vital to our engineering team. It seems unlikely that we would have been able to build FoundationDB without this technology.
 
+Running unit tests in simulation
+--------------------------------
+
+Several standalone unit-test binaries can also run their tests under Simulation. The ``fdbclient_test``, ``fdbrpc_test``, and ``fdbserver_*_test`` targets support the ``--simulation`` flag. For example:
+
+.. code-block:: bash
+
+   ./bin/fdbclient_test --simulation
+
+Without an explicit test filter, simulation mode skips ``noSim/...``, incompatible ``/fdbrpc/grpc``, and opt-in performance or long-running correctness tests. Normal mode skips standalone-incompatible gRPC and simulation-only HTTP-server, mock-DNS, external-client, and file-shutdown tests, tests requiring an external backup URL, and opt-in performance or long-running correctness tests. An explicit ``--filter`` can still select any of these tests. The ``flow_test`` target does not support simulation because it is not linked with simulator support.
+
 Performance testing with Circus
 ===============================
 

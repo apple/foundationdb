@@ -206,10 +206,10 @@ public:
 				ipV4Addresses.push_back(addr);
 			}
 		}
-		if (ipV4Addresses.size() > 0 && FLOW_KNOBS->RESOLVE_PREFER_IPV4_ADDR) {
+		if (!ipV4Addresses.empty() && FLOW_KNOBS->RESOLVE_PREFER_IPV4_ADDR) {
 			return ipV4Addresses[deterministicRandom()->randomInt(0, ipV4Addresses.size())];
 		}
-		if (ipV6Addresses.size() > 0) {
+		if (!ipV6Addresses.empty()) {
 			return ipV6Addresses[deterministicRandom()->randomInt(0, ipV6Addresses.size())];
 		}
 		return addresses[deterministicRandom()->randomInt(0, addresses.size())];

@@ -23,9 +23,8 @@
 #include "fdbclient/FDBTypes.h"
 
 struct EpochTagsVersionsInfo {
-	int32_t logRouterTags;
+	int32_t tags;
 	Version epochBegin, epochEnd;
 
-	explicit EpochTagsVersionsInfo(int32_t n, Version begin, Version end)
-	  : logRouterTags(n), epochBegin(begin), epochEnd(end) {}
+	explicit EpochTagsVersionsInfo(int32_t n, Version begin, Version end) : tags(n), epochBegin(begin), epochEnd(end) {}
 };

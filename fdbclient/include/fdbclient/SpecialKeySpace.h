@@ -53,7 +53,7 @@ public:
 	// TODO : give this function a more descriptive name
 	virtual bool isAsync() const { return false; }
 
-	virtual ~SpecialKeyRangeReadImpl() {}
+	virtual ~SpecialKeyRangeReadImpl() = default;
 
 protected:
 	// underlying key range for this function
@@ -71,7 +71,7 @@ public:
 	}
 
 private:
-	ManagementAPIError() {};
+	ManagementAPIError() = default;
 };
 
 class SpecialKeyRangeRWImpl : public SpecialKeyRangeReadImpl {
@@ -103,7 +103,7 @@ public:
 
 	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-	~SpecialKeyRangeRWImpl() override {}
+	~SpecialKeyRangeRWImpl() override = default;
 };
 
 class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeReadImpl {

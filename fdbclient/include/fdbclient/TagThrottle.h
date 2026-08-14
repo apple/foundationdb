@@ -26,20 +26,20 @@
 #include "flow/Error.h"
 #include "flow/flow.h"
 #include "flow/network.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 
-typedef StringRef TransactionTagRef;
-typedef Standalone<TransactionTagRef> TransactionTag;
+using TransactionTagRef = StringRef;
+using TransactionTag = Standalone<TransactionTagRef>;
 
 FDB_BOOLEAN_PARAM(ContainsRecommended);
 FDB_BOOLEAN_PARAM(Capitalize);
 
 class TagSet {
 public:
-	typedef std::vector<TransactionTagRef>::const_iterator const_iterator;
+	using const_iterator = std::vector<TransactionTagRef>::const_iterator;
 
 	TagSet() : bytes(0) {}
 
@@ -416,7 +416,7 @@ Future<bool> unthrottleMatchingThrottles(Reference<DB> db,
 				co_return removed;
 			}
 
-			ASSERT(tags.size() > 0);
+			ASSERT(!tags.empty());
 			begin = KeySelector(firstGreaterThan(tags[tags.size() - 1].key), tags.arena());
 		} catch (Error& e) {
 			err = e;
@@ -591,29 +591,6 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 		}
 		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
-}
-
-class TagQuotaValue {
-public:
-	int64_t reservedQuota{ 0 };
-	int64_t totalQuota{ 0 };
-	bool isValid() const;
-	Value toValue() const;
-	static TagQuotaValue fromValue(ValueRef);
-};
-
-Key getTagQuotaKey(TransactionTagRef);
-
-template <class Tr>
-void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, int64_t reservedQuota, int64_t totalQuota) {
-	TagQuotaValue tagQuotaValue;
-	tagQuotaValue.reservedQuota = reservedQuota;
-	tagQuotaValue.totalQuota = totalQuota;
-	if (!tagQuotaValue.isValid()) {
-		throw invalid_throttle_quota_value();
-	}
-	tr->set(getTagQuotaKey(tag), tagQuotaValue.toValue());
-	signalThrottleChange(tr);
 }
 
 }; // namespace ThrottleApi

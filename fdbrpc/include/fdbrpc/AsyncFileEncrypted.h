@@ -33,7 +33,7 @@ class AsyncFileEncrypted : public IAsyncFile, public ReferenceCounted<AsyncFileE
 public:
 	enum class Mode { APPEND_ONLY, READ_ONLY };
 
-	virtual StringRef getClassName() override { return "AsyncFileEncrypted"_sr; }
+	StringRef getClassName() override { return "AsyncFileEncrypted"_sr; }
 
 private:
 	Reference<IAsyncFile> file;
@@ -45,7 +45,6 @@ private:
 	int64_t fileSize = -1;
 
 	// Writing (append only):
-	std::unique_ptr<EncryptionStreamCipher> encryptor;
 	uint32_t currentBlock{ 0 };
 	int offsetInBlock{ 0 };
 	std::vector<unsigned char> writeBuffer;
@@ -67,4 +66,11 @@ public:
 	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override;
 	void releaseZeroCopy(void* data, int length, int64_t offset) override;
 	int64_t debugFD() const override;
+
+	// Convert raw on-disk file size (including per-block GCM tags) to logical plaintext size.
+	// Pure math, no I/O. blockSize is the plaintext block size (encryptionBlockSize).
+	static int64_t rawToLogicalSize(int64_t rawSize, int blockSize);
+
+	// Inverse of rawToLogicalSize: given a logical plaintext size, return the raw on-disk size.
+	static int64_t logicalToRawSize(int64_t logicalSize, int blockSize);
 };

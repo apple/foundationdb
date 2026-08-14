@@ -20,7 +20,7 @@
 
 #include "fdbserver/tester/workloads.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/core/Knobs.h"
 
 struct TimeKeeperCorrectnessWorkload : TestWorkload {

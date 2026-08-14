@@ -231,10 +231,10 @@ public:
 	};
 
 	// takes (object size, allocator context pointer), returns pointer to allocated memory
-	typedef uint8_t* (*AllocatorFuncType)(const size_t, void*);
+	using AllocatorFuncType = uint8_t* (*)(const size_t, void*);
 
 	// takes (wipe begin pointer, wipe length, allocator context pointer)
-	typedef void (*MarkForWipeFuncType)(uint8_t*, size_t, void*);
+	using MarkForWipeFuncType = void (*)(uint8_t*, size_t, void*);
 
 	// Overload that enables serializer traits to mark the buffers for wiping (zeroing out) after use.
 	// MarkForWipeFunc shares allocator context with allocatorFunc

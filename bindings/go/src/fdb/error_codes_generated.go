@@ -40,8 +40,6 @@ var (
 	ErrWrongShardServer = Error{Code: 1001}
 	// Operation result no longer necessary
 	ErrOperationObsolete = Error{Code: 1002}
-	// Cache server is not warm for this range
-	ErrColdCacheServer = Error{Code: 1003}
 	// Operation timed out
 	ErrTimedOut = Error{Code: 1004}
 	// Conflict occurred while changing coordination information
@@ -228,8 +226,6 @@ var (
 	ErrAuditStorageFailed = Error{Code: 1221}
 	// Exceeded the max number of allowed concurrent audit storage requests
 	ErrAuditStorageExceededRequestLimit = Error{Code: 1222}
-	// Exceeded maximum proxy tag throttling duration
-	ErrProxyTagThrottled = Error{Code: 1223}
 	// Exceeded maximum time allowed to read or write.
 	ErrKeyValueStoreDeadlineExceeded = Error{Code: 1224}
 	// Found data corruption
@@ -284,6 +280,12 @@ var (
 	ErrTransactionGRVQueueRejected = Error{Code: 1251}
 	// finishMoveKeys exceeded retry limit
 	ErrFinishMoveKeysTooManyRetries = Error{Code: 1252}
+	// startMoveKeys exceeded retry limit
+	ErrStartMoveKeysTooManyRetries = Error{Code: 1253}
+	// Cluster recovery terminating because a CDCProxy failed
+	ErrCdcProxyFailed = Error{Code: 1254}
+	// TLog CDC peek reply exceeds configured byte limit
+	ErrCdcTLogPeekReplyTooLarge = Error{Code: 1255}
 	// Platform error
 	ErrPlatformError = Error{Code: 1500}
 	// Large block allocation failed
@@ -416,8 +418,6 @@ var (
 	ErrMapperNotTuple = Error{Code: 2043}
 	// Invalid checkpoint format
 	ErrInvalidCheckpointFormat = Error{Code: 2044}
-	// Invalid quota value. Note that reserved_throughput cannot exceed total_throughput
-	ErrInvalidThrottleQuotaValue = Error{Code: 2045}
 	// Failed to create a checkpoint
 	ErrFailedToCreateCheckpoint = Error{Code: 2046}
 	// Failed to restore a checkpoint
@@ -460,7 +460,7 @@ var (
 	ErrSpecialKeysNoWriteModuleFound = Error{Code: 2115}
 	// Special key space clear crosses modules
 	ErrSpecialKeysCrossModuleClear = Error{Code: 2116}
-	// Api call through special keys failed. For more information, call get on special key 0xff0xff/error_message to get a json string of the error message.
+	// Api call through special keys failed. For more information, call get - within the same transaction - on special key 0xff0xff/error_message to get a json string of the error message.
 	ErrSpecialKeysAPIFailure = Error{Code: 2117}
 	// Invalid client library metadata.
 	ErrClientLibInvalidMetadata = Error{Code: 2118}

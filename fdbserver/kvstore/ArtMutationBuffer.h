@@ -39,9 +39,9 @@ public:
 
 		explicit(false) const_iterator(const const_iterator& i) { artIterator = i.artIterator; }
 
-		const KeyRef& key() { return artIterator.key(); }
+		const KeyRef& key() const { return artIterator.key(); }
 
-		const RangeMutation& mutation() { return (const RangeMutation&)(*((RangeMutation*)artIterator.value())); }
+		const RangeMutation& mutation() const { return (const RangeMutation&)(*((RangeMutation*)artIterator.value())); }
 
 		bool operator==(const const_iterator& other) const { return (artIterator) == (other.artIterator); }
 		bool operator!=(const const_iterator& other) const { return !(*this == other); }
@@ -67,9 +67,9 @@ public:
 
 		explicit(false) iterator(const iterator& i) { artIterator = i.artIterator; }
 
-		const KeyRef& key() { return artIterator.key(); }
+		const KeyRef& key() const { return artIterator.key(); }
 
-		RangeMutation& mutation() { return (RangeMutation&)(*((RangeMutation*)artIterator.value())); }
+		RangeMutation& mutation() const { return (RangeMutation&)(*((RangeMutation*)artIterator.value())); }
 
 		void** value_ptr() { return artIterator.value_ptr(); }
 

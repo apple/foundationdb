@@ -248,6 +248,23 @@ int main(int argc, char** argv) {
 
 		testNewOnlyApi(options);
 
+#ifdef ADDRESS_SANITIZER
+		// Flush the network thread's onMainThread queue to ensure deferred
+		// cleanup callbacks have been processed before stopping the network.
+		{
+			fdb::native::FDBDatabase* flushDb = nullptr;
+			auto err = fdb::native::fdb_create_database(options.clusterFile.c_str(), &flushDb);
+			if (!err && flushDb) {
+				auto f = fdb::native::fdb_database_get_server_protocol(flushDb, 0);
+				if (f) {
+					(void)fdb::native::fdb_future_block_until_ready(f);
+					fdb::native::fdb_future_destroy(f);
+				}
+				fdb::native::fdb_database_destroy(flushDb);
+			}
+		}
+#endif
+
 		fdb_check(fdb::network::stop(), "Stop network failed");
 		network_thread.join();
 	} catch (const std::runtime_error& err) {

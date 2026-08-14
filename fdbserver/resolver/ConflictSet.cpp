@@ -431,8 +431,9 @@ public:
 
 	void addConflictRanges(const Finger* fingers, int rangeCount, Version version) {
 		for (int r = rangeCount - 1; r >= 0; r--) {
-			const Finger& startF = fingers[r * 2];
-			const Finger& endF = fingers[r * 2 + 1];
+			const size_t fingerIndex = static_cast<size_t>(r) * 2;
+			const Finger& startF = fingers[fingerIndex];
+			const Finger& endF = fingers[fingerIndex + 1];
 
 			if (endF.found() == nullptr)
 				insert(endF, endF.finger[0]->getMaxVersion(0));
@@ -1018,7 +1019,7 @@ void ConflictBatch::addConflictRanges(Version now,
 
 	int ss = stringCount - (stripes - 1) * stripeSize;
 	for (int s = stripes - 1; s >= 0; s--) {
-		part->find(&strings[s * stripeSize], fingers, temp, ss);
+		part->find(&strings[static_cast<size_t>(s) * stripeSize], fingers, temp, ss);
 		part->addConflictRanges(fingers, ss / 2, now);
 		ss = stripeSize;
 	}

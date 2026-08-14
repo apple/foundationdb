@@ -35,7 +35,7 @@ struct IGenerator {
 	virtual T last() const = 0;
 	virtual std::string toString() const = 0;
 	virtual T next(int distance, bool wrap = false) { throw unsupported_operation(); }
-	virtual ~IGenerator() {};
+	virtual ~IGenerator() = default;
 };
 
 struct IKeyGenerator : public IGenerator<Key> {
@@ -58,7 +58,7 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 	Skew skew = NONE;
 
 	unsigned int parseInt(StringRef s) {
-		if (s.size() == 0) {
+		if (s.empty()) {
 			return 0;
 		} else if (std::isalpha(s[0])) {
 			alpha = true;
@@ -88,7 +88,7 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 
 		StringRef first = str.eat("..");
 		StringRef last = str;
-		if (last.size() == 0) {
+		if (last.empty()) {
 			last = first;
 		}
 
@@ -103,7 +103,7 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 	}
 
 	// Generate and return a random number
-	unsigned int next() {
+	unsigned int next() override {
 		switch (skew) {
 		case SMALL:
 			return val = deterministicRandom()->randomSkewedUInt32(min, max + 1);
@@ -115,13 +115,13 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 		}
 	}
 	// Return the last random number returned by next()
-	unsigned int last() const { return val; }
+	unsigned int last() const override { return val; }
 
 	std::string formatLimit(int x) const {
 		return (alpha && std::isalpha(x)) ? fmt::format("{}", (char)x) : fmt::format("{}", x);
 	}
 
-	std::string toString() const {
+	std::string toString() const override {
 		if (min == max) {
 			return fmt::format("{}", min);
 		}
@@ -141,14 +141,14 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 // sizeRange and byteRange are RandomIntGenerators
 // The default `byteRange` is 0:255
 struct RandomStringGenerator : IKeyGenerator {
-	RandomStringGenerator() {}
+	RandomStringGenerator() = default;
 	RandomStringGenerator(RandomIntGenerator size, RandomIntGenerator byteset) : size(size), bytes(byteset) {}
 	explicit(false) RandomStringGenerator(const char* cstr) : RandomStringGenerator(std::string(cstr)) {}
 	explicit(false) RandomStringGenerator(std::string str) : RandomStringGenerator(StringRef(str)) {}
 	explicit(false) RandomStringGenerator(StringRef str) {
 		StringRef sSize = str.eat("/");
 		StringRef sBytes = str;
-		if (sBytes.size() == 0) {
+		if (sBytes.empty()) {
 			sBytes = "0:255"_sr;
 		}
 		size = RandomIntGenerator(sSize.toString());
@@ -293,15 +293,15 @@ struct RandomStringSetGenerator : public RandomStringSetGeneratorBase {
 	RandomIntGenerator indexGen;
 	StringGenT stringGen;
 
-	std::string toString() const { return fmt::format("{}::{}", indexGen.toString(), stringGen.toString()); }
+	std::string toString() const override { return fmt::format("{}::{}", indexGen.toString(), stringGen.toString()); }
 };
 
-typedef RandomStringSetGenerator<RandomStringGenerator> RandomKeySetGenerator;
+using RandomKeySetGenerator = RandomStringSetGenerator<RandomStringGenerator>;
 
 // Generate random keys which are composed of tuple segments from a list of RandomKeySets
 // String Definition Format: RandomKeySet[,RandomKeySet]...
 struct RandomKeyTupleGenerator : public IKeyGenerator {
-	RandomKeyTupleGenerator() {};
+	RandomKeyTupleGenerator() = default;
 	explicit RandomKeyTupleGenerator(std::vector<RandomKeySetGenerator> tupleParts) : tuples(tupleParts) {}
 	explicit RandomKeyTupleGenerator(std::string s) : RandomKeyTupleGenerator(StringRef(s)) {}
 	explicit RandomKeyTupleGenerator(StringRef s) {
@@ -350,7 +350,7 @@ struct RandomKeyTupleGenerator : public IKeyGenerator {
 	}
 };
 
-typedef RandomStringSetGenerator<RandomKeyTupleGenerator> RandomKeyTupleSetGenerator;
+using RandomKeyTupleSetGenerator = RandomStringSetGenerator<RandomKeyTupleGenerator>;
 
 // RandomKeyGenerator is a helper function to contain multiple KeyGenerators
 // TODO: ideally, if all RandomGenerators support IGenerator interface and can be nested with each other, there's no

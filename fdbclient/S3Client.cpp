@@ -657,6 +657,7 @@ Future<Void> copyUpBulkDumpFileSet(std::string s3url,
 
 	TraceEvent(s3VerboseEventSev(), "S3ClientCopyUpBulkDumpFileSetStart")
 	    .detail("Bucket", bucket)
+	    .setMaxFieldLength(495)
 	    .detail("SourceFileSet", sourceFileSet.toString())
 	    .detail("DestinationFileSet", destinationFileSet.toString());
 	int pNumDeleted = 0;
@@ -707,9 +708,8 @@ static Future<PartState> downloadPart(Reference<S3BlobStoreEndpoint> endpoint,
 	while (true) {
 		Error err;
 		try {
-			std::vector<uint8_t> buffer;
+			std::shared_ptr<std::vector<uint8_t>> buffer = std::make_shared<std::vector<uint8_t>>(resultPart.size);
 			int64_t totalBytesRead = 0;
-			buffer.resize(resultPart.size);
 
 			// Add range validation
 			if (resultPart.offset < 0 || resultPart.size <= 0) {
@@ -720,11 +720,14 @@ static Future<PartState> downloadPart(Reference<S3BlobStoreEndpoint> endpoint,
 			}
 
 			while (totalBytesRead < resultPart.size) {
-				int bytesRead = co_await endpoint->readObject(bucket,
-				                                              objectName,
-				                                              buffer.data() + totalBytesRead,
-				                                              resultPart.size - totalBytesRead,
-				                                              resultPart.offset + totalBytesRead);
+				// Keep the shared buffer alive until the async read has fully settled, even if this actor is cancelled.
+				int bytesRead =
+				    co_await uncancellable(holdWhile(buffer,
+				                                     endpoint->readObject(bucket,
+				                                                          objectName,
+				                                                          buffer->data() + totalBytesRead,
+				                                                          resultPart.size - totalBytesRead,
+				                                                          resultPart.offset + totalBytesRead)));
 				if (bytesRead == 0) {
 					// Avoid infinite loop if server closes connection prematurely
 					TraceEvent(SevError, "S3ClientDownloadPartUnexpectedEOF")
@@ -746,7 +749,7 @@ static Future<PartState> downloadPart(Reference<S3BlobStoreEndpoint> endpoint,
 
 			// Verify checksum if provided (currently only MD5 is used for download verification)
 			if (!resultPart.checksum.empty()) {
-				std::string calculatedMD5 = HTTP::computeMD5Sum(std::string((char*)buffer.data(), totalBytesRead));
+				std::string calculatedMD5 = HTTP::computeMD5Sum(std::string((char*)buffer->data(), totalBytesRead));
 				if (resultPart.checksum != calculatedMD5) {
 					TraceEvent(SevWarnAlways, "S3ClientDownloadPartChecksumMismatch")
 					    .detail("Expected", resultPart.checksum)
@@ -755,7 +758,8 @@ static Future<PartState> downloadPart(Reference<S3BlobStoreEndpoint> endpoint,
 				}
 			}
 
-			co_await file->write(buffer.data(), totalBytesRead, resultPart.offset);
+			// Keep the shared buffer alive until the async write has fully settled, even if this actor is cancelled.
+			co_await uncancellable(holdWhile(buffer, file->write(buffer->data(), totalBytesRead, resultPart.offset)));
 
 			resultPart.completed = true;
 			TraceEvent(SevDebug, "S3ClientDownloadPartEnd")

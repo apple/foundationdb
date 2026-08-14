@@ -228,26 +228,32 @@ static void traceKeyValuesSummary(TraceEvent& event,
 // convert a StringRef to Hex string
 static std::string hexStringRef(const StringRef& s) {
 	std::string result;
-	result.reserve(s.size() * 2);
+	result.reserve(static_cast<size_t>(s.size()) * 2);
 	for (int i = 0; i < s.size(); i++) {
 		result.append(format("%02x", s[i]));
 	}
 	return result;
 }
 
+template <class Request, class Reply>
 static void traceKeyValuesDiff(TraceEvent& event,
-                               const KeySelectorRef& begin,
-                               const KeySelectorRef& end,
-                               Version version,
-                               int limit,
-                               int limitBytes,
-                               const VectorRef<KeyValueRef>& ssKV,
-                               bool ssMore,
-                               const VectorRef<KeyValueRef>& tssKV,
-                               bool tssMore,
+                               const Request& request,
+                               const Reply& source,
+                               const Reply& target,
                                const ComparisonType& type) {
-	traceKeyValuesSummary(
-	    event, begin, end, version, limit, limitBytes, ssKV.size(), ssMore, tssKV.size(), tssMore, type);
+	const auto& ssKV = source.data;
+	const auto& tssKV = target.data;
+	traceKeyValuesSummary(event,
+	                      request.begin,
+	                      request.end,
+	                      request.version,
+	                      request.limit,
+	                      request.limitBytes,
+	                      ssKV.size(),
+	                      source.more,
+	                      tssKV.size(),
+	                      target.more,
+	                      type);
 	bool mismatchFound = false;
 	for (int i = 0; i < std::max(ssKV.size(), tssKV.size()); i++) {
 		if (i >= ssKV.size() || i >= tssKV.size() || ssKV[i] != tssKV[i]) {
@@ -279,17 +285,7 @@ void TSS_traceMismatch(TraceEvent& event,
                        const GetKeyValuesReply& src,
                        const GetKeyValuesReply& tss,
                        const ComparisonType& type) {
-	traceKeyValuesDiff(event,
-	                   req.begin,
-	                   req.end,
-	                   req.version,
-	                   req.limit,
-	                   req.limitBytes,
-	                   src.data,
-	                   src.more,
-	                   tss.data,
-	                   tss.more,
-	                   type);
+	traceKeyValuesDiff(event, req, src, tss, type);
 }
 
 // range reads and flat map
@@ -334,24 +330,13 @@ const char* LB_mismatchTraceName(const GetKeyValuesStreamRequest& req, const Com
 	return type == TSS_COMPARISON ? "TSSMismatchGetKeyValuesStream" : "ReplicaMismatchGetKeyValuesStream";
 }
 
-// TODO this is all duplicated from above, simplify?
 template <>
 void TSS_traceMismatch(TraceEvent& event,
                        const GetKeyValuesStreamRequest& req,
                        const GetKeyValuesStreamReply& src,
                        const GetKeyValuesStreamReply& tss,
                        const ComparisonType& type) {
-	traceKeyValuesDiff(event,
-	                   req.begin,
-	                   req.end,
-	                   req.version,
-	                   req.limit,
-	                   req.limitBytes,
-	                   src.data,
-	                   src.more,
-	                   tss.data,
-	                   tss.more,
-	                   type);
+	traceKeyValuesDiff(event, req, src, tss, type);
 }
 
 template <>

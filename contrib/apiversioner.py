@@ -24,7 +24,6 @@ import logging
 import os
 import re
 import sys
-import traceback
 
 
 LOG_FORMAT = "%(created)f [%(levelname)s] %(message)s"

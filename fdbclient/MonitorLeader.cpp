@@ -29,6 +29,8 @@
 #include "flow/IConnection.h"
 #include "flow/CoroUtils.h"
 
+#include <compare>
+
 namespace {
 
 std::string trim(std::string const& connectionString) {
@@ -43,8 +45,9 @@ std::string trim(std::string const& connectionString) {
 				++c;
 			if (c == end)
 				break;
-		} else if (*c != ' ' && *c != '\n' && *c != '\r' && *c != '\t')
+		} else if (*c != ' ' && *c != '\n' && *c != '\r' && *c != '\t') {
 			trimmed += *c;
+		}
 	}
 	return trimmed;
 }
@@ -249,7 +252,7 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 
 		ClusterConnectionString cs(hostnames, "TestCluster:0"_sr);
 		ASSERT(cs.hostnames.size() == 2);
-		ASSERT(cs.coords.size() == 0);
+		ASSERT(cs.coords.empty());
 		ASSERT(cs.toString() == connectionString);
 	}
 
@@ -454,7 +457,7 @@ std::string ClusterConnectionString::toString() const {
 ClientCoordinators::ClientCoordinators(Reference<IClusterConnectionRecord> ccr) : ccr(ccr) {
 	ClusterConnectionString cs = ccr->getConnectionString();
 	clusterKey = cs.clusterKey();
-	for (auto h : cs.hostnames) {
+	for (const auto& h : cs.hostnames) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
 	}
 	for (auto s : cs.coords) {
@@ -529,38 +532,46 @@ Future<Void> monitorNominee(Key key,
 	}
 }
 
-// Also used in fdbserver/LeaderElection.actor.cpp!
+// Also used in fdbserver/core/LeaderElection.cpp!
 // bool represents if the LeaderInfo is a majority answer or not.
-// This function also masks the first 7 bits of changeId of the nominees and returns the Leader with masked changeId
+// Group nominees by changeID with the priority bits masked, then return the most common full changeID in the winning
+// group.
 Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<LeaderInfo>>& nominees) {
 	// If any coordinator says that the quorum is forwarded, then it is
 	for (int i = 0; i < nominees.size(); i++)
 		if (nominees[i].present() && nominees[i].get().forward)
 			return std::pair<LeaderInfo, bool>(nominees[i].get(), true);
 
-	std::vector<std::pair<UID, int>> maskedNominees;
+	struct MaskedNominee {
+		UID maskedChangeID;
+		UID changeID;
+		int nomineeIndex;
+
+		std::strong_ordering operator<=>(MaskedNominee const&) const = default;
+	};
+
+	std::vector<MaskedNominee> maskedNominees;
 	maskedNominees.reserve(nominees.size());
 	for (int i = 0; i < nominees.size(); i++) {
 		if (nominees[i].present()) {
-			maskedNominees.emplace_back(
-			    UID(nominees[i].get().changeID.first() & LeaderInfo::changeIDMask, nominees[i].get().changeID.second()),
-			    i);
+			maskedNominees.push_back({ UID(nominees[i].get().changeID.first() & LeaderInfo::changeIDMask,
+			                               nominees[i].get().changeID.second()),
+			                           nominees[i].get().changeID,
+			                           i });
 		}
 	}
 
-	if (!maskedNominees.size())
+	if (maskedNominees.empty())
 		return Optional<std::pair<LeaderInfo, bool>>();
 
-	std::sort(maskedNominees.begin(),
-	          maskedNominees.end(),
-	          [](const std::pair<UID, int>& l, const std::pair<UID, int>& r) { return l.first < r.first; });
+	std::sort(maskedNominees.begin(), maskedNominees.end());
 
 	int bestCount = 1;
 	int bestIdx = 0;
 	int currentIdx = 0;
 	int curCount = 1;
 	for (int i = 1; i < maskedNominees.size(); i++) {
-		if (maskedNominees[currentIdx].first == maskedNominees[i].first) {
+		if (maskedNominees[currentIdx].maskedChangeID == maskedNominees[i].maskedChangeID) {
 			curCount++;
 		} else {
 			currentIdx = i;
@@ -572,8 +583,84 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 		}
 	}
 
+	// Coordinators can agree on the leader identity while reporting different priority bits. Select the modal full
+	// changeID so that one stale coordinator cannot pin the aggregate to an obsolete priority. The sort order and
+	// strict count comparison deterministically prefer the fitter (lower) changeID when variant counts tie.
+	int representativeIdx = maskedNominees[bestIdx].nomineeIndex;
+	int bestVariantCount = 1;
+	currentIdx = bestIdx;
+	curCount = 1;
+	for (int i = bestIdx + 1; i < bestIdx + bestCount; i++) {
+		if (maskedNominees[currentIdx].changeID == maskedNominees[i].changeID) {
+			curCount++;
+		} else {
+			currentIdx = i;
+			curCount = 1;
+		}
+		if (curCount > bestVariantCount) {
+			representativeIdx = maskedNominees[currentIdx].nomineeIndex;
+			bestVariantCount = curCount;
+		}
+	}
+
 	bool majority = bestCount >= nominees.size() / 2 + 1;
-	return std::pair<LeaderInfo, bool>(nominees[maskedNominees[bestIdx].second].get(), majority);
+	return std::pair<LeaderInfo, bool>(nominees[representativeIdx].get(), majority);
+}
+
+TEST_CASE("/fdbclient/MonitorLeader/getLeader/priorityVariants") {
+	auto makeLeader = [](UID internalID, ClusterControllerPriorityInfo::DCFitness dcFitness) {
+		LeaderInfo leader(internalID);
+		ClusterControllerPriorityInfo priority;
+		priority.dcFitness = dcFitness;
+		leader.updateChangeID(priority);
+		return leader;
+	};
+	auto assertLeader =
+	    [](const std::vector<Optional<LeaderInfo>>& nominees, LeaderInfo const& expected, bool majority) {
+		    auto result = getLeader(nominees);
+		    ASSERT(result.present());
+		    ASSERT(result.get().first.changeID == expected.changeID);
+		    ASSERT(result.get().second == majority);
+	    };
+
+	UID internalID(1, 2);
+	LeaderInfo primary = makeLeader(internalID, ClusterControllerPriorityInfo::FitnessPrimary);
+	LeaderInfo remote = makeLeader(internalID, ClusterControllerPriorityInfo::FitnessRemote);
+	LeaderInfo unknown = makeLeader(internalID, ClusterControllerPriorityInfo::FitnessUnknown);
+
+	for (int staleIndex = 0; staleIndex < 10; staleIndex++) {
+		std::vector<Optional<LeaderInfo>> nominees(10, remote);
+		nominees[staleIndex] = primary;
+		assertLeader(nominees, remote, true);
+
+		nominees.assign(10, primary);
+		nominees[staleIndex] = remote;
+		assertLeader(nominees, primary, true);
+	}
+
+	std::vector<Optional<LeaderInfo>> nominees(5, primary);
+	nominees.insert(nominees.end(), 5, remote);
+	assertLeader(nominees, primary, true);
+
+	nominees.assign(6, remote);
+	nominees.insert(nominees.end(), 4, primary);
+	assertLeader(nominees, remote, true);
+
+	nominees.assign(5, unknown);
+	nominees.insert(nominees.end(), 5, remote);
+	assertLeader(nominees, remote, true);
+
+	LeaderInfo other = makeLeader(UID(3, 4), ClusterControllerPriorityInfo::FitnessPrimary);
+	nominees.assign(3, primary);
+	nominees.insert(nominees.end(), 3, remote);
+	nominees.insert(nominees.end(), 4, other);
+	assertLeader(nominees, primary, true);
+
+	nominees.assign(5, primary);
+	nominees.insert(nominees.end(), 5, other);
+	assertLeader(nominees, primary, false);
+
+	return Void();
 }
 
 // Leader is the process that will be elected by coordinators as the cluster controller
@@ -686,7 +773,7 @@ OpenDatabaseRequest ClientData::getRequest() {
 			tryInsertIntoSamples(req.issues[issue], networkAddress, traceLogGroup);
 		}
 
-		if (!ci.second.versions.size()) {
+		if (ci.second.versions.empty()) {
 			tryInsertIntoSamples(req.supportedVersions[ClientVersionRef()], networkAddress, traceLogGroup);
 			continue;
 		}
@@ -726,8 +813,8 @@ Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterControll
 		if (res.index() == 0) {
 			ClientDBInfo ni = std::get<0>(std::move(res));
 			TraceEvent("GetClientInfoFromLeaderGotClientInfo", knownLeader->get().get().clientInterface.id())
-			    .detail("CommitProxy0", ni.commitProxies.size() ? ni.commitProxies[0].address().toString() : "")
-			    .detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].address().toString() : "")
+			    .detail("CommitProxy0", !ni.commitProxies.empty() ? ni.commitProxies[0].address().toString() : "")
+			    .detail("GrvProxy0", !ni.grvProxies.empty() ? ni.grvProxies[0].address().toString() : "")
 			    .detail("ClientID", ni.id);
 			clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(ni));
 		}
@@ -747,7 +834,7 @@ Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
 	    new AsyncVar<Optional<ClusterControllerClientInterface>>{});
 
 	clientLeaderServers.reserve(hostnames.size() + coordinators.size());
-	for (auto h : hostnames) {
+	for (const auto& h : hostnames) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
 	}
 	for (auto s : coordinators) {
@@ -782,7 +869,7 @@ Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
 				co_return;
 			}
 
-			if (leader.get().first.serializedInfo.size()) {
+			if (!leader.get().first.serializedInfo.empty()) {
 				ObjectReader reader(leader.get().first.serializedInfo.begin(), IncludeVersion());
 				ClusterControllerClientInterface res;
 				reader.deserialize(res);
@@ -861,7 +948,7 @@ Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	for (const auto& c : cs.coords) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(c));
 	}
-	ASSERT(clientLeaderServers.size() > 0);
+	ASSERT(!clientLeaderServers.empty());
 
 	deterministicRandom()->randomShuffle(clientLeaderServers);
 

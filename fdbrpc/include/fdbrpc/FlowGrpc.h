@@ -150,9 +150,9 @@ public:
 	void registerService(std::shared_ptr<grpc::Service> service);
 	void registerRoleServices(const UID& owner_id, const ServiceList& services);
 
-	// Removes services associated with given `owner_id` from the server. Returns future that is fulfilled onced the
+	// Removes services associated with given `owner_id` from the server. Returns future that is fulfilled once the
 	// services are no longer alive (however, server may not have restarted yet).
-	Future<Void> deregisterRoleServices(const UID& owner_id);
+	Future<Void> deregisterRoleServices(UID owner_id);
 	void deregisterRoleServicesSync(const UID& owner_id);
 
 	// Returns `true` if TLS is enabled.

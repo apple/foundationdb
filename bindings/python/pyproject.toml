@@ -7,6 +7,7 @@ name = "foundationdb"
 dynamic = ["version"]
 authors = [{name = "FoundationDB Team", email="fdb-dist@apple.com"}]
 description = "Python bindings for the FoundationDB Database"
+license = "Apache-2.0"
 readme = "README.rst"
 keywords = ["database", "key-value store", "acid"]
 urls = {Homepage = "https://www.foundationdb.org", Repository = "https://github.com/apple/foundationdb"}
@@ -14,7 +15,6 @@ requires-python = ">=3.8"
 classifiers = [
 	'Development Status :: 5 - Production/Stable',
 	'Intended Audience :: Developers',
-	'License :: OSI Approved :: Apache Software License',
 	'Operating System :: MacOS :: MacOS X',
 	'Operating System :: Microsoft :: Windows',
 	'Operating System :: POSIX :: Linux',

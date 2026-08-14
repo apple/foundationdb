@@ -2,6 +2,11 @@
 - have epoch associated with txn interfaces. useful to understand what generation they belong to, especially useful during recovery.
       --- log routers, tlog, backup workers DONE. left: master, cp, grv proxy, resolver, anything else in txn system which is associated with an epoch?
 - topology view nesting: role interface id child of a certain worker interface id, tlog id can be a child of a shared tlog id. visually show these.
+- shared tlog, tlog nesting.
+- versions associated with tlog, log router, ss.
 - control plane metadata (srcs: system key space, commit proxy txn state store, role specific code, etc.)
       --- range maps (key to shard, shard to key range, shard to ss, ss to shards)
       --- buddies in txn (ss <-> tlog on primary and remote, remote tlog <-> LR, LR <-> primary/satellite tlog)
+      --- dd operations, even on dst ss, we can tell which ss it's fetching from
+- sequencer's live version state is invisible in traces. version, liveCommittedVersion, minKnownCommittedVersion, databaseLocked all live on MasterData and none of them are traced - MasterMetrics only carries request counters. so the role handing out versions is the one role whose versions you can't see. nothing a trace reader can fix on its own, needs the trace events added on the fdbserver side first. only the recovery-time versions (lastEpochEnd, recoveryTransactionVersion) are available today.
+- txn timeout knobs: MAX_READ_TRANSACTION_LIFE_VERSIONS, MAX_WRITE_TRANSACTION_LIFE_VERSIONS, VERSIONS_PER_SECOND. with these i can turn version gaps into seconds, so lag reads as time instead of a big number, and show whether a txn was already past its window at the version i'm sitting on. careful: defaults are 5s and 1e6, but simulation overrides both life-version knobs, so read the real values out of the trace rather than hardcoding.

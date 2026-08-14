@@ -97,12 +97,12 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					Value valueToCheck = Standalone(readResult[i].value);
 					bool toAdd = false;
 					for (const auto& range : ranges) {
-						if (rangeToCheck.intersects(range) == true) {
+						if (rangeToCheck.intersects(range)) {
 							toAdd = true;
 							break;
 						}
 					}
-					if (toAdd == true) {
+					if (toAdd) {
 						res.push_back(std::make_pair(rangeToCheck, valueToCheck));
 					}
 					beginKeyToReadKeyServer = readResult[i + 1].key;
@@ -182,7 +182,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 
 		// Do consistency check shard by shard
 		Reference<IRateControl> rateLimiter =
-		    Reference<IRateControl>(new SpeedLimit(CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX, 1));
+		    makeReference<SpeedLimit>(CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX, 1);
 		KeyRangeMap<bool> failedRanges; // Used to collect failed ranges in the current checkDataConsistency
 		failedRanges.insert(allKeys, false); // Initialized with false and will set any failed range as true later
 		// Which will be used to start the next consistencyCheckEpoch of the checkDataConsistency

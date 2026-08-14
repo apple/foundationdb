@@ -1,6 +1,7 @@
 fdb_find_sources(FDBCLIENT_SRCS)
 list(REMOVE_ITEM FDBCLIENT_SRCS LinkTest.cpp)
 list(REMOVE_ITEM FDBCLIENT_SRCS S3Client_cli.cpp)
+list(REMOVE_ITEM FDBCLIENT_SRCS fdbclient_test.cpp)
 list(APPEND FDBCLIENT_SRCS sha1/SHA1.cpp)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
@@ -163,10 +164,11 @@ if(WITH_SWIFT)
   # Generate the module map for FDBClient.
   include(GenerateModulemap)
   set(FDBCLIENT_BINARY_DIR "${CMAKE_BINARY_DIR}/fdbclient")
-  generate_modulemap("${CMAKE_BINARY_DIR}/fdbclient/include" "FDBClient" fdbclient)
+  generate_modulemap("${CMAKE_BINARY_DIR}/fdbclient/include" "FDBClient" fdbclient OMIT
+                     AsyncFileBlobStore.h RYWIterator.h SnapshotCache.h WriteMap.h)
 
   # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
-  target_compile_options(fdbclient_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++20 -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml>")
+  target_compile_options(fdbclient_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++20 -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml>")
 
   add_dependencies(fdbclient_swift flow_swift fdbclient_actors fdbrpc_actors fdboptions)
   # This does not work! (see rdar://99107402)
@@ -199,6 +201,10 @@ endif()
 add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbclientlinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbclient>" rapidxml) # re-link rapidxml due to private link interface
 
+add_flow_target(EXECUTABLE NAME fdbclient_test SRCS fdbclient_test.cpp)
+set_target_properties(fdbclient_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+target_link_libraries(fdbclient_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbclient>" rapidxml)
+
 if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
                                      # x-compiling.
   add_subdirectory(bench EXCLUDE_FROM_ALL)
@@ -219,4 +225,6 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   add_test(NAME s3client_test COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3client_test.sh ${CMAKE_BINARY_DIR})
   add_test(NAME gcs_client_test COMMAND ${CMAKE_COMMAND} -E env USE_MOCK_GCS=true ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3client_test.sh ${CMAKE_BINARY_DIR})
   add_test(NAME bulkload_test COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/bulkload_test.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+  set_tests_properties(s3client_test gcs_client_test bulkload_test
+    PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
 endif()

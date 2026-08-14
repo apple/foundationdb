@@ -24,7 +24,7 @@
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/network.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 
 // C++20 coroutine version of callback benchmarks (matches BenchNet2.cpp pattern)
 

@@ -43,7 +43,7 @@ struct RangeResultBlock {
 	// rounded up to the nearest 1M), to ensure that no versions out of this RangeResultBlock can be in between.
 	Standalone<RangeResultRef> consume();
 
-	bool empty() { return indexToRead == result.size(); }
+	bool empty() const { return indexToRead == result.size(); }
 
 	bool operator<(const RangeResultBlock& r) const {
 		// We want a min heap. The standard C++ priority queue is a max heap.

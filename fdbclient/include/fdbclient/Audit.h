@@ -40,6 +40,7 @@ enum class AuditType : uint8_t {
 	ValidateLocationMetadata = 3,
 	ValidateStorageServerShard = 4,
 	ValidateRestore = 5,
+	ValidateMetadataEncoding = 6,
 };
 
 struct AuditStorageState {

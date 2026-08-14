@@ -27,6 +27,7 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/IClientApi.h"
 #include "fdbclient/RangeLock.h"
 #include "flow/Error.h"
 #include "fmt/format.h"
@@ -36,6 +37,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/ManagementAPI.h"
 
 #include "fdbclient/SystemData.h"
@@ -48,7 +50,6 @@
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
-#include "fdbclient/Schemas.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/CoroUtils.h"
@@ -270,61 +271,43 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	if (mode == "single") {
 		redundancy = "1";
 		log_replicas = "1";
-		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
+		storagePolicy = tLogPolicy = makeReference<PolicyOne>();
 
 	} else if (mode == "double" || mode == "fast_recovery_double") {
 		redundancy = "2";
 		log_replicas = "2";
-		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		storagePolicy = tLogPolicy = makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>());
 	} else if (mode == "triple" || mode == "fast_recovery_triple") {
 		redundancy = "3";
 		log_replicas = "3";
-		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		storagePolicy = tLogPolicy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 	} else if (mode == "three_datacenter" || mode == "multi_dc") {
 		redundancy = "6";
 		log_replicas = "4";
-		storagePolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3,
-		                     "dcid",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
-		tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2,
-		                     "dcid",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
+		storagePolicy = makeReference<PolicyAcross>(
+		    3, "dcid", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
+		tLogPolicy = makeReference<PolicyAcross>(
+		    2, "dcid", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
 	} else if (mode == "three_datacenter_fallback") {
 		redundancy = "4";
 		log_replicas = "4";
-		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2,
-		                     "dcid",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
+		storagePolicy = tLogPolicy = makeReference<PolicyAcross>(
+		    2, "dcid", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
 	} else if (mode == "three_data_hall") {
 		redundancy = "3";
 		log_replicas = "4";
-		storagePolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "data_hall", Reference<IReplicationPolicy>(new PolicyOne())));
-		tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2,
-		                     "data_hall",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
+		storagePolicy = makeReference<PolicyAcross>(3, "data_hall", makeReference<PolicyOne>());
+		tLogPolicy = makeReference<PolicyAcross>(
+		    2, "data_hall", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
 	} else if (mode == "three_data_hall_fallback") {
 		redundancy = "2";
 		log_replicas = "4";
-		storagePolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "data_hall", Reference<IReplicationPolicy>(new PolicyOne())));
-		tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2,
-		                     "data_hall",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
-	} else
+		storagePolicy = makeReference<PolicyAcross>(2, "data_hall", makeReference<PolicyOne>());
+		tLogPolicy = makeReference<PolicyAcross>(
+		    2, "data_hall", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
+	} else {
 		redundancySpecified = false;
+	}
 	if (redundancySpecified) {
 		out[p + "storage_replicas"] = redundancy;
 		out[p + "log_replicas"] = log_replicas;
@@ -350,27 +333,23 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	} else if (mode == "remote_single") {
 		remote_redundancy = "1";
 		remote_log_replicas = "1";
-		remoteTLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
+		remoteTLogPolicy = makeReference<PolicyOne>();
 	} else if (mode == "remote_double") {
 		remote_redundancy = "2";
 		remote_log_replicas = "2";
-		remoteTLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		remoteTLogPolicy = makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>());
 	} else if (mode == "remote_triple") {
 		remote_redundancy = "3";
 		remote_log_replicas = "3";
-		remoteTLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		remoteTLogPolicy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 	} else if (mode == "remote_three_data_hall") { // FIXME: not tested in simulation
 		remote_redundancy = "3";
 		remote_log_replicas = "4";
-		remoteTLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2,
-		                     "data_hall",
-		                     Reference<IReplicationPolicy>(
-		                         new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())))));
-	} else
+		remoteTLogPolicy = makeReference<PolicyAcross>(
+		    2, "data_hall", makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>()));
+	} else {
 		remoteRedundancySpecified = false;
+	}
 	if (remoteRedundancySpecified) {
 		out[p + "remote_log_replicas"] = remote_log_replicas;
 
@@ -407,8 +386,8 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 	auto p = configKeysPrefix.toString();
 	if (!outConf.contains(p + "storage_replication_policy") && outConf.contains(p + "storage_replicas")) {
 		int storageCount = stoi(outConf[p + "storage_replicas"]);
-		Reference<IReplicationPolicy> storagePolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(storageCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> storagePolicy =
+		    makeReference<PolicyAcross>(storageCount, "zoneid", makeReference<PolicyOne>());
 		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, storagePolicy);
 		outConf[p + "storage_replication_policy"] = policyWriter.toValue().toString();
@@ -416,8 +395,8 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 
 	if (!outConf.contains(p + "log_replication_policy") && outConf.contains(p + "log_replicas")) {
 		int logCount = stoi(outConf[p + "log_replicas"]);
-		Reference<IReplicationPolicy> logPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(logCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> logPolicy =
+		    makeReference<PolicyAcross>(logCount, "zoneid", makeReference<PolicyOne>());
 		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p + "log_replication_policy"] = policyWriter.toValue().toString();
@@ -503,6 +482,34 @@ Future<Void> enableBackupWorker(Database cx) {
 	}
 }
 
+Future<Void> enableRangePartitionedBackupWorker(Database cx) {
+	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
+	if (configuration.rangePartitionedBackupWorkerEnabled) {
+		TraceEvent("RangePartitionedBWAlreadyEnabled");
+		co_return;
+	}
+	ConfigurationResult res =
+	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_partitioned_backup_worker_enabled:=1", true);
+	if (res != ConfigurationResult::SUCCESS) {
+		TraceEvent("RangePartitionedBWEnableFailed").detail("Result", res);
+		throw operation_failed();
+	}
+}
+
+Future<Void> disableRangePartitionedBackupWorker(Database cx) {
+	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
+	if (!configuration.rangePartitionedBackupWorkerEnabled) {
+		TraceEvent("RangePartitionedBWAlreadyDisabled");
+		co_return;
+	}
+	ConfigurationResult res =
+	    co_await ManagementAPI::changeConfig(cx.getReference(), "range_partitioned_backup_worker_enabled:=0", true);
+	if (res != ConfigurationResult::SUCCESS) {
+		TraceEvent("RangePartitionedBWDisableFailed").detail("Result", res);
+		throw operation_failed();
+	}
+}
+
 Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bool useSystemPriority) {
 	if (useSystemPriority) {
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -571,8 +578,9 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	} else if (result.old_replication == "three_data_hall_fallback") {
 		storage_replication = 2;
 		log_replication = 4;
-	} else
+	} else {
 		return ConfigureAutoResult();
+	}
 
 	StatusObjectReader machinesMap;
 	if (!statusObjCluster.get("machines", machinesMap))
@@ -976,7 +984,7 @@ Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		connectionStrings.clear();
-		if (BUGGIFY_WITH_PROB(0.1)) {
+		if (buggify(0.1)) {
 			// Introduce a random delay in simulation to allow processes to be
 			// killed before previousCoordinatorKeys has been reset. This helps
 			// exercise coordinator change edge cases around key cleanup.
@@ -1137,10 +1145,11 @@ Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> ch
 				}
 			}
 			leaderServers.reserve(coord.clientLeaderServers.size());
-			for (int i = 0; i < coord.clientLeaderServers.size(); i++)
+			for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
 				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
 				                                           GetLeaderRequest(coord.clusterKey, UID()),
 				                                           TaskPriority::CoordinationReply));
+			}
 			auto leaderServersResult = co_await timeout(waitForAll(leaderServers), 5.0);
 			if (!leaderServersResult.present()) {
 				co_return CoordinatorsResult::COORDINATOR_UNREACHABLE;
@@ -1173,7 +1182,7 @@ struct NameQuorumChange final : IQuorumChange {
 	std::string getDesiredClusterKeyName() const override { return newName; }
 };
 Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other) {
-	return Reference<IQuorumChange>(new NameQuorumChange(name, other));
+	return makeReference<NameQuorumChange>(name, other);
 }
 
 struct AutoQuorumChange final : IQuorumChange {
@@ -1412,7 +1421,38 @@ struct AutoQuorumChange final : IQuorumChange {
 	}
 };
 Reference<IQuorumChange> autoQuorumChange(int desired) {
-	return Reference<IQuorumChange>(new AutoQuorumChange(desired));
+	return makeReference<AutoQuorumChange>(desired);
+}
+
+Future<std::vector<std::string>> getManagementApiSpecialKeyValues(Reference<IDatabase> db,
+                                                                  KeyRange range,
+                                                                  const char* errorEvent) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
+		Error err;
+		try {
+			ThreadFuture<RangeResult> resultFuture = tr->getRange(range, CLIENT_KNOBS->TOO_MANY);
+			RangeResult result = co_await safeThreadFutureToFuture(resultFuture);
+			ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
+
+			std::vector<std::string> values;
+			values.reserve(result.size());
+			for (const auto& entry : result) {
+				values.push_back(entry.key.removePrefix(range.begin).toString());
+			}
+			co_return values;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			err = e;
+		}
+
+		if (errorEvent != nullptr) {
+			TraceEvent(SevWarn, errorEvent).error(err);
+		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
+	}
 }
 
 Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> servers, bool failed) {
@@ -1450,32 +1490,28 @@ Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> serve
 
 Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
 	if (cx->apiVersionAtLeast(700)) {
-		ReadYourWritesTransaction ryw(cx);
-		while (true) {
-			Error err;
-			try {
-				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
-				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				ryw.set(
-				    SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failed" : "excluded", "force"),
-				    ValueRef());
-				for (auto& s : servers) {
-					Key addr = failed
-					               ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(s.toString())
-					               : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(s.toString());
-					ryw.set(addr, ValueRef());
-				}
-				TraceEvent("ExcludeServersSpecialKeySpaceCommit")
-				    .detail("Servers", describe(servers))
-				    .detail("ExcludeFailed", failed);
-				co_await ryw.commit();
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent("ExcludeServersError").errorUnsuppressed(err);
-			co_await ryw.onError(err);
-		}
+		co_await runRYWTransactionVoid(
+		    cx,
+		    [&servers, failed](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
+			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			    ryw->set(
+			        SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failed" : "excluded", "force"),
+			        ValueRef());
+			    for (const auto& server : servers) {
+				    Key address =
+				        failed
+				            ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(server.toString())
+				            : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(server.toString());
+				    ryw->set(address, ValueRef());
+			    }
+			    TraceEvent("ExcludeServersSpecialKeySpaceCommit")
+			        .detail("Servers", describe(servers))
+			        .detail("ExcludeFailed", failed);
+			    return Void();
+		    },
+		    "ExcludeServersError");
+		co_return;
 	} else {
 		Transaction tr(cx);
 		while (true) {
@@ -1529,33 +1565,28 @@ Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::string> 
 // excludes localities by setting the keys.
 Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed) {
 	if (cx->apiVersionAtLeast(700)) {
-		ReadYourWritesTransaction ryw(cx);
-		while (true) {
-			Error err;
-			try {
-				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
-				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
-				            failed ? "failed_locality" : "excluded_locality", "force"),
-				        ValueRef());
-				for (const auto& l : localities) {
-					Key addr = failed
-					               ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(l)
-					               : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(l);
-					ryw.set(addr, ValueRef());
-				}
-				TraceEvent("ExcludeLocalitiesSpecialKeySpaceCommit")
-				    .detail("Localities", describe(localities))
-				    .detail("ExcludeFailed", failed);
-
-				co_await ryw.commit();
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent("ExcludeLocalitiesError").errorUnsuppressed(err);
-			co_await ryw.onError(err);
-		}
+		co_await runRYWTransactionVoid(
+		    cx,
+		    [&localities, failed](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
+			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			    ryw->set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
+			                 failed ? "failed_locality" : "excluded_locality", "force"),
+			             ValueRef());
+			    for (const auto& locality : localities) {
+				    Key address =
+				        failed
+				            ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(locality)
+				            : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(locality);
+				    ryw->set(address, ValueRef());
+			    }
+			    TraceEvent("ExcludeLocalitiesSpecialKeySpaceCommit")
+			        .detail("Localities", describe(localities))
+			        .detail("ExcludeFailed", failed);
+			    return Void();
+		    },
+		    "ExcludeLocalitiesError");
+		co_return;
 	} else {
 		Transaction tr(cx);
 		while (true) {
@@ -1576,46 +1607,35 @@ Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> loca
 Future<Void> includeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	if (cx->apiVersionAtLeast(700)) {
-		ReadYourWritesTransaction ryw(cx);
-		while (true) {
-			Error err;
-			try {
-				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
-				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				for (auto& s : servers) {
-					if (!s.isValid()) {
-						if (failed) {
-							ryw.clear(SpecialKeySpace::getManagementApiCommandRange("failed"));
-						} else {
-							ryw.clear(SpecialKeySpace::getManagementApiCommandRange("exclude"));
-						}
-					} else {
-						Key addr =
-						    failed ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(s.toString())
-						           : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(s.toString());
-						ryw.clear(addr);
-						// Eliminate both any ip-level exclusion (1.2.3.4) and any
-						// port-level exclusions (1.2.3.4:5)
-						// The range ['IP', 'IP;'] was originally deleted. ';' is
-						// char(':' + 1). This does not work, as other for all
-						// x between 0 and 9, 'IPx' will also be in this range.
-						//
-						// This is why we now make two clears: first only of the ip
-						// address, the second will delete all ports.
-						if (s.isWholeMachine())
-							ryw.clear(KeyRangeRef(addr.withSuffix(":"_sr), addr.withSuffix(";"_sr)));
-					}
-				}
-				TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
-
-				co_await ryw.commit();
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent("IncludeServersError").errorUnsuppressed(err);
-			co_await ryw.onError(err);
-		}
+		co_await runRYWTransactionVoid(
+		    cx,
+		    [&servers, failed](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
+			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			    for (const auto& server : servers) {
+				    if (!server.isValid()) {
+					    ryw->clear(SpecialKeySpace::getManagementApiCommandRange(failed ? "failed" : "exclude"));
+				    } else {
+					    Key address =
+					        failed
+					            ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(server.toString())
+					            : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(
+					                  server.toString());
+					    ryw->clear(address);
+					    // Eliminate both any ip-level exclusion (1.2.3.4) and any
+					    // port-level exclusions (1.2.3.4:5). Clearing ['IP', 'IP;']
+					    // would also include 'IPx', so clear the IP and port range
+					    // separately.
+					    if (server.isWholeMachine()) {
+						    ryw->clear(KeyRangeRef(address.withSuffix(":"_sr), address.withSuffix(";"_sr)));
+					    }
+				    }
+			    }
+			    TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
+			    return Void();
+		    },
+		    "IncludeServersError");
+		co_return;
 	} else {
 		Transaction tr(cx);
 		while (true) {
@@ -1683,39 +1703,32 @@ Future<Void> includeServers(Database cx, std::vector<AddressExclusion> servers, 
 Future<Void> includeLocalities(Database cx, std::vector<std::string> localities, bool failed, bool includeAll) {
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	if (cx->apiVersionAtLeast(700)) {
-		ReadYourWritesTransaction ryw(cx);
-		while (true) {
-			Error err;
-			try {
-				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
-				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				if (includeAll) {
-					if (failed) {
-						ryw.clear(SpecialKeySpace::getManagementApiCommandRange("failedlocality"));
-					} else {
-						ryw.clear(SpecialKeySpace::getManagementApiCommandRange("excludedlocality"));
-					}
-				} else {
-					for (const auto& l : localities) {
-						Key locality =
-						    failed ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(l)
-						           : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(l);
-						ryw.clear(locality);
-					}
-				}
-				TraceEvent("IncludeLocalitiesCommit")
-				    .detail("Localities", describe(localities))
-				    .detail("Failed", failed)
-				    .detail("IncludeAll", includeAll);
-
-				co_await ryw.commit();
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent("IncludeLocalitiesError").errorUnsuppressed(err);
-			co_await ryw.onError(err);
-		}
+		co_await runRYWTransactionVoid(
+		    cx,
+		    [&localities, failed, includeAll](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
+			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			    if (includeAll) {
+				    ryw->clear(
+				        SpecialKeySpace::getManagementApiCommandRange(failed ? "failedlocality" : "excludedlocality"));
+			    } else {
+				    for (const auto& locality : localities) {
+					    Key key =
+					        failed
+					            ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(locality)
+					            : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality")
+					                  .withSuffix(locality);
+					    ryw->clear(key);
+				    }
+			    }
+			    TraceEvent("IncludeLocalitiesCommit")
+			        .detail("Localities", describe(localities))
+			        .detail("Failed", failed)
+			        .detail("IncludeAll", includeAll);
+			    return Void();
+		    },
+		    "IncludeLocalitiesError");
+		co_return;
 	} else {
 		Transaction tr(cx);
 		while (true) {
@@ -1785,11 +1798,12 @@ Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass process
 			bool foundChange = false;
 			for (int i = 0; i < workers.size(); i++) {
 				if (server.excludes(workers[i].address)) {
-					if (processClass.classType() != ProcessClass::InvalidClass)
+					if (processClass.classType() != ProcessClass::InvalidClass) {
 						tr.set(processClassKeyFor(workers[i].locality.processId().get()),
 						       processClassValue(processClass));
-					else
+					} else {
 						tr.clear(processClassKeyFor(workers[i].locality.processId().get()));
+					}
 					foundChange = true;
 				}
 			}
@@ -2882,6 +2896,14 @@ Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware) {
 	ASSERT(jobState.getPhase() == BulkLoadJobPhase::Submitted);
 
+	// TODO(BulkLoad): validate cluster preconditions before accepting the job.
+	// BulkLoad requires shard_encode_location_metadata=1 and enable_read_lock_on_range=1,
+	// plus a storage engine that supports SST ingestion. Without these, this function and
+	// setBulkLoadMode both succeed, but the Data Distributor never dispatches the job and
+	// any restore that triggered it stalls in "State: running, Tasks: 0/0" forever.
+	// This check must read live cluster knob state — SERVER_KNOBS in fdbclient is the
+	// caller's local defaults and tells us nothing about the cluster.
+
 	Transaction tr(cx);
 	while (true) {
 		Error err;
@@ -3556,389 +3578,6 @@ Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx) {
 	co_return progress;
 }
 
-// Persist a new owner if input ownerUniqueID is not existing; Update description if input ownerUniqueID exists
-Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description) {
-	if (ownerUniqueID.empty() || description.empty()) {
-		throw range_lock_failed();
-	}
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> res = co_await tr.get(rangeLockOwnerKeyFor(ownerUniqueID));
-			RangeLockOwner owner;
-			if (res.present()) {
-				owner = decodeRangeLockOwner(res.get());
-				ASSERT(owner.isValid());
-				if (owner.getDescription() == description) {
-					co_return;
-				}
-				owner.setDescription(description);
-			} else {
-				owner = RangeLockOwner(ownerUniqueID, description);
-			}
-			tr.set(rangeLockOwnerKeyFor(ownerUniqueID), rangeLockOwnerValue(owner));
-			co_await tr.commit();
-			co_return;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
-Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID) {
-	if (ownerUniqueID.empty()) {
-		throw range_lock_failed();
-	}
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> res = co_await tr.get(rangeLockOwnerKeyFor(ownerUniqueID));
-			if (!res.present()) {
-				co_return;
-			}
-			RangeLockOwner owner = decodeRangeLockOwner(res.get());
-			ASSERT(owner.isValid());
-			tr.clear(rangeLockOwnerKeyFor(ownerUniqueID));
-			co_await tr.commit();
-			co_return;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
-Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID) {
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> res = co_await tr.get(rangeLockOwnerKeyFor(ownerUniqueID));
-			if (!res.present()) {
-				co_return Optional<RangeLockOwner>();
-			}
-			RangeLockOwner owner = decodeRangeLockOwner(res.get());
-			ASSERT(owner.isValid());
-			co_return owner;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
-AsyncResult<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
-	std::vector<RangeLockOwner> res;
-	Key beginKey = rangeLockOwnerKeys.begin;
-	Key endKey = rangeLockOwnerKeys.end;
-	Transaction tr(cx);
-	while (beginKey < endKey) {
-		KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-		Error err;
-		try {
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult result = co_await tr.getRange(rangeToRead, CLIENT_KNOBS->TOO_MANY);
-			for (const auto& kv : result) {
-				RangeLockOwner owner = decodeRangeLockOwner(kv.value);
-				ASSERT(owner.isValid());
-				res.push_back(owner);
-				beginKey = keyAfter(kv.key);
-			}
-			if (!result.more) {
-				break;
-			}
-			continue;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-	co_return res;
-}
-
-// Not transactional
-Future<std::vector<std::pair<KeyRange, RangeLockState>>>
-findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwnerName> ownerName) {
-	if (range.end > normalKeys.end) {
-		throw range_lock_failed();
-	}
-	std::vector<std::pair<KeyRange, RangeLockState>> lockedRanges;
-	Key beginKey = range.begin;
-	Key endKey = range.end;
-	Transaction tr(cx);
-	while (beginKey < endKey) {
-		KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-		Error err;
-		try {
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult result = co_await krmGetRanges(&tr, rangeLockPrefix, rangeToRead);
-			if (result.empty()) {
-				break;
-			}
-			for (int i = 0; i < static_cast<int>(result.size()) - 1; i++) {
-				if (result[i].value.empty()) {
-					continue;
-				}
-				RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(result[i].value);
-				ASSERT(rangeLockStateSet.isValid());
-				if (rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
-				    (!ownerName.present() ||
-				     ownerName.get() == rangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId())) {
-					// Exclusive lock can only have one lock in the set, so we just check the first lock in the set
-					lockedRanges.push_back(std::make_pair(Standalone(KeyRangeRef(result[i].key, result[i + 1].key)),
-					                                      rangeLockStateSet.getAllLockStats()[0]));
-				}
-			}
-			beginKey = result.back().key;
-			continue;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-	co_return lockedRanges;
-}
-
-// Validate the input range and owner.
-// If invalid, reject the request by throwing range_lock_failed error.
-// If the range has been locked, reject the request by throwing range_lock_reject error.
-Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
-	// Check input range
-	if (range.end > normalKeys.end) {
-		TraceEvent(SevDebug, "PrepareExclusiveRangeLockOperationFailed")
-		    .detail("Reason", "Range out of scope")
-		    .detail("Range", range);
-		throw range_lock_failed();
-	}
-	// Check owner
-	Optional<Value> ownerValue = co_await tr->get(rangeLockOwnerKeyFor(ownerUniqueID));
-	if (!ownerValue.present()) {
-		TraceEvent(SevDebug, "PrepareExclusiveRangeLockOperationFailed")
-		    .detail("Reason", "Owner not found")
-		    .detail("Owner", ownerUniqueID)
-		    .detail("Range", range);
-		throw range_lock_failed();
-	}
-	RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
-	ASSERT(owner.isValid());
-	// Check lock state on the entire input range. Throw exception if the range has been locked by a different owner.
-	Key beginKey = range.begin;
-	Key endKey = range.end;
-	KeyRange rangeToRead;
-	while (beginKey < endKey) {
-		rangeToRead = KeyRangeRef(beginKey, endKey);
-		RangeResult res = co_await krmGetRanges(tr, rangeLockPrefix, rangeToRead);
-		if (res.empty()) {
-			break;
-		}
-		for (int i = 0; i < static_cast<int>(res.size()) - 1; i++) {
-			if (res[i].value.empty()) {
-				continue;
-			}
-			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
-			ASSERT(rangeLockStateSet.isValid());
-			auto lockSet = rangeLockStateSet.getLocks();
-			if (!lockSet.empty() && (!rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) ||
-			                         lockSet.find(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range)
-			                                          .getLockUniqueString()) == lockSet.end())) {
-				TraceEvent(SevDebug, "PrepareExclusiveRangeLockOperationFailed")
-				    .detail("Reason", "Locked")
-				    .detail("NewLockType", RangeLockType::ExclusiveReadLock)
-				    .detail("NewLockRange", range)
-				    .detail("NewLockOwner", ownerUniqueID)
-				    .detail("ExistingLocks", rangeLockStateSet.toString());
-				throw range_lock_reject(); // Has been locked
-			}
-		}
-		beginKey = res.back().key;
-	}
-}
-
-Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
-	// Check input range
-	if (range.end > normalKeys.end) {
-		TraceEvent(SevDebug, "PrepareExclusiveRangeUnlockOperationFailed")
-		    .detail("Reason", "Range out of scope")
-		    .detail("Range", range);
-		throw range_lock_failed();
-	}
-	// Check owner
-	Optional<Value> ownerValue = co_await tr->get(rangeLockOwnerKeyFor(ownerUniqueID));
-	if (!ownerValue.present()) {
-		TraceEvent(SevDebug, "PrepareExclusiveRangeUnlockOperationFailed")
-		    .detail("Reason", "Owner not found")
-		    .detail("Owner", ownerUniqueID)
-		    .detail("Range", range);
-		throw range_lock_failed();
-	}
-	RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
-	ASSERT(owner.isValid());
-
-	// Check lock state on the entire input range. Throw exception if the range has been locked by a different owner.
-	Key beginKey = range.begin;
-	Key endKey = range.end;
-	KeyRange rangeToRead;
-	while (beginKey < endKey) {
-		rangeToRead = KeyRangeRef(beginKey, endKey);
-		RangeResult res = co_await krmGetRanges(tr, rangeLockPrefix, rangeToRead);
-		if (res.empty()) {
-			break;
-		}
-		for (int i = 0; i < static_cast<int>(res.size()) - 1; i++) {
-			if (res[i].value.empty()) {
-				continue;
-			}
-			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
-			ASSERT(rangeLockStateSet.isValid());
-			auto lockSet = rangeLockStateSet.getLocks();
-			if (!lockSet.empty() && (!rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) ||
-			                         lockSet.find(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range)
-			                                          .getLockUniqueString()) == lockSet.end())) {
-				TraceEvent(SevDebug, "PrepareExclusiveRangeUnlockOperationFailed")
-				    .detail("Reason", "Has been locked by a different user or the same user with a different range")
-				    .detail("UnLockOwner", ownerUniqueID)
-				    .detail("UnLockRange", range)
-				    .detail("ExistingLocks", rangeLockStateSet.toString());
-				throw range_unlock_reject();
-			}
-		}
-		beginKey = res.back().key;
-	}
-}
-
-// Transactional. One transaction can call takeExclusiveReadLockOnRange at most for one time.
-// This is the limitation of the krmSetRangeCoalescing.
-Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	// Add conflict range
-	tr->addWriteConflictRange(range);
-	co_await prepareExclusiveRangeLockOperation(tr, range, ownerUniqueID);
-	// At this point, no lock presents on the range.
-	// Lock range by writting the range.
-	RangeLockStateSet rangeLockStateSet;
-	rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range));
-	co_await krmSetRange(tr, rangeLockPrefix, range, rangeLockStateSetValue(rangeLockStateSet));
-	TraceEvent(SevInfo, "TakeExclusiveReadLockTransactionOnRange").detail("Range", range);
-}
-
-// Transactional. One transaction can call releaseExclusiveReadLockOnRange at most for one time.
-// This is the limitation of the krmSetRangeCoalescing.
-Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	co_await prepareExclusiveRangeUnlockOperation(tr, range, ownerUniqueID);
-	// At this point, no lock presents on the range.
-	// Unlock by overwiting the range.
-	co_await krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, rangeLockStateSetValue(RangeLockStateSet()));
-	TraceEvent(SevInfo, "ReleaseExclusiveReadLockTransactionOnRange").detail("Range", range);
-}
-
-Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID) {
-	Key beginKey = normalKeys.begin;
-	Key endKey = normalKeys.end;
-	Transaction tr(cx);
-	int i = 0;
-	RangeResult result;
-	KeyRange rangeToRead;
-	RangeLockStateSet currentRangeLockStateSet;
-	KeyRange currentRange;
-	Key beginKeyToClear;
-	Key endKeyToClear;
-	while (beginKey < endKey) {
-		rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-		Error err;
-		try {
-			tr.reset();
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			result.clear();
-			result = co_await krmGetRanges(&tr, rangeLockPrefix, rangeToRead);
-			if (result.empty()) {
-				break;
-			}
-			i = 0;
-			beginKeyToClear = result[0].key;
-			endKeyToClear = result[0].key; // Expanding when currentRange is valid to clear
-			for (; i < static_cast<int>(result.size()) - 1; i++) {
-				currentRange = KeyRangeRef(result[i].key, result[i + 1].key);
-				if (result[i].value.empty()) {
-					endKeyToClear = currentRange.end;
-					continue;
-				}
-				currentRangeLockStateSet = decodeRangeLockStateSet(result[i].value);
-				ASSERT(currentRangeLockStateSet.isValid());
-				if (currentRangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
-				    currentRangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId() == ownerUniqueID) {
-					// If this range is exclusively locked by the input owner, we will clear it.
-					endKeyToClear = currentRange.end;
-					continue;
-				}
-				break;
-			}
-			if (beginKeyToClear != endKeyToClear) {
-				ASSERT(endKeyToClear > beginKeyToClear);
-				co_await krmSetRangeCoalescing(&tr,
-				                               rangeLockPrefix,
-				                               KeyRangeRef(beginKeyToClear, endKeyToClear),
-				                               normalKeys,
-				                               rangeLockStateSetValue(RangeLockStateSet()));
-				co_await tr.commit();
-			}
-			beginKey = currentRange.end; // We skip the currentRange if it is not locked by the input owner.
-			continue;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
-// Transactional
-Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID) {
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			co_await takeExclusiveReadLockOnRange(&tr, range, ownerUniqueID);
-			co_await tr.commit();
-			TraceEvent(SevInfo, "TakeExclusiveReadLockOnRange").detail("Range", range);
-			break;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
-// Transactional
-Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID) {
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			co_await releaseExclusiveReadLockOnRange(&tr, range, ownerUniqueID);
-			co_await tr.commit();
-			TraceEvent(SevInfo, "ReleaseExclusiveReadLockOnRange").detail("Range", range);
-			break;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
-	}
-}
-
 Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
 	ReadYourWritesTransaction tr(cx);
 
@@ -3960,173 +3599,6 @@ Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
 			err = e;
 		}
 		co_await tr.onError(err);
-	}
-}
-
-json_spirit::Value_type normJSONType(json_spirit::Value_type type) {
-	if (type == json_spirit::int_type)
-		return json_spirit::real_type;
-	return type;
-}
-
-void schemaCoverage(std::string const& spath, bool covered) {
-	static std::map<bool, std::set<std::string>> coveredSchemaPaths;
-
-	if (coveredSchemaPaths[covered].insert(spath).second) {
-		TraceEvent ev(SevInfo, "CodeCoverage");
-		ev.detail("File", "documentation/StatusSchema.json/" + spath).detail("Line", 0);
-		if (!covered)
-			ev.detail("Covered", 0);
-	}
-}
-
-bool schemaMatch(json_spirit::mValue const& schemaValue,
-                 json_spirit::mValue const& resultValue,
-                 std::string& errorStr,
-                 Severity sev,
-                 bool checkCoverage,
-                 std::string path,
-                 std::string schemaPath) {
-	// Returns true if everything in `result` is permitted by `schema`
-	bool ok = true;
-
-	try {
-		if (normJSONType(schemaValue.type()) != normJSONType(resultValue.type())) {
-			errorStr += format("ERROR: Incorrect value type for key `%s'\n", path.c_str());
-			TraceEvent(sev, "SchemaMismatch")
-			    .detail("Path", path)
-			    .detail("SchemaType", schemaValue.type())
-			    .detail("ValueType", resultValue.type());
-			return false;
-		}
-
-		if (resultValue.type() == json_spirit::obj_type) {
-			auto& result = resultValue.get_obj();
-			auto& schema = schemaValue.get_obj();
-
-			for (auto& rkv : result) {
-				auto& key = rkv.first;
-				auto& rv = rkv.second;
-				std::string kpath = path + "." + key;
-				std::string spath = schemaPath + "." + key;
-
-				if (checkCoverage) {
-					schemaCoverage(spath);
-				}
-
-				if (!schema.contains(key)) {
-					errorStr += format("ERROR: Unknown key `%s'\n", kpath.c_str());
-					TraceEvent(sev, "SchemaMismatch").detail("Path", kpath).detail("SchemaPath", spath);
-					ok = false;
-					continue;
-				}
-				auto& sv = schema.at(key);
-
-				if (sv.type() == json_spirit::obj_type && sv.get_obj().contains("$enum")) {
-					auto& enum_values = sv.get_obj().at("$enum").get_array();
-
-					bool any_match = false;
-					for (auto& enum_item : enum_values)
-						if (enum_item == rv) {
-							any_match = true;
-							if (checkCoverage) {
-								schemaCoverage(spath + ".$enum." + enum_item.get_str());
-							}
-							break;
-						}
-					if (!any_match) {
-						errorStr += format("ERROR: Unknown value `%s' for key `%s'\n",
-						                   json_spirit::write_string(rv).c_str(),
-						                   kpath.c_str());
-						TraceEvent(sev, "SchemaMismatch")
-						    .detail("Path", kpath)
-						    .detail("SchemaEnumItems", enum_values.size())
-						    .detail("Value", json_spirit::write_string(rv));
-						if (checkCoverage) {
-							schemaCoverage(spath + ".$enum." + json_spirit::write_string(rv));
-						}
-						ok = false;
-					}
-				} else if (sv.type() == json_spirit::obj_type && sv.get_obj().contains("$map")) {
-					if (rv.type() != json_spirit::obj_type) {
-						errorStr += format("ERROR: Expected an object as the value for key `%s'\n", kpath.c_str());
-						TraceEvent(sev, "SchemaMismatch")
-						    .detail("Path", kpath)
-						    .detail("SchemaType", sv.type())
-						    .detail("ValueType", rv.type());
-						ok = false;
-						continue;
-					}
-					if (sv.get_obj().at("$map").type() != json_spirit::obj_type) {
-						continue;
-					}
-					auto& schemaVal = sv.get_obj().at("$map");
-					auto& valueObj = rv.get_obj();
-
-					if (checkCoverage) {
-						schemaCoverage(spath + ".$map");
-					}
-
-					for (auto& valuePair : valueObj) {
-						auto vpath = kpath + "[" + valuePair.first + "]";
-						auto upath = spath + ".$map";
-						if (valuePair.second.type() != json_spirit::obj_type) {
-							errorStr += format("ERROR: Expected an object for `%s'\n", vpath.c_str());
-							TraceEvent(sev, "SchemaMismatch")
-							    .detail("Path", vpath)
-							    .detail("ValueType", valuePair.second.type());
-							ok = false;
-							continue;
-						}
-						if (!schemaMatch(schemaVal, valuePair.second, errorStr, sev, checkCoverage, vpath, upath)) {
-							ok = false;
-						}
-					}
-				} else {
-					if (!schemaMatch(sv, rv, errorStr, sev, checkCoverage, kpath, spath)) {
-						ok = false;
-					}
-				}
-			}
-		} else if (resultValue.type() == json_spirit::array_type) {
-			auto& valueArray = resultValue.get_array();
-			auto& schemaArray = schemaValue.get_array();
-			if (schemaArray.empty()) {
-				// An empty schema array means that the value array is required to be empty
-				if (!valueArray.empty()) {
-					errorStr += format("ERROR: Expected an empty array for key `%s'\n", path.c_str());
-					TraceEvent(sev, "SchemaMismatch")
-					    .detail("Path", path)
-					    .detail("SchemaSize", schemaArray.size())
-					    .detail("ValueSize", valueArray.size());
-					return false;
-				}
-			} else if (schemaArray.size() == 1) {
-				// A one item schema array means that all items in the value must match the first item in the schema
-				int index = 0;
-				for (auto& valueItem : valueArray) {
-					if (!schemaMatch(schemaArray[0],
-					                 valueItem,
-					                 errorStr,
-					                 sev,
-					                 checkCoverage,
-					                 path + format("[%d]", index),
-					                 schemaPath + "[0]")) {
-						ok = false;
-					}
-					index++;
-				}
-			} else {
-				ASSERT(false); // Schema doesn't make sense
-			}
-		}
-		return ok;
-	} catch (std::exception& e) {
-		TraceEvent(SevError, "SchemaMatchException")
-		    .detail("What", e.what())
-		    .detail("Path", path)
-		    .detail("SchemaPath", schemaPath);
-		throw unknown_error();
 	}
 }
 
@@ -4190,7 +3662,7 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 			                        false,
 			                        1,
 			                        data.locality,
-			                        ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
+			                        makeReference<simulator::ProcessInfoMetadata>("coordinator"),
 			                        "",
 			                        "",
 			                        currentProtocolVersion(),

@@ -1,0 +1,36 @@
+name: clang-format
+
+on:
+  pull_request:
+    branches:
+      - main
+      - release-7.4
+
+permissions:
+  contents: read
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          # by default PR virtual "merge" commit is checked-out
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: tool versions
+        run: |
+          sudo apt-get update
+          sudo apt-get install clang-format-19
+
+      - name: clang-format
+        # skip contrib dir, find all files named *.c/h/cpp/hpp,
+        # run clang-format 19.x on each file, in-place modifications
+        run: |
+          find . -name contrib -prune -or -type f \
+                 '(' -name \*.c -or -name \*.cpp -or -name \*.h -or -name \*.hpp ')' \
+                 -exec clang-format-19 -i '{}' \;
+
+          git diff --exit-code
