@@ -82,14 +82,16 @@ function discover_network_environment() {
 function create_server_environment() {
     FDB_IP_VERSION=${FDB_IP_VERSION:-v4}
 
-    discover_network_environment
+    if [[ -z "$PUBLIC_IP" ]]; then
+        discover_network_environment
+    fi
 
     if [[ "$FDB_IP_VERSION" == *'4'* ]]; then
-        export LISTEN_IP='0.0.0.0'
-        export PUBLIC_IP="$PUBLIC_IP4"
+        export LISTEN_IP=${LISTEN_IP:-'0.0.0.0'}
+        export PUBLIC_IP=${PUBLIC_IP:-$PUBLIC_IP4}
     elif [[ "$FDB_IP_VERSION" == *'6'* ]]; then
-        export LISTEN_IP='[::]'
-        export PUBLIC_IP="$PUBLIC_IP6"
+        export LISTEN_IP=${LISTEN_IP:-'[::]'}
+        export PUBLIC_IP=${PUBLIC_IP:-$PUBLIC_IP6}
     else
         echo "Unknown FDB IP version \"$FDB_IP_VERSION\"" 1>&2
         exit 1
