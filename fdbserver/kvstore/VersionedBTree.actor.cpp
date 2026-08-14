@@ -3084,16 +3084,14 @@ public:
 
 	// Read the physical extent at given pageID
 	// NOTE that we use the same interface (<ArenaPage>) for the extent as the page
-	ACTOR static Future<Reference<ArenaPage>> readPhysicalExtent(DWALPager* self,
-	                                                             PhysicalPageID pageID,
-	                                                             int readSize = 0) {
+	static Future<Reference<ArenaPage>> readPhysicalExtent(DWALPager* self, PhysicalPageID pageID, int readSize = 0) {
 		// First take the concurrentExtentReads lock to avoid issuing too many reads concurrently
-		wait(self->concurrentExtentReads->take());
+		co_await self->concurrentExtentReads->take();
 
 		ASSERT(!self->memoryOnly);
 
 		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
-			wait(delay(0, TaskPriority::DiskRead));
+			co_await delay(0, TaskPriority::DiskRead);
 		}
 
 		// readSize may not be equal to the physical extent size (for the first and last extents)
@@ -3102,7 +3100,7 @@ public:
 			readSize = self->physicalExtentSize;
 		}
 
-		state Reference<ArenaPage> extent = makeReference<ArenaPage>(readSize, readSize);
+		auto extent = makeReference<ArenaPage>(readSize, readSize);
 
 		// physicalReadSize is the size of disk read we intend to issue
 		auto physicalReadSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_READ_SIZE;
@@ -3147,7 +3145,7 @@ public:
 		}
 
 		// wait for all the parallel read futures for the given extent
-		wait(waitForAll(reads));
+		co_await waitForAll(reads);
 
 		debug_printf("DWALPager(%s) op=readPhysicalExtentComplete %s ptr=%p bytes=%d file offset=%d\n",
 		             self->filename.c_str(),
@@ -3156,7 +3154,7 @@ public:
 		             readSize,
 		             (pageID * self->physicalPageSize));
 
-		return extent;
+		co_return extent;
 	}
 
 	Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) override {
@@ -5905,29 +5903,29 @@ private:
 		co_return records;
 	}
 
-	ACTOR static Future<Reference<const ArenaPage>> readPage(VersionedBTree* self,
-	                                                         PagerEventReasons reason,
-	                                                         unsigned int level,
-	                                                         IPagerSnapshot* snapshot,
-	                                                         BTreeNodeLinkRef id,
-	                                                         int priority,
-	                                                         bool forLazyClear,
-	                                                         bool cacheable) {
+	static Future<Reference<const ArenaPage>> readPage(VersionedBTree* self,
+	                                                   PagerEventReasons reason,
+	                                                   unsigned int level,
+	                                                   IPagerSnapshot* snapshot,
+	                                                   BTreeNodeLinkRef id,
+	                                                   int priority,
+	                                                   bool forLazyClear,
+	                                                   bool cacheable) {
 
 		debug_printf("readPage() op=read%s %s @%" PRId64 "\n",
 		             forLazyClear ? "ForDeferredClear" : "",
 		             toString(id).c_str(),
 		             snapshot->getVersion());
 
-		state Reference<const ArenaPage> page;
+		Reference<const ArenaPage> page;
 		if (id.size() == 1) {
 			Reference<const ArenaPage> p =
-			    wait(snapshot->getPhysicalPage(reason, level, id.front(), priority, cacheable, false));
+			    co_await snapshot->getPhysicalPage(reason, level, id.front(), priority, cacheable, false);
 			page = std::move(p);
 		} else {
 			ASSERT(!id.empty());
 			Reference<const ArenaPage> p =
-			    wait(snapshot->getMultiPhysicalPage(reason, level, id, priority, cacheable, false));
+			    co_await snapshot->getMultiPhysicalPage(reason, level, id, priority, cacheable, false);
 			page = std::move(p);
 		}
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
@@ -5936,7 +5934,7 @@ private:
 		metrics.pageRead += 1;
 		metrics.pageReadExt += (id.size() - 1);
 
-		return std::move(page);
+		co_return page;
 	}
 
 	// Get cursor into a BTree node, creating decode cache from boundaries if needed
