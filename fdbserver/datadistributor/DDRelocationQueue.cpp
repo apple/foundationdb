@@ -147,6 +147,27 @@ static bool shouldRetryDestinationTeamFailure(bool doBulkLoading, RelocateData c
 	return !doBulkLoading;
 }
 
+// Simulation-only test hook, off by default: a team rarely goes unhealthy inside the window a
+// bulkload move is in flight, so the retry and give-up paths need the failure injected. The budget is
+// a count spent on one task, because the give-up path bounds a single task's restartCount and a
+// budget spread across tasks never reaches it.
+static bool injectBulkLoadDestinationTeamFailure(bool doBulkLoading, RelocateData const& rd) {
+	static int injected = 0;
+	static UID targetTaskId;
+	if (!doBulkLoading || !g_network->isSimulated() ||
+	    injected >= SERVER_KNOBS->BULKLOAD_SIM_INJECT_DEST_TEAM_FAILURES) {
+		return false;
+	}
+	UID const taskId = rd.bulkLoadTask.get().coreState.getTaskId();
+	if (!targetTaskId.isValid()) {
+		targetTaskId = taskId;
+	} else if (targetTaskId != taskId) {
+		return false;
+	}
+	++injected;
+	return true;
+}
+
 static bool shouldYieldDestinationFailureRetry(RelocateData const& retry, RelocateData const& queued) {
 	bool isSplit = retry.reason == RelocateReason::SIZE_SPLIT || retry.reason == RelocateReason::WRITE_SPLIT;
 	return isSplit && retry.keys != queued.keys && retry.keys.contains(queued.keys);
@@ -2303,7 +2324,8 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							break;
 						}
 					} else if (res.index() == 1) {
-						if (!healthyDestinations.isHealthy()) {
+						if (!healthyDestinations.isHealthy() ||
+						    injectBulkLoadDestinationTeamFailure(doBulkLoading, rd)) {
 							if (!signalledTransferComplete) {
 								signalledTransferComplete = true;
 								self->dataTransferComplete.send(rd);
