@@ -49,9 +49,27 @@
 // roots comparable even though shard boundaries move: the root depends only on
 // the multiset of key-value pairs (and keys are unique), not on the partition.
 //
-// A mismatch of two roots can be localized by comparing the persisted per-range
-// digests and, because the combine is additive, by re-running a digest over a
-// narrower key range to bisect the divergent region.
+// Precondition: the digest must be taken over a QUIESCENT cluster. Each storage
+// server folds the key-values it currently owns at its own current read version,
+// and the additive combine assumes every key-value is folded exactly once. Both
+// assumptions break under activity: concurrent writes let servers hash at
+// inconsistent versions, and in-flight data-distribution movement lets a key be
+// double-counted (by both the losing and the gaining server) or missed (owned by
+// neither at the instant it is read) -- either yields a wrong root. Callers must
+// wait for writes to stop and data movement to drain (moving_data -> 0) before
+// reading, on both the before and after sides of a comparison.
+//
+// TODO: the quiescence requirement is an implementation choice, not inherent to
+// the construction. Folding every server against a single pinned cluster read
+// version, with an ownership snapshot consistent with that version, would make
+// the digest correct online (no quiescence needed) by restoring the exactly-once
+// and single-version invariants the MVCC way. Unnecessary for the backup/restore
+// use case (which compares two settled states) but would generalize the primitive.
+//
+// A mismatch of two roots can be localized by re-running a digest over narrower
+// key ranges to bisect the divergent region, which the additive combine makes
+// valid at any granularity. The per-range digests are not available for this:
+// they are progress metadata, cleared when the audit reaches Complete.
 struct RangeDigest {
 	// Big-endian 256-bit accumulator (most-significant byte first). Zero is the
 	// identity for combine and the digest of the empty set.
