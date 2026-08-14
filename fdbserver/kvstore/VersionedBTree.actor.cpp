@@ -5934,7 +5934,7 @@ private:
 		metrics.pageRead += 1;
 		metrics.pageReadExt += (id.size() - 1);
 
-		co_return std::move(page);
+		co_return page;
 	}
 
 	// Get cursor into a BTree node, creating decode cache from boundaries if needed
