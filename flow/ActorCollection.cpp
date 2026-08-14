@@ -20,7 +20,6 @@
 
 #include "flow/ActorCollection.h"
 #include "flow/CoroUtils.h"
-#include "flow/IndexedSet.h"
 #include "flow/UnitTest.h"
 #include <boost/intrusive/list.hpp>
 #include <string>
@@ -36,7 +35,7 @@ static LineageReference actorCollectionLineage(LineageReference const& parent) {
 
 class ActorCollectionRuntime;
 
-// Owns a child callback and preserves its intrusive-list membership until completion or cancellation.
+// Owns a child callback and intrusive-list membership; completion may synchronously destroy it.
 class Runner final : public boost::intrusive::list_base_hook<>,
                      public Callback<Void>,
                      public FastAllocated<Runner>,
@@ -71,22 +70,9 @@ private:
 // An intrusive list of Runners, which are FastAllocated.
 using RunnerList = boost::intrusive::list<Runner, boost::intrusive::constant_time_size<false>>;
 
-// Disposes remaining runners in insertion order before their intrusive list is destroyed.
-class RunnerListDestroyer final : NonCopyable {
-public:
-	explicit RunnerListDestroyer(RunnerList* list) : list(list) {}
-
-	~RunnerListDestroyer() {
-		list->clear_and_dispose([](Runner* r) { delete r; });
-	}
-
-private:
-	RunnerList* list;
-};
-
 // Coordinates queued additions, child completion, and reentrant-safe collection teardown.
 class ActorCollectionRuntime final : NonCopyable {
-	// Keeps the add stream's single callback registered for the runtime's active lifetime.
+	// Keeps the add callback registered; terminal delivery may synchronously destroy it.
 	class AddActorCallback final : public SingleCallback<Future<Void>> {
 	public:
 		explicit AddActorCallback(ActorCollectionRuntime* owner) : owner(owner) {}
@@ -107,7 +93,7 @@ public:
 	                       double* allTime,
 	                       bool returnWhenEmptied)
 	  : addActor(std::move(addActor)), pCount(pCount), lastChangeTime(lastChangeTime), idleTime(idleTime),
-	    allTime(allTime), returnWhenEmptied(returnWhenEmptied), runnersDestroyer(&runners), addActorCallback(this) {
+	    allTime(allTime), returnWhenEmptied(returnWhenEmptied), addActorCallback(this) {
 		if (!this->pCount) {
 			this->pCount = &count;
 		}
@@ -197,11 +183,13 @@ private:
 
 	void addRunner(Future<Void> actor) {
 		auto runner = runners.insert(runners.end(), *new Runner(this));
+		// Synchronous completion stays queued until this runner has been counted.
 		runner->start(std::move(actor));
 		incrementCount();
 	}
 
 	void handleAdded(Future<Void> actor) {
+		ASSERT(draining);
 		// Completing inline must not outrun an earlier queued addition.
 		if (!runners.empty() || !actor.isReady() || addActor.isReady() || !pendingAdds.empty()) {
 			addRunner(std::move(actor));
@@ -211,6 +199,7 @@ private:
 		if (actor.isError()) {
 			Error e = actor.getError();
 			if (e.code() == error_code_actor_cancelled) {
+				// Cancelled children do not report completion and remain counted until teardown.
 				addRunner(std::move(actor));
 				return;
 			}
@@ -324,7 +313,6 @@ private:
 	bool returnWhenEmptied;
 	int count = 0;
 	RunnerList runners;
-	RunnerListDestroyer runnersDestroyer;
 	Promise<Void> done;
 	AddActorCallback addActorCallback;
 	Runner* completedHead = nullptr;
@@ -403,14 +391,14 @@ void ActorCollectionRuntime::AddActorCallback::error(Error e) {
 	owner->onAddError(e);
 }
 
+// Collections that never return on empty normally end by cancellation without unwinding.
 static Future<Void> actorCollectionImpl(FutureStream<Future<Void>> addActor,
                                         int* pCount,
                                         double* lastChangeTime,
                                         double* idleTime,
                                         double* allTime,
-                                        bool returnWhenEmptied,
                                         NoThrowOnCancel = {}) {
-	ActorCollectionRuntime runtime(std::move(addActor), pCount, lastChangeTime, idleTime, allTime, returnWhenEmptied);
+	ActorCollectionRuntime runtime(std::move(addActor), pCount, lastChangeTime, idleTime, allTime, false);
 	Future<Void> result = runtime.getResult();
 	runtime.start();
 	co_await result;
@@ -436,25 +424,8 @@ Future<Void> actorCollection(FutureStream<Future<Void>> const& addActor,
 	if (returnWhenEmptied) {
 		return actorCollectionUntilEmpty(addActor, pCount, lastChangeTime, idleTime, allTime);
 	}
-	return actorCollectionImpl(addActor, pCount, lastChangeTime, idleTime, allTime, returnWhenEmptied);
+	return actorCollectionImpl(addActor, pCount, lastChangeTime, idleTime, allTime);
 }
-
-template <class T, class U>
-struct Traceable<std::pair<T, U>> {
-	static constexpr bool value = Traceable<T>::value && Traceable<U>::value;
-	static std::string toString(const std::pair<T, U>& p) {
-		auto tStr = Traceable<T>::toString(p.first);
-		auto uStr = Traceable<U>::toString(p.second);
-		std::string result(tStr.size() + uStr.size() + 3, 'x');
-		std::copy(tStr.begin(), tStr.end(), result.begin());
-		auto iter = result.begin() + tStr.size();
-		*(iter++) = ' ';
-		*(iter++) = '-';
-		*(iter++) = ' ';
-		std::copy(uStr.begin(), uStr.end(), iter);
-		return result;
-	}
-};
 
 void forceLinkActorCollectionTests() {}
 
@@ -518,6 +489,20 @@ static Future<Void> recancelCollectionOnActorCancellation(Future<Void> pending,
 	}
 }
 
+static Future<Void> reclearNoErrorsCollectionOnActorCancellation(Future<Void> pending,
+                                                                 ActorCollectionNoErrors* collection,
+                                                                 int* cancellationCount) {
+	try {
+		co_await pending;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			++*cancellationCount;
+			collection->clear();
+		}
+		throw;
+	}
+}
+
 // test contract that actors are cancelled when the actor collection is cleared
 TEST_CASE("/flow/actorCollection/testCancel") {
 	ActorCollection actorCollection(false);
@@ -566,16 +551,40 @@ TEST_CASE("/flow/actorCollection/testCancelReentrantSiblingCompletion") {
 TEST_CASE("/flow/actorCollection/testCancelReentrantCollection") {
 	for (bool returnWhenEmptied : { false, true }) {
 		for (bool clearCollection : { false, true }) {
-			ActorCollection collection(returnWhenEmptied);
-			Promise<Void> pending;
-			int cancellationCount = 0;
-			collection.add(recancelCollectionOnActorCancellation(
-			    pending.getFuture(), &collection, returnWhenEmptied, clearCollection, &cancellationCount));
-			collection.clear(returnWhenEmptied);
-			ASSERT_EQ(cancellationCount, 1);
-			ASSERT(!collection.getResult().isReady());
+			for (bool nestedReturnWhenEmptied : { false, true }) {
+				ActorCollection collection(returnWhenEmptied);
+				Promise<Void> pending;
+				int cancellationCount = 0;
+				collection.add(recancelCollectionOnActorCancellation(
+				    pending.getFuture(), &collection, nestedReturnWhenEmptied, clearCollection, &cancellationCount));
+				collection.clear(returnWhenEmptied);
+				ASSERT_EQ(cancellationCount, 1);
+				Future<Void> replacement = collection.getResult();
+				ASSERT(!replacement.isReady());
+				collection.add(Void());
+				ASSERT_EQ(replacement.isReady(), clearCollection ? nestedReturnWhenEmptied : returnWhenEmptied);
+			}
 		}
 	}
+	return Void();
+}
+
+TEST_CASE("/flow/actorCollection/testCancelReentrantNoErrorsCollection") {
+	ActorCollectionNoErrors collection;
+	Promise<Void> pending;
+	int cancellationCount = 0;
+	collection.add(reclearNoErrorsCollectionOnActorCancellation(pending.getFuture(), &collection, &cancellationCount));
+	ASSERT_EQ(collection.size(), 1);
+
+	collection.clear();
+	ASSERT_EQ(cancellationCount, 1);
+	ASSERT_EQ(collection.size(), 0);
+
+	Promise<Void> replacement;
+	collection.add(replacement.getFuture());
+	ASSERT_EQ(collection.size(), 1);
+	replacement.send(Void());
+	ASSERT_EQ(collection.size(), 0);
 	return Void();
 }
 

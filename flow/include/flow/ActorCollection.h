@@ -54,7 +54,11 @@ private:
 public:
 	ActorCollectionNoErrors() { init(); }
 	void clear() {
-		m_ac = Future<Void>();
+		Future<Void> previous = m_ac;
+		previous.cancel();
+		if (m_ac != previous) {
+			return;
+		}
 		init();
 	}
 	void add(Future<Void> actor) { m_add.send(actor); }
@@ -73,6 +77,7 @@ public:
 
 	void add(Future<Void> a) { m_add.send(a); }
 	Future<Void> getResult() const { return m_out; }
+	// A reentrant clear retains the innermost replacement and its returnWhenEmptied setting.
 	void clear(bool returnWhenEmptied) {
 		Future<Void> previous = m_out;
 		previous.cancel();
