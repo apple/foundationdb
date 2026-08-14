@@ -1961,13 +1961,13 @@ public:
 		    .detail("TotalBytesLost", bytesLost);
 	}
 
-	ACTOR static Future<Void> storageServerFailureTracker(DDTeamCollection* self,
-	                                                      TCServerInfo* server,
-	                                                      ServerStatus* status,
-	                                                      Version addedVersion) {
-		state StorageServerInterface interf = server->getLastKnownInterface();
-		loop {
-			state bool inHealthyZone = false; // healthChanged actor will be Never() if this flag is true
+	static Future<Void> storageServerFailureTracker(DDTeamCollection* self,
+	                                                TCServerInfo* server,
+	                                                ServerStatus* status,
+	                                                Version addedVersion) {
+		StorageServerInterface interf = server->getLastKnownInterface();
+		while (true) {
+			bool inHealthyZone = false; // healthChanged actor will be Never() if this flag is true
 			if (self->healthyZone.get().present()) {
 				if (interf.locality.zoneId() == self->healthyZone.get()) {
 					status->isFailed = false;
@@ -2025,48 +2025,51 @@ public:
 				                                        SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME,
 				                                        TaskPriority::DataDistribution);
 			}
-			choose {
-				when(wait(healthChanged)) {
-					status->isFailed = !status->isFailed;
-					if (status->isFailed && self->healthyZone.get().present()) {
-						if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
-							// Ignore the failed storage server
-							TraceEvent("SSFailureTracker", self->distributorId)
-							    .detail("IgnoredFailure", "InsideChooseWhen")
-							    .detail("ServerID", interf.id())
-							    .detail("Status", status->toString());
-							status->isFailed = false;
-						} else if (SERVER_KNOBS->DD_REMOVE_MAINTENANCE_ON_FAILURE &&
-						           self->clearHealthyZoneFuture.isReady()) {
-							self->clearHealthyZoneFuture = clearHealthyZone(self->dbContext());
-							// For now we are not logging the duration here, e.g. in cases where another storage
-							// server outside of the maintenance zone failed.
-							TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
-							self->healthyZone.set(Optional<Key>());
-						}
+			// Avoid starting a removal transaction when the earlier health-change branch is ready.
+			auto res = co_await race(healthChanged,
+			                         !healthChanged.isReady() && status->isUnhealthy()
+			                             ? self->waitForAllDataRemoved(interf.id(), addedVersion)
+			                             : Future<Void>(Never()),
+			                         self->healthyZone.onChange());
+			if (res.index() == 0) {
+				status->isFailed = !status->isFailed;
+				if (status->isFailed && self->healthyZone.get().present()) {
+					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
+						// Ignore the failed storage server
+						TraceEvent("SSFailureTracker", self->distributorId)
+						    .detail("IgnoredFailure", "InsideChooseWhen")
+						    .detail("ServerID", interf.id())
+						    .detail("Status", status->toString());
+						status->isFailed = false;
+					} else if (SERVER_KNOBS->DD_REMOVE_MAINTENANCE_ON_FAILURE &&
+					           self->clearHealthyZoneFuture.isReady()) {
+						self->clearHealthyZoneFuture = clearHealthyZone(self->dbContext());
+						// For now we are not logging the duration here, e.g. in cases where another storage
+						// server outside of the maintenance zone failed.
+						TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
+						self->healthyZone.set(Optional<Key>());
 					}
-					if (!status->isUnhealthy()) {
-						// On server transition from unhealthy -> healthy, trigger buildTeam check,
-						// handles scenario when team building failed due to insufficient healthy servers.
-						// Operation cost is minimal if currentTeamCount == desiredTeamCount/maxTeamCount.
-						self->doBuildTeams = true;
-					}
+				}
+				if (!status->isUnhealthy()) {
+					// On server transition from unhealthy -> healthy, trigger buildTeam check,
+					// handles scenario when team building failed due to insufficient healthy servers.
+					// Operation cost is minimal if currentTeamCount == desiredTeamCount/maxTeamCount.
+					self->doBuildTeams = true;
+				}
 
-					TraceEvent(SevDebug, "StatusMapChange", self->distributorId)
-					    .detail("ServerID", interf.id())
-					    .detail("Status", status->toString())
-					    .detail(
-					        "Available",
-					        IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
-				}
-				when(wait(status->isUnhealthy() ? self->waitForAllDataRemoved(interf.id(), addedVersion) : Never())) {
-					break;
-				}
-				when(wait(self->healthyZone.onChange())) {}
+				TraceEvent(SevDebug, "StatusMapChange", self->distributorId)
+				    .detail("ServerID", interf.id())
+				    .detail("Status", status->toString())
+				    .detail("Available",
+				            IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
+			} else if (res.index() == 1) {
+				break;
+			} else if (res.index() != 2) {
+				UNREACHABLE();
 			}
 		}
 
-		return Void(); // Don't ignore failures
+		co_return; // Don't ignore failures
 	}
 
 	static Future<Void> machineTeamRemover(DDTeamCollection* self) {
@@ -2762,17 +2765,17 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
-		state bool recruiting = false;
-		state bool lastIsTss = false;
+	static Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
+		bool recruiting = false;
+		bool lastIsTss = false;
 		TraceEvent("StorageServerRecruitment", self->distributorId)
 		    .detail("State", "Idle")
 		    .detail("Primary", self->primary)
 		    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
-		loop {
+		while (true) {
 			if (!recruiting) {
 				while (self->recruitingStream.get() == 0) {
-					wait(self->recruitingStream.onChange());
+					co_await self->recruitingStream.onChange();
 				}
 				TraceEvent("StorageServerRecruitment", self->distributorId)
 				    .detail("State", "Recruiting")
@@ -2782,23 +2785,25 @@ public:
 				recruiting = true;
 				lastIsTss = self->isTssRecruiting;
 			} else {
-				loop {
-					choose {
-						when(wait(self->recruitingStream.onChange())) {
-							if (lastIsTss != self->isTssRecruiting) {
-								TraceEvent("StorageServerRecruitment", self->distributorId)
-								    .detail("State", "Recruiting")
-								    .detail("Primary", self->primary)
-								    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
-								    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
-								lastIsTss = self->isTssRecruiting;
-							}
+				while (true) {
+					auto res =
+					    co_await race(self->recruitingStream.onChange(),
+					                  self->recruitingStream.get() == 0
+					                      ? delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY, TaskPriority::DataDistribution)
+					                      : Future<Void>(Never()));
+					if (res.index() == 0) {
+						if (lastIsTss != self->isTssRecruiting) {
+							TraceEvent("StorageServerRecruitment", self->distributorId)
+							    .detail("State", "Recruiting")
+							    .detail("Primary", self->primary)
+							    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
+							    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
+							lastIsTss = self->isTssRecruiting;
 						}
-						when(wait(self->recruitingStream.get() == 0
-						              ? delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY, TaskPriority::DataDistribution)
-						              : Future<Void>(Never()))) {
-							break;
-						}
+					} else if (res.index() == 1) {
+						break;
+					} else {
+						UNREACHABLE();
 					}
 				}
 				TraceEvent("StorageServerRecruitment", self->distributorId)
@@ -3354,60 +3359,54 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> waitServerListChange(DDTeamCollection* self,
-	                                               FutureStream<Void> serverRemoved,
-	                                               const DDEnabledState* ddEnabledState) {
-		state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
-		state Future<ServerWorkerInfos> serverListAndProcessClasses = Never();
-		state bool isFetchingResults = false;
-		loop {
-			choose {
-				when(wait(checkSignal)) {
-					checkSignal = Never();
-					isFetchingResults = true;
+	static Future<Void> waitServerListChange(DDTeamCollection* self,
+	                                         FutureStream<Void> serverRemoved,
+	                                         const DDEnabledState* ddEnabledState) {
+		Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
+		Future<ServerWorkerInfos> serverListAndProcessClasses = Never();
+		bool isFetchingResults = false;
+		while (true) {
+			auto res = co_await race(checkSignal, serverListAndProcessClasses, serverRemoved);
+			if (res.index() == 0) {
+				checkSignal = Never();
+				isFetchingResults = true;
+				serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
+			} else if (res.index() == 1) {
+				ServerWorkerInfos infos = std::get<1>(std::move(res));
+				auto& servers = infos.servers;
+				serverListAndProcessClasses = Never();
+				isFetchingResults = false;
+
+				for (int i = 0; i < servers.size(); i++) {
+					UID serverId = servers[i].first.id();
+					StorageServerInterface const& ssi = servers[i].first;
+					ProcessClass const& processClass = servers[i].second;
+					if (!self->shouldHandleServer(ssi)) {
+						continue;
+					} else if (self->server_and_tss_info.contains(serverId)) {
+						auto& serverInfo = self->server_and_tss_info[serverId];
+						if (ssi.getValue.getEndpoint() != serverInfo->getLastKnownInterface().getValue.getEndpoint() ||
+						    processClass != serverInfo->getLastKnownClass().classType()) {
+							Promise<std::pair<StorageServerInterface, ProcessClass>> currentInterfaceChanged =
+							    serverInfo->interfaceChanged;
+							serverInfo->interfaceChanged = Promise<std::pair<StorageServerInterface, ProcessClass>>();
+							serverInfo->onInterfaceChanged = Future<std::pair<StorageServerInterface, ProcessClass>>(
+							    serverInfo->interfaceChanged.getFuture());
+							currentInterfaceChanged.send(std::make_pair(ssi, processClass));
+						}
+					} else if (!self->recruitingIds.contains(ssi.id())) {
+						self->addServer(
+						    ssi, processClass, self->serverTrackerErrorOut, infos.readVersion.get(), *ddEnabledState);
+					}
+				}
+
+				checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
+			} else if (res.index() == 2) {
+				if (isFetchingResults) {
 					serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
 				}
-				when(ServerWorkerInfos infos = wait(serverListAndProcessClasses)) {
-					auto& servers = infos.servers;
-					serverListAndProcessClasses = Never();
-					isFetchingResults = false;
-
-					for (int i = 0; i < servers.size(); i++) {
-						UID serverId = servers[i].first.id();
-						StorageServerInterface const& ssi = servers[i].first;
-						ProcessClass const& processClass = servers[i].second;
-						if (!self->shouldHandleServer(ssi)) {
-							continue;
-						} else if (self->server_and_tss_info.contains(serverId)) {
-							auto& serverInfo = self->server_and_tss_info[serverId];
-							if (ssi.getValue.getEndpoint() !=
-							        serverInfo->getLastKnownInterface().getValue.getEndpoint() ||
-							    processClass != serverInfo->getLastKnownClass().classType()) {
-								Promise<std::pair<StorageServerInterface, ProcessClass>> currentInterfaceChanged =
-								    serverInfo->interfaceChanged;
-								serverInfo->interfaceChanged =
-								    Promise<std::pair<StorageServerInterface, ProcessClass>>();
-								serverInfo->onInterfaceChanged =
-								    Future<std::pair<StorageServerInterface, ProcessClass>>(
-								        serverInfo->interfaceChanged.getFuture());
-								currentInterfaceChanged.send(std::make_pair(ssi, processClass));
-							}
-						} else if (!self->recruitingIds.contains(ssi.id())) {
-							self->addServer(ssi,
-							                processClass,
-							                self->serverTrackerErrorOut,
-							                infos.readVersion.get(),
-							                *ddEnabledState);
-						}
-					}
-
-					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
-				}
-				when(waitNext(serverRemoved)) {
-					if (isFetchingResults) {
-						serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
-					}
-				}
+			} else {
+				UNREACHABLE();
 			}
 		}
 	}
