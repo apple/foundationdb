@@ -2769,7 +2769,7 @@ Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState)
 	tr->set(newJobKey, bulkLoadJobValue(jobState));
 }
 
-AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
+AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx, bool lockAware) {
 	RangeResult jobHistoryResult;
 	Key beginKey = bulkLoadJobHistoryKeys.begin;
 	Key endKey = bulkLoadJobHistoryKeys.end;
@@ -2778,6 +2778,13 @@ AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx
 	while (true) {
 		Error err;
 		try {
+			// The history lives in the system key space, and a caller may be reading it while the
+			// database is locked -- a restore holds the lock while deciding whether its bulkload job
+			// succeeded. Without these the read fails every attempt and this loop never terminates.
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			if (lockAware) {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			}
 			jobHistoryResult.clear();
 			jobHistoryResult =
 			    co_await tr.getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX);

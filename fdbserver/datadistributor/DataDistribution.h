@@ -526,12 +526,21 @@ private:
 // If the priority indicates the data move is a team unhealthy related data move, the bulkload engine
 // system trigger a new data move when terminate the error task.
 struct BulkLoadAck {
+	// The data move failed in a way no later attempt can clear, so the task is marked Error and its
+	// data is never ingested. Reserve this for genuinely terminal conditions: a bulkload task's data
+	// lives only in the dump until some attempt succeeds, so calling a recoverable failure terminal
+	// drops that data with no other copy in the cluster.
 	bool unretryableError = false;
+	// The data move failed on a condition a later attempt can clear -- e.g. the destination team was
+	// momentarily unhealthy. The task must stay eligible for re-dispatch rather than be marked Error.
+	bool retryableError = false;
 	int dataMovePriority = -1;
 
 	BulkLoadAck() = default;
 	BulkLoadAck(bool unretryableError, int dataMovePriority)
 	  : unretryableError(unretryableError), dataMovePriority(dataMovePriority) {}
+	BulkLoadAck(bool unretryableError, bool retryableError, int dataMovePriority)
+	  : unretryableError(unretryableError), retryableError(retryableError), dataMovePriority(dataMovePriority) {}
 };
 
 struct DDBulkLoadEngineTask {
