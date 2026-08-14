@@ -38,6 +38,7 @@
 #include "fdbserver/core/ProcessClassRecruitment.h"
 #include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
+#include "flow/BooleanParam.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/BackupInterface.h"
@@ -1186,6 +1187,12 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 }
 
+FDB_BOOLEAN_PARAM(HasStorageServers);
+
+static bool shouldDeferBetterMasterRecovery(Optional<Version> lastEpochEnd, HasStorageServers hasStorageServers) {
+	return lastEpochEnd.present() && lastEpochEnd.get() == 0 && !hasStorageServers;
+}
+
 Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 	try {
 		co_await delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL);
@@ -1205,7 +1212,11 @@ Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 		checkBetterSingletons(self);
 
 		self->checkRecoveryStalled();
-		if (self->betterMasterExists()) {
+		const Optional<Version> lastEpochEnd = self->db.recoveryData.isValid()
+		                                           ? Optional<Version>(self->db.recoveryData->lastEpochEnd)
+		                                           : Optional<Version>();
+		if (!shouldDeferBetterMasterRecovery(lastEpochEnd, HasStorageServers(!self->storageStatusInfos.empty())) &&
+		    self->betterMasterExists()) {
 			self->db.forceMasterFailure.trigger();
 			TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().master.id());
 		}
@@ -2142,8 +2153,13 @@ Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 			Future<Void> watchFuture = tr->watch(serverMetadataChangeKey);
 			co_await tr->commit();
 
+			const bool hadStorageServers = !self->storageStatusInfos.empty();
 			self->storageStatusInfos = std::move(servers);
 			self->updateClusterHealthMonitorInputs();
+			if (!hadStorageServers && !self->storageStatusInfos.empty() && self->db.recoveryData.isValid() &&
+			    self->db.recoveryData->lastEpochEnd == 0) {
+				checkOutstandingRequests(self);
+			}
 			co_await watchFuture;
 			tr->reset();
 			continue;
@@ -3910,6 +3926,14 @@ TEST_CASE("/fdbserver/clustercontroller/ignoreStaleWorkerRegistration") {
 	ASSERT(registered.issues[0] == "current-issue"_sr);
 	ASSERT(data.updateDBInfoEndpoints.contains(worker.updateServerDBInfo.getEndpoint()));
 	ASSERT(!data.removedDBInfoEndpoints.contains(worker.updateServerDBInfo.getEndpoint()));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/deferBetterMasterRecoveryUntilInitialStorage") {
+	ASSERT(!shouldDeferBetterMasterRecovery(Optional<Version>(), HasStorageServers::False));
+	ASSERT(shouldDeferBetterMasterRecovery(Optional<Version>(0), HasStorageServers::False));
+	ASSERT(!shouldDeferBetterMasterRecovery(Optional<Version>(0), HasStorageServers::True));
+	ASSERT(!shouldDeferBetterMasterRecovery(Optional<Version>(1), HasStorageServers::False));
 	return Void();
 }
 
