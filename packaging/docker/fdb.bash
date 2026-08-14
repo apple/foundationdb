@@ -64,13 +64,6 @@ function discover_network_environment() {
         export PUBLIC_IP4=127.0.0.1
         export PUBLIC_IP6="[::1]"
     elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
-        my_hostname=$(hostname -i | awk '{print $1}')
-        if [[ "$my_hostname" == *'.'* ]]; then
-            export PUBLIC_IP4="$my_hostname"
-        elif [[ "$my_hostname" == *':'* ]]; then
-            export PUBLIC_IP6="[$my_hostname]"
-        fi
-
         for addr in $(hostname -I); do
             if [[ -z "$PUBLIC_IP4" && $addr == *'.'* ]]; then
                 export PUBLIC_IP4="$addr"
