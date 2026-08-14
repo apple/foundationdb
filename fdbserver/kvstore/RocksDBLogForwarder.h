@@ -27,7 +27,7 @@
 #ifdef WITH_ROCKSDB
 #include <rocksdb/env.h>
 
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 

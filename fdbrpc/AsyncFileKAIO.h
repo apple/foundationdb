@@ -32,7 +32,7 @@
 #include "flow/Knobs.h"
 #include "fdbrpc/Stats.h"
 #include "crc32/crc32c.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 // Set this to true to enable detailed KAIO request logging, which currently is written to a hardcoded location
 // /data/v7/fdb/

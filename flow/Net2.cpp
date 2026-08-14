@@ -60,7 +60,7 @@
 #include "flow/SendBufferIterator.h"
 #include "flow/TLSConfig.h"
 #include "flow/WatchFile.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Util.h"
 #include "flow/UnitTest.h"
 #include "flow/ScopeExit.h"

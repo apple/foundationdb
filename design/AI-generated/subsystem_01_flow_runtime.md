@@ -310,7 +310,7 @@ TraceEvent("MyEvent", self->dbgid)
 
 ---
 
-## Generic Actors -- [`genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h)
+## Generic Actors -- [`genericactors.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.h)
 
 Key utility actors:
 
@@ -328,7 +328,7 @@ Key utility actors:
 | `holdWhile(object, Future<T>)` | Keep object alive until future resolves |
 | `uncancellable(Future<T>)` | Prevent cancellation |
 
-**AsyncVar<T>** ([`genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h)`:753-785`):
+**AsyncVar<T>** ([`genericactors.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.h)`:753-785`):
 - Reactive variable: holds a value, notifies on change
 - `get()` -- current value
 - `onChange()` -- returns `Future<Void>` that fires on next change
@@ -370,7 +370,7 @@ Key utility actors:
 | [`flow/include/flow/Arena.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Arena.h) | Arena, StringRef, Standalone, VectorRef |
 | [`flow/include/flow/Error.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Error.h) | Error class and error code definitions |
 | [`flow/include/flow/CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h) | C++20 coroutine integration (CoroPromise, AwaitableFuture) |
-| [`flow/include/flow/genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h) | Utility actors (delay, timeout, waitForAll, AsyncVar) |
+| [`flow/include/flow/genericactors.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.h) | Utility actors (delay, timeout, waitForAll, AsyncVar) |
 | [`flow/include/flow/serialize.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/serialize.h) | Serialization framework |
 | `flow/include/flow/FastAlloc.h` | Thread-local pool allocator |
 | [`flow/Net2.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.cpp) | Real event loop (Boost.ASIO based) |

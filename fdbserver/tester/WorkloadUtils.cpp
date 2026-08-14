@@ -28,7 +28,7 @@
 #include "flow/CoroUtils.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
 

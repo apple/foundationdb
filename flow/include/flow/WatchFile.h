@@ -23,7 +23,7 @@
 #include <ctime>
 #include <string>
 #include "flow/IAsyncFile.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 static Future<Void> watchFileForChanges(std::string filename,
                                         AsyncTrigger* fileChanged,

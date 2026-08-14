@@ -32,7 +32,7 @@
 #include "flow/Platform.h"
 #include "flow/ProcessEvents.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/DataDistributionConfig.h"

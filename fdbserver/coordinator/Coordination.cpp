@@ -29,7 +29,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/network.h"
 #include "flow/CoroUtils.h"

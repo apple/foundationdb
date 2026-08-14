@@ -42,7 +42,7 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 struct GrvProxyStats {
 	CounterCollection cc;
