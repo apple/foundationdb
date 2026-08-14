@@ -1290,15 +1290,16 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 
 	state Future<std::vector<AddressExclusion>> fExclusions = getAllExcludedServers(&tr);
 	state Future<std::vector<std::string>> fExcludedLocalities = getAllExcludedLocalities(&tr);
-
-	wait(success(fExclusions) && success(fExcludedLocalities));
+	state Future<RangeResult> fServerList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+	state Future<Optional<Standalone<StringRef>>> fLogsKey = tr.get(logsKey);
+	wait(success(fExclusions) && success(fExcludedLocalities) && success(fServerList));
 
 	state std::vector<AddressExclusion> excl = fExclusions.get();
 	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	state std::set<NetworkAddress> inProgressExclusion;
 	// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed
 	// recovery Check that there aren't any storage servers with addresses violating the exclusions
-	state RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeResult serverList = fServerList.get();
 	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 	// We have to make use of the localities here to verify if a server is still in the server list,
@@ -1338,7 +1339,8 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 		}
 	}
 
-	Optional<Standalone<StringRef>> value = wait(tr.get(logsKey));
+	wait(success(fLogsKey));
+	Optional<Standalone<StringRef>> value = fLogsKey.get();
 	ASSERT(value.present());
 	// TODO(jscheuermann): The logs key range doesn't hold any information about localities. This is a limitation
 	// for locality based exclusions. The problematic edge case here is a log server that still has mutation on it
