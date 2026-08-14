@@ -3100,7 +3100,7 @@ public:
 			readSize = self->physicalExtentSize;
 		}
 
-		Reference<ArenaPage> extent = makeReference<ArenaPage>(readSize, readSize);
+		auto extent = makeReference<ArenaPage>(readSize, readSize);
 
 		// physicalReadSize is the size of disk read we intend to issue
 		auto physicalReadSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_READ_SIZE;
