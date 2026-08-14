@@ -734,18 +734,18 @@ Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> al
 	}
 }
 
-// Keep the legacy public API separate from the actor implementation: actor-generated headers do not preserve default
-// template arguments, so callers without an explicit model need a concrete QueueModel overload here.
-template <class Interface, class Request, class Multi, bool P>
+// Actor-generated headers do not preserve default template arguments, so this wrapper preserves both the default model
+// and the concrete model type supplied by a caller.
+template <class Interface, class Request, class Multi, bool P, class Model = QueueModel>
 Future<REPLY_TYPE(Request)> loadBalance(Reference<MultiInterface<Multi>> alternatives,
                                         RequestStream<Request, P> Interface::* channel,
                                         Request request = Request(),
                                         TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
                                         AtMostOnce atMostOnce = AtMostOnce::False,
-                                        QueueModel* model = nullptr,
+                                        Model* model = nullptr,
                                         bool compareReplicas = false,
                                         int requiredReplicas = 0) {
-	return loadBalanceImpl<Interface, Request, Multi, P, QueueModel>(
+	return loadBalanceImpl<Interface, Request, Multi, P, Model>(
 	    alternatives, channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
 }
 
