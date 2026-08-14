@@ -2317,8 +2317,13 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								    .detail("Range", rd.keys)
 								    .detail("Dest", describe(destIds));
 								if (doBulkLoading && rd.bulkLoadTask.get().completeAck.canBeSet()) {
-									rd.bulkLoadTask.get().completeAck.send(
-									    BulkLoadAck(/*unretryableError=*/true, rd.priority));
+									CODE_PROBE(true, "Bulkload data move lost its destination team");
+									// Recoverable: the same task can succeed against a team chosen
+									// later. Terminal here would abandon the task, and its key-values
+									// exist only in the dump until an attempt ingests them, so the
+									// range would simply be missing from the restored database.
+									rd.bulkLoadTask.get().completeAck.send(BulkLoadAck(
+									    /*unretryableError=*/false, /*retryableError=*/true, rd.priority));
 								}
 								retryAfterDestinationTeamFailure = shouldRetryDestinationTeamFailure(doBulkLoading, rd);
 								throw data_move_dest_team_not_found();

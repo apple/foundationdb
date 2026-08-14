@@ -647,6 +647,43 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 		bool stillRunning = currentJob.present() && currentJob.get().getJobId() == jobId;
 
 		if (!stillRunning) {
+			// The job's live metadata is gone, which says the job manager finished walking the job
+			// range -- not that every task succeeded. A job that ends with a task in Error is
+			// archived to history in the same transaction that clears the live metadata, so treating
+			// "no longer running" as success reports a restore complete while part of the key space
+			// was never ingested. Consult the archived phase before declaring success.
+			// lockAware: the restore holds the database lock while it runs, so a plain read here
+			// retries on database_locked until its transaction gives up, and the caller waits forever.
+			std::vector<BulkLoadJobState> history;
+			try {
+				history = co_await getBulkLoadJobFromHistory(cx, lockAware);
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				// Every task reported done, so the restore is very likely fine; refusing to finish
+				// because the outcome could not be re-read would fail a good restore. Say so loudly
+				// instead, since this is the check that would otherwise catch a lost task.
+				TraceEvent(SevWarnAlways, "BulkLoadRestoreJobOutcomeUnknown")
+				    .error(e)
+				    .detail("RestoreUID", restoreUid)
+				    .detail("BulkLoadJobId", jobId);
+				co_return true;
+			}
+			for (const auto& job : history) {
+				if (job.getJobId() != jobId) {
+					continue;
+				}
+				if (job.getPhase() == BulkLoadJobPhase::Error) {
+					TraceEvent(SevError, "BulkLoadRestoreJobEndedInError")
+					    .detail("RestoreUID", restoreUid)
+					    .detail("BulkLoadJobId", jobId)
+					    .detail("JobRange", job.getJobRange())
+					    .detail("JobPhase", convertBulkLoadJobPhaseToString(job.getPhase()));
+					throw restore_bulkload_failed();
+				}
+				break;
+			}
 			co_return true;
 		}
 
