@@ -28,6 +28,7 @@
 #include <sanitizer/lsan_interface.h>
 #endif
 
+#include "fdbclient/ClientOptionValidation.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.h"
@@ -1411,30 +1412,6 @@ Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, double
 
 	tsav->trySendError(transaction_timed_out());
 }
-
-namespace {
-
-void validateOptionValuePresent(Optional<StringRef> value) {
-	if (!value.present()) {
-		throw invalid_option_value();
-	}
-}
-
-int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
-	validateOptionValuePresent(value);
-	if (value.get().size() != 8) {
-		throw invalid_option_value();
-	}
-
-	int64_t passed = *((int64_t*)(value.get().begin()));
-	if (passed > maxValue || passed < minValue) {
-		throw invalid_option_value();
-	}
-
-	return passed;
-}
-
-} // namespace
 
 // Configure a timeout based on the options set for this transaction. This timeout only applies
 // if we don't have an underlying database object to connect with.

@@ -39,6 +39,7 @@
 #include "fdbserver/core/WaitFailure.h"
 #include "DataDistribution.h"
 #include "DataDistributionTeam.h"
+#include "StorageWiggler.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
