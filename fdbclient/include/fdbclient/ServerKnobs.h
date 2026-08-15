@@ -880,6 +880,7 @@ public:
 	int MOVE_KEYS_KRM_LIMIT;
 	int FINISH_MOVE_KEYS_MAX_RETRIES; // Max retries in finishMoveKeys before returning move to queue; set very high to
 	                                  // disable
+	int START_MOVE_KEYS_MAX_RETRIES; // Max retries in startMoveKeys before throwing start_move_keys_too_many_retries
 	int MOVE_KEYS_KRM_LIMIT_BYTES; // This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT
 	                               // (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an
 	                               // attempt to read a key range map
