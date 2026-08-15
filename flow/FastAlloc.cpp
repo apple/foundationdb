@@ -384,14 +384,25 @@ void* FastAllocator<Size>::allocate() {
 	bytes->increment(size);
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
-	// Some usages of FastAllocator require 4096 byte alignment.
-	return aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+	{
+		// Some usages of FastAllocator require 4096 byte alignment.
+		// This path bypasses the freelist and the memTrackerOnAlloc at the bottom
+		// of the function, so track here too — otherwise every FastAllocator size
+		// class (and the small Arena blocks backed by it) would be invisible to the
+		// tracker under gperftools / ASan. Symmetric with release() below. (Braces
+		// scope this `p` so it can't collide with the freelist `p` compiled below.)
+		void* p = aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+		memTrackerOnAlloc(p, Size);
+		return p;
+	}
 #endif
 
 #if VALGRIND
 	if (valgrindPrecise()) {
 		// Some usages of FastAllocator require 4096 byte alignment
-		return aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+		void* p = aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+		memTrackerOnAlloc(p, Size); // track here too (see the gperftools/ASan path above)
+		return p;
 	}
 #endif
 
@@ -459,11 +470,15 @@ void FastAllocator<Size>::release(void* ptr) {
 	bytes->increment(size);
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
+	// Mirror allocate()'s early-return tracking so frees on this path debit the
+	// live table (without this the block would leak in the tracker's accounting).
+	memTrackerOnFree(ptr);
 	return aligned_free(ptr);
 #endif
 
 #if VALGRIND
 	if (valgrindPrecise()) {
+		memTrackerOnFree(ptr); // mirror allocate() (see the gperftools/ASan path above)
 		return aligned_free(ptr);
 	}
 #endif
