@@ -1178,8 +1178,20 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 				} catch (Error& e) {
 					txnAborted->increment(1);
 					state Error err = e;
+					if (err.code() == error_code_actor_cancelled)
+						throw err;
 					if (err.code() == error_code_move_to_removed_server)
-						throw;
+						throw err;
+					if (retries > SERVER_KNOBS->START_MOVE_KEYS_MAX_RETRIES) {
+						CODE_PROBE(true, "startMoveKeys giving up after max retries");
+						TraceEvent(SevWarnAlways, "RelocateShard_StartMoveKeysGivingUp", relocationIntervalId)
+						    .error(err)
+						    .detail("KeyBegin", keys.begin)
+						    .detail("KeyEnd", keys.end)
+						    .detail("BeginKey", begin)
+						    .detail("Retries", retries);
+						throw start_move_keys_too_many_retries();
+					}
 					wait(tr->onError(e));
 
 					if (retries % 10 == 0) {
