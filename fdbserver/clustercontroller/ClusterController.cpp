@@ -4067,6 +4067,88 @@ TEST_CASE("/fdbserver/clustercontroller/avoidSatelliteTLogRouterColocation") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/clustercontroller/recruitStatelessProcessesOnOneMachine") {
+	const Key dcId = "stateless-dc"_sr;
+	LocalityData controllerLocality;
+	controllerLocality.set(LocalityData::keyDcId, dcId);
+	controllerLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "stateless-1" }));
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           controllerLocality,
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+
+	constexpr int workersPerClass = 3;
+	auto addWorkers = [&](ProcessClass::ClassType classType, std::string const& prefix, bool shareMachine) {
+		std::vector<WorkerInterface> workers;
+		for (int i = 0; i < workersPerClass; ++i) {
+			std::string processId = prefix + std::to_string(i);
+			std::string machineId = shareMachine ? "stateless-machine" : processId + "-machine";
+			LocalityData locality;
+			locality.set(LocalityData::keyDcId, dcId);
+			locality.set(LocalityData::keyProcessId, Standalone<StringRef>(processId));
+			locality.set(LocalityData::keyZoneId, Standalone<StringRef>(machineId));
+			locality.set(LocalityData::keyMachineId, Standalone<StringRef>(machineId));
+
+			WorkerInterface worker(locality);
+			worker.initEndpoints();
+			auto& info = data.id_worker[locality.processId()];
+			info.verified = true;
+			info.details.interf = worker;
+			info.details.processClass = ProcessClass(classType, ProcessClass::CommandLineSource);
+			info.details.recoveredDiskFiles = true;
+			workers.push_back(worker);
+		}
+		return workers;
+	};
+
+	const auto statelessWorkers = addWorkers(ProcessClass::StatelessClass, "stateless-", true);
+	addWorkers(ProcessClass::TransactionClass, "transaction-", false);
+	addWorkers(ProcessClass::StorageClass, "storage-", false);
+	data.masterProcessId = statelessWorkers[0].locality.processId();
+	data.clusterControllerProcessId = statelessWorkers[1].locality.processId();
+	data.gotFullyRecoveredConfig = true;
+	data.gotProcessClasses = true;
+
+	DatabaseConfiguration configuration;
+	configuration.initialized = true;
+	configuration.tLogReplicationFactor = workersPerClass;
+	configuration.desiredTLogCount = workersPerClass;
+	configuration.commitProxyCount = workersPerClass;
+	configuration.grvProxyCount = workersPerClass;
+	configuration.resolverCount = workersPerClass;
+	configuration.tLogPolicy = makeReference<PolicyAcross>(workersPerClass, "zoneid", makeReference<PolicyOne>());
+	data.db.config = configuration;
+	data.db.fullyRecoveredConfig = configuration;
+
+	RecruitFromConfigurationRequest request;
+	request.configuration = configuration;
+	request.recruitSeedServers = false;
+	request.maxOldLogRouters = 0;
+	auto recruited = data.findWorkersForConfigurationDispatch(request, false);
+
+	ASSERT_EQ(recruited.tLogs.size(), workersPerClass);
+	ASSERT_EQ(recruited.commitProxies.size(), workersPerClass);
+	ASSERT_EQ(recruited.grvProxies.size(), workersPerClass);
+	ASSERT_EQ(recruited.resolvers.size(), workersPerClass);
+
+	std::set<Optional<Standalone<StringRef>>> statelessProcessIds;
+	for (const auto& worker : statelessWorkers) {
+		ASSERT(worker.locality.machineId() == statelessWorkers[0].locality.machineId());
+		ASSERT(statelessProcessIds.insert(worker.locality.processId()).second);
+	}
+	for (const auto& proxy : recruited.commitProxies) {
+		ASSERT(statelessProcessIds.contains(proxy.locality.processId()));
+	}
+	for (const auto& proxy : recruited.grvProxies) {
+		ASSERT(statelessProcessIds.contains(proxy.locality.processId()));
+	}
+	for (const auto& resolver : recruited.resolvers) {
+		ASSERT(statelessProcessIds.contains(resolver.locality.processId()));
+	}
+	return Void();
+}
+
 // Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth`
 // based on `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {

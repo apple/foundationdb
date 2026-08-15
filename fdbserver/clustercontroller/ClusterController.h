@@ -1550,10 +1550,8 @@ public:
 			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    it.second.details.interf.locality.dcId() == dcId &&
-			    (!minWorker.present() ||
-			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
-			      (fitness < minWorker.get().fitness ||
-			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
+			    (!minWorker.present() || (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
+			                              fitness <= minWorker.get().fitness))) {
 				auto sharing = preferredSharing.find(it.first);
 				fitness_workers[{ fitness,
 				                  id_used[it.first],
