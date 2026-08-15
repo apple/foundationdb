@@ -6344,6 +6344,37 @@ Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection
 	return DDTeamCollectionImpl::printSnapshotTeamsInfo(self);
 }
 
+class DDTeamCollectionTestTxnProcessor final : public DDTxnProcessor {
+public:
+	explicit DDTeamCollectionTestTxnProcessor(Database database) : DDTxnProcessor(database) {}
+
+	Future<Void> waitForAllDataRemoved(const UID&,
+	                                   const Version&,
+	                                   Reference<ShardsAffectedByTeamFailure>) const override {
+		++dataRemovalCheckCount;
+		return Never();
+	}
+
+	Future<ServerWorkerInfos> getServerListAndProcessClasses() override {
+		serverListReplies.emplace_back();
+		return serverListReplies.back().getFuture();
+	}
+
+	int getDataRemovalCheckCount() const { return dataRemovalCheckCount; }
+
+	int getServerListFetchCount() const { return static_cast<int>(serverListReplies.size()); }
+
+	bool isServerListFetchActive(int index) const { return serverListReplies.at(index).getFutureReferenceCount() > 0; }
+
+	void completeServerListFetch(int index, ServerWorkerInfos result) {
+		serverListReplies.at(index).send(std::move(result));
+	}
+
+private:
+	mutable int dataRemovalCheckCount = 0;
+	std::vector<Promise<ServerWorkerInfos>> serverListReplies;
+};
+
 class DDTeamCollectionUnitTest {
 public:
 	static void setTestEndpoint(StorageServerInterface& interface, int id) {
@@ -7203,6 +7234,111 @@ public:
 		co_await delay(0);
 	}
 
+	static Future<Void> StorageServerFailureTracker_ReadyRecoverySkipsRemovalCheck() {
+		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 1);
+		auto txnProcessor = makeReference<DDTeamCollectionTestTxnProcessor>(collection->dbContext());
+		collection->db = txnProcessor;
+
+		Reference<TCServerInfo> server = collection->server_info.at(UID(1, 0));
+		StorageServerInterface interface = server->getLastKnownInterface();
+		FutureStream<ReplyPromise<Void>> failureRequests = interface.waitFailure.getFuture();
+
+		NetworkAddress address = interface.waitFailure.getEndpoint().getPrimaryAddress();
+		IFailureMonitor& failureMonitor = IFailureMonitor::failureMonitor();
+		FailureStatus previousStatus = failureMonitor.getState(address);
+		failureMonitor.setStatus(address, FailureStatus(false));
+
+		collection->doBuildTeams = false;
+		ServerStatus status(IsFailed::True, IsUndesired::False, IsWiggling::False, interface.locality);
+		Future<Void> tracker = collection->storageServerFailureTracker(server.getPtr(), &status, 1);
+
+		ASSERT(!tracker.isReady());
+		ASSERT(failureRequests.isReady());
+		ASSERT(!status.isFailed);
+		ASSERT(!collection->server_status.get(server->getId()).isFailed);
+		ASSERT(collection->doBuildTeams);
+		ASSERT_EQ(txnProcessor->getDataRemovalCheckCount(), 0);
+
+		tracker.cancel();
+		failureMonitor.setStatus(address, previousStatus);
+		co_await delay(0);
+	}
+
+	static Future<Void> MonitorStorageServerRecruitment_TracksRecruitmentTransitions() {
+		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 0);
+		const std::string trackingKey = collection->storageServerRecruitmentEventHolder->trackingKey;
+		Future<Void> monitor = collection->monitorStorageServerRecruitment();
+
+		ASSERT(!monitor.isReady());
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Idle");
+
+		collection->recruitingStream.set(1);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("IsTSS"), "False");
+
+		collection->isTssRecruiting = true;
+		collection->recruitingStream.set(2);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("IsTSS"), "True");
+
+		collection->recruitingStream.set(0);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
+		collection->recruitingStream.set(1);
+		co_await delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY + 0.01);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("IsTSS"), "True");
+
+		collection->recruitingStream.set(0);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
+		co_await delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY + 0.01);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Idle");
+
+		collection->isTssRecruiting = false;
+		collection->recruitingStream.set(1);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("IsTSS"), "False");
+
+		monitor.cancel();
+		co_await delay(0);
+	}
+
+	static Future<Void> WaitServerListChange_RestartsFetchOnRemoval() {
+		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 0);
+		auto txnProcessor = makeReference<DDTeamCollectionTestTxnProcessor>(collection->dbContext());
+		collection->db = txnProcessor;
+
+		DDEnabledState ddEnabledState;
+		PromiseStream<Void> serverRemoved;
+		FutureStream<Void> removalEvents = serverRemoved.getFuture();
+		Future<Void> monitor = collection->waitServerListChange(removalEvents, ddEnabledState);
+
+		ASSERT_EQ(txnProcessor->getServerListFetchCount(), 0);
+		co_await delay(SERVER_KNOBS->SERVER_LIST_DELAY + 0.01);
+		ASSERT_EQ(txnProcessor->getServerListFetchCount(), 1);
+		ASSERT(txnProcessor->isServerListFetchActive(0));
+
+		serverRemoved.send(Void());
+		ASSERT(!removalEvents.isReady());
+		ASSERT_EQ(txnProcessor->getServerListFetchCount(), 2);
+		ASSERT(!txnProcessor->isServerListFetchActive(0));
+		ASSERT(txnProcessor->isServerListFetchActive(1));
+
+		serverRemoved.send(Void());
+		ASSERT(!removalEvents.isReady());
+		ASSERT_EQ(txnProcessor->getServerListFetchCount(), 3);
+		ASSERT(!txnProcessor->isServerListFetchActive(1));
+		ASSERT(txnProcessor->isServerListFetchActive(2));
+
+		ServerWorkerInfos infos;
+		infos.readVersion = 1;
+		txnProcessor->completeServerListFetch(2, std::move(infos));
+		ASSERT(!txnProcessor->isServerListFetchActive(2));
+		ASSERT(!monitor.isReady());
+
+		monitor.cancel();
+		co_await delay(0);
+	}
+
 	static Future<Void> TeamTracker_RetriesMergedShardForUndesiredServer() {
 		constexpr double checkTeamDelay = 0.05;
 
@@ -7562,6 +7698,21 @@ TEST_CASE("/DataDistribution/GetTeam/PreferWithinShardRange") {
 
 TEST_CASE("/DataDistribution/Recruitment/RecruitmentFailedCooldownReleasesId") {
 	wait(DDTeamCollectionUnitTest::InitializeStorage_RecruitmentFailedCooldownReleasesId());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/StorageServerFailureTracker/ReadyRecoverySkipsRemovalCheck") {
+	wait(DDTeamCollectionUnitTest::StorageServerFailureTracker_ReadyRecoverySkipsRemovalCheck());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Recruitment/MonitorTracksRecruitmentTransitions") {
+	wait(DDTeamCollectionUnitTest::MonitorStorageServerRecruitment_TracksRecruitmentTransitions());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/ServerList/RestartsFetchOnRemoval") {
+	wait(DDTeamCollectionUnitTest::WaitServerListChange_RestartsFetchOnRemoval());
 	return Void();
 }
 
