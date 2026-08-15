@@ -189,9 +189,13 @@ struct RangeDigestValidationWorkload : TestWorkload {
 		int maxAuditRetries = 10;
 		while (true) {
 			Error retryErr;
+			// Distinguishes a launch timeout from a completion timeout: both surface as timed_out, but
+			// only the former is unambiguously transient (see the retry decision below).
+			bool auditScheduled = false;
 			try {
 				UID auditId = co_await auditStorage(
 				    clusterFile, normalKeys, AuditType::RangeDigest, KeyValueStoreType::END, maxWaitTime);
+				auditScheduled = true;
 				TraceEvent("RangeDigestValidationAuditScheduled")
 				    .detail("AuditID", auditId)
 				    .detail("RetryCount", auditRetryCount);
@@ -240,11 +244,16 @@ struct RangeDigestValidationWorkload : TestWorkload {
 			if (retryErr.code() == error_code_actor_cancelled) {
 				throw retryErr;
 			}
-			// audit_storage_failed and related transient conditions are retryable under buggify.
+			// audit_storage_failed and related transient conditions are retryable under buggify. A
+			// timed_out from auditStorage() means the CC never issued an audit ID -- no audit exists to
+			// be stuck, so it is equally transient. A timed_out from the completion wait is NOT retried:
+			// that audit was scheduled and stopped making progress, which is a finding, and re-arming it
+			// maxAuditRetries times would spend maxWaitTime on each before failing anyway.
 			if ((retryErr.code() == error_code_audit_storage_failed ||
 			     retryErr.code() == error_code_persist_new_audit_metadata_error ||
 			     retryErr.code() == error_code_audit_storage_cancelled ||
-			     retryErr.code() == error_code_audit_storage_task_outdated) &&
+			     retryErr.code() == error_code_audit_storage_task_outdated ||
+			     (retryErr.code() == error_code_timed_out && !auditScheduled)) &&
 			    auditRetryCount < maxAuditRetries) {
 				++auditRetryCount;
 				TraceEvent(SevWarn, "RangeDigestValidationAuditRetry")
