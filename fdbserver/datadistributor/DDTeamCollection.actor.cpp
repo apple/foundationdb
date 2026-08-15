@@ -7284,13 +7284,13 @@ public:
 		collection->recruitingStream.set(0);
 		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
 		collection->recruitingStream.set(1);
-		co_await delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY + 0.01);
+		co_await delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY + 0.01, TaskPriority::DataDistribution);
 		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
 		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("IsTSS"), "True");
 
 		collection->recruitingStream.set(0);
 		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
-		co_await delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY + 0.01);
+		co_await delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY + 0.01, TaskPriority::DataDistribution);
 		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Idle");
 
 		collection->isTssRecruiting = false;
@@ -7313,7 +7313,7 @@ public:
 		Future<Void> monitor = collection->waitServerListChange(removalEvents, ddEnabledState);
 
 		ASSERT_EQ(txnProcessor->getServerListFetchCount(), 0);
-		co_await delay(SERVER_KNOBS->SERVER_LIST_DELAY + 0.01);
+		co_await delay(SERVER_KNOBS->SERVER_LIST_DELAY + 0.01, TaskPriority::DataDistributionLaunch);
 		ASSERT_EQ(txnProcessor->getServerListFetchCount(), 1);
 		ASSERT(txnProcessor->isServerListFetchActive(0));
 
