@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/core/TesterInterface.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/tester/workloads.h"
@@ -77,6 +78,8 @@ public:
 		case 8:
 			CODE_PROBE(true, "Testing atomic CompareAndClear");
 			return testCompareAndClear(cx->clone(), this);
+		case 9:
+			return testAppendIfFits(cx->clone(), this);
 		default:
 			ASSERT(false);
 		}
@@ -87,6 +90,47 @@ public:
 	Future<bool> check(Database const& cx) override { return !testFailed; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	Future<Void> testAppendIfFits(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
+		const Key key = self->getTestKey("test_key_append_if_fits_");
+		const Value nearlyFull(std::string(CLIENT_KNOBS->VALUE_SIZE_LIMIT - 1, 'x'));
+		const Value full(std::string(CLIENT_KNOBS->VALUE_SIZE_LIMIT, 'x'));
+		const Value suffix("x"_sr);
+
+		co_await runRYWTransactionVoid(cx, [key, nearlyFull](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->set(key, nearlyFull);
+			return Void();
+		});
+		co_await runRYWTransactionVoid(cx, [key, suffix](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->atomicOp(key, suffix, MutationRef::AppendIfFits);
+			return Void();
+		});
+
+		Optional<Value> stored = co_await runRYWTransaction(
+		    cx, [key](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
+		ASSERT(stored.present());
+		ASSERT(stored.get() == full);
+
+		co_await runRYWTransactionVoid(cx, [key, suffix](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->atomicOp(key, suffix, MutationRef::AppendIfFits);
+			return Void();
+		});
+
+		stored = co_await runRYWTransaction(
+		    cx, [key](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
+		ASSERT(stored.present());
+		ASSERT(stored.get() == full);
+
+		Optional<Value> visible = co_await runRYWTransaction(
+		    cx, [key, nearlyFull, suffix](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+			    tr->set(key, nearlyFull);
+			    tr->atomicOp(key, suffix, MutationRef::AppendIfFits);
+			    tr->atomicOp(key, suffix, MutationRef::AppendIfFits);
+			    return tr->get(key);
+		    });
+		ASSERT(visible.present());
+		ASSERT(visible.get() == full);
+	}
 
 	// Test Atomic ops on non existing keys that results in a set
 	Future<Void> testAtomicOpSetOnNonExistingKey(Database cx,
