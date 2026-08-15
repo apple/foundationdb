@@ -22,7 +22,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 
 static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> const> db,
                                       Reference<AsyncVar<ClientDBInfo>> info) {

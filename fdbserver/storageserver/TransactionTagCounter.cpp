@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/core/BusyTagCollector.h"
 #include "fdbserver/core/Knobs.h"
 #include "TransactionTagCounter.h"
 #include "flow/Coroutines.h"
@@ -36,24 +37,14 @@ class TransactionTagCounterImpl {
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
 
 	std::vector<BusyTagInfo> getBusiestTagsFromLastInterval(double elapsed) const {
-		std::priority_queue<BusyTagInfo, std::vector<BusyTagInfo>, std::greater<BusyTagInfo>> topKTags;
+		BusyTagCollector busiestTags(maxTagsTracked, minRateTracked);
 		for (auto const& [tag, cost] : intervalCosts) {
 			auto const rate = cost / elapsed;
 			auto const fractionalBusyness = std::min(1.0, cost / intervalTotalCost);
-			if (rate < minRateTracked) {
-				continue;
-			} else if (topKTags.size() < maxTagsTracked) {
-				topKTags.emplace(tag, rate, fractionalBusyness);
-			} else if (topKTags.top().rate < rate) {
-				topKTags.pop();
-				topKTags.emplace(tag, rate, fractionalBusyness);
-			}
+			busiestTags.add(tag, rate, fractionalBusyness);
 		}
 		std::vector<BusyTagInfo> result;
-		while (!topKTags.empty()) {
-			result.push_back(topKTags.top());
-			topKTags.pop();
-		}
+		busiestTags.drainInto(result);
 		return result;
 	}
 

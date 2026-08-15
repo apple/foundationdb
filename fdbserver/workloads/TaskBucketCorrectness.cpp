@@ -265,7 +265,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 				TraceEvent("TaskBucketCorrectness").detail("ClearingDb", "...");
 				co_await taskBucket->clear(cx);
 
-				Reference<Task> cancelledTask =
+				auto cancelledTask =
 				    makeReference<Task>(CancelledTaskFunc::name, CancelledTaskFunc::version, StringRef(), 0);
 				Future<bool> cancelledResult = taskBucket->doTask(cx, futureBucket, cancelledTask);
 				ASSERT(cancelledResult.isReady() && cancelledResult.isError());

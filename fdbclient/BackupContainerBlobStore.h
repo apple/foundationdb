@@ -22,7 +22,6 @@
 #define FDBCLIENT_BACKUP_CONTAINER_BLOBSTORE_H
 #pragma once
 
-#include "fdbclient/AsyncFileBlobStore.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/IBlobStore.h"
 

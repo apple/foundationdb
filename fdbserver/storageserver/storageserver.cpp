@@ -51,6 +51,7 @@
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
+#include "MappedKeyPlan.h"
 #include "ReadLatencySamples.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.h"
@@ -96,11 +97,11 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
 #include "fdbserver/storageserver/StorageServer.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "StorageServerUtils.h"
 #include "flow/CoroUtils.h"
 #include "flow/TDMetric.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 #ifndef __INTEL_COMPILER
 #pragma region Data Structures
@@ -1679,7 +1680,7 @@ public:
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
 		    now() > fdbSimulationPolicyState().injectTargetedSSRestartTime &&
 		    rebootAfterDurableVersion == std::numeric_limits<Version>::max()) {
-			CODE_PROBE(true, "Injecting SS targeted restart");
+			CODE_PROBE(true, "Injecting SS targeted restart", probe::decoration::rare);
 			TraceEvent("SimSSInjectTargetedRestart", thisServerID).detail("Version", v);
 			rebootAfterDurableVersion = v;
 			fdbSimulationPolicyState().injectTargetedSSRestartTime = std::numeric_limits<double>::max();
@@ -1689,7 +1690,7 @@ public:
 	bool maybeInjectDelay() {
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
 		    now() > fdbSimulationPolicyState().injectSSDelayTime) {
-			CODE_PROBE(true, "Injecting SS targeted delay");
+			CODE_PROBE(true, "Injecting SS targeted delay", probe::decoration::rare);
 			TraceEvent("SimSSInjectDelay", thisServerID).log();
 			fdbSimulationPolicyState().injectSSDelayTime = std::numeric_limits<double>::max();
 			return true;
@@ -1983,16 +1984,6 @@ Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanCo
 		}
 		throw future_version();
 	}
-}
-
-// If the latest commit version that mutated the shard(s) being served by the specified storage
-// server is below the client specified read version then do a read at the latest commit version
-// of the storage server.
-Version getRealReadVersion(VersionVector& ssLatestCommitVersions, Tag& tag, Version specifiedReadVersion) {
-	Version realReadVersion =
-	    ssLatestCommitVersions.hasVersion(tag) ? ssLatestCommitVersions.getVersion(tag) : specifiedReadVersion;
-	ASSERT(realReadVersion <= specifiedReadVersion);
-	return realReadVersion;
 }
 
 // Find the latest commit version of the given tag.
@@ -3631,140 +3622,6 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 	}
 }
 
-void unpackKeyTuple(Tuple** referenceTuple, Optional<Tuple>& keyTuple, KeyValueRef* keyValue) {
-	if (!keyTuple.present()) {
-		// May throw exception if the key is not parsable as a tuple.
-		try {
-			keyTuple = Tuple::unpack(keyValue->key);
-		} catch (Error& e) {
-			TraceEvent("KeyNotTuple").error(e).detail("Key", keyValue->key.printable());
-			throw key_not_tuple();
-		}
-	}
-	*referenceTuple = &keyTuple.get();
-}
-
-void unpackValueTuple(Tuple** referenceTuple, Optional<Tuple>& valueTuple, KeyValueRef* keyValue) {
-	if (!valueTuple.present()) {
-		// May throw exception if the value is not parsable as a tuple.
-		try {
-			valueTuple = Tuple::unpack(keyValue->value);
-		} catch (Error& e) {
-			TraceEvent("ValueNotTuple").error(e).detail("Value", keyValue->value.printable());
-			throw value_not_tuple();
-		}
-	}
-	*referenceTuple = &valueTuple.get();
-}
-
-bool unescapeLiterals(std::string& s, std::string before, std::string after) {
-	bool escaped = false;
-	size_t p = 0;
-	while (true) {
-		size_t found = s.find(before, p);
-		if (found == std::string::npos) {
-			break;
-		}
-		s.replace(found, before.length(), after);
-		p = found + after.length();
-		escaped = true;
-	}
-	return escaped;
-}
-
-bool singleKeyOrValue(const std::string& s, size_t sz) {
-	// format would be {K[??]} or {V[??]}
-	return sz > 5 && s[0] == '{' && (s[1] == 'K' || s[1] == 'V') && s[2] == '[' && s[sz - 2] == ']' && s[sz - 1] == '}';
-}
-
-bool rangeQuery(const std::string& s) {
-	return s == "{...}";
-}
-
-// create a vector of Optional<Tuple>
-// in case of a singleKeyOrValue, insert an empty Tuple to vector as placeholder
-// in case of a rangeQuery, insert Optional.empty as placeholder
-// in other cases, insert the correct Tuple to be used.
-void preprocessMappedKey(Tuple& mappedKeyFormatTuple, std::vector<Optional<Tuple>>& vt, bool& isRangeQuery) {
-	vt.reserve(mappedKeyFormatTuple.size());
-
-	for (int i = 0; i < mappedKeyFormatTuple.size(); i++) {
-		Tuple::ElementType type = mappedKeyFormatTuple.getType(i);
-		if (type == Tuple::BYTES || type == Tuple::UTF8) {
-			std::string s = mappedKeyFormatTuple.getString(i).toString();
-			auto sz = s.size();
-			bool escaped = unescapeLiterals(s, "{{", "{");
-			escaped = unescapeLiterals(s, "}}", "}") || escaped;
-			if (escaped) {
-				vt.emplace_back(Tuple::makeTuple(s));
-			} else if (singleKeyOrValue(s, sz)) {
-				// when it is SingleKeyOrValue, insert an empty Tuple to vector as placeholder
-				vt.emplace_back(Tuple());
-			} else if (rangeQuery(s)) {
-				if (i != mappedKeyFormatTuple.size() - 1) {
-					// It must be the last element of the mapper tuple
-					throw mapper_bad_range_decriptor();
-				}
-				// when it is rangeQuery, insert Optional.empty as placeholder
-				vt.emplace_back(Optional<Tuple>());
-				isRangeQuery = true;
-			} else {
-				Tuple t;
-				t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
-				vt.emplace_back(t);
-			}
-		} else {
-			Tuple t;
-			t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
-			vt.emplace_back(t);
-		}
-	}
-}
-
-Key constructMappedKey(KeyValueRef* keyValue, std::vector<Optional<Tuple>>& vec, Tuple& mappedKeyFormatTuple) {
-	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
-	Optional<Tuple> keyTuple;
-	Optional<Tuple> valueTuple;
-	Tuple mappedKeyTuple;
-
-	mappedKeyTuple.reserve(vec.size());
-
-	for (int i = 0; i < vec.size(); i++) {
-		if (!vec[i].present()) {
-			// rangeQuery
-			continue;
-		}
-		if (vec[i].get().size()) {
-			mappedKeyTuple.append(vec[i].get());
-		} else {
-			// singleKeyOrValue is true
-			std::string s = mappedKeyFormatTuple.getString(i).toString();
-			auto sz = s.size();
-			int idx;
-			Tuple* referenceTuple;
-			try {
-				idx = std::stoi(s.substr(3, sz - 5));
-			} catch (std::exception& e) {
-				throw mapper_bad_index();
-			}
-			if (s[1] == 'K') {
-				unpackKeyTuple(&referenceTuple, keyTuple, keyValue);
-			} else if (s[1] == 'V') {
-				unpackValueTuple(&referenceTuple, valueTuple, keyValue);
-			} else {
-				ASSERT(false);
-				throw internal_error();
-			}
-			if (idx < 0 || idx >= referenceTuple->size()) {
-				throw mapper_bad_index();
-			}
-			mappedKeyTuple.appendRaw(referenceTuple->subTupleRawString(idx));
-		}
-	}
-
-	return mappedKeyTuple.pack();
-}
-
 struct AuditGetShardInfoRes {
 	Version readAtVersion;
 	UID serverId;
@@ -4266,23 +4123,6 @@ Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest r
  * allows overwriting existing data, making it suitable for validation purposes.
  *
  */
-
-// Helper: Issue a GetKeyValues request for a given range and return the future
-static Future<ErrorOr<GetKeyValuesReply>> issueGetKeyValuesRequest(StorageServer* data,
-                                                                   KeyRange range,
-                                                                   Version version,
-                                                                   int limit,
-                                                                   int limitBytes) {
-	GetKeyValuesRequest req;
-	req.begin = firstGreaterOrEqual(range.begin);
-	req.end = firstGreaterOrEqual(range.end);
-	req.limit = limit;
-	req.limitBytes = limitBytes;
-	req.version = version;
-	req.tags = TagSet();
-	data->actors.add(getKeyValuesQ(data, req));
-	return errorOr(req.reply.getFuture());
-}
 
 // Helper: Read both source and restored data for a given range
 //
@@ -5434,55 +5274,42 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	{
 		Tuple mappedKeyFormatTuple =
 		    Tuple::makeTuple("normal"_sr, "{{escaped}}"_sr, "{K[2]}"_sr, "{V[0]}"_sr, "{...}"_sr);
-
-		std::vector<Optional<Tuple>> vt;
-		bool isRangeQuery = false;
-		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+		MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+		Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 
 		Key expectedMappedKey =
 		    Tuple::makeTuple("normal"_sr, "{escaped}"_sr, "key-2"_sr, "value-0"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
-		ASSERT(isRangeQuery == true);
+		ASSERT(mappedKeyPlan.isRangeQuery() == true);
 	}
 
 	{
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{{{{}}"_sr, "}}"_sr);
-
-		std::vector<Optional<Tuple>> vt;
-		bool isRangeQuery = false;
-		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+		MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+		Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 
 		Key expectedMappedKey = Tuple::makeTuple("{{}"_sr, "}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
-		ASSERT(isRangeQuery == false);
+		ASSERT(mappedKeyPlan.isRangeQuery() == false);
 	}
 	{
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{{{{}}"_sr, "}}"_sr);
-
-		std::vector<Optional<Tuple>> vt;
-		bool isRangeQuery = false;
-		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+		MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+		Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 
 		Key expectedMappedKey = Tuple::makeTuple("{{}"_sr, "}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
-		ASSERT(isRangeQuery == false);
+		ASSERT(mappedKeyPlan.isRangeQuery() == false);
 	}
 	{
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{K[100]}"_sr);
 		bool throwException = false;
 		try {
-			std::vector<Optional<Tuple>> vt;
-			bool isRangeQuery = false;
-			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+			MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+			Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException = true;
@@ -5493,11 +5320,8 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{...}"_sr, "last-element"_sr);
 		bool throwException2 = false;
 		try {
-			std::vector<Optional<Tuple>> vt;
-			bool isRangeQuery = false;
-			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+			MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+			Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
 			throwException2 = true;
@@ -5508,16 +5332,27 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{K[not-a-number]}"_sr);
 		bool throwException3 = false;
 		try {
-			std::vector<Optional<Tuple>> vt;
-			bool isRangeQuery = false;
-			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+			MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+			Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException3 = true;
 		}
 		ASSERT(throwException3);
+	}
+	{
+		KeyValueRef invalidKeyAndValue("\xff"_sr, "\xff"_sr);
+		MappedKeyPlan literalPlan(Tuple::makeTuple("literal"_sr).pack());
+		ASSERT(literalPlan.constructMappedKey(invalidKeyAndValue) ==
+		       Tuple::makeTuple("literal"_sr).getDataAsStandalone());
+
+		KeyValueRef invalidValue(key, "\xff"_sr);
+		MappedKeyPlan keyPlan(Tuple::makeTuple("{K[1]}"_sr).pack());
+		ASSERT(keyPlan.constructMappedKey(invalidValue) == Tuple::makeTuple("key-1"_sr).getDataAsStandalone());
+
+		KeyValueRef invalidKey("\xff"_sr, value);
+		MappedKeyPlan valuePlan(Tuple::makeTuple("{V[1]}"_sr).pack());
+		ASSERT(valuePlan.constructMappedKey(invalidKey) == Tuple::makeTuple("value-1"_sr).getDataAsStandalone());
 	}
 	return Void();
 }
@@ -5573,17 +5408,7 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent(
 		    "TransactionDebug", pOriginalReq->options.get().debugID.get().first(), "storageserver.mapKeyValues.Start");
-	Tuple mappedKeyFormatTuple;
-
-	try {
-		mappedKeyFormatTuple = Tuple::unpack(mapper);
-	} catch (Error& e) {
-		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper);
-		throw mapper_not_tuple();
-	}
-	std::vector<Optional<Tuple>> vt;
-	bool isRangeQuery = false;
-	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
+	MappedKeyPlan mappedKeyPlan(mapper);
 
 	int sz = input.data.size();
 	const int k = std::min(sz, SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE);
@@ -5604,15 +5429,15 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// Clear key value to the default.
 			kvm->key = ""_sr;
 			kvm->value = ""_sr;
-			Key mappedKey = constructMappedKey(it, vt, mappedKeyFormatTuple);
+			Key mappedKey = mappedKeyPlan.constructMappedKey(*it);
 			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 			result.arena.dependsOn(mappedKey.arena());
 
 			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
 			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
 
-			subqueries.push_back(
-			    mapSubquery(data, input.version, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey));
+			subqueries.push_back(mapSubquery(
+			    data, input.version, pOriginalReq, &result.arena, mappedKeyPlan.isRangeQuery(), it, kvm, mappedKey));
 		}
 		co_await waitForAll(subqueries);
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
@@ -6248,20 +6073,6 @@ bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
 	validate(data);
 
 	return nextDurableVersion == desiredDurableVersion;
-}
-
-Optional<MutationRef> clipMutation(MutationRef const& m, KeyRangeRef range) {
-	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-		if (range.contains(m.param1))
-			return m;
-	} else if (m.type == MutationRef::ClearRange) {
-		KeyRangeRef i = range & KeyRangeRef(m.param1, m.param2);
-		if (!i.empty())
-			return MutationRef((MutationRef::Type)m.type, i.begin, i.end);
-	} else {
-		ASSERT(false);
-	}
-	return Optional<MutationRef>();
 }
 
 bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, UpdateEagerReadInfo* eager, Arena& ar) {
@@ -11630,28 +11441,30 @@ Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueReq
 	}
 }
 
-Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues) {
-	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
+template <class Request, class Handler>
+Future<Void> serveGuardedReadRequests(StorageServer* self,
+                                      FutureStream<Request> requests,
+                                      TransactionLineage::Operation operation,
+                                      Handler handler) {
+	getCurrentLineage()->modify(&TransactionLineage::operation) = operation;
 	while (true) {
-		GetKeyValuesRequest req = co_await getKeyValues;
-
+		Request req = co_await requests;
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
-		self->actors.add(self->readGuard(req, getKeyValuesQ));
+		self->actors.add(self->readGuard(req, handler));
 	}
+}
+
+Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues) {
+	return serveGuardedReadRequests(
+	    self, std::move(getKeyValues), TransactionLineage::Operation::GetKeyValues, getKeyValuesQ);
 }
 
 Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
                                              FutureStream<GetMappedKeyValuesRequest> getMappedKeyValues) {
 	// TODO: Is it fine to keep TransactionLineage::Operation::GetKeyValues here?
-	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
-	while (true) {
-		GetMappedKeyValuesRequest req = co_await getMappedKeyValues;
-
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
-		// downgrade before doing real work
-		self->actors.add(self->readGuard(req, getMappedKeyValuesQ));
-	}
+	return serveGuardedReadRequests(
+	    self, std::move(getMappedKeyValues), TransactionLineage::Operation::GetKeyValues, getMappedKeyValuesQ);
 }
 
 Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
@@ -11666,13 +11479,7 @@ Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
 }
 
 Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyRequest> getKey) {
-	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKey;
-	while (true) {
-		GetKeyRequest req = co_await getKey;
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
-		// downgrade before doing real work
-		self->actors.add(self->readGuard(req, getKeyQ));
-	}
+	return serveGuardedReadRequests(self, std::move(getKey), TransactionLineage::Operation::GetKey, getKeyQ);
 }
 
 Future<Void> watchValueWaitForVersion(StorageServer* self,
@@ -12624,7 +12431,15 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 		}
 		ssCore.cancel();
 		self.actors = ActorCollection(false);
-		co_await delay(0);
+		try {
+			co_await delay(0);
+		} catch (Error& cleanupError) {
+			// A rollback keeps the KVS open for its rebooter, which cannot reclaim it after cancellation.
+			if (cleanupError.code() == error_code_actor_cancelled && err.code() == error_code_please_reboot) {
+				persistentData->close();
+			}
+			throw;
+		}
 		throw err;
 	}
 }
@@ -12743,7 +12558,15 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 	}
 	ssCore.cancel();
 	self.actors = ActorCollection(false);
-	co_await delay(0);
+	try {
+		co_await delay(0);
+	} catch (Error& cleanupError) {
+		// A rollback keeps the KVS open for its rebooter, which cannot reclaim it after cancellation.
+		if (cleanupError.code() == error_code_actor_cancelled && err.code() == error_code_please_reboot) {
+			persistentData->close();
+		}
+		throw;
+	}
 	throw err;
 }
 

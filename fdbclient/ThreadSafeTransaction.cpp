@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#include <memory>
+#include <utility>
+
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/CoordinationInterface.h"
@@ -25,6 +28,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/GenericManagementAPI.h"
+#include "fdbclient/NativeCdc.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
@@ -32,6 +36,120 @@
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't
 // call addRef (e.g. C API follows this). Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any
 // of these functions.
+
+namespace {
+
+struct NativeCdcCursorState {
+	explicit NativeCdcCursorState(NativeCdcCursor cursor) : cursor(cursor) {}
+
+	ThreadSpinLock lock;
+	NativeCdcCursor cursor;
+};
+
+NativeCdcCursor toClientCursor(CDCCursor const& cursor) {
+	return NativeCdcCursor{ cursor.streamId, cursor.lastConsumedVersion };
+}
+
+CDCCursor toNativeCursor(NativeCdcCursor const& cursor) {
+	return CDCCursor(cursor.streamId, cursor.lastConsumedVersion);
+}
+
+void updateCursor(std::shared_ptr<NativeCdcCursorState> const& state, NativeCdcCursor cursor) {
+	ThreadSpinLockHolder holder(state->lock);
+	state->cursor = cursor;
+}
+
+NativeCdcCursor readCursor(std::shared_ptr<NativeCdcCursorState> const& state) {
+	ThreadSpinLockHolder holder(state->lock);
+	return state->cursor;
+}
+
+NativeCdcConsumeResult copyNativeCdcConsumeResult(CDCConsumeReply const& reply, NativeCdcCursor cursor) {
+	NativeCdcConsumeResult result;
+	result.cursor = cursor;
+	result.mutations.reserve(reply.mutations.size());
+	for (auto const& versioned : reply.mutations) {
+		NativeCdcVersionedMutations copiedVersion;
+		copiedVersion.version = versioned.version;
+		copiedVersion.mutations.reserve(versioned.mutations.size());
+		for (auto const& mutation : versioned.mutations) {
+			copiedVersion.mutations.push_back(
+			    NativeCdcMutation{ mutation.type, Key(mutation.param1), Value(mutation.param2) });
+		}
+		result.mutations.push_back(std::move(copiedVersion));
+	}
+	return result;
+}
+
+Future<NativeCdcConsumeResult> consumeNativeCdc(Reference<NativeCdcConsumer> consumer,
+                                                std::shared_ptr<NativeCdcCursorState> cursorState) {
+	try {
+		CDCConsumeReply reply = co_await consumer->consume();
+		NativeCdcCursor cursor = toClientCursor(consumer->position());
+		updateCursor(cursorState, cursor);
+		co_return copyNativeCdcConsumeResult(reply, cursor);
+	} catch (Error&) {
+		updateCursor(cursorState, toClientCursor(consumer->position()));
+		throw;
+	}
+}
+
+Future<Void> acknowledgeNativeCdc(Reference<NativeCdcConsumer> consumer,
+                                  std::shared_ptr<NativeCdcCursorState> cursorState) {
+	try {
+		co_await consumer->acknowledge();
+		updateCursor(cursorState, toClientCursor(consumer->position()));
+		co_return;
+	} catch (Error&) {
+		updateCursor(cursorState, toClientCursor(consumer->position()));
+		throw;
+	}
+}
+
+// The native consumer is confined to the network thread. This wrapper keeps
+// only a raw native pointer off-thread and defers its final release back to the
+// network thread, matching ThreadSafeDatabase and ThreadSafeTransaction.
+class ThreadSafeNativeCdcConsumer final : public INativeCdcConsumer,
+                                          public ThreadSafeReferenceCounted<ThreadSafeNativeCdcConsumer> {
+public:
+	ThreadSafeNativeCdcConsumer(NativeCdcConsumer* consumer, NativeCdcCursor cursor)
+	  : consumer(consumer), cursorState(std::make_shared<NativeCdcCursorState>(cursor)) {}
+
+	~ThreadSafeNativeCdcConsumer() override {
+		NativeCdcConsumer* consumer = this->consumer;
+		onMainThreadVoid([consumer]() { consumer->delref(); });
+	}
+
+	ThreadFuture<NativeCdcConsumeResult> consume() override {
+		auto self = Reference<ThreadSafeNativeCdcConsumer>::addRef(this);
+		return onMainThread([self]() -> Future<NativeCdcConsumeResult> {
+			return consumeNativeCdc(Reference<NativeCdcConsumer>::addRef(self->consumer), self->cursorState);
+		});
+	}
+
+	ThreadFuture<Void> acknowledge() override {
+		auto self = Reference<ThreadSafeNativeCdcConsumer>::addRef(this);
+		return onMainThread([self]() -> Future<Void> {
+			return acknowledgeNativeCdc(Reference<NativeCdcConsumer>::addRef(self->consumer), self->cursorState);
+		});
+	}
+
+	NativeCdcCursor getPosition() override { return readCursor(cursorState); }
+
+	void addref() override { ThreadSafeReferenceCounted<ThreadSafeNativeCdcConsumer>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<ThreadSafeNativeCdcConsumer>::delref(); }
+
+private:
+	NativeCdcConsumer* consumer;
+	std::shared_ptr<NativeCdcCursorState> cursorState;
+};
+
+Reference<INativeCdcConsumer> wrapNativeCdcConsumer(Reference<NativeCdcConsumer> consumer) {
+	NativeCdcCursor cursor = toClientCursor(consumer->position());
+	return makeReference<ThreadSafeNativeCdcConsumer>(consumer.extractPtr(), cursor);
+}
+
+} // namespace
 
 ThreadFuture<Void> ThreadSafeDatabase::onConnected() {
 	DatabaseContext* db = this->db;
@@ -100,6 +218,53 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 	return onMainThread([db, snapUID, cmd]() -> Future<Void> {
 		db->checkDeferredError();
 		return db->createSnapshot(snapUID, cmd);
+	});
+}
+
+ThreadFuture<CDCStreamId> ThreadSafeDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
+	DatabaseContext* db = this->db;
+	Key nameCopy(name);
+	KeyRange keysCopy(keys);
+	return onMainThread([db, nameCopy, keysCopy]() -> Future<CDCStreamId> {
+		db->checkDeferredError();
+		return registerNativeCdcStreamClient(Database(Reference<DatabaseContext>::addRef(db)), nameCopy, keysCopy);
+	});
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::removeNativeCdcStream(const KeyRef& name) {
+	DatabaseContext* db = this->db;
+	Key nameCopy(name);
+	return onMainThread([db, nameCopy]() -> Future<Void> {
+		db->checkDeferredError();
+		return removeNativeCdcStreamClient(Database(Reference<DatabaseContext>::addRef(db)), nameCopy);
+	});
+}
+
+ThreadFuture<std::vector<NativeCdcStreamInfo>> ThreadSafeDatabase::listNativeCdcStreams() {
+	DatabaseContext* db = this->db;
+	return onMainThread([db]() -> Future<std::vector<NativeCdcStreamInfo>> {
+		db->checkDeferredError();
+		return listNativeCdcStreamsClient(Database(Reference<DatabaseContext>::addRef(db)));
+	});
+}
+
+ThreadFuture<Reference<INativeCdcConsumer>> ThreadSafeDatabase::createNativeCdcConsumer(const KeyRef& name) {
+	DatabaseContext* db = this->db;
+	Key nameCopy(name);
+	return onMainThread([db, nameCopy]() -> Future<Reference<INativeCdcConsumer>> {
+		db->checkDeferredError();
+		return map(::createNativeCdcConsumer(Database(Reference<DatabaseContext>::addRef(db)), nameCopy),
+		           [](Reference<NativeCdcConsumer> consumer) { return wrapNativeCdcConsumer(std::move(consumer)); });
+	});
+}
+
+ThreadFuture<Reference<INativeCdcConsumer>> ThreadSafeDatabase::resumeNativeCdcConsumer(const NativeCdcCursor& cursor) {
+	DatabaseContext* db = this->db;
+	return onMainThread([db, cursor]() -> Future<Reference<INativeCdcConsumer>> {
+		db->checkDeferredError();
+		Reference<NativeCdcConsumer> consumer =
+		    ::resumeNativeCdcConsumer(Database(Reference<DatabaseContext>::addRef(db)), toNativeCursor(cursor));
+		return Future<Reference<INativeCdcConsumer>>(wrapNativeCdcConsumer(std::move(consumer)));
 	});
 }
 

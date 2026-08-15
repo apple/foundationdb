@@ -35,14 +35,14 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbrpc/sim_validation.h"
 #include "flow/Buggify.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 struct GrvProxyStats {
 	CounterCollection cc;
@@ -1253,7 +1253,7 @@ Future<Void> grvProxyServer(GrvProxyInterface proxy,
 		ASSERT(e.code() !=
 		       error_code_broken_promise); // all broken_promise should be transformed to the correct error code
 		CODE_PROBE(e.code() == error_code_master_failed, "GrvProxyServer master failed");
-		CODE_PROBE(e.code() == error_code_tlog_failed, "GrvProxyServer tlog failed");
+		CODE_PROBE(e.code() == error_code_tlog_failed, "GrvProxyServer tlog failed", probe::decoration::rare);
 		CODE_PROBE(e.code() == error_code_failed_to_progress, "GRV proxy failed to progress");
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&

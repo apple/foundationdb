@@ -35,7 +35,7 @@ Several standalone unit-test binaries can also run their tests under Simulation.
 
    ./bin/fdbclient_test --simulation
 
-When a binary is run in simulation mode without an explicit test filter, tests whose names start with ``noSim/`` are skipped. The ``flow_test`` target does not support this option because it is not linked with simulator support.
+Without an explicit test filter, simulation mode skips ``noSim/...``, incompatible ``/fdbrpc/grpc``, and opt-in performance or long-running correctness tests. Normal mode skips standalone-incompatible gRPC and simulation-only HTTP-server, mock-DNS, external-client, and file-shutdown tests, tests requiring an external backup URL, and opt-in performance or long-running correctness tests. An explicit ``--filter`` can still select any of these tests. The ``flow_test`` target does not support simulation because it is not linked with simulator support.
 
 Performance testing with Circus
 ===============================

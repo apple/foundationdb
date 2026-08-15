@@ -119,6 +119,7 @@ TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
 		} catch (Error& e) {
 			err = e;
 		}
+		AsyncFileKAIO::setTimeout(0.0);
 		if (err.present()) {
 			if (f) {
 				co_await AsyncFileEIO::deleteFile(f->getFilename(), true);

@@ -18,15 +18,15 @@ the expectation that it is, at least, partially (if not entirely) incorrect.
 If you only want to build a custom container image based on an already released FDB version you run the following command from the root:
 
 ```bash
-export REGISTRY=docker.io
-export FDB_VERSION=7.3.63
-docker build --build-arg FDB_VERSION=${FDB_VERSION} -t ${REGISTRY}/foundationdb/fdb-kubernetes-monitor:${FDB_VERSION} --target fdb-kubernetes-monitor -f ./packaging/docker/Dockerfile .
+FDB_VERSION=7.3.79
+docker build --build-arg FDB_VERSION=${FDB_VERSION} -t foundationdb:${FDB_VERSION} --target foundationdb ./packaging/docker
 ```
 
-Or if you want to build the `foundationdb` image and not the `fdb-kubernetes-monitor`:
+If you want to build the `fdb-kubernetes-monitor` image (which includes fdb binaries too),
+you need to use the build-output directory, even if not using binaries from the build.
+(Just the cmake configure step is enough to set this up.)
 
 ```bash
-export REGISTRY=docker.io
-export FDB_VERSION=7.3.63
-docker build --build-arg FDB_VERSION=${FDB_VERSION} -t ${REGISTRY}/foundationdb/foundationdb:${FDB_VERSION} --target foundationdb -f ./packaging/docker/Dockerfile .
+FDB_VERSION=7.3.79
+docker build --build-arg FDB_VERSION=${FDB_VERSION} -t fdb-kubernetes-monitor:${FDB_VERSION} --target fdb-kubernetes-monitor .../build-output/packages/docker
 ```

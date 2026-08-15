@@ -24,7 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/VersionedMap.h"
-#include "fdbclient/SnapshotCache.h"
+#include "SnapshotCache.h"
 #include "fdbclient/Atomic.h"
 
 struct RYWMutation {

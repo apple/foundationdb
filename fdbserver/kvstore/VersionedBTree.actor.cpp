@@ -30,13 +30,13 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "VersionedBTreeDebug.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/CoroUtils.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Histogram.h"
 #include "flow/IAsyncFile.h"
 #include "flow/IRandom.h"
@@ -455,7 +455,9 @@ public:
 		// Cancel outstanding operations.  Further use of cursor is not allowed.
 		void cancel() {
 			nextPageReader.cancel();
+			nextPageReader = Future<Reference<ArenaPage>>();
 			writeOperations.cancel();
+			writeOperations = Future<Void>();
 		}
 
 		// A read cursor can be initialized from a pop cursor
@@ -919,6 +921,7 @@ public:
 		tailWriter.cancel();
 		headWriter.cancel();
 		newTailPage.cancel();
+		newTailPage = Future<PhysicalPageID>();
 	}
 
 	FIFOQueue(const FIFOQueue& other) = delete;
@@ -1364,10 +1367,6 @@ public:
 		e.detail(format("%sRecordsPerPage", prefix), numPages > 0 ? (double)numEntries / numPages : 0);
 	}
 };
-
-int nextPowerOf2(uint32_t x) {
-	return 1 << (32 - clz(x - 1));
-}
 
 struct RedwoodMetrics {
 	constexpr static unsigned int btreeLevels = 5;
@@ -1905,7 +1904,10 @@ Future<T> forwardError(Future<T> f, Promise<Void> target, ExplicitVoid = {}) {
 		T x = co_await f;
 		co_return x;
 	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled && target.canBeSet()) {
+		if (e.code() == error_code_actor_cancelled) {
+			Promise<Void> targetToRelease(std::move(target));
+			Future<T> inputToRelease(std::move(f));
+		} else if (target.canBeSet()) {
 			target.sendError(e);
 		}
 		throw;
@@ -3082,16 +3084,14 @@ public:
 
 	// Read the physical extent at given pageID
 	// NOTE that we use the same interface (<ArenaPage>) for the extent as the page
-	ACTOR static Future<Reference<ArenaPage>> readPhysicalExtent(DWALPager* self,
-	                                                             PhysicalPageID pageID,
-	                                                             int readSize = 0) {
+	static Future<Reference<ArenaPage>> readPhysicalExtent(DWALPager* self, PhysicalPageID pageID, int readSize = 0) {
 		// First take the concurrentExtentReads lock to avoid issuing too many reads concurrently
-		wait(self->concurrentExtentReads->take());
+		co_await self->concurrentExtentReads->take();
 
 		ASSERT(!self->memoryOnly);
 
 		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
-			wait(delay(0, TaskPriority::DiskRead));
+			co_await delay(0, TaskPriority::DiskRead);
 		}
 
 		// readSize may not be equal to the physical extent size (for the first and last extents)
@@ -3100,7 +3100,7 @@ public:
 			readSize = self->physicalExtentSize;
 		}
 
-		state Reference<ArenaPage> extent = makeReference<ArenaPage>(readSize, readSize);
+		auto extent = makeReference<ArenaPage>(readSize, readSize);
 
 		// physicalReadSize is the size of disk read we intend to issue
 		auto physicalReadSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_READ_SIZE;
@@ -3145,7 +3145,7 @@ public:
 		}
 
 		// wait for all the parallel read futures for the given extent
-		wait(waitForAll(reads));
+		co_await waitForAll(reads);
 
 		debug_printf("DWALPager(%s) op=readPhysicalExtentComplete %s ptr=%p bytes=%d file offset=%d\n",
 		             self->filename.c_str(),
@@ -3154,7 +3154,7 @@ public:
 		             readSize,
 		             (pageID * self->physicalPageSize));
 
-		return extent;
+		co_return extent;
 	}
 
 	Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) override {
@@ -3621,14 +3621,18 @@ public:
 
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
+		self->recoverFuture = Future<Void>();
 		debug_printf("DWALPager(%s) shutdown cancel commit\n", self->filename.c_str());
-		// Cancelling the future does not destroy the state held by the commit coroutine. Reset the future entirely so
-		// shutdown releases that coroutine state before tearing down the pager.
+		// Cancel explicitly in case a caller still holds the commit result, then release the coroutine state before
+		// tearing down the pager.
+		self->commitFuture.cancel();
 		self->commitFuture = Future<Void>();
 		debug_printf("DWALPager(%s) shutdown cancel remap\n", self->filename.c_str());
 		self->remapCleanupFuture.cancel();
+		self->remapCleanupFuture = Future<Void>();
 		debug_printf("DWALPager(%s) shutdown kill file extension\n", self->filename.c_str());
 		self->fileExtension.cancel();
+		self->fileExtension = Future<Void>();
 
 		debug_printf("DWALPager(%s) shutdown cancel operations\n", self->filename.c_str());
 		for (auto& f : self->operations) {
@@ -5151,7 +5155,8 @@ public:
 	Future<Void> init() { return m_init; }
 
 	virtual ~VersionedBTree() {
-		// Release the latest commit coroutine and its previousCommit chain before tearing down the tree state.
+		// Cancel and release the latest commit coroutine and its previousCommit chain before tearing down the tree.
+		m_latestCommit.cancel();
 		m_latestCommit = Future<Void>();
 		m_lazyClearActor.cancel();
 		m_init.cancel();
@@ -5898,29 +5903,29 @@ private:
 		co_return records;
 	}
 
-	ACTOR static Future<Reference<const ArenaPage>> readPage(VersionedBTree* self,
-	                                                         PagerEventReasons reason,
-	                                                         unsigned int level,
-	                                                         IPagerSnapshot* snapshot,
-	                                                         BTreeNodeLinkRef id,
-	                                                         int priority,
-	                                                         bool forLazyClear,
-	                                                         bool cacheable) {
+	static Future<Reference<const ArenaPage>> readPage(VersionedBTree* self,
+	                                                   PagerEventReasons reason,
+	                                                   unsigned int level,
+	                                                   IPagerSnapshot* snapshot,
+	                                                   BTreeNodeLinkRef id,
+	                                                   int priority,
+	                                                   bool forLazyClear,
+	                                                   bool cacheable) {
 
 		debug_printf("readPage() op=read%s %s @%" PRId64 "\n",
 		             forLazyClear ? "ForDeferredClear" : "",
 		             toString(id).c_str(),
 		             snapshot->getVersion());
 
-		state Reference<const ArenaPage> page;
+		Reference<const ArenaPage> page;
 		if (id.size() == 1) {
 			Reference<const ArenaPage> p =
-			    wait(snapshot->getPhysicalPage(reason, level, id.front(), priority, cacheable, false));
+			    co_await snapshot->getPhysicalPage(reason, level, id.front(), priority, cacheable, false);
 			page = std::move(p);
 		} else {
 			ASSERT(!id.empty());
 			Reference<const ArenaPage> p =
-			    wait(snapshot->getMultiPhysicalPage(reason, level, id, priority, cacheable, false));
+			    co_await snapshot->getMultiPhysicalPage(reason, level, id, priority, cacheable, false);
 			page = std::move(p);
 		}
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
@@ -5929,7 +5934,7 @@ private:
 		metrics.pageRead += 1;
 		metrics.pageReadExt += (id.size() - 1);
 
-		return std::move(page);
+		co_return page;
 	}
 
 	// Get cursor into a BTree node, creating decode cache from boundaries if needed
@@ -7148,7 +7153,10 @@ private:
 		}
 	}
 
-	static Future<Void> commit_impl(VersionedBTree* self, Version writeVersion, Future<Void> previousCommit) {
+	static Future<Void> commit_impl(VersionedBTree* self,
+	                                Version writeVersion,
+	                                Future<Void> previousCommit,
+	                                NoThrowOnCancel = {}) {
 		// Take ownership of the current mutation buffer and make a new one
 		struct CommitImplState {
 			CommitBatch batch;
@@ -7667,7 +7675,8 @@ public:
 				       err.getError().code() == error_code_unexpected_encoding_type);
 			}
 		} else {
-			// The KVS user shouldn't be holding a commit future anymore so self shouldn't either.
+			// A storage server can still hold the last commit future while it is shutting down.
+			self->m_lastCommit.cancel();
 			self->m_lastCommit = Void();
 		}
 
@@ -9761,7 +9770,7 @@ Future<Void> commitAndReportLoadProgress(VersionedBTree* btree,
 
 } // namespace
 
-TEST_CASE("Lredwood/correctness/btreeCloseWithQueuedCommits") {
+TEST_CASE("/redwood/correctness/btreeCloseWithQueuedCommits") {
 	g_redwoodMetricsActor = Void();
 	g_redwoodMetrics.clear();
 
@@ -9789,15 +9798,73 @@ TEST_CASE("Lredwood/correctness/btreeCloseWithQueuedCommits") {
 	state Future<Void> secondCommit = btree->commit(++version);
 	ASSERT(!secondCommit.isReady());
 
-	// The tree owns the commit chain when it is closed; callers must not keep commit futures alive.
-	firstCommit = Future<Void>();
-	secondCommit = Future<Void>();
-	Future<Void> closedFuture = btree->onClosed();
+	// A storage server can retain both commit results while its KVS is being removed.
+	state Future<Void> closedFuture = btree->onClosed();
+	btree->dispose();
+	wait(closedFuture);
+	ASSERT(firstCommit.isReady() && firstCommit.isError() &&
+	       firstCommit.getError().code() == error_code_actor_cancelled);
+	ASSERT(secondCommit.isReady() && secondCommit.isError() &&
+	       secondCommit.getError().code() == error_code_actor_cancelled);
+	wait(delay(FLOW_KNOBS->NON_DURABLE_MAX_WRITE_DELAY + FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY + 1.0));
+	ASSERT(DWALPager::PageCacheT::Evictor::getEvictor()->empty());
+
+	// A replacement pager shares the process-global evictor and must not see entries from the disposed pager.
+	btree = new VersionedBTree(new DWALPager(4096,
+	                                         SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE,
+	                                         file,
+	                                         FLOW_KNOBS->PAGE_CACHE_4K,
+	                                         0,
+	                                         SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
+	                                         false),
+	                           file,
+	                           UID(),
+	                           {});
+	wait(btree->init());
+	version = btree->getLastCommittedVersion();
+	btree->set(KeyValueRef("c"_sr, "replacement"_sr));
+	wait(btree->commit(++version));
+	closedFuture = btree->onClosed();
 	btree->dispose();
 	wait(closedFuture);
 	wait(delay(0));
 	ASSERT(DWALPager::PageCacheT::Evictor::getEvictor()->empty());
 
+	return Void();
+}
+
+TEST_CASE("Lredwood/correctness/forwardErrorCancellationReleasesInput") {
+	Promise<Void> input;
+	Promise<Void> target;
+	Future<Void> forwarded = forwardError(input.getFuture(), target);
+	Future<Void> retained = forwarded;
+
+	ASSERT(input.getFutureReferenceCount() > 0);
+	forwarded.cancel();
+	ASSERT(retained.isReady() && retained.isError() && retained.getError().code() == error_code_actor_cancelled);
+	ASSERT_EQ(input.getFutureReferenceCount(), 0);
+	input.send(Void());
+	return Void();
+}
+
+Future<Void> cancelForwardErrorOnTargetError(Future<Void> error, Future<Void>* forwarded) {
+	try {
+		co_await error;
+	} catch (Error&) {
+		forwarded->cancel();
+	}
+	co_return;
+}
+
+TEST_CASE("Lredwood/correctness/forwardErrorReentrantCancellation") {
+	Promise<Void> input;
+	Promise<Void> target;
+	Future<Void> forwarded = forwardError(input.getFuture(), target);
+	Future<Void> watcher = cancelForwardErrorOnTargetError(target.getFuture(), &forwarded);
+
+	input.sendError(io_error());
+	ASSERT(watcher.isReady() && !watcher.isError());
+	ASSERT(forwarded.isReady() && forwarded.isError());
 	return Void();
 }
 

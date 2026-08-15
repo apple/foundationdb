@@ -415,11 +415,6 @@ std::string describeSplit(KeyRange keys, Standalone<VectorRef<KeyRef>>& splitKey
 
 	return s;
 }
-void traceSplit(KeyRange keys, Standalone<VectorRef<KeyRef>>& splitKeys) {
-	auto s = describeSplit(keys, splitKeys);
-	TraceEvent(SevInfo, "ExecutingShardSplit").detail("AtKeys", s);
-}
-
 void executeShardSplit(DataDistributionTracker* self,
                        KeyRange keys,
                        Standalone<VectorRef<KeyRef>> splitKeys,
@@ -463,39 +458,6 @@ void executeShardSplit(DataDistributionTracker* self,
 	}
 
 	self->actors.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes, "ShardSplit"));
-}
-
-struct RangeToSplit {
-	RangeMap<Standalone<StringRef>, ShardTrackedData, KeyRangeRef>::iterator shard;
-	Standalone<VectorRef<KeyRef>> faultLines;
-
-	RangeToSplit(RangeMap<Standalone<StringRef>, ShardTrackedData, KeyRangeRef>::iterator shard,
-	             Standalone<VectorRef<KeyRef>> faultLines)
-	  : shard(shard), faultLines(faultLines) {}
-};
-
-bool faultLinesMatch(std::vector<RangeToSplit>& ranges, std::vector<std::vector<KeyRef>>& expectedFaultLines) {
-	if (ranges.size() != expectedFaultLines.size()) {
-		return false;
-	}
-
-	for (auto& range : ranges) {
-		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
-		traceSplit(keys, range.faultLines);
-	}
-
-	for (int r = 0; r < ranges.size(); r++) {
-		if (ranges[r].faultLines.size() != expectedFaultLines[r].size()) {
-			return false;
-		}
-		for (int fl = 0; fl < ranges[r].faultLines.size(); fl++) {
-			if (ranges[r].faultLines[fl] != expectedFaultLines[r][fl]) {
-				return false;
-			}
-		}
-	}
-
-	return true;
 }
 
 Future<Void> shardSplitter(DataDistributionTracker* self,

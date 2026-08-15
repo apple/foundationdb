@@ -25,7 +25,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/core/ServerDBInfo.h"
 

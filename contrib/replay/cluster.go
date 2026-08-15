@@ -2,14 +2,38 @@ package main
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
+// isSetID reports whether a UID-valued trace detail actually holds an ID.
+//
+// fdbserver has two ways of saying "no ID here", and neither is an all-ffs
+// sentinel:
+//
+//   - "[not set]" for an Optional<UID> passed straight to detail(), which is what
+//     Traceable<Optional<T>> renders when the value is absent. This is the case
+//     for LogRouterMetrics.PrimaryPeekLocation and LogRouterPeekLocation.LogID,
+//     both of which come from IReplayPeekCursor::getPrimaryPeekLocation() and are
+//     absent whenever the cursor has no chosen best server.
+//   - "unknown", written explicitly by StorageServerSourceTLogID when the storage
+//     server has no source TLog yet.
+//
+// Note also that a UID reaching a trace via Traceable<UID> is only the first 16
+// hex digits, while one written with UID::toString() is the full 32; callers
+// truncate to 16 to match the Role event's ID format.
+func isSetID(v string) bool {
+	return v != "" && v != "[not set]" && v != "unknown"
+}
+
 // RoleInfo represents a role with its ID
 type RoleInfo struct {
-	Name  string // e.g., "StorageServer", "Coordinator"
-	ID    string // e.g., "f5f3670ef3675364"
-	Epoch string // Generation/Epoch for TLog, LogRouter, BackupWorker (empty for others)
+	Name     string   // e.g., "StorageServer", "Coordinator"
+	ID       string   // e.g., "f5f3670ef3675364"
+	Epoch    string   // Generation/Epoch for TLog, LogRouter, BackupWorker (empty for others)
+	Version  int64    // Latest processed version for TLog, StorageServer, LogRouter (0 if unknown)
+	BuddyID  string   // Buddy relationship: SS->TLog, LogRouter->TLog it peeks from (empty if unknown)
+	BuddyIDs []string // For Remote TLog: list of LogRouter IDs it pulls from (1:N relationship)
 }
 
 // Worker represents a process in the cluster
@@ -85,6 +109,12 @@ func BuildClusterState(events []TraceEvent) *ClusterState {
 
 	// Map to track epoch info by role ID (from metrics events)
 	epochByID := make(map[string]string)
+	// Map to track version by role ID (from metrics events)
+	versionByID := make(map[string]int64)
+	// Map to track buddy ID by role ID (SS->TLog, LogRouter->TLog)
+	buddyByID := make(map[string]string)
+	// Map to track buddy IDs list by role ID (Remote TLog->LogRouters, 1:N)
+	buddyIDsByID := make(map[string][]string)
 
 	for _, event := range events {
 		// Extract epoch info from start events (preferred - happens at initialization)
@@ -112,11 +142,70 @@ func BuildClusterState(events []TraceEvent) *ClusterState {
 					epochByID[event.ID] = generation
 				}
 			}
+			// TLog version from metrics
+			if version, ok := event.Attrs["Version"]; ok && event.ID != "" {
+				if v, err := strconv.ParseInt(version, 10, 64); err == nil {
+					versionByID[event.ID] = v
+				}
+			}
 		case "LogRouterMetrics":
 			// LogRouter epoch from metrics (fallback if start event missed)
 			if generation, ok := event.Attrs["Generation"]; ok && event.ID != "" {
 				if _, exists := epochByID[event.ID]; !exists {
 					epochByID[event.ID] = generation
+				}
+			}
+			// LogRouter version from metrics
+			if version, ok := event.Attrs["Version"]; ok && event.ID != "" {
+				if v, err := strconv.ParseInt(version, 10, 64); err == nil {
+					versionByID[event.ID] = v
+				}
+			}
+			// LogRouter buddy from metrics (PrimaryPeekLocation)
+			if peekLocation, ok := event.Attrs["PrimaryPeekLocation"]; ok && event.ID != "" {
+				if isSetID(peekLocation) {
+					buddyByID[event.ID] = peekLocation
+				}
+			}
+		case "StorageMetrics":
+			// StorageServer version from metrics
+			if version, ok := event.Attrs["Version"]; ok && event.ID != "" {
+				if v, err := strconv.ParseInt(version, 10, 64); err == nil {
+					versionByID[event.ID] = v
+				}
+			}
+		case "StorageServerSourceTLogID":
+			// StorageServer buddy - which TLog it peeks from
+			if sourceTLogID, ok := event.Attrs["SourceTLogID"]; ok && event.ID != "" {
+				if isSetID(sourceTLogID) {
+					buddyByID[event.ID] = sourceTLogID
+				}
+			}
+		case "LogRouterPeekLocation":
+			// LogRouter buddy - which TLog it peeks from
+			if logID, ok := event.Attrs["LogID"]; ok && event.ID != "" {
+				if isSetID(logID) {
+					buddyByID[event.ID] = logID
+				}
+			}
+		case "TLogPeekRemoteBestOnly":
+			// Remote TLog - list of LogRouters it pulls from (1:N relationship)
+			if logRouterIds, ok := event.Attrs["LogRouterIds"]; ok && event.ID != "" {
+				// Parse comma-separated list of LogRouter IDs
+				// Format: "fe567807fe9a2aa3f2ada4c5b58afa9c, 8b4de5474b14b0f05356203f4c4c5034, ..."
+				var ids []string
+				for _, id := range strings.Split(logRouterIds, ",") {
+					id = strings.TrimSpace(id)
+					if id != "" {
+						// Extract just the first 16 chars (the actual ID, not the full UID)
+						if len(id) > 16 {
+							id = id[:16]
+						}
+						ids = append(ids, id)
+					}
+				}
+				if len(ids) > 0 {
+					buddyIDsByID[event.ID] = ids
 				}
 			}
 		}
@@ -175,12 +264,52 @@ func BuildClusterState(events []TraceEvent) *ClusterState {
 		}
 	}
 
-	// Second pass: Update roles with epoch info that may have arrived after the Role event
+	// Second pass: Build set of active role IDs for validating buddy references
+	activeRoleIDs := make(map[string]bool)
+	for _, worker := range state.Workers {
+		for _, role := range worker.Roles {
+			if role.ID != "" {
+				activeRoleIDs[role.ID] = true
+			}
+		}
+	}
+
+	// Third pass: Update roles with epoch, version, and buddy info that may have arrived after the Role event
+	// Only include buddy references if the buddy still exists in the current topology
 	for _, worker := range state.Workers {
 		for i := range worker.Roles {
 			if worker.Roles[i].Epoch == "" {
 				if epoch, ok := epochByID[worker.Roles[i].ID]; ok {
 					worker.Roles[i].Epoch = epoch
+				}
+			}
+			// Update version from metrics
+			if version, ok := versionByID[worker.Roles[i].ID]; ok {
+				worker.Roles[i].Version = version
+			}
+			// Update buddy info (1:1 relationships: SS->TLog, LogRouter->TLog)
+			// Only if the buddy still exists in topology
+			// Truncate to 16 chars to match Role ID format
+			if buddy, ok := buddyByID[worker.Roles[i].ID]; ok {
+				buddyShort := buddy
+				if len(buddyShort) > 16 {
+					buddyShort = buddyShort[:16]
+				}
+				if activeRoleIDs[buddyShort] {
+					worker.Roles[i].BuddyID = buddyShort
+				}
+			}
+			// Update buddy IDs list (1:N relationships: TLog->LogRouters)
+			// Only include LogRouters that still exist in topology
+			if buddyIDs, ok := buddyIDsByID[worker.Roles[i].ID]; ok {
+				var activeIDs []string
+				for _, id := range buddyIDs {
+					if activeRoleIDs[id] {
+						activeIDs = append(activeIDs, id)
+					}
+				}
+				if len(activeIDs) > 0 {
+					worker.Roles[i].BuddyIDs = activeIDs
 				}
 			}
 		}

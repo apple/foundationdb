@@ -21,14 +21,15 @@
 #include <cstdint>
 
 #include "fdbserver/coordinator/CoordinationServer.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/Knobs.h"
 #include "OnDemandStore.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/network.h"
 #include "flow/CoroUtils.h"
@@ -874,7 +875,9 @@ Future<Void> leaderServer(LeaderElectionRegInterface interf,
 	co_await server.run();
 }
 
-Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
+static Future<Void> coordinationServerOnce(std::string dataFolder,
+                                           Reference<IClusterConnectionRecord> ccr,
+                                           bool* repairedIncompleteQueue) {
 	UID myID = deterministicRandom()->randomUniqueID();
 	LeaderElectionRegInterface myLeaderInterface(g_network);
 	GenerationRegInterface myInterface(g_network);
@@ -921,7 +924,8 @@ Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnec
 	// queue state on the coordinator. In the long term, we should either
 	// modify simulation to consider injected errors as fatal or allow the
 	// coordinator to manually fix disk queue state in real clusters.
-	if (g_network->isSimulated() && g_simulator->speedUpSimulation && err.code() == error_code_file_not_found) {
+	if (g_network->isSimulated() && (g_simulator->speedUpSimulation || fdbSimulationPolicyState().restarted) &&
+	    err.code() == error_code_file_not_found) {
 		std::vector<Future<Reference<IAsyncFile>>> fs;
 		fs.reserve(2);
 		for (int i = 0; i < 2; ++i) {
@@ -956,9 +960,36 @@ Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnec
 			co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "0.fdq"),
 			                                                    true);
 		}
+		if (repairedIncompleteQueue != nullptr) {
+			*repairedIncompleteQueue = true;
+		}
 	}
 
 	throw err;
+}
+
+static Future<Void> restartCoordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
+	while (true) {
+		bool repairedIncompleteQueue = false;
+		try {
+			co_await coordinationServerOnce(dataFolder, ccr, &repairedIncompleteQueue);
+			co_return;
+		} catch (Error& e) {
+			if (e.code() != error_code_file_not_found || !repairedIncompleteQueue) {
+				throw;
+			}
+		}
+
+		TraceEvent("CoordinatorRetryAfterIncompleteQueue").detail("Folder", dataFolder);
+		co_await delay(0);
+	}
+}
+
+Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
+	if (g_network->isSimulated() && fdbSimulationPolicyState().restarted) {
+		return restartCoordinationServer(dataFolder, ccr);
+	}
+	return coordinationServerOnce(dataFolder, ccr, nullptr);
 }
 
 Future<Void> changeClusterDescription(std::string datafolder, KeyRef newClusterKey, KeyRef oldClusterKey) {

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/WriteMap.h"
+#include "WriteMap.h"
 
 void OperationStack::reset(RYWMutation initialEntry) {
 	defaultConstructed = false;

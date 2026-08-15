@@ -287,7 +287,18 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    .. note:: This function provides no benefit to most application code. It is designed for use in writing generic, thread-safe language bindings. Applications should normally call :func:`fdb_future_destroy` only.
 
-   This function may only be called after a successful (zero return value) call to :func:`fdb_future_get_key`, :func:`fdb_future_get_value`, or :func:`fdb_future_get_keyvalue_array`. It indicates that the memory returned by the prior get call is no longer needed by the application. After this function has been called the same number of times as ``fdb_future_get_*()``, further calls to ``fdb_future_get_*()`` will return a :ref:`future_released <developer-guide-error-codes>` error. It is still necessary to later destroy the future with :func:`fdb_future_destroy`.
+   This function may only be called after a successful (zero return value)
+   call to an ``fdb_future_get_*()`` function that returns memory owned by
+   the future. This includes :func:`fdb_future_get_key`,
+   :func:`fdb_future_get_value`, :func:`fdb_future_get_keyvalue_array`,
+   :func:`fdb_future_get_cdc_stream_info_array`, and
+   :func:`fdb_future_get_cdc_versioned_mutations`. It indicates that the
+   memory returned by the prior get call is no longer needed by the
+   application. After this function has been called the same number of times
+   as ``fdb_future_get_*()``, further calls to ``fdb_future_get_*()``
+   will return a :ref:`future_released <developer-guide-error-codes>` error.
+   It is still necessary to later destroy the future with
+   :func:`fdb_future_destroy`.
 
    Calling this function is optional, since :func:`fdb_future_destroy` will also release the memory returned by get functions. However, :func:`fdb_future_release_memory` leaves the future object itself intact and provides a specific error code which can be used for coordination by multiple threads racing to do something with the results of a specific future. This has proven helpful in writing binding code.
 
@@ -298,6 +309,13 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 .. function:: fdb_error_t fdb_future_get_int64(FDBFuture* future, int64_t* out)
 
    Extracts a 64-bit integer from a pointer to :type:`FDBFuture` into a caller-provided variable of type ``int64_t``. |future-warning|
+
+   |future-get-return1| |future-get-return2|.
+
+.. function:: fdb_error_t fdb_future_get_uint64(FDBFuture* future, uint64_t* out)
+
+   Extracts an unsigned 64-bit integer from a pointer to :type:`FDBFuture`
+   into a caller-provided variable of type ``uint64_t``. |future-warning|
 
    |future-get-return1| |future-get-return2|.
 
@@ -542,6 +560,135 @@ An |database-blurb1| Modifications to a database are performed via transactions.
          ...
          ]
       }
+
+CDC
+---
+
+CDC exposes durable, named streams of committed mutations for one half-open
+user-key range. New stream registration requires CDC admission
+to be enabled on the cluster. Listing, removal, consumer creation, resume,
+consume, and acknowledgement remain available for already durable streams while
+new admission is disabled so that callers can drain or remove them.
+
+The CDC C API is available beginning with API version 800. Applications must
+select API version 800 or later before calling these functions.
+
+.. type:: FDBCdcMutationType
+
+   The raw mutation type returned by CDC. Values match the corresponding
+   FoundationDB mutation encoding. ``SET_VALUE`` uses ``param1`` as the key and
+   ``param2`` as the value; ``CLEAR_RANGE`` uses them as the clipped begin and
+   end keys; atomic mutations use them as the key and operand.
+
+   The listed constants are not exhaustive. Callers must handle an
+   unrecognized raw ``uint8_t`` value in ``FDBCdcMutation.type``.
+
+.. type:: FDBCdcStreamInfo
+
+   A listed CDC stream, including its name, stable stream ID, registered
+   key range, and durable minimum required version.
+
+.. type:: FDBCdcMutation
+
+   One raw mutation within a CDC commit-version group.
+
+.. type:: FDBCdcVersionedMutations
+
+   A complete group of mutations with one FoundationDB commit version. A
+   consume reply contains only complete groups; callers should preserve this
+   grouping when processing a reply.
+
+.. type:: FDBCdcConsumer
+
+   An opaque, reference-counted CDC consumer handle. A handle extracted
+   with :func:`fdb_future_get_cdc_consumer()` is owned by the caller and
+   remains valid after the originating future is destroyed. Destroy it exactly
+   once with :func:`fdb_cdc_consumer_destroy()`.
+
+.. function:: FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* database, uint8_t const* name, int name_length, uint8_t const* begin_key, int begin_key_length, uint8_t const* end_key, int end_key_length)
+
+   Registers ``name`` for the non-empty half-open range ``[begin_key,
+   end_key)`` in normal user key space. Repeating the same name and range is
+   idempotent; reusing a name with a different range fails. The future returns
+   the ``uint64_t`` stream ID, extracted with :func:`fdb_future_get_uint64()`.
+
+.. function:: FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* database, uint8_t const* name, int name_length)
+
+   Removes the named stream and relinquishes its unread history. Removing a
+   missing name succeeds. The returned future contains no value.
+
+.. function:: FDBFuture* fdb_database_list_cdc_streams(FDBDatabase* database)
+
+   Returns the currently registered CDC streams. Extract the result with
+   :func:`fdb_future_get_cdc_stream_info_array()`.
+
+.. function:: fdb_error_t fdb_future_get_cdc_stream_info_array(FDBFuture* future, FDBCdcStreamInfo const** out_streams, int* out_count)
+
+   Extracts the stream-info array returned by
+   :func:`fdb_database_list_cdc_streams()`. |future-get-return1|
+   |future-get-return2|.
+
+   |future-memory-mine|
+
+.. function:: FDBFuture* fdb_database_create_cdc_consumer(FDBDatabase* database, uint8_t const* name, int name_length)
+
+   Creates a consumer for an existing stream name at its initial position.
+   Extract the returned handle with
+   :func:`fdb_future_get_cdc_consumer()`.
+
+.. function:: FDBFuture* fdb_database_resume_cdc_consumer(FDBDatabase* database, uint64_t stream_id, int64_t last_consumed_version)
+
+   Constructs a local consumer handle from a checkpointed cursor. A cursor is
+   only the stable ``stream_id`` and the version through which the caller has
+   consumed; it does not contain process-local state. This call does not
+   validate the stream ID or cursor; those checks occur when the handle
+   consumes or acknowledges. Resume from the last durably processed and
+   acknowledged position because unacknowledged mutations may be redelivered
+   after CDC proxy replacement.
+
+.. function:: fdb_error_t fdb_future_get_cdc_consumer(FDBFuture* future, FDBCdcConsumer** out_consumer)
+
+   Extracts the owned consumer handle returned by
+   :func:`fdb_database_create_cdc_consumer()` or
+   :func:`fdb_database_resume_cdc_consumer()`. |future-get-return1|
+   |future-get-return2|.
+
+.. function:: void fdb_cdc_consumer_destroy(FDBCdcConsumer* consumer)
+
+   Releases an owned CDC consumer handle.
+
+.. function:: FDBFuture* fdb_cdc_consumer_consume(FDBCdcConsumer* consumer)
+
+   Long-polls for the next delivered position and complete commit-version
+   mutation groups. Extract the reply with
+   :func:`fdb_future_get_cdc_versioned_mutations()`. Consumption advances
+   the in-memory consumer position but does not release durable CDC retention.
+
+.. function:: fdb_error_t fdb_future_get_cdc_versioned_mutations(FDBFuture* future, FDBCdcVersionedMutations const** out_mutations, int* out_count, int64_t* out_last_consumed_version)
+
+   Extracts the grouped mutation reply from
+   :func:`fdb_cdc_consumer_consume()`. ``out_last_consumed_version`` is
+   the delivered cursor after the reply and may advance across commit-version
+   gaps that contain no returned mutation. |future-get-return1|
+   |future-get-return2|.
+
+   The returned groups, mutation arrays, and parameter bytes are owned by
+   ``future`` and remain valid until :func:`fdb_future_destroy()` or
+   :func:`fdb_future_release_memory()` is called.
+
+.. function:: FDBFuture* fdb_cdc_consumer_acknowledge(FDBCdcConsumer* consumer)
+
+   Durably acknowledges the consumer's current delivered position. Call this
+   only after all mutations represented through that position have been durably
+   processed. Acknowledgement advances a frontier shared by the stream, not one
+   private to the handle, so a stream may have only one active logical
+   consumer. Independently, a consumer handle may have only one consume or
+   acknowledge operation outstanding at a time. The returned future contains
+   no value.
+
+.. function:: fdb_error_t fdb_cdc_consumer_get_position(FDBCdcConsumer* consumer, uint64_t* out_stream_id, int64_t* out_last_consumed_version)
+
+   Returns the consumer's current cursor.
 
 Transaction
 ===========

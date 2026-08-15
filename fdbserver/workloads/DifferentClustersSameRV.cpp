@@ -24,7 +24,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/ApiVersion.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 void traceError(const char* filename, int line, Error const& e) {
 	TraceEvent("DifferentClustersSameRVWorkload_Error").error(e).detail("File", filename).detail("Line", line);

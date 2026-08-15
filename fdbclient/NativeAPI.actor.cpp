@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <iterator>
 #include <limits>
@@ -47,6 +48,7 @@
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
+#include "fdbclient/ClientOptionValidation.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -84,7 +86,7 @@
 #include "flow/Trace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
@@ -272,40 +274,6 @@ bool DatabaseContext::sampleOnCost(uint64_t cost) const {
 	if (sampleCost <= 0)
 		return false;
 	return deterministicRandom()->random01() <= (double)cost / sampleCost;
-}
-
-void validateOptionValuePresent(Optional<StringRef> value) {
-	if (!value.present()) {
-		throw invalid_option_value();
-	}
-}
-
-void validateOptionValueNotPresent(Optional<StringRef> value) {
-	if (value.present() && value.get().size() > 0) {
-		throw invalid_option_value();
-	}
-}
-
-int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
-	validateOptionValuePresent(value);
-	if (value.get().size() != 8) {
-		throw invalid_option_value();
-	}
-
-	int64_t passed = *((int64_t*)(value.get().begin()));
-	if (passed > maxValue || passed < minValue) {
-		throw invalid_option_value();
-	}
-
-	return passed;
-}
-
-uint64_t extractHexOption(StringRef value) {
-	char* end;
-	uint64_t id = strtoull(value.toString().c_str(), &end, 16);
-	if (*end)
-		throw invalid_option_value();
-	return id;
 }
 
 void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -2901,7 +2869,7 @@ static Future<Void> tssStreamComparison(Request request,
 
 			// skip tss comparison if both are end of stream
 			if ((!ssEndOfStream || !tssEndOfStream) && !TSS_doCompare(ssReply.get(), tssReply.get())) {
-				CODE_PROBE(true, "TSS mismatch in stream comparison");
+				CODE_PROBE(true, "TSS mismatch in stream comparison", probe::decoration::rare);
 				TraceEvent mismatchEvent(
 				    (simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
 				        ? SevWarnAlways
@@ -2917,7 +2885,8 @@ static Future<Void> tssStreamComparison(Request request,
 					           "Tracing Full TSS Mismatch in stream comparison",
 					           probe::decoration::rare);
 					CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
-					           "Tracing Partial TSS Mismatch in stream comparison and storing the rest in FDB");
+					           "Tracing Partial TSS Mismatch in stream comparison and storing the rest in FDB",
+					           probe::decoration::rare);
 
 					if (!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL) {
 						mismatchEvent.disable();
@@ -6464,7 +6433,7 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 		double clientSamplingProbability = std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || buggify()) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
-		    (!g_network->isSimulated() || !g_simulator->speedUpSimulation)) {
+		    (!g_network->isSimulated() || !g_simulator->speedUpSimulation || std::isfinite(sampleRate))) {
 			return makeReference<TransactionLogInfo>(TransactionLogInfo::DATABASE);
 		}
 	}

@@ -27,7 +27,7 @@
 #include "flow/IConnection.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 #include "md5/md5.h"
 #include "libb64/encode.h"

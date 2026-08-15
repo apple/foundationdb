@@ -36,7 +36,7 @@
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/tlog/TLogServer.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/sim_validation.h"
@@ -48,7 +48,7 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/Histogram.h"
 #include "flow/DebugTrace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
 #include "flow/CoroUtils.h"
 
@@ -183,7 +183,7 @@ private:
 
 			Standalone<StringRef> e = co_await self->queue->readNext(payloadSize + 1);
 			if (e.size() != payloadSize + 1) {
-				CODE_PROBE(true, "Zero fill within payload", probe::decoration::rare);
+				CODE_PROBE(true, "Zero fill within payload");
 				zeroFillSize = payloadSize + 1 - e.size();
 				break;
 			}
@@ -199,7 +199,7 @@ private:
 			}
 		}
 		if (zeroFillSize) {
-			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue", probe::decoration::rare);
+			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue");
 			for (int i = 0; i < zeroFillSize; i++)
 				self->queue->push(StringRef((const uint8_t*)"", 1));
 		}
@@ -2345,8 +2345,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				}
 				if (sequenceData.isSet()) {
 					if (sequenceData.getFuture().get().first != rep.end) {
-						CODE_PROBE(
-						    true, "tlog peek second attempt ended at a different version", probe::decoration::rare);
+						CODE_PROBE(true, "tlog peek second attempt ended at a different version");
 						replyPromise.sendError(operation_obsolete());
 						co_return;
 					}
@@ -3413,28 +3412,6 @@ void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerI
 	}
 }
 
-static void throwLowDiskTLogRecoveryFailed(TLogData* self,
-                                           Reference<LogData> logData,
-                                           Version ver,
-                                           double minAvailableSpaceRatio,
-                                           StorageBytes kvStoreBytes,
-                                           StorageBytes queueBytes) {
-	if (!self->lowDiskTLogExclusion->get()) {
-		self->lowDiskTLogExclusion->set(true);
-	}
-	TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpace", logData->logId)
-	    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
-	    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
-	    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
-	    .detail("KvstoreBytesTotal", kvStoreBytes.total)
-	    .detail("QueueDiskBytesAvailable", queueBytes.available)
-	    .detail("QueueDiskBytesTotal", queueBytes.total)
-	    .detail("Version", ver)
-	    .detail("Action", "FailRecoveryAndRecruitNewTLogs");
-	CODE_PROBE(true, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
-	throw recruitment_failed();
-}
-
 double effectiveTLogMinAvailableSpaceRatio() {
 	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 		return 0.0;
@@ -3442,15 +3419,16 @@ double effectiveTLogMinAvailableSpaceRatio() {
 	return SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO;
 }
 
-static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> logData, Version ver) {
+static bool canTLogAcceptNewData(TLogData* self, Reference<LogData> logData, Version ver, bool failRecovery) {
 	StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
 	StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
 	const double minAvailableSpaceRatio = effectiveTLogMinAvailableSpaceRatio();
 	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, minAvailableSpaceRatio)) {
-		return;
+		return true;
 	}
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
-		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpeedUpSimulation", logData->logId)
+		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSimulationBypass", logData->logId)
+		    .suppressFor(60.0)
 		    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
 		    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
 		    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
@@ -3458,15 +3436,58 @@ static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> log
 		    .detail("QueueDiskBytesAvailable", queueBytes.available)
 		    .detail("QueueDiskBytesTotal", queueBytes.total)
 		    .detail("Version", ver);
-		g_simulator->speedUpSimulation = true;
-		if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, effectiveTLogMinAvailableSpaceRatio())) {
-			return;
-		}
+		// Bypass only this simulated pull; do not speed up the whole simulation.
+		return true;
 	}
 	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO", probe::decoration::rare);
-	// Outside speedUpSimulation, fail recovery and temporarily exclude this worker from TLog recruitment until disk
-	// space recovers.
-	throwLowDiskTLogRecoveryFailed(self, logData, ver, minAvailableSpaceRatio, kvStoreBytes, queueBytes);
+	const bool enteringLowDisk = !self->lowDiskTLogExclusion->get();
+	if (enteringLowDisk) {
+		self->lowDiskTLogExclusion->set(true);
+	}
+	if (enteringLowDisk || failRecovery) {
+		TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpace", logData->logId)
+		    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
+		    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
+		    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
+		    .detail("KvstoreBytesTotal", kvStoreBytes.total)
+		    .detail("QueueDiskBytesAvailable", queueBytes.available)
+		    .detail("QueueDiskBytesTotal", queueBytes.total)
+		    .detail("Version", ver)
+		    .detail("Action", failRecovery ? "FailRecoveryAndRecruitNewTLogs" : "PausePullAndRecruitNewTLogs");
+	}
+	CODE_PROBE(failRecovery, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO");
+	if (failRecovery) {
+		throw recruitment_failed();
+	}
+	return false;
+}
+
+static Future<Void> waitUntilTLogAcceptsNewDataImpl(TLogData* self, Reference<LogData> logData, Version ver) {
+	while (true) {
+		if (logData->stopped()) {
+			co_return;
+		}
+		co_await race(self->lowDiskTLogExclusion->onChange(),
+		              logData->stoppedPromise.getFuture(),
+		              delayJittered(1.0, TaskPriority::TLogCommit));
+		if (logData->stopped()) {
+			co_return;
+		}
+
+		if (canTLogAcceptNewData(self, logData, ver, false)) {
+			co_return;
+		}
+	}
+}
+
+static Future<Void> waitUntilTLogAcceptsNewData(TLogData* self,
+                                                Reference<LogData> logData,
+                                                Version ver,
+                                                Optional<Version> endVersion) {
+	if (canTLogAcceptNewData(self, logData, ver, endVersion.present())) {
+		return Void();
+	}
+	return waitUntilTLogAcceptsNewDataImpl(self, logData, ver);
 }
 
 // remote tLog pull data from log routers
@@ -3545,7 +3566,7 @@ Future<Void> pullAsyncData(TLogData* self,
 						    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 					}
 
-					failIfTLogCannotAcceptNewData(self, logData, ver);
+					co_await waitUntilTLogAcceptsNewData(self, logData, ver, endVersion);
 					if (logData->stopped()) {
 						co_return;
 					}
@@ -3586,7 +3607,7 @@ Future<Void> pullAsyncData(TLogData* self,
 							    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 						}
 
-						failIfTLogCannotAcceptNewData(self, logData, ver);
+						co_await waitUntilTLogAcceptsNewData(self, logData, ver, endVersion);
 						if (logData->stopped()) {
 							co_return;
 						}
@@ -3871,6 +3892,7 @@ Future<Void> restorePersistentState(TLogData* self,
 		Version ver = BinaryReader::fromStringRef<Version>(fVers.get()[idx].value, Unversioned());
 		logData->persistentDataVersion = ver;
 		logData->persistentDataDurableVersion = ver;
+		logData->queuePoppedVersion = ver;
 		logData->version.set(ver);
 		logData->recoveryCount =
 		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
@@ -3903,6 +3925,10 @@ Future<Void> restorePersistentState(TLogData* self,
 				logData->createTagData(
 				    tag, popped, NothingPersistent::False, PoppedRecently::False, UnpoppedRecovered::False);
 				logData->getTagData(tag)->persistentPopped = popped;
+				// Reference-spilled data can still pin disk queue entries before the restored durable version.
+				if (logData->shouldSpillByReference(tag)) {
+					logData->queuePoppedVersion = std::min(logData->queuePoppedVersion, popped);
+				}
 			}
 		}
 	}
@@ -4154,6 +4180,7 @@ Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, LocalityData l
 			logData->persistentDataVersion = logData->unrecoveredBefore - 1;
 			logData->persistentDataDurableVersion = logData->unrecoveredBefore - 1;
 			logData->queueCommittedVersion.set(logData->unrecoveredBefore - 1);
+			logData->queuePoppedVersion = logData->unrecoveredBefore - 1;
 			logData->version.set(logData->unrecoveredBefore - 1);
 
 			logData->unpoppedRecoveredTagCount = req.allTags.size();

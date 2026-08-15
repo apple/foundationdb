@@ -40,6 +40,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	using FDBCluster = struct FDB_cluster;
 	using FDBDatabase = struct FDB_database;
 	using FDBTransaction = struct FDB_transaction;
+	using FDBNativeCdcConsumer = struct FDB_native_cdc_consumer;
 
 	using fdb_error_t = int;
 	using fdb_bool_t = int;
@@ -91,6 +92,27 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		int endKeyLength;
 	};
 
+	using FDBNativeCdcStreamInfo = struct native_cdc_stream_info {
+		FDBKey name;
+		uint64_t streamId;
+		FDBKeyRange keyRange;
+		int64_t minVersion;
+	};
+
+	using FDBNativeCdcMutation = struct native_cdc_mutation {
+		uint8_t type;
+		const uint8_t* param1;
+		int param1Length;
+		const uint8_t* param2;
+		int param2Length;
+	};
+
+	using FDBNativeCdcVersionedMutations = struct native_cdc_versioned_mutations {
+		int64_t version;
+		const FDBNativeCdcMutation* mutations;
+		int mutationCount;
+	};
+
 #pragma pack(pop)
 
 	using FDBCallback = void (*)(FDBFuture*, void*);
@@ -132,6 +154,26 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
 
 	FDBFuture* (*databaseGetClientStatus)(FDBDatabase* db);
+	FDBFuture* (*databaseRegisterNativeCdcStream)(FDBDatabase* database,
+	                                              uint8_t const* name,
+	                                              int nameLength,
+	                                              uint8_t const* beginKey,
+	                                              int beginKeyLength,
+	                                              uint8_t const* endKey,
+	                                              int endKeyLength);
+	FDBFuture* (*databaseRemoveNativeCdcStream)(FDBDatabase* database, uint8_t const* name, int nameLength);
+	FDBFuture* (*databaseListNativeCdcStreams)(FDBDatabase* database);
+	FDBFuture* (*databaseCreateNativeCdcConsumer)(FDBDatabase* database, uint8_t const* name, int nameLength);
+	FDBFuture* (*databaseResumeNativeCdcConsumer)(FDBDatabase* database,
+	                                              uint64_t streamId,
+	                                              int64_t lastConsumedVersion);
+
+	void (*nativeCdcConsumerDestroy)(FDBNativeCdcConsumer* consumer);
+	FDBFuture* (*nativeCdcConsumerConsume)(FDBNativeCdcConsumer* consumer);
+	FDBFuture* (*nativeCdcConsumerAcknowledge)(FDBNativeCdcConsumer* consumer);
+	fdb_error_t (*nativeCdcConsumerGetPosition)(FDBNativeCdcConsumer* consumer,
+	                                            uint64_t* outStreamId,
+	                                            int64_t* outLastConsumedVersion);
 
 	// Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction* tr,
@@ -257,6 +299,14 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                            FDBMappedKeyValue const** outKVM,
 	                                            int* outCount,
 	                                            fdb_bool_t* outMore);
+	fdb_error_t (*futureGetNativeCdcStreamInfoArray)(FDBFuture* f,
+	                                                 FDBNativeCdcStreamInfo const** outStreams,
+	                                                 int* outCount);
+	fdb_error_t (*futureGetNativeCdcConsumer)(FDBFuture* f, FDBNativeCdcConsumer** outConsumer);
+	fdb_error_t (*futureGetNativeCdcVersionedMutations)(FDBFuture* f,
+	                                                    FDBNativeCdcVersionedMutations const** outMutations,
+	                                                    int* outCount,
+	                                                    int64_t* outLastConsumedVersion);
 
 	fdb_error_t (*futureGetSharedState)(FDBFuture* f, DatabaseSharedState** outPtr);
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
@@ -383,6 +433,11 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) override;
+	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
+	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;
+	ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) override;
+	ThreadFuture<Reference<INativeCdcConsumer>> resumeNativeCdcConsumer(const NativeCdcCursor& cursor) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
@@ -696,6 +751,11 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) override;
+	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
+	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;
+	ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) override;
+	ThreadFuture<Reference<INativeCdcConsumer>> resumeNativeCdcConsumer(const NativeCdcCursor& cursor) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;

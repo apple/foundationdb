@@ -42,7 +42,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 
 **Key dynamic behavior:** Every server-side component is a collection of ACTOR coroutines scheduled on Net2's run loop. There is no threading within a process (except for disk I/O thread pools). All concurrency is cooperative, driven by Future resolution.
 
-**Principal files:** [`flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h), [`Arena.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Arena.h), [`Error.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Error.h), [`genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h), [`Net2.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.cpp), [`Trace.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Trace.cpp), [`serialize.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/serialize.h), [`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)
+**Principal files:** [`flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h), [`Arena.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Arena.h), [`Error.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Error.h), [`genericactors.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.h), [`Net2.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.cpp), [`Trace.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Trace.cpp), [`serialize.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/serialize.h), [`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)
 
 ---
 
@@ -107,7 +107,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - `ServerDBInfo` is the cluster-wide configuration broadcast. Contains: master interface, proxy lists, log system config, recovery state, latency band config.
 - Updated by CC and distributed to all workers. Workers react to changes (e.g., new proxy set).
 
-**Principal files:** [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp), `ClusterController.h`, [`Coordination.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.cpp), [`LeaderElection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.cpp), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h)
+**Principal files:** [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp), `ClusterController.h`, [`Coordination.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.cpp), [`LeaderElection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.cpp), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`WorkerInterface.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.h)
 
 ---
 

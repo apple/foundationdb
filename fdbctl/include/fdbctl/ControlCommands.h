@@ -23,6 +23,7 @@
 #define FDB_CTL_LIB_FDB_CONTROL_COMMANDS_H
 
 #include "fdbclient/IClientApi.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbctl/control_service/control_service.pb.h"
@@ -73,26 +74,19 @@ Future<bool> getWorkersProcessData(Reference<IDatabase> db, std::vector<ProcessD
 
 namespace special_keys {
 
-// TODO: Point fdbcli ones to this.
 const KeyRef clusterDescriptionSpecialKey = "\xff\xff/configuration/coordinators/cluster_description"_sr;
 const KeyRef coordinatorsAutoSpecialKey = "\xff\xff/management/auto_coordinators"_sr;
 const KeyRef coordinatorsProcessSpecialKey = "\xff\xff/configuration/coordinators/processes"_sr;
 
-// Special key ranges for include/exclude functionality
-const KeyRange excludedServersSpecialKeyRange =
-    KeyRangeRef("\xff\xff/management/excluded/"_sr, "\xff\xff/management/excluded0"_sr);
-const KeyRange failedServersSpecialKeyRange =
-    KeyRangeRef("\xff\xff/management/failed/"_sr, "\xff\xff/management/failed0"_sr);
-const KeyRange excludedLocalitySpecialKeyRange =
-    KeyRangeRef("\xff\xff/management/excluded_locality/"_sr, "\xff\xff/management/excluded_locality0"_sr);
-const KeyRange failedLocalitySpecialKeyRange =
-    KeyRangeRef("\xff\xff/management/failed_locality/"_sr, "\xff\xff/management/failed_locality0"_sr);
-const KeyRef excludedForceOptionSpecialKey = "\xff\xff/management/options/excluded/force"_sr;
-const KeyRef failedForceOptionSpecialKey = "\xff\xff/management/options/failed/force"_sr;
-const KeyRef excludedLocalityForceOptionSpecialKey = "\xff\xff/management/options/excluded_locality/force"_sr;
-const KeyRef failedLocalityForceOptionSpecialKey = "\xff\xff/management/options/failed_locality/force"_sr;
-const KeyRangeRef exclusionInProgressSpecialKeyRange("\xff\xff/management/in_progress_exclusion/"_sr,
-                                                     "\xff\xff/management/in_progress_exclusion0"_sr);
+using management_api::excludedForceOptionSpecialKey;
+using management_api::excludedLocalityForceOptionSpecialKey;
+using management_api::excludedLocalitySpecialKeyRange;
+using management_api::excludedServersSpecialKeyRange;
+using management_api::exclusionInProgressSpecialKeyRange;
+using management_api::failedForceOptionSpecialKey;
+using management_api::failedLocalityForceOptionSpecialKey;
+using management_api::failedLocalitySpecialKeyRange;
+using management_api::failedServersSpecialKeyRange;
 
 const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 } // namespace special_keys

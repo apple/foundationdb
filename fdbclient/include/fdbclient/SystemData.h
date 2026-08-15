@@ -778,6 +778,12 @@ extern const KeyRangeRef monitorConfKeys;
 
 extern const KeyRef healthyZoneKey;
 extern const StringRef ignoreSSFailuresZoneString;
+// Stores the version at which the current healthyZoneKey window started. Written and read only by
+// the Data Distributor (fdbserver/datadistributor/DDTeamCollection.actor.cpp), so a DD recruited
+// mid-maintenance can recover the true start version. Without persisting this information the
+// true start time of the maintenance mode would be lost when a DD is recruited during maintenance
+// mode. To preserve the current semantics of healthyZoneKey this additional key was added.
+extern const KeyRef healthyZoneStartVersionKey;
 extern const KeyRef rebalanceDDIgnoreKey;
 namespace DDIgnore {
 enum IgnoreType : uint8_t { NONE = 0, REBALANCE_DISK = 1, REBALANCE_READ = 2, ALL = 3 };

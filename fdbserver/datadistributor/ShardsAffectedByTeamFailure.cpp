@@ -166,6 +166,65 @@ void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> 
 	check();
 }
 
+std::vector<KeyRange> ShardsAffectedByTeamFailure::cancelMove(KeyRangeRef keys,
+                                                              const std::vector<Team>& destinationTeams,
+                                                              const std::vector<Team>& sourceTeams) {
+	std::vector<KeyRange> restoredRanges;
+	// A later shard split or merge can leave the cancelled move range strictly inside a tracked shard. Recreate only
+	// the move's boundary points before removing its destinations. defineShard() would merge all tracked shards inside
+	// keys, losing the distinct destinations of overlapping newer moves.
+	std::vector<KeyRange> rangesToSplit;
+	auto beginRange = shard_teams.rangeContaining(keys.begin);
+	if (beginRange->begin() != keys.begin) {
+		rangesToSplit.push_back(beginRange->range());
+	}
+	auto endRange = shard_teams.rangeContaining(keys.end);
+	if (endRange->begin() != keys.end && (rangesToSplit.empty() || rangesToSplit.back() != endRange->range())) {
+		rangesToSplit.push_back(endRange->range());
+	}
+	for (const auto& range : rangesToSplit) {
+		for (const auto& team : shard_teams.rangeContaining(range.begin)->value().first) {
+			erase(team, range);
+		}
+	}
+	shard_teams.modify(keys);
+	for (const auto& range : rangesToSplit) {
+		for (auto splitRange : shard_teams.containedRanges(range)) {
+			for (const auto& team : splitRange.value().first) {
+				insert(team, splitRange.range());
+			}
+		}
+	}
+	auto ranges = shard_teams.containedRanges(keys);
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		std::vector<Team> retainedTeams;
+		for (const auto& team : it->value().first) {
+			if (std::find(destinationTeams.begin(), destinationTeams.end(), team) == destinationTeams.end()) {
+				retainedTeams.push_back(team);
+			}
+		}
+		if (retainedTeams.size() == it->value().first.size()) {
+			continue;
+		}
+
+		KeyRange range = it->range();
+		for (const auto& team : it->value().first) {
+			erase(team, range);
+		}
+		const auto& replacementTeams = retainedTeams.empty() ? sourceTeams : retainedTeams;
+		for (const auto& team : replacementTeams) {
+			insert(team, range);
+		}
+		it->value().first = replacementTeams;
+		if (retainedTeams.empty()) {
+			it->value().second.clear();
+		}
+		restoredRanges.push_back(range);
+	}
+	check();
+	return restoredRanges;
+}
+
 void ShardsAffectedByTeamFailure::finishMove(KeyRangeRef keys) {
 	auto ranges = shard_teams.containedRanges(keys);
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {

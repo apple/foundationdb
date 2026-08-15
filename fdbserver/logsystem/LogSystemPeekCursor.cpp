@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/logsystem/LogSystem.h"
+#include "LogSystemTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MutationTracking.h"
@@ -371,7 +372,7 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 				//
 				// A cursor for a log router can be delayed indefinitely during a network partition, so only fail
 				// simulation tests sufficiently far after we finish simulating network partitions.
-				CODE_PROBE(e.code() == error_code_timed_out, "peek cursor timed out");
+				CODE_PROBE(e.code() == error_code_timed_out, "peek cursor timed out", probe::decoration::rare);
 				if (g_network->isSimulated() && now() >= g_simulator->connectionFailureEnableTime +
 				                                             FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS +
 				                                             SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME) {

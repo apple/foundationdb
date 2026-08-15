@@ -25,7 +25,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "flow/TxnCounters.h"
 #include "flow/CoroUtils.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 static void updateServersAndCompleteSources(std::set<UID>& servers,
                                             std::vector<UID>& completeSources,
@@ -410,7 +410,8 @@ class DDTxnProcessorImpl {
 		Optional<Key> healthyZone = co_await getHealthyZone(cx, distributorId);
 		result->initHealthyZoneValue = healthyZone;
 
-		CODE_PROBE((bool)skipDDModeCheck, "DD Mode won't prevent read initial data distribution.");
+		CODE_PROBE(
+		    (bool)skipDDModeCheck, "DD Mode won't prevent read initial data distribution.", probe::decoration::rare);
 		// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 		// causing entries to be duplicated
 		// Phase 1: Single transaction to read server list and all persisted data moves

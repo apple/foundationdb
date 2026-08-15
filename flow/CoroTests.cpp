@@ -48,7 +48,7 @@ TEST_CASE("/flow/coro/buggifiedDelay") {
 	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
 		co_return;
 	}
-	loop {
+	while (true) {
 		double x = deterministicRandom()->random01();
 		int last = 0;
 		Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
@@ -65,6 +65,19 @@ TEST_CASE("/flow/coro/buggifiedDelay") {
 			co_return;
 		}
 	}
+}
+
+TEST_CASE("/flow/genericactors/ActorHeaderDeclarations") {
+	std::vector<Future<bool>> values = { Future<bool>(true), Future<bool>(false) };
+	bool quorum = co_await quorumEqualsTrue(values, 1);
+	ASSERT(quorum);
+	bool any = co_await shortCircuitAny(values);
+	ASSERT(any);
+	co_await returnIfTrue(Future<bool>(true));
+
+	Reference<AsyncVar<bool>> condition = makeReference<AsyncVar<bool>>(false);
+	co_await delayAfterCleared(condition, 0.0);
+	co_await lowPriorityDelayAfterCleared(condition, 0.0);
 }
 
 template <class T, class Func, class ErrFunc, class CallbackType>
@@ -168,7 +181,7 @@ Future<int> consumeOneActor(FutureStream<int> in) {
 Future<int> sumActor(FutureStream<int> in) {
 	int total = 0;
 	try {
-		loop {
+		while (true) {
 			int i = co_await in;
 			total += i;
 		}
@@ -2394,7 +2407,7 @@ AsyncGenerator<StringRef> lineGenerator(size_t minLen,
 	size_t remainingLine = 0;
 	bool firstBlock = true;
 	bool startedLine = false;
-	loop {
+	while (true) {
 		Arena arena;
 		auto block = new (arena) uint8_t[blockSize];
 		size_t offset = 0;
@@ -2550,7 +2563,7 @@ Future<Void> testSimpleCoro() {
 
 Generator<unsigned> fibonacci() {
 	unsigned curr = 1, next = 1;
-	loop {
+	while (true) {
 		co_yield curr;
 		curr = std::exchange(next, next + curr);
 	}
@@ -2607,9 +2620,7 @@ TEST_CASE("/flow/coro/generators") {
 	testFibDivisible();
 	co_await testEmptyGenerator();
 	co_await testSimpleGenerator();
-	if (IAsyncFileSystem::filesystem() != nullptr) {
-		co_await testReadLines();
-	}
+	co_await testReadLines();
 	testElementWalker();
 }
 
@@ -2878,6 +2889,8 @@ TEST_CASE("/flow/coro/raceSuccess") {
 	auto result = co_await raced;
 	ASSERT_EQ(result.index(), 1);
 	ASSERT_EQ(std::get<1>(result), "winner");
+	ASSERT_EQ(intPromise.getFutureReferenceCount(), 0);
+	ASSERT_EQ(stringPromise.getFutureReferenceCount(), 0);
 	co_return;
 }
 
@@ -2903,6 +2916,8 @@ TEST_CASE("/flow/coro/raceError") {
 	} catch (Error const& e) {
 		ASSERT_EQ(e.code(), error_code_io_error);
 	}
+	ASSERT_EQ(intPromise.getFutureReferenceCount(), 0);
+	ASSERT_EQ(stringPromise.getFutureReferenceCount(), 0);
 	co_return;
 }
 
@@ -2914,6 +2929,8 @@ TEST_CASE("/flow/coro/raceCancel") {
 	ASSERT(raced.isReady());
 	ASSERT(raced.isError());
 	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
+	ASSERT_EQ(intPromise.getFutureReferenceCount(), 0);
+	ASSERT_EQ(stringPromise.getFutureReferenceCount(), 0);
 	intPromise.send(1);
 	stringPromise.send("late");
 	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);

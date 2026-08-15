@@ -30,7 +30,7 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 class DatabaseContext;
 struct ClientDBInfo;

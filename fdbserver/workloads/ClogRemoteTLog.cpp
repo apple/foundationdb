@@ -20,7 +20,7 @@
 #include "flow/Optional.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 struct ClogRemoteTLog : TestWorkload {
 	static constexpr auto NAME = "ClogRemoteTLog";

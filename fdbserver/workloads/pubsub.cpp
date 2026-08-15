@@ -52,9 +52,6 @@ Key keyForInboxCacheByIDPrefix(uint64_t inbox) {
 Key keyForInboxCacheByID(uint64_t inbox, uint64_t messageId) {
 	return StringRef(format("i/%016llx/cid/%016llx", inbox, messageId));
 }
-Key keyForInboxCacheByFeedPrefix(uint64_t inbox) {
-	return StringRef(format("i/%016llx/cf/", inbox));
-}
 Key keyForInboxCacheByFeed(uint64_t inbox, uint64_t feed) {
 	return StringRef(format("i/%016llx/cf/%016llx", inbox, feed));
 }

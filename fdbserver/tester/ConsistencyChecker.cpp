@@ -24,7 +24,7 @@
 
 #include "flow/DeterministicRandom.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
@@ -36,7 +36,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "ConsistencyChecker.h"
 #include "fdbserver/tester/workloads.h"
 

@@ -39,7 +39,7 @@ extern Future<Void> waitShutdownSignal();
 template <class T>
 Future<T> sendErrorOnShutdown(Future<T> in, bool assertOnCancel = false) {
 	try {
-		auto res = co_await race(waitShutdownSignal(), in);
+		auto res = co_await race(waitShutdownSignal(), std::move(in));
 		if (res.index() == 0) {
 			throw io_error().asInjectedFault();
 		} else {
