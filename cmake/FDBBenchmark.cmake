@@ -28,10 +28,9 @@ function(fdb_setup_googlebenchmark)
     set(BENCHMARK_ENABLE_INSTALL OFF)
     FetchContent_MakeAvailable(googlebenchmark)
 
-    # Google Benchmark turns on -Wthread-safety and -Werror for itself in release builds. Its
-    # std::mutex wrapper in src/mutex.h doesn't survive that on recent clang/libc++, which annotate
-    # std::mutex as a capability. It's a third party dependency, so don't fail the build over its
-    # warnings.
+    # On modern macOS with modern clang and libcxx, -Wthread-safety-analysis is enabled by default,
+    # and the std::mutex wrapper in googlebenchmark can be a problem for it, so make sure
+    # -Werror is disabled (and avoid any other new-compiler pickyness in this third-party code).
     foreach(target IN ITEMS benchmark benchmark_main)
       target_compile_options(${target} PRIVATE -Wno-error)
       set_target_properties(${target} PROPERTIES EXCLUDE_FROM_ALL ON)
