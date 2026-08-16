@@ -29,6 +29,8 @@
 #include "flow/Trace.h"
 #include "flow/serialize.h"
 
+#include <algorithm>
+
 Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
 	KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	KeySelectorRef end = firstGreaterOrEqual(keys.end);
@@ -102,7 +104,8 @@ struct StreamingRangeReadWorkload : KVWorkload {
 	                                KeySelector begin,
 	                                KeySelector end,
 	                                uint64_t expectedBegin,
-	                                uint64_t expectedEnd) {
+	                                uint64_t expectedEnd,
+	                                bool expectImmediateEnd = false) {
 		Transaction tr(cx);
 		while (true) {
 			PromiseStream<RangeResult> results;
@@ -110,6 +113,14 @@ struct StreamingRangeReadWorkload : KVWorkload {
 			Error err;
 			try {
 				stream = tr.getRangeStream(results, begin, end, GetRangeLimits(), Snapshot::True);
+				if (expectImmediateEnd) {
+					ASSERT(stream.isReady());
+					ASSERT(!stream.isError());
+					FutureStream<RangeResult> result = results.getFuture();
+					ASSERT(result.isReady());
+					ASSERT(result.isError());
+					ASSERT_EQ(result.getError().code(), error_code_end_of_stream);
+				}
 				RangeResult expected = co_await tr.getRange(begin, end, 100, Snapshot::True);
 				ASSERT_EQ(expected.size(), expectedEnd - expectedBegin);
 				for (uint64_t i = expectedBegin; i < expectedEnd; ++i) {
@@ -148,18 +159,21 @@ struct StreamingRangeReadWorkload : KVWorkload {
 	}
 
 	Future<Void> checkSelectorBoundaries(Database cx) {
-		Key begin = keyForIndex(10, false);
-		Key end = keyForIndex(20, false);
+		const uint64_t endIndex = nodeCount == 0 ? 0 : std::min<uint64_t>(20, nodeCount - 1);
+		const uint64_t beginIndex = endIndex == 0 ? 0 : std::min<uint64_t>(10, endIndex - 1);
+		Key begin = keyForIndex(beginIndex, false);
+		Key end = keyForIndex(endIndex, false);
 		co_await checkSelectorRange(cx,
 		                            KeySelector(firstGreaterThan(begin), begin.arena()),
 		                            KeySelector(firstGreaterThan(end), end.arena()),
-		                            11,
-		                            21);
+		                            std::min(beginIndex + 1, nodeCount),
+		                            std::min(endIndex + 1, nodeCount));
 		co_await checkSelectorRange(cx,
 		                            KeySelector(firstGreaterThan(end), end.arena()),
 		                            KeySelector(firstGreaterOrEqual(begin), begin.arena()),
 		                            0,
-		                            0);
+		                            0,
+		                            true);
 		co_return;
 	}
 
