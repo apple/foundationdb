@@ -753,8 +753,8 @@ void loadClientFunction(T* fp, void* lib, std::string libPath, const char* funct
 	}
 }
 
-DLApi::DLApi(std::string fdbCPath, bool unlinkOnLoad)
-  : fdbCPath(fdbCPath), api(new FdbCApi()), unlinkOnLoad(unlinkOnLoad), networkSetup(false) {}
+DLApi::DLApi(std::string fdbCPath, std::string origPath, bool unlinkOnLoad)
+  : fdbCPath(fdbCPath), origPath(origPath), unlinkOnLoad(unlinkOnLoad), api(new FdbCApi()), networkSetup(false) {}
 
 // Loads client API functions (definitions are in FdbCApi struct)
 void DLApi::init() {
@@ -772,6 +772,12 @@ void DLApi::init() {
 		if (err) {
 			TraceEvent(SevError, "ErrorUnlinkingTempClientLibraryFile").GetLastError().detail("LibraryPath", fdbCPath);
 			throw platform_error();
+		}
+		// Add symlink so debugger/profiler can find the lib file for symbols and build-id.
+		// Will not work on Windows, but Windows does not support unlinkOnLoad (nor multi-threaded fdb client).
+		err = symlink(origPath.c_str(), fdbCPath.c_str());
+		if (err) {
+			TraceEvent(SevWarn, "ErrorSymlinkingTempClientLibraryFile").GetLastError().detail("LibraryPath", fdbCPath);
 		}
 	}
 
@@ -2566,11 +2572,8 @@ void MultiVersionApi::setupNetwork() {
 					auto libCopies = copyExternalLibraryPerThread(path);
 					for (int idx = 0; idx < libCopies.size(); ++idx) {
 						bool unlinkOnLoad = libCopies[idx].second && !retainClientLibCopies;
-						externalClients[filename].push_back(
-						    makeReference<ClientInfo>(new DLApi(libCopies[idx].first, unlinkOnLoad /*unlink on load*/),
-						                              path,
-						                              useFutureVersion,
-						                              idx));
+						externalClients[filename].push_back(makeReference<ClientInfo>(
+						    new DLApi(libCopies[idx].first, path, unlinkOnLoad), path, useFutureVersion, idx));
 					}
 				}
 			}
