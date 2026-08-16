@@ -587,7 +587,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			rejected = true;
 		}
 		ASSERT(rejected);
-		co_return;
 	}
 
 	Future<Void> checkMappedSelectorBoundaries(Database cx, Key mapper, GetMappedRangeWorkload* self) {

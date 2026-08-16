@@ -1214,7 +1214,7 @@ public:
 		// isolation support. But it is not default and is rarely used. So we disallow it until we have thorough test
 		// coverage for it.)
 		if (snapshot) {
-			CODE_PROBE(true, "getMappedRange not supported for snapshot.", probe::decoration::rare);
+			CODE_PROBE(true, "getMappedRange not supported for snapshot.");
 			throw unsupported_operation();
 		}
 		// For now, getMappedRange requires read-your-writes being NOT disabled. But the support of RYW is limited
@@ -1223,7 +1223,7 @@ public:
 		// which returns the written value transparently. In another word, it makes sure not break RYW semantics without
 		// actually implementing reading from the writes.
 		if (ryw->options.readYourWritesDisabled) {
-			CODE_PROBE(true, "getMappedRange not supported for read-your-writes disabled.", probe::decoration::rare);
+			CODE_PROBE(true, "getMappedRange not supported for read-your-writes disabled.");
 			throw unsupported_operation();
 		}
 
