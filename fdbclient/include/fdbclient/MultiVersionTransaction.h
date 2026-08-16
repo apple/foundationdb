@@ -456,7 +456,7 @@ private:
 // The DL prefix stands for "dynamic library".
 class DLApi : public IClientApi {
 public:
-	explicit DLApi(std::string fdbCPath, bool unlinkOnLoad = false);
+	explicit DLApi(std::string fdbCPath, std::string origPath, bool unlinkOnLoad = false);
 
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
@@ -476,6 +476,7 @@ public:
 
 private:
 	const std::string fdbCPath;
+	const std::string origPath; // for symlink after unlinkOnLoad
 	const Reference<FdbCApi> api;
 	const bool unlinkOnLoad;
 	int headerVersion;
