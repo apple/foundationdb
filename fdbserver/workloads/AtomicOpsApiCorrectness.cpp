@@ -79,6 +79,7 @@ public:
 			CODE_PROBE(true, "Testing atomic CompareAndClear");
 			return testCompareAndClear(cx->clone(), this);
 		case 9:
+			CODE_PROBE(true, "Testing atomic AppendIfFits");
 			return testAppendIfFits(cx->clone(), this);
 		default:
 			ASSERT(false);
