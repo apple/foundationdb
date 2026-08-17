@@ -508,6 +508,23 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 		}
 
+		// Surface "degraded multi-region" as a first-class signal: with usableRegions > 1, the remote region's
+		// log set has not been recruited (allLogs == false). Committed data is still safe in the surviving
+		// region, so this is distinct from data loss. Note that oldTLogData is deliberately not a
+		// discriminator: when the remote region is down, old log generations cannot be purged (finalUpdate
+		// requires allLogs), so oldTLogData stays non-empty precisely in this stalled state. The value is also
+		// (re)set when all logs are recruited or the cluster fully recovers, so the trackLatest event always
+		// reflects the current state.
+		bool remoteRegionLogsMissing = configuration.usableRegions > 1 && !allLogs;
+		TraceEvent(
+		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME).c_str(),
+		    self->dbgid)
+		    .detail("RemoteRegionLogsMissing", remoteRegionLogsMissing)
+		    .detail("AllLogs", allLogs)
+		    .detail("OldTLogDataSize", newState.oldTLogData.size())
+		    .detail("UsableRegions", configuration.usableRegions)
+		    .trackLatest(self->clusterRecoveryRemoteRegionStallEventHolder->trackingKey);
+
 		self->registrationTrigger.trigger();
 
 		if (finalUpdate) {
@@ -1999,6 +2016,8 @@ const std::string& getRecoveryEventName(ClusterRecoveryEventType type) {
 		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryAvailable" });
 		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME,
 		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryMetrics" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryRemoteRegionStall" });
 	}
 
 	auto iter = recoveryEventNameMap.find(type);
