@@ -25,6 +25,7 @@
 #include <utility>
 
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbrpc/LoadBalance.actor.h"

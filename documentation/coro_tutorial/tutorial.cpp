@@ -30,6 +30,7 @@
 #include <unordered_map>
 #include <memory>
 #include <iostream>
+#include <utility>
 
 using namespace std::literals::string_literals;
 using namespace std::literals::string_view_literals;
@@ -479,10 +480,7 @@ Future<Void> runTransactionWhile(DB const& db, Fun f) {
 
 template <class DB, class Fun>
 Future<Void> runTransaction(DB const& db, Fun f) {
-	return runTransactionWhile(db, [&f](Transaction* tr) -> Future<bool> {
-		co_await f(tr);
-		co_return true;
-	});
+	return runTransactionWhile(db, [f = std::move(f)](Transaction* tr) mutable { return tag(f(tr), true); });
 }
 
 template <class DB, class Fun>
@@ -503,24 +501,46 @@ Future<Void> runRYWTransaction(DB const& db, Fun f) {
 	}
 }
 
+Future<bool> readNextRange(Transaction* tr, int64_t* bytes, Key* next) {
+	RangeResult range =
+	    co_await tr->getRange(KeySelector(firstGreaterOrEqual(*next), next->arena()),
+	                          KeySelector(firstGreaterOrEqual(normalKeys.end)),
+	                          GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+	*bytes += range.expectedSize();
+	if (!range.more) {
+		co_return true;
+	}
+	*next = keyAfter(range.back().key);
+	co_return false;
+}
+
 Future<Void> fdbClientGetRange() {
 	Database db = Database::createDatabase(clusterFile, 300);
 	Transaction tx(db);
 	Key next;
 	int64_t bytes = 0;
 	Future<Void> logFuture = logThroughput(&bytes, &next);
-	co_await runTransactionWhile(db, [&bytes, &next](Transaction* tr) -> Future<bool> {
-		RangeResult range =
-		    co_await tr->getRange(KeySelector(firstGreaterOrEqual(next), next.arena()),
-		                          KeySelector(firstGreaterOrEqual(normalKeys.end)),
-		                          GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
-		bytes += range.expectedSize();
-		if (!range.more) {
-			co_return true;
-		}
-		next = keyAfter(range.back().key);
-		co_return false;
-	});
+	co_await runTransactionWhile(db, [&bytes, &next](Transaction* tr) { return readNextRange(tr, &bytes, &next); });
+	co_return;
+}
+
+Future<Void> writeRandomKeys(Transaction* tr, std::string keyPrefix, Key endKey) {
+	// this workload is stupidly simple:
+	// 1. select a random key between 1
+	//    and 1e8
+	// 2. select this key plus the 100
+	//    next ones
+	// 3. write 10 values in [k, k+100]
+	int beginIdx = deterministicRandom()->randomInt(0, 1e8 - 100);
+	Key startKey(keyPrefix + std::to_string(beginIdx));
+	auto range = co_await tr->getRange(KeyRangeRef(startKey, endKey), 100);
+	for (int i = 0; i < 10; ++i) {
+		Key k = Key(keyPrefix + std::to_string(beginIdx + deterministicRandom()->randomInt(0, 100)));
+		tr->set(k, "foo"_sr);
+	}
+	co_await tr->commit();
+	std::cout << "Committed\n";
+	co_await delay(2.0);
 	co_return;
 }
 
@@ -528,29 +548,10 @@ Future<Void> fdbClient() {
 	co_await delay(30);
 	Database db = Database::createDatabase(clusterFile, 300);
 	std::string keyPrefix = "/tut/";
-	Key startKey;
-	KeyRef endKey = "/tut0"_sr;
-	int beginIdx = 0;
+	Key endKey = "/tut0"_sr;
 	while (true) {
-		co_await runTransaction(db, [&](Transaction* tr) -> Future<Void> {
-			// this workload is stupidly simple:
-			// 1. select a random key between 1
-			//    and 1e8
-			// 2. select this key plus the 100
-			//    next ones
-			// 3. write 10 values in [k, k+100]
-			beginIdx = deterministicRandom()->randomInt(0, 1e8 - 100);
-			startKey = keyPrefix + std::to_string(beginIdx);
-			auto range = co_await tr->getRange(KeyRangeRef(startKey, endKey), 100);
-			for (int i = 0; i < 10; ++i) {
-				Key k = Key(keyPrefix + std::to_string(beginIdx + deterministicRandom()->randomInt(0, 100)));
-				tr->set(k, "foo"_sr);
-			}
-			co_await tr->commit();
-			std::cout << "Committed\n";
-			co_await delay(2.0);
-			co_return;
-		});
+		co_await runTransaction(
+		    db, [keyPrefix, endKey](Transaction* tr) { return writeRandomKeys(tr, keyPrefix, endKey); });
 	}
 }
 
@@ -570,7 +571,7 @@ AsyncGenerator<Optional<StringRef>> readBlocks(Reference<IAsyncFile> file, int64
 }
 
 AsyncGenerator<Optional<StringRef>> readLines(Reference<IAsyncFile> file) {
-	auto blocks = readBlocks(file, 4 * 1024);
+	auto blocks = readBlocks(file, int64_t{ 4 } * 1024);
 	Arena arena;
 	StringRef lastLine;
 	while (true) {
