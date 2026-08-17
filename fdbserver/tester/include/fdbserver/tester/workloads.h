@@ -22,7 +22,7 @@
 #define FDBSERVER_TESTER_WORKLOADS_H
 #pragma once
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/TesterInterface.h"

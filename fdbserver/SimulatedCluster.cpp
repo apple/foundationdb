@@ -47,7 +47,7 @@
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/versions.h"
 #include "flow/IRandom.h"

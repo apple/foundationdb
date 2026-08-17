@@ -26,7 +26,7 @@
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbrpc/LoadBalance.actor.h"
 
 // Stores constructor arguments so a request can be rebuilt on each retry.

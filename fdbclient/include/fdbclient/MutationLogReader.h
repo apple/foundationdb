@@ -22,7 +22,7 @@
 
 #include <deque>
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "flow/flow.h"
 #include "flow/ActorCollection.h"
 

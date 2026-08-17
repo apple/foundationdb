@@ -20,7 +20,7 @@
 
 #include "flow/Hash3.h"
 #include "flow/UnitTest.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RunRYWTransaction.h"

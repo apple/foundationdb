@@ -20,7 +20,7 @@
 
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/BulkLoadUtil.h"

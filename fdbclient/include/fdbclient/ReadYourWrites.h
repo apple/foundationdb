@@ -23,7 +23,7 @@
 #include "fdbclient/Status.h"
 #pragma once
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "flow/FastRef.h"
 #include "flow/WipedString.h"

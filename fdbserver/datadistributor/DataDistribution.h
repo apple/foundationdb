@@ -23,7 +23,7 @@
 #define FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
 
 #include "fdbclient/BulkLoading.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"

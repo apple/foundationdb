@@ -1,5 +1,5 @@
 /*
- * NativeAPI.actor.h
+ * NativeAPI.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,12 +18,8 @@
  * limitations under the License.
  */
 
-#pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
-#define FDBCLIENT_NATIVEAPI_ACTOR_G_H
-#include "fdbclient/NativeAPI.actor.g.h"
-#elif !defined(FDBCLIENT_NATIVEAPI_ACTOR_H)
-#define FDBCLIENT_NATIVEAPI_ACTOR_H
+#ifndef FDBCLIENT_NATIVEAPI_H
+#define FDBCLIENT_NATIVEAPI_H
 
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
@@ -41,7 +37,6 @@
 #include "fdbclient/ClientLogEvents.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Tracing.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 /*
 // CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like buggify() but for client side testing)
@@ -106,9 +101,9 @@ public:
 
 	static Database createSimulatedExtraDatabase(std::string connectionString);
 
-	Database() {} // an uninitialized database can be destructed or reassigned safely; that's it
+	Database() = default; // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator=(Database const& rhs) { db = rhs.db; }
-	explicit(false) Database(Database const& rhs) : db(rhs.db) {}
+	explicit(false) Database(Database const& rhs) = default;
 	explicit(false) Database(Database&& r) noexcept : db(std::move(r.db)) {}
 	void operator=(Database&& r) noexcept { db = std::move(r.db); }
 
@@ -540,7 +535,7 @@ Future<Void> Database::run(Fun fun) {
 	}
 }
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext);
+Future<Version> waitForCommittedVersion(Database const& cx, Version const& version, SpanContext const& spanContext);
 Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys, int shardLimit);
 
 // Takes a snapshot of the cluster, specifically the following persistent
@@ -631,12 +626,12 @@ Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(Version version,
 // Return the suggested split points from storage server.The locations tell which interface should
 // serve the request. `limit` is the current estimated storage metrics of `keys`.The returned points, if present,
 // guarantee the metrics of split result is within limit.
-ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocations(
-    std::vector<KeyRangeLocationInfo> locations,
-    KeyRange keys,
-    StorageMetrics limit,
-    StorageMetrics estimated,
-    Optional<int> minSplitBytes);
+Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocations(
+    std::vector<KeyRangeLocationInfo> const& locations,
+    KeyRange const& keys,
+    StorageMetrics const& limit,
+    StorageMetrics const& estimated,
+    Optional<int> const& minSplitBytes);
 
 Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
 
@@ -653,5 +648,4 @@ Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 
 Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr);
 
-#include "flow/unactorcompiler.h"
-#endif
+#endif // FDBCLIENT_NATIVEAPI_H

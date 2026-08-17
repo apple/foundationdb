@@ -40,7 +40,7 @@
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/tester/workloads.h"
 
 struct RestoreValidationWorkload : TestWorkload {

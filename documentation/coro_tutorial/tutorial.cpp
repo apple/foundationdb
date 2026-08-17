@@ -22,7 +22,7 @@
 #include "flow/flow.h"
 #include "flow/Platform.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TLSConfig.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -48,7 +48,7 @@ Future<Void> simpleTimer() {
 	// we need to remember the time when we first
 	// started.
 	double start_time = g_network->now();
-	loop {
+	while (true) {
 		co_await delay(1.0);
 		std::cout << format("Time: %.2f\n", g_network->now() - start_time);
 	}
@@ -58,7 +58,7 @@ Future<Void> simpleTimer() {
 // blocks work.
 Future<Void> someFuture(Future<int> ready) {
 	// loop choose {} works as well here - the braces are optional
-	loop {
+	while (true) {
 		co_await Choose()
 		    .When(delay(0.5), [](Void const&) { std::cout << "Still waiting...\n"; })
 		    .When(ready, [](int const& r) { std::cout << format("Ready %d\n", r); })
@@ -75,7 +75,7 @@ Future<Void> promiseDemo() {
 }
 
 Future<Void> eventLoop(AsyncTrigger* trigger) {
-	loop {
+	while (true) {
 		co_await Choose()
 		    .When(delay(0.5), [](Void const&) { std::cout << "Still waiting...\n"; })
 		    .When(trigger->onTrigger(), [](Void const&) { std::cout << "Triggered!\n"; })
@@ -173,7 +173,7 @@ Future<Void> echoServer() {
 	EchoServerInterface echoServer;
 	echoServer.getInterface.makeWellKnownEndpoint(WLTOKEN_ECHO_SERVER, TaskPriority::DefaultEndpoint);
 	ActorCollection requests;
-	loop {
+	while (true) {
 		try {
 			co_await Choose()
 			    .When(requests.getResult(),
@@ -229,7 +229,7 @@ Future<Void> echoClient() {
 	ReplyPromiseStream<StreamReply> stream = server.stream.getReplyStream(StreamRequest{});
 	int j = 0;
 	try {
-		loop {
+		while (true) {
 			StreamReply rep = co_await stream.getFuture();
 			std::cout << "Rep: " << rep.index << std::endl;
 			ASSERT(rep.index == j++);
@@ -301,7 +301,7 @@ Future<Void> kvStoreServer() {
 	SimpleKeyValueStoreInterface inf;
 	std::map<std::string, std::string> store;
 	inf.connect.makeWellKnownEndpoint(WLTOKEN_SIMPLE_KV_SERVER, TaskPriority::DefaultEndpoint);
-	loop {
+	while (true) {
 		co_await Choose()
 		    .When(inf.connect.getFuture(),
 		          [&inf](GetKVInterface const& req) {
@@ -363,7 +363,7 @@ Future<Void> kvSimpleClient() {
 Future<Void> kvClient(SimpleKeyValueStoreInterface server, std::shared_ptr<uint64_t> ops) {
 	auto timeout = delay(20);
 	int rangeSize = 2 << 12;
-	loop {
+	while (true) {
 		SetRequest setRequest;
 		setRequest.key = std::to_string(deterministicRandom()->randomInt(0, rangeSize));
 		setRequest.value = "foo";
@@ -393,7 +393,7 @@ Future<Void> kvClient(SimpleKeyValueStoreInterface server, std::shared_ptr<uint6
 }
 
 Future<Void> throughputMeasurement(std::shared_ptr<uint64_t> operations) {
-	loop {
+	while (true) {
 		co_await delay(1.0);
 		std::cout << format("%llu op/s\n", *operations);
 		*operations = 0;
@@ -415,7 +415,7 @@ Future<Void> multipleClients() {
 std::string clusterFile = "fdb.cluster";
 
 Future<Void> logThroughput(int64_t* v, Key* next) {
-	loop {
+	while (true) {
 		int64_t last = *v;
 		co_await delay(1);
 		fmt::print("throughput: {} bytes/s, next: {}\n", *v - last, printable(*next).c_str());
@@ -428,7 +428,7 @@ Future<Void> fdbClientStream() {
 	Key next;
 	int64_t bytes = 0;
 	Future<Void> logFuture = logThroughput(&bytes, &next);
-	loop {
+	while (true) {
 		Future<Void> onError;
 		PromiseStream<Standalone<RangeResultRef>> results;
 		try {
@@ -436,7 +436,7 @@ Future<Void> fdbClientStream() {
 			                                        KeySelector(firstGreaterOrEqual(next), next.arena()),
 			                                        KeySelector(firstGreaterOrEqual(normalKeys.end)),
 			                                        GetRangeLimits());
-			loop {
+			while (true) {
 				Standalone<RangeResultRef> range = co_await results.getFuture();
 				if (!range.empty()) {
 					bytes += range.expectedSize();
@@ -464,7 +464,7 @@ bool transaction_done(void) {
 template <class DB, class Fun>
 Future<Void> runTransactionWhile(DB const& db, Fun f) {
 	Transaction tr(db);
-	loop {
+	while (true) {
 		Future<Void> onError;
 		try {
 			if (transactionDone(co_await f(&tr))) {
@@ -489,7 +489,7 @@ template <class DB, class Fun>
 Future<Void> runRYWTransaction(DB const& db, Fun f) {
 	Future<Void> onError;
 	ReadYourWritesTransaction tr(db);
-	loop {
+	while (true) {
 		if (onError.isValid()) {
 			co_await onError;
 			onError = Future<Void>();
@@ -531,7 +531,7 @@ Future<Void> fdbClient() {
 	Key startKey;
 	KeyRef endKey = "/tut0"_sr;
 	int beginIdx = 0;
-	loop {
+	while (true) {
 		co_await runTransaction(db, [&](Transaction* tr) -> Future<Void> {
 			// this workload is stupidly simple:
 			// 1. select a random key between 1
@@ -573,7 +573,7 @@ AsyncGenerator<Optional<StringRef>> readLines(Reference<IAsyncFile> file) {
 	auto blocks = readBlocks(file, 4 * 1024);
 	Arena arena;
 	StringRef lastLine;
-	loop {
+	while (true) {
 		auto optionalBlock = co_await blocks();
 		if (!optionalBlock.present()) {
 			if (lastLine.empty()) {

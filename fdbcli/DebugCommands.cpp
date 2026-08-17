@@ -23,7 +23,7 @@
 #include "fdbcli/fdbcli.h"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 
 #include "flow/CoroUtils.h"
 
