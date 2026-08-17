@@ -121,18 +121,41 @@ namespace {
 
 // Retry through the installed std::new_handler on failure, as the default
 // operator new does. fdbserver installs platform::outOfMemory, so an allocation
-// failure (including the tracker's own map growth) reaches FDB's OOM diagnostics
-// and FDB_EXIT_NO_MEM rather than throwing straight past them.
+// failure reaches FDB's OOM diagnostics and FDB_EXIT_NO_MEM rather than throwing
+// straight past them.
+//
+// Exception: the tracker's own bookkeeping allocations (gInMemTrackerAlloc set —
+// map growth on the sampled path, reporter scratch) fail OPEN. They throw
+// std::bad_alloc directly, skipping the fatal handler, so a diagnostic allocation
+// that fails just drops the sample or report (the tracker catches it) instead of
+// terminating the server after the caller's real allocation already succeeded.
 void* mallocWithNewHandler(std::size_t n) {
-	void* p;
-	while (!(p = std::malloc(n))) {
+	while (true) {
+		void* p = std::malloc(n);
+		// Test-only: make one tracker-internal allocation look like it failed, so the
+		// fail-open decision below is driven through the real allocator path — see
+		// memTrackerFailNextInternalAllocForTest. Gated on gInMemTrackerAlloc so an
+		// unrelated allocation can't consume the one-shot before the tracker runs.
+		if (p && gInMemTrackerAlloc && gMemTrackerFailNextInternalAllocForTest) {
+			gMemTrackerFailNextInternalAllocForTest = false;
+			std::free(p);
+			p = nullptr;
+		}
+		if (p) {
+			return p;
+		}
+		// Allocation failed. Tracker bookkeeping fails open — throw straight to the
+		// tracker's catch, never the fatal handler. Everything else honors the
+		// installed std::new_handler / OOM path.
+		if (gInMemTrackerAlloc) {
+			throw std::bad_alloc();
+		}
 		std::new_handler h = std::get_new_handler();
 		if (!h) {
 			throw std::bad_alloc();
 		}
 		h();
 	}
-	return p;
 }
 
 // Same handler loop for over-aligned allocations. C11 aligned_alloc requires the
@@ -143,15 +166,20 @@ void* alignedAllocWithNewHandler(std::size_t alignment, std::size_t n) {
 	if (rounded < n) {
 		throw std::bad_alloc(); // round-up overflowed; the request can't be satisfied
 	}
-	void* p;
-	while (!(p = aligned_alloc(alignment, rounded))) {
+	while (true) {
+		void* p = aligned_alloc(alignment, rounded);
+		if (p) {
+			return p;
+		}
+		if (gInMemTrackerAlloc) {
+			throw std::bad_alloc(); // tracker bookkeeping fails open (see mallocWithNewHandler)
+		}
 		std::new_handler h = std::get_new_handler();
 		if (!h) {
 			throw std::bad_alloc();
 		}
 		h();
 	}
-	return p;
 }
 
 } // namespace
