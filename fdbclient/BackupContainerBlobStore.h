@@ -32,6 +32,10 @@ class BackupContainerBlobStore final : public BackupContainerFileSystem, Referen
 	// All backup data goes into a single bucket
 	std::string m_bucket;
 
+	// Optional object key prefix under which the data and index folder trees are placed.
+	// Normalized to contain no leading or trailing slash.  Empty means the default bucket-root layout.
+	std::string m_prefix;
+
 	// if not used for backup, don't prefix paths with fdbbackup-specific logic
 	bool isBackup;
 
@@ -57,9 +61,16 @@ public:
 
 	static void validateBackupUrl(const std::string& resource);
 
+	// Normalize and validate the value of the "prefix" URL parameter.  Strips leading and trailing
+	// slashes; an empty result selects the default bucket-root layout.  Throws backup_invalid_url
+	// if the prefix contains characters outside [A-Za-z0-9_-./] or an empty, "." or ".." path segment.
+	static std::string normalizePrefix(std::string prefix);
+
 	Future<Reference<IAsyncFile>> readFile(const std::string& path) final;
 
-	static Future<std::vector<std::string>> listURLs(Reference<IBlobStoreEndpoint> bstore, const std::string& bucket);
+	static Future<std::vector<std::string>> listURLs(Reference<IBlobStoreEndpoint> bstore,
+	                                                 const std::string& bucket,
+	                                                 const std::string& prefix);
 
 	Future<Reference<IBackupFile>> writeFile(const std::string& path) final;
 
@@ -77,6 +88,8 @@ public:
 	Future<Void> deleteContainer(int* pNumDeleted) final;
 
 	std::string getBucket() const;
+
+	std::string getPrefix() const;
 };
 
 #endif
