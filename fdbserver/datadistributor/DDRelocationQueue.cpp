@@ -1661,7 +1661,11 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 						// rd with bulkLoadTask set.
 						// TODO(BulkLoad): reset rd.bulkLoadTask here for the risk of overloading the source
 						// servers.
-						TraceEvent(SevWarn, "DDBulkLoadTaskFallbackToNormalDataMove", self->distributorId)
+						//
+						// An expected race, not a bulkload failure: rd's task snapshot was Triggered/Running, but
+						// the persisted phase has moved on since -- usually to Complete. An ordinary move is then
+						// the correct outcome and loses no bulkload work.
+						TraceEvent(SevInfo, "DDBulkLoadTaskFallbackToNormalDataMove", self->distributorId)
 						    .detail("TrackID", rd.randomId)
 						    .detail("DataMovePriority", rd.priority)
 						    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId())
