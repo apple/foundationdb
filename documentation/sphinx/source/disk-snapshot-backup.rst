@@ -51,7 +51,7 @@ Before using the ``snapshot`` command the following setup needs to be done
 
 * Write a program that will snapshot the local disk store when invoked by the ``fdbserver`` with the following arguments:
 
-  - UID - 32 byte alpha-numeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup
+  - UID - 32 byte alphanumeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup
   - Version - version string of the FoundationDB binary
   - Path - path of the FoundationDB ``datadir`` to be snapshotted, ``datadir`` specified in :ref:`foundationdb-conf-fdbserver`
   - Role - ``tlog``/``storage``/``coordinator``, identifies the role of the node on which the snapshot is being invoked
