@@ -222,7 +222,7 @@ ENTRYPOINT ["/usr/bin/mako"]
 FROM foundationdb-base AS ycsb
 
 RUN microdnf -y install \
-    java-11-openjdk java-11-openjdk-devel && \
+    java-21-openjdk java-21-openjdk-devel && \
     microdnf clean all && \
     rm -rf /var/cache/yum
 
