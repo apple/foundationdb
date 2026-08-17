@@ -383,8 +383,8 @@ public:
 	  : errContext(errContext), errID(errID), peerAddr(peerAddr) {}
 	BindPromise(AuditedEvent auditedEvent, UID errID, NetworkAddress peerAddr)
 	  : errContext(auditedEvent), errID(errID), peerAddr(peerAddr) {}
-	explicit(false) BindPromise(BindPromise const& r) = default;
-	explicit(false) BindPromise(BindPromise&& r) noexcept
+	BindPromise(BindPromise const& r) = default;
+	BindPromise(BindPromise&& r) noexcept
 	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
@@ -617,9 +617,8 @@ class ReadPromise {
 
 public:
 	ReadPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
-	explicit(false) ReadPromise(ReadPromise const& other) = default;
-	explicit(false) ReadPromise(ReadPromise&& other)
-	  : p(std::move(other.p)), errContext(other.errContext), errID(other.errID) {}
+	ReadPromise(ReadPromise const& other) = default;
+	ReadPromise(ReadPromise&& other) : p(std::move(other.p)), errContext(other.errContext), errID(other.errID) {}
 
 	std::shared_ptr<udp::endpoint>& getEndpoint() { return endpoint; }
 

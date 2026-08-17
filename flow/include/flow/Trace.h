@@ -337,8 +337,8 @@ protected:
 				value = Type::FORCED;
 		}
 
-		explicit(false) State(const State& other) noexcept = default;
-		explicit(false) State(State&& other) noexcept : value(other.value) { other.value = Type::DISABLED; }
+		State(const State& other) noexcept = default;
+		State(State&& other) noexcept : value(other.value) { other.value = Type::DISABLED; }
 		State& operator=(const State& other) noexcept = default;
 		State& operator=(State&& other) noexcept {
 			if (this != &other) {

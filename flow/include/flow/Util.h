@@ -90,7 +90,7 @@ struct Hold {
 		}
 	}
 
-	explicit(false) Hold(Hold&& other) {
+	Hold(Hold&& other) {
 		pCount = other.pCount;
 		other.pCount = nullptr;
 		n = other.n;
