@@ -21,6 +21,8 @@
 #ifndef FLOW_OWNING_REOSURCE_H
 #define FLOW_OWNING_REOSURCE_H
 
+#include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/FastRef.h"
 
 // Consider the following situation:
