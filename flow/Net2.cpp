@@ -811,19 +811,14 @@ public:
 	void delref() override { ReferenceCounted<Listener>::delref(); }
 
 	// Returns one incoming connection when it is available
-	Future<Reference<IConnection>> accept() override { return doAccept(this); }
-
-	NetworkAddress getListenAddress() const override { return listenAddress; }
-
-private:
-	static Future<Reference<IConnection>> doAccept(Listener* self) {
-		Reference<Connection> conn(new Connection(self->io_service));
+	Future<Reference<IConnection>> accept() override {
+		Reference<Connection> conn(new Connection(io_service));
 		tcp::acceptor::endpoint_type peer_endpoint;
 		try {
 			// Peer address not known until accept succeeds
 			BindPromise p("N2_AcceptError", UID(), NetworkAddress());
 			auto f = p.getFuture();
-			self->acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
+			acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
 			co_await f;
 			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
 			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
@@ -835,6 +830,8 @@ private:
 			throw;
 		}
 	}
+
+	NetworkAddress getListenAddress() const override { return listenAddress; }
 };
 
 using ssl_socket = boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>;
@@ -1340,19 +1337,14 @@ public:
 	void delref() override { ReferenceCounted<SSLListener>::delref(); }
 
 	// Returns one incoming connection when it is available
-	Future<Reference<IConnection>> accept() override { return doAccept(this); }
-
-	NetworkAddress getListenAddress() const override { return listenAddress; }
-
-private:
-	static Future<Reference<IConnection>> doAccept(SSLListener* self) {
-		Reference<SSLConnection> conn(new SSLConnection(self->io_service, self->contextVar->get()));
+	Future<Reference<IConnection>> accept() override {
+		Reference<SSLConnection> conn(new SSLConnection(io_service, contextVar->get()));
 		tcp::acceptor::endpoint_type peer_endpoint;
 		try {
 			// Peer address not known until accept succeeds
 			BindPromise p("N2_AcceptError", UID(), NetworkAddress());
 			auto f = p.getFuture();
-			self->acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
+			acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
 			co_await f;
 			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
 			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
@@ -1365,6 +1357,8 @@ private:
 			throw;
 		}
 	}
+
+	NetworkAddress getListenAddress() const override { return listenAddress; }
 };
 
 // 5MB for loading files into memory
