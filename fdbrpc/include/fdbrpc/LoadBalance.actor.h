@@ -90,6 +90,9 @@ Optional<LoadBalancedReply> getLoadBalancedReply(const void*);
 // behavior without teaching the generic RPC load balancer about storage semantics.
 template <class Request, class Interface, class Multi, class Model, bool P>
 struct LoadBalanceRequestHooks {
+	static_assert(!LoadBalanceHooksRequired<Model>::value,
+	              "LoadBalanceRequestHooks specialization required for this queue model");
+
 	static void maybeDuplicate(RequestStream<Request, P> const* stream,
 	                           Request& request,
 	                           Model* model,

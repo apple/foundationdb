@@ -27,6 +27,11 @@
 #include "flow/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FlowTransport.h" // For Endpoint
+#include <type_traits>
+
+// Models that require specialized load-balancing hooks must opt in beside their declaration.
+template <class Model>
+struct LoadBalanceHooksRequired : std::false_type {};
 
 // The data structure used for the client-side load balancing algorithm to
 // decide which storage server to read data from. Conceptually, it tracks the

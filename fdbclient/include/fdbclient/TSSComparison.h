@@ -134,6 +134,9 @@ private:
 	std::unordered_map<uint64_t, TSSEndpointData> tssData;
 };
 
+template <>
+struct LoadBalanceHooksRequired<StorageServerQueueModel> : std::true_type {};
+
 template <class Rep>
 bool TSS_doCompare(const Rep& src, const Rep& tss);
 
