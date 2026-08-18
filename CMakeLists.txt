@@ -40,6 +40,9 @@ if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
   message(FATAL_ERROR "In-source builds are forbidden")
 endif()
 
+set(FDB_RELEASE           OFF CACHE BOOL "This is a building of a final release")
+set(FDB_RELEASE_CANDIDATE OFF CACHE BOOL "This is a building of a release candidate")
+
 set(OPEN_FOR_IDE
     OFF
     CACHE BOOL "Open this in an IDE (won't compile/link)")
@@ -53,23 +56,23 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE
         Debug
         CACHE STRING "Choose the type of build" FORCE)
-  else()
-    message(STATUS "Setting build type to 'Release' as none was specified")
+  elseif(FDB_RELEASE OR FDB_RELEASE_CANDIDATE)
+    message(STATUS "Setting build type to 'Release'")
     set(CMAKE_BUILD_TYPE
         Release
         CACHE STRING "Choose the type of build" FORCE)
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
-                                                 "MinSizeRel" "RelWithDebInfo")
+  else()
+    message(STATUS "Setting build type to 'RelWithDebInfo'")
+    set(CMAKE_BUILD_TYPE
+        RelWithDebInfo
+        CACHE STRING "Choose the type of build" FORCE)
   endif()
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
+                                               "MinSizeRel" "RelWithDebInfo")
 endif()
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
-
-option(USE_SCCACHE "Use sccache if found" ON)
-if(USE_SCCACHE)
-  find_package(sccache)
-endif()
 
 option(FDB_MEMORY_TRACKER "Compile in the sampled per-call-site memory tracker (flow/MemoryTracker)" ON)
 if(NOT FDB_MEMORY_TRACKER)
