@@ -20,6 +20,7 @@
 
 #include "fdbserver/CoroFlow.h"
 #include "flow/ActorCollection.h"
+#include "flow/CoroUtils.h"
 #include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -197,13 +198,15 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 	};
 
 	Reference<Pool> pool;
-	Future<Void> m_stopOnError; // must be last, because its cancellation calls stop()!
 	Error error;
+	bool destroying{ false };
+	Promise<Void> stopRequested;
+	Future<Void> m_stopOnError; // Cancel before releasing pool; cancellation performs implicit shutdown.
 
 	Future<Void> stopOnError(WorkPool* w) {
 		try {
-			co_await w->getError();
-			ASSERT(false);
+			auto result = co_await race(w->getError(), w->stopRequested.getFuture());
+			ASSERT(result.index() == 1);
 		} catch (Error& e) {
 			w->stop(e);
 		}
@@ -218,6 +221,7 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 
 public:
 	WorkPool() : pool(new Pool) { m_stopOnError = stopOnError(this); }
+	~WorkPool() override { destroying = true; }
 
 	Future<Void> getError() const override { return pool->anyError.getResult(); }
 	void addThread(IThreadPoolReceiver* userData, const char*) override {
@@ -251,6 +255,11 @@ public:
 			pool->queueLock.leave();
 	}
 	Future<Void> stop(Error const& e) override {
+		// User cancellation callbacks can release the last owner, except during implicit destruction itself.
+		Reference<WorkPool> keepAlive;
+		if (!destroying) {
+			keepAlive = Reference<WorkPool>::addRef(this);
+		}
 		if (error.code() == invalid_error_code) {
 			error = e;
 		}
@@ -275,6 +284,10 @@ public:
 		for (int i = 0; i < idle.size(); i++)
 			idle[i]->unblock();
 
+		// Keep the cancellation fallback if synchronous cleanup throws; finish before stop waiters can release us.
+		if (stopRequested.canBeSet()) {
+			stopRequested.send(Void());
+		}
 		pool->allStopped.add(Void());
 
 		return pool->allStopped.getResult();
