@@ -223,11 +223,15 @@ BENCHMARK_TEMPLATE(benchWait, WaitKind::Ready)->Name("coroflow_wait_ready")->Use
 BENCHMARK_TEMPLATE(benchWait, WaitKind::Suspended)->Name("coroflow_wait_suspended")->UseRealTime();
 BENCHMARK(benchStartStop)->Name("coroflow_start_stop")->UseRealTime();
 BENCHMARK(benchZeroWorkerCreateDrop)->Name("coroflow_zero_worker_create_drop")->UseRealTime();
+// These rows exclude worker startup, so time-based calibration can spend excessive wall time on setup.
+constexpr int lifecyclePhaseIterations = 16384;
 BENCHMARK_TEMPLATE(benchLifecyclePhase, LifecyclePhase::ExplicitStop)
     ->Name("coroflow_explicit_stop_only")
+    ->Iterations(lifecyclePhaseIterations)
     ->UseRealTime();
 BENCHMARK_TEMPLATE(benchLifecyclePhase, LifecyclePhase::FinalReferenceDrop)
     ->Name("coroflow_final_reference_drop_only")
+    ->Iterations(lifecyclePhaseIterations)
     ->UseRealTime();
 
 } // namespace
