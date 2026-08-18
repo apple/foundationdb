@@ -65,6 +65,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SimulationCapabilities.h"
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
@@ -2870,11 +2871,10 @@ static Future<Void> tssStreamComparison(Request request,
 			// skip tss comparison if both are end of stream
 			if ((!ssEndOfStream || !tssEndOfStream) && !TSS_doCompare(ssReply.get(), tssReply.get())) {
 				CODE_PROBE(true, "TSS mismatch in stream comparison", probe::decoration::rare);
-				TraceEvent mismatchEvent(
-				    (simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
-				        ? SevWarnAlways
-				        : SevError,
-				    LB_mismatchTraceName(request, TSS_COMPARISON));
+				TraceEvent mismatchEvent((fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch))
+				                             ? SevWarnAlways
+				                             : SevError,
+				                         LB_mismatchTraceName(request, TSS_COMPARISON));
 				mismatchEvent.setMaxEventLength(FLOW_KNOBS->TSS_LARGE_TRACE_SIZE);
 				mismatchEvent.detail("TSSID", tssData.tssId);
 
@@ -2896,7 +2896,7 @@ static Future<Void> tssStreamComparison(Request request,
 						// record a summarized trace event instead
 						TraceEvent summaryEvent(
 						    (g_network->isSimulated() &&
-						     simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
+						     fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch))
 						        ? SevWarnAlways
 						        : SevError,
 						    LB_mismatchTraceName(request, TSS_COMPARISON));
