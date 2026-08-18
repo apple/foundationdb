@@ -1266,6 +1266,10 @@ public:
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
 		    getRangeStreamQueries, lowPriorityQueries, rowsQueried, watchQueries, emptyQueries;
 
+		// How the watches counted by watchQueries ended. Exactly one is incremented per watch, so
+		// watchQueries == triggeredWatches + timedOutWatches + erroredWatches + numWatches.
+		Counter triggeredWatches, timedOutWatches, erroredWatches;
+
 		// counters related to getMappedRange queries
 		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
 		    finishedGetMappedRangeQueries;
@@ -1343,8 +1347,10 @@ public:
 		    getRangeSystemKeyQueries("GetRangeSystemKeyQueries", cc),
 		    getMappedRangeQueries("GetMappedRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
 		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
-		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
-		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
+		    watchQueries("WatchQueries", cc), triggeredWatches("TriggeredWatches", cc),
+		    timedOutWatches("TimedOutWatches", cc), erroredWatches("ErroredWatches", cc),
+		    emptyQueries("EmptyQueries", cc), logicalBytesInput("LogicalBytesInput", cc),
+		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
 		    bytesDurable("BytesDurable", cc), sampledBytesCleared("SampledBytesCleared", cc),
@@ -2428,6 +2434,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 
 					// fire watch
 					req.reply.send(WatchValueReply{ ver });
+					++data->counters.triggeredWatches;
 					finishWatchValueReply(data, metadata);
 					--data->numWatches;
 					data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
@@ -2445,9 +2452,11 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 				if (response.present()) {
 					// fire watch
 					req.reply.send(WatchValueReply{ response.get() });
+					++data->counters.triggeredWatches;
 				} else {
 					// watch timed out
 					data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
+					++data->counters.timedOutWatches;
 				}
 				finishWatchValueReply(data, metadata);
 				--data->numWatches;
@@ -2461,6 +2470,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 			data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
 			finishWatchValueReply(data, metadata);
 			--data->numWatches;
+			++data->counters.erroredWatches;
 
 			if (!canReplyWith(e))
 				throw e;
@@ -6690,6 +6700,107 @@ static Future<Void> processSampleFiles(StorageServer* data,
 	} // end file iteration loop
 }
 
+// Filter the whole task's file set down to what this fetchKeys owns. The set spans the task, while `keys` is a
+// single destination shard piece, so files outside `keys` are routine rather than a fault. A straddling file is
+// still returned -- it holds keys this fetch owns and only the KV-replay path can clip it to `keys` -- but it
+// clears *allOwnedContained, disqualifying the fetch from whole-file ingest.
+static BulkLoadFileSetKeyMap selectOwnedBulkLoadFileSets(const BulkLoadFileSetKeyMap& taskFileSets,
+                                                         KeyRangeRef keys,
+                                                         bool* allOwnedContained,
+                                                         KeyRange* firstUncontained) {
+	ASSERT(allOwnedContained != nullptr);
+	BulkLoadFileSetKeyMap owned;
+	*allOwnedContained = true;
+	for (const auto& fileSetPair : taskFileSets) {
+		if (!keys.intersects(fileSetPair.first)) {
+			continue;
+		}
+		if (!keys.contains(fileSetPair.first)) {
+			if (*allOwnedContained && firstUncontained != nullptr) {
+				*firstUncontained = fileSetPair.first;
+			}
+			*allOwnedContained = false;
+		}
+		owned.push_back(fileSetPair);
+	}
+	return owned;
+}
+
+TEST_CASE("/fdbserver/storageserver/selectOwnedBulkLoadFileSets") {
+	auto entry = [](StringRef begin, StringRef end) {
+		return std::make_pair(KeyRange(KeyRangeRef(begin, end)), BulkLoadFileSet());
+	};
+	bool allContained = false;
+	KeyRange uncontained;
+
+	// Fetch owns the whole task.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "c"_sr), entry("c"_sr, "e"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "e"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 2);
+		ASSERT(allContained);
+	}
+
+	// Disjoint ("e"-"g") and adjacent ("c"-"e") files are dropped without disqualifying the fetch.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "c"_sr), entry("c"_sr, "e"_sr), entry("e"_sr, "g"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "c"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 1);
+		ASSERT(owned[0].first == KeyRangeRef("a"_sr, "c"_sr));
+		ASSERT(allContained);
+	}
+
+	// A straddling file is retained, but disqualifies the fetch.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "d"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "c"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 1);
+		ASSERT(!allContained);
+		ASSERT(uncontained == KeyRangeRef("a"_sr, "d"_sr));
+	}
+
+	// As does one spanning it.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "z"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("c"_sr, "e"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 1);
+		ASSERT(!allContained);
+	}
+
+	// Empty task file set is vacuously contained.
+	{
+		BulkLoadFileSetKeyMap task;
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "z"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 0);
+		ASSERT(allContained);
+	}
+
+	// Across pieces partitioning the task range, every file must be claimed exactly once: zero loses it, twice
+	// ingests the same keys under two shards.
+	{
+		BulkLoadFileSetKeyMap task{
+			entry("a"_sr, "c"_sr), entry("c"_sr, "e"_sr), entry("e"_sr, "g"_sr), entry("g"_sr, "i"_sr)
+		};
+		const std::vector<KeyRangeRef> pieces{ KeyRangeRef("a"_sr, "c"_sr),
+			                                   KeyRangeRef("c"_sr, "g"_sr),
+			                                   KeyRangeRef("g"_sr, "i"_sr) };
+		std::map<std::string, int> owners;
+		for (const auto& piece : pieces) {
+			bool contained = false;
+			for (const auto& ownedPair : selectOwnedBulkLoadFileSets(task, piece, &contained, nullptr)) {
+				owners[ownedPair.first.begin.toString()]++;
+			}
+			ASSERT(contained); // the partition is manifest-aligned, so nothing straddles
+		}
+		ASSERT_EQ(owners.size(), task.size());
+		for (const auto& ownerPair : owners) {
+			ASSERT_EQ(ownerPair.second, 1);
+		}
+	}
+
+	return Void();
+}
+
 Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	TraceInterval interval("FetchKeys");
@@ -6974,19 +7085,21 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("Phase", "File download")
 				    .detail("FKID", fetchKeysID);
 				// Do SST ingestion if (1) the knob is enabled, (2) the storage engine supports SST ingestion, and
-				// (3) the task range is aligned with manifests' range, and (4) all file ranges fit within shard.
-				// Check (4) is needed because shard boundaries may differ between backup and restore time.
+				// (3) the task range is aligned with manifests' range, and (4) every file this fetch owns fits
+				// within the shard. Check (4) is needed because shard boundaries may differ between backup and
+				// restore time.
 				bool allFilesContained = true;
-				for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
-					if (!keys.contains(range)) {
-						allFilesContained = false;
-						TraceEvent(SevInfo, "SSBulkLoadFileRangeMismatch", data->thisServerID)
-						    .detail("ShardRange", keys)
-						    .detail("FileRange", range)
-						    .detail("DataMoveId", dataMoveId.toString())
-						    .detail("FKID", fetchKeysID);
-						break;
-					}
+				KeyRange firstUncontainedFileRange;
+				auto ownedBulkLoadFileSets = std::make_shared<BulkLoadFileSetKeyMap>(selectOwnedBulkLoadFileSets(
+				    *localBulkLoadFileSets, keys, &allFilesContained, &firstUncontainedFileRange));
+				if (!allFilesContained) {
+					TraceEvent(SevInfo, "SSBulkLoadFileRangeMismatch", data->thisServerID)
+					    .detail("ShardRange", keys)
+					    .detail("FileRange", firstUncontainedFileRange)
+					    .detail("OwnedFileCount", ownedBulkLoadFileSets->size())
+					    .detail("TaskFileCount", localBulkLoadFileSets->size())
+					    .detail("DataMoveId", dataMoveId.toString())
+					    .detail("FKID", fetchKeysID);
 				}
 				if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
 				    data->storage.getKeyValueStore()->supportsSstIngestion() && bulkloadCanIngestSSTFile &&
@@ -7009,7 +7122,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// Ingest the SST files.
 					// Measure duration at this level so we capture the inter-thread handoff time.
 					double ingestStartTime = g_network->timer(); // Record start time
-					co_await data->storage.getKeyValueStore()->ingestSSTFiles(localBulkLoadFileSets);
+					co_await data->storage.getKeyValueStore()->ingestSSTFiles(ownedBulkLoadFileSets);
 					const double ingestDuration = g_network->timer() - ingestStartTime;
 					data->counters.ingestDurationLatencySample->addMeasurement(ingestDuration);
 
@@ -7017,7 +7130,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					co_await data->storage.getKeyValueStore()->compactRange(keys);
 
 					// Process sample files after SST ingestion
-					co_await processSampleFiles(data, keys, bulkLoadLocalDir, localBulkLoadFileSets);
+					co_await processSampleFiles(data, keys, bulkLoadLocalDir, ownedBulkLoadFileSets);
 
 					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
 					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
@@ -7036,7 +7149,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						    .detail("AllFilesContained", allFilesContained)
 						    .detail("FKID", fetchKeysID);
 					}
-					hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
+					hold = tryGetRangeForBulkLoad(results, keys, ownedBulkLoadFileSets);
 					rangeEnd = keys.end;
 				}
 			} else {

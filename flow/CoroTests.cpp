@@ -75,7 +75,7 @@ TEST_CASE("/flow/genericactors/ActorHeaderDeclarations") {
 	ASSERT(any);
 	co_await returnIfTrue(Future<bool>(true));
 
-	Reference<AsyncVar<bool>> condition = makeReference<AsyncVar<bool>>(false);
+	auto condition = makeReference<AsyncVar<bool>>(false);
 	co_await delayAfterCleared(condition, 0.0);
 	co_await lowPriorityDelayAfterCleared(condition, 0.0);
 }
