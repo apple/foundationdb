@@ -57,7 +57,7 @@ TLSPolicy::~TLSPolicy() {}
 #include "flow/IAsyncFile.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 std::vector<std::string> LoadedTLSConfig::getVerifyPeers() const {
 	if (!tlsVerifyPeers.empty()) {

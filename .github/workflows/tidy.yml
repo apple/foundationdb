@@ -92,11 +92,17 @@ jobs:
                 ;;
             esac
             # These inputs are not parseable as standalone clang-tidy translation units in this workflow:
-            # the public C headers require C consumer setup and intentionally use C typedefs, the RocksDB compile
-            # commands refer to headers that are not built here, and the Flow headers depend on include order
-            # from their real consumers.
+            # the public C headers require C consumer setup and intentionally use C typedefs, the AWS and RocksDB
+            # compile commands refer to SDK headers that are not built here, and the Flow/RPC headers depend on
+            # include order from their real consumers.
             case "$FILE" in
               bindings/c/foundationdb/fdb_c.h|bindings/c/foundationdb/fdb_c_types.h)
+                continue
+                ;;
+              fdbclient/S3BlobStore.cpp|fdbserver/kvstore/RocksDBLogForwarder.h)
+                continue
+                ;;
+              fdbrpc/AsyncFileKAIO.h)
                 continue
                 ;;
               fdbserver/core/RocksDBCheckpointUtils.cpp|fdbserver/kvstore/KeyValueStoreRocksDB.cpp|fdbserver/kvstore/KeyValueStoreShardedRocksDB.cpp)

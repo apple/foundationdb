@@ -44,7 +44,7 @@
 #include "DDRelocationQueue.h"
 #include "TCInfo.h"
 #include "flow/CoroUtils.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/SimpleCounter.h"
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
@@ -1661,7 +1661,11 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 						// rd with bulkLoadTask set.
 						// TODO(BulkLoad): reset rd.bulkLoadTask here for the risk of overloading the source
 						// servers.
-						TraceEvent(SevWarn, "DDBulkLoadTaskFallbackToNormalDataMove", self->distributorId)
+						//
+						// An expected race, not a bulkload failure: rd's task snapshot was Triggered/Running, but
+						// the persisted phase has moved on since -- usually to Complete. An ordinary move is then
+						// the correct outcome and loses no bulkload work.
+						TraceEvent(SevInfo, "DDBulkLoadTaskFallbackToNormalDataMove", self->distributorId)
 						    .detail("TrackID", rd.randomId)
 						    .detail("DataMovePriority", rd.priority)
 						    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId())
@@ -2345,9 +2349,30 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			    error.code() != error_code_start_move_keys_too_many_retries) {
 				if (!error.code()) {
 					try {
-						co_await healthyDestinations
-						    .updateStorageMetrics(); // prevent a gap between the polling for an increase in
-						                             // storage metrics and decrementing data in flight
+						// Prevent a gap between the polling for an increase in storage metrics and
+						// decrementing data in flight: until that increase is observed the destination looks
+						// emptier than it is and can attract further moves.
+						//
+						// The refresh is bounded because updateServerMetrics() returns only once the server
+						// replies or leaves the team, and completing this relocation must not depend on
+						// either. Losing it only widens that gap to one STORAGE_METRICS_POLLING_DELAY; the
+						// decrement below is derived from the shard's own metrics and is exact regardless.
+						Optional<Void> refreshed = co_await timeout(healthyDestinations.updateStorageMetrics(),
+						                                            SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT,
+						                                            TaskPriority::DataDistributionLaunch);
+						if (!refreshed.present()) {
+							CODE_PROBE(true,
+							           "Destination metrics refresh timed out after a data move",
+							           probe::decoration::rare);
+							TraceEvent(SevWarn, "RelocateShardDestMetricsTimeout", distributorId)
+							    .suppressFor(5.0)
+							    .detail("TraceID", rd.randomId)
+							    .detail("Range", rd.keys)
+							    .detail("DataMoveID", rd.dataMoveId)
+							    .detail("Priority", rd.priority)
+							    .detail("Dest", describe(destIds))
+							    .detail("Timeout", SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT);
+						}
 					} catch (Error& e) {
 						error = e;
 					}

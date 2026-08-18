@@ -30,7 +30,7 @@
 #include "flow/CoroUtils.h"
 #include "flow/network.h"
 #include "flow/Knobs.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/CompressedInt.h"
 #include "flow/OTELMetrics.h"
 #include <algorithm>

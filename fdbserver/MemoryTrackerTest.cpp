@@ -696,22 +696,55 @@ TEST_CASE("/flow/MemoryTracker/operatorNewAccounting") {
 }
 
 TEST_CASE("/flow/MemoryTracker/failOpenOnMetadataAllocFailure") {
-	// The tracker must fail open: if its own metadata allocation throws, the
-	// underlying user allocation still succeeds and tracking recovers on this
-	// thread afterward (the reentrancy guard is restored, not leaked). Runs on all
+	// The tracker must fail open: if one of its own bookkeeping allocations fails,
+	// the underlying user allocation still succeeds, the process is NOT terminated
+	// through the installed std::new_handler, and tracking recovers on this thread
+	// afterward (the reentrancy guards are restored, not leaked). Runs on all
 	// platforms — no frame inspection.
+	//
+	// Unlike a throw injected at the top of the sampled path, this drives the real
+	// failure route: the one-shot forces an actual tracker-internal allocation
+	// (map growth) through the global operator new override, which — seeing the
+	// tracker-internal context — throws std::bad_alloc WITHOUT running the handler.
 	KnobOverride ko; // inverse = 1: sample every allocation
 	memTrackerResetForTest();
 
-	// Arm the one-shot; it is consumed by the next sampled allocation, which throws
-	// inside the tracker. new/delete must not observe that exception.
-	memTrackerFailNextSampleForTest();
+	// Install a new_handler that records if it ran. The tracker-internal fail-open
+	// path must never reach it; if it does (bug), we still break the retry loop so
+	// the test fails cleanly instead of spinning or aborting via the real
+	// platform::outOfMemory handler.
+	static bool handlerRan;
+	handlerRan = false;
+	std::new_handler prevHandler = std::set_new_handler([]() {
+		handlerRan = true;
+		throw std::bad_alloc();
+	});
+
+	// Arm the one-shot; the next tracker-internal allocation is forced to fail
+	// inside mallocWithNewHandler, which throws bad_alloc (fail open) and the
+	// tracker swallows it. The user's new[] must observe none of this.
+	//
+	// escape(p) is essential: at -O3 clang elides a new/delete pair whose pointer
+	// never escapes (P0593), so without it the allocation never reaches the global
+	// operator new, the sampler never runs, and the one-shot is never consumed — the
+	// test would pass without exercising anything (see the consumption assert below).
+	memTrackerFailNextInternalAllocForTest();
 	int* p = new int[4];
 	ASSERT(p != nullptr);
 	p[0] = 42;
+	escape(p);
 	int observed = p[0];
 	delete[] p;
+
+	std::set_new_handler(prevHandler);
+
+	// The one-shot must have been consumed by a real tracker-internal allocation;
+	// if it's still armed, no tracker metadata allocation went through the global
+	// operator new and the fail-open path was never exercised (the test would then
+	// pass trivially — exactly the weakness this rewrite fixes).
+	ASSERT(!gMemTrackerFailNextInternalAllocForTest);
 	ASSERT_EQ(observed, 42);
+	ASSERT(!handlerRan); // fail-open path must bypass the fatal OOM handler
 
 	// Tracking must still work after the injected failure.
 	memTrackerResetForTest();

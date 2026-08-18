@@ -20,7 +20,7 @@
 
 #include <cinttypes>
 #include "fdbclient/json_spirit/json_spirit_value.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/KeyBackedTypes.h"
@@ -515,6 +515,11 @@ struct RolesInfo {
 			obj["low_priority_queries"] = StatusCounter(storageMetrics.getValue("LowPriorityQueries")).getStatus();
 			obj["bytes_queried"] = StatusCounter(storageMetrics.getValue("BytesQueried")).getStatus();
 			obj["keys_queried"] = StatusCounter(storageMetrics.getValue("RowsQueried")).getStatus();
+			obj.setKeyRawNumber("active_watches", storageMetrics.getValue("ActiveWatches"));
+			obj["total_watches"] = StatusCounter(storageMetrics.getValue("WatchQueries")).getStatus();
+			obj["triggered_watches"] = StatusCounter(storageMetrics.getValue("TriggeredWatches")).getStatus();
+			obj["timed_out_watches"] = StatusCounter(storageMetrics.getValue("TimedOutWatches")).getStatus();
+			obj["errored_watches"] = StatusCounter(storageMetrics.getValue("ErroredWatches")).getStatus();
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
 			obj["mutations"] = StatusCounter(storageMetrics.getValue("Mutations")).getStatus();
 			obj.setKeyRawNumber("local_rate", storageMetrics.getValue("LocalRate"));

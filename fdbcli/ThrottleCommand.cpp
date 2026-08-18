@@ -28,7 +28,7 @@
 
 #include "flow/Arena.h"
 #include "flow/ThreadHelper.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 namespace fdb_cli {
 

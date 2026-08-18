@@ -26,7 +26,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "fdbserver/core/StorageMetrics.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/UnitTest.h"
 
 Future<Void> readBulkFileBytes(std::string path, int64_t maxLength, std::shared_ptr<std::string> output) {

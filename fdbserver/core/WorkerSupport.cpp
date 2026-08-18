@@ -7,7 +7,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/TDMetric.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
 
 template class RequestStream<RecruitMasterRequest, false>;
