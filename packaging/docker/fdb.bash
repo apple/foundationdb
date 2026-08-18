@@ -59,48 +59,36 @@ function create_cluster_file() {
     fi
 }
 
-function discover_network_environment() {
-    if [[ "$FDB_NETWORKING_MODE" == "host" ]]; then
-        export FDB_PUBLIC_IP4=127.0.0.1
-        export FDB_PUBLIC_IP6="[::1]"
-    elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
-        for addr in $(hostname -I); do
-            if [[ -z "$FDB_PUBLIC_IP4" && $addr == *'.'* ]]; then
-                export FDB_PUBLIC_IP4="$addr"
-            elif [[ -z "$FDB_PUBLIC_IP6" && $addr == *':'* ]]; then
-                export FDB_PUBLIC_IP6="[$addr]"
-            elif [[ (! -z "$FDB_PUBLIC_IP4") && (! -z "$FDB_PUBLIC_IP6") ]]; then
-                break
-            fi
-        done
-    else
-        echo "Unknown FDB Networking mode \"$FDB_NETWORKING_MODE\"" 1>&2
-        exit 1
-    fi
+function first_hostname_with_str() {
+    for addr in $(hostname -I); do
+        if [[ $addr == *"$1"* ]]; then
+            echo "$addr"
+            return 0
+        fi
+    done
+    return 1
 }
 
 function create_server_environment() {
     FDB_IP_VERSION=${FDB_IP_VERSION:-v4}
 
-    if [[ -z "$FDB_PUBLIC_IP" ]]; then
-        discover_network_environment
-    fi
-
     if [[ "$FDB_IP_VERSION" == '4' ]]; then
         export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'0.0.0.0'}
-        export FDB_PUBLIC_IP=${FDB_PUBLIC_IP:-$FDB_PUBLIC_IP4}
+        public_ip=${FDB_PUBLIC_IP:-"$(first_hostname_with_str '.')"}
     elif [[ "$FDB_IP_VERSION" == '6' ]]; then
         export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'[::]'}
-        export FDB_PUBLIC_IP=${FDB_PUBLIC_IP:-$FDB_PUBLIC_IP6}
+        public_ip=${FDB_PUBLIC_IP:-"[$(first_hostname_with_str ':')]"}
     else
         echo "Unknown FDB IP version \"$FDB_IP_VERSION\"" 1>&2
         exit 1
     fi
 
-    if [[ -z $FDB_PUBLIC_IP ]]; then
+    if (( $? > 0 )); then
         echo "No valid IP for IP version \"$FDB_IP_VERSION\"" 1>&2
         exit 1
     fi
+
+    export FDB_PUBLIC_IP="$public_ip"
     
 
     # Set default cluster file contents only if no other configuration is specified.
