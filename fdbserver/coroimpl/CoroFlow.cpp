@@ -1,5 +1,5 @@
 /*
- * CoroFlowCoro.actor.cpp
+ * CoroFlow.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,21 +20,23 @@
 
 #include "fdbserver/CoroFlow.h"
 #include "flow/ActorCollection.h"
-#include "Coro.h"
 #include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "flow/actorcompiler.h" // has to be last include
+#include <boost/coroutine2/all.hpp>
+#include <boost/coroutine2/coroutine.hpp>
+#include <functional>
+#include "flow/flow.h"
+#include "flow/network.h"
 
-// Old libcoroutine based implementation. Used on Windows until CI has
-// boost context installed
+using coro_t = boost::coroutines2::coroutine<Future<Void>>;
 
-Coro *current_coro = 0, *main_coro = 0;
-Coro* swapCoro(Coro* n) {
-	Coro* t = current_coro;
-	current_coro = n;
-	return t;
-}
+// Coro *current_coro = 0, *main_coro = 0;
+// Coro* swapCoro( Coro* n ) {
+// 	Coro* t = current_coro;
+// 	current_coro = n;
+// 	return t;
+// }
 
 /*struct IThreadlike {
 public:
@@ -48,27 +50,57 @@ protected:
 destroyed.
 };*/
 
-struct Coroutine /*: IThreadlike*/ {
-	Coroutine() {
-		coro = Coro_new();
-		if (coro == nullptr)
-			platform::outOfMemory();
-	}
+struct Coroutine;
+Coroutine* current_coro;
 
-	~Coroutine() { Coro_free(coro); }
+struct Coroutine /*: IThreadlike*/ {
+	Coroutine() = default;
+	~Coroutine() { *alive = false; }
+
+	static constexpr auto kStackSize = 256 * (1 << 10);
 
 	void start() {
-		int result = Coro_startCoro_(swapCoro(coro), coro, this, &entry);
-		if (result == ENOMEM)
-			platform::outOfMemory();
+		coro.reset(new coro_t::pull_type(boost::coroutines2::fixedsize_stack(kStackSize),
+		                                 [this](coro_t::push_type& sink) { entry(sink); }));
+		switcher(this);
 	}
 
 	void unblock() {
 		// Coro_switchTo_( swapCoro(coro), coro );
-		blocked.send(Void());
+
+		// Copy blocked before calling send, since the call to send might destroy it.
+		auto b = blocked;
+		b.send(Void());
+	}
+
+	void waitFor(Future<Void> const& what) {
+		ASSERT(current_coro == this);
+		current_coro = nullptr;
+		(*sink)(what); // Pass control back to the switcher coroutine
+		ASSERT(what.isReady());
+		current_coro = this;
 	}
 
 protected:
+	static Future<Void> switcher(Coroutine* self, Uncancellable = Uncancellable()) {
+		std::shared_ptr<bool> alive = self->alive;
+		while (*alive && *self->coro) {
+			try {
+				co_await self->coro->get();
+			} catch (Error& e) {
+				// We just want to transfer control back to the coroutine. The coroutine will handle the error.
+			}
+			(*self->coro)(); // Transfer control to the coroutine. This call "returns" after waitFor is called.
+			co_await delay(0, g_network->getCurrentTask());
+		}
+	}
+
+	void entry(coro_t::push_type& sink) {
+		current_coro = this;
+		this->sink = &sink;
+		run();
+	}
+
 	void block() {
 		// Coro_switchTo_( swapCoro(main_coro), main_coro );
 		blocked = Promise<Void>();
@@ -81,16 +113,10 @@ protected:
 	virtual void run() = 0;
 
 private:
-	void wrapRun() {
-		run();
-		Coro_switchTo_(swapCoro(main_coro), main_coro);
-		// block();
-	}
-
-	static void entry(void* _this) { ((Coroutine*)_this)->wrapRun(); }
-
-	Coro* coro;
+	coro_t::push_type* sink;
 	Promise<Void> blocked;
+	std::shared_ptr<bool> alive{ std::make_shared<bool>(true) };
+	std::unique_ptr<coro_t::pull_type> coro;
 };
 
 template <class Threadlike, class Mutex, bool IS_CORO>
@@ -112,11 +138,10 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 				delete workers[c];
 		}
 
-		ACTOR Future<Void> holdRefUntilStopped(Pool* p) {
+		Future<Void> holdRefUntilStopped(Pool* p) {
 			p->addref();
-			wait(p->allStopped.getResult());
+			co_await p->allStopped.getResult();
 			p->delref();
-			return Void();
 		}
 	};
 
@@ -175,14 +200,13 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 	Future<Void> m_stopOnError; // must be last, because its cancellation calls stop()!
 	Error error;
 
-	ACTOR Future<Void> stopOnError(WorkPool* w) {
+	Future<Void> stopOnError(WorkPool* w) {
 		try {
-			wait(w->getError());
+			co_await w->getError();
 			ASSERT(false);
 		} catch (Error& e) {
 			w->stop(e);
 		}
-		return Void();
 	}
 
 	void checkError() {
@@ -207,10 +231,10 @@ public:
 		pool->allStopped.add(w->stopped.getFuture());
 		startWorker(w);
 	}
-	ACTOR static void startWorker(Worker* w) {
+	static Future<Void> startWorker(Worker* w, Uncancellable = Uncancellable()) {
 		// We want to make sure that coroutines are always started after Net2::run() is called, so the main coroutine is
 		// initialized.
-		wait(delay(0, g_network->getCurrentTask()));
+		co_await delay(0, g_network->getCurrentTask());
 		w->start();
 	}
 	void post(PThreadAction action) override {
@@ -260,44 +284,19 @@ public:
 	void delref() override { ReferenceCounted<WorkPool>::delref(); }
 };
 
-using CoroPool = WorkPool<Coroutine, ThreadUnsafeSpinLock, true>;
-
-ACTOR void coroSwitcher(Future<Void> what, TaskPriority taskID, Coro* coro) {
-	try {
-		// state double t = now();
-		wait(what);
-		// if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting && now()!=t)
-		//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", taskID).detail("Elapsed", now()-t).backtrace("Flow");
-	} catch (Error&) {
-	}
-	wait(delay(0, taskID));
-	Coro_switchTo_(swapCoro(coro), coro);
-}
+typedef WorkPool<Coroutine, ThreadUnsafeSpinLock, true> CoroPool;
 
 void CoroThreadPool::waitFor(Future<Void> what) {
-	ASSERT(current_coro != main_coro);
+	ASSERT(current_coro != nullptr);
 	if (what.isReady())
 		return;
 	// double t = now();
-	coroSwitcher(what, g_network->getCurrentTask(), current_coro);
-	Coro_switchTo_(swapCoro(main_coro), main_coro);
-	// if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting && now()!=t)
-	//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", currentTaskID).detail("Elapsed",
-	// now()-t).backtrace("Coro");
-	ASSERT(what.isReady());
+	current_coro->waitFor(what);
+	what.get(); // Throw if |what| is an error
 }
 
 // Right After INet2::run
-void CoroThreadPool::init() {
-	if (!current_coro) {
-		current_coro = main_coro = Coro_new();
-		if (main_coro == nullptr)
-			platform::outOfMemory();
-
-		Coro_initializeMainCoro(main_coro);
-		// printf("Main thread: %d bytes stack presumed available\n", Coro_bytesLeftOnStack(current_coro));
-	}
-}
+void CoroThreadPool::init() {}
 
 Reference<IThreadPool> CoroThreadPool::createThreadPool() {
 	return Reference<IThreadPool>(new CoroPool);
