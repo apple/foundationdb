@@ -288,7 +288,7 @@ struct CommitProxyVersionReplies {
 	MAP_UInt64_GetCommitVersionReply replies;
 	NotifiedVersion latestRequestNum;
 
-	explicit(false) CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
+	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
 	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
 
 	void operator=(CommitProxyVersionReplies&& r) noexcept {

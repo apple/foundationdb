@@ -38,7 +38,7 @@ struct ExclusionTracker {
 	Future<Void> trackerFuture;
 
 	ExclusionTracker() = default;
-	explicit ExclusionTracker(Database db) : db(db) { trackerFuture = tracker(this); }
+	explicit ExclusionTracker(Database db) : db(db) { trackerFuture = tracker(); }
 
 	bool isFailedOrExcluded(NetworkAddress addr) {
 		AddressExclusion addrExclusion(addr.ip, addr.port);
@@ -47,9 +47,9 @@ struct ExclusionTracker {
 
 	// Note the tracker is intended to be used by the Data Distributor. The tracker will check for excluded localities
 	// based on the server list, the server list only includes storage processes.
-	static Future<Void> tracker(ExclusionTracker* self) {
+	Future<Void> tracker() {
 		// Fetch the list of excluded servers
-		ReadYourWritesTransaction tr(self->db);
+		ReadYourWritesTransaction tr(db);
 		while (true) {
 			Error err;
 			bool hasErr = false;
@@ -150,17 +150,17 @@ struct ExclusionTracker {
 				}
 
 				bool foundChange = false;
-				if (self->excluded != newExcluded) {
-					self->excluded = newExcluded;
+				if (excluded != newExcluded) {
+					excluded = newExcluded;
 					foundChange = true;
 				}
-				if (self->failed != newFailed) {
-					self->failed = newFailed;
+				if (failed != newFailed) {
+					failed = newFailed;
 					foundChange = true;
 				}
 
 				if (foundChange) {
-					self->changed.trigger();
+					changed.trigger();
 				}
 
 				Future<Void> watchFuture = tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey) ||

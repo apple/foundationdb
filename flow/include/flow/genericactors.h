@@ -478,15 +478,15 @@ struct WorkerCache {
 		return id_interface[id];
 	}
 
-	Future<Void> removeOnReady(UID id, Future<Void> const& ready) { return removeOnReady(this, id, ready); }
+	Future<Void> removeOnReady(UID id, Future<Void> const& ready) { return removeOnReadyImpl(id, ready); }
 
 private:
-	static Future<Void> removeOnReady(WorkerCache* self, UID id, Future<Void> ready) {
+	Future<Void> removeOnReadyImpl(UID id, Future<Void> ready) {
 		try {
 			co_await ready;
-			self->id_interface.erase(id);
+			id_interface.erase(id);
 		} catch (Error& e) {
-			self->id_interface.erase(id);
+			id_interface.erase(id);
 			throw;
 		}
 	}
@@ -657,7 +657,7 @@ public:
 	ReferencedObject() : value() {}
 	explicit ReferencedObject(V const& v) : value(v) {}
 	explicit ReferencedObject(V&& v) : value(std::move(v)) {}
-	explicit(false) ReferencedObject(ReferencedObject&& r) : value(std::move(r.value)) {}
+	ReferencedObject(ReferencedObject&& r) : value(std::move(r.value)) {}
 
 	void operator=(ReferencedObject&& r) { value = std::move(r.value); }
 
@@ -724,7 +724,7 @@ private:
 class AsyncTrigger : NonCopyable {
 public:
 	AsyncTrigger() = default;
-	explicit(false) AsyncTrigger(AsyncTrigger&& at) : v(std::move(at.v)) {}
+	AsyncTrigger(AsyncTrigger&& at) : v(std::move(at.v)) {}
 	void operator=(AsyncTrigger&& at) { v = std::move(at.v); }
 	Future<Void> onTrigger() const { return v.onChange(); }
 	void trigger() { v.trigger(); }
@@ -746,7 +746,7 @@ Future<Void> forward(Reference<AsyncVar<T> const> from, AsyncTrigger* to) {
 class Debouncer : NonCopyable {
 public:
 	explicit Debouncer(double delay) { worker = debounceWorker(this, delay); }
-	explicit(false) Debouncer(Debouncer&& at) = default;
+	Debouncer(Debouncer&& at) = default;
 	Debouncer& operator=(Debouncer&& at) = default;
 	Future<Void> onTrigger() { return output.onChange(); }
 	void trigger() { input.setUnconditional(Void()); }
@@ -1924,8 +1924,7 @@ struct ActiveCounter {
 		  : parent(parent), delta(delta), releaseCallback(releaseCallback) {
 			parent->counter += delta;
 		}
-		explicit(false) Releaser(Releaser&& r) noexcept
-		  : parent(r.parent), delta(r.delta), releaseCallback(r.releaseCallback) {
+		Releaser(Releaser&& r) noexcept : parent(r.parent), delta(r.delta), releaseCallback(r.releaseCallback) {
 			r.parent = nullptr;
 		}
 		void operator=(Releaser&& r) {
@@ -2028,7 +2027,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 		int64_t remaining;
 		Releaser() : lock(0), remaining(0) {}
 		explicit(false) Releaser(FlowLock& lock, int64_t amount = 1) : lock(&lock), remaining(amount) {}
-		explicit(false) Releaser(Releaser&& r) noexcept : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
+		Releaser(Releaser&& r) noexcept : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
 		void operator=(Releaser&& r) {
 			if (remaining)
 				lock->release(remaining);
@@ -2058,9 +2057,9 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	Future<Void> take(TaskPriority taskID = TaskPriority::DefaultYield, int64_t amount = 1) {
 		if (active + amount <= permits || active == 0) {
 			active += amount;
-			return safeYieldActor(this, taskID, amount);
+			return safeYieldActor(taskID, amount);
 		}
-		return takeActor(this, taskID, amount);
+		return takeActor(taskID, amount);
 	}
 	void release(int64_t amount = 1) {
 		ASSERT((active > 0 || amount == 0) && active - amount >= 0);
@@ -2078,13 +2077,11 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 		}
 	}
 
-	Future<Void> releaseWhen(Future<Void> const& signal, int amount = 1) {
-		return releaseWhenActor(this, signal, amount);
-	}
+	Future<Void> releaseWhen(Future<Void> const& signal, int amount = 1) { return releaseWhenActor(signal, amount); }
 
 	// returns when any permits are available, having taken as many as possible up to the given amount, and modifies
 	// amount to the number of permits taken
-	Future<Void> takeUpTo(int64_t& amount) { return takeMoreActor(this, &amount); }
+	Future<Void> takeUpTo(int64_t& amount) { return takeMoreActor(&amount); }
 
 	int64_t available() const { return permits - active; }
 	int64_t activePermits() const { return active; }
@@ -2106,15 +2103,15 @@ private:
 	int64_t active;
 	Promise<Void> broken_on_destruct;
 
-	static Future<Void> takeActor(FlowLock* lock, TaskPriority taskID, int64_t amount) {
-		auto it = lock->takers.emplace(lock->takers.end(), Promise<Void>(), amount);
+	Future<Void> takeActor(TaskPriority taskID, int64_t amount) {
+		auto it = takers.emplace(takers.end(), Promise<Void>(), amount);
 
 		try {
 			co_await it->first.getFuture();
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
-				lock->takers.erase(it);
-				lock->release(0);
+				takers.erase(it);
+				release(0);
 			}
 			throw;
 		}
@@ -2122,34 +2119,34 @@ private:
 			double duration =
 			    buggify(.001) ? deterministicRandom()->random01() * FLOW_KNOBS->BUGGIFY_FLOW_LOCK_RELEASE_DELAY : 0.0;
 			// Yield so releasing the lock does not run arbitrary code on the release() stack.
-			co_await race(delay(duration, taskID), lock->broken_on_destruct.getFuture());
+			co_await race(delay(duration, taskID), broken_on_destruct.getFuture());
 		} catch (...) {
 			CODE_PROBE(true,
 			           "If we get cancelled here, we are holding the lock but the caller doesn't know, so release it");
-			lock->release(amount);
+			release(amount);
 			throw;
 		}
 	}
 
-	static Future<Void> takeMoreActor(FlowLock* lock, int64_t* amount) {
-		co_await lock->take();
-		int64_t extra = std::min(lock->available(), *amount - 1);
-		lock->active += extra;
+	Future<Void> takeMoreActor(int64_t* amount) {
+		co_await take();
+		int64_t extra = std::min(available(), *amount - 1);
+		active += extra;
 		*amount = 1 + extra;
 	}
 
-	static Future<Void> safeYieldActor(FlowLock* lock, TaskPriority taskID, int64_t amount) {
+	Future<Void> safeYieldActor(TaskPriority taskID, int64_t amount) {
 		try {
-			co_await race(yield(taskID), lock->broken_on_destruct.getFuture());
+			co_await race(yield(taskID), broken_on_destruct.getFuture());
 		} catch (Error& e) {
-			lock->release(amount);
+			release(amount);
 			throw;
 		}
 	}
 
-	static Future<Void> releaseWhenActor(FlowLock* self, Future<Void> signal, int64_t amount) {
+	Future<Void> releaseWhenActor(Future<Void> signal, int64_t amount) {
 		co_await signal;
-		self->release(amount);
+		release(amount);
 	}
 };
 
@@ -2185,7 +2182,7 @@ struct NotifiedInt {
 
 	void operator=(int64_t v) { set(v); }
 
-	explicit(false) NotifiedInt(NotifiedInt&& r) noexcept : waiting(std::move(r.waiting)), val(r.val) {}
+	NotifiedInt(NotifiedInt&& r) noexcept : waiting(std::move(r.waiting)), val(r.val) {}
 	void operator=(NotifiedInt&& r) noexcept {
 		waiting = std::move(r.waiting);
 		val = r.val;
@@ -2211,9 +2208,7 @@ struct BoundedFlowLock : NonCopyable, public ReferenceCounted<BoundedFlowLock> {
 		int64_t permitNumber;
 		Releaser() : lock(nullptr), permitNumber(0) {}
 		Releaser(BoundedFlowLock* lock, int64_t permitNumber) : lock(lock), permitNumber(permitNumber) {}
-		explicit(false) Releaser(Releaser&& r) noexcept : lock(r.lock), permitNumber(r.permitNumber) {
-			r.permitNumber = 0;
-		}
+		Releaser(Releaser&& r) noexcept : lock(r.lock), permitNumber(r.permitNumber) { r.permitNumber = 0; }
 		void operator=(Releaser&& r) {
 			if (permitNumber)
 				lock->release(permitNumber);
@@ -2240,7 +2235,7 @@ struct BoundedFlowLock : NonCopyable, public ReferenceCounted<BoundedFlowLock> {
 	  : minOutstanding(0), nextPermitNumber(0), unrestrictedPermits(unrestrictedPermits),
 	    boundedPermits(boundedPermits) {}
 
-	Future<int64_t> take() { return takeActor(this); }
+	Future<int64_t> take() { return takeActor(); }
 	void release(int64_t permitNumber) {
 		outstanding.erase(permitNumber);
 		updateMinOutstanding();
@@ -2262,11 +2257,11 @@ private:
 		}
 	}
 
-	static Future<int64_t> takeActor(BoundedFlowLock* lock) {
-		int64_t permitNumber = ++lock->nextPermitNumber;
-		lock->outstanding.insert(permitNumber, 1);
-		lock->updateMinOutstanding();
-		co_await lock->minOutstanding.whenAtLeast(std::max<int64_t>(0, permitNumber - lock->boundedPermits));
+	Future<int64_t> takeActor() {
+		int64_t permitNumber = ++nextPermitNumber;
+		outstanding.insert(permitNumber, 1);
+		updateMinOutstanding();
+		co_await minOutstanding.whenAtLeast(std::max<int64_t>(0, permitNumber - boundedPermits));
 		co_return permitNumber;
 	}
 };
@@ -2401,8 +2396,8 @@ public:
 class AndFuture {
 public:
 	AndFuture() = default;
-	explicit(false) AndFuture(AndFuture const& f) = default;
-	explicit(false) AndFuture(AndFuture&& f) noexcept = default;
+	AndFuture(AndFuture const& f) = default;
+	AndFuture(AndFuture&& f) noexcept = default;
 	AndFuture& operator=(AndFuture const& f) = default;
 	AndFuture& operator=(AndFuture&& f) noexcept = default;
 

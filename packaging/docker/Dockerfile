@@ -236,15 +236,17 @@ RUN microdnf -y install \
 WORKDIR /tmp
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
         AWS_ARCH=x86_64; \
+        KUBECTL_SHA256=9f652f0f4d8a06a211a694739f80259db008da63547f024345a42f4dd88a3341; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
         AWS_ARCH=aarch64; \
+        KUBECTL_SHA256=cd1b787b804b5c16dfd1c5440dbce75c01410ed791a0d518de6fcf8353d8883e; \
     else \
         echo "ERROR: unsupported architecture $TARGETARCH" 1>&2; \
         exit 1; \
     fi; \
-    NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-eks/1.22.6/2022-03-09/bin/linux/$TARGETARCH/kubectl -o kubectl && \
-    echo "860c3d37a5979491895767e7332404d28dc0d7797c7673c33df30ca80e215a07  kubectl" > kubectl.txt && \
-    sha256sum --quiet -c kubectl.txt && \
+    NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-eks/1.31.14/2026-08-04/bin/linux/$TARGETARCH/kubectl -o kubectl && \
+    echo "${KUBECTL_SHA256}  kubectl" > kubectl.txt && \
+    sha256sum -c kubectl.txt && \
     mv kubectl /usr/local/bin/kubectl && \
     chmod 755 /usr/local/bin/kubectl && \
     curl -Ls https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}-2.7.34.zip -o "awscliv2-${AWS_ARCH}.zip" && \
