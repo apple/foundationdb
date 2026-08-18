@@ -71,6 +71,7 @@
 #include "flow/PriorityMultiLock.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
+#include "flow/ScopeExit.h"
 #include "flow/SystemMonitor.h"
 #include "flow/Trace.h"
 #include "fdbclient/Tracing.h"
@@ -1229,6 +1230,18 @@ public:
 
 	FlowLock serveAuditStorageParallelismLock;
 
+	// Serializes ValidateStorageServerShard audits against each other. They drive
+	// shardAssignmentHistory / trackShardAssignmentMinVersion, single-instance state on this server
+	// (startTrackShardAssignment() ASSERTs tracking is off), so two concurrent ssshard audits corrupt
+	// each other's view of which ranges moved. Exclusion must not depend on
+	// SERVE_AUDIT_STORAGE_PARALLELISM. Held only by ssshard audits; other types stay parallel.
+	FlowLock ssShardAuditExclusionLock;
+
+	// Shared by every concurrent audit task on this server. It must NOT be per-task: the knob is named
+	// AUDIT_STORAGE_RATE_PER_SERVER_MAX, and a per-task limiter would multiply the allowance by
+	// SERVE_AUDIT_STORAGE_PARALLELISM, against a server that is also serving reads.
+	Reference<IRateControl> auditStorageRateLimiter;
+
 	FlowLock serveBulkDumpParallelismLock;
 
 	int64_t instanceID;
@@ -1475,7 +1488,8 @@ public:
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    ssLock(makeReference<PriorityMultiLock>(SERVER_KNOBS->STORAGE_SERVER_READ_CONCURRENCY,
 	                                            SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES)),
-	    serveAuditStorageParallelismLock(SERVER_KNOBS->SERVE_AUDIT_STORAGE_PARALLELISM),
+	    serveAuditStorageParallelismLock(SERVER_KNOBS->SERVE_AUDIT_STORAGE_PARALLELISM), ssShardAuditExclusionLock(1),
+	    auditStorageRateLimiter(makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1)),
 	    serveBulkDumpParallelismLock(SERVER_KNOBS->SS_SERVE_BULKDUMP_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
@@ -3673,21 +3687,34 @@ AuditGetShardInfoRes getThisServerShardInfo(StorageServer* data, KeyRange range)
 // Check consistency between StorageServer->shardInfo and ServerKeys system key space
 Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
+	// trackShardAssignment is only correct when at most one auditStorageServerShardQ runs at a time, so
+	// take the exclusion lock before the shared permit -- waiting on a peer ssshard audit must not sit on
+	// a permit the other audit types are competing for. The check below is the tripwire for this
+	// invariant and deliberately fails simulation, so reintroducing concurrency shows up loudly.
+	co_await data->ssShardAuditExclusionLock.take(TaskPriority::DefaultYield);
+	FlowLock::Releaser ssShardHolder(data->ssShardAuditExclusionLock);
 	co_await data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield);
-	// The trackShardAssignment is correct when at most 1 auditStorageServerShardQ runs
-	// at a time. Currently, this is guaranteed by setting serveAuditStorageParallelismLock == 1
-	// If serveAuditStorageParallelismLock > 1, we need to check trackShardAssignmentMinVersion
-	// to make sure no onging auditStorageServerShardQ is running
+	// Constructed BEFORE the tripwire below: the early co_return there would otherwise leak a permit,
+	// and this lock is shared by every audit type, so enough leaks exhaust it permanently and every
+	// later audit on this server blocks in take() forever.
+	FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 	if (data->trackShardAssignmentMinVersion != invalidVersion) {
-		// Another auditStorageServerShardQ is running
+		// Another auditStorageServerShardQ is running, or a previous one was cancelled before reaching
+		// its stopTrackShardAssignment() -- that call is plain code at the end of the function, not a
+		// destructor, so cancellation skips it and leaves tracking on.
 		req.reply.sendError(audit_storage_cancelled());
 		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 		           "ExistStorageServerShardAuditExit") // unexpected
 		    .detail("NewAuditId", req.id)
-		    .detail("NewAuditType", req.getType());
+		    .detail("NewAuditType", req.getType())
+		    .detail("TrackShardAssignmentMinVersion", data->trackShardAssignmentMinVersion);
 		co_return;
 	}
-	FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
+	// The stopTrackShardAssignment() calls below are plain statements, so a cancelled audit destroys the
+	// coroutine frame without running any of them and strands trackShardAssignmentMinVersion set, which
+	// trips the check above for every later ssshard audit on this server. Idempotent, so it coexists with
+	// the early stops that close the tracking window before the audit finishes.
+	ScopeExit stopTrackingOnExit([data]() { data->stopTrackShardAssignment(); });
 	TraceEvent(SevInfo, "SSAuditStorageSsShardBegin", data->thisServerID)
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range);
@@ -3721,7 +3748,8 @@ Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest r
 	int retryCount = 0;
 	int64_t cumulatedValidatedLocalShardsNum = 0;
 	int64_t cumulatedValidatedServerKeysNum = 0;
-	Reference<IRateControl> rateLimiter = makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
+	// Server-wide, not per-task: see StorageServer::auditStorageRateLimiter.
+	Reference<IRateControl> rateLimiter = data->auditStorageRateLimiter;
 	int64_t remoteReadBytes = 0;
 	double startTime = now();
 	double lastRateLimiterWaitTime = 0;
@@ -4136,6 +4164,44 @@ Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest r
 
 // Helper: Read both source and restored data for a given range
 //
+// Per-batch validate_restore traces, which at scale run to millions of events per audit, so they are
+// gated behind the existing ENABLE_AUDIT_VERBOSE_TRACE knob. The per-range events
+// (SSAuditRestoreBegin/Complete, and any error) stay unconditional.
+//
+// TODO(Audit): move to fdbclient/Audit.h as auditVerboseEventSev(), beside the audit types, matching
+// bulkLoadVerboseEventSev() in BulkLoading.h and s3VerboseEventSev() in S3Client.h. DataDistribution.cpp
+// gates this same knob with six `if (SERVER_KNOBS->ENABLE_AUDIT_VERBOSE_TRACE)` blocks, so the subsystem
+// has two idioms for one knob. Deferred because consolidating flips those six sites from emitting nothing
+// to emitting SevDebug, which is a trace-volume change and wants measuring on its own.
+static inline Severity auditRestoreVerboseEventSev() {
+	return SERVER_KNOBS->ENABLE_AUDIT_VERBOSE_TRACE ? SevInfo : SevDebug;
+}
+
+// Adapt the byte budget of one validate_restore comparison batch (AIMD). See
+// AUDIT_RESTORE_BATCH_BYTE_LIMIT for why a fixed size does not work.
+//
+// The increase is a quarter of the ceiling, coarse on purpose: a failure is cheap and self-correcting
+// (one re-read), whereas sitting below the workable size costs throughput on every remaining batch.
+//
+// Never returns zero or below, because GetRangeLimits overloads the sign of `bytes`: -1 means
+// BYTE_LIMIT_UNLIMITED and removes the bound, below -1 fails isValid(), and 0 costs a round trip per
+// key. Not hang protection -- minRows=1 means even a zero budget still returns a key.
+static int nextAuditBatchBytes(int currentBytes, bool succeeded, int floorBytes, int ceilingBytes) {
+	// Tolerate a misconfigured floor above the ceiling rather than producing an empty window.
+	floorBytes = std::max(1, floorBytes);
+	ceilingBytes = std::max(floorBytes, ceilingBytes);
+	currentBytes = std::clamp(currentBytes, floorBytes, ceilingBytes);
+	if (succeeded) {
+		const int increment = std::max(1, ceilingBytes / 4);
+		// Guard the add: currentBytes + increment can overflow int for a large ceiling.
+		if (currentBytes > ceilingBytes - increment) {
+			return ceilingBytes;
+		}
+		return currentBytes + increment;
+	}
+	return std::max(floorBytes, currentBytes / 2);
+}
+
 // Restored data is stored at validateRestoreLogKeys (\xff\x02/rlog/) in system key space.
 // NOTE: We read the ENTIRE restored keyspace (not just rangeToRead with prefix),
 // because restored keys are stored with their original names under the prefix.
@@ -4151,7 +4217,7 @@ static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSourceAndRes
 	Key restoredEnd = rangeToRead.end.withPrefix(validateRestoreLogKeys.begin);
 	KeyRange restoredRange = KeyRangeRef(restoredBegin, restoredEnd);
 
-	TraceEvent("SSAuditRestoreFetch", data->thisServerID)
+	TraceEvent(auditRestoreVerboseEventSev(), "SSAuditRestoreFetch", data->thisServerID)
 	    .detail("RangeToRead", rangeToRead)
 	    .detail("RestoredRange", restoredRange)
 	    .detail("Version", version)
@@ -4167,8 +4233,18 @@ static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSourceAndRes
 		Transaction tr(data->cx);
 		tr.setVersion(version);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		// ACCESS_SYSTEM_KEYS is needed for the restored range (it lives under \xff\x02/rlog/) and is set up
+		// front so both reads can be issued together.
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		// Issue both reads concurrently. They are independent ranges on the same transaction at the same
+		// explicit read version, so there is no ordering dependency between them; awaiting them in sequence
+		// paid two serial round trips per batch.
 		GetRangeLimits sourceLimits(limit, limitBytes);
-		RangeResult sourceData = co_await tr.getRange(rangeToRead, sourceLimits, Snapshot::False, Reverse::False);
+		GetRangeLimits restoredLimits(limit, limitBytes);
+		Future<RangeResult> sourceFuture = tr.getRange(rangeToRead, sourceLimits, Snapshot::False, Reverse::False);
+		Future<RangeResult> restoredFuture =
+		    tr.getRange(restoredRange, restoredLimits, Snapshot::False, Reverse::False);
+		RangeResult sourceData = co_await sourceFuture;
 
 		// Convert source to GetKeyValuesReply format
 		GetKeyValuesReply sourceReply;
@@ -4177,10 +4253,7 @@ static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSourceAndRes
 		sourceReply.version = version;
 		sourceResult = sourceReply;
 
-		// Read restored data with the same limits as source to ensure comparable results
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		GetRangeLimits restoredLimits(limit, limitBytes);
-		RangeResult restoredData = co_await tr.getRange(restoredRange, restoredLimits, Snapshot::False, Reverse::False);
+		RangeResult restoredData = co_await restoredFuture;
 
 		// Convert restored to GetKeyValuesReply format
 		GetKeyValuesReply restoredReply;
@@ -4211,7 +4284,7 @@ static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSourceAndRes
 	}
 
 	// Log what we fetched
-	TraceEvent("SSAuditRestoreFetchResult", data->thisServerID)
+	TraceEvent(auditRestoreVerboseEventSev(), "SSAuditRestoreFetchResult", data->thisServerID)
 	    .detail("SourceKeys", sourceResult.get().data.size())
 	    .detail("RestoredKeys", restoredResult.get().data.size())
 	    .detail("SourceBytes", sourceResult.get().data.expectedSize())
@@ -4237,7 +4310,7 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 	int sourceIdx = 0;
 	int restoredIdx = 0;
 
-	TraceEvent("SSAuditRestoreCompare", thisServerID)
+	TraceEvent(auditRestoreVerboseEventSev(), "SSAuditRestoreCompare", thisServerID)
 	    .detail("AuditID", auditID)
 	    .detail("SourceKeys", sourceReply.data.size())
 	    .detail("RestoredKeys", restoredReply.data.size())
@@ -4246,17 +4319,17 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 
 	// Log first few keys from both sets for debugging
 	if (!sourceReply.data.empty()) {
-		TraceEvent("SSAuditRestoreCompareSourceKeys", thisServerID)
+		TraceEvent(auditRestoreVerboseEventSev(), "SSAuditRestoreCompareSourceKeys", thisServerID)
 		    .detail("FirstSourceKey", sourceReply.data[0].key)
 		    .detail("LastSourceKey", sourceReply.data[sourceReply.data.size() - 1].key);
 	}
 	if (!restoredReply.data.empty()) {
-		TraceEvent("SSAuditRestoreCompareRestoredKeys", thisServerID)
+		TraceEvent(auditRestoreVerboseEventSev(), "SSAuditRestoreCompareRestoredKeys", thisServerID)
 		    .detail("FirstRestoredKey", restoredReply.data[0].key)
 		    .detail("LastRestoredKey", restoredReply.data[restoredReply.data.size() - 1].key);
 	}
 
-	TraceEvent("SSAuditRestoreCompareStart", thisServerID)
+	TraceEvent(auditRestoreVerboseEventSev(), "SSAuditRestoreCompareStart", thisServerID)
 	    .detail("SourceSize", sourceReply.data.size())
 	    .detail("RestoredSize", restoredReply.data.size())
 	    .detail("SourceMore", sourceReply.more)
@@ -4360,7 +4433,7 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 		errors.push_back(error);
 	}
 
-	TraceEvent("SSAuditRestoreCompareEnd", thisServerID)
+	TraceEvent(auditRestoreVerboseEventSev(), "SSAuditRestoreCompareEnd", thisServerID)
 	    .detail("SourceIdx", sourceIdx)
 	    .detail("RestoredIdx", restoredIdx)
 	    .detail("SourceSize", sourceReply.data.size())
@@ -4398,7 +4471,20 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 	Key rangeToReadBegin = req.range.begin;
 	KeyRange claimRange;
 	int limit = SERVER_KNOBS->AUDIT_RESTORE_BATCH_KEY_LIMIT; // Use knob instead of hardcoded 10K
-	int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+	// Ceiling of an adaptive budget, not a fixed batch size. Deliberately not
+	// CLIENT_KNOBS->REPLY_BYTE_LIMIT, which is what silently defeated the key limit above; see that knob
+	// and nextAuditBatchBytes().
+	const int limitBytesCeiling = SERVER_KNOBS->AUDIT_RESTORE_BATCH_BYTE_LIMIT;
+	const int limitBytesFloor = std::min<int>(limitBytesCeiling, SERVER_KNOBS->AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN);
+	// Seeded through nextAuditBatchBytes() so a nonsensical knob pair cannot put the FIRST batch outside
+	// the window. Returns the ceiling unchanged for any sane configuration.
+	int limitBytes = nextAuditBatchBytes(limitBytesCeiling, true, limitBytesFloor, limitBytesCeiling);
+	int consecutiveRetries = 0;
+	int64_t totalRetryableErrors = 0;
+	// Jittered geometric backoff on the house knobs (DEFAULT_BACKOFF -> DEFAULT_MAX_BACKOFF at
+	// BACKOFF_GROWTH_RATE), reset on success so an audit that hits an occasional retry does not ratchet
+	// to the maximum and stay there.
+	Backoff retryBackoff;
 	int64_t readBytes = 0;
 	Error nonRetryableError;
 	int64_t numValidatedKeys = 0;
@@ -4406,12 +4492,23 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 	int64_t lastPersistBytes = 0; // Track when we last persisted progress
 	bool complete = false;
 	double startTime = now();
-	Reference<IRateControl> rateLimiter = makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
+	// Time spent blocked on the audit rate limiter, which is now shared per server rather than per task.
+	double rateLimiterTotalWaitTime = 0;
+	// Server-wide, not per-task: see StorageServer::auditStorageRateLimiter.
+	Reference<IRateControl> rateLimiter = data->auditStorageRateLimiter;
 
 	{
 		Optional<Error> err;
 		try {
 			while (true) {
+				// Snapshot every piece of per-attempt state: a retryable failure re-reads this same batch
+				// from the same start key. `complete` matters most -- a stale true would end the audit
+				// early and report Complete over a range never fully read; only the persist block's
+				// !complete guard makes that unreachable today.
+				const int64_t batchStartValidatedKeys = numValidatedKeys;
+				const int64_t batchStartValidatedBytes = validatedBytes;
+				const int64_t batchStartPersistBytes = lastPersistBytes;
+				const bool batchStartComplete = complete;
 				try {
 					readBytes = 0;
 					rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
@@ -4518,8 +4615,12 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 						lastPersistBytes = validatedBytes;
 					}
 
-					// Apply rate limiting
+					// Apply rate limiting. The limiter is shared by every concurrent audit task on this
+					// server, so unlike the old per-task limiter it can actually bind; account for the
+					// wait so a throttled audit is distinguishable from a slow one.
+					const double rateLimiterBeforeWaitTime = now();
 					co_await rateLimiter->getAllowance(readBytes);
+					rateLimiterTotalWaitTime += now() - rateLimiterBeforeWaitTime;
 
 					// If errors found or complete, break
 					if (!errors.empty() || complete) {
@@ -4528,6 +4629,10 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 
 					// Move to next range
 					rangeToReadBegin = keyAfter(lastKey);
+					// The batch succeeded, so let the byte budget grow back toward its ceiling.
+					consecutiveRetries = 0;
+					retryBackoff = Backoff();
+					limitBytes = nextAuditBatchBytes(limitBytes, true, limitBytesFloor, limitBytesCeiling);
 					if (rangeToReadBegin >= req.range.end) {
 						complete = true;
 						break;
@@ -4544,13 +4649,32 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 					if (nonRetryableError.code() == error_code_future_version ||
 					    nonRetryableError.code() == error_code_transaction_too_old ||
 					    nonRetryableError.code() == error_code_server_overloaded) {
+						// This batch is retried from the same start key, so undo its partial accounting.
+						numValidatedKeys = batchStartValidatedKeys;
+						validatedBytes = batchStartValidatedBytes;
+						lastPersistBytes = batchStartPersistBytes;
+						complete = batchStartComplete;
+						const int retriedBytes = limitBytes;
+						limitBytes = nextAuditBatchBytes(limitBytes, false, limitBytesFloor, limitBytesCeiling);
+						// A flat 1s per retry was pure latency when the remedy is a smaller batch, and
+						// these can number in the thousands per server.
+						++consecutiveRetries;
+						++totalRetryableErrors;
+						// Suppressed, with the running total reported in SSAuditRestoreComplete. Retrying
+						// is the normal path -- the budget halving above exists because these are expected.
+						// Event name kept for greps.
 						TraceEvent(SevWarn, "SSAuditRestoreRetryableError", data->thisServerID)
+						    .suppressFor(10.0)
 						    .detail("AuditID", req.id)
 						    .detail("Error", nonRetryableError.what())
 						    .detail("Version", version)
-						    .detail("Range", rangeToRead);
+						    .detail("Range", rangeToRead)
+						    .detail("BatchBytes", retriedBytes)
+						    .detail("NextBatchBytes", limitBytes)
+						    .detail("ConsecutiveRetries", consecutiveRetries)
+						    .detail("TotalRetryableErrors", totalRetryableErrors);
 						nonRetryableError = Error();
-						co_await delay(1.0);
+						co_await retryBackoff.onError();
 						continue;
 					}
 					throw nonRetryableError;
@@ -4569,7 +4693,10 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 				    .detail("ValidationErrors", errors.size())
 				    .detail("NumValidatedKeys", numValidatedKeys)
 				    .detail("ValidatedBytes", validatedBytes)
-				    .detail("Duration", now() - startTime);
+				    .detail("Duration", now() - startTime)
+				    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+				    .detail("FinalBatchBytes", limitBytes)
+				    .detail("TotalRetryableErrors", totalRetryableErrors);
 			} else {
 				res.setPhase(AuditPhase::Complete);
 				res.range = req.range;
@@ -4579,7 +4706,10 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 				    .detail("Complete", complete)
 				    .detail("NumValidatedKeys", numValidatedKeys)
 				    .detail("ValidatedBytes", validatedBytes)
-				    .detail("Duration", now() - startTime);
+				    .detail("Duration", now() - startTime)
+				    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+				    .detail("FinalBatchBytes", limitBytes)
+				    .detail("TotalRetryableErrors", totalRetryableErrors);
 			}
 
 			// Persist final audit state
@@ -4646,7 +4776,8 @@ Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRequest 
 	double lastRateLimiterWaitTime = 0;
 	double rateLimiterBeforeWaitTime = 0;
 	double rateLimiterTotalWaitTime = 0;
-	Reference<IRateControl> rateLimiter = makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
+	// Server-wide, not per-task: see StorageServer::auditStorageRateLimiter.
+	Reference<IRateControl> rateLimiter = data->auditStorageRateLimiter;
 	try {
 		while (true) {
 			{
@@ -5252,7 +5383,16 @@ Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			TraceEvent(SevWarn, "SSBulkDumpError", data->thisServerID)
+			// Retrying is the normal path here: this loop allows up to 50 attempts a second apart while
+			// shards move underneath the dump, and one task routinely burns dozens of them. Only the
+			// terminal outcome is warning-worthy. Reporting every attempt at SevWarn reads as thousands of
+			// failures rather than the handful of tasks that actually gave up.
+			const bool giveUp = e.code() == error_code_bulkdump_task_outdated ||
+			                    e.code() == error_code_wrong_shard_server || e.code() == error_code_platform_error ||
+			                    e.code() == error_code_io_error || retryCount >= 50;
+			TraceEvent(giveUp ? SevWarn : bulkLoadVerboseEventSev(),
+			           giveUp ? "SSBulkDumpError" : "SSBulkDumpRetry",
+			           data->thisServerID)
 			    .errorUnsuppressed(e)
 			    .detail("TaskID", req.bulkDumpState.getTaskId())
 			    .detail("TaskRange", req.bulkDumpState.getRange())
@@ -5263,8 +5403,7 @@ Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 				req.reply.sendError(bulkdump_task_outdated()); // give up
 				break; // silently exit
 			}
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_platform_error ||
-			    e.code() == error_code_io_error || retryCount >= 50) {
+			if (giveUp) {
 				req.reply.sendError(bulkdump_task_failed()); // give up
 				break; // silently exit
 			}
@@ -6726,6 +6865,55 @@ static BulkLoadFileSetKeyMap selectOwnedBulkLoadFileSets(const BulkLoadFileSetKe
 	return owned;
 }
 
+TEST_CASE("/fdbserver/storageserver/nextAuditBatchBytes") {
+	const int floorBytes = 256000;
+	const int ceilingBytes = 4000000;
+
+	// Failure halves, and keeps halving, but never below the floor. The floor is not hang protection
+	// (GetRangeLimits sets minRows=1, so even a zero budget still returns a key): it exists because a
+	// budget of -1 reads as BYTE_LIMIT_UNLIMITED, below -1 fails as range_limits_invalid, and 0 costs a
+	// round trip per key. See nextAuditBatchBytes().
+	ASSERT_EQ(nextAuditBatchBytes(ceilingBytes, false, floorBytes, ceilingBytes), 2000000);
+	ASSERT_EQ(nextAuditBatchBytes(2000000, false, floorBytes, ceilingBytes), 1000000);
+	int budget = ceilingBytes;
+	for (int i = 0; i < 100; ++i) {
+		budget = nextAuditBatchBytes(budget, false, floorBytes, ceilingBytes);
+		ASSERT(budget >= floorBytes && budget <= ceilingBytes);
+	}
+	ASSERT_EQ(budget, floorBytes);
+
+	// Success increases additively (a quarter of the ceiling) and saturates at the ceiling rather than
+	// overshooting it.
+	ASSERT_EQ(nextAuditBatchBytes(floorBytes, true, floorBytes, ceilingBytes), floorBytes + ceilingBytes / 4);
+	ASSERT_EQ(nextAuditBatchBytes(ceilingBytes, true, floorBytes, ceilingBytes), ceilingBytes);
+	budget = floorBytes;
+	for (int i = 0; i < 100; ++i) {
+		budget = nextAuditBatchBytes(budget, true, floorBytes, ceilingBytes);
+		ASSERT(budget >= floorBytes && budget <= ceilingBytes);
+	}
+	ASSERT_EQ(budget, ceilingBytes);
+
+	// A huge ceiling must not overflow int when the increment is added.
+	ASSERT_EQ(
+	    nextAuditBatchBytes(std::numeric_limits<int>::max() - 1, true, floorBytes, std::numeric_limits<int>::max()),
+	    std::numeric_limits<int>::max());
+
+	// Degenerate configurations: floor above ceiling, and a zero/negative current budget.
+	ASSERT_EQ(nextAuditBatchBytes(1000, false, 5000, 1000), 5000); // floor wins, clamped up
+	ASSERT(nextAuditBatchBytes(0, false, floorBytes, ceilingBytes) >= floorBytes);
+	ASSERT(nextAuditBatchBytes(-1, true, floorBytes, ceilingBytes) >= floorBytes);
+	ASSERT(nextAuditBatchBytes(0, false, 0, 0) >= 1); // never returns a budget of zero
+
+	// Randomized: the budget stays inside the window no matter the sequence of outcomes.
+	budget = deterministicRandom()->randomInt(floorBytes, ceilingBytes);
+	for (int i = 0; i < 1000; ++i) {
+		budget = nextAuditBatchBytes(budget, deterministicRandom()->coinflip(), floorBytes, ceilingBytes);
+		ASSERT(budget >= floorBytes && budget <= ceilingBytes);
+	}
+
+	return Void();
+}
+
 TEST_CASE("/fdbserver/storageserver/selectOwnedBulkLoadFileSets") {
 	auto entry = [](StringRef begin, StringRef end) {
 		return std::make_pair(KeyRange(KeyRangeRef(begin, end)), BulkLoadFileSet());
@@ -7092,7 +7280,14 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				KeyRange firstUncontainedFileRange;
 				auto ownedBulkLoadFileSets = std::make_shared<BulkLoadFileSetKeyMap>(selectOwnedBulkLoadFileSets(
 				    *localBulkLoadFileSets, keys, &allFilesContained, &firstUncontainedFileRange));
+				// Coverage probes: the filtering above only matters when a task spans more than one
+				// destination shard piece. Deliberately unannotated -- probe::assert::simOnly asserts a path
+				// is reachable ONLY under simulation, and both of these are normal production behaviour.
+				if (ownedBulkLoadFileSets->size() < localBulkLoadFileSets->size()) {
+					CODE_PROBE(true, "bulkload fetchKeys skipped a sibling fetch's file");
+				}
 				if (!allFilesContained) {
+					CODE_PROBE(true, "bulkload file straddles the fetched shard piece");
 					TraceEvent(SevInfo, "SSBulkLoadFileRangeMismatch", data->thisServerID)
 					    .detail("ShardRange", keys)
 					    .detail("FileRange", firstUncontainedFileRange)
