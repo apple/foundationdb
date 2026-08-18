@@ -58,6 +58,73 @@ std::tuple<int, std::vector<TLogLockResult>, bool> makeLogGroupResults(
 
 void forceLinkLogSystemRecoveryTests() {}
 
+TEST_CASE("/LogSystem/RetireOldLogRoles/FinalCoreState") {
+	constexpr LogEpoch epoch = 2;
+	LocalityData locality;
+	auto logSystem = makeReference<LogSystem>(UID(), locality, epoch);
+	logSystem->logSystemType = LogSystemType::tagPartitioned;
+	logSystem->expectedLogSets = 2;
+	logSystem->oldestBackupEpoch = epoch - 1;
+	logSystem->repopulateRegionAntiQuorum = 1;
+	logSystem->recoveryComplete = Void();
+	logSystem->remoteRecovery = Never();
+	logSystem->remoteRecoveryComplete = Never();
+	logSystem->hasRemoteServers = true;
+	logSystem->tLogs.push_back(makeSingleLogSet({ TLogInterface(locality) }));
+	OldLogData old;
+	old.epoch = epoch - 1;
+	old.epochEnd = 100;
+	old.tLogs.push_back(makeSingleLogSet({ TLogInterface(locality) }));
+	logSystem->oldLogData.push_back(old);
+	const auto oldRoles = logSystem->getLogSystemConfig().oldTLogs;
+
+	DBCoreState partialState;
+	logSystem->toCoreState(partialState);
+	partialState.recoveryCount = epoch;
+	ASSERT_EQ(partialState.oldTLogData.size(), 1);
+	logSystem->coreStateWritten(partialState);
+	ASSERT(!logSystem->recoveryCompleteWrittenToCoreState.get());
+	ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+
+	// Local recovery and backups can finish before the expected remote log set exists.
+	logSystem->oldestBackupEpoch = epoch;
+	logSystem->toCoreState(partialState);
+	ASSERT(partialState.oldTLogData.empty());
+	ASSERT_EQ(partialState.tLogs.size(), 1);
+	logSystem->coreStateWritten(partialState);
+	ASSERT(logSystem->recoveryCompleteWrittenToCoreState.get());
+	ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+
+	logSystem->tLogs.push_back(makeSingleLogSet({ TLogInterface(locality) }, false));
+	logSystem->remoteRecovery = Void();
+	ASSERT(!logSystem->remoteRecoveryComplete.isReady());
+	DBCoreState finalState;
+	logSystem->toCoreState(finalState);
+	finalState.recoveryCount = epoch;
+	ASSERT(finalState.oldTLogData.empty());
+	ASSERT_EQ(finalState.tLogs.size(), logSystem->expectedLogSets);
+	logSystem->coreStateWritten(finalState);
+	LogSystemConfig expected = logSystem->getLogSystemConfig();
+	ASSERT_EQ(expected.tLogs.size(), 2);
+	ASSERT(expected.oldTLogs == oldRoles);
+	expected.oldTLogs.clear();
+
+	Future<Void> configChanged = logSystem->onLogSystemConfigChange();
+	ASSERT(!configChanged.isReady());
+	logSystem->retireOldLogRoles(finalState);
+	ASSERT(configChanged.isReady() && !configChanged.isError());
+	ASSERT(!logSystem->remoteRecoveryComplete.isReady());
+	ASSERT(logSystem->getLogSystemConfig() == expected);
+	ASSERT_EQ(logSystem->oldLogData.size(), 1);
+	ASSERT(logSystem->oldLogData.front().tLogs.front() == old.tLogs.front());
+
+	Future<Void> unchanged = logSystem->onLogSystemConfigChange();
+	logSystem->retireOldLogRoles(finalState);
+	ASSERT(!unchanged.isReady());
+	ASSERT(logSystem->getLogSystemConfig() == expected);
+	return Void();
+}
+
 TEST_CASE("/LogSystem/GetPseudoPopTag/LogRouterWithoutMappedLocality") {
 	LocalityData locality;
 	auto logSystem = makeReference<LogSystem>(UID(), locality, LogEpoch(1));

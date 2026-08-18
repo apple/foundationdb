@@ -2458,31 +2458,6 @@ public:
 		std::vector<WorkerDetails> backup_workers;
 		std::set<NetworkAddress> backup_addresses;
 
-		if (dbi.recoveryState == RecoveryState::FULLY_RECOVERED) {
-			for (const auto& oldLog : dbi.logSystemConfig.oldTLogs) {
-				for (const auto& logSet : oldLog.tLogs) {
-					for (const auto& tlog : logSet.tLogs) {
-						if (!tlog.present()) {
-							continue;
-						}
-
-						auto tlogWorker = std::find_if(id_worker.begin(), id_worker.end(), [&tlog](const auto& worker) {
-							return worker.second.details.interf.address() == tlog.interf().address();
-						});
-						const auto& locality = tlogWorker == id_worker.end()
-						                           ? tlog.interf().filteredLocality
-						                           : tlogWorker->second.details.interf.locality;
-						if (db.config.isExcludedServer(tlog.interf().addresses(), locality)) {
-							TraceEvent("BetterMasterExists", id)
-							    .detail("Reason", "OldTLogExcluded")
-							    .detail("ProcessID", locality.processId());
-							return true;
-						}
-					}
-				}
-			}
-		}
-
 		for (auto& logSet : dbi.logSystemConfig.tLogs) {
 			for (auto& it : logSet.tLogs) {
 				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());

@@ -212,6 +212,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/NativeCdcRetiredRecovery.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcRetiredRecoveryMultiRegion.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcSatellite.toml)
+  add_fdb_test(TEST_FILES fast/OldTLogRetirement.toml)
   add_fdb_test(
     TEST_FILES fast/NativeCdcDisableRestart-1.toml
     fast/NativeCdcDisableRestart-2.toml)

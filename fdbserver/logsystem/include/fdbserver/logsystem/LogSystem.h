@@ -377,6 +377,10 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	void coreStateWritten(DBCoreState const& newState);
 
+	// Requires the successfully committed terminal recovery state with every expected current log set.
+	// Finalizing a partial state for a coordinator change is insufficient.
+	void retireOldLogRoles(DBCoreState const& finalState);
+
 	Future<Void> onError() const;
 
 	static Future<Void> pushResetChecker(Reference<ConnectionResetInfo> self, NetworkAddress addr);
@@ -547,6 +551,9 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	static Future<TLogLockResult> lockTLog(UID myID, Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog);
 	template <class T>
 	static std::vector<T> getReadyNonError(std::vector<Future<T>> const& futures);
+
+private:
+	bool oldLogRolesRetired = false;
 };
 
 // Recovery version calculation for version vector unicast

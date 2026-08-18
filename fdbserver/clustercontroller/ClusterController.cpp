@@ -1444,6 +1444,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	}
 
 	if (req.recoveryState == RecoveryState::FULLY_RECOVERED) {
+		ASSERT(req.logSystemConfig.oldTLogs.empty());
 		self->db.unfinishedRecoveries = 0;
 	}
 
@@ -3937,7 +3938,7 @@ TEST_CASE("/fdbserver/clustercontroller/deferBetterMasterRecoveryUntilInitialSto
 	return Void();
 }
 
-TEST_CASE("/fdbserver/clustercontroller/recoverForExcludedOldTLogLocality") {
+TEST_CASE("/fdbserver/clustercontroller/ignoreExcludedOldTLogLocality") {
 	ClusterControllerData data(ClusterControllerFullInterface(),
 	                           LocalityData(),
 	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
@@ -3969,12 +3970,24 @@ TEST_CASE("/fdbserver/clustercontroller/recoverForExcludedOldTLogLocality") {
 	oldTLogSet.tLogs.push_back(OptionalInterface(oldTLog));
 	OldTLogConf oldTLogConf;
 	oldTLogConf.tLogs.push_back(oldTLogSet);
+	LocalityData currentLocality;
+	currentLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "current-tlog" }));
+	TLogInterface currentTLog(currentLocality);
+	TLogSet currentTLogSet;
+	currentTLogSet.tLogs.push_back(OptionalInterface(currentTLog));
 	ServerDBInfo dbInfo;
 	dbInfo.master.locality = masterLocality;
+	dbInfo.logSystemConfig.tLogs.push_back(currentTLogSet);
 	dbInfo.logSystemConfig.oldTLogs.push_back(oldTLogConf);
 	dbInfo.recoveryState = RecoveryState::FULLY_RECOVERED;
 	data.db.serverInfo->set(dbInfo);
 
+	// An unregistered current log stops unrelated placement comparisons after checking the old roles.
+	ASSERT(!data.betterMasterExists());
+
+	auto& currentWorker = data.id_worker[currentLocality.processId()];
+	currentWorker.details.interf = WorkerInterface(currentLocality);
+	currentWorker.priorityInfo.isExcluded = true;
 	ASSERT(data.betterMasterExists());
 	return Void();
 }
