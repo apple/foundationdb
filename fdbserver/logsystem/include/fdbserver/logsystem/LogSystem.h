@@ -368,7 +368,11 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	// Convert LogSystem to DBCoreState and override input newState as return value
 	void toCoreState(DBCoreState& newState) const;
 
+	// The storage/backup recovery policy can be satisfied before remote logs have copied their old prefix.
+	bool storageRecovered() const;
 	bool remoteStorageRecovered() const;
+	// Requires every expected current log set. The returned future is shared by this recovery.
+	Future<Void> onRemoteLogPrefixDurable();
 
 	// Removes no-longer-needed older TLog generations from the outgoing core state.
 	void purgeOldRecoveredGenerationsCoreState(DBCoreState&);
@@ -553,6 +557,8 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	static std::vector<T> getReadyNonError(std::vector<Future<T>> const& futures);
 
 private:
+	bool remoteLogPrefixRecovered() const;
+	Future<Void> remoteLogPrefixComplete;
 	bool oldLogRolesRetired = false;
 };
 
