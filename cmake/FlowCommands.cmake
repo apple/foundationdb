@@ -314,7 +314,7 @@ function(add_flow_target)
     endif()
     if(AFT_LINK_TEST)
       set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/linktest)
-      set(strip_target ON)
+      # set(strip_target ON) # no need
       set(target_type exec)
       add_executable(${AFT_NAME} ${sources} ${AFT_ADDL_SRCS})
     endif()
