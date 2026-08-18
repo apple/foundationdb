@@ -199,6 +199,31 @@ private:
 	std::function<void()> work;
 };
 
+class DropPoolOnCancelAction final : public ThreadAction {
+public:
+	DropPoolOnCancelAction(Reference<ActionState> state, Reference<IThreadPool> pool)
+	  : state(std::move(state)), pool(std::move(pool)) {}
+	~DropPoolOnCancelAction() { state->destroy(); }
+
+	void operator()(IThreadPoolReceiver*) override {
+		std::unique_ptr<DropPoolOnCancelAction> destroyOnReturn(this);
+		state->start();
+		state->fail(operation_failed().asInjectedFault());
+	}
+
+	void cancel() override {
+		state->cancel();
+		pool.clear();
+		delete this;
+	}
+
+	double getTimeEstimate() const override { return 0.; }
+
+private:
+	Reference<ActionState> state;
+	Reference<IThreadPool> pool;
+};
+
 Reference<ActionState> postAction(Reference<IThreadPool> const& pool, std::function<void()> work) {
 	auto state = makeReference<ActionState>();
 	pool->post(new TestAction(state, std::move(work)));
@@ -391,6 +416,40 @@ TEST_CASE("/fdbserver/CoroFlow/DropBusyPool") {
 
 	gate.sendError(io_error());
 	co_await assertActionCompleted(active);
+	co_await queued->onDestroyed();
+	co_await receiver->onDestroyed();
+	queued->assertCancelled();
+	ASSERT_EQ(receiver->getInitCount(), 1);
+	ASSERT_EQ(receiver->getDestroyCount(), 1);
+}
+
+TEST_CASE("/fdbserver/CoroFlow/EmptyPoolLifecycle") {
+	{
+		auto pool = CoroThreadPool::createThreadPool();
+		co_await pool->stop();
+	}
+	auto pool = CoroThreadPool::createThreadPool();
+	pool.clear();
+}
+
+TEST_CASE("/fdbserver/CoroFlow/ErrorStopDropsLastOwner") {
+	auto receiver = makeReference<ReceiverState>();
+	auto pool = CoroThreadPool::createThreadPool();
+	const Error expectedError = operation_failed().asInjectedFault();
+	auto poolError = pool->getError();
+	pool->addThread(new FailingTestReceiver(receiver, expectedError));
+	auto queued = makeReference<ActionState>();
+	pool->post(new DropPoolOnCancelAction(queued, pool));
+
+	// The queued action is the only external owner when stopOnError cancels it.
+	pool.clear();
+	ASSERT(!poolError.isReady());
+	ASSERT_EQ(queued->getCancelCount(), 0);
+
+	ErrorOr<Void> result = co_await coro::errorOr(poolError);
+	ASSERT(result.isError());
+	ASSERT_EQ(result.getError().code(), expectedError.code());
+	ASSERT(result.getError().isInjectedFault());
 	co_await queued->onDestroyed();
 	co_await receiver->onDestroyed();
 	queued->assertCancelled();

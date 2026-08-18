@@ -128,6 +128,79 @@ Future<Void> runStartStopBenchmark(benchmark::State* state) {
 	state->SetItemsProcessed(state->iterations());
 }
 
+Future<Void> runZeroWorkerCreateDropBenchmark(benchmark::State* state) {
+	while (state->KeepRunning()) {
+		Reference<IThreadPool> pool = CoroThreadPool::createThreadPool();
+		benchmark::DoNotOptimize(pool.getPtr());
+		pool.clear();
+	}
+	state->SetItemsProcessed(state->iterations());
+	return Void();
+}
+
+// No owning pool reference may escape setup into the final-reference-drop measurement.
+Future<Void> startBenchWorker(IThreadPool* pool) {
+	auto* receiver = new BenchReceiver();
+	Future<Void> started = receiver->onStarted();
+	pool->addThread(receiver);
+	co_await started;
+}
+
+enum class LifecyclePhase { ExplicitStop, FinalReferenceDrop };
+
+template <LifecyclePhase phase>
+Future<Void> runLifecyclePhaseBenchmark(benchmark::State* state) {
+	while (state->KeepRunning()) {
+		state->PauseTiming();
+		Reference<IThreadPool> pool;
+		Optional<Error> err;
+		bool stopped = false;
+		bool timing = false;
+		try {
+			pool = CoroThreadPool::createThreadPool();
+			co_await startBenchWorker(pool.getPtr());
+			if constexpr (phase == LifecyclePhase::FinalReferenceDrop) {
+				co_await pool->stop();
+				stopped = true;
+			}
+
+			state->ResumeTiming();
+			timing = true;
+			if constexpr (phase == LifecyclePhase::ExplicitStop) {
+				co_await pool->stop();
+				stopped = true;
+			} else {
+				pool.clear();
+			}
+			state->PauseTiming();
+			timing = false;
+		} catch (Error& e) {
+			err = e;
+		} catch (...) {
+			err = unknown_error();
+		}
+
+		if (timing) {
+			state->PauseTiming();
+		}
+		if (pool.isValid() && !stopped) {
+			try {
+				co_await pool->stop();
+			} catch (Error& e) {
+				if (!err.present()) {
+					err = e;
+				}
+			}
+		}
+		pool.clear();
+		state->ResumeTiming();
+		if (err.present()) {
+			throw err.get();
+		}
+	}
+	state->SetItemsProcessed(state->iterations());
+}
+
 template <WaitKind kind>
 void benchWait(benchmark::State& state) {
 	onMainThread([&state] { return runWaitBenchmark<kind>(&state); }).getBlocking();
@@ -137,8 +210,24 @@ void benchStartStop(benchmark::State& state) {
 	onMainThread([&state] { return runStartStopBenchmark(&state); }).getBlocking();
 }
 
+void benchZeroWorkerCreateDrop(benchmark::State& state) {
+	onMainThread([&state] { return runZeroWorkerCreateDropBenchmark(&state); }).getBlocking();
+}
+
+template <LifecyclePhase phase>
+void benchLifecyclePhase(benchmark::State& state) {
+	onMainThread([&state] { return runLifecyclePhaseBenchmark<phase>(&state); }).getBlocking();
+}
+
 BENCHMARK_TEMPLATE(benchWait, WaitKind::Ready)->Name("coroflow_wait_ready")->UseRealTime();
 BENCHMARK_TEMPLATE(benchWait, WaitKind::Suspended)->Name("coroflow_wait_suspended")->UseRealTime();
 BENCHMARK(benchStartStop)->Name("coroflow_start_stop")->UseRealTime();
+BENCHMARK(benchZeroWorkerCreateDrop)->Name("coroflow_zero_worker_create_drop")->UseRealTime();
+BENCHMARK_TEMPLATE(benchLifecyclePhase, LifecyclePhase::ExplicitStop)
+    ->Name("coroflow_explicit_stop_only")
+    ->UseRealTime();
+BENCHMARK_TEMPLATE(benchLifecyclePhase, LifecyclePhase::FinalReferenceDrop)
+    ->Name("coroflow_final_reference_drop_only")
+    ->UseRealTime();
 
 } // namespace
