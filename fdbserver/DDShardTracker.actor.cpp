@@ -1679,6 +1679,8 @@ struct DataDistributionTrackerImpl {
 
 		try {
 			wait(trackInitialShards(self, initData));
+			if (*self->trackerCancelled)
+				return Void();
 			initData.clear(); // Release reference count.
 
 			state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;

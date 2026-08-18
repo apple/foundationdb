@@ -72,7 +72,7 @@ struct PartConfig {
 ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size) {
 	state int64_t pos = 0;
 	state XXH64_state_t* hashState = XXH64_createState();
-	state std::vector<uint8_t> buffer(65536);
+	state std::shared_ptr<std::vector<uint8_t>> buffer = std::make_shared<std::vector<uint8_t>>(65536);
 	state int readSize;
 
 	XXH64_reset(hashState, 0);
@@ -84,8 +84,8 @@ ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int6
 		}
 
 		while (pos < size) {
-			readSize = std::min<int64_t>(buffer.size(), size - pos);
-			int bytesRead = wait(file->read(buffer.data(), readSize, pos));
+			readSize = std::min<int64_t>(buffer->size(), size - pos);
+			int bytesRead = wait(uncancellable(holdWhile(buffer, file->read(buffer->data(), readSize, pos))));
 			if (bytesRead != readSize) {
 				XXH64_freeState(hashState);
 				TraceEvent(SevError, "S3ClientCalculateChecksumReadError")
@@ -94,7 +94,7 @@ ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int6
 				    .detail("Position", pos);
 				throw io_error();
 			}
-			XXH64_update(hashState, buffer.data(), bytesRead);
+			XXH64_update(hashState, buffer->data(), bytesRead);
 			pos += bytesRead;
 		}
 
