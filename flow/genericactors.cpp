@@ -253,8 +253,8 @@ TEST_CASE("/flow/genericactors/AsyncListener") {
 }
 
 TEST_CASE("/flow/genericactors/DelayedAsyncVarPreservesReentrantInputChange") {
-	Reference<AsyncVar<bool>> input = makeReference<AsyncVar<bool>>(true);
-	Reference<AsyncVar<bool>> output = makeReference<AsyncVar<bool>>(true);
+	auto input = makeReference<AsyncVar<bool>>(true);
+	auto output = makeReference<AsyncVar<bool>>(true);
 	Future<Void> feedback = trigger(SetAsyncVarTrue{ input }, output->onChange());
 	Future<Void> publisher = delayedAsyncVar(input, output, 0);
 
@@ -613,7 +613,7 @@ TEST_CASE("/flow/genericactors/Delayed") {
 }
 
 TEST_CASE("/flow/genericactors/Trigger") {
-	Reference<AsyncVar<bool>> called = makeReference<AsyncVar<bool>>(false);
+	auto called = makeReference<AsyncVar<bool>>(false);
 	Promise<Void> signal;
 	Future<Void> triggered = trigger(SetAsyncVarTrue{ called }, signal.getFuture());
 
