@@ -25,9 +25,9 @@ function create_cluster_file() {
     mkdir -p "$(dirname $FDB_CLUSTER_FILE)"
 
     if [[ -n $FDB_COORDINATOR ]]; then
-        if [[ "$FDB_IP_VERSION" == *'4'* ]]; then
+        if [[ "$FDB_IP_VERSION" == '4' ]]; then
             coordinator_ip="$(getent ahostsv4 $FDB_COORDINATOR | awk 'END{ print $1 }')"
-        elif [[ "$FDB_IP_VERSION" == *'6'* ]]; then
+        elif [[ "$FDB_IP_VERSION" == '6' ]]; then
             coordinator_ip="[$(getent ahostsv6 $FDB_COORDINATOR | awk 'END{ print $1 }')]"
         fi
         
@@ -86,10 +86,10 @@ function create_server_environment() {
         discover_network_environment
     fi
 
-    if [[ "$FDB_IP_VERSION" == *'4'* ]]; then
+    if [[ "$FDB_IP_VERSION" == '4' ]]; then
         export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'0.0.0.0'}
         export FDB_PUBLIC_IP=${FDB_PUBLIC_IP:-$FDB_PUBLIC_IP4}
-    elif [[ "$FDB_IP_VERSION" == *'6'* ]]; then
+    elif [[ "$FDB_IP_VERSION" == '6' ]]; then
         export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'[::]'}
         export FDB_PUBLIC_IP=${FDB_PUBLIC_IP:-$FDB_PUBLIC_IP6}
     else
