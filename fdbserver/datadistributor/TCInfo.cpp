@@ -133,17 +133,6 @@ public:
 	}
 };
 
-class TCTeamInfoImpl {
-public:
-	static Future<Void> updateStorageMetrics(TCTeamInfo* self) {
-		std::vector<Future<Void>> updates;
-		updates.reserve(self->servers.size());
-		for (int i = 0; i < self->servers.size(); i++)
-			updates.push_back(TCServerInfo::updateServerMetrics(self->servers[i]));
-		co_await waitForAll(updates);
-	}
-};
-
 TCServerInfo::TCServerInfo(StorageServerInterface ssi,
                            DDTeamCollection* collection,
                            ProcessClass processClass,
@@ -604,5 +593,9 @@ int64_t TCTeamInfo::getLoadAverage() const {
 }
 
 Future<Void> TCTeamInfo::updateStorageMetrics() {
-	return TCTeamInfoImpl::updateStorageMetrics(this);
+	std::vector<Future<Void>> updates;
+	updates.reserve(servers.size());
+	for (int i = 0; i < servers.size(); i++)
+		updates.push_back(TCServerInfo::updateServerMetrics(servers[i]));
+	co_await waitForAll(updates);
 }
