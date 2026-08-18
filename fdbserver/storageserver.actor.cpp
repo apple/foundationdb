@@ -6715,8 +6715,6 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// used if read-your-writes is disabled
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 
-	++data->counters.finishedQueries;
-
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
 	data->counters.readKeyLatencySample.addMeasurement(duration);
