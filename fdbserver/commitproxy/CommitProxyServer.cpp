@@ -1781,12 +1781,13 @@ Future<Void> postResolution(CommitBatchContext* self) {
 
 	self->msg = self->storeCommits.back().first.get();
 
-	if (self->debugIDs.present())
+	if (self->debugIDs.present()) {
 		g_traceBatch.addEvent("CommitDebug",
 		                      debugID.get().first(),
 		                      "CommitProxyServer.commitBatch.AfterStoreCommits",
 		                      self->debugIDs.get().debugTraceID,
 		                      self->debugIDs.get().debugSpanID);
+	}
 
 	// txnState (transaction subsystem state) tag: message extracted from log adapter
 	bool firstMessage = true;
@@ -1942,12 +1943,13 @@ Future<Void> reply(CommitBatchContext* self) {
 	// TraceEvent("ProxyPushed", pProxyCommitData->dbgid)
 	//     .detail("PrevVersion", self->prevVersion)
 	//     .detail("Version", self->commitVersion);
-	if (debugID.present())
+	if (debugID.present()) {
 		g_traceBatch.addEvent("CommitDebug",
 		                      debugID.get().first(),
 		                      "CommitProxyServer.commitBatch.AfterLogPush",
 		                      debugIDs.get().debugTraceID,
 		                      debugIDs.get().debugSpanID);
+	}
 
 	// After logging finishes, we report the commit version to master so that every other proxy can get the most
 	// up-to-date live committed version. We also maintain the invariant that master's committed version >=

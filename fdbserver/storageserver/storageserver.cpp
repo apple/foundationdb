@@ -2378,12 +2378,13 @@ Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* 
 					watchFuture = watchFuture || delay(deterministicRandom()->random01());
 				}
 
-				if (metadata->debugID.present())
+				if (metadata->debugID.present()) {
 					g_traceBatch.addEvent("WatchValueDebug",
 					                      metadata->debugID.get().first(),
 					                      "watchValueSendReply.WaitChange",
 					                      metadata->spanContext.traceID,
 					                      metadata->spanContext.spanID);
+				}
 				co_await watchFuture;
 				data->watchBytes -= watchBytes;
 			} catch (Error& e) {
@@ -3383,12 +3384,13 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	    queueWaitEnd - req.requestTime(), ReadLatencySamples::READ_QUEUE_WAIT, trackedReadType(req));
 
 	try {
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "storageserver.getKeyValues.Before",
 			                      req.spanContext.traceID,
 			                      req.spanContext.spanID);
+		}
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);
@@ -3407,12 +3409,13 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		//		try {
 		KeyRange shard = getShardKeyRange(data, req.begin);
 
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "storageserver.getKeyValues.AfterVersion",
 			                      req.spanContext.traceID,
 			                      req.spanContext.spanID);
+		}
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
 		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
@@ -3440,12 +3443,13 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		Key begin = co_await fBegin;
 		Key end = co_await fEnd;
 
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "storageserver.getKeyValues.AfterKeys",
 			                      req.spanContext.traceID,
 			                      req.spanContext.spanID);
+		}
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
@@ -3473,12 +3477,13 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		}
 
 		if (begin >= end) {
-			if (req.options.present() && req.options.get().debugID.present())
+			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
 				                      "storageserver.getKeyValues.Send",
 				                      req.spanContext.traceID,
 				                      req.spanContext.spanID);
+			}
 			//.detail("Begin",begin).detail("End",end);
 
 			GetKeyValuesReply none;
@@ -5455,12 +5460,13 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	result.arena.dependsOn(input.arena);
 
 	result.data.reserve(result.arena, input.data.size());
-	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
+	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
 		                      "storageserver.mapKeyValues.Start",
 		                      pOriginalReq->spanContext.traceID,
 		                      pOriginalReq->spanContext.spanID);
+	}
 	MappedKeyPlan mappedKeyPlan(mapper);
 
 	int sz = input.data.size();
@@ -5565,12 +5571,13 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 	    queueWaitEnd - req.requestTime(), ReadLatencySamples::READ_QUEUE_WAIT, trackedReadType(req));
 
 	try {
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "storageserver.getMappedKeyValues.Before",
 			                      req.spanContext.traceID,
 			                      req.spanContext.spanID);
+		}
 		// VERSION_VECTOR change
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);
@@ -5753,12 +5760,13 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 	co_await delay(0, TaskPriority::DefaultEndpoint);
 
 	try {
-		if (req.options.present() && req.options.get().debugID.present())
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
 			                      "storageserver.getKeyValuesStream.Before",
 			                      req.spanContext.traceID,
 			                      req.spanContext.spanID);
+		}
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);

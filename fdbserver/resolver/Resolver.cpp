@@ -339,12 +339,13 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 		Version firstUnseenVersion = proxyInfo.lastVersion + 1;
 		proxyInfo.lastVersion = req.version;
 
-		if (req.debugID.present())
+		if (req.debugID.present()) {
 			g_traceBatch.addEvent("CommitDebug",
 			                      debugID.get().first(),
 			                      "Resolver.resolveBatch.AfterOrderer",
 			                      req.spanContext.traceID,
 			                      req.spanContext.spanID);
+		}
 
 		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
 		reply.writtenTags = req.writtenTags;
@@ -545,12 +546,13 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 		const double endComputeTime = g_network->timer();
 		self->computeTimeDist->sampleSeconds(endComputeTime - beginComputeTime);
 
-		if (req.debugID.present())
+		if (req.debugID.present()) {
 			g_traceBatch.addEvent("CommitDebug",
 			                      debugID.get().first(),
 			                      "Resolver.resolveBatch.After",
 			                      req.spanContext.traceID,
 			                      req.spanContext.spanID);
+		}
 	} else {
 		CODE_PROBE(true, "Duplicate resolve batch request");
 		//TraceEvent("DupResolveBatchReq", self->dbgid).detail("From", proxyAddress);

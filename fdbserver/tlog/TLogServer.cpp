@@ -2881,12 +2881,13 @@ Future<Void> tLogCommit(TLogData* self,
 	// Not a duplicate (check relies on critical section between here self->version.set() below!)
 	bool isNotDuplicate = (logData->version.get() == req.prevVersion);
 	if (isNotDuplicate) {
-		if (req.debugID.present())
+		if (req.debugID.present()) {
 			g_traceBatch.addEvent("CommitDebug",
 			                      tlogDebugID.get().first(),
 			                      "TLog.tLogCommit.Before",
 			                      req.spanContext.traceID,
 			                      req.spanContext.spanID);
+		}
 
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
 		commitMessages(self, logData, req.version, req.arena, req.messages);
@@ -2912,12 +2913,13 @@ Future<Void> tLogCommit(TLogData* self,
 			ASSERT(req.prevVersion == req.seqPrevVersion); // @todo remove this assert later
 		}
 
-		if (req.debugID.present())
+		if (req.debugID.present()) {
 			g_traceBatch.addEvent("CommitDebug",
 			                      tlogDebugID.get().first(),
 			                      "TLog.tLogCommit.AfterTLogCommit",
 			                      req.spanContext.traceID,
 			                      req.spanContext.spanID);
+		}
 	}
 	// Send replies only once all prior messages have been received and committed.
 	Future<Void> stopped = logData->stopCommit.onTrigger();
@@ -2933,12 +2935,13 @@ Future<Void> tLogCommit(TLogData* self,
 		co_return;
 	}
 
-	if (req.debugID.present())
+	if (req.debugID.present()) {
 		g_traceBatch.addEvent("CommitDebug",
 		                      tlogDebugID.get().first(),
 		                      "TLog.tLogCommit.After",
 		                      req.spanContext.traceID,
 		                      req.spanContext.spanID);
+	}
 
 	req.reply.send(logData->durableKnownCommittedVersion);
 
