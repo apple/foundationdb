@@ -2079,6 +2079,18 @@ Future<Void> noThrowOnCancelTest(NoThrowOnCancelRecorder& recorder, Future<Void>
 	recorder.record(NoThrowOnCancelEvent::AfterWait);
 }
 
+Future<Void> noThrowOnCancelReentrantCancelTest(Future<Void>* result,
+                                                Future<Void> signal,
+                                                int* cleanupCount,
+                                                NoThrowOnCancel = {}) {
+	ScopeExit cleanup([result, cleanupCount]() {
+		++*cleanupCount;
+		result->cancel();
+	});
+
+	co_await signal;
+}
+
 Future<int> noThrowOnCancelValueTest(NoThrowOnCancelRecorder& recorder, Future<Void> signal, NoThrowOnCancel = {}) {
 	recorder.record(NoThrowOnCancelEvent::Start);
 
@@ -2766,6 +2778,23 @@ TEST_CASE("/flow/coro/noThrowOnCancel/awaitedFutureErrorRunsCatch") {
 	ASSERT(f.isReady() && !f.isError());
 	ASSERT(signal.getFutureReferenceCount() == 0);
 	assertNoThrowOnCancelCaughtError(recorder);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/reentrantCancelDuringCleanup") {
+	Promise<Void> signal;
+	Future<Void> result;
+	int cleanupCount = 0;
+	result = noThrowOnCancelReentrantCancelTest(&result, signal.getFuture(), &cleanupCount);
+	ASSERT(signal.getFutureReferenceCount() > 0);
+
+	result.cancel();
+	ASSERT(result.isReady() && result.isError() && result.getError().code() == error_code_actor_cancelled);
+	ASSERT_EQ(cleanupCount, 1);
+	ASSERT_EQ(signal.getFutureReferenceCount(), 0);
+
+	result.cancel();
+	ASSERT_EQ(cleanupCount, 1);
 	return Void();
 }
 
