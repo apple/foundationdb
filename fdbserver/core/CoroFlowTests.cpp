@@ -224,6 +224,49 @@ private:
 	Reference<IThreadPool> pool;
 };
 
+class CancelRetryState final : public ReferenceCounted<CancelRetryState> {
+public:
+	explicit CancelRetryState(Error firstError) : firstError(firstError) {}
+	int getAttemptCount() const { return attemptCount; }
+
+	void attempt() {
+		++attemptCount;
+		if (attemptCount == 1) {
+			throw firstError;
+		}
+		ASSERT_EQ(attemptCount, 2);
+	}
+
+private:
+	Error firstError;
+	int attemptCount{ 0 };
+};
+
+class ThrowOnceOnCancelAction final : public ThreadAction {
+public:
+	ThrowOnceOnCancelAction(Reference<ActionState> state, Reference<CancelRetryState> retry)
+	  : state(std::move(state)), retry(std::move(retry)) {}
+	~ThrowOnceOnCancelAction() { state->destroy(); }
+
+	void operator()(IThreadPoolReceiver*) override {
+		std::unique_ptr<ThrowOnceOnCancelAction> destroyOnReturn(this);
+		state->start();
+		state->fail(operation_failed().asInjectedFault());
+	}
+
+	void cancel() override {
+		retry->attempt();
+		state->cancel();
+		delete this;
+	}
+
+	double getTimeEstimate() const override { return 0.; }
+
+private:
+	Reference<ActionState> state;
+	Reference<CancelRetryState> retry;
+};
+
 Reference<ActionState> postAction(Reference<IThreadPool> const& pool, std::function<void()> work) {
 	auto state = makeReference<ActionState>();
 	pool->post(new TestAction(state, std::move(work)));
@@ -453,6 +496,77 @@ TEST_CASE("/fdbserver/CoroFlow/ErrorStopDropsLastOwner") {
 	co_await queued->onDestroyed();
 	co_await receiver->onDestroyed();
 	queued->assertCancelled();
+	ASSERT_EQ(receiver->getInitCount(), 1);
+	ASSERT_EQ(receiver->getDestroyCount(), 1);
+}
+
+TEST_CASE("/fdbserver/CoroFlow/StopRetryAfterCancelError") {
+	auto receiver = makeReference<ReceiverState>();
+	auto pool = CoroThreadPool::createThreadPool();
+	pool->addThread(new TestReceiver(receiver));
+	Promise<Void> gate;
+	auto active = postAction(pool, [input = gate.getFuture()] { waitFor(input); });
+	co_await active->onStarted();
+	const Error expectedError = operation_failed().asInjectedFault();
+	auto retry = makeReference<CancelRetryState>(expectedError);
+	auto queued = makeReference<ActionState>();
+	pool->post(new ThrowOnceOnCancelAction(queued, retry));
+
+	Error observedError;
+	try {
+		pool->stop();
+	} catch (Error& e) {
+		observedError = e;
+	}
+	ASSERT_EQ(observedError.code(), expectedError.code());
+	ASSERT(observedError.isInjectedFault());
+	ASSERT_EQ(retry->getAttemptCount(), 1);
+	ASSERT_EQ(queued->getCancelCount(), 0);
+	ASSERT(!queued->onDestroyed().isReady());
+	ASSERT(!active->onCompleted().isReady());
+	ASSERT_EQ(receiver->getDestroyCount(), 0);
+
+	pool.clear();
+	ASSERT_EQ(retry->getAttemptCount(), 2);
+	queued->assertCancelled();
+	ASSERT_EQ(active->getCancelCount(), 0);
+	ASSERT(!active->onCompleted().isReady());
+	ASSERT_EQ(receiver->getDestroyCount(), 0);
+
+	gate.send(Void());
+	co_await assertActionCompleted(active);
+	co_await queued->onDestroyed();
+	co_await receiver->onDestroyed();
+	ASSERT_EQ(retry->getAttemptCount(), 2);
+	ASSERT_EQ(receiver->getInitCount(), 1);
+	ASSERT_EQ(receiver->getDestroyCount(), 1);
+}
+
+TEST_CASE("/fdbserver/CoroFlow/ExplicitStopDropsLastOwner") {
+	auto receiver = makeReference<ReceiverState>();
+	auto pool = CoroThreadPool::createThreadPool();
+	pool->addThread(new TestReceiver(receiver));
+	Promise<Void> gate;
+	auto active = postAction(pool, [input = gate.getFuture()] { waitFor(input); });
+	co_await active->onStarted();
+	auto queued = makeReference<ActionState>();
+	pool->post(new DropPoolOnCancelAction(queued, pool));
+
+	// The queued action keeps this pointer alive until stop() begins canceling it.
+	IThreadPool* poolToStop = pool.getPtr();
+	pool.clear();
+	auto stopped = poolToStop->stop();
+	queued->assertCancelled();
+	ASSERT(!stopped.isReady());
+	ASSERT_EQ(active->getCancelCount(), 0);
+	ASSERT(!active->onCompleted().isReady());
+	ASSERT_EQ(receiver->getDestroyCount(), 0);
+
+	gate.send(Void());
+	co_await assertActionCompleted(active);
+	co_await queued->onDestroyed();
+	co_await stopped;
+	co_await receiver->onDestroyed();
 	ASSERT_EQ(receiver->getInitCount(), 1);
 	ASSERT_EQ(receiver->getDestroyCount(), 1);
 }
