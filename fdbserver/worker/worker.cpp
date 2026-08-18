@@ -19,6 +19,7 @@
  */
 
 #include <cstdlib>
+#include <map>
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 #include <unordered_map>
@@ -28,6 +29,7 @@
 #include "flow/Buggify.h"
 #include "flow/CodeProbe.h"
 #include "flow/IAsyncFile.h"
+#include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/ProcessInterface.h"
@@ -44,6 +46,7 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/ScopeExit.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
@@ -58,6 +61,7 @@
 #include "fdbserver/datadistributor/DataDistributor.h"
 #include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "fdbserver/logrouter/LogRouter.h"
+#include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/core/BackupInterface.h"
 #include "RoleLineage.h"
 #include "fdbserver/core/WorkerInterface.h"
@@ -1969,6 +1973,171 @@ bool skipInitRspInSim(const UID workerInterfID, const bool allowDropInSim) {
 	return skip;
 }
 
+Promise<TLogInterface> cacheLogRouterInitialization(WorkerCache<TLogInterface>& cache,
+                                                    InitializeLogRouterRequest const& request) {
+	Promise<TLogInterface> ready;
+	cache.set(request.reqId, ready.getFuture());
+	return ready;
+}
+
+bool replyToCachedLogRouter(WorkerCache<TLogInterface>& cache, InitializeLogRouterRequest const& request) {
+	if (!cache.exists(request.reqId)) {
+		return false;
+	}
+	forwardPromise(Uncancellable{}, request.reply, cache.get(request.reqId));
+	return true;
+}
+
+TEST_CASE("/fdbserver/worker/logRouterInitialization/cachedReplySurvivesDroppedResponse") {
+	WorkerCache<TLogInterface> cache;
+	InitializeLogRouterRequest first{};
+	first.reqId = UID(1, 1);
+	Future<TLogInterface> firstReply = first.reply.getFuture();
+	ASSERT(!replyToCachedLogRouter(cache, first));
+
+	TLogInterface router(UID(2, 2), UID(2, 2), LocalityData());
+	Promise<Void> roleLifetime;
+	Promise<TLogInterface> initialized = cacheLogRouterInitialization(cache, first);
+	Future<Void> role = cache.removeOnReady(first.reqId, roleLifetime.getFuture());
+	initialized.send(router);
+	ASSERT(!role.isReady());
+	ASSERT(!firstReply.isReady());
+
+	InitializeLogRouterRequest duplicate = first;
+	duplicate.reply.reset();
+	Future<TLogInterface> duplicateReply = duplicate.reply.getFuture();
+	ASSERT(replyToCachedLogRouter(cache, duplicate));
+	TLogInterface cachedRouter = co_await timeoutError(duplicateReply, 1.0);
+	ASSERT_EQ(cachedRouter.id(), router.id());
+	ASSERT(!firstReply.isReady());
+	ASSERT(cache.exists(first.reqId));
+	ASSERT(!role.isReady());
+
+	roleLifetime.send(Void());
+	co_await role;
+	ASSERT(!cache.exists(first.reqId));
+	ASSERT(!replyToCachedLogRouter(cache, duplicate));
+}
+
+TEST_CASE("/fdbserver/worker/logRouterInitialization/recruitmentRetriesDroppedResponse") {
+	constexpr double retryDelay = 0.01;
+	IFailureMonitor& failureMonitor = IFailureMonitor::failureMonitor();
+	std::map<NetworkAddress, FailureStatus> savedStatus;
+	ScopeExit restoreStatus([&] {
+		for (const auto& [address, status] : savedStatus) {
+			failureMonitor.setStatus(address, status);
+		}
+	});
+	WorkerInterface worker;
+	worker.logRouter.getEndpoint(TaskPriority::Worker);
+	TLogInterface router(UID(2, 2), UID(2, 2), LocalityData());
+	router.initEndpoints();
+	const Endpoint endpoints[] = { worker.logRouter.getEndpoint(), router.waitFailure.getEndpoint() };
+	for (const auto& endpoint : endpoints) {
+		const NetworkAddress address = endpoint.getPrimaryAddress();
+		if (savedStatus.emplace(address, failureMonitor.getState(address)).second) {
+			failureMonitor.setStatus(address, FailureStatus(false));
+		}
+		ASSERT(failureMonitor.getState(endpoint).isAvailable());
+	}
+
+	auto logSystem = makeReference<LogSystem>(UID(1, 1), LocalityData(), LogEpoch(1));
+	auto logSet = makeReference<LogSet>();
+	logSet->locality = 1;
+	logSet->startVersion = 100;
+	logSystem->logRouterTags = 1;
+	logSystem->recoverAt = 200;
+	logSystem->knownLockedTLogIds[1] = { 2, 4 };
+	logSystem->tLogs.push_back(logSet);
+	Future<Void> changed = logSystem->onLogSystemConfigChange();
+	WorkerCache<TLogInterface> cache;
+	Promise<Void> roleLifetime;
+	Promise<TLogInterface> initialized;
+	InitializeLogRouterRequest first{};
+	InitializeLogRouterRequest retry{};
+	ReplyPromise<Void> failureRequest;
+	Future<TLogInterface> firstReply;
+	Future<TLogInterface> retryReply;
+	Future<Void> role;
+	Future<Void> recruitment;
+	ScopeExit cancelActors([&] {
+		recruitment.cancel();
+		role.cancel();
+	});
+	{
+		const double savedTimeout = SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_TIMEOUT;
+		ScopeExit restoreTimeout(
+		    [savedTimeout] { setServerKnob("cc_rerecruit_log_router_timeout", KnobValueRef::create(savedTimeout)); });
+		setServerKnob("cc_rerecruit_log_router_timeout", KnobValueRef::create(retryDelay));
+		recruitment = logSystem->recruitOldLogRouters(
+		    { worker }, LogEpoch(2), 1, 100, { LocalityData() }, makeReference<PolicyOne>(), false);
+	}
+
+	const char* stage = "first request";
+	try {
+		first = co_await timeoutError(waitOrError(worker.logRouter.getFuture(), recruitment), 1.0);
+		firstReply = first.reply.getFuture();
+		ASSERT(!replyToCachedLogRouter(cache, first));
+		initialized = cacheLogRouterInitialization(cache, first);
+		role = cache.removeOnReady(first.reqId, roleLifetime.getFuture());
+		initialized.send(router);
+		ASSERT(!firstReply.isReady());
+
+		stage = "retry request";
+		retry = co_await timeoutError(waitOrError(worker.logRouter.getFuture(), recruitment), 1.0);
+		ASSERT(retry.reqId == first.reqId);
+		ASSERT_EQ(retry.recoveryCount, first.recoveryCount);
+		ASSERT(retry.routerTag == first.routerTag);
+		ASSERT_EQ(retry.startVersion, first.startVersion);
+		ASSERT(retry.tLogLocalities == first.tLogLocalities);
+		ASSERT(retry.tLogPolicy == first.tLogPolicy);
+		ASSERT_EQ(retry.locality, first.locality);
+		ASSERT(retry.recoverAt == first.recoverAt);
+		ASSERT(retry.knownLockedTLogIds == first.knownLockedTLogIds);
+		ASSERT_EQ(retry.allowDropInSim, first.allowDropInSim);
+		ASSERT_EQ(retry.isReplacement, first.isReplacement);
+		ASSERT(!(first.reply.getFuture() == retry.reply.getFuture()));
+		retryReply = retry.reply.getFuture();
+		ASSERT(replyToCachedLogRouter(cache, retry));
+		stage = "cached reply";
+		TLogInterface cachedRouter = co_await timeoutError(retryReply, 1.0);
+		ASSERT_EQ(cachedRouter.id(), router.id());
+		stage = "router publication";
+		co_await timeoutError(waitOrError(changed, recruitment), 1.0);
+		ASSERT_EQ(logSet->logRouters.size(), 1);
+		ASSERT_EQ(logSet->logRouters.front()->get().id(), router.id());
+		ASSERT(!firstReply.isReady());
+		ASSERT(cache.exists(first.reqId));
+		ASSERT(!role.isReady());
+		ASSERT(!recruitment.isReady());
+		stage = "failure monitoring";
+		failureRequest = co_await timeoutError(waitAndForward(router.waitFailure.getFuture()), 1.0);
+		co_await delay(2 * retryDelay);
+		ASSERT(!worker.logRouter.getFuture().isReady());
+		ASSERT(!recruitment.isReady());
+
+		recruitment.cancel();
+		ASSERT(recruitment.isError());
+		ASSERT_EQ(recruitment.getError().code(), error_code_actor_cancelled);
+		ASSERT_EQ(failureRequest.getFutureReferenceCount(), 0);
+		firstReply = Future<TLogInterface>();
+		ASSERT_EQ(first.reply.getFutureReferenceCount(), 0);
+		ASSERT(cache.exists(first.reqId));
+		roleLifetime.send(Void());
+		co_await role;
+		ASSERT(!cache.exists(first.reqId));
+	} catch (Error& e) {
+		fprintf(stderr,
+		        "Log router recruitment test failed at %s (cacheReady=%d, firstReplyReady=%d, configChanged=%d): %s\n",
+		        stage,
+		        cache.exists(first.reqId) && cache.get(first.reqId).isReady(),
+		        firstReply.isValid() && firstReply.isReady(),
+		        changed.isReady(),
+		        e.what());
+		throw;
+	}
+}
+
 #ifdef FLOW_GRPC_ENABLED
 Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionRecord> ccr) {
 	if (GrpcServer::instance() == nullptr) {
@@ -2635,7 +2804,7 @@ class WorkerServerCore {
 		while (true) {
 			InitializeLogRouterRequest req = co_await interf.logRouter.getFuture();
 
-			if (!logRouterCache.exists(req.reqId)) {
+			if (!replyToCachedLogRouter(logRouterCache, req)) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::LogRouter;
 				TLogInterface recruited(locality);
@@ -2657,19 +2826,18 @@ class WorkerServerCore {
 				DUMPTOKEN(recruited.enablePopRequest);
 				DUMPTOKEN(recruited.snapRequest);
 
-				ReplyPromise<TLogInterface> logRouterReady = req.reply;
-				logRouterCache.set(req.reqId, logRouterReady.getFuture());
+				Promise<TLogInterface> logRouterReady = cacheLogRouterInitialization(logRouterCache, req);
 				Future<Void> logRouterProcess = logRouter(recruited, req, dbInfo);
 				logRouterProcess = logRouterCache.removeOnReady(req.reqId, logRouterProcess);
 				errorForwarders.add(
 				    zombie(recruited, forwardError(errors, Role::LOG_ROUTER, recruited.id(), logRouterProcess)));
 
 				TraceEvent("LogRouterInitRequest", req.reqId).detail("LogRouterId", recruited.id());
+				// A lost response must not leave duplicate requests waiting on that response's promise.
+				logRouterReady.send(recruited);
 				if (!skipInitRspInSim(interf.id(), req.allowDropInSim)) {
-					logRouterReady.send(recruited);
+					req.reply.send(recruited);
 				}
-			} else {
-				forwardPromise(Uncancellable{}, req.reply, logRouterCache.get(req.reqId));
 			}
 		}
 	}
