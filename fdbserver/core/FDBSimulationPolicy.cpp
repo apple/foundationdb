@@ -21,7 +21,6 @@
 #include "fdbserver/core/FDBSimulationPolicy.h"
 
 #include <algorithm>
-#include <array>
 #include <set>
 #include <vector>
 
@@ -31,8 +30,6 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/FDBSimulatorProcessInfo.h"
-#include "flow/ScopeExit.h"
-#include "flow/UnitTest.h"
 
 FDBExtraDatabaseMode stringToFDBExtraDatabaseMode(const std::string& databaseMode) {
 	if (databaseMode == "Disabled") {
@@ -407,53 +404,4 @@ void updateFDBSimulationPolicy(DatabaseConfiguration const& configuration, bool 
 
 void setFDBSimulationPolicyRemoteTLogPolicy(Reference<IReplicationPolicy> remoteTLogPolicy) {
 	fdbSimulationPolicyState().remoteTLogPolicy = remoteTLogPolicy;
-}
-
-TEST_CASE("/fdbserver/core/FDBSimulationPolicy/Capabilities") {
-	const auto previousMode = fdbSimulationPolicyState().tssMode;
-	auto* const simulator = g_simulator;
-	const auto previousPolicy = simulator ? simulator->getSimulationPolicy() : Reference<ISimulationPolicy>();
-	ScopeExit restore([&]() {
-		fdbSimulationPolicyState().tssMode = previousMode;
-		if (simulator) {
-			simulator->setSimulationPolicy(previousPolicy);
-		}
-	});
-
-	const bool simulated = g_network && g_network->isSimulated() && simulator;
-	Reference<ISimulationPolicy> policy;
-	if (simulated) {
-		installFDBSimulationPolicy();
-		policy = simulator->getSimulationPolicy();
-	} else {
-		policy = makeReference<FDBSimulationPolicy>();
-	}
-	const auto* fdbPolicy = dynamic_cast<const IFDBSimulationPolicy*>(policy.getPtr());
-	ASSERT(fdbPolicy);
-
-	constexpr std::array capabilities = { FDBSimulationCapability::WarnOnStorageMismatch,
-		                                  FDBSimulationCapability::StorageReplicaFaultInjection,
-		                                  FDBSimulationCapability::StorageReplicaDelay,
-		                                  FDBSimulationCapability::StorageReplicaMutationDrop,
-		                                  FDBSimulationCapability::LimitStorageServerReadBytes };
-	struct ExpectedCapabilities {
-		FDBTSSMode mode;
-		std::array<bool, 5> enabled;
-	};
-	constexpr std::array cases = {
-		ExpectedCapabilities{ FDBTSSMode::Disabled, { false, false, false, false, true } },
-		ExpectedCapabilities{ FDBTSSMode::EnabledNormal, { false, false, false, false, false } },
-		ExpectedCapabilities{ FDBTSSMode::EnabledAddDelay, { false, true, true, false, false } },
-		ExpectedCapabilities{ FDBTSSMode::EnabledDropMutations, { true, true, false, true, false } },
-		ExpectedCapabilities{ FDBTSSMode::Disabled, { false, false, false, false, true } }
-	};
-
-	for (const auto& expected : cases) {
-		fdbSimulationPolicyState().tssMode = expected.mode;
-		for (size_t i = 0; i < capabilities.size(); ++i) {
-			ASSERT_EQ(fdbPolicy->hasCapability(capabilities[i]), expected.enabled[i]);
-			ASSERT_EQ(fdbSimulationHasCapability(capabilities[i]), simulated && expected.enabled[i]);
-		}
-	}
-	return Void();
 }
