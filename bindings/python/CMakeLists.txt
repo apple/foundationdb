@@ -70,7 +70,6 @@ configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_CURRENT_BINARY_DIR}/LICENSE C
 add_test(
   NAME              python_pycodestyle
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  BUILD_DEPENDS     ${out_files}
   COMMAND sh -c "
     if ! which pycodestyle >/dev/null; then
       exit 66
