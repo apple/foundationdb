@@ -74,8 +74,6 @@ add_test(
     if ! which pycodestyle >/dev/null; then
       exit 66
     fi
-    echo PWD=$PWD
-    echo CFG=${CMAKE_CURRENT_SOURCE_DIR}/pycodestyle.cfg
     pycodestyle . --config=${CMAKE_CURRENT_SOURCE_DIR}/pycodestyle.cfg
     "
 )
