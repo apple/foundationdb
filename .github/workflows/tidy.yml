@@ -102,6 +102,9 @@ jobs:
               fdbclient/S3BlobStore.cpp|fdbserver/kvstore/RocksDBLogForwarder.h)
                 continue
                 ;;
+              fdbserver/kvstore/ArtMutationBuffer.h)
+                continue  # included inside VersionedBTree's class definition
+                ;;
               fdbrpc/AsyncFileKAIO.h)
                 continue
                 ;;
