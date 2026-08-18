@@ -34,7 +34,7 @@ struct TestCounters {
 };
 
 ACTOR Future<Void> doNothing(TestCounters *tc, Future<Void> f) {
-	CountedSection cs(tc->start, tc->end);
+	state CountedSection cs(tc->start, tc->end);
 	wait(f);
 	return Void();
 }
