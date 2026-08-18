@@ -1,6 +1,6 @@
-#############
-Release Notes
-#############
+###################
+Release Notes - 7.3
+###################
 
 7.3.79
 ======
@@ -380,7 +380,7 @@ Release Notes
 7.3.16
 ======
 * Released with AVX disabled.
-* Added location_metadata fdbcli to query shard locations and assignements. `(PR #10428) <https://github.com/apple/foundationdb/pull/10428>`_
+* Added location_metadata fdbcli to query shard locations and assignments. `(PR #10428) <https://github.com/apple/foundationdb/pull/10428>`_
 * Added degraded/disconnected peer recovery in gray failure. `(PR #10541) <https://github.com/apple/foundationdb/pull/10541>`_
 * Added replica and metadata audit support. `(PR #10631) <https://github.com/apple/foundationdb/pull/10631>`_
 * Added a SecurityMode for data distributor where data movements are not allowed but auditStorage is enabled. `(PR #10660) <https://github.com/apple/foundationdb/pull/10660>`_
@@ -465,8 +465,3 @@ Earlier release notes
 * :doc:`3.0 (API Version 300) </release-notes/release-notes-300>`
 * :doc:`2.0 (API Version 200) </release-notes/release-notes-200>`
 * :doc:`1.0 (API Version 100) </release-notes/release-notes-100>`
-* :doc:`Beta 3 (API Version 23) </release-notes/release-notes-023>`
-* :doc:`Beta 2 (API Version 22) </release-notes/release-notes-022>`
-* :doc:`Beta 1 (API Version 21) </release-notes/release-notes-021>`
-* :doc:`Alpha 6 (API Version 16) </release-notes/release-notes-016>`
-* :doc:`Alpha 5 (API Version 14) </release-notes/release-notes-014>`

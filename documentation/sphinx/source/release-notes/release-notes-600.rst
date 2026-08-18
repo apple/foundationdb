@@ -1,6 +1,6 @@
-#############
-Release Notes
-#############
+###################
+Release Notes - 6.0
+###################
 
 6.0.18
 ======
@@ -51,7 +51,7 @@ Features
 * Added support for asynchronous replication to a remote DC with processes in a single cluster. This improves on the asynchronous replication offered by fdbdr because servers can fetch data from the remote DC if all replicas have been lost in one DC.
 * Added support for synchronous replication of the transaction log to a remote DC. This remote DC does not need to contain any storage servers, meaning you need much fewer servers in this remote DC.
 * The TLS plugin is now statically linked into the client and server binaries and no longer requires a separate library. `(Issue #436) <https://github.com/apple/foundationdb/issues/436>`_
-* TLS peer verification now supports verifiying on Subject Alternative Name. `(Issue #514) <https://github.com/apple/foundationdb/issues/514>`_
+* TLS peer verification now supports verifying on Subject Alternative Name. `(Issue #514) <https://github.com/apple/foundationdb/issues/514>`_
 * TLS peer verification now supports suffix matching by field. `(Issue #515) <https://github.com/apple/foundationdb/issues/515>`_
 * TLS certificates are automatically reloaded after being updated. [6.0.5] `(Issue #505) <https://github.com/apple/foundationdb/issues/505>`_
 * Added the ``fileconfigure`` command to fdbcli, which configures a database from a JSON document. [6.0.10] `(PR #713) <https://github.com/apple/foundationdb/pull/713>`_
@@ -174,8 +174,3 @@ Earlier release notes
 * :doc:`3.0 (API Version 300) </release-notes/release-notes-300>`
 * :doc:`2.0 (API Version 200) </release-notes/release-notes-200>`
 * :doc:`1.0 (API Version 100) </release-notes/release-notes-100>`
-* :doc:`Beta 3 (API Version 23) </release-notes/release-notes-023>`
-* :doc:`Beta 2 (API Version 22) </release-notes/release-notes-022>`
-* :doc:`Beta 1 (API Version 21) </release-notes/release-notes-021>`
-* :doc:`Alpha 6 (API Version 16) </release-notes/release-notes-016>`
-* :doc:`Alpha 5 (API Version 14) </release-notes/release-notes-014>`
