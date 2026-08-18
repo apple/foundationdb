@@ -2532,11 +2532,8 @@ void MultiVersionApi::setupNetwork() {
 					auto libCopies = copyExternalLibraryPerThread(path);
 					for (int idx = 0; idx < libCopies.size(); ++idx) {
 						bool unlinkOnLoad = libCopies[idx].second && !retainClientLibCopies;
-						externalClients[filename].push_back(
-						    makeReference<ClientInfo>(new DLApi(libCopies[idx].first, path, unlinkOnLoad),
-						                              path,
-						                              useFutureVersion,
-						                              idx));
+						externalClients[filename].push_back(makeReference<ClientInfo>(
+						    new DLApi(libCopies[idx].first, path, unlinkOnLoad), path, useFutureVersion, idx));
 					}
 				}
 			}
