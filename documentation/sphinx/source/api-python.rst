@@ -1087,7 +1087,7 @@ The following event models are available:
     The default.  Blocking operations will block the current Python thread.  This is also fine for programs without any form of concurrency.
 
 ``event_model="gevent"``
-    The calling program uses the `gevent <http://www.gevent.org/>`_ module for single-threaded concurrency. Blocking operations will block the current greenlet.
+    The calling program uses the `gevent <https://www.gevent.org/>`_ module for single-threaded concurrency. Blocking operations will block the current greenlet.
 
     The FoundationDB Python API has been tested with gevent versions 0.13.8 and 1.0rc2 and should work with all gevent 0.13 and 1.0 releases.
 

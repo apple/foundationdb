@@ -51,6 +51,7 @@
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
+#include "MappedKeyPlan.h"
 #include "ReadLatencySamples.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.h"
@@ -1265,6 +1266,10 @@ public:
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
 		    getRangeStreamQueries, lowPriorityQueries, rowsQueried, watchQueries, emptyQueries;
 
+		// How the watches counted by watchQueries ended. Exactly one is incremented per watch, so
+		// watchQueries == triggeredWatches + timedOutWatches + erroredWatches + numWatches.
+		Counter triggeredWatches, timedOutWatches, erroredWatches;
+
 		// counters related to getMappedRange queries
 		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
 		    finishedGetMappedRangeQueries;
@@ -1342,8 +1347,10 @@ public:
 		    getRangeSystemKeyQueries("GetRangeSystemKeyQueries", cc),
 		    getMappedRangeQueries("GetMappedRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
 		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
-		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
-		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
+		    watchQueries("WatchQueries", cc), triggeredWatches("TriggeredWatches", cc),
+		    timedOutWatches("TimedOutWatches", cc), erroredWatches("ErroredWatches", cc),
+		    emptyQueries("EmptyQueries", cc), logicalBytesInput("LogicalBytesInput", cc),
+		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
 		    bytesDurable("BytesDurable", cc), sampledBytesCleared("SampledBytesCleared", cc),
@@ -2427,6 +2434,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 
 					// fire watch
 					req.reply.send(WatchValueReply{ ver });
+					++data->counters.triggeredWatches;
 					finishWatchValueReply(data, metadata);
 					--data->numWatches;
 					data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
@@ -2444,9 +2452,11 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 				if (response.present()) {
 					// fire watch
 					req.reply.send(WatchValueReply{ response.get() });
+					++data->counters.triggeredWatches;
 				} else {
 					// watch timed out
 					data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
+					++data->counters.timedOutWatches;
 				}
 				finishWatchValueReply(data, metadata);
 				--data->numWatches;
@@ -2460,6 +2470,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 			data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
 			finishWatchValueReply(data, metadata);
 			--data->numWatches;
+			++data->counters.erroredWatches;
 
 			if (!canReplyWith(e))
 				throw e;
@@ -3619,140 +3630,6 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 	} else {
 		throw quick_get_key_values_miss();
 	}
-}
-
-void unpackKeyTuple(Tuple** referenceTuple, Optional<Tuple>& keyTuple, KeyValueRef* keyValue) {
-	if (!keyTuple.present()) {
-		// May throw exception if the key is not parsable as a tuple.
-		try {
-			keyTuple = Tuple::unpack(keyValue->key);
-		} catch (Error& e) {
-			TraceEvent("KeyNotTuple").error(e).detail("Key", keyValue->key.printable());
-			throw key_not_tuple();
-		}
-	}
-	*referenceTuple = &keyTuple.get();
-}
-
-void unpackValueTuple(Tuple** referenceTuple, Optional<Tuple>& valueTuple, KeyValueRef* keyValue) {
-	if (!valueTuple.present()) {
-		// May throw exception if the value is not parsable as a tuple.
-		try {
-			valueTuple = Tuple::unpack(keyValue->value);
-		} catch (Error& e) {
-			TraceEvent("ValueNotTuple").error(e).detail("Value", keyValue->value.printable());
-			throw value_not_tuple();
-		}
-	}
-	*referenceTuple = &valueTuple.get();
-}
-
-bool unescapeLiterals(std::string& s, std::string before, std::string after) {
-	bool escaped = false;
-	size_t p = 0;
-	while (true) {
-		size_t found = s.find(before, p);
-		if (found == std::string::npos) {
-			break;
-		}
-		s.replace(found, before.length(), after);
-		p = found + after.length();
-		escaped = true;
-	}
-	return escaped;
-}
-
-bool singleKeyOrValue(const std::string& s, size_t sz) {
-	// format would be {K[??]} or {V[??]}
-	return sz > 5 && s[0] == '{' && (s[1] == 'K' || s[1] == 'V') && s[2] == '[' && s[sz - 2] == ']' && s[sz - 1] == '}';
-}
-
-bool rangeQuery(const std::string& s) {
-	return s == "{...}";
-}
-
-// create a vector of Optional<Tuple>
-// in case of a singleKeyOrValue, insert an empty Tuple to vector as placeholder
-// in case of a rangeQuery, insert Optional.empty as placeholder
-// in other cases, insert the correct Tuple to be used.
-void preprocessMappedKey(Tuple& mappedKeyFormatTuple, std::vector<Optional<Tuple>>& vt, bool& isRangeQuery) {
-	vt.reserve(mappedKeyFormatTuple.size());
-
-	for (int i = 0; i < mappedKeyFormatTuple.size(); i++) {
-		Tuple::ElementType type = mappedKeyFormatTuple.getType(i);
-		if (type == Tuple::BYTES || type == Tuple::UTF8) {
-			std::string s = mappedKeyFormatTuple.getString(i).toString();
-			auto sz = s.size();
-			bool escaped = unescapeLiterals(s, "{{", "{");
-			escaped = unescapeLiterals(s, "}}", "}") || escaped;
-			if (escaped) {
-				vt.emplace_back(Tuple::makeTuple(s));
-			} else if (singleKeyOrValue(s, sz)) {
-				// when it is SingleKeyOrValue, insert an empty Tuple to vector as placeholder
-				vt.emplace_back(Tuple());
-			} else if (rangeQuery(s)) {
-				if (i != mappedKeyFormatTuple.size() - 1) {
-					// It must be the last element of the mapper tuple
-					throw mapper_bad_range_decriptor();
-				}
-				// when it is rangeQuery, insert Optional.empty as placeholder
-				vt.emplace_back(Optional<Tuple>());
-				isRangeQuery = true;
-			} else {
-				Tuple t;
-				t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
-				vt.emplace_back(t);
-			}
-		} else {
-			Tuple t;
-			t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
-			vt.emplace_back(t);
-		}
-	}
-}
-
-Key constructMappedKey(KeyValueRef* keyValue, std::vector<Optional<Tuple>>& vec, Tuple& mappedKeyFormatTuple) {
-	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
-	Optional<Tuple> keyTuple;
-	Optional<Tuple> valueTuple;
-	Tuple mappedKeyTuple;
-
-	mappedKeyTuple.reserve(vec.size());
-
-	for (int i = 0; i < vec.size(); i++) {
-		if (!vec[i].present()) {
-			// rangeQuery
-			continue;
-		}
-		if (vec[i].get().size()) {
-			mappedKeyTuple.append(vec[i].get());
-		} else {
-			// singleKeyOrValue is true
-			std::string s = mappedKeyFormatTuple.getString(i).toString();
-			auto sz = s.size();
-			int idx;
-			Tuple* referenceTuple;
-			try {
-				idx = std::stoi(s.substr(3, sz - 5));
-			} catch (std::exception& e) {
-				throw mapper_bad_index();
-			}
-			if (s[1] == 'K') {
-				unpackKeyTuple(&referenceTuple, keyTuple, keyValue);
-			} else if (s[1] == 'V') {
-				unpackValueTuple(&referenceTuple, valueTuple, keyValue);
-			} else {
-				ASSERT(false);
-				throw internal_error();
-			}
-			if (idx < 0 || idx >= referenceTuple->size()) {
-				throw mapper_bad_index();
-			}
-			mappedKeyTuple.appendRaw(referenceTuple->subTupleRawString(idx));
-		}
-	}
-
-	return mappedKeyTuple.pack();
 }
 
 struct AuditGetShardInfoRes {
@@ -5407,55 +5284,42 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	{
 		Tuple mappedKeyFormatTuple =
 		    Tuple::makeTuple("normal"_sr, "{{escaped}}"_sr, "{K[2]}"_sr, "{V[0]}"_sr, "{...}"_sr);
-
-		std::vector<Optional<Tuple>> vt;
-		bool isRangeQuery = false;
-		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+		MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+		Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 
 		Key expectedMappedKey =
 		    Tuple::makeTuple("normal"_sr, "{escaped}"_sr, "key-2"_sr, "value-0"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
-		ASSERT(isRangeQuery == true);
+		ASSERT(mappedKeyPlan.isRangeQuery() == true);
 	}
 
 	{
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{{{{}}"_sr, "}}"_sr);
-
-		std::vector<Optional<Tuple>> vt;
-		bool isRangeQuery = false;
-		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+		MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+		Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 
 		Key expectedMappedKey = Tuple::makeTuple("{{}"_sr, "}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
-		ASSERT(isRangeQuery == false);
+		ASSERT(mappedKeyPlan.isRangeQuery() == false);
 	}
 	{
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{{{{}}"_sr, "}}"_sr);
-
-		std::vector<Optional<Tuple>> vt;
-		bool isRangeQuery = false;
-		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+		MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+		Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 
 		Key expectedMappedKey = Tuple::makeTuple("{{}"_sr, "}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
-		ASSERT(isRangeQuery == false);
+		ASSERT(mappedKeyPlan.isRangeQuery() == false);
 	}
 	{
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{K[100]}"_sr);
 		bool throwException = false;
 		try {
-			std::vector<Optional<Tuple>> vt;
-			bool isRangeQuery = false;
-			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+			MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+			Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException = true;
@@ -5466,11 +5330,8 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{...}"_sr, "last-element"_sr);
 		bool throwException2 = false;
 		try {
-			std::vector<Optional<Tuple>> vt;
-			bool isRangeQuery = false;
-			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+			MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+			Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
 			throwException2 = true;
@@ -5481,16 +5342,27 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{K[not-a-number]}"_sr);
 		bool throwException3 = false;
 		try {
-			std::vector<Optional<Tuple>> vt;
-			bool isRangeQuery = false;
-			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+			MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+			Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException3 = true;
 		}
 		ASSERT(throwException3);
+	}
+	{
+		KeyValueRef invalidKeyAndValue("\xff"_sr, "\xff"_sr);
+		MappedKeyPlan literalPlan(Tuple::makeTuple("literal"_sr).pack());
+		ASSERT(literalPlan.constructMappedKey(invalidKeyAndValue) ==
+		       Tuple::makeTuple("literal"_sr).getDataAsStandalone());
+
+		KeyValueRef invalidValue(key, "\xff"_sr);
+		MappedKeyPlan keyPlan(Tuple::makeTuple("{K[1]}"_sr).pack());
+		ASSERT(keyPlan.constructMappedKey(invalidValue) == Tuple::makeTuple("key-1"_sr).getDataAsStandalone());
+
+		KeyValueRef invalidKey("\xff"_sr, value);
+		MappedKeyPlan valuePlan(Tuple::makeTuple("{V[1]}"_sr).pack());
+		ASSERT(valuePlan.constructMappedKey(invalidKey) == Tuple::makeTuple("value-1"_sr).getDataAsStandalone());
 	}
 	return Void();
 }
@@ -5546,17 +5418,7 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent(
 		    "TransactionDebug", pOriginalReq->options.get().debugID.get().first(), "storageserver.mapKeyValues.Start");
-	Tuple mappedKeyFormatTuple;
-
-	try {
-		mappedKeyFormatTuple = Tuple::unpack(mapper);
-	} catch (Error& e) {
-		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper);
-		throw mapper_not_tuple();
-	}
-	std::vector<Optional<Tuple>> vt;
-	bool isRangeQuery = false;
-	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
+	MappedKeyPlan mappedKeyPlan(mapper);
 
 	int sz = input.data.size();
 	const int k = std::min(sz, SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE);
@@ -5577,15 +5439,15 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// Clear key value to the default.
 			kvm->key = ""_sr;
 			kvm->value = ""_sr;
-			Key mappedKey = constructMappedKey(it, vt, mappedKeyFormatTuple);
+			Key mappedKey = mappedKeyPlan.constructMappedKey(*it);
 			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 			result.arena.dependsOn(mappedKey.arena());
 
 			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
 			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
 
-			subqueries.push_back(
-			    mapSubquery(data, input.version, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey));
+			subqueries.push_back(mapSubquery(
+			    data, input.version, pOriginalReq, &result.arena, mappedKeyPlan.isRangeQuery(), it, kvm, mappedKey));
 		}
 		co_await waitForAll(subqueries);
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
@@ -6838,6 +6700,107 @@ static Future<Void> processSampleFiles(StorageServer* data,
 	} // end file iteration loop
 }
 
+// Filter the whole task's file set down to what this fetchKeys owns. The set spans the task, while `keys` is a
+// single destination shard piece, so files outside `keys` are routine rather than a fault. A straddling file is
+// still returned -- it holds keys this fetch owns and only the KV-replay path can clip it to `keys` -- but it
+// clears *allOwnedContained, disqualifying the fetch from whole-file ingest.
+static BulkLoadFileSetKeyMap selectOwnedBulkLoadFileSets(const BulkLoadFileSetKeyMap& taskFileSets,
+                                                         KeyRangeRef keys,
+                                                         bool* allOwnedContained,
+                                                         KeyRange* firstUncontained) {
+	ASSERT(allOwnedContained != nullptr);
+	BulkLoadFileSetKeyMap owned;
+	*allOwnedContained = true;
+	for (const auto& fileSetPair : taskFileSets) {
+		if (!keys.intersects(fileSetPair.first)) {
+			continue;
+		}
+		if (!keys.contains(fileSetPair.first)) {
+			if (*allOwnedContained && firstUncontained != nullptr) {
+				*firstUncontained = fileSetPair.first;
+			}
+			*allOwnedContained = false;
+		}
+		owned.push_back(fileSetPair);
+	}
+	return owned;
+}
+
+TEST_CASE("/fdbserver/storageserver/selectOwnedBulkLoadFileSets") {
+	auto entry = [](StringRef begin, StringRef end) {
+		return std::make_pair(KeyRange(KeyRangeRef(begin, end)), BulkLoadFileSet());
+	};
+	bool allContained = false;
+	KeyRange uncontained;
+
+	// Fetch owns the whole task.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "c"_sr), entry("c"_sr, "e"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "e"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 2);
+		ASSERT(allContained);
+	}
+
+	// Disjoint ("e"-"g") and adjacent ("c"-"e") files are dropped without disqualifying the fetch.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "c"_sr), entry("c"_sr, "e"_sr), entry("e"_sr, "g"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "c"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 1);
+		ASSERT(owned[0].first == KeyRangeRef("a"_sr, "c"_sr));
+		ASSERT(allContained);
+	}
+
+	// A straddling file is retained, but disqualifies the fetch.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "d"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "c"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 1);
+		ASSERT(!allContained);
+		ASSERT(uncontained == KeyRangeRef("a"_sr, "d"_sr));
+	}
+
+	// As does one spanning it.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "z"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("c"_sr, "e"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 1);
+		ASSERT(!allContained);
+	}
+
+	// Empty task file set is vacuously contained.
+	{
+		BulkLoadFileSetKeyMap task;
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "z"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 0);
+		ASSERT(allContained);
+	}
+
+	// Across pieces partitioning the task range, every file must be claimed exactly once: zero loses it, twice
+	// ingests the same keys under two shards.
+	{
+		BulkLoadFileSetKeyMap task{
+			entry("a"_sr, "c"_sr), entry("c"_sr, "e"_sr), entry("e"_sr, "g"_sr), entry("g"_sr, "i"_sr)
+		};
+		const std::vector<KeyRangeRef> pieces{ KeyRangeRef("a"_sr, "c"_sr),
+			                                   KeyRangeRef("c"_sr, "g"_sr),
+			                                   KeyRangeRef("g"_sr, "i"_sr) };
+		std::map<std::string, int> owners;
+		for (const auto& piece : pieces) {
+			bool contained = false;
+			for (const auto& ownedPair : selectOwnedBulkLoadFileSets(task, piece, &contained, nullptr)) {
+				owners[ownedPair.first.begin.toString()]++;
+			}
+			ASSERT(contained); // the partition is manifest-aligned, so nothing straddles
+		}
+		ASSERT_EQ(owners.size(), task.size());
+		for (const auto& ownerPair : owners) {
+			ASSERT_EQ(ownerPair.second, 1);
+		}
+	}
+
+	return Void();
+}
+
 Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	TraceInterval interval("FetchKeys");
@@ -7122,19 +7085,21 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("Phase", "File download")
 				    .detail("FKID", fetchKeysID);
 				// Do SST ingestion if (1) the knob is enabled, (2) the storage engine supports SST ingestion, and
-				// (3) the task range is aligned with manifests' range, and (4) all file ranges fit within shard.
-				// Check (4) is needed because shard boundaries may differ between backup and restore time.
+				// (3) the task range is aligned with manifests' range, and (4) every file this fetch owns fits
+				// within the shard. Check (4) is needed because shard boundaries may differ between backup and
+				// restore time.
 				bool allFilesContained = true;
-				for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
-					if (!keys.contains(range)) {
-						allFilesContained = false;
-						TraceEvent(SevInfo, "SSBulkLoadFileRangeMismatch", data->thisServerID)
-						    .detail("ShardRange", keys)
-						    .detail("FileRange", range)
-						    .detail("DataMoveId", dataMoveId.toString())
-						    .detail("FKID", fetchKeysID);
-						break;
-					}
+				KeyRange firstUncontainedFileRange;
+				auto ownedBulkLoadFileSets = std::make_shared<BulkLoadFileSetKeyMap>(selectOwnedBulkLoadFileSets(
+				    *localBulkLoadFileSets, keys, &allFilesContained, &firstUncontainedFileRange));
+				if (!allFilesContained) {
+					TraceEvent(SevInfo, "SSBulkLoadFileRangeMismatch", data->thisServerID)
+					    .detail("ShardRange", keys)
+					    .detail("FileRange", firstUncontainedFileRange)
+					    .detail("OwnedFileCount", ownedBulkLoadFileSets->size())
+					    .detail("TaskFileCount", localBulkLoadFileSets->size())
+					    .detail("DataMoveId", dataMoveId.toString())
+					    .detail("FKID", fetchKeysID);
 				}
 				if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
 				    data->storage.getKeyValueStore()->supportsSstIngestion() && bulkloadCanIngestSSTFile &&
@@ -7157,7 +7122,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// Ingest the SST files.
 					// Measure duration at this level so we capture the inter-thread handoff time.
 					double ingestStartTime = g_network->timer(); // Record start time
-					co_await data->storage.getKeyValueStore()->ingestSSTFiles(localBulkLoadFileSets);
+					co_await data->storage.getKeyValueStore()->ingestSSTFiles(ownedBulkLoadFileSets);
 					const double ingestDuration = g_network->timer() - ingestStartTime;
 					data->counters.ingestDurationLatencySample->addMeasurement(ingestDuration);
 
@@ -7165,7 +7130,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					co_await data->storage.getKeyValueStore()->compactRange(keys);
 
 					// Process sample files after SST ingestion
-					co_await processSampleFiles(data, keys, bulkLoadLocalDir, localBulkLoadFileSets);
+					co_await processSampleFiles(data, keys, bulkLoadLocalDir, ownedBulkLoadFileSets);
 
 					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
 					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
@@ -7184,7 +7149,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						    .detail("AllFilesContained", allFilesContained)
 						    .detail("FKID", fetchKeysID);
 					}
-					hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
+					hold = tryGetRangeForBulkLoad(results, keys, ownedBulkLoadFileSets);
 					rangeEnd = keys.end;
 				}
 			} else {
