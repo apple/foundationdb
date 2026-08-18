@@ -21,14 +21,18 @@
 #include "fdbserver/core/FDBSimulationPolicy.h"
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <vector>
 
+#include "fdbclient/GenericManagementAPI.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/FDBSimulatorProcessInfo.h"
+#include "flow/UnitTest.h"
 
 FDBExtraDatabaseMode stringToFDBExtraDatabaseMode(const std::string& databaseMode) {
 	if (databaseMode == "Disabled") {
@@ -49,6 +53,44 @@ FDBExtraDatabaseMode stringToFDBExtraDatabaseMode(const std::string& databaseMod
 }
 
 namespace {
+
+std::string regionConfigurationString(StatusArray const& regions) {
+	return "regions=" + json_spirit::write_string(json_spirit::mValue(regions), json_spirit::Output_options::none);
+}
+
+std::string disabledRegionConfiguration(StatusArray regions, std::string const& dcId) {
+	int matches = 0;
+	for (auto& region : regions) {
+		for (auto& datacenter : region.get_obj().at("datacenters").get_array()) {
+			auto& dc = datacenter.get_obj();
+			auto satellite = dc.find("satellite");
+			if ((satellite == dc.end() || satellite->second.get_int() != 1) && dc.at("id").get_str() == dcId) {
+				dc["priority"] = -1;
+				++matches;
+			}
+		}
+	}
+	ASSERT_EQ(matches, 1);
+	return regionConfigurationString(regions);
+}
+
+void restoreRestartedRegionConfiguration(FDBSimulationPolicyState& state,
+                                         DatabaseConfiguration const& configuration,
+                                         bool restartingTest) {
+	if (!restartingTest || configuration.usableRegions < 2 || configuration.regions.size() != 2 ||
+	    !state.originalRegions.empty()) {
+		return;
+	}
+
+	// Older restart files do not contain these commands. Preserve the persisted region JSON, including its
+	// ordering and satellite settings, and capture it only once before a workload changes the configuration.
+	Optional<ValueRef> storedRegions = configuration.get("regions"_sr.withPrefix(configKeysPrefix));
+	ASSERT(storedRegions.present());
+	StatusObject regions = BinaryReader::fromStringRef<StatusObject>(storedRegions.get(), IncludeVersion());
+	state.setRegionConfiguration(regions.at("regions").get_array(),
+	                             configuration.regions[0].dcId.toString(),
+	                             configuration.regions[1].dcId.toString());
+}
 
 FDBSimulationPolicyState& policyState() {
 	static auto* state = new FDBSimulationPolicyState;
@@ -354,8 +396,22 @@ FDBSimulationPolicyState& fdbSimulationPolicyState() {
 	return policyState();
 }
 
+void FDBSimulationPolicyState::setRegionConfiguration(StatusArray const& regions,
+                                                      std::string const& primaryDc,
+                                                      std::string const& remoteDc) {
+	ASSERT_EQ(regions.size(), 2);
+	ASSERT_NE(primaryDc, remoteDc);
+	std::string original = regionConfigurationString(regions);
+	std::string primary = disabledRegionConfiguration(regions, primaryDc);
+	std::string remote = disabledRegionConfiguration(regions, remoteDc);
+	originalRegions = std::move(original);
+	disablePrimary = std::move(primary);
+	disableRemote = std::move(remote);
+}
+
 void updateFDBSimulationPolicy(DatabaseConfiguration const& configuration, bool restartingTest) {
 	auto& state = fdbSimulationPolicyState();
+	restoreRestartedRegionConfiguration(state, configuration, restartingTest);
 	state.storagePolicy = configuration.storagePolicy;
 	state.tLogPolicy = configuration.tLogPolicy;
 	state.tLogWriteAntiQuorum = configuration.tLogWriteAntiQuorum;
@@ -403,4 +459,103 @@ void updateFDBSimulationPolicy(DatabaseConfiguration const& configuration, bool 
 
 void setFDBSimulationPolicyRemoteTLogPolicy(Reference<IReplicationPolicy> remoteTLogPolicy) {
 	fdbSimulationPolicyState().remoteTLogPolicy = remoteTLogPolicy;
+}
+
+namespace {
+
+StatusArray regionCommandTestRegions() {
+	json_spirit::mValue value;
+	const std::string json = R"json([
+          {
+            "datacenters": [
+              {"id":"region-b","priority":8,"satellite":1,"satellite_logs":2},
+              {"id":"region-a","priority":3},
+              {"id":"satellite-a","priority":4,"satellite":1}
+            ],
+            "satellite_redundancy_mode":"two_satellite_fast",
+            "satellite_logs":4,
+            "preserved_extension":{"value":1}
+          },
+          {
+            "datacenters": [
+              {"id":"region-a","priority":7,"satellite":1},
+              {"id":"region-b","priority":9}
+            ],
+            "satellite_redundancy_mode":"one_satellite_double",
+            "satellite_logs":3
+          }
+        ])json";
+	ASSERT(json_spirit::read_string(json, value));
+	return value.get_array();
+}
+
+DatabaseConfiguration regionCommandTestConfiguration(StatusArray const& regions, int usableRegions = 2) {
+	std::map<std::string, std::string> options;
+	ASSERT(
+	    buildConfiguration("usable_regions=" + std::to_string(usableRegions) + " " + regionConfigurationString(regions),
+	                       options) == ConfigurationResult::SUCCESS);
+	DatabaseConfiguration configuration;
+	for (auto const& [key, value] : options) {
+		configuration.set(StringRef(key), StringRef(value));
+	}
+	return configuration;
+}
+
+void checkRegionCommand(std::string const& command, StatusArray const& expected) {
+	std::map<std::string, std::string> options;
+	ASSERT(buildConfiguration(command + " repopulate_anti_quorum=1", options) == ConfigurationResult::SUCCESS);
+	ASSERT_EQ(options.size(), 2);
+	ASSERT_EQ(options.at(configKeysPrefix.toString() + "repopulate_anti_quorum"), "1");
+	StatusObject decoded = BinaryReader::fromStringRef<StatusObject>(
+	    StringRef(options.at(configKeysPrefix.toString() + "regions")), IncludeVersion());
+	ASSERT_EQ(regionConfigurationString(decoded.at("regions").get_array()), regionConfigurationString(expected));
+}
+
+} // namespace
+
+TEST_CASE("/fdbserver/FDBSimulationPolicy/RestartRegionCommands") {
+	StatusArray regions = regionCommandTestRegions();
+	DatabaseConfiguration configuration = regionCommandTestConfiguration(regions);
+	ASSERT_EQ(configuration.regions[0].dcId, "region-b"_sr);
+	ASSERT_EQ(configuration.regions[1].dcId, "region-a"_sr);
+
+	FDBSimulationPolicyState state;
+	restoreRestartedRegionConfiguration(state, configuration, true);
+	ASSERT_EQ(state.originalRegions, regionConfigurationString(regions));
+	ASSERT(state.startingDisabledConfiguration.empty());
+
+	StatusArray primaryDisabled = regions;
+	primaryDisabled[1].get_obj().at("datacenters").get_array()[1].get_obj()["priority"] = -1;
+	checkRegionCommand(state.disablePrimary, primaryDisabled);
+	StatusArray remoteDisabled = regions;
+	remoteDisabled[0].get_obj().at("datacenters").get_array()[1].get_obj()["priority"] = -1;
+	checkRegionCommand(state.disableRemote, remoteDisabled);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/FDBSimulationPolicy/RegionCommandInitialization") {
+	StatusArray regions = regionCommandTestRegions();
+	DatabaseConfiguration configuration = regionCommandTestConfiguration(regions);
+	FDBSimulationPolicyState state;
+	restoreRestartedRegionConfiguration(state, configuration, false);
+	ASSERT(state.originalRegions.empty());
+	restoreRestartedRegionConfiguration(state, regionCommandTestConfiguration(regions, 1), true);
+	ASSERT(state.originalRegions.empty());
+	StatusArray singleRegion;
+	singleRegion.push_back(regions[0]);
+	restoreRestartedRegionConfiguration(state, regionCommandTestConfiguration(singleRegion), true);
+	ASSERT(state.originalRegions.empty());
+	restoreRestartedRegionConfiguration(state, DatabaseConfiguration(), true);
+	ASSERT(state.originalRegions.empty());
+
+	state.setRegionConfiguration(regions, "region-b", "region-a");
+	const std::string original = state.originalRegions;
+	const std::string primary = state.disablePrimary;
+	const std::string remote = state.disableRemote;
+	regions[0].get_obj().at("datacenters").get_array()[1].get_obj()["priority"] = 10;
+	restoreRestartedRegionConfiguration(state, regionCommandTestConfiguration(regions), true);
+	ASSERT_EQ(state.originalRegions, original);
+	ASSERT_EQ(state.disablePrimary, primary);
+	ASSERT_EQ(state.disableRemote, remote);
+	return Void();
 }

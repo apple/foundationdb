@@ -30,6 +30,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/flow.h"
 #include "flow/ProcessEvents.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -737,26 +738,50 @@ Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo> 
 				    .detail("Servers", describe(servers));
 				co_await excludeServers(cx, servers, false);
 			}
+			if (simPolicy.usableRegions <= 1 || simPolicy.quiesced || simPolicy.primaryDcId != primaryDcId ||
+			    simPolicy.remoteDcId != remoteDcId) {
+				co_return;
+			}
 
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
 			    .detail("Location", context)
 			    .detail("Stage", "Repopulate")
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
-			simPolicy.usableRegions = 1;
 
-			co_await ManagementAPI::changeConfig(
-			    cx.getReference(),
-			    (primaryDead ? fdbSimulationPolicyState().disablePrimary : fdbSimulationPolicyState().disableRemote) +
-			        " repopulate_anti_quorum=1",
-			    true);
+			const std::string regionConfiguration = primaryDead ? simPolicy.disablePrimary : simPolicy.disableRemote;
+			ASSERT(!regionConfiguration.empty());
+			const int previousUsableRegions = simPolicy.usableRegions;
+			bool repopulated = false;
+			ScopeExit restorePolicy([&simPolicy, previousUsableRegions, &repopulated]() {
+				if (!repopulated) {
+					simPolicy.usableRegions = previousUsableRegions;
+				}
+			});
+			// Keep concurrent repair callers out while the configuration transaction is in flight.
+			simPolicy.usableRegions = 1;
+			ConfigurationResult result = co_await ManagementAPI::changeConfig(
+			    cx.getReference(), regionConfiguration + " repopulate_anti_quorum=1", true);
+			if (result != ConfigurationResult::SUCCESS) {
+				TraceEvent(SevError, "DisablingFearlessConfigurationFailed")
+				    .detail("Stage", "Repopulate")
+				    .detail("Result", result);
+				throw operation_failed();
+			}
+			repopulated = true;
 			while (dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
 				co_await dbInfo->onChange();
 			}
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
 			    .detail("Location", context)
 			    .detail("Stage", "Usable_Regions");
-			co_await ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true);
+			result = co_await ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true);
+			if (result != ConfigurationResult::SUCCESS) {
+				TraceEvent(SevError, "DisablingFearlessConfigurationFailed")
+				    .detail("Stage", "Usable_Regions")
+				    .detail("Result", result);
+				throw operation_failed();
+			}
 		}
 	}
 }

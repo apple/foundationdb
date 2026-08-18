@@ -2064,20 +2064,8 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 	}
 
 	if (needsRemote) {
-		fdbSimulationPolicyState().originalRegions =
-		    "regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
-
-		StatusArray disablePrimary = regionArr;
-		disablePrimary[0].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
-		fdbSimulationPolicyState().disablePrimary =
-		    "regions=" +
-		    json_spirit::write_string(json_spirit::mValue(disablePrimary), json_spirit::Output_options::none);
-
-		StatusArray disableRemote = regionArr;
-		disableRemote[1].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
-		fdbSimulationPolicyState().disableRemote =
-		    "regions=" +
-		    json_spirit::write_string(json_spirit::mValue(disableRemote), json_spirit::Output_options::none);
+		fdbSimulationPolicyState().setRegionConfiguration(
+		    regionArr, primaryDcObj["id"].get_str(), remoteDcObj["id"].get_str());
 	} else {
 		// In order to generate a starting configuration with the remote disabled, do not apply the region
 		// configuration to the DatabaseConfiguration until after creating the starting conf string.
