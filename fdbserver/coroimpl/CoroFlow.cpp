@@ -261,8 +261,9 @@ public:
 			pool->idle.pop_back();
 			pool->queueLock.leave();
 			c->unblock();
-		} else
+		} else {
 			pool->queueLock.leave();
+		}
 	}
 	Future<Void> stop(Error const& e) override {
 		// User cancellation callbacks can release the last owner, except during implicit destruction itself.
@@ -307,7 +308,7 @@ public:
 	void delref() override { ReferenceCounted<WorkPool>::delref(); }
 };
 
-typedef WorkPool<Coroutine, ThreadUnsafeSpinLock, true> CoroPool;
+using CoroPool = WorkPool<Coroutine, ThreadUnsafeSpinLock, true>;
 
 void CoroThreadPool::waitFor(Future<Void> what) {
 	ASSERT(current_coro != nullptr);

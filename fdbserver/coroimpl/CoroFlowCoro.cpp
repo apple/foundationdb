@@ -234,8 +234,9 @@ public:
 			pool->idle.pop_back();
 			pool->queueLock.leave();
 			c->unblock();
-		} else
+		} else {
 			pool->queueLock.leave();
+		}
 	}
 	Future<Void> stop(Error const& e) override {
 		// User cancellation callbacks can release the last owner, except during implicit destruction itself.
