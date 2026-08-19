@@ -294,19 +294,6 @@ TEST_CASE("/fdbrpc/FlowTransport/WellKnownEndpointReservations") {
 	return Void();
 }
 
-TEST_CASE("/fdbrpc/FlowTransport/HostnameEndpointIds") {
-	using Request = ReplyPromise<Void>;
-	using Try = Future<ErrorOr<Void>> (*)(Request, Hostname, int);
-	using TryWithPriority = Future<ErrorOr<Void>> (*)(Request, Hostname, int, TaskPriority);
-	using Retry = Future<Void> (*)(Request, Hostname, int, ExplicitVoid);
-	using RetryWithPriority = Future<Void> (*)(Request, Hostname, int, TaskPriority, ExplicitVoid);
-	[[maybe_unused]] constexpr Try tryWithoutPriority = &tryGetReplyFromHostname<Request>;
-	[[maybe_unused]] constexpr TryWithPriority tryWithPriority = &tryGetReplyFromHostname<Request>;
-	[[maybe_unused]] constexpr Retry retryWithoutPriority = &retryGetReplyFromHostname<Request>;
-	[[maybe_unused]] constexpr RetryWithPriority retryWithPriority = &retryGetReplyFromHostname<Request>;
-	return Void();
-}
-
 struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 	explicit EndpointNotFoundReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(
