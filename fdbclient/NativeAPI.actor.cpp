@@ -64,6 +64,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
+#include "fdbclient/ProxyLoadBalanceMetrics.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -89,6 +90,7 @@
 #include "flow/genericactors.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
+#include "flow/ScopeExit.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
@@ -297,7 +299,7 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			if (clientInfo->get().commitProxies.size())
 				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
 			if (clientInfo->get().grvProxies.size())
-				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
+				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies);
 			server_interf.clear();
 			locationCache.insert(allKeys, Reference<LocationInfo>());
 			break;
@@ -313,7 +315,7 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			if (clientInfo->get().commitProxies.size())
 				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
 			if (clientInfo->get().grvProxies.size())
-				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
+				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies);
 			server_interf.clear();
 			locationCache.insert(allKeys, Reference<LocationInfo>());
 			break;
@@ -938,13 +940,79 @@ void DatabaseContext::updateProxies() {
 		commitProxyProvisional = clientInfo->get().commitProxies[0].provisional;
 	}
 	if (clientInfo->get().grvProxies.size()) {
-		grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
+		grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies);
 		grvProxyProvisional = clientInfo->get().grvProxies[0].provisional;
 	}
 	if (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size()) {
 		ASSERT(commitProxyProvisional == grvProxyProvisional);
 		proxyProvisional = commitProxyProvisional;
 	}
+}
+
+TEST_CASE("/fdbclient/NativeAPI/proxyLoadBalanceMetrics") {
+	FlowKnobs knobs(Randomize::False, IsSimulated::False);
+	knobs.BASIC_LOAD_BALANCE_COMPUTE_PRECISION = 10000;
+	knobs.BASIC_LOAD_BALANCE_MIN_REQUESTS = 20;
+	knobs.BASIC_LOAD_BALANCE_MIN_CPU = 0.05;
+	knobs.BASIC_LOAD_BALANCE_MAX_CHANGE = 0.10;
+	knobs.BASIC_LOAD_BALANCE_MAX_PROB = 2.0;
+	const FlowKnobs* previousKnobs = FLOW_KNOBS;
+	ScopeExit restoreKnobs([previousKnobs]() { FLOW_KNOBS = previousKnobs; });
+	FLOW_KNOBS = &knobs;
+
+	// Keep this synchronous so the model updaters are cancelled before the global knobs are restored.
+	auto grv = makeReference<GrvProxyInfo>(std::vector<GrvProxyInterface>(2));
+	auto cpu = makeReference<CommitProxyInfo>(std::vector<CommitProxyInterface>(2));
+	auto update = [](const auto& model, int first, int second) {
+		model->updateRecent(0, first);
+		model->updateRecent(1, second);
+		model->updateProbabilities();
+	};
+	auto checkSelections = [](const auto& model, double firstProbability) {
+		for (int i = 0; i < 1024; ++i) {
+			// Match DeterministicRandom::random01 without reseeding or consuming an extra draw.
+			double next = deterministicRandom()->peek() / double(std::numeric_limits<uint64_t>::max());
+			int chosen = model->getBest();
+			// Ignore normalization roundoff at the expected selection boundary.
+			if (std::abs(next - firstProbability) > 1e-12) {
+				ASSERT_EQ(chosen, next <= firstProbability ? 0 : 1);
+			}
+		}
+	};
+
+	const int precision = knobs.BASIC_LOAD_BALANCE_COMPUTE_PRECISION;
+	ASSERT_EQ(ProxyGrvMetric::decode(-1), 0);
+	ASSERT_EQ(ProxyCpuMetric::decode(-1), -1);
+	ASSERT_EQ(ProxyGrvMetric::decode(precision - 1), 0);
+	ASSERT_EQ(ProxyCpuMetric::decode(precision - 1), precision - 1);
+	ASSERT_EQ(ProxyGrvMetric::decode(precision), 1);
+	ASSERT_EQ(ProxyCpuMetric::decode(precision), 0);
+
+	update(grv, 80 * precision + 1000, 20 * precision + 9000);
+	update(cpu, 80 * precision + 1000, 20 * precision + 9000);
+	checkSelections(grv, 0.47);
+	checkSelections(cpu, 0.54);
+
+	update(grv, 19 * precision + 9000, 20 * precision + 1000);
+	update(cpu, 80 * precision + 999, 20 * precision);
+	checkSelections(grv, 0.47);
+	checkSelections(cpu, 0.54);
+
+	update(grv, 40 * precision, 0);
+	update(cpu, 1000, 0);
+	checkSelections(grv, 0.47 - 0.05);
+	checkSelections(cpu, 0.54 - 0.05);
+
+	grv->updateRecent(0, 31000);
+	grv->updateRecent(1, 19000);
+	cpu->updateRecent(0, 31000);
+	cpu->updateRecent(1, 19000);
+	knobs.BASIC_LOAD_BALANCE_COMPUTE_PRECISION = 1000;
+	grv->updateProbabilities();
+	cpu->updateProbabilities();
+	checkSelections(grv, 0.42 + (0.5 - 31.0 / 50.0) * 0.10);
+	checkSelections(cpu, 0.54 - 0.05);
+	return Void();
 }
 
 Reference<CommitProxyInfo> DatabaseContext::getCommitProxies(UseProvisionalProxies useProvisionalProxies) {
