@@ -164,11 +164,18 @@ struct Traceable<Counter> : std::true_type {
 class CountedSection final : public NonCopyable {
 public:
 	CountedSection() : end(nullptr) {}
-	CountedSection(Counter &start, Counter &end) : end(&end) { ++start; }
-	CountedSection &operator=(CountedSection &&other)  { std::swap(end, other.end); return *this; }
-	~CountedSection() { if (end) ++*end; }
+	CountedSection(Counter& start, Counter& end) : end(&end) { ++start; }
+	CountedSection& operator=(CountedSection&& other) {
+		std::swap(end, other.end);
+		return *this;
+	}
+	~CountedSection() {
+		if (end)
+			++*end;
+	}
+
 private:
-	Counter *end;
+	Counter* end;
 };
 
 template <class F>

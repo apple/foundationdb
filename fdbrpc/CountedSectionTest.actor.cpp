@@ -33,7 +33,7 @@ struct TestCounters {
 	TestCounters() : cc("CountedSectionTest"), start("start", cc), end("end", cc) {}
 };
 
-ACTOR Future<Void> doNothing(TestCounters *tc, Future<Void> f) {
+ACTOR Future<Void> doNothing(TestCounters* tc, Future<Void> f) {
 	state CountedSection cs(tc->start, tc->end);
 	wait(f);
 	return Void();
@@ -49,7 +49,7 @@ TEST_CASE("/fdbrpc/countedsection/uninterrupted") {
 
 	ASSERT(tc.start.getValue() == 1);
 	ASSERT(tc.end.getValue() == 1);
-        return Void();
+	return Void();
 }
 
 TEST_CASE("/fdbrpc/countedesction/interrupted") {
@@ -62,5 +62,5 @@ TEST_CASE("/fdbrpc/countedesction/interrupted") {
 
 	ASSERT(tc.start.getValue() == 1);
 	ASSERT(tc.end.getValue() == 1);
-        return Void();
+	return Void();
 }
