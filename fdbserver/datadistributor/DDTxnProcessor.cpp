@@ -523,7 +523,7 @@ class DDTxnProcessorImpl {
 				if (!morePages) {
 					break;
 				}
-				if (ranges.size() == 0) {
+				if (ranges.empty()) {
 					// morePages with size==0 shouldn't happen; guard against infinite loop.
 					break;
 				}
