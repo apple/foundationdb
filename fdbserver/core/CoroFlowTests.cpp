@@ -68,126 +68,96 @@ private:
 
 class TestReceiver final : public IThreadPoolReceiver {
 public:
-	explicit TestReceiver(Reference<ReceiverState> state) : state(std::move(state)) {}
+	explicit TestReceiver(Reference<ReceiverState> state, Error initError = Error())
+	  : state(std::move(state)), initError(initError) {}
 	~TestReceiver() override { state->destroy(); }
-	void init() override { state->initialize(); }
-
-private:
-	Reference<ReceiverState> state;
-};
-
-class FailingTestReceiver final : public IThreadPoolReceiver {
-public:
-	FailingTestReceiver(Reference<ReceiverState> state, Error error) : state(std::move(state)), error(error) {}
-	~FailingTestReceiver() override { state->destroy(); }
 	void init() override {
 		state->initialize();
-		throw error;
+		if (initError.isValid()) {
+			throw initError;
+		}
 	}
 
 private:
 	Reference<ReceiverState> state;
-	Error error;
+	Error initError;
 };
 
 class ActionState final : public ReferenceCounted<ActionState> {
 public:
-	ActionState()
-	  : startedFuture(started.getFuture()), completedFuture(completed.getFuture()),
-	    destroyedFuture(destroyed.getFuture()) {}
+	ActionState() : startedFuture(started.getFuture()), doneFuture(done.getFuture()) {}
 
 	Future<Void> onStarted() const { return startedFuture; }
-	Future<Void> onCompleted() const { return completedFuture; }
-	Future<Void> onDestroyed() const { return destroyedFuture; }
-	int getRunCount() const { return runCount; }
-	int getCancelCount() const { return cancelCount; }
+	Future<Void> onDone() const { return doneFuture; }
+	void assertQueued() const { ASSERT(phase == Phase::Queued); }
+	void assertRunning() const { ASSERT(phase == Phase::Running); }
+	void assertCompleted() const { ASSERT(phase == Phase::Completed && destroyed); }
+	void assertCancelled() const { ASSERT(phase == Phase::Cancelled && destroyed); }
 
 	void start() {
-		ASSERT_EQ(runCount, 0);
-		ASSERT_EQ(cancelCount, 0);
-		++runCount;
+		assertQueued();
+		phase = Phase::Running;
 		started.send(Void());
 	}
 
-	void complete() {
-		finish();
-		completed.send(Void());
-	}
-
-	void fail(Error error) {
-		finish();
-		completed.sendError(error);
+	void finish(Error error = Error()) {
+		assertRunning();
+		phase = Phase::Completed;
+		workError = error;
 	}
 
 	void cancel() {
-		ASSERT_EQ(runCount, 0);
-		ASSERT_EQ(cancelCount, 0);
-		ASSERT(!finished);
-		++cancelCount;
-		finished = true;
+		assertQueued();
+		phase = Phase::Cancelled;
 		started.sendError(actor_cancelled());
-		completed.sendError(actor_cancelled());
 	}
 
 	void destroy() {
-		ASSERT(finished);
-		ASSERT_EQ(destroyCount, 0);
-		++destroyCount;
-		destroyed.send(Void());
-	}
-
-	void assertCompleted() const {
-		ASSERT_EQ(runCount, 1);
-		ASSERT_EQ(cancelCount, 0);
-		ASSERT_EQ(destroyCount, 1);
-	}
-
-	void assertCancelled() const {
-		ASSERT_EQ(runCount, 0);
-		ASSERT_EQ(cancelCount, 1);
-		ASSERT_EQ(destroyCount, 1);
+		ASSERT(!destroyed && (phase == Phase::Completed || phase == Phase::Cancelled));
+		destroyed = true;
+		if (workError.isValid()) {
+			done.sendError(workError);
+		} else {
+			done.send(Void());
+		}
 	}
 
 private:
-	void finish() {
-		ASSERT_EQ(runCount, 1);
-		ASSERT_EQ(cancelCount, 0);
-		ASSERT(!finished);
-		finished = true;
-	}
-
+	enum class Phase { Queued, Running, Completed, Cancelled };
 	ThreadReturnPromise<Void> started;
-	ThreadReturnPromise<Void> completed;
-	ThreadReturnPromise<Void> destroyed;
+	ThreadReturnPromise<Void> done;
 	Future<Void> startedFuture;
-	Future<Void> completedFuture;
-	Future<Void> destroyedFuture;
-	int runCount{ 0 };
-	int cancelCount{ 0 };
-	int destroyCount{ 0 };
-	bool finished{ false };
+	Future<Void> doneFuture;
+	Phase phase{ Phase::Queued };
+	Error workError;
+	bool destroyed{ false };
 };
 
 class TestAction final : public ThreadAction {
 public:
-	TestAction(Reference<ActionState> state, std::function<void()> work)
-	  : state(std::move(state)), work(std::move(work)) {}
+	TestAction(Reference<ActionState> state, std::function<void()> work, std::function<void()> beforeCancel)
+	  : state(std::move(state)), work(std::move(work)), beforeCancel(std::move(beforeCancel)) {}
 	~TestAction() { state->destroy(); }
 
 	void operator()(IThreadPoolReceiver*) override {
 		std::unique_ptr<TestAction> destroyOnReturn(this);
 		state->start();
+		Error error;
 		try {
 			work();
-			state->complete();
 		} catch (Error& e) {
-			state->fail(e);
+			error = e;
 		} catch (...) {
-			state->fail(unknown_error());
+			error = unknown_error();
 		}
+		state->finish(error);
 	}
 
 	void cancel() override {
+		// A throwing callback must leave this action queued and available for a later stop() retry.
+		if (beforeCancel) {
+			beforeCancel();
+		}
 		state->cancel();
 		delete this;
 	}
@@ -197,79 +167,14 @@ public:
 private:
 	Reference<ActionState> state;
 	std::function<void()> work;
+	std::function<void()> beforeCancel;
 };
 
-class DropPoolOnCancelAction final : public ThreadAction {
-public:
-	DropPoolOnCancelAction(Reference<ActionState> state, Reference<IThreadPool> pool)
-	  : state(std::move(state)), pool(std::move(pool)) {}
-	~DropPoolOnCancelAction() { state->destroy(); }
-
-	void operator()(IThreadPoolReceiver*) override {
-		std::unique_ptr<DropPoolOnCancelAction> destroyOnReturn(this);
-		state->start();
-		state->fail(operation_failed().asInjectedFault());
-	}
-
-	void cancel() override {
-		state->cancel();
-		pool.clear();
-		delete this;
-	}
-
-	double getTimeEstimate() const override { return 0.; }
-
-private:
-	Reference<ActionState> state;
-	Reference<IThreadPool> pool;
-};
-
-class CancelRetryState final : public ReferenceCounted<CancelRetryState> {
-public:
-	explicit CancelRetryState(Error firstError) : firstError(firstError) {}
-	int getAttemptCount() const { return attemptCount; }
-
-	void attempt() {
-		++attemptCount;
-		if (attemptCount == 1) {
-			throw firstError;
-		}
-		ASSERT_EQ(attemptCount, 2);
-	}
-
-private:
-	Error firstError;
-	int attemptCount{ 0 };
-};
-
-class ThrowOnceOnCancelAction final : public ThreadAction {
-public:
-	ThrowOnceOnCancelAction(Reference<ActionState> state, Reference<CancelRetryState> retry)
-	  : state(std::move(state)), retry(std::move(retry)) {}
-	~ThrowOnceOnCancelAction() { state->destroy(); }
-
-	void operator()(IThreadPoolReceiver*) override {
-		std::unique_ptr<ThrowOnceOnCancelAction> destroyOnReturn(this);
-		state->start();
-		state->fail(operation_failed().asInjectedFault());
-	}
-
-	void cancel() override {
-		retry->attempt();
-		state->cancel();
-		delete this;
-	}
-
-	double getTimeEstimate() const override { return 0.; }
-
-private:
-	Reference<ActionState> state;
-	Reference<CancelRetryState> retry;
-};
-
-Reference<ActionState> postAction(Reference<IThreadPool> const& pool, std::function<void()> work) {
+Reference<ActionState> postAction(Reference<IThreadPool> const& pool,
+                                  std::function<void()> work,
+                                  std::function<void()> beforeCancel = {}) {
 	auto state = makeReference<ActionState>();
-	pool->post(new TestAction(state, std::move(work)));
+	pool->post(new TestAction(state, std::move(work), std::move(beforeCancel)));
 	return state;
 }
 
@@ -285,8 +190,7 @@ void assertThrowsError(F&& f, int expectedCode) {
 }
 
 Future<Void> assertActionCompleted(Reference<ActionState> action) {
-	co_await action->onCompleted();
-	co_await action->onDestroyed();
+	co_await action->onDone();
 	action->assertCompleted();
 }
 
@@ -305,14 +209,13 @@ TEST_CASE("/fdbserver/CoroFlow/DeferredStartAndReadyWaits") {
 		assertThrowsError([] { waitFor(Future<Void>(operation_failed())); }, error_code_operation_failed);
 		assertThrowsError([] { waitForAndGet(Future<int>(io_error())); }, error_code_io_error);
 	});
-	ASSERT_EQ(action->getRunCount(), 0);
+	action->assertQueued();
 	co_await assertActionCompleted(action);
 	ASSERT_EQ(receiver->getInitCount(), 1);
 	ASSERT(!pool->getError().isReady());
 
 	co_await pool->stop();
 	co_await receiver->onDestroyed();
-	ASSERT_EQ(receiver->getDestroyCount(), 1);
 	co_await pool->stop();
 }
 
@@ -324,14 +227,14 @@ TEST_CASE("/fdbserver/CoroFlow/SuspendedWaits") {
 	Promise<int> value;
 	auto valueAction = postAction(pool, [input = value.getFuture()] { ASSERT_EQ(waitForAndGet(input), 17); });
 	co_await valueAction->onStarted();
-	ASSERT(!valueAction->onCompleted().isReady());
+	valueAction->assertRunning();
 	value.send(17);
 	co_await assertActionCompleted(valueAction);
 
 	Promise<Void> ready;
 	auto voidAction = postAction(pool, [input = ready.getFuture()] { waitFor(input); });
 	co_await voidAction->onStarted();
-	ASSERT(!voidAction->onCompleted().isReady());
+	voidAction->assertRunning();
 	ready.send(Void());
 	co_await assertActionCompleted(voidAction);
 
@@ -340,7 +243,7 @@ TEST_CASE("/fdbserver/CoroFlow/SuspendedWaits") {
 		assertThrowsError([&] { waitForAndGet(input); }, error_code_io_error);
 	});
 	co_await valueErrorAction->onStarted();
-	ASSERT(!valueErrorAction->onCompleted().isReady());
+	valueErrorAction->assertRunning();
 	failedValue.sendError(io_error());
 	co_await assertActionCompleted(valueErrorAction);
 
@@ -349,7 +252,7 @@ TEST_CASE("/fdbserver/CoroFlow/SuspendedWaits") {
 		assertThrowsError([&] { waitFor(input); }, error_code_operation_failed);
 	});
 	co_await voidErrorAction->onStarted();
-	ASSERT(!voidErrorAction->onCompleted().isReady());
+	voidErrorAction->assertRunning();
 	failedVoid.sendError(operation_failed());
 	co_await assertActionCompleted(voidErrorAction);
 
@@ -357,60 +260,6 @@ TEST_CASE("/fdbserver/CoroFlow/SuspendedWaits") {
 	co_await pool->stop();
 	co_await receiver->onDestroyed();
 	ASSERT_EQ(receiver->getInitCount(), 1);
-	ASSERT_EQ(receiver->getDestroyCount(), 1);
-}
-
-TEST_CASE("/fdbserver/CoroFlow/StopCancelsQueuedAction") {
-	auto receiver = makeReference<ReceiverState>();
-	auto pool = CoroThreadPool::createThreadPool();
-	pool->addThread(new TestReceiver(receiver));
-	Promise<Void> gate;
-	auto active = postAction(pool, [input = gate.getFuture()] { waitFor(input); });
-	co_await active->onStarted();
-	auto queued = postAction(pool, [] { ASSERT(false); });
-
-	auto stopped = pool->stop();
-	queued->assertCancelled();
-	ASSERT_EQ(active->getCancelCount(), 0);
-	ASSERT(!active->onCompleted().isReady());
-	ASSERT(!stopped.isReady());
-	ASSERT_EQ(receiver->getDestroyCount(), 0);
-
-	gate.send(Void());
-	co_await assertActionCompleted(active);
-	co_await queued->onDestroyed();
-	co_await stopped;
-	co_await receiver->onDestroyed();
-	queued->assertCancelled();
-	ASSERT_EQ(receiver->getDestroyCount(), 1);
-}
-
-TEST_CASE("/fdbserver/CoroFlow/WorkerInitErrorStopsPool") {
-	auto receiver = makeReference<ReceiverState>();
-	auto pool = CoroThreadPool::createThreadPool();
-	const Error expectedError = operation_failed().asInjectedFault();
-	auto poolError = pool->getError();
-	pool->addThread(new FailingTestReceiver(receiver, expectedError));
-	auto queued = postAction(pool, [] { ASSERT(false); });
-	ASSERT(!poolError.isReady());
-
-	bool caughtError{ false };
-	try {
-		co_await poolError;
-	} catch (Error& e) {
-		ASSERT_EQ(e.code(), expectedError.code());
-		ASSERT(e.isInjectedFault());
-		caughtError = true;
-	}
-	ASSERT(caughtError);
-
-	// Cancellation must come from stopOnError, before any explicit stop call.
-	co_await queued->onDestroyed();
-	co_await receiver->onDestroyed();
-	queued->assertCancelled();
-	ASSERT_EQ(receiver->getInitCount(), 1);
-	ASSERT_EQ(receiver->getDestroyCount(), 1);
-	co_await pool->stop(expectedError);
 }
 
 TEST_CASE("/fdbserver/CoroFlow/DropBeforeStart") {
@@ -422,10 +271,9 @@ TEST_CASE("/fdbserver/CoroFlow/DropBeforeStart") {
 
 	pool.clear();
 	queued->assertCancelled();
-	co_await queued->onDestroyed();
+	co_await queued->onDone();
 	co_await receiver->onDestroyed();
 	ASSERT_EQ(receiver->getInitCount(), 0);
-	ASSERT_EQ(receiver->getDestroyCount(), 1);
 }
 
 TEST_CASE("/fdbserver/CoroFlow/DropIdlePool") {
@@ -438,7 +286,6 @@ TEST_CASE("/fdbserver/CoroFlow/DropIdlePool") {
 	pool.clear();
 	co_await receiver->onDestroyed();
 	ASSERT_EQ(receiver->getInitCount(), 1);
-	ASSERT_EQ(receiver->getDestroyCount(), 1);
 }
 
 TEST_CASE("/fdbserver/CoroFlow/DropBusyPool") {
@@ -453,25 +300,20 @@ TEST_CASE("/fdbserver/CoroFlow/DropBusyPool") {
 
 	pool.clear();
 	queued->assertCancelled();
-	ASSERT_EQ(active->getCancelCount(), 0);
-	ASSERT(!active->onCompleted().isReady());
+	active->assertRunning();
 	ASSERT_EQ(receiver->getDestroyCount(), 0);
 
 	gate.sendError(io_error());
 	co_await assertActionCompleted(active);
-	co_await queued->onDestroyed();
+	co_await queued->onDone();
 	co_await receiver->onDestroyed();
-	queued->assertCancelled();
 	ASSERT_EQ(receiver->getInitCount(), 1);
-	ASSERT_EQ(receiver->getDestroyCount(), 1);
 }
 
 TEST_CASE("/fdbserver/CoroFlow/EmptyPoolLifecycle") {
-	{
-		auto pool = CoroThreadPool::createThreadPool();
-		co_await pool->stop();
-	}
 	auto pool = CoroThreadPool::createThreadPool();
+	co_await pool->stop();
+	pool = CoroThreadPool::createThreadPool();
 	pool.clear();
 }
 
@@ -480,24 +322,23 @@ TEST_CASE("/fdbserver/CoroFlow/ErrorStopDropsLastOwner") {
 	auto pool = CoroThreadPool::createThreadPool();
 	const Error expectedError = operation_failed().asInjectedFault();
 	auto poolError = pool->getError();
-	pool->addThread(new FailingTestReceiver(receiver, expectedError));
-	auto queued = makeReference<ActionState>();
-	pool->post(new DropPoolOnCancelAction(queued, pool));
+	pool->addThread(new TestReceiver(receiver, expectedError));
+	auto queued = postAction(pool, [] { ASSERT(false); }, [owner = pool]() mutable { owner.clear(); });
 
 	// The queued action is the only external owner when stopOnError cancels it.
 	pool.clear();
 	ASSERT(!poolError.isReady());
-	ASSERT_EQ(queued->getCancelCount(), 0);
+	queued->assertQueued();
 
 	ErrorOr<Void> result = co_await coro::errorOr(poolError);
 	ASSERT(result.isError());
 	ASSERT_EQ(result.getError().code(), expectedError.code());
 	ASSERT(result.getError().isInjectedFault());
-	co_await queued->onDestroyed();
+	// Cancellation must come from stopOnError, without an explicit stop call.
+	co_await queued->onDone();
 	co_await receiver->onDestroyed();
 	queued->assertCancelled();
 	ASSERT_EQ(receiver->getInitCount(), 1);
-	ASSERT_EQ(receiver->getDestroyCount(), 1);
 }
 
 TEST_CASE("/fdbserver/CoroFlow/StopRetryAfterCancelError") {
@@ -508,9 +349,16 @@ TEST_CASE("/fdbserver/CoroFlow/StopRetryAfterCancelError") {
 	auto active = postAction(pool, [input = gate.getFuture()] { waitFor(input); });
 	co_await active->onStarted();
 	const Error expectedError = operation_failed().asInjectedFault();
-	auto retry = makeReference<CancelRetryState>(expectedError);
-	auto queued = makeReference<ActionState>();
-	pool->post(new ThrowOnceOnCancelAction(queued, retry));
+	auto attempts = std::make_shared<int>(0);
+	auto queued = postAction(
+	    pool,
+	    [] { ASSERT(false); },
+	    [attempts, expectedError] {
+		    if (++*attempts == 1) {
+			    throw expectedError;
+		    }
+		    ASSERT_EQ(*attempts, 2);
+	    });
 
 	Error observedError;
 	try {
@@ -520,26 +368,23 @@ TEST_CASE("/fdbserver/CoroFlow/StopRetryAfterCancelError") {
 	}
 	ASSERT_EQ(observedError.code(), expectedError.code());
 	ASSERT(observedError.isInjectedFault());
-	ASSERT_EQ(retry->getAttemptCount(), 1);
-	ASSERT_EQ(queued->getCancelCount(), 0);
-	ASSERT(!queued->onDestroyed().isReady());
-	ASSERT(!active->onCompleted().isReady());
+	ASSERT_EQ(*attempts, 1);
+	queued->assertQueued();
+	active->assertRunning();
 	ASSERT_EQ(receiver->getDestroyCount(), 0);
 
 	pool.clear();
-	ASSERT_EQ(retry->getAttemptCount(), 2);
+	ASSERT_EQ(*attempts, 2);
 	queued->assertCancelled();
-	ASSERT_EQ(active->getCancelCount(), 0);
-	ASSERT(!active->onCompleted().isReady());
+	active->assertRunning();
 	ASSERT_EQ(receiver->getDestroyCount(), 0);
 
 	gate.send(Void());
 	co_await assertActionCompleted(active);
-	co_await queued->onDestroyed();
+	co_await queued->onDone();
 	co_await receiver->onDestroyed();
-	ASSERT_EQ(retry->getAttemptCount(), 2);
+	ASSERT_EQ(*attempts, 2);
 	ASSERT_EQ(receiver->getInitCount(), 1);
-	ASSERT_EQ(receiver->getDestroyCount(), 1);
 }
 
 TEST_CASE("/fdbserver/CoroFlow/ExplicitStopDropsLastOwner") {
@@ -549,8 +394,7 @@ TEST_CASE("/fdbserver/CoroFlow/ExplicitStopDropsLastOwner") {
 	Promise<Void> gate;
 	auto active = postAction(pool, [input = gate.getFuture()] { waitFor(input); });
 	co_await active->onStarted();
-	auto queued = makeReference<ActionState>();
-	pool->post(new DropPoolOnCancelAction(queued, pool));
+	auto queued = postAction(pool, [] { ASSERT(false); }, [owner = pool]() mutable { owner.clear(); });
 
 	// The queued action keeps this pointer alive until stop() begins canceling it.
 	IThreadPool* poolToStop = pool.getPtr();
@@ -558,15 +402,13 @@ TEST_CASE("/fdbserver/CoroFlow/ExplicitStopDropsLastOwner") {
 	auto stopped = poolToStop->stop();
 	queued->assertCancelled();
 	ASSERT(!stopped.isReady());
-	ASSERT_EQ(active->getCancelCount(), 0);
-	ASSERT(!active->onCompleted().isReady());
+	active->assertRunning();
 	ASSERT_EQ(receiver->getDestroyCount(), 0);
 
 	gate.send(Void());
 	co_await assertActionCompleted(active);
-	co_await queued->onDestroyed();
+	co_await queued->onDone();
 	co_await stopped;
 	co_await receiver->onDestroyed();
 	ASSERT_EQ(receiver->getInitCount(), 1);
-	ASSERT_EQ(receiver->getDestroyCount(), 1);
 }
