@@ -3756,18 +3756,18 @@ Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
 
 	KeySelector b = begin;
 	if (b.orEqual) {
-		CODE_PROBE(true, "Native stream begin orEqual==true", probe::decoration::rare);
+		CODE_PROBE(true, "Native stream begin orEqual==true");
 		b.removeOrEqual(b.arena());
 	}
 
 	KeySelector e = end;
 	if (e.orEqual) {
-		CODE_PROBE(true, "Native stream end orEqual==true", probe::decoration::rare);
+		CODE_PROBE(true, "Native stream end orEqual==true");
 		e.removeOrEqual(e.arena());
 	}
 
 	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
-		CODE_PROBE(true, "Native stream range inverted", probe::decoration::rare);
+		CODE_PROBE(true, "Native stream range inverted");
 		results.sendError(end_of_stream());
 		return Void();
 	}
