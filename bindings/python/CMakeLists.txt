@@ -66,19 +66,18 @@ set(out_files "${out_files};${options_file};${apiversion_file}")
 
 # Create Python package in tar.gz format
 configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_CURRENT_BINARY_DIR}/LICENSE COPYONLY)
-find_program(pycodestyle pycodestyle)
-if (pycodestyle)
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/check_py_code_style
-    COMMAND ${pycodestyle} bindings/python --config=${CMAKE_CURRENT_SOURCE_DIR}/pycodestyle.cfg &&
-            ${CMAKE_COMMAND} -E ${CMAKE_CURRENT_BINARY_DIR}/check_py_code_style
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    DEPENDS ${out_files}
-    COMMENT "Check python code style")
-  add_custom_target(fdb_python_check DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/check_py_code_style)
-else()
-  add_custom_target(fdb_python_check COMMAND ${CMAKE_COMMAND} -E echo "Skipped Python style check! Missing: pycodestyle")
-endif()
 
+add_test(
+  NAME              python_pycodestyle
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  COMMAND sh -c "
+    if ! which pycodestyle >/dev/null; then
+      exit 66
+    fi
+    pycodestyle . --config=${CMAKE_CURRENT_SOURCE_DIR}/pycodestyle.cfg
+    "
+)
+set_tests_properties(python_pycodestyle PROPERTIES SKIP_RETURN_CODE 66)
 
 set(setup_file_name foundationdb-${FDB_PY_VERSION}.tar.gz)
 set(wheel_file_name foundationdb-${FDB_PY_VERSION}-py3-none-any.whl)

@@ -45,21 +45,20 @@ const std::string fileCoordinatorPrefix = "coordination-";
 class LivenessChecker {
 	double threshold;
 	AsyncVar<double> lastTime;
-	static Future<Void> checkStuck(LivenessChecker const* self) {
-		while (true) {
-			auto res = co_await race(delayUntil(self->lastTime.get() + self->threshold), self->lastTime.onChange());
-			if (res.index() == 0) {
-				co_return;
-			}
-		}
-	}
 
 public:
 	explicit LivenessChecker(double threshold) : threshold(threshold), lastTime(now()) {}
 
 	void confirmLiveness() { lastTime.set(now()); }
 
-	Future<Void> checkStuck() const { return checkStuck(this); }
+	Future<Void> checkStuck() const {
+		while (true) {
+			auto res = co_await race(delayUntil(lastTime.get() + threshold), lastTime.onChange());
+			if (res.index() == 0) {
+				co_return;
+			}
+		}
+	}
 };
 
 struct GenerationRegVal {

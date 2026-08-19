@@ -147,7 +147,7 @@ public:
 	// These are to permit use as state variables in actors:
 	ReadYourWritesTransaction();
 	void operator=(ReadYourWritesTransaction&& r) noexcept;
-	explicit(false) ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept;
+	ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept;
 
 	void cancel();
 	void reset();

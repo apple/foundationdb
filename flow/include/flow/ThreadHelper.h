@@ -592,11 +592,11 @@ public:
 	explicit ThreadFuture(ThreadSingleAssignmentVar<T>* sav) : sav(sav) {
 		// sav->addref();
 	}
-	explicit(false) ThreadFuture(const ThreadFuture<T>& rhs) : sav(rhs.sav) {
+	ThreadFuture(const ThreadFuture<T>& rhs) : sav(rhs.sav) {
 		if (sav)
 			sav->addref();
 	}
-	explicit(false) ThreadFuture(ThreadFuture<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
+	ThreadFuture(ThreadFuture<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 	explicit(false) ThreadFuture(const T& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) {
 		sav->send(presentValue);
 	}
@@ -940,11 +940,11 @@ public:
 		ASSERT(sav->isReady());
 		// sav->addref();
 	}
-	explicit(false) ThreadResult(const ThreadResult<T>& rhs) : sav(rhs.sav) {
+	ThreadResult(const ThreadResult<T>& rhs) : sav(rhs.sav) {
 		if (sav)
 			sav->addref();
 	}
-	explicit(false) ThreadResult(ThreadResult<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
+	ThreadResult(ThreadResult<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 	explicit(false) ThreadResult(const T& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) {
 		sav->send(presentValue);
 	}

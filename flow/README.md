@@ -91,7 +91,7 @@ int count = wait( f );
 printf( "%d\n", count );
 ```
 
-It is worth nothing that, although the function `wait()` is declared in [actorcompiler.h](actorcompiler.h), this
+It is worth noting that, although the function `wait()` is declared in [actorcompiler.h](include/flow/actorcompiler.h), this
 “function” is compiled by the Actor Compiler into a complex set of integrated statements and
 callbacks. It is therefore never present in generated code or at link time.
 **Note** : because of the way that the actor compiler is built, `wait()` must always assign the
@@ -150,7 +150,7 @@ ACTOR Future<int> asyncCalculation(Future<int> f1, Future<int> f2, int offset ) 
 ### Void
 
 The `Void `type is used as a signalling-only type for coordination of asynchronous processes.
-The following function waits on an input, send an output to a `Promise`, and signals completion:
+The following function waits on an input, sends an output to a `Promise`, and signals completion:
 
 ```c++
 ACTOR Future<Void> asyncCalculation(Future<int> f, Promise<int> p, int offset ) {
@@ -172,7 +172,7 @@ They can be waited on with the `waitNext()` function.
 
 Like `wait()`, `waitNext()` pauses program execution and awaits the next value in a
 `FutureStream`. If there is a value ready in the stream, execution continues without delay. The
-following “server” waits on input, send an output to a `PromiseStream`:
+following “server” waits on input, sends an output to a `PromiseStream`:
 
 ```c++
 ACTOR void asyncCalculation(FutureStream<int> f, PromiseStream<int> p, int offset ) {
@@ -460,7 +460,7 @@ this exception should not be caught, though there are certainly exceptions!
 
 The FoundationDB solution uses reference counting to manage the lifetimes of many of its
 constituent classes. In order for a class `T` to be reference counted, the following two globally
-defined methods must be defined (see [FastRef.h](FastRef.h)):
+defined methods must be defined (see [FastRef.h](include/flow/FastRef.h)):
 
 
 ```c++

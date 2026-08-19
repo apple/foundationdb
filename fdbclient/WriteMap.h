@@ -162,7 +162,7 @@ public:
 		                                IsUnreadable::False));
 	}
 
-	explicit(false) WriteMap(WriteMap&& r) noexcept
+	WriteMap(WriteMap&& r) noexcept
 	  : arena(r.arena), writeMapEmpty(r.writeMapEmpty), writes(std::move(r.writes)), ver(r.ver),
 	    scratch_iterator(std::move(r.scratch_iterator)) {}
 

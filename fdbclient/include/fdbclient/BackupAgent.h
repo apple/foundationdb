@@ -143,7 +143,7 @@ class FileBackupAgent : public BackupAgentBase {
 public:
 	FileBackupAgent();
 
-	explicit(false) FileBackupAgent(FileBackupAgent&& r) noexcept
+	FileBackupAgent(FileBackupAgent&& r) noexcept
 	  : subspace(r.subspace), config(r.config), lastRestorable(r.lastRestorable), taskBucket(std::move(r.taskBucket)),
 	    futureBucket(std::move(r.futureBucket)) {}
 
@@ -393,7 +393,7 @@ public:
 	DatabaseBackupAgent();
 	explicit DatabaseBackupAgent(Database src);
 
-	explicit(false) DatabaseBackupAgent(DatabaseBackupAgent&& r) noexcept
+	DatabaseBackupAgent(DatabaseBackupAgent&& r) noexcept
 	  : subspace(r.subspace), states(r.states), config(r.config), errors(r.errors), ranges(r.ranges),
 	    tagNames(r.tagNames), sourceStates(r.sourceStates), sourceTagNames(r.sourceTagNames),
 	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)) {}

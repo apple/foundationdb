@@ -103,8 +103,8 @@ public:
 
 	Database() = default; // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator=(Database const& rhs) { db = rhs.db; }
-	explicit(false) Database(Database const& rhs) = default;
-	explicit(false) Database(Database&& r) noexcept : db(std::move(r.db)) {}
+	Database(Database const& rhs) = default;
+	Database(Database&& r) noexcept : db(std::move(r.db)) {}
 	void operator=(Database&& r) noexcept { db = std::move(r.db); }
 
 	// For internal use by the native client:
@@ -201,10 +201,10 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
 
 	template <typename T>
-	void addLog(const T& event) {
+	void addLog(const T& event, SpanContext spanContext) {
 		if (logLocation & TRACE_LOG) {
 			ASSERT(!identifier.empty());
-			event.logEvent(identifier, maxFieldLength);
+			event.logEvent(identifier, maxFieldLength, spanContext);
 		}
 
 		if (flushed) {
