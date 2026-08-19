@@ -1,7 +1,7 @@
 # fdb-aws-s3-credentials-fetcher
 
 This script will fetch credentials to access AWS S3 and store them in a [FDB compatible format](https://apple.github.io/foundationdb/backups.html#blob-credential-files).
-The intention of this script is to be long running. The adjacent Dockefile builds a container that can be used
+The intention of this script is to be long running. The adjacent Dockerfile builds a container that can be used
 as a sidecar that runs adjacent to an fdb pod; the sidekick keeps the s3 credentials up-to-date for the adjacent
 running fdbservers to use making backups, bulkloads, etc., to s3.
 

@@ -45,7 +45,12 @@ public:
 	IBackupFile(const std::string& fileName) : m_fileName(fileName) {}
 	virtual ~IBackupFile() {}
 	// Backup files are append-only and cannot have more than 1 append outstanding at once.
-	virtual Future<Void> append(const void* data, int len) = 0;
+	// Backend hook that writes a single chunk. len is bounded by the chunk size (see append()), so
+	// backends may safely narrow it to the int length taken by IAsyncFile::write().
+	virtual Future<Void> appendImpl(const void* data, size_t len) = 0;
+	// Writes len bytes, slicing them into chunks of at most CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE
+	// so appendImpl() never receives more than INT_MAX bytes.
+	Future<Void> append(const void* data, size_t len);
 	virtual Future<Void> finish() = 0;
 	inline std::string getFileName() const { return m_fileName; }
 	virtual int64_t size() const = 0;
@@ -278,6 +283,12 @@ public:
 		std::string step;
 		int total;
 		int done;
+		// The expire version actually requested, once resolved to an absolute version.
+		Version requestedEndVersion = invalidVersion;
+		// The version expiration was actually performed to, which can differ from requestedEndVersion
+		// because expiration cannot split a log file and will move the end version back to the
+		// beginning of a log file that would otherwise have been partially deleted.
+		Version actualEndVersion = invalidVersion;
 		std::string toString() const;
 	};
 	// Delete backup files which do not contain any data at or after (more recent than) expireEndVersion.

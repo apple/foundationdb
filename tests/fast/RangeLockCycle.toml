@@ -1,6 +1,12 @@
 [configuration]
 tenantModes = ['disabled'] # do not support tenant
 encryptModes = ['disabled'] # do not support encryption
+# Require at least double redundancy. With single storage replication, a rapid
+# recovery-generation handoff during initial database bring-up can orphan the
+# sole (not-yet-durable) seed storage server via PeekPoppedTLogData, leaving the
+# database permanently without storage servers and timing out the starting
+# configuration. Extra replicas keep the database available across that handoff.
+minimumReplication = 2
 
 [[knobs]]
 enable_read_lock_on_range = true
