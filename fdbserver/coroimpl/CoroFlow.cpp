@@ -201,7 +201,7 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 	Error error;
 	bool destroying{ false };
 	Promise<Void> stopRequested;
-	Future<Void> m_stopOnError; // Cancel before releasing pool; cancellation performs implicit shutdown.
+	Future<Void> m_stopOnError; // Destroy before the shutdown signal and pool.
 
 	Future<Void> stopOnError(WorkPool* w) {
 		try {
@@ -209,6 +209,10 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 			ASSERT(result.index() == 1);
 		} catch (Error& e) {
 			w->stop(e);
+			co_return;
+		}
+		if (w->destroying) {
+			w->stop(actor_cancelled());
 		}
 	}
 
@@ -221,7 +225,13 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 
 public:
 	WorkPool() : pool(new Pool) { m_stopOnError = stopOnError(this); }
-	~WorkPool() override { destroying = true; }
+	~WorkPool() override {
+		destroying = true;
+		// Run implicit stop inside the watcher's exception boundary, not this noexcept destructor.
+		if (stopRequested.canBeSet()) {
+			stopRequested.send(Void());
+		}
+	}
 
 	Future<Void> getError() const override { return pool->anyError.getResult(); }
 	void addThread(IThreadPoolReceiver* userData, const char*) override {
@@ -284,7 +294,7 @@ public:
 		for (int i = 0; i < idle.size(); i++)
 			idle[i]->unblock();
 
-		// Keep the cancellation fallback if synchronous cleanup throws; finish before stop waiters can release us.
+		// Keep implicit shutdown pending if synchronous cleanup throws; finish before stop waiters can release us.
 		if (stopRequested.canBeSet()) {
 			stopRequested.send(Void());
 		}
