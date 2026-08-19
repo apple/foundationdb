@@ -6223,7 +6223,8 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 	state CountedSection csAll(data->counters.allQueries, data->counters.finishedQueries);
-	state CountedSection csRangeMapped(data->counters.getMappedRangeQueries, data->counters.finishedGetMappedRangeQueries);
+	state CountedSection csRangeMapped(data->counters.getMappedRangeQueries,
+	                                   data->counters.finishedGetMappedRangeQueries);
 	if (req.begin.getKey().startsWith(systemKeys.begin)) {
 		++data->counters.systemKeyQueries;
 	}
