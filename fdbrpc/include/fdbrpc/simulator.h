@@ -391,7 +391,7 @@ inline bool simulationPolicyHasCapability(ISimulationPolicy::Capability capabili
 }
 
 void startNewSimulator(bool printSimTime);
-Future<Void> startUnitTestSimulator();
+Future<Void> startUnitTestSimulator(int wellKnownEndpointCount);
 
 // Parameters used to simulate disk performance
 struct DiskParameters : ReferenceCounted<DiskParameters> {

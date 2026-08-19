@@ -25,7 +25,6 @@
 #include "flow/Hostname.h"
 
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/WellKnownEndpoints.h"
 
 #include <type_traits>
 
@@ -74,7 +73,7 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request
 }
 
 template <class Req>
-Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request, Hostname hostname, WellKnownEndpoints token) {
+Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request, Hostname hostname, int token) {
 	// A wrapper of tryGetReply(request), except that the request is sent to an address resolved from a hostname.
 	// If resolving fails, return lookup_failed().
 	// Otherwise, return tryGetReply(request).
@@ -97,7 +96,7 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request, Hostname h
 template <class Req>
 Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request,
                                                          Hostname hostname,
-                                                         WellKnownEndpoints token,
+                                                         int token,
                                                          TaskPriority taskID) {
 	// A wrapper of tryGetReply(request), except that the request is sent to an address resolved from a hostname.
 	// If resolving fails, return lookup_failed().
@@ -119,10 +118,7 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request,
 }
 
 template <class Req>
-Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
-                                                  Hostname hostname,
-                                                  WellKnownEndpoints token,
-                                                  ExplicitVoid = {}) {
+Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request, Hostname hostname, int token, ExplicitVoid = {}) {
 	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
@@ -153,7 +149,7 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
 template <class Req>
 Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
                                                   Hostname hostname,
-                                                  WellKnownEndpoints token,
+                                                  int token,
                                                   TaskPriority taskID,
                                                   ExplicitVoid = {}) {
 	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.

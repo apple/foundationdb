@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbserver/core/CoordinatedState.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/Knobs.h"

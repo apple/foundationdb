@@ -53,7 +53,7 @@
 #include "flow/IRandom.h"
 #include "flow/MkCert.h"
 #include "flow/ProcessEvents.h"
-#include "fdbrpc/WellKnownEndpoints.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
 #include "flow/network.h"
