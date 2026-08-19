@@ -56,6 +56,8 @@ FDBSimulationPolicyState& policyState() {
 	return *state;
 }
 
+// Applies FDB replication and test configuration to availability, process-kill, and
+// storage capability decisions without exposing FDB-specific state to the generic simulator.
 class FDBSimulationPolicy final : public IFDBSimulationPolicy {
 public:
 	bool shouldIncludeInAvailabilityCheck(ProcessInfo const& processInfo) const override {

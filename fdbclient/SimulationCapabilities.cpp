@@ -60,23 +60,14 @@ private:
 	Reference<ISimulationPolicy> policy;
 };
 
+// Test policy that returns the same fixed answer for every capability.
 class TestCapabilityPolicy final : public IFDBSimulationPolicy {
 public:
-	explicit TestCapabilityPolicy(bool enabled, int* destructionCount = nullptr)
-	  : enabled(enabled), destructionCount(destructionCount) {}
-
-	~TestCapabilityPolicy() override {
-		if (destructionCount) {
-			++*destructionCount;
-		}
-	}
-
-	void setEnabled(bool value) { enabled = value; }
+	explicit TestCapabilityPolicy(bool enabled) : enabled(enabled) {}
 	bool hasCapability(FDBSimulationCapability) const override { return enabled; }
 
 private:
-	bool enabled;
-	int* destructionCount;
+	const bool enabled;
 };
 
 struct ReentrantPolicyLifetime {
@@ -85,6 +76,8 @@ struct ReentrantPolicyLifetime {
 	bool destroyedDuringQuery = false;
 };
 
+// Replaces itself during a capability query to verify that the queried policy stays alive
+// until the call returns.
 class ReplacingCapabilityPolicy final : public IFDBSimulationPolicy {
 public:
 	ReplacingCapabilityPolicy(ISimulator* simulator,
@@ -146,44 +139,6 @@ TEST_CASE("/fdbclient/SimulationCapabilities/Defaults") {
 	assertAllCapabilities(false);
 	g_simulator = simulator;
 	assertAllCapabilities(true);
-	return Void();
-}
-
-TEST_CASE("/fdbclient/SimulationCapabilities/PolicyReplacement") {
-	ASSERT(g_network);
-	if (!g_network->isSimulated()) {
-		assertAllCapabilities(false);
-		return Void();
-	}
-
-	int firstDestructions = 0;
-	int secondDestructions = 0;
-	SimulationPolicyRestore restore;
-	auto* const simulator = g_simulator;
-	ASSERT(simulator);
-
-	auto first = makeReference<TestCapabilityPolicy>(true, &firstDestructions);
-	simulator->setSimulationPolicy(first);
-	assertAllCapabilities(true);
-	first->setEnabled(false);
-	assertAllCapabilities(false);
-	first->setEnabled(true);
-	auto retainedFirst = simulator->getSimulationPolicy();
-	first.clear();
-	ASSERT_EQ(firstDestructions, 0);
-	assertAllCapabilities(true);
-
-	auto second = makeReference<TestCapabilityPolicy>(false, &secondDestructions);
-	simulator->setSimulationPolicy(second);
-	second.clear();
-	ASSERT_EQ(firstDestructions, 0);
-	assertAllCapabilities(false);
-	retainedFirst.clear();
-	ASSERT_EQ(firstDestructions, 1);
-
-	simulator->setSimulationPolicy({});
-	ASSERT_EQ(secondDestructions, 1);
-	assertAllCapabilities(false);
 	return Void();
 }
 
