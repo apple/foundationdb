@@ -83,7 +83,7 @@ struct Coroutine /*: IThreadlike*/ {
 	}
 
 protected:
-	static Future<Void> switcher(Coroutine* self, Uncancellable = Uncancellable()) {
+	static coro::DetachedCoroutine switcher(Coroutine* self) {
 		std::shared_ptr<bool> alive = self->alive;
 		while (*alive && *self->coro) {
 			try {
@@ -235,7 +235,7 @@ public:
 		pool->allStopped.add(w->stopped.getFuture());
 		startWorker(w);
 	}
-	static Future<Void> startWorker(Worker* w, Uncancellable = Uncancellable()) {
+	static coro::DetachedCoroutine startWorker(Worker* w) {
 		// We want to make sure that coroutines are always started after Net2::run() is called, so the main coroutine is
 		// initialized.
 		co_await delay(0, g_network->getCurrentTask());

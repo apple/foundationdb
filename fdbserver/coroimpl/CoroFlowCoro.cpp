@@ -208,7 +208,7 @@ public:
 		pool->allStopped.add(w->stopped.getFuture());
 		startWorker(w);
 	}
-	static Future<Void> startWorker(Worker* w, Uncancellable = Uncancellable()) {
+	static coro::DetachedCoroutine startWorker(Worker* w) {
 		// We want to make sure that coroutines are always started after Net2::run() is called, so the main coroutine is
 		// initialized.
 		co_await delay(0, g_network->getCurrentTask());
@@ -272,7 +272,7 @@ public:
 
 using CoroPool = WorkPool<Coroutine, ThreadUnsafeSpinLock, true>;
 
-Future<Void> coroSwitcher(Future<Void> what, TaskPriority taskID, Coro* coro, Uncancellable = Uncancellable()) {
+coro::DetachedCoroutine coroSwitcher(Future<Void> what, TaskPriority taskID, Coro* coro) {
 	try {
 		// state double t = now();
 		co_await what;
