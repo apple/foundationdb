@@ -34,7 +34,7 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
-#include "fdbrpc/TSSComparison.h"
+#include "fdbclient/TSSComparison.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tracing.h"
@@ -1268,5 +1268,7 @@ inline int mvccStorageBytes(int mutationBytes) {
 	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
 	       (mutationBytes + MutationRef::OVERHEAD_BYTES) * 2;
 }
+
+#include "fdbclient/StorageServerLoadBalance.h"
 
 #endif

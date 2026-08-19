@@ -107,7 +107,7 @@ public:
 		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::operator=(std::move(r));
 	}
 
-	explicit(false) CoalescedKeyRangeMap(CoalescedKeyRangeMap&& source) = default;
+	CoalescedKeyRangeMap(CoalescedKeyRangeMap&& source) = default;
 
 	void insert(const KeyRangeRef& keys, const Val& value);
 	void insert(const KeyRef& key, const Val& value);

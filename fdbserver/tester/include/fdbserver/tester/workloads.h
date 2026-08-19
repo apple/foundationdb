@@ -45,7 +45,7 @@ struct WorkloadContext {
 	std::vector<KeyRange> rangesToCheck; // for urgent consistency checker
 
 	WorkloadContext();
-	explicit(false) WorkloadContext(const WorkloadContext&);
+	WorkloadContext(const WorkloadContext&);
 	~WorkloadContext();
 	WorkloadContext& operator=(const WorkloadContext&) = delete;
 };

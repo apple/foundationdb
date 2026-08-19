@@ -324,7 +324,7 @@ private:
 public:
 	explicit art_iterator(art_tree::art_leaf* l) { leaf = l; }
 
-	explicit(false) art_iterator(const art_iterator& i) { leaf = i.leaf; }
+	art_iterator(const art_iterator& i) { leaf = i.leaf; }
 
 	art_iterator() { leaf = nullptr; }
 

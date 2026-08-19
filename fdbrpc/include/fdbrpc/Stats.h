@@ -220,7 +220,7 @@ public:
 	    double loggingInterval,
 	    std::function<void(TraceEvent&)> const& decorator = [](auto&) {});
 
-	explicit(false) LatencyBands(LatencyBands&&) = default;
+	LatencyBands(LatencyBands&&) = default;
 	LatencyBands& operator=(LatencyBands&&) = default;
 
 	void addThreshold(double value);
