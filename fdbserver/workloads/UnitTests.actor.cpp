@@ -125,7 +125,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkWipedStringTests();
 		forceLinkRandomKeyValueUtilsTests();
 		forceLinkSimpleCounterTests();
-                forceLinkCountedSectionTests();
+		forceLinkCountedSectionTests();
 
 #ifdef FLOW_GRPC_ENABLED
 		forceLinkGrpcTests();
