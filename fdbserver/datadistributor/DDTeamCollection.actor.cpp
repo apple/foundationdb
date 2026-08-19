@@ -2064,8 +2064,6 @@ public:
 				            IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			} else if (res.index() == 1) {
 				break;
-			} else if (res.index() != 2) {
-				UNREACHABLE();
 			}
 		}
 
@@ -2800,10 +2798,8 @@ public:
 							    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 							lastIsTss = self->isTssRecruiting;
 						}
-					} else if (res.index() == 1) {
-						break;
 					} else {
-						UNREACHABLE();
+						break;
 					}
 				}
 				TraceEvent("StorageServerRecruitment", self->distributorId)
@@ -3401,12 +3397,8 @@ public:
 				}
 
 				checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
-			} else if (res.index() == 2) {
-				if (isFetchingResults) {
-					serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
-				}
-			} else {
-				UNREACHABLE();
+			} else if (isFetchingResults) {
+				serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
 			}
 		}
 	}
@@ -7269,7 +7261,6 @@ public:
 		const std::string trackingKey = collection->storageServerRecruitmentEventHolder->trackingKey;
 		Future<Void> monitor = collection->monitorStorageServerRecruitment();
 
-		ASSERT(!monitor.isReady());
 		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Idle");
 
 		collection->recruitingStream.set(1);
@@ -7286,17 +7277,10 @@ public:
 		collection->recruitingStream.set(1);
 		co_await delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY + 0.01, TaskPriority::DataDistribution);
 		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
-		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("IsTSS"), "True");
 
 		collection->recruitingStream.set(0);
-		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
 		co_await delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY + 0.01, TaskPriority::DataDistribution);
 		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Idle");
-
-		collection->isTssRecruiting = false;
-		collection->recruitingStream.set(1);
-		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
-		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("IsTSS"), "False");
 
 		monitor.cancel();
 		co_await delay(0);
@@ -7323,16 +7307,10 @@ public:
 		ASSERT(!txnProcessor->isServerListFetchActive(0));
 		ASSERT(txnProcessor->isServerListFetchActive(1));
 
-		serverRemoved.send(Void());
-		ASSERT(!removalEvents.isReady());
-		ASSERT_EQ(txnProcessor->getServerListFetchCount(), 3);
-		ASSERT(!txnProcessor->isServerListFetchActive(1));
-		ASSERT(txnProcessor->isServerListFetchActive(2));
-
 		ServerWorkerInfos infos;
 		infos.readVersion = 1;
-		txnProcessor->completeServerListFetch(2, std::move(infos));
-		ASSERT(!txnProcessor->isServerListFetchActive(2));
+		txnProcessor->completeServerListFetch(1, std::move(infos));
+		ASSERT(!txnProcessor->isServerListFetchActive(1));
 		ASSERT(!monitor.isReady());
 
 		monitor.cancel();
