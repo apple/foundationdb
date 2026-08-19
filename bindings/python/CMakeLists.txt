@@ -87,11 +87,28 @@ set(wheel_package_file ${CMAKE_BINARY_DIR}/packages/${wheel_file_name})
 # Build both source distribution and wheel
 # Note: foundationdb is a pure Python package (uses ctypes), so wheel is py3-none-any
 set(PYPKG_VENV_DIR "${CMAKE_BINARY_DIR}/pypkg-venv")
-set(PYPKG_PY3      "${PYPKG_VENV_DIR}/bin/python3")
+set(PYPKG_PY3       ${Python3_EXECUTABLE})
+execute_process(
+  COMMAND         ${PYPKG_PY3} -m build --version
+  RESULT_VARIABLE PY_BUILD_STATUS
+  OUTPUT_VARIABLE PY_BUILD_OUTPUT
+  ERROR_VARIABLE  PY_BUILD_OUTPUT
+)
+if(PY_BUILD_STATUS EQUAL 0)
+  message(STATUS "Found python ${PY_BUILD_OUTPUT}")
+else()
+  message(STATUS "Setting up python pkg build virtual environment")
+  execute_process(COMMAND ${Python3_EXECUTABLE} -m venv ${PYPKG_VENV_DIR} COMMAND_ERROR_IS_FATAL ANY)
+  find_program(
+    VENV_Python3_EXECUTABLE
+    NAMES python3 python3.exe python.exe
+    PATHS ${PYPKG_VENV_DIR}/Scripts ${PYPKG_VENV_DIR}/bin
+    REQUIRED NO_DEFAULT_PATH NO_CACHE
+    DOC "Checking Python3 executable in virtual environment")
+  set(PYPKG_PY3 ${VENV_Python3_EXECUTABLE})
+  execute_process(COMMAND "${PYPKG_PY3}" -m pip install build COMMAND_ERROR_IS_FATAL ANY)
+endif()
 add_custom_command(OUTPUT ${package_file} ${wheel_package_file}
-  COMMAND $<TARGET_FILE:Python3::Interpreter> -m venv "${PYPKG_VENV_DIR}"
-  COMMAND ${PYPKG_PY3} -m ensurepip
-  COMMAND ${PYPKG_PY3} -m pip install --upgrade build
   COMMAND ${PYPKG_PY3} -m build --sdist --wheel
   COMMAND ${CMAKE_COMMAND} -E copy dist/${setup_file_name} ${package_file}
   COMMAND ${CMAKE_COMMAND} -E copy dist/${wheel_file_name} ${wheel_package_file}
