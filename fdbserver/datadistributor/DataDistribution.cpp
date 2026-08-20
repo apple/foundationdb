@@ -1765,6 +1765,7 @@ Future<BulkLoadTaskState> bulkLoadJobSubmitTask(Reference<DataDistributor> self,
 
 Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistributor> self,
                                                      UID jobId,
+                                                     KeyRange jobRange,
                                                      BulkLoadTaskState bulkLoadTask) {
 	ASSERT(bulkLoadTask.isValid());
 	Database cx = self->txnProcessor->context();
@@ -1802,6 +1803,25 @@ Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistributor> 
 			hasErr = true;
 		}
 		if (hasErr) {
+			if (err.code() == error_code_bulkload_task_outdated) {
+				// The task being watched may have been replaced by narrower tasks covering the same range.
+				// getBulkLoadTask reports that as outdated, because the range no longer maps to a single
+				// task, but it is not a failure: the replacements carry the same data and are monitored in
+				// their own right. Treating it as one fails the whole job, and the restart cancels every
+				// other monitor, so one split would strand the entire load.
+				BulkLoadJobTaskLookup lookup =
+				    co_await bulkLoadJobFindTask(self, bulkLoadTask.getRange(), jobId, jobRange, self->ddId);
+				bool replaced = lookup.rangeSplit || !lookup.task.present() ||
+				                lookup.task.get().getTaskId() != bulkLoadTask.getTaskId();
+				if (replaced) {
+					TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorStopMonitoringReplacedTask", self->ddId)
+					    .detail("InputJobID", jobId)
+					    .detail("TaskRange", bulkLoadTask.getRange())
+					    .detail("TaskID", bulkLoadTask.getTaskId())
+					    .detail("RangeSplit", lookup.rangeSplit);
+					co_return;
+				}
+			}
 			co_await tr.onError(err);
 		}
 		co_await delay(SERVER_KNOBS->DD_BULKLOAD_JOB_MONITOR_PERIOD_SEC);
@@ -1932,7 +1952,7 @@ Future<Void> bulkLoadJobMonitorTask(Reference<DataDistributor> self,
 		}
 
 		// Step 2: Monitor the bulkload completion
-		co_await bulkLoadJobWaitUntilTaskCompleteOrError(self, jobId, bulkLoadTask);
+		co_await bulkLoadJobWaitUntilTaskCompleteOrError(self, jobId, jobRange, bulkLoadTask);
 		TraceEvent(bulkLoadPerfEventSev(), "DDBulkLoadJobExecutorTask", self->ddId)
 		    .detail("Phase", "Found task complete")
 		    .detail("JobID", jobId)
@@ -1941,6 +1961,11 @@ Future<Void> bulkLoadJobMonitorTask(Reference<DataDistributor> self,
 		self->bulkLoadParallelismLimitor.decrementTaskCounter();
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
+			// Release the slot before unwinding. Cancellation is how the job manager tears monitors down
+			// when it restarts, so skipping the decrement permanently shrinks the parallelism budget: after
+			// enough restarts scheduleBulkLoadJob blocks forever waiting for a slot no live monitor holds,
+			// and the job stops progressing with no error reported anywhere.
+			self->bulkLoadParallelismLimitor.decrementTaskCounter();
 			throw e;
 		}
 		TraceEvent(SevWarn, "DDBulkLoadJobExecutorTaskMonitorError", self->ddId)
