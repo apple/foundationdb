@@ -304,8 +304,9 @@ struct BulkDumping : TestWorkload {
 
 	Future<std::vector<BulkLoadTaskState>> waitUntilLoadJobCompleteOrError(BulkDumping* self,
 	                                                                       Database cx,
-	                                                                       UID jobId,
-	                                                                       KeyRange jobRange) {
+	                                                                       BulkLoadJobHandle expectedJob) {
+		const UID jobId = expectedJob.getJobState().getJobId();
+		const KeyRange jobRange = expectedJob.getJobState().getJobRange();
 		double startTime = now();
 		while (true) {
 			// Check for timeout to prevent infinite waiting
@@ -320,16 +321,16 @@ struct BulkDumping : TestWorkload {
 				co_return errorTasks;
 			}
 
-			Optional<BulkLoadJobState> runningJob = co_await getRunningBulkLoadJob(cx);
+			Optional<BulkLoadJobHandle> runningJob = co_await getRunningBulkLoadJobHandle(cx);
 			if (runningJob.present()) {
-				ASSERT(runningJob.get().getJobId() == jobId);
+				ASSERT(runningJob.get().hasSameSubmission(expectedJob));
 				// During the wait for the job completion, we may inject the job cancellation.
 				// We varies the timing of the job cancellation, we trigger the job cancellation with 10% probability at
 				// each time. Throughout the entire test, we inject the job cancellation at most maxCancelTimes times to
 				// ensure the job can complete fast.
 				if (SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION && self->cancelTimes < self->maxCancelTimes &&
 				    deterministicRandom()->random01() < 0.1) {
-					co_await cancelBulkLoadJob(cx, jobId);
+					co_await cancelBulkLoadJob(cx, expectedJob);
 					self->cancelTimes++; // Inject cancellation. Then the bulkload job should run again.
 					TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Job Cancelled").detail("Job", jobId.toString());
 					co_await self->clearRangeData(cx, jobRange);
@@ -557,7 +558,8 @@ struct BulkDumping : TestWorkload {
 			BulkLoadJobState bulkLoadJob =
 			    createBulkLoadJob(dataSourceId, bulkLoadJobRange, dataSourceRoot, bulkLoadTransportMethod);
 			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Submitting Load Job").detail("JobId", dataSourceId);
-			co_await timeoutError(submitBulkLoadJob(cx, bulkLoadJob), jobSubmitTimeout);
+			BulkLoadJobHandle bulkLoadHandle =
+			    co_await timeoutError(submitBulkLoadJobWithLock(cx, bulkLoadJob), jobSubmitTimeout);
 			TraceEvent("BulkDumpingWorkLoad")
 			    .detail("Phase", "Load Job Submitted")
 			    .detail("JobId", dataSourceId)
@@ -568,7 +570,7 @@ struct BulkDumping : TestWorkload {
 			// Wait until the load job complete
 			std::vector<KeyRange> errorRanges;
 			std::vector<BulkLoadTaskState> errorTasks =
-			    co_await waitUntilLoadJobCompleteOrError(this, cx, bulkLoadJob.getJobId(), bulkLoadJob.getJobRange());
+			    co_await waitUntilLoadJobCompleteOrError(this, cx, bulkLoadHandle);
 			// waitUntilLoadJobCompleteOrError can cancel the job and set cancelled to true.
 			// If this happens, the current job is intentionally cancelled and we should retry the job.
 			ASSERT(cancelTimes >= oldCancelTimes);
@@ -602,7 +604,7 @@ struct BulkDumping : TestWorkload {
 			}
 
 			// Acknowledge any error task of the job
-			co_await acknowledgeAllErrorBulkLoadTasks(cx, bulkLoadJob.getJobId(), bulkLoadJob.getJobRange());
+			co_await acknowledgeAllErrorBulkLoadTasks(cx, bulkLoadHandle);
 			co_await validateBulkLoadJobHistory(
 			    cx, bulkLoadJob.getJobId(), hasError, bulkDumpRangeContainBulkLoadRange);
 			break;

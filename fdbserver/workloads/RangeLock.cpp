@@ -581,7 +581,6 @@ struct RangeLocking : TestWorkload {
 
 	Future<Void> testUnlockByUser(RangeLocking* self, Database cx) {
 		int i = 0;
-		int j = 0;
 		std::unordered_map<RangeLockOwnerName, std::vector<KeyRange>> rangeLocks;
 		RangeLockOwnerName rangeLockOwnerName;
 		std::vector<RangeLockOwnerName> candidates;
@@ -593,7 +592,7 @@ struct RangeLocking : TestWorkload {
 			rangeLockOwnerName = "TestUnlockByUser" + std::to_string(i);
 			co_await registerRangeLockOwner(cx, rangeLockOwnerName, rangeLockOwnerName);
 			lockedRanges.clear();
-			for (; j < 2; j++) {
+			for (int j = 0; j < 2; j++) {
 				try {
 					rangeToLock = self->getRandomRange();
 					co_await takeExclusiveReadLockOnRange(cx, rangeToLock, rangeLockOwnerName);

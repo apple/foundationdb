@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <cinttypes>
 #include <cstddef>
 #include <string>
@@ -2713,20 +2714,27 @@ Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID
 	    tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState));
 }
 
+BulkLoadJobHandle::BulkLoadJobHandle(BulkLoadJobState jobState, RangeLockState rangeLock)
+  : jobState(std::move(jobState)), rangeLock(std::move(rangeLock)) {
+	if (!this->jobState.isValid() || !this->rangeLock.isValid() ||
+	    !this->rangeLock.isLockedFor(RangeLockType::ExclusiveReadLock) || this->rangeLock.getLockId().empty() ||
+	    this->rangeLock.getOwnerUniqueId() != rangeLockNameForBulkLoad ||
+	    this->rangeLock.getRange() != this->jobState.getJobRange()) {
+		throw bulkload_task_failed();
+	}
+}
+
 // This is the only place to update job history map. So, we check the number of job history entries here is sufficient
 // to maintain that the number of jobs in the history is no more than BULKLOAD_JOB_HISTORY_COUNT_MAX.
-Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState) {
-	Key newJobKey = bulkLoadJobHistoryKeyFor(jobState.getJobId());
-	RangeResult jobHistoryResult;
-	Optional<BulkLoadJobState> oldestJobState; // Set to remove when the job history is full.
+Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState, RangeLockState rangeLock) {
+	const BulkLoadJobHandle handle(jobState, rangeLock);
+	const int historyLimit = std::max(1, CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	std::vector<BulkLoadJobState> olderJobs;
 	Key beginKey = bulkLoadJobHistoryKeys.begin;
-	Key endKey = bulkLoadJobHistoryKeys.end;
-	while (true) {
-		jobHistoryResult.clear();
-		jobHistoryResult =
-		    co_await tr->getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX * 2);
-		// Set limit twice the max count to check the number of jobs in the history is no more than the max
-		// count.
+	while (beginKey < bulkLoadJobHistoryKeys.end) {
+		RangeResult jobHistoryResult =
+		    co_await tr->getRange(KeyRangeRef(beginKey, bulkLoadJobHistoryKeys.end), historyLimit * 2);
 		for (int i = 0; i < jobHistoryResult.size(); i++) {
 			ASSERT_WE_THINK(!jobHistoryResult[i].value.empty());
 			if (jobHistoryResult[i].value.empty()) {
@@ -2740,33 +2748,30 @@ Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState)
 				    .detail("JobState", jobStateInHistory.toString());
 				continue;
 			}
-			if (jobStateInHistory.getJobId() == jobState.getJobId()) {
-				tr->set(newJobKey, bulkLoadJobValue(jobState));
-				// BulkLoad job with the same jobId can run for multiple times, we only keep the latest one
-				// in the history.
-				co_return;
-			}
-			if (jobHistoryResult.size() > CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX) {
-				TraceEvent(SevError, "DDBulkLoadJobHistoryCountExceed", jobState.getJobId())
-				    .detail("JobHistoryCount", jobHistoryResult.size())
-				    .detail("More", jobHistoryResult.more);
-			}
-			if (jobHistoryResult.size() >= CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX && oldestJobState.present() &&
-			    jobStateInHistory.getSubmitTime() < oldestJobState.get().getSubmitTime()) {
-				oldestJobState = jobStateInHistory;
+			if (jobStateInHistory.getJobId() != jobState.getJobId()) {
+				olderJobs.push_back(jobStateInHistory);
 			}
 		}
-		if (jobHistoryResult.more) {
-			beginKey = keyAfter(jobHistoryResult.back().key);
-			continue;
-		} else {
+		if (!jobHistoryResult.more) {
 			break;
 		}
+		beginKey = keyAfter(jobHistoryResult.back().key);
 	}
-	if (oldestJobState.present()) {
-		tr->clear(bulkLoadJobHistoryKeyFor(oldestJobState.get().getJobId()));
+	std::sort(olderJobs.begin(), olderJobs.end(), [](const BulkLoadJobState& lhs, const BulkLoadJobState& rhs) {
+		if (lhs.getSubmitTime() != rhs.getSubmitTime()) {
+			return lhs.getSubmitTime() < rhs.getSubmitTime();
+		}
+		return lhs.getJobId() < rhs.getJobId();
+	});
+	// Also repair an overfull history left by older versions. Both records are evicted atomically.
+	const int evictCount = std::max(0, static_cast<int>(olderJobs.size()) + 1 - historyLimit);
+	for (int i = 0; i < evictCount; ++i) {
+		tr->clear(bulkLoadJobHistoryKeyFor(olderJobs[i].getJobId()));
+		tr->clear(bulkLoadJobHistoryRangeLockKeyFor(olderJobs[i].getJobId()));
 	}
-	tr->set(newJobKey, bulkLoadJobValue(jobState));
+	// The same source dump ID can run repeatedly; only its latest terminal submission is retained.
+	tr->set(bulkLoadJobHistoryKeyFor(jobState.getJobId()), bulkLoadJobValue(jobState));
+	tr->set(bulkLoadJobHistoryRangeLockKeyFor(jobState.getJobId()), rangeLockStateValue(handle.getRangeLock()));
 }
 
 AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
@@ -2811,8 +2816,10 @@ Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId) {
 		try {
 			if (jobId.present()) {
 				tr.clear(bulkLoadJobHistoryKeyFor(jobId.get()));
+				tr.clear(bulkLoadJobHistoryRangeLockKeyFor(jobId.get()));
 			} else {
 				tr.clear(bulkLoadJobHistoryKeys);
+				tr.clear(bulkLoadJobHistoryRangeLockKeys);
 			}
 			co_await tr.commit();
 			break;
@@ -2823,78 +2830,332 @@ Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId) {
 	}
 }
 
-Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
-	RangeResult rangeResult;
-	// At most one job at a time, so looking at the first returned range is sufficient
-	rangeResult = co_await krmGetRanges(tr, bulkLoadJobPrefix, normalKeys);
-	if (rangeResult.empty()) {
-		co_return Optional<BulkLoadJobState>();
-	}
-	for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
-		if (rangeResult[i].value.empty()) {
-			continue;
+Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr, KeyRange range) {
+	Key beginKey = range.begin;
+	while (beginKey < range.end) {
+		RangeResult ranges = co_await krmGetRanges(tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, range.end));
+		if (ranges.size() < 2) {
+			co_return Optional<BulkLoadJobState>();
 		}
-		BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
-		if (!jobState.isValid()) {
-			continue;
+		for (int i = 0; i < static_cast<int>(ranges.size()) - 1; ++i) {
+			if (ranges[i].value.empty()) {
+				continue;
+			}
+			BulkLoadJobState jobState = decodeBulkLoadJobState(ranges[i].value);
+			if (jobState.isValid()) {
+				co_return jobState;
+			}
 		}
-		co_return jobState;
+		ASSERT(ranges.back().key > beginKey);
+		beginKey = ranges.back().key;
 	}
 	co_return Optional<BulkLoadJobState>();
 }
 
-Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
+Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
+	return getSubmittedBulkLoadJob(tr, normalKeys);
+}
+
+namespace {
+
+bool sameBulkLoadJobInput(const BulkLoadJobState& lhs, const BulkLoadJobState& rhs) {
+	return lhs.getJobId() == rhs.getJobId() && lhs.getJobRange() == rhs.getJobRange() &&
+	       lhs.getJobRoot() == rhs.getJobRoot() && lhs.getTransportMethod() == rhs.getTransportMethod();
+}
+
+// A transaction retry may observe a newer use of the same source dump ID. Once selected, neither an existing
+// acquisition nor a proposed new/adopted acquisition may change identity during this API invocation.
+class BulkLoadJobAttempt {
+public:
+	BulkLoadJobAttempt() : proposedLockId(deterministicRandom()->randomUniqueID().toString()) {}
+
+	bool hasObservedJob() const { return observedJob.present(); }
+	bool hasHandle() const { return handle.present(); }
+	const BulkLoadJobHandle& getHandle() const { return handle.get(); }
+	bool canRetryNewSubmission() const { return source == Source::NewSubmission && !commitUnknown; }
+
+	void observeJob(const BulkLoadJobState& job) {
+		if (observedJob.present()) {
+			if (!sameBulkLoadJobInput(observedJob.get(), job) ||
+			    observedJob.get().getSubmitTime() != job.getSubmitTime()) {
+				throw bulkload_task_outdated();
+			}
+		} else {
+			observedJob = job;
+		}
+	}
+
+	void selectExisting(const BulkLoadJobState& job, const RangeLockState& rangeLock) {
+		observeJob(job);
+		BulkLoadJobHandle existing(job, rangeLock);
+		if (handle.present()) {
+			if (!handle.get().hasSameSubmission(existing)) {
+				throw bulkload_task_outdated();
+			}
+		} else {
+			handle = existing;
+			source = Source::Existing;
+		}
+	}
+
+	void selectLegacy(const BulkLoadJobState& job) { selectProposed(job, Source::LegacyAdoption); }
+	void selectNew(const BulkLoadJobState& job) {
+		if (commitUnknown) {
+			throw bulkload_task_outdated();
+		}
+		selectProposed(job, Source::NewSubmission);
+	}
+
+	void pinOwnerGeneration(UID generation) {
+		if (!generation.isValid() || (ownerGeneration.present() && ownerGeneration.get() != generation)) {
+			throw range_lock_failed();
+		}
+		ownerGeneration = generation;
+	}
+
+	UID getOwnerGeneration() const { return ownerGeneration.get(); }
+	void noteCommitUnknown() { commitUnknown = true; }
+
+private:
+	enum class Source { Unselected, Existing, LegacyAdoption, NewSubmission };
+
+	void selectProposed(const BulkLoadJobState& job, Source requestedSource) {
+		observeJob(job);
+		if (source != Source::Unselected && source != requestedSource) {
+			throw bulkload_task_outdated();
+		}
+		if (!handle.present()) {
+			handle = BulkLoadJobHandle(
+			    job,
+			    RangeLockState(
+			        RangeLockType::ExclusiveReadLock, rangeLockNameForBulkLoad, job.getJobRange(), proposedLockId));
+			source = requestedSource;
+		}
+	}
+
+	const RangeLockID proposedLockId;
+	Optional<BulkLoadJobState> observedJob;
+	Optional<BulkLoadJobHandle> handle;
+	Optional<UID> ownerGeneration;
+	Source source = Source::Unselected;
+	bool commitUnknown = false;
+};
+
+Future<BulkLoadJobHandle> readBulkLoadJobHandle(Transaction* tr,
+                                                BulkLoadJobState job,
+                                                bool adoptLegacy,
+                                                BulkLoadJobAttempt* attempt) {
+	attempt->observeJob(job);
+	Optional<Value> value = co_await tr->get(bulkLoadJobRangeLockKeyFor(job.getJobId()));
+	if (value.present()) {
+		attempt->selectExisting(job, decodeRangeLockState(value.get()));
+		co_return attempt->getHandle();
+	}
+	if (!adoptLegacy) {
+		throw range_lock_failed();
+	}
+	attempt->selectLegacy(job);
+	Optional<Value> ownerValue = co_await tr->get(rangeLockOwnerKeyFor(rangeLockNameForBulkLoad));
+	if (!ownerValue.present()) {
+		throw range_lock_failed();
+	}
+	attempt->pinOwnerGeneration(decodeRangeLockOwner(ownerValue.get()).getGeneration());
+	const RangeLockState rangeLock = attempt->getHandle().getRangeLock();
+	co_await adoptExclusiveReadLockOnRange(tr, rangeLock, attempt->getOwnerGeneration());
+	tr->set(bulkLoadJobRangeLockKeyFor(job.getJobId()), rangeLockStateValue(rangeLock));
+	co_return attempt->getHandle();
+}
+
+Future<Optional<BulkLoadJobState>> readBulkLoadJobHistory(Transaction* tr, BulkLoadJobHandle expectedJob) {
+	const UID jobId = expectedJob.getJobState().getJobId();
+	Optional<Value> historyValue = co_await tr->get(bulkLoadJobHistoryKeyFor(jobId));
+	Optional<Value> historyLock = co_await tr->get(bulkLoadJobHistoryRangeLockKeyFor(jobId));
+	if (historyValue.present() && historyLock.present() &&
+	    decodeRangeLockState(historyLock.get()).hasSameAcquisition(expectedJob.getRangeLock())) {
+		BulkLoadJobState job = decodeBulkLoadJobState(historyValue.get());
+		if (job.getJobId() == jobId && job.getJobRange() == expectedJob.getJobState().getJobRange()) {
+			co_return job;
+		}
+	}
+	co_return Optional<BulkLoadJobState>();
+}
+
+} // namespace
+
+Future<Optional<BulkLoadJobHandle>> getSubmittedBulkLoadJobHandle(Transaction* tr, bool adoptLegacy) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	Optional<BulkLoadJobState> job = co_await getSubmittedBulkLoadJob(tr);
+	if (!job.present()) {
+		co_return Optional<BulkLoadJobHandle>();
+	}
+	BulkLoadJobAttempt attempt;
+	co_return co_await readBulkLoadJobHandle(tr, job.get(), adoptLegacy, &attempt);
+}
+
+Future<Optional<BulkLoadJobHandle>> getRunningBulkLoadJobHandle(Database cx, bool lockAware, bool adoptLegacy) {
 	Transaction tr(cx);
-	Optional<BulkLoadJobState> aliveJob;
+	BulkLoadJobAttempt attempt;
 	while (true) {
 		Error err;
 		try {
-			aliveJob = co_await getSubmittedBulkLoadJob(&tr);
-			if (!aliveJob.present()) {
-				co_return; // Has been cancelled
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if (lockAware) {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
-			if (aliveJob.get().getJobId() != jobId) {
-				throw bulkload_task_outdated(); // jobId is outdated
+			Optional<BulkLoadJobState> jobState = co_await getSubmittedBulkLoadJob(&tr);
+			if (!jobState.present()) {
+				if (attempt.hasObservedJob()) {
+					throw bulkload_task_outdated();
+				}
+				co_return Optional<BulkLoadJobHandle>();
 			}
-			// Change DD key to trigger DD restarts
-			BinaryWriter wrMyOwner(Unversioned());
-			wrMyOwner << dataDistributionModeLock;
-			tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
-			BinaryWriter wrLastWrite(Unversioned());
-			wrLastWrite << deterministicRandom()->randomUniqueID();
-			tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
-			// Clear all metadata of the job
-			ASSERT(!aliveJob.get().getJobRange().empty());
-			co_await krmSetRangeCoalescing(
-			    &tr, bulkLoadJobPrefix, aliveJob.get().getJobRange(), normalKeys, bulkLoadJobValue(BulkLoadJobState()));
-			// Clear all metadata of the task. The task and the job is guaranteed to be consistent.
-			co_await krmSetRangeCoalescing(&tr,
-			                               bulkLoadTaskPrefix,
-			                               aliveJob.get().getJobRange(),
-			                               normalKeys,
-			                               bulkLoadTaskStateValue(BulkLoadTaskState()));
-			// Add cancelled job to history
-			aliveJob.get().setEndTime(now());
-			aliveJob.get().setCancelledPhase();
-			co_await addBulkLoadJobToHistory(&tr, aliveJob.get());
-			co_await releaseExclusiveReadLockOnRange(&tr, aliveJob.get().getJobRange(), rangeLockNameForBulkLoad);
-			// Clean up BulkLoad owner info when clearing job metadata
-			tr.clear(bulkLoadOwnerKeyFor(jobId));
-			co_await tr.commit();
-			break;
+			BulkLoadJobHandle job = co_await readBulkLoadJobHandle(&tr, jobState.get(), adoptLegacy, &attempt);
+			if (adoptLegacy) {
+				co_await tr.commit();
+			}
+			co_return job;
 		} catch (Error& e) {
 			err = e;
 		}
-		// Currently, only bulkload job uses the range lock, and one job exists at a time.
-		// TODO(BulkLoad): support multiple jobs at a time
-		ASSERT(err.code() != error_code_range_unlock_reject);
 		co_await tr.onError(err);
 	}
 }
 
+Future<Void> checkBulkLoadJobLock(Transaction* tr, UID jobId, RangeLockState expectedLock, bool requireHeld) {
+	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	Optional<BulkLoadJobState> job = co_await getSubmittedBulkLoadJob(tr);
+	if (!job.present() || job.get().getJobId() != jobId || job.get().getJobRange() != expectedLock.getRange()) {
+		throw bulkload_task_outdated();
+	}
+	Optional<Value> value = co_await tr->get(bulkLoadJobRangeLockKeyFor(jobId));
+	if (!value.present() || !decodeRangeLockState(value.get()).hasSameAcquisition(expectedLock)) {
+		throw bulkload_task_outdated();
+	}
+	if (requireHeld && !(co_await isExclusiveReadLockHeld(tr, expectedLock))) {
+		throw range_unlock_reject();
+	}
+}
+
+Future<Optional<BulkLoadJobState>> getBulkLoadJobOutcome(Database cx, BulkLoadJobHandle expectedJob, bool lockAware) {
+	Transaction tr(cx);
+	const UID jobId = expectedJob.getJobState().getJobId();
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			if (lockAware) {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			}
+			Optional<BulkLoadJobState> current = co_await getSubmittedBulkLoadJob(&tr);
+			if (current.present() && current.get().getJobId() == jobId &&
+			    current.get().getJobRange() == expectedJob.getJobState().getJobRange()) {
+				Optional<Value> lockValue = co_await tr.get(bulkLoadJobRangeLockKeyFor(jobId));
+				if (lockValue.present() &&
+				    decodeRangeLockState(lockValue.get()).hasSameAcquisition(expectedJob.getRangeLock())) {
+					co_return Optional<BulkLoadJobState>();
+				}
+			}
+			Optional<BulkLoadJobState> history = co_await readBulkLoadJobHistory(&tr, expectedJob);
+			if (history.present()) {
+				co_return history;
+			}
+			throw bulkload_task_outdated();
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+Future<Void> setBulkLoadJobTerminationTransaction(Transaction* tr,
+                                                  BulkLoadJobHandle expectedJob,
+                                                  Optional<std::string> errorMessage) {
+	const UID jobId = expectedJob.getJobState().getJobId();
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	Optional<BulkLoadJobState> aliveJob = co_await getSubmittedBulkLoadJob(tr);
+	if (!aliveJob.present()) {
+		co_return;
+	}
+	if (aliveJob.get().getJobId() != jobId) {
+		throw bulkload_task_outdated();
+	}
+	co_await checkBulkLoadJobLock(tr, jobId, expectedJob.getRangeLock(), false);
+	bool lockHeld = co_await isExclusiveReadLockHeld(tr, expectedJob.getRangeLock());
+	// Revoke DD's move-keys ownership so in-flight task work cannot survive cancellation.
+	BinaryWriter wrMyOwner(Unversioned());
+	wrMyOwner << dataDistributionModeLock;
+	tr->set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+	BinaryWriter wrLastWrite(Unversioned());
+	wrLastWrite << deterministicRandom()->randomUniqueID();
+	tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
+	co_await krmSetRangeCoalescing(
+	    tr, bulkLoadJobPrefix, aliveJob.get().getJobRange(), normalKeys, bulkLoadJobValue(BulkLoadJobState()));
+	co_await krmSetRangeCoalescing(
+	    tr, bulkLoadTaskPrefix, aliveJob.get().getJobRange(), normalKeys, bulkLoadTaskStateValue(BulkLoadTaskState()));
+	aliveJob.get().setEndTime(now());
+	if (errorMessage.present()) {
+		aliveJob.get().setErrorPhase(errorMessage.get());
+	} else {
+		aliveJob.get().setCancelledPhase();
+	}
+	co_await addBulkLoadJobToHistory(tr, aliveJob.get(), expectedJob.getRangeLock());
+	if (lockHeld) {
+		co_await releaseExclusiveReadLockOnRange(tr, expectedJob.getRangeLock());
+	} else {
+		TraceEvent(SevWarnAlways, "BulkLoadJobFenceLostOnTermination")
+		    .detail("JobID", jobId)
+		    .detail("LockID", expectedJob.getRangeLock().getLockId());
+	}
+	tr->clear(bulkLoadJobRangeLockKeyFor(jobId));
+	tr->clear(bulkLoadOwnerKeyFor(jobId));
+}
+
+namespace {
+
+Future<Void> terminateBulkLoadJob(Database cx, BulkLoadJobHandle expectedJob, Optional<std::string> errorMessage) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			co_await setBulkLoadJobTerminationTransaction(&tr, expectedJob, errorMessage);
+			co_await tr.commit();
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+} // namespace
+
+Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
+	Optional<BulkLoadJobHandle> job = co_await getRunningBulkLoadJobHandle(cx, true, true);
+	if (!job.present()) {
+		co_return;
+	}
+	if (job.get().getJobState().getJobId() != jobId) {
+		throw bulkload_task_outdated();
+	}
+	co_await terminateBulkLoadJob(cx, job.get(), Optional<std::string>());
+}
+
+Future<Void> cancelBulkLoadJob(Database cx, BulkLoadJobHandle expectedJob) {
+	return terminateBulkLoadJob(cx, expectedJob, Optional<std::string>());
+}
+
+Future<Void> failBulkLoadJob(Database cx, BulkLoadJobHandle expectedJob, std::string errorMessage) {
+	return terminateBulkLoadJob(cx, expectedJob, errorMessage);
+}
+
 // TODO(Zhe): clear bulkload task metadata within the input range
-Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware) {
+Future<BulkLoadJobHandle> submitBulkLoadJobWithLock(Database cx, BulkLoadJobState jobState, bool lockAware) {
 	ASSERT(jobState.getPhase() == BulkLoadJobPhase::Submitted);
+	BulkLoadJobAttempt attempt;
 
 	// TODO(BulkLoad): validate cluster preconditions before accepting the job.
 	// BulkLoad requires shard_encode_location_metadata=1 and enable_read_lock_on_range=1,
@@ -2904,14 +3165,43 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 	// This check must read live cluster knob state — SERVER_KNOBS in fdbclient is the
 	// caller's local defaults and tells us nothing about the cluster.
 
+	co_await registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad);
 	Transaction tr(cx);
 	while (true) {
 		Error err;
 		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (lockAware) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
-			// There is at most one bulkLoad job or bulkDump job at a time globally
+			if (attempt.hasHandle() && (co_await readBulkLoadJobHistory(&tr, attempt.getHandle())).present()) {
+				// A commit-unknown retry can arrive after this exact submission has already finished.
+				co_return attempt.getHandle();
+			}
+			Optional<BulkLoadJobState> aliveJob = co_await getSubmittedBulkLoadJob(&tr);
+			if (aliveJob.present()) {
+				if (sameBulkLoadJobInput(aliveJob.get(), jobState)) {
+					BulkLoadJobHandle existing = co_await readBulkLoadJobHandle(&tr, aliveJob.get(), true, &attempt);
+					co_await tr.commit();
+					co_return existing;
+				}
+				if (attempt.hasObservedJob()) {
+					throw bulkload_task_outdated();
+				}
+				TraceEvent(SevWarn, "SubmitBulkLoadJobFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Conflict to a running BulkLoad job")
+				    .detail("SubmitJob", jobState.toString())
+				    .detail("ExistJob", aliveJob.get().toString());
+				throw bulkload_task_failed();
+			}
+			if (attempt.hasObservedJob() && !attempt.canRetryNewSubmission()) {
+				// Its identity may have been overwritten or evicted from bounded history. Absence is not permission
+				// to create the same invocation again, especially after an ambiguous commit.
+				throw bulkload_task_outdated();
+			}
+			// There is at most one bulkLoad job or bulkDump job at a time globally.
 			Optional<BulkDumpState> aliveBulkDumpJob = co_await getSubmittedBulkDumpJob(&tr);
 			if (aliveBulkDumpJob.present()) {
 				TraceEvent(SevWarn, "SubmitBulkLoadJobFailed")
@@ -2920,19 +3210,6 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 				    .detail("Reason", "Conflict to a running BulkDump job")
 				    .detail("SubmitBulkLoadJob", jobState.toString())
 				    .detail("ExistBulkDumpJob", aliveBulkDumpJob.get().toString());
-				throw bulkload_task_failed();
-			}
-			Optional<BulkLoadJobState> aliveJob = co_await getSubmittedBulkLoadJob(&tr);
-			if (aliveJob.present()) {
-				if (aliveJob.get().getJobId() == jobState.getJobId()) {
-					co_return; // The job has been submitted.
-				}
-				TraceEvent(SevWarn, "SubmitBulkLoadJobFailed")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Reason", "Conflict to a running BulkLoad job")
-				    .detail("SubmitJob", jobState.toString())
-				    .detail("ExistJob", aliveJob.get().toString());
 				throw bulkload_task_failed();
 			}
 			if (jobState.getPhase() != BulkLoadJobPhase::Submitted) {
@@ -2952,27 +3229,39 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 				throw bulkload_task_failed();
 			}
 			ASSERT(!jobState.getJobRange().empty());
+			attempt.selectNew(jobState);
+			Optional<Value> ownerValue = co_await tr.get(rangeLockOwnerKeyFor(rangeLockNameForBulkLoad));
+			if (!ownerValue.present()) {
+				throw range_lock_failed();
+			}
+			attempt.pinOwnerGeneration(decodeRangeLockOwner(ownerValue.get()).getGeneration());
+			const RangeLockState rangeLock = attempt.getHandle().getRangeLock();
 			// Init the map of task states
 			co_await krmSetRange(
 			    &tr, bulkLoadTaskPrefix, jobState.getJobRange(), bulkLoadTaskStateValue(BulkLoadTaskState()));
 			// Persist job metadata
 			co_await krmSetRange(&tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(jobState));
 			// Take lock on the job range
-			co_await takeExclusiveReadLockOnRange(&tr, jobState.getJobRange(), rangeLockNameForBulkLoad);
+			co_await takeExclusiveReadLockOnRange(&tr, rangeLock, attempt.getOwnerGeneration());
+			tr.set(bulkLoadJobRangeLockKeyFor(jobState.getJobId()), rangeLockStateValue(rangeLock));
 			co_await tr.commit();
 			TraceEvent(SevInfo, "BulkLoadJobSubmitted")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("SubmitBulkLoadJob", jobState.toString());
-			break;
+			co_return attempt.getHandle();
 		} catch (Error& e) {
 			err = e;
+			if (e.code() == error_code_commit_unknown_result || e.code() == error_code_commit_unknown_result_fatal) {
+				attempt.noteCommitUnknown();
+			}
 		}
-		// Currently, only bulkload job uses the range lock, and one job exists at a time.
-		// TODO(BulkLoad): support multiple jobs at a time
-		ASSERT(err.code() != error_code_range_lock_reject);
 		co_await tr.onError(err);
 	}
+}
+
+Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware) {
+	co_await submitBulkLoadJobWithLock(cx, jobState, lockAware);
 }
 
 Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockAware) {
@@ -3013,7 +3302,30 @@ Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockA
 	co_return Optional<BulkLoadJobState>();
 }
 
-Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange jobRange) {
+namespace {
+
+Future<Void> checkBulkLoadJobAcknowledgement(Transaction* tr, BulkLoadJobHandle expectedJob) {
+	const UID jobId = expectedJob.getJobState().getJobId();
+	Optional<BulkLoadJobState> current = co_await getSubmittedBulkLoadJob(tr);
+	if (current.present() && current.get().getJobId() == jobId) {
+		Optional<Value> lock = co_await tr->get(bulkLoadJobRangeLockKeyFor(jobId));
+		if (current.get().getJobRange() != expectedJob.getJobState().getJobRange() || !lock.present() ||
+		    !decodeRangeLockState(lock.get()).hasSameAcquisition(expectedJob.getRangeLock())) {
+			throw bulkload_task_outdated();
+		}
+		co_return;
+	}
+	// A terminal job can retain Error tasks after its range fence is released. The history token identifies those
+	// tasks; the active-job read conflicts with any concurrent resubmission of the same reusable source ID.
+	if (!(co_await readBulkLoadJobHistory(tr, expectedJob)).present()) {
+		throw bulkload_task_outdated();
+	}
+}
+
+Future<Void> acknowledgeAllErrorBulkLoadTasksImpl(Database cx,
+                                                  UID jobId,
+                                                  KeyRange jobRange,
+                                                  Optional<BulkLoadJobHandle> expectedJob) {
 	Transaction tr(cx);
 	Key beginKey = jobRange.begin;
 	Key endKey = jobRange.end;
@@ -3025,6 +3337,11 @@ Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange j
 		Error err;
 		try {
 			tr.reset();
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if (expectedJob.present()) {
+				co_await checkBulkLoadJobAcknowledgement(&tr, expectedJob.get());
+			}
 			bulkLoadTaskResult.clear();
 			bulkLoadTaskResult = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey));
 			if (bulkLoadTaskResult.empty()) {
@@ -3045,6 +3362,7 @@ Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange j
 					throw bulkload_task_outdated();
 				}
 				if (existTask.getRange() != KeyRangeRef(bulkLoadTaskResult[i].key, bulkLoadTaskResult[i + 1].key)) {
+					lastKey = bulkLoadTaskResult[i + 1].key;
 					continue; // The task has been overlapped by other tasks
 				}
 				if (existTask.phase == BulkLoadPhase::Error) {
@@ -3068,6 +3386,17 @@ Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange j
 		}
 		co_await tr.onError(err);
 	}
+}
+
+} // namespace
+
+Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange jobRange) {
+	return acknowledgeAllErrorBulkLoadTasksImpl(cx, jobId, jobRange, Optional<BulkLoadJobHandle>());
+}
+
+Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, BulkLoadJobHandle expectedJob) {
+	return acknowledgeAllErrorBulkLoadTasksImpl(
+	    cx, expectedJob.getJobState().getJobId(), expectedJob.getJobState().getJobRange(), expectedJob);
 }
 
 Future<int> setBulkDumpMode(Database cx, int mode) {
@@ -3634,6 +3963,51 @@ std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {
 		break;
 	}
 	return msg;
+}
+
+TEST_CASE("/ManagementAPI/BulkLoadAttemptIdentity") {
+	const auto expectError = [](int code, const auto& operation) {
+		bool rejected = false;
+		try {
+			operation();
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), code);
+			rejected = true;
+		}
+		ASSERT(rejected);
+	};
+	const BulkLoadJobState job(UID(1, 2), "bulkload-test", KeyRangeRef("a"_sr, "z"_sr), BulkLoadTransportMethod::CP);
+	const RangeLockState replacement(
+	    RangeLockType::ExclusiveReadLock, rangeLockNameForBulkLoad, job.getJobRange(), "replacement");
+
+	BulkLoadJobAttempt created;
+	created.selectNew(job);
+	const BulkLoadJobHandle first = created.getHandle();
+	created.pinOwnerGeneration(UID(3, 4));
+	created.selectNew(job);
+	created.selectExisting(job, first.getRangeLock());
+	ASSERT(created.getHandle().hasSameSubmission(first));
+	ASSERT(created.canRetryNewSubmission());
+	expectError(error_code_range_lock_failed, [&] { created.pinOwnerGeneration(UID(5, 6)); });
+	expectError(error_code_bulkload_task_outdated, [&] { created.selectExisting(job, replacement); });
+	created.noteCommitUnknown();
+	ASSERT(!created.canRetryNewSubmission());
+	expectError(error_code_bulkload_task_outdated, [&] { created.selectNew(job); });
+	created.selectExisting(job, first.getRangeLock());
+
+	BulkLoadJobAttempt adopted;
+	adopted.selectLegacy(job);
+	const BulkLoadJobHandle legacy = adopted.getHandle();
+	adopted.selectLegacy(job);
+	adopted.selectExisting(job, legacy.getRangeLock());
+	ASSERT(adopted.getHandle().hasSameSubmission(legacy));
+	expectError(error_code_bulkload_task_outdated, [&] { adopted.selectExisting(job, replacement); });
+
+	BulkLoadJobAttempt existing;
+	existing.selectExisting(job, first.getRangeLock());
+	expectError(error_code_bulkload_task_outdated, [&] { existing.selectLegacy(job); });
+	expectError(error_code_bulkload_task_outdated, [&] { existing.selectExisting(job, replacement); });
+	return Void();
 }
 
 TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {

@@ -1413,6 +1413,17 @@ BulkLoadJobState decodeBulkLoadJobState(const ValueRef& value) {
 	return bulkLoadJobState;
 }
 
+const KeyRangeRef bulkLoadJobRangeLockKeys =
+    KeyRangeRef("\xff/bulkLoadJobRangeLock/"_sr, "\xff/bulkLoadJobRangeLock0"_sr);
+const KeyRef bulkLoadJobRangeLockPrefix = bulkLoadJobRangeLockKeys.begin;
+
+Key bulkLoadJobRangeLockKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkLoadJobRangeLockPrefix);
+	wr << jobId;
+	return wr.toValue();
+}
+
 const KeyRangeRef bulkLoadJobHistoryKeys = KeyRangeRef("\xff/bulkLoadJobHistory/"_sr, "\xff/bulkLoadJobHistory0"_sr);
 const KeyRef bulkLoadJobHistoryPrefix = bulkLoadJobHistoryKeys.begin;
 
@@ -1422,6 +1433,17 @@ Key bulkLoadJobHistoryKeyFor(const UID& jobId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(bulkLoadJobHistoryPrefix);
 	wr.serializeBytes(StringRef(jobId.toString()));
+	return wr.toValue();
+}
+
+const KeyRangeRef bulkLoadJobHistoryRangeLockKeys =
+    KeyRangeRef("\xff/bulkLoadJobHistoryRangeLock/"_sr, "\xff/bulkLoadJobHistoryRangeLock0"_sr);
+const KeyRef bulkLoadJobHistoryRangeLockPrefix = bulkLoadJobHistoryRangeLockKeys.begin;
+
+Key bulkLoadJobHistoryRangeLockKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkLoadJobHistoryRangeLockPrefix);
+	wr << jobId;
 	return wr.toValue();
 }
 
@@ -1468,6 +1490,17 @@ const std::string rangeLockNameForBulkLoad = "BulkLoad";
 
 const KeyRangeRef rangeLockKeys = KeyRangeRef("\xff/rangeLock/"_sr, "\xff/rangeLock0"_sr);
 const KeyRef rangeLockPrefix = rangeLockKeys.begin;
+
+Value rangeLockStateValue(const RangeLockState& rangeLockState) {
+	return ObjectWriter::toValue(rangeLockState, IncludeVersion());
+}
+
+RangeLockState decodeRangeLockState(const ValueRef& value) {
+	RangeLockState rangeLockState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(rangeLockState);
+	return rangeLockState;
+}
 
 Value rangeLockStateSetValue(const RangeLockStateSet& rangeLockStateSet) {
 	return ObjectWriter::toValue(rangeLockStateSet, IncludeVersion());

@@ -15,6 +15,9 @@ A range can have at most one lock by one user.
 Note that the "user" here is not an user of the database, but an application or a feature that uses the range lock.
 In this document, we use "user" to represent the application or feature that uses the range lock.
 
+Range locks are a trusted administrative write-exclusion mechanism, not an authorization boundary.
+Transactions using ``LOCK_AWARE`` bypass range locks; registering an owner does not grant a separate database identity.
+
 Comparison with general locking concepts
 ----------------------------------------
 The range lock is similar to a "read lock" --- when a user wants to do read, the user grabs a read lock which prevents other users
@@ -67,7 +70,7 @@ Register a range lock owner to database metadata.
 
 ``ACTOR Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);``
 
-Remove an owner from the database metadata
+Remove an owner from the database metadata. An owner that still holds a lock cannot be removed.
 
 ``ACTOR Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
 
@@ -78,6 +81,19 @@ Get all registered range lock owners
 Get a range lock owner by uniqueId
 
 ``ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
+
+Fenced ownership
+----------------
+The name-only take and release APIs are administrative operations. They cannot distinguish an old caller from a new caller that reuses the same owner name and range. Long-running work should use a fenced acquisition instead:
+
+1. Read the registered ``RangeLockOwner`` and retain its ``getGeneration()`` value.
+2. Construct a ``RangeLockState`` with a fresh, non-empty acquisition ID that will never be reused.
+3. Call ``takeExclusiveReadLockOnRange`` with that state and the expected owner generation.
+4. Retain the exact state and pass it to the fenced ``releaseExclusiveReadLockOnRange`` overload.
+
+Retried takes are idempotent only for the same acquisition. A stale release cannot remove a replacement lock, even if its owner name and range are identical. The expected-owner overload of ``removeRangeLockOwner`` similarly protects against owner-name reuse. None of these operations gives a lock an automatic expiration time.
+
+BulkLoad persists the exact acquisition alongside the active job. Data-distributor task submission, cancellation, and finalization check that acquisition before changing the job or releasing its lock. A source dump ID can be loaded more than once, so it is not itself a submission token. Normal administrative release commands refuse to remove an active BulkLoad job's fence. Prefer ``bulkload cancel <JOBID>``. The ``rangelock force-release`` and ``rangelock force-release-all`` commands are emergency operations that can invalidate a running job; use them only after coordinating with the job owner.
 
 
 Using ``fdbcli``

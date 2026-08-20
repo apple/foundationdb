@@ -633,21 +633,27 @@ Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulk
 // Monitor BulkLoad job completion and update restore progress counters
 // restoreUid is used to update the RestoreConfig progress
 Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
-                                                      UID jobId,
+                                                      BulkLoadJobHandle expectedJob,
                                                       UID restoreUid,
                                                       int64_t totalBlocks,
                                                       double timeoutDuration,
                                                       double pollInterval,
                                                       bool lockAware) {
 	double timeoutStart = now();
+	const UID jobId = expectedJob.getJobState().getJobId();
 	RestoreConfig restore(restoreUid);
 
 	while (true) {
-		Optional<BulkLoadJobState> currentJob = co_await getRunningBulkLoadJob(cx, lockAware);
-		bool stillRunning = currentJob.present() && currentJob.get().getJobId() == jobId;
-
-		if (!stillRunning) {
-			co_return true;
+		Optional<BulkLoadJobState> outcome = co_await getBulkLoadJobOutcome(cx, expectedJob, lockAware);
+		if (outcome.present()) {
+			if (outcome.get().getPhase() == BulkLoadJobPhase::Complete) {
+				co_return true;
+			}
+			TraceEvent(SevWarnAlways, "BulkLoadRestoreJobFailed")
+			    .detail("JobId", jobId)
+			    .detail("LockID", expectedJob.getRangeLock().getLockId())
+			    .detail("Phase", convertBulkLoadJobPhaseToString(outcome.get().getPhase()));
+			throw bulkload_task_failed();
 		}
 
 		// Update progress based on completed bulkload tasks
@@ -4274,7 +4280,8 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("BulkLoadJobId", bulkLoadJob.getJobId());
 
 				// Submit BulkLoad job (must be lockAware since DB is locked during restore)
-				co_await submitBulkLoadJob(cx, bulkLoadJob, true /* lockAware */);
+				BulkLoadJobHandle bulkLoadHandle =
+				    co_await submitBulkLoadJobWithLock(cx, bulkLoadJob, true /* lockAware */);
 
 				TraceEvent("BulkLoadRestoreJobSubmitted")
 				    .detail("RestoreUID", restore.getUid())
@@ -4287,7 +4294,7 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				// Must be lockAware since DB is locked during restore
 				// Use the progress-tracking version to update restore counters
 				bool completed = co_await monitorBulkLoadJobCompletionWithProgress(cx,
-				                                                                   bulkLoadJob.getJobId(),
+				                                                                   bulkLoadHandle,
 				                                                                   restore.getUid(),
 				                                                                   totalBlocks,
 				                                                                   CLIENT_KNOBS->BULKLOAD_JOB_TIMEOUT,

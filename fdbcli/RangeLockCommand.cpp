@@ -33,13 +33,20 @@ static const std::string RANGELOCK_RELEASE_USAGE =
     "To release a lock: rangelock release <BEGIN_KEY> <END_KEY> <OWNER_ID>\n";
 static const std::string RANGELOCK_RELEASE_ALL_USAGE =
     "To release every lock held by an owner: rangelock release-all <OWNER_ID>\n";
+static const std::string RANGELOCK_FORCE_RELEASE_USAGE =
+    "Emergency only: rangelock force-release <BEGIN_KEY> <END_KEY> <OWNER_ID>\n"
+    "  This can remove a live BulkLoad fence. Prefer bulkload cancel <JOBID>.\n";
+static const std::string RANGELOCK_FORCE_RELEASE_ALL_USAGE =
+    "Emergency only: rangelock force-release-all <OWNER_ID>\n"
+    "  This can remove a live BulkLoad fence. Prefer bulkload cancel <JOBID>.\n";
 static const std::string RANGELOCK_LIST_USAGE =
     "To list locked ranges: rangelock list [<BEGIN_KEY> <END_KEY>]\n"
     "  Omit both keys to list every locked range. If supplied, BEGIN_KEY and END_KEY must be given together.\n";
 
 static const std::string RANGELOCK_HELP_MESSAGE =
     RANGELOCK_REGISTER_USAGE + RANGELOCK_UNREGISTER_USAGE + RANGELOCK_OWNERS_USAGE + RANGELOCK_TAKE_USAGE +
-    RANGELOCK_RELEASE_USAGE + RANGELOCK_RELEASE_ALL_USAGE + RANGELOCK_LIST_USAGE;
+    RANGELOCK_RELEASE_USAGE + RANGELOCK_RELEASE_ALL_USAGE + RANGELOCK_LIST_USAGE + RANGELOCK_FORCE_RELEASE_USAGE +
+    RANGELOCK_FORCE_RELEASE_ALL_USAGE;
 
 // Range locks only take effect when commit proxies are started with
 // knob_enable_read_lock_on_range=true. The client cannot probe the knob
@@ -75,10 +82,12 @@ static Optional<KeyRange> parseNormalKeyRange(Key rangeBegin, Key rangeEnd) {
 static bool reportRangeLockError(const Error& e, std::string_view operation) {
 	switch (e.code()) {
 	case error_code_range_lock_reject:
-		fmt::println("ERROR: cannot {}: range overlaps a lock held by another owner", operation);
+		fmt::println("ERROR: cannot {}: range conflicts with an existing lock, or the owner still holds locks",
+		             operation);
 		break;
 	case error_code_range_unlock_reject:
-		fmt::println("ERROR: cannot {}: range is not held by this owner (or held with a different range)", operation);
+		fmt::println("ERROR: cannot {}: acquisition differs or an active BulkLoad job owns the fence", operation);
+		fmt::println("       Cancel an active BulkLoad job with bulkload cancel <JOBID>.");
 		break;
 	case error_code_range_lock_failed:
 		fmt::println("ERROR: cannot {}: invalid range, unregistered owner, or empty argument", operation);
@@ -192,9 +201,10 @@ Future<bool> rangeLockCommandActor(Database cx, std::vector<StringRef> tokens) {
 		co_return true;
 	}
 
-	if (tokencmp(tokens[1], "release")) {
+	if (tokencmp(tokens[1], "release") || tokencmp(tokens[1], "force-release")) {
+		const bool force = tokencmp(tokens[1], "force-release");
 		if (tokens.size() != 5) {
-			fmt::print("{}", RANGELOCK_RELEASE_USAGE);
+			fmt::print("{}", force ? RANGELOCK_FORCE_RELEASE_USAGE : RANGELOCK_RELEASE_USAGE);
 			co_return false;
 		}
 		std::string ownerId = tokens[4].toString();
@@ -208,7 +218,10 @@ Future<bool> rangeLockCommandActor(Database cx, std::vector<StringRef> tokens) {
 			co_return false;
 		}
 		try {
-			co_await releaseExclusiveReadLockOnRange(cx, range.get(), ownerId);
+			if (force) {
+				fmt::println("WARNING: Emergency release may invalidate an active BulkLoad job.");
+			}
+			co_await releaseExclusiveReadLockOnRange(cx, range.get(), ownerId, force);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
@@ -219,9 +232,10 @@ Future<bool> rangeLockCommandActor(Database cx, std::vector<StringRef> tokens) {
 		co_return true;
 	}
 
-	if (tokencmp(tokens[1], "release-all")) {
+	if (tokencmp(tokens[1], "release-all") || tokencmp(tokens[1], "force-release-all")) {
+		const bool force = tokencmp(tokens[1], "force-release-all");
 		if (tokens.size() != 3) {
-			fmt::print("{}", RANGELOCK_RELEASE_ALL_USAGE);
+			fmt::print("{}", force ? RANGELOCK_FORCE_RELEASE_ALL_USAGE : RANGELOCK_RELEASE_ALL_USAGE);
 			co_return false;
 		}
 		std::string ownerId = tokens[2].toString();
@@ -231,7 +245,10 @@ Future<bool> rangeLockCommandActor(Database cx, std::vector<StringRef> tokens) {
 			co_return false;
 		}
 		try {
-			co_await releaseExclusiveReadLockByUser(cx, ownerId);
+			if (force) {
+				fmt::println("WARNING: Emergency release may invalidate an active BulkLoad job.");
+			}
+			co_await releaseExclusiveReadLockByUser(cx, ownerId, force);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
@@ -276,8 +293,9 @@ Future<bool> rangeLockCommandActor(Database cx, std::vector<StringRef> tokens) {
 
 CommandFactory rangeLockFactory(
     "rangelock",
-    CommandHelp("rangelock [register|unregister|owners|take|release|release-all|list] [ARGs]",
-                "manage exclusive read locks on key ranges",
-                RANGELOCK_HELP_MESSAGE.c_str()));
+    CommandHelp(
+        "rangelock [register|unregister|owners|take|release|release-all|list|force-release|force-release-all] [ARGs]",
+        "manage exclusive read locks on key ranges",
+        RANGELOCK_HELP_MESSAGE.c_str()));
 
 } // namespace fdb_cli

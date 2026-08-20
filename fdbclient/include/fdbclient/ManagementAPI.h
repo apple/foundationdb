@@ -29,12 +29,14 @@ standard API and some knowledge of the contents of the system key space.
 
 #include <string>
 #include <map>
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/ProcessClass.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/MonitorLeader.h"
+#include "fdbclient/RangeLock.h"
 
 class IDatabase;
 
@@ -200,8 +202,23 @@ Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
                                           UID taskId,
                                           std::vector<BulkLoadPhase> phases);
 
-// Add bulkLoad job to history map
-Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState);
+// The source dump ID can be loaded repeatedly. This handle identifies one submission's durable range fence.
+class BulkLoadJobHandle {
+public:
+	BulkLoadJobHandle(BulkLoadJobState jobState, RangeLockState rangeLock);
+	const BulkLoadJobState& getJobState() const { return jobState; }
+	const RangeLockState& getRangeLock() const { return rangeLock; }
+	bool hasSameSubmission(const BulkLoadJobHandle& other) const {
+		return jobState.getJobId() == other.jobState.getJobId() && rangeLock.hasSameAcquisition(other.rangeLock);
+	}
+
+private:
+	BulkLoadJobState jobState;
+	RangeLockState rangeLock;
+};
+
+// Add a terminal job and its acquisition identity to the bounded history map.
+Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState, RangeLockState rangeLock);
 
 // Get all past bulkLoad jobs from history map
 AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx);
@@ -213,22 +230,44 @@ Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId = Optional
 // Set lockAware=true when checking during database restore (when database is locked).
 Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockAware = false);
 
+// Read the job and its fence at one version. Legacy adoption upgrades only an exact, still-held empty-ID lock.
+Future<Optional<BulkLoadJobHandle>> getSubmittedBulkLoadJobHandle(Transaction* tr, bool adoptLegacy = false);
+Future<Optional<BulkLoadJobHandle>> getRunningBulkLoadJobHandle(Database cx,
+                                                                bool lockAware = false,
+                                                                bool adoptLegacy = false);
+Future<Void> checkBulkLoadJobLock(Transaction* tr, UID jobId, RangeLockState expectedLock, bool requireHeld = true);
+// Empty while the exact submission is active; otherwise return its retained terminal history or throw outdated.
+Future<Optional<BulkLoadJobState>> getBulkLoadJobOutcome(Database cx,
+                                                         BulkLoadJobHandle expectedJob,
+                                                         bool lockAware = false);
+
 // Cancel bulkLoad job for the given jobId
 Future<Void> cancelBulkLoadJob(Database cx, UID jobId);
+Future<Void> cancelBulkLoadJob(Database cx, BulkLoadJobHandle expectedJob);
+Future<Void> failBulkLoadJob(Database cx, BulkLoadJobHandle expectedJob, std::string errorMessage);
+// Stage cancellation/error cleanup without committing; DD callers can include their move-keys ownership check.
+Future<Void> setBulkLoadJobTerminationTransaction(Transaction* tr,
+                                                  BulkLoadJobHandle expectedJob,
+                                                  Optional<std::string> errorMessage);
 
 // Acknowledge all bulk load tasks that are in the Error phase.
 // After acknowledge, the write traffic to the task's range is turned on and the task's metadata is cleared by the bulk
 // load engine.
+// The UID/range overload is an administrative, unfenced operation for standalone task-engine cleanup. Automated
+// global-job callers must use the handle overload so a reused source dump ID cannot redirect acknowledgement.
 Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange jobRange);
+Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, BulkLoadJobHandle expectedJob);
 
 // Submit a BulkLoad job: loading data from a remote folder using bulkloading mechanism.
 // There is at most one BulkLoad or one BulkDump job at a time.
 // If there is any existing BulkLoad or BulkDump job, reject the new job.
 // Set lockAware=true when submitting during database restore (when database is locked).
 Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware = false);
+Future<BulkLoadJobHandle> submitBulkLoadJobWithLock(Database cx, BulkLoadJobState jobState, bool lockAware = false);
 
 // Return the existing BulkLoad job metadata (if any)
 Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr);
+Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr, KeyRange range);
 
 // Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
 // the metadata.

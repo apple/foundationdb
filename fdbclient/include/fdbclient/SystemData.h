@@ -612,9 +612,17 @@ extern const KeyRef bulkLoadJobPrefix;
 Value bulkLoadJobValue(const BulkLoadJobState& bulkLoadJobState);
 BulkLoadJobState decodeBulkLoadJobState(const ValueRef& value);
 
+// The exact range-lock acquisition for the current submission of a reusable BulkDump job ID.
+extern const KeyRangeRef bulkLoadJobRangeLockKeys;
+extern const KeyRef bulkLoadJobRangeLockPrefix;
+Key bulkLoadJobRangeLockKeyFor(const UID& jobId);
+
 extern const KeyRangeRef bulkLoadJobHistoryKeys;
 extern const KeyRef bulkLoadJobHistoryPrefix;
 Key bulkLoadJobHistoryKeyFor(const UID& jobId);
+extern const KeyRangeRef bulkLoadJobHistoryRangeLockKeys;
+extern const KeyRef bulkLoadJobHistoryRangeLockPrefix;
+Key bulkLoadJobHistoryRangeLockKeyFor(const UID& jobId);
 
 extern const KeyRef bulkDumpModeKey;
 extern const KeyRangeRef bulkDumpKeys;
@@ -636,6 +644,8 @@ Key bulkLoadOwnerKeyFor(const UID& jobId);
 extern const std::string rangeLockNameForBulkLoad;
 extern const KeyRangeRef rangeLockKeys;
 extern const KeyRef rangeLockPrefix;
+Value rangeLockStateValue(const RangeLockState& rangeLockState);
+RangeLockState decodeRangeLockState(const ValueRef& value);
 Value rangeLockStateSetValue(const RangeLockStateSet& rangeLockStateSet);
 RangeLockStateSet decodeRangeLockStateSet(const ValueRef& value);
 

@@ -23,6 +23,7 @@
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include <string>
+#include <utility>
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -64,6 +65,7 @@ public:
 	bool operator==(RangeLockOwner const& r) const { return ownerUniqueId == r.ownerUniqueId; }
 
 	RangeLockOwnerName getOwnerUniqueId() const { return ownerUniqueId; }
+	UID getGeneration() const { return logId; }
 
 	void setDescription(const std::string& inputDescription) {
 		description = inputDescription;
@@ -80,7 +82,7 @@ public:
 private:
 	RangeLockOwnerName ownerUniqueId; // The owner's unique ID and the owner is free to use as many times as needed.
 	std::string description; // More details about the owner
-	UID logId; // For logging purpose
+	UID logId; // Identifies this registration, including after an owner name is reused.
 	double creationTime; // Indicate when the data structure is created
 };
 
@@ -91,8 +93,11 @@ struct RangeLockState {
 public:
 	RangeLockState() = default;
 
-	RangeLockState(RangeLockType type, const RangeLockOwnerName& ownerUniqueId, const KeyRange& range)
-	  : lockType(type), ownerUniqueId(ownerUniqueId), range(range) {
+	RangeLockState(RangeLockType type,
+	               const RangeLockOwnerName& ownerUniqueId,
+	               const KeyRange& range,
+	               RangeLockID lockId = RangeLockID())
+	  : ownerUniqueId(ownerUniqueId), lockType(type), range(range), lockId(std::move(lockId)) {
 		ASSERT(isValid());
 	}
 
@@ -121,7 +126,9 @@ public:
 		return lockType == r.lockType && ownerUniqueId == r.ownerUniqueId && range == r.range;
 	}
 
-	bool operator==(RangeLockState const& r) const { return hasSameLogicalIdentity(r); }
+	bool hasSameAcquisition(RangeLockState const& r) const { return hasSameLogicalIdentity(r) && lockId == r.lockId; }
+
+	bool operator==(RangeLockState const& r) const { return hasSameAcquisition(r); }
 
 	// This legacy map key is persisted and can collide. Compare the lock fields for identity;
 	// changing this encoding requires migrating existing range-lock metadata.
@@ -130,6 +137,7 @@ public:
 	}
 
 	RangeLockOwnerName getOwnerUniqueId() const { return ownerUniqueId; }
+	const RangeLockID& getLockId() const { return lockId; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -138,9 +146,9 @@ public:
 
 private:
 	RangeLockOwnerName ownerUniqueId; // The app/user that owns the lock.
-	RangeLockType lockType;
+	RangeLockType lockType = RangeLockType::Invalid;
 	KeyRange range;
-	RangeLockID lockId; // Reserved for physical lock. Is not used now.
+	RangeLockID lockId; // Empty only for legacy, unfenced acquisitions.
 };
 
 // Persisted state on a range. A range can have multiple locks distinguishing by owner and lockType.
@@ -184,6 +192,15 @@ public:
 		return false;
 	}
 
+	bool containsExactLock(const RangeLockState& inputLock) const {
+		for (const auto& [name, lock] : locks) {
+			if (lock.hasSameAcquisition(inputLock)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	bool operator==(RangeLockStateSet const& r) const {
 		auto rLocks = r.getLocks();
 		if (locks.size() != rLocks.size()) {
@@ -203,7 +220,7 @@ public:
 
 	void insertIfNotExist(const RangeLockState& inputLock) {
 		ASSERT(inputLock.isValid());
-		if (containsLogicalLock(inputLock)) {
+		if (containsExactLock(inputLock)) {
 			return;
 		}
 		if (inputLock.isLockedFor(RangeLockType::ExclusiveReadLock) && !locks.empty()) {
@@ -217,7 +234,7 @@ public:
 	void remove(const RangeLockState& inputLock) {
 		ASSERT(inputLock.isValid());
 		for (auto it = locks.begin(); it != locks.end(); ++it) {
-			if (it->second.hasSameLogicalIdentity(inputLock)) {
+			if (it->second.hasSameAcquisition(inputLock)) {
 				locks.erase(it);
 				return;
 			}
@@ -247,8 +264,9 @@ private:
 // A range can only be locked by a registered owner.
 Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);
 
-// Remove an owner from the database metadata.
+// Remove an owner only when it holds no locks. The expected-owner overload also fences owner-name reuse.
 Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
+Future<Void> removeRangeLockOwner(Database cx, RangeLockOwner expectedOwner);
 
 // Get all registered rangeLock owners.
 AsyncResult<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
@@ -261,10 +279,32 @@ Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerNa
 Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
 Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
-// Unblock a non-empty user range within normalKeys; otherwise throw range_lock_failed.
-// One transaction can call releaseExclusiveReadLockOnRange at most one time.
-Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
-Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
+// Fenced operations require a nonempty, never-reused acquisition ID. Retrying a take is idempotent only for
+// the same acquisition. Owner generation is the value returned by RangeLockOwner::getGeneration().
+Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, RangeLockState requestedLock, UID expectedOwnerGeneration);
+Future<Void> takeExclusiveReadLockOnRange(Database cx, RangeLockState requestedLock, UID expectedOwnerGeneration);
+
+// Administrative, unfenced release of a non-empty range in normalKeys. One transaction can call this at most
+// once. A live BulkLoad job must be cancelled through its job API unless allowActiveBulkLoad explicitly authorizes
+// emergency fence removal.
+Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr,
+                                             KeyRange range,
+                                             RangeLockOwnerName ownerUniqueID,
+                                             bool allowActiveBulkLoad = false);
+Future<Void> releaseExclusiveReadLockOnRange(Database cx,
+                                             KeyRange range,
+                                             RangeLockOwnerName ownerUniqueID,
+                                             bool allowActiveBulkLoad = false);
+
+// Release only this acquisition. An empty range is already released; a replacement acquisition is rejected.
+Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, RangeLockState expectedLock);
+Future<Void> releaseExclusiveReadLockOnRange(Database cx, RangeLockState expectedLock);
+
+// Check the whole original range at the transaction's read version. Used to fence work before it mutates metadata.
+Future<bool> isExclusiveReadLockHeld(Transaction* tr, RangeLockState expectedLock);
+
+// Upgrade an exact legacy acquisition in the same transaction as its caller's durable fence metadata.
+Future<Void> adoptExclusiveReadLockOnRange(Transaction* tr, RangeLockState requestedLock, UID expectedOwnerGeneration);
 
 // Get locked ranges within a non-empty range in normalKeys; otherwise throw range_lock_failed.
 Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(
@@ -272,7 +312,9 @@ Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOn
     KeyRange range,
     Optional<RangeLockOwnerName> ownerName = Optional<RangeLockOwnerName>());
 
-// Clear all exclusive read locks owned by the input user. Not transactional.
-Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID);
+// Administrative, unfenced release of all locks owned by the input user. Not transactional.
+Future<Void> releaseExclusiveReadLockByUser(Database cx,
+                                            RangeLockOwnerName ownerUniqueID,
+                                            bool allowActiveBulkLoad = false);
 
 #endif

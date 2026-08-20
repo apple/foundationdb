@@ -44,7 +44,9 @@ static const std::string BULKLOAD_ADD_LOCK_OWNER_USAGE =
     "To add a range lock owner: bulkload addlockowner <OWNER_UNIQUE_ID>\n";
 static const std::string BULKLOAD_PRINT_LOCK_USAGE = "To print locked ranges: bulkload printlock\n";
 static const std::string BULKLOAD_PRINT_LOCK_OWNER_USAGE = "To print range lock owners: bulkload printlockowner\n";
-static const std::string BULKLOAD_CLEAR_LOCK_USAGE = "To clear a range lock: bulkload clearlock <OWNER_UNIQUE_ID>\n";
+static const std::string BULKLOAD_CLEAR_LOCK_USAGE =
+    "To clear an orphaned range lock: bulkload clearlock <OWNER_UNIQUE_ID>\n"
+    "  Cancel active jobs with bulkload cancel <JOBID>.\n";
 
 static const std::string BULK_LOAD_HELP_MESSAGE =
     BULK_LOAD_MODE_USAGE + BULK_LOAD_LOAD_USAGE + BULK_LOAD_STATUS_USAGE + BULK_LOAD_CANCEL_USAGE +
@@ -208,7 +210,15 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 		    range,
 		    jobRoot,
 		    jobRoot.find("blobstore://") == 0 ? BulkLoadTransportMethod::BLOBSTORE : BulkLoadTransportMethod::CP);
-		co_await submitBulkLoadJob(cx, bulkLoadJob);
+		try {
+			co_await submitBulkLoadJob(cx, bulkLoadJob);
+		} catch (Error& e) {
+			if (e.code() != error_code_range_lock_reject) {
+				throw;
+			}
+			fmt::println("ERROR: The BulkLoad range conflicts with an existing range lock.");
+			co_return UID();
+		}
 		co_return bulkLoadJob.getJobId();
 	} else if (tokencmp(tokens[1], "cancel")) {
 		if (tokens.size() != 3) {
@@ -368,7 +378,15 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 			co_return UID();
 		}
 		std::string ownerUniqueID = tokens[2].toString();
-		co_await releaseExclusiveReadLockByUser(cx, ownerUniqueID);
+		try {
+			co_await releaseExclusiveReadLockByUser(cx, ownerUniqueID);
+		} catch (Error& e) {
+			if (e.code() != error_code_range_unlock_reject) {
+				throw;
+			}
+			fmt::println("ERROR: A live BulkLoad job owns this fence. Use bulkload cancel <JOBID>.");
+			fmt::println("       Emergency fence removal requires rangelock force-release-all <OWNER_ID>.");
+		}
 		co_return UID();
 
 	} else {
