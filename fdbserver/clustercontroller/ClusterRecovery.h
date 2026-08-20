@@ -55,6 +55,7 @@ enum ClusterRecoveryEventType {
 	CLUSTER_RECOVERY_COMMIT_EVENT_NAME,
 	CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME,
 	CLUSTER_RECOVERY_METRICS_EVENT_NAME,
+	CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME,
 	CLUSTER_RECOVERY_LAST // Always the last entry
 };
 
@@ -254,6 +255,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	Reference<EventCacheHolder> clusterRecoveryGenerationsEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryDurationEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryAvailableEventHolder;
+	Reference<EventCacheHolder> clusterRecoveryRemoteRegionStallEventHolder;
 
 	ClusterRecoveryData(ClusterControllerData* controllerData,
 	                    Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
@@ -290,6 +292,8 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_DURATION_EVENT_NAME));
 		clusterRecoveryAvailableEventHolder = makeReference<EventCacheHolder>(
 		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME));
+		clusterRecoveryRemoteRegionStallEventHolder = makeReference<EventCacheHolder>(
+		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME));
 		logger =
 		    cc.traceCounters(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME),
 		                     dbgid,

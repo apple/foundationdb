@@ -714,10 +714,20 @@ void printStatus(StatusObjectReader statusObj,
 							ASSERT_WE_THINK(availLoss == -1);
 							const bool possiblyLosingData = logEpochsMayBeLosingData(statusObjCluster);
 							if (possiblyLosingData) {
-								outputString += format(
-								    "\n\n  Warning: the database may have data loss and availability loss. Please "
-								    "restart following tlog interfaces, otherwise storage servers may never be able "
-								    "to catch up.\n");
+								const std::string baseMessage =
+								    "Please restart following tlog interfaces, otherwise storage servers "
+								    "may never be able to catch up.\n";
+
+								bool degradedMultiRegion = false;
+								statusObjCluster.get("degraded_multi_region", degradedMultiRegion);
+
+								const std::string header =
+								    !degradedMultiRegion
+								        ? "\n\n  Warning: the database may have data loss and availability loss. "
+								        : "\n\n  Warning: one region is unavailable; committed data remains safe in "
+								          "the surviving region. ";
+
+								outputString += header + baseMessage;
 							} else {
 								outputString += format(
 								    "\n\n  Warning: the database may have availability loss. The current log state "

@@ -256,6 +256,7 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES slow/GcGenerations.toml)
     add_fdb_test(TEST_FILES fast/KillRegionCycle.toml)
     add_fdb_test(TEST_FILES rare/ClogRemoteTLog.toml)
+    add_fdb_test(TEST_FILES slow/DegradedMultiRegionStatus.toml)
   endif()
 
   if(WITH_ROCKSDB)
