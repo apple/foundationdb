@@ -1122,6 +1122,13 @@ Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<Data
 Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskState parent) {
 	std::vector<BulkLoadManifest> manifests = parent.getManifests();
 	if (manifests.size() < 2) {
+		// A single manifest is as narrow as a task gets, and a manifest can span an arbitrarily wide range,
+		// so this is reachable with a range covering the whole key space. Nothing here can place it: the
+		// cluster needs servers outside src, or the manifest needs to have been dumped more finely.
+		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", self->ddId)
+		    .detail("Reason", "Task holds a single manifest and cannot be narrowed")
+		    .detail("TaskRange", parent.getRange())
+		    .detail("TaskID", parent.getTaskId());
 		co_return false;
 	}
 	std::sort(manifests.begin(), manifests.end(), [](BulkLoadManifest const& a, BulkLoadManifest const& b) {
