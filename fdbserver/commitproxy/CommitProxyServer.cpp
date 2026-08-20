@@ -70,8 +70,129 @@
 
 using WriteMutationRefVar = std::variant<MutationRef, VectorRef<MutationRef>>;
 
+namespace {
+
+constexpr int internalReadConflictRange = -1;
+
+enum class RangeLockCommitCheck : uint8_t { NotRequired, Certified, Rejected };
+
+bool mutationIntersectsRange(const MutationRef& mutation, const KeyRangeRef& range) {
+	if (isSingleKeyMutation(static_cast<MutationRef::Type>(mutation.type))) {
+		return range.contains(mutation.param1);
+	}
+	return mutation.type == MutationRef::ClearRange && range.intersects(KeyRangeRef(mutation.param1, mutation.param2));
+}
+
+class RangeLockMutationSummary {
+public:
+	void add(const MutationRef& mutation) {
+		hasMetadata = hasMetadata || isMetadataMutation(mutation);
+		hasNormalMutation = hasNormalMutation || mutationIntersectsRange(mutation, normalKeys);
+		changesLocks = changesLocks || mutationIntersectsRange(mutation, rangeLockKeys);
+	}
+
+	bool needsCertificate() const { return hasMetadata && hasNormalMutation; }
+	bool hasMetadataMutations() const { return hasMetadata; }
+	bool changesRangeLocks() const { return changesLocks; }
+
+private:
+	bool hasMetadata = false;
+	bool hasNormalMutation = false;
+	bool changesLocks = false;
+};
+
+bool hasRangeLockedMutation(const CommitTransactionRef& transaction, const RangeLock& rangeLock) {
+	if (!rangeLock.anyExclusiveLockHeld()) {
+		return false;
+	}
+	for (const auto& mutation : transaction.mutations) {
+		if (isSingleKeyMutation(static_cast<MutationRef::Type>(mutation.type))) {
+			if (rangeLock.isLocked(singleKeyRange(mutation.param1))) {
+				return true;
+			}
+		} else if (mutation.type == MutationRef::ClearRange &&
+		           rangeLock.isLocked(KeyRangeRef(mutation.param1, mutation.param2))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void addRangeLockReadFence(CommitTransactionRef& transaction,
+                           Arena& arena,
+                           Version lockStateVersion,
+                           std::vector<int>& readConflictRangeIndexMap) {
+	// The proxy's lock map may predate the client's read version. This older
+	// snapshot makes every subsequent lock change invalidate the certificate.
+	transaction.read_snapshot = std::min(transaction.read_snapshot, lockStateVersion);
+	transaction.read_conflict_ranges.push_back(arena, rangeLockKeys);
+	readConflictRangeIndexMap.push_back(internalReadConflictRange);
+}
+
+void addRangeLockWriteFence(CommitTransactionRef& transaction, Arena& arena) {
+	transaction.write_conflict_ranges.push_back(arena, rangeLockKeys);
+}
+
+} // namespace
+
+TEST_CASE("/fdbserver/commitproxy/RangeLock/CertificateConstruction") {
+	Arena arena;
+	RangeLockMutationSummary ordinary;
+	ordinary.add(MutationRef(MutationRef::SetValue, "rangeLockCertificate/user"_sr, "value"_sr));
+	ASSERT(!ordinary.needsCertificate());
+	ASSERT(!ordinary.changesRangeLocks());
+
+	MutationRef metadataVersion(
+	    MutationRef::SetVersionstampedValue, metadataVersionKey, ValueRef(arena, metadataVersionRequiredValue));
+	transformVersionstampMutation(metadataVersion, &MutationRef::param2, 120, 0);
+	ASSERT_EQ(metadataVersion.type, MutationRef::SetValue);
+	ordinary.add(metadataVersion);
+	ASSERT(ordinary.needsCertificate());
+	ASSERT(!ordinary.changesRangeLocks());
+
+	RangeLockMutationSummary lockChange;
+	lockChange.add(MutationRef(MutationRef::SetValue, rangeLockPrefix, ""_sr));
+	ASSERT(lockChange.hasMetadataMutations());
+	ASSERT(lockChange.changesRangeLocks());
+	ASSERT(!lockChange.needsCertificate());
+	RangeLockMutationSummary atomicLockChange;
+	atomicLockChange.add(MutationRef(MutationRef::CompareAndClear, rangeLockPrefix, "value"_sr));
+	ASSERT(atomicLockChange.changesRangeLocks());
+
+	RangeLockMutationSummary crossingClear;
+	crossingClear.add(MutationRef(MutationRef::ClearRange, "rangeLockCertificate/user"_sr, rangeLockKeys.end));
+	ASSERT(crossingClear.needsCertificate());
+	ASSERT(crossingClear.changesRangeLocks());
+
+	CommitTransactionRef candidate;
+	candidate.read_snapshot = 120;
+	candidate.read_conflict_ranges.push_back(arena, KeyRangeRef("a"_sr, "b"_sr));
+	std::vector<int> readIndices{ 7 };
+	addRangeLockReadFence(candidate, arena, 100, readIndices);
+	ASSERT_EQ(candidate.read_snapshot, 100);
+	ASSERT_EQ(candidate.read_conflict_ranges.size(), 2);
+	ASSERT(candidate.read_conflict_ranges.back() == rangeLockKeys);
+	ASSERT_EQ(readIndices.size(), 2);
+	ASSERT_EQ(readIndices[0], 7);
+	ASSERT_EQ(readIndices[1], internalReadConflictRange);
+
+	CommitTransactionRef olderCandidate;
+	olderCandidate.read_snapshot = 80;
+	std::vector<int> olderReadIndices;
+	addRangeLockReadFence(olderCandidate, arena, 100, olderReadIndices);
+	ASSERT_EQ(olderCandidate.read_snapshot, 80);
+
+	CommitTransactionRef noClientWriteConflicts;
+	ASSERT(noClientWriteConflicts.write_conflict_ranges.empty());
+	addRangeLockWriteFence(noClientWriteConflicts, arena);
+	ASSERT_EQ(noClientWriteConflicts.write_conflict_ranges.size(), 1);
+	ASSERT(noClientWriteConflicts.write_conflict_ranges.front() == rangeLockKeys);
+	co_return;
+}
+
 struct ResolutionRequestBuilder {
 	const ProxyCommitData* self;
+	const Version rangeLockStateVersion;
 
 	// One request per resolver.
 	std::vector<ResolveTransactionBatchRequest> requests;
@@ -79,10 +200,11 @@ struct ResolutionRequestBuilder {
 	// Txn i to resolvers that have i'th data sent
 	std::vector<std::vector<int>> transactionResolverMap;
 	std::vector<CommitTransactionRef*> outTr;
+	std::vector<RangeLockCommitCheck> rangeLockChecks;
 
 	// Used to report conflicting keys, the format is
 	// [CommitTransactionRef_Index][Resolver_Index][Read_Conflict_Range_Index_on_Resolver]
-	// -> read_conflict_range's original index in the commitTransactionRef
+	// -> the client's original index, or internalReadConflictRange for a server-only range
 	std::vector<std::vector<std::vector<int>>> txReadConflictRangeIndexMap;
 
 	ResolutionRequestBuilder(ProxyCommitData* self,
@@ -91,7 +213,7 @@ struct ResolutionRequestBuilder {
 	                         Version lastReceivedVersion,
 	                         Version lastShardMove,
 	                         Span& parentSpan)
-	  : self(self), requests(self->resolvers.size()) {
+	  : self(self), rangeLockStateVersion(lastReceivedVersion), requests(self->resolvers.size()) {
 		for (auto& req : requests) {
 			req.spanContext = parentSpan.context;
 			req.prevVersion = prevVersion;
@@ -151,14 +273,14 @@ struct ResolutionRequestBuilder {
 
 	// Returns a read conflict index map: [resolver_index][read_conflict_range_index_on_the_resolver]
 	// -> read_conflict_range's original index
-	std::vector<std::vector<int>> addReadConflictRanges(CommitTransactionRef& trIn) {
+	std::vector<std::vector<int>> addReadConflictRanges(CommitTransactionRef& trIn, int clientReadConflictRangeCount) {
 		std::vector<std::vector<int>> rCRIndexMap(requests.size());
 		for (int idx = 0; idx < trIn.read_conflict_ranges.size(); ++idx) {
 			const auto& r = trIn.read_conflict_ranges[idx];
 			for (int resolver : getResolversForRange(r, trIn.read_snapshot)) {
 				getOutTransaction(resolver, trIn.read_snapshot)
 				    .read_conflict_ranges.push_back(requests[resolver].arena, r);
-				rCRIndexMap[resolver].push_back(idx);
+				rCRIndexMap[resolver].push_back(idx < clientReadConflictRangeCount ? idx : internalReadConflictRange);
 			}
 		}
 		return rCRIndexMap;
@@ -175,11 +297,12 @@ struct ResolutionRequestBuilder {
 
 	void addTransaction(CommitTransactionRequest& trRequest, Version ver, int transactionNumberInBatch) {
 		auto& trIn = trRequest.transaction;
+		const int clientReadConflictRangeCount = trIn.read_conflict_ranges.size();
 		// SOMEDAY: There are a couple of unnecessary O( # resolvers ) steps here
 		outTr.assign(requests.size(), nullptr);
 		ASSERT(transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768);
 
-		bool isTXNStateTransaction = false;
+		RangeLockMutationSummary rangeLockSummary;
 		for (auto& m : trIn.mutations) {
 			DEBUG_MUTATION("AddTr", ver, m, self->dbgid).detail("Idx", transactionNumberInBatch);
 			if (m.type == MutationRef::SetVersionstampedKey) {
@@ -188,8 +311,30 @@ struct ResolutionRequestBuilder {
 			} else if (m.type == MutationRef::SetVersionstampedValue) {
 				transformVersionstampMutation(m, &MutationRef::param2, requests[0].version, transactionNumberInBatch);
 			}
-			if (isMetadataMutation(m)) {
-				isTXNStateTransaction = true;
+			rangeLockSummary.add(m);
+		}
+
+		// Metadata is replicated from resolver verdicts, so mixed transactions
+		// need an unlocked view certified by resolver 0 before those verdicts.
+		const bool certifyRangeLock =
+		    self->rangeLock != nullptr && !trRequest.isLockAware() && rangeLockSummary.needsCertificate();
+		if (certifyRangeLock && hasRangeLockedMutation(trIn, *self->rangeLock)) {
+			// No part of a rejected metadata transaction may reach a resolver:
+			// it could otherwise become durable transaction state or a private mutation.
+			rangeLockChecks.push_back(RangeLockCommitCheck::Rejected);
+			transactionResolverMap.emplace_back();
+			txReadConflictRangeIndexMap.emplace_back(requests.size());
+			return;
+		}
+		rangeLockChecks.push_back(certifyRangeLock ? RangeLockCommitCheck::Certified
+		                                           : RangeLockCommitCheck::NotRequired);
+
+		const bool isTXNStateTransaction = rangeLockSummary.hasMetadataMutations();
+		if (isTXNStateTransaction) {
+			for (const auto& m : trIn.mutations) {
+				if (!isMetadataMutation(m)) {
+					continue;
+				}
 				auto& tr = getOutTransaction(0, trIn.read_snapshot);
 				tr.mutations.push_back(requests[0].arena, m);
 				tr.lock_aware = trRequest.isLockAware();
@@ -203,10 +348,19 @@ struct ResolutionRequestBuilder {
 			trIn.read_conflict_ranges.push_back(trRequest.arena, KeyRangeRef(databaseLockedKey, databaseLockedKeyEnd));
 		}
 
-		std::vector<std::vector<int>> rCRIndexMap = addReadConflictRanges(trIn);
+		std::vector<std::vector<int>> rCRIndexMap = addReadConflictRanges(trIn, clientReadConflictRangeCount);
+		if (certifyRangeLock) {
+			addRangeLockReadFence(
+			    getOutTransaction(0, trIn.read_snapshot), requests[0].arena, rangeLockStateVersion, rCRIndexMap[0]);
+		}
 		txReadConflictRangeIndexMap.push_back(std::move(rCRIndexMap));
 
 		addWriteConflictRanges(trIn);
+		if (rangeLockSummary.changesRangeLocks()) {
+			// Resolver 0 owns the fence even if resolver ranges move. Derive it
+			// from mutations so suppressing client write conflicts cannot bypass it.
+			addRangeLockWriteFence(getOutTransaction(0, trIn.read_snapshot), requests[0].arena);
+		}
 
 		if (isTXNStateTransaction) {
 			for (int r = 0; r < requests.size(); r++) {
@@ -531,6 +685,7 @@ struct CommitBatchContext {
 	int64_t maxTransactionBytes;
 	std::vector<std::vector<int>> transactionResolverMap;
 	std::vector<std::vector<std::vector<int>>> txReadConflictRangeIndexMap;
+	std::vector<RangeLockCommitCheck> rangeLockChecks;
 
 	Future<Void> releaseDelay;
 	Future<Void> releaseFuture;
@@ -985,6 +1140,7 @@ Future<Void> getResolution(CommitBatchContext* self) {
 	self->transactionResolverMap.swap(requests.transactionResolverMap);
 	// Used to report conflicting keys
 	self->txReadConflictRangeIndexMap.swap(requests.txReadConflictRangeIndexMap);
+	self->rangeLockChecks.swap(requests.rangeLockChecks);
 
 	self->releaseFuture = releaseResolvingAfter(pProxyCommitData, self->releaseDelay, self->localBatchNumber);
 
@@ -1146,10 +1302,22 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	const auto& trs = self->trs;
 
 	ASSERT(self->transactionResolverMap.size() == self->committed.size());
+	ASSERT(self->rangeLockChecks.size() == self->committed.size());
 	// For each commitTransactionRef, it is only sent to resolvers specified in transactionResolverMap
 	// Thus, we use this nextTr to track the correct transaction index on each resolver.
 	self->nextTr.resize(self->resolution.size());
 	for (int t = 0; t < trs.size(); t++) {
+		if (self->rangeLockChecks[t] == RangeLockCommitCheck::Rejected) {
+			ASSERT(self->transactionResolverMap[t].empty());
+			ASSERT(pProxyCommitData->rangeLock != nullptr);
+			self->committed[t] = ConflictBatchStatus::TransactionLockReject;
+			// Prior batches are now reflected in the lock map. If the lock was
+			// released, retry instead of returning a stale lock rejection.
+			trs[t].reply.sendError(hasRangeLockedMutation(trs[t].transaction, *pProxyCommitData->rangeLock)
+			                           ? transaction_rejected_range_locked()
+			                           : not_committed());
+			continue;
+		}
 		uint8_t commit = ConflictBatchStatus::TransactionCommitted;
 		for (int r : self->transactionResolverMap[t]) {
 			commit = std::min(self->resolution[r].committed[self->nextTr[r]++], commit);
@@ -1359,22 +1527,15 @@ void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
 			continue;
 		} else if (trs[i].isLockAware()) {
 			continue; // rangeLock is transparent to lock-aware transactions
+		} else if (self->rangeLockChecks[i] == RangeLockCommitCheck::Certified) {
+			// Resolver 0 already validated the lock-state certificate before
+			// recording metadata effects. A later lock in this batch must not
+			// retroactively reject the transaction.
+			continue;
 		}
-		VectorRef<MutationRef>* pMutations = &trs[i].transaction.mutations;
-		for (int j = 0; j < pMutations->size(); j++) {
-			MutationRef m = (*pMutations)[j];
-			KeyRange rangeToCheck;
-			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-				rangeToCheck = singleKeyRange(m.param1);
-			} else if (m.type == MutationRef::ClearRange) {
-				rangeToCheck = KeyRangeRef(m.param1, m.param2);
-			}
-			bool shouldReject = pProxyCommitData->rangeLock->isLocked(rangeToCheck);
-			if (shouldReject) {
-				self->committed[i] = ConflictBatchStatus::TransactionLockReject;
-				trs[i].reply.sendError(transaction_rejected_range_locked());
-				break;
-			}
+		if (hasRangeLockedMutation(trs[i].transaction, *pProxyCommitData->rangeLock)) {
+			self->committed[i] = ConflictBatchStatus::TransactionLockReject;
+			trs[i].reply.sendError(transaction_rejected_range_locked());
 		}
 	}
 }
@@ -2046,14 +2207,21 @@ Future<Void> reply(CommitBatchContext* self) {
 					for (auto const& rCRIndex : cKRs) {
 						// read_conflict_range can change when sent to resolvers, mapping the index from
 						// resolver-side to original index in commitTransactionRef
-						conflictingKRIndices.push_back(conflictingKRIndices.arena(),
-						                               self->txReadConflictRangeIndexMap[t][resolverInd][rCRIndex]);
+						const int originalIndex = self->txReadConflictRangeIndexMap[t][resolverInd][rCRIndex];
+						if (originalIndex != internalReadConflictRange) {
+							conflictingKRIndices.push_back(conflictingKRIndices.arena(), originalIndex);
+						}
 					}
 				}
-				// At least one keyRange index should be returned
-				ASSERT(!conflictingKRIndices.empty());
-				tr.reply.send(CommitID(
-				    invalidVersion, t, Optional<Value>(), Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
+				if (conflictingKRIndices.empty()) {
+					// Internal fences have no corresponding client read-conflict index.
+					tr.reply.sendError(not_committed());
+				} else {
+					tr.reply.send(CommitID(invalidVersion,
+					                       t,
+					                       Optional<Value>(),
+					                       Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
+				}
 			} else {
 				tr.reply.sendError(not_committed());
 			}

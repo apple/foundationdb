@@ -22,6 +22,7 @@
 #include <memory.h>
 #include <stdio.h>
 #include <algorithm>
+#include <memory>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -1213,6 +1214,59 @@ void skipListTest() {
 	}
 
 	printf("%d entries in version history\n", cs->versionHistory.count());
+}
+
+TEST_CASE("/fdbserver/resolver/RangeLock/ConflictFence") {
+	Arena arena;
+	auto makeWriter = [&]() {
+		CommitTransactionRef transaction;
+		transaction.read_snapshot = 100;
+		transaction.write_conflict_ranges.push_back(arena, rangeLockKeys);
+		return transaction;
+	};
+	auto makeCertificate = [&](Version knownLockStateVersion) {
+		CommitTransactionRef transaction;
+		transaction.read_snapshot = knownLockStateVersion;
+		transaction.read_conflict_ranges.push_back(arena, rangeLockKeys);
+		return transaction;
+	};
+	auto makeConflictSet = []() {
+		return std::unique_ptr<ConflictSet, decltype(&destroyConflictSet)>(newConflictSet(), destroyConflictSet);
+	};
+	auto resolve = [](ConflictSet* conflictSet,
+	                  Version commitVersion,
+	                  Version oldestVersion,
+	                  const std::vector<CommitTransactionRef>& transactions) {
+		ConflictBatch batch(conflictSet);
+		for (const auto& transaction : transactions) {
+			batch.addTransaction(transaction, oldestVersion);
+		}
+		std::pair<std::vector<int>, std::vector<int>> result;
+		batch.detectConflicts(commitVersion, oldestVersion, result.first, &result.second);
+		return result;
+	};
+
+	// A lock change resolved for another proxy invalidates an older cache,
+	// even when the client's own read version was newer than the change.
+	auto crossProxy = makeConflictSet();
+	ASSERT(resolve(crossProxy.get(), 110, 90, { makeWriter() }).first == std::vector<int>{ 0 });
+	ASSERT(resolve(crossProxy.get(), 120, 90, { makeCertificate(100) }).first.empty());
+	ASSERT(resolve(crossProxy.get(), 130, 90, { makeCertificate(110) }).first == std::vector<int>{ 0 });
+
+	auto earlierLock = makeConflictSet();
+	ASSERT(resolve(earlierLock.get(), 110, 90, { makeWriter(), makeCertificate(100) }).first == std::vector<int>{ 0 });
+
+	// A later acquisition is serialized after the certified transaction; it
+	// must not retroactively turn that transaction into a partial commit.
+	auto laterLock = makeConflictSet();
+	const std::vector<int> both{ 0, 1 };
+	ASSERT(resolve(laterLock.get(), 110, 90, { makeCertificate(100), makeWriter() }).first == both);
+
+	auto expiredHistory = makeConflictSet();
+	const auto tooOld = resolve(expiredHistory.get(), 120, 90, { makeCertificate(80) });
+	ASSERT(tooOld.first.empty());
+	ASSERT(tooOld.second == std::vector<int>{ 0 });
+	co_return;
 }
 
 TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
