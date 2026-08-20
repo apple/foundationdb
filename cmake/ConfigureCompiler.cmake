@@ -222,12 +222,13 @@ else()
     add_compile_options("$<${is_cxx_compile}:-gdwarf-5>")
   endif()
 
-  # Also generating debug symbols in release builds.
+  # Also generate debug symbols in release builds,
   # CPack will strip them out and create a debuginfo rpm.
-  if(FULL_DEBUG_SYMBOLS OR CMAKE_BUILD_TYPE STREQUAL "Debug")
+  # (Just -g1 by default because they can be huge.)
+  if(FULL_DEBUG_SYMBOLS)
     # As much as possible, including macros and such.
     add_compile_options("$<${is_cxx_compile}:-g3>")
-  elseif(FDB_RELEASE)
+  elseif(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     # Reasonable for debugging, including function locals and c++ namespaces.
     add_compile_options("$<${is_cxx_compile}:-g2>")
   else()
