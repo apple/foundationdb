@@ -1102,6 +1102,93 @@ Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<Data
 	}
 }
 
+// Replace a task with two tasks covering the same manifests, halving the key range each covers.
+//
+// This is the recovery for a placement failure the task's range itself causes: src is the union of the
+// owners of every shard the range spans, and a destination team must be disjoint from src, so a range
+// spanning enough of the fleet has no legal destination. Re-dispatch cannot clear that, because every
+// attempt presents the same range and recomputes the same src. Narrower ranges span fewer shards and so
+// have narrower src.
+//
+// A task's range is exactly the span of its manifests, and the job's manifests tile the key space, so
+// splitting the manifest list in two yields adjacent sub-ranges that together cover the parent exactly.
+// The two writes therefore overwrite the parent's entry with no gap and nothing is ever persisted in an
+// invalid state: at every version the range is owned by tasks whose union is the parent. That is the
+// difference from erasing the task and relying on something to rebuild it, which drops the range's data
+// if nothing does.
+//
+// Returns false if the task holds a single manifest, which is as narrow as a task can get; the caller
+// then has a genuinely unplaceable range. Halving also bounds recursion without a counter.
+Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskState parent) {
+	std::vector<BulkLoadManifest> manifests = parent.getManifests();
+	if (manifests.size() < 2) {
+		co_return false;
+	}
+	std::sort(manifests.begin(), manifests.end(), [](BulkLoadManifest const& a, BulkLoadManifest const& b) {
+		return a.getBeginKey() < b.getBeginKey();
+	});
+	int const half = manifests.size() / 2;
+
+	std::vector<BulkLoadTaskState> children;
+	for (int part = 0; part < 2; part++) {
+		int const from = part == 0 ? 0 : half;
+		int const to = part == 0 ? half : manifests.size();
+		BulkLoadManifestSet set(to - from);
+		for (int i = from; i < to; i++) {
+			bool added = set.addManifest(manifests[i]);
+			ASSERT(added);
+		}
+		ASSERT(set.isValid());
+		children.push_back(
+		    BulkLoadTaskState(parent.getJobId(), set, KeyRangeRef(set.getMinBeginKey(), set.getMaxEndKey())));
+	}
+	// The children must tile the parent exactly, or the two writes below would leave part of the range
+	// owned by nothing and its data would never be ingested.
+	ASSERT(children[0].getRange().begin == parent.getRange().begin);
+	ASSERT(children[0].getRange().end == children[1].getRange().begin);
+	ASSERT(children[1].getRange().end == parent.getRange().end);
+
+	Database cx = self->txnProcessor->context();
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
+			// Confirm the parent is still ours and has not moved on before replacing it.
+			co_await getBulkLoadTask(
+			    &tr, parent.getRange(), parent.getTaskId(), { BulkLoadPhase::Triggered, BulkLoadPhase::Running });
+			for (const auto& child : children) {
+				co_await krmSetRange(&tr, bulkLoadTaskPrefix, child.getRange(), bulkLoadTaskStateValue(child));
+			}
+			co_await tr.commit();
+			TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplit", self->ddId)
+			    .detail("CommitVersion", tr.getCommittedVersion())
+			    .detail("TaskRange", parent.getRange())
+			    .detail("TaskID", parent.getTaskId())
+			    .detail("ManifestCount", manifests.size())
+			    .detail("FirstRange", children[0].getRange())
+			    .detail("FirstTaskID", children[0].getTaskId())
+			    .detail("SecondRange", children[1].getRange())
+			    .detail("SecondTaskID", children[1].getTaskId());
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.code() == error_code_bulkload_task_outdated) {
+			// Someone else already moved the parent on; it is no longer ours to split.
+			co_return false;
+		}
+		co_await tr.onError(err);
+	}
+	// Ordered after the commit: publishTask refuses an already-published taskId, so the stale parent
+	// would block its own children, but dropping it before the commit is durable would strand the range
+	// if the commit failed.
+	self->bulkLoadTaskCollection->eraseTask(parent);
+	co_return true;
+}
+
 // TODO(BulkLoad): add reason to persist
 Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
                               KeyRange taskRange,
@@ -1276,6 +1363,26 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 			    .detail("MaxRetryableRedispatch", maxRetryableRedispatch)
 			    .detail("Duration", now() - beginTime);
 			throw data_move_dest_team_not_found();
+		}
+
+		// A retryable error that survives the whole budget is not transient: re-dispatch presents the same
+		// range every time, so a failure the range itself causes cannot clear. Before giving up, try to
+		// narrow the range by splitting the task, which is what makes its src narrow enough to place.
+		bool taskSplit = false;
+		if (retriesExhausted) {
+			taskSplit = co_await splitBulkLoadTask(self, triggeredBulkLoadTask);
+		}
+		if (taskSplit) {
+			CODE_PROBE(true, "Bulkload task split after exhausting recoverable retries");
+			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
+			    .detail("Phase", "Retryable error budget exhausted; task split")
+			    .detail("CancelledDataMovePriority", ack.dataMovePriority)
+			    .detail("Range", range)
+			    .detail("TaskID", taskId)
+			    .detail("RestartCount", triggeredBulkLoadTask.restartCount)
+			    .detail("Duration", now() - beginTime);
+			self->bulkLoadEngineParallelismLimitor.decrementTaskCounter();
+			co_return;
 		}
 
 		if (ack.unretryableError || retriesExhausted) {
