@@ -1,0 +1,37 @@
+# Integration test for the "degraded multi-region" status signal.
+#
+# Simulated fearless topology (generateFearless=true) with two usable regions:
+#   - region 0 (primary): datacenter "0" (priority 2) + satellite "2" (priority 1)
+#   - region 1 (remote):  datacenter "1" (priority 1) + satellite "3" (priority 1)
+#   - usable_regions=2, coordinators placed in non-primary DCs (minimumRegions=2)
+#
+# The workload kills ONLY datacenter "0" (the primary of the first region), leaving
+# its satellite "2" and the remote region alive. The cluster fails over to region 1,
+# recovers data from the surviving satellite "2", and recovery gets stuck at
+# accepting_commits with the dead primary's log set not recruited
+# (allLogs == false => RemoteRegionLogsMissing=1 => degraded_multi_region=true).
+
+[configuration]
+generateFearless = true
+minimumRegions = 2
+coordinators = 3
+datacenters = 4
+simHTTPServerEnabled = false
+satelliteRedundancyMode = "one_satellite_single"
+config = "single"
+
+[[test]]
+testTitle = 'DegradedMultiRegionStatus'
+clearAfterTest = false
+runFailureWorkloads = false
+runConsistencyCheck = true
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 100
+    transactionsPerSecond = 100.0
+    testDuration = 3.0
+
+    [[test.workload]]
+    testName = 'DegradedMultiRegionStatus'
+    testDuration = 200.0

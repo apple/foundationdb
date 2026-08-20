@@ -514,6 +514,10 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 	DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
 	DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
+	// Start of the current remote-region stall, if any. Kept across loop iterations so that
+	// re-emissions of the event on unrelated core-state changes do not reset the reported
+	// stall duration; it grows monotonically until the log set is complete.
+	Optional<double> remoteLogsMissingSince;
 	while (true) {
 		DBCoreState newState;
 		self->logSystem->toCoreState(newState);
@@ -581,6 +585,46 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 		}
 
+		// Surface "degraded multi-region" as a first-class signal: with usableRegions > 1, the remote region's
+		// log set has not been recruited (allLogs == false). Committed data is still safe in the surviving
+		// region, so this is distinct from data loss. Note that oldTLogData is deliberately not a
+		// discriminator: when the remote region is down, old log generations cannot be purged (finalUpdate
+		// requires allLogs), so oldTLogData stays non-empty precisely in this stalled state. The value is also
+		// (re)set when all logs are recruited or the cluster fully recovers, so the trackLatest event always
+		// reflects the current state.
+		//
+		// The remote log set is legitimately absent before recovery reaches accepting_commits even during a
+		// normal (non-region-loss) recovery, because remote tlog recruitment is part of the normal recovery
+		// path. Only begin tracking the stall once the cluster is accepting commits: at that point a missing
+		// remote log set is no longer a transient recruiting artifact but a genuine degraded multi-region
+		// condition. Without this gate, StallSeconds accumulates across the pre-accepting_commits recruiting
+		// window and a slow-but-healthy recovery trips degraded_multi_region once the stall exceeds
+		// DEGRADED_MULTI_REGION_MIN_STALL_SECONDS.
+		bool remoteRegionLogsMissing =
+		    configuration.usableRegions > 1 && !allLogs && self->recoveryState >= RecoveryState::ACCEPTING_COMMITS;
+		if (remoteRegionLogsMissing) {
+			if (!remoteLogsMissingSince.present()) {
+				remoteLogsMissingSince = now();
+			}
+		} else {
+			remoteLogsMissingSince = Optional<double>();
+		}
+		// StallSeconds is carried in the event itself rather than derived from the event's
+		// emission Time by status: the event is re-emitted on every core-state change, and
+		// deriving the duration from the latest emission would reset the stall counter while
+		// the stall is still ongoing.
+		double remoteRegionStallSeconds =
+		    remoteLogsMissingSince.present() ? std::max(0.0, now() - remoteLogsMissingSince.get()) : 0.0;
+		TraceEvent(
+		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME).c_str(),
+		    self->dbgid)
+		    .detail("RemoteRegionLogsMissing", remoteRegionLogsMissing)
+		    .detail("AllLogs", allLogs)
+		    .detail("OldTLogDataSize", newState.oldTLogData.size())
+		    .detail("UsableRegions", configuration.usableRegions)
+		    .detail("StallSeconds", remoteRegionStallSeconds)
+		    .trackLatest(self->clusterRecoveryRemoteRegionStallEventHolder->trackingKey);
+
 		self->registrationTrigger.trigger();
 
 		if (finalUpdate) {
@@ -589,7 +633,15 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			co_return;
 		}
 
-		co_await changed;
+		// While the remote log set is missing, keep re-emitting the stall event on a fixed cadence so
+		// StallSeconds keeps advancing even when no core-state change would otherwise wake this loop.
+		// Without this, an idle (commits-stalled) cluster would block forever in co_await changed and
+		// the sustained-stall threshold could never be crossed.
+		if (remoteRegionLogsMissing) {
+			co_await (changed || delay(SERVER_KNOBS->DEGRADED_MULTI_REGION_REFRESH_SECONDS));
+		} else {
+			co_await changed;
+		}
 	}
 }
 
@@ -2100,6 +2152,8 @@ const std::string& getRecoveryEventName(ClusterRecoveryEventType type) {
 		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryAvailable" });
 		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME,
 		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryMetrics" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryRemoteRegionStall" });
 	}
 
 	auto iter = recoveryEventNameMap.find(type);

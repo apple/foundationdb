@@ -729,6 +729,12 @@ public:
 	double MIN_CONFIRM_INTERVAL;
 	double ENFORCED_MIN_RECOVERY_DURATION;
 	double REQUIRED_MIN_RECOVERY_DURATION;
+	double DEGRADED_MULTI_REGION_MIN_STALL_SECONDS; // How long the remote region's log set must be missing after
+	                                                // accepting commits before status reports degraded_multi_region.
+	                                                // Filters out the transient window of a normal recovery.
+	double DEGRADED_MULTI_REGION_REFRESH_SECONDS; // Cadence for re-emitting the remote-region-stall event while it is
+	                                              // active, so StallSeconds keeps advancing even without core-state
+	                                              // changes (e.g. an idle cluster with a stalled remote DC).
 	bool ALWAYS_CAUSAL_READ_RISKY;
 	int MAX_COMMIT_UPDATES;
 	double MAX_PROXY_COMPUTE;
