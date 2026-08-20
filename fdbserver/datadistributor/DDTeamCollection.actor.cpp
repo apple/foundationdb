@@ -5034,6 +5034,21 @@ void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTe
 	auto badTeam = IsBadTeam{ redundantTeam || !satisfiesPolicy(teamInfo->getServers()) ||
 		                      (!ddLargeTeamEnabled() && teamInfo->size() != configuration.storageTeamSize) };
 
+	if (!badTeam) {
+		// A rebuilt team owns the same shard mappings as its old bad-team entries. Keeping both
+		// trackers alive can repeatedly relocate a shard to itself.
+		for (size_t i = 0; i < badTeams.size();) {
+			if (badTeams[i]->getServerIDs() != teamInfo->getServerIDs()) {
+				++i;
+				continue;
+			}
+			auto obsoleteTeam = badTeams[i];
+			badTeams[i] = badTeams.back();
+			badTeams.pop_back();
+			obsoleteTeam->tracker.cancel();
+		}
+	}
+
 	teamInfo->tracker = teamTracker(teamInfo, badTeam, redundantTeam, checkTeamDelay);
 	// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
 	if (badTeam) {
@@ -7377,6 +7392,94 @@ public:
 		          initialTeamCollectionInfoTime);
 	}
 
+	static Future<Void> TeamTracker_RetiresRecreatedRedundantTeam() {
+		constexpr double checkTeamDelay = 0.05;
+		const UID first(1, 0), second(2, 0), third(3, 0), fourth(4, 0);
+		const ShardsAffectedByTeamFailure::Team target({ first, second }, true);
+		const KeyRange keys = KeyRangeRef("a"_sr, "b"_sr);
+		auto shards = makeReference<ShardsAffectedByTeamFailure>();
+		shards->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+		shards->assignRangeToTeams(keys, { target });
+
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>());
+		auto collection = testTeamCollection(2, policy, 4, shards);
+		collection->teamCollections = { collection.get() };
+		collection->initialFailureReactionDelay = Future<Void>(Void());
+		collection->teamCollectionInfoEventHolder =
+		    makeReference<EventCacheHolder>("TeamTrackerRetiresRecreatedRedundantTeam");
+		FutureStream<RelocateShard> relocations = collection->output.getFuture();
+		collection->addTeam(std::set<UID>({ first, second }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ third, fourth }), IsInitialTeam::True);
+		co_await delay(0.01);
+		ASSERT_EQ(collection->healthyTeamCount, 2);
+		const int initialOptimalTeamCount = collection->optimalTeamCount;
+		ASSERT(!relocations.isReady());
+
+		Reference<TCTeamInfo> original = collection->teams.front();
+		ASSERT(collection->removeTeam(original));
+		collection->addTeam(original->getServers(), IsInitialTeam::True, IsRedundantTeam::True, checkTeamDelay);
+		Reference<TCTeamInfo> obsolete = collection->badTeams.back();
+		collection->addTeam({ collection->server_info[first], collection->server_info[third] },
+		                    IsInitialTeam::True,
+		                    IsRedundantTeam::True,
+		                    checkTeamDelay);
+		Reference<TCTeamInfo> unrelated = collection->badTeams.back();
+		co_await delay(0.01);
+		ASSERT(relocations.isReady());
+		RelocateShard initial = relocations.pop();
+		ASSERT_EQ(initial.keys, keys);
+		ASSERT_EQ(initial.priority, SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT);
+		ASSERT(!relocations.isReady());
+		ASSERT_EQ(collection->priority_teams[SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT], 2);
+
+		collection->processingUnhealthy->set(true);
+		collection->addTeam(original->getServers(), IsInitialTeam::True, IsRedundantTeam::False, checkTeamDelay);
+		co_await delay(0.01);
+		ASSERT(obsolete->tracker.isReady());
+		ASSERT(obsolete->tracker.isError());
+		ASSERT_EQ(obsolete->tracker.getError().code(), error_code_actor_cancelled);
+		ASSERT_EQ(collection->badTeams.size(), 1);
+		ASSERT(collection->badTeams.front() == unrelated);
+		ASSERT_EQ(collection->priority_teams[SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT], 1);
+		ASSERT_EQ(collection->healthyTeamCount, 2);
+		ASSERT_EQ(collection->optimalTeamCount, initialOptimalTeamCount);
+		ASSERT_EQ(collection->teams.size(), 2);
+		ASSERT_EQ(collection->teamsByServerIDs.size(), collection->teams.size());
+		Reference<TCTeamInfo> replacement = collection->teamsByServerIDs.at(original->getServerIDsStr());
+		ASSERT(replacement != original);
+		ASSERT(replacement->isHealthy());
+		for (const auto& server : replacement->getServers()) {
+			ASSERT_EQ(std::count(server->getTeams().begin(), server->getTeams().end(), replacement), 1);
+		}
+		ASSERT_EQ(std::count(replacement->machineTeam->getServerTeams().begin(),
+		                     replacement->machineTeam->getServerTeams().end(),
+		                     replacement),
+		          1);
+		ASSERT(collection->sanityCheckTeams());
+		ASSERT(shards->hasShards(target));
+
+		collection->processingUnhealthy->set(false);
+		collection->pipelineFull->set(true);
+		co_await delay(0.01);
+		collection->pipelineFull->set(false);
+		co_await delay(2 * checkTeamDelay + 0.01);
+		ASSERT(!relocations.isReady());
+
+		collection->server_status.set(first,
+		                              ServerStatus(IsFailed::True,
+		                                           IsUndesired::False,
+		                                           IsWiggling::False,
+		                                           collection->server_info[first]->getLastKnownInterface().locality));
+		co_await delay(0.01);
+		ASSERT(relocations.isReady());
+		RelocateShard recovery = relocations.pop();
+		ASSERT_EQ(recovery.keys, keys);
+		ASSERT_EQ(recovery.priority, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT);
+		ASSERT(!relocations.isReady());
+		ASSERT(!replacement->isHealthy());
+		ASSERT_EQ(collection->healthyTeamCount, 1);
+	}
+
 	static Future<Void> TeamTracker_RechecksHealthyZone() {
 		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		auto collection = testTeamCollection(3, policy, 3);
@@ -7568,6 +7671,11 @@ TEST_CASE("/DataDistribution/Recruitment/RecruitmentFailedCooldownReleasesId") {
 
 TEST_CASE("/DataDistribution/TeamTracker/RetriesMergedShardForUndesiredServer") {
 	wait(DDTeamCollectionUnitTest::TeamTracker_RetriesMergedShardForUndesiredServer());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/TeamTracker/RetiresRecreatedRedundantTeam") {
+	wait(DDTeamCollectionUnitTest::TeamTracker_RetiresRecreatedRedundantTeam());
 	return Void();
 }
 
