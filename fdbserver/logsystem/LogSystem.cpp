@@ -491,6 +491,11 @@ Reference<LogSystem> LogSystem::fromOldLogSystemConfig(UID const& dbgid,
 }
 
 void LogSystem::purgeOldRecoveredGenerationsCoreState(DBCoreState& newState) {
+	// Anti-quorum recovery may still need these generations after a controller or router failure.
+	// Do not let incremental purging bypass the remote-prefix durability barrier.
+	if (!remoteLogPrefixRecovered()) {
+		return;
+	}
 	Version oldestGenerationRecoverAtVersion = std::min(recoveredVersion->get(), remoteRecoveredVersion->get());
 	TraceEvent("ToCoreStateOldestGenerationRecoverAtVersion")
 	    .detail("RecoveredVersion", recoveredVersion->get())
@@ -537,6 +542,8 @@ void LogSystem::toCoreState(DBCoreState& newState) const {
 
 	if (remoteRecoveryComplete.isValid() && remoteRecoveryComplete.isError())
 		throw remoteRecoveryComplete.getError();
+	if (remoteLogPrefixComplete.isValid() && remoteLogPrefixComplete.isError())
+		throw remoteLogPrefixComplete.getError();
 
 	newState.tLogs.clear();
 	newState.logRouterTags = logRouterTags;
@@ -554,9 +561,7 @@ void LogSystem::toCoreState(DBCoreState& newState) const {
 	}
 
 	newState.oldTLogData.clear();
-	if (!recoveryComplete.isValid() || !recoveryComplete.isReady() ||
-	    (repopulateRegionAntiQuorum == 0 && (!remoteRecoveryComplete.isValid() || !remoteRecoveryComplete.isReady())) ||
-	    epoch != oldestBackupEpoch) {
+	if (!storageRecovered() || !remoteLogPrefixRecovered()) {
 		for (const auto& oldData : oldLogData) {
 			newState.oldTLogData.push_back(toOldTLogCoreData(oldData));
 			TraceEvent("BWToCore")
@@ -572,8 +577,21 @@ void LogSystem::toCoreState(DBCoreState& newState) const {
 	newState.logSystemType = logSystemType;
 }
 
+bool LogSystem::storageRecovered() const {
+	return recoveryComplete.isValid() && recoveryComplete.isReady() && !recoveryComplete.isError() &&
+	       (repopulateRegionAntiQuorum != 0 || (remoteStorageRecovered() && !remoteRecoveryComplete.isError())) &&
+	       epoch == oldestBackupEpoch;
+}
+
 bool LogSystem::remoteStorageRecovered() const {
 	return remoteRecoveryComplete.isValid() && remoteRecoveryComplete.isReady();
+}
+
+bool LogSystem::remoteLogPrefixRecovered() const {
+	return repopulateRegionAntiQuorum == 0 || !hasRemoteServers || oldLogData.empty() ||
+	       (remoteStorageRecovered() && !remoteRecoveryComplete.isError()) ||
+	       (remoteLogPrefixComplete.isValid() && remoteLogPrefixComplete.isReady() &&
+	        !remoteLogPrefixComplete.isError());
 }
 
 Future<Void> LogSystem::onCoreStateChanged() const {
@@ -588,6 +606,9 @@ Future<Void> LogSystem::onCoreStateChanged() const {
 	if (remoteRecoveryComplete.isValid() && !remoteRecoveryComplete.isReady()) {
 		changes.push_back(remoteRecoveryComplete);
 	}
+	if (remoteLogPrefixComplete.isValid() && !remoteLogPrefixComplete.isReady()) {
+		changes.push_back(remoteLogPrefixComplete);
+	}
 	changes.push_back(backupWorkerChanged.onTrigger()); // changes to oldestBackupEpoch
 	changes.push_back(recoveredVersion->onChange());
 	changes.push_back(remoteRecoveredVersion->onChange());
@@ -596,6 +617,7 @@ Future<Void> LogSystem::onCoreStateChanged() const {
 
 void LogSystem::coreStateWritten(DBCoreState const& newState) {
 	if (newState.oldTLogData.empty()) {
+		ASSERT(remoteLogPrefixRecovered());
 		recoveryCompleteWrittenToCoreState.set(true);
 	}
 	for (auto& t : newState.tLogs) {
@@ -605,6 +627,72 @@ void LogSystem::coreStateWritten(DBCoreState const& newState) {
 			break;
 		}
 	}
+}
+
+namespace {
+
+Future<Void> waitForRemoteTLogPrefixDurable(UID dbgid,
+                                            Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog,
+                                            Version handoffVersion) {
+	TraceEvent("WaitForRemoteTLogPrefixDurable", dbgid)
+	    .detail("TLogID", tlog->get().id())
+	    .detail("HandoffVersion", handoffVersion);
+	while (true) {
+		Future<Void> changed = tlog->onChange();
+		if (!tlog->get().present()) {
+			co_await changed;
+			continue;
+		}
+
+		auto result = co_await race(tlog->get().interf().getQueuingMetrics.getReplyUnlessFailedFor(
+		                                TLogQueuingMetricsRequest(),
+		                                SERVER_KNOBS->TLOG_TIMEOUT,
+		                                SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY),
+		                            changed);
+		if (result.index() != 0 || changed.isReady()) {
+			continue;
+		}
+		ErrorOr<TLogQueuingMetricsReply> reply = std::get<0>(result);
+		if (reply.isError()) {
+			if (reply.getError().code() == error_code_actor_cancelled) {
+				throw reply.getError();
+			}
+			throw tlog_failed();
+		}
+
+		// Old-router pops advance from this remote log's durable acknowledgements. The current router's initial
+		// pop becomes visible only after the old prefix is consumed. Since the metric is durable known-committed
+		// progress and router pop positions are exclusive, require the handoff rather than its preceding version.
+		if (reply.get().v >= handoffVersion) {
+			TraceEvent("RemoteTLogPrefixDurable", dbgid)
+			    .detail("TLogID", tlog->get().id())
+			    .detail("HandoffVersion", handoffVersion)
+			    .detail("DurableKnownCommittedVersion", reply.get().v);
+			co_return;
+		}
+		co_await (delay(SERVER_KNOBS->METRIC_UPDATE_RATE) || changed);
+	}
+}
+
+} // namespace
+
+Future<Void> LogSystem::onRemoteLogPrefixDurable() {
+	ASSERT(expectedLogSets > 0 && tLogs.size() == static_cast<size_t>(expectedLogSets));
+	if (!remoteLogPrefixComplete.isValid()) {
+		const Version handoffVersion = getMaxLocalStartVersion(tLogs);
+		std::vector<Future<Void>> remotePrefixes;
+		if (!remoteLogPrefixRecovered()) {
+			for (const auto& logSet : tLogs) {
+				if (!logSet->isLocal && logSet->startVersion < handoffVersion) {
+					for (const auto& tlog : logSet->logServers) {
+						remotePrefixes.push_back(waitForRemoteTLogPrefixDurable(dbgid, tlog, handoffVersion));
+					}
+				}
+			}
+		}
+		remoteLogPrefixComplete = waitForAll(remotePrefixes);
+	}
+	return remoteLogPrefixComplete;
 }
 
 Future<Void> LogSystem::onError() const {
@@ -2493,6 +2581,7 @@ Future<Void> LogSystem::newRemoteEpoch(Reference<LogSystem> oldLogSystem,
 	remoteRecoveryComplete = waitForAll(recoveryComplete);
 	remoteTrackTLogRecovery = LogSystem::trackTLogRecoveryActor(allRemoteTLogServers, remoteRecoveredVersion);
 	tLogs.push_back(logSet);
+	onRemoteLogPrefixDurable();
 	TraceEvent("RemoteLogRecruitment_CompletingRecovery").log();
 }
 
