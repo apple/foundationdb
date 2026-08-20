@@ -30,6 +30,7 @@
 #include "flow/genericactors.actor.h"
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -547,6 +548,10 @@ public:
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
+
+	// Periodically samples FlowTransport per-address connect-failed counts and evicts
+	// location-cache entries for any address whose count advanced (a dead/flapping peer).
+	Future<Void> locationCachePeerEvictor;
 
 	// map from ssid -> tss interface
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
