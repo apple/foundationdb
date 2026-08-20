@@ -1662,12 +1662,23 @@ Future<BulkLoadJobState> getBulkLoadJob(Transaction* tr, UID jobId, KeyRange job
 	}
 }
 
+// Outcome of looking up the task that owns a range.
+struct BulkLoadJobTaskLookup {
+	// The task owning exactly this range, if one does.
+	Optional<BulkLoadTaskState> task;
+	// The range is owned by several narrower tasks, because a task covering it was split. This is neither
+	// "a task owns this range" nor "this range is unclaimed", and conflating it with either is a bug: the
+	// executor must not create a task over the range, which would overwrite the narrower ones, and a
+	// monitor watching the old wide range has nothing left to watch.
+	bool rangeSplit = false;
+};
+
 // Find task metadata for a bulk load job with jobId and input range
-Future<Optional<BulkLoadTaskState>> bulkLoadJobFindTask(Reference<DataDistributor> self,
-                                                        KeyRange range,
-                                                        UID jobId,
-                                                        KeyRange jobRange,
-                                                        UID logId) {
+Future<BulkLoadJobTaskLookup> bulkLoadJobFindTask(Reference<DataDistributor> self,
+                                                  KeyRange range,
+                                                  UID jobId,
+                                                  KeyRange jobRange,
+                                                  UID logId) {
 	BulkLoadTaskState bulkLoadTaskState;
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
@@ -1680,10 +1691,20 @@ Future<Optional<BulkLoadTaskState>> bulkLoadJobFindTask(Reference<DataDistributo
 			ASSERT(!range.empty());
 			RangeResult result = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, range);
 			// The task map has been initialized when submitBulkLoadJob, so we check the invariant here.
-			ASSERT(!result[0].value.empty() && result.size() == 2);
+			ASSERT(result.size() >= 2 && !result[0].value.empty());
+			if (result.size() > 2) {
+				// More than one entry covers the range, so a task over it was split into narrower tasks.
+				TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorFindRangeSplit", logId)
+				    .detail("InputRange", range)
+				    .detail("InputJobID", jobId)
+				    .detail("EntryCount", result.size() - 1);
+				BulkLoadJobTaskLookup lookup;
+				lookup.rangeSplit = true;
+				co_return lookup;
+			}
 			bulkLoadTaskState = decodeBulkLoadTaskState(result[0].value);
 			if (!bulkLoadTaskState.isValid()) {
-				co_return Optional<BulkLoadTaskState>();
+				co_return BulkLoadJobTaskLookup();
 			}
 			KeyRange currentRange = Standalone(KeyRangeRef(result[0].key, result[1].key));
 			ASSERT(result[0].key != result[1].key);
@@ -1703,7 +1724,9 @@ Future<Optional<BulkLoadTaskState>> bulkLoadJobFindTask(Reference<DataDistributo
 		}
 		co_await tr.onError(err);
 	}
-	co_return bulkLoadTaskState;
+	BulkLoadJobTaskLookup lookup;
+	lookup.task = bulkLoadTaskState;
+	co_return lookup;
 }
 
 // Submit a bulkload task for the given jobId
@@ -1818,10 +1841,11 @@ Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 
 		// Step 2: Check if the task has been created
 		// We define the task range as the range between the min begin key and the max end key of all manifests
-		Optional<BulkLoadTaskState> bulkLoadTask_ =
-		    co_await bulkLoadJobFindTask(self, taskRange, jobId, jobRange, self->ddId);
-		if (bulkLoadTask_.present()) {
+		BulkLoadJobTaskLookup lookup = co_await bulkLoadJobFindTask(self, taskRange, jobId, jobRange, self->ddId);
+		if (lookup.task.present() || lookup.rangeSplit) {
 			// The task was not existing in the metadata but existing now. So, we need not create the task.
+			// A split range is likewise already covered, by narrower tasks; creating one here would
+			// overwrite them with a single task as wide as the range that could not be placed.
 			co_return;
 		}
 
@@ -1885,14 +1909,15 @@ Future<Void> bulkLoadJobMonitorTask(Reference<DataDistributor> self,
 	self->bulkLoadParallelismLimitor.incrementTaskCounter();
 	try {
 		// Step 1: Check if the task has been created
-		Optional<BulkLoadTaskState> bulkLoadTask_ =
-		    co_await bulkLoadJobFindTask(self, taskRange, jobId, jobRange, self->ddId);
-		if (!bulkLoadTask_.present()) {
+		BulkLoadJobTaskLookup lookup = co_await bulkLoadJobFindTask(self, taskRange, jobId, jobRange, self->ddId);
+		if (!lookup.task.present()) {
 			// The task was existing in the metadata but now disappear. So, we need not monitor the task.
+			// The same applies to a range that was split: this monitor was watching one task over the whole
+			// range, and the narrower tasks that replaced it get their own monitors from the next scan.
 			self->bulkLoadParallelismLimitor.decrementTaskCounter();
 			co_return;
 		}
-		bulkLoadTask = bulkLoadTask_.get();
+		bulkLoadTask = lookup.task.get();
 		TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadJobExecutorTask", self->ddId)
 		    .detail("Phase", "Task found")
 		    .detail("JobID", jobId)
