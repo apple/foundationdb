@@ -1365,17 +1365,20 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 			throw data_move_dest_team_not_found();
 		}
 
-		// A retryable error that survives the whole budget is not transient: re-dispatch presents the same
-		// range every time, so a failure the range itself causes cannot clear. Before giving up, try to
-		// narrow the range by splitting the task, which is what makes its src narrow enough to place.
+		// A range with no disjoint destination team cannot be placed by re-attempting it: src is recomputed
+		// from the same range every time. Narrow it instead. Note this arrives as an unretryable ack with
+		// restartCount still 0 -- the relocator gives bulkload no retries for this condition -- so it is
+		// reached without spending any of the re-dispatch budget above.
 		bool taskSplit = false;
-		if (retriesExhausted) {
+		if (ack.destTeamNotFound || retriesExhausted) {
 			taskSplit = co_await splitBulkLoadTask(self, triggeredBulkLoadTask);
 		}
 		if (taskSplit) {
-			CODE_PROBE(true, "Bulkload task split after exhausting recoverable retries");
+			CODE_PROBE(true, "Bulkload task split because its range could not be placed");
 			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
-			    .detail("Phase", "Retryable error budget exhausted; task split")
+			    .detail("Phase", "Range could not be placed; task split")
+			    .detail("DestTeamNotFound", ack.destTeamNotFound)
+			    .detail("RetriesExhausted", retriesExhausted)
 			    .detail("CancelledDataMovePriority", ack.dataMovePriority)
 			    .detail("Range", range)
 			    .detail("TaskID", taskId)

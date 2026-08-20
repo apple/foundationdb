@@ -534,6 +534,13 @@ struct BulkLoadAck {
 	// The data move failed on a condition a later attempt can clear -- e.g. the destination team was
 	// momentarily unhealthy. The task must stay eligible for re-dispatch rather than be marked Error.
 	bool retryableError = false;
+	// No destination team could be found for the move. Distinct from both flags above because it is
+	// neither transient nor a property of this attempt: a destination team must be disjoint from src, src
+	// is the union of the owners of every shard the range spans, and so a range spanning enough of the
+	// fleet has no legal destination however often it is attempted. Narrowing the range is what clears
+	// it, so such a task is split while it still holds more than one manifest. Set together with
+	// unretryableError, which stays the outcome for a task too narrow to split.
+	bool destTeamNotFound = false;
 	int dataMovePriority = -1;
 
 	BulkLoadAck() = default;
@@ -541,6 +548,11 @@ struct BulkLoadAck {
 	  : unretryableError(unretryableError), dataMovePriority(dataMovePriority) {}
 	BulkLoadAck(bool unretryableError, bool retryableError, int dataMovePriority)
 	  : unretryableError(unretryableError), retryableError(retryableError), dataMovePriority(dataMovePriority) {}
+	static BulkLoadAck destinationTeamNotFound(int dataMovePriority) {
+		BulkLoadAck ack(/*unretryableError=*/true, dataMovePriority);
+		ack.destTeamNotFound = true;
+		return ack;
+	}
 };
 
 struct DDBulkLoadEngineTask {
