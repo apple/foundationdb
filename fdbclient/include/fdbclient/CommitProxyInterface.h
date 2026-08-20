@@ -32,6 +32,7 @@
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/IdempotencyId.h"
+#include "fdbclient/RangeLockConfiguration.h"
 #include "fdbclient/StorageServerInterface.h"
 
 struct CommitProxyInterface {
@@ -57,6 +58,7 @@ struct CommitProxyInterface {
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
 	RequestStream<struct SetThrottledShardRequest> setThrottledShard;
+	PublicRequestStream<struct RangeLockProxyStatusRequest> rangeLockStatus;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -85,6 +87,8 @@ struct CommitProxyInterface {
 			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
 			setThrottledShard =
 			    RequestStream<struct SetThrottledShardRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
+			rangeLockStatus =
+			    PublicRequestStream<struct RangeLockProxyStatusRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 		}
 	}
 
@@ -102,7 +106,51 @@ struct CommitProxyInterface {
 		streams.push_back(getDDMetrics.getReceiver());
 		streams.push_back(expireIdempotencyId.getReceiver());
 		streams.push_back(setThrottledShard.getReceiver());
+		streams.push_back(rangeLockStatus.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
+	}
+};
+
+struct RangeLockProxyStatusReply {
+	constexpr static FileIdentifier file_identifier = 1384412;
+	RangeLockReadiness readiness = RangeLockReadiness::Unknown;
+	uint32_t formatRevision = RangeLockConfiguration::currentFormatRevision;
+	Version metadataVersion = invalidVersion;
+	// Local knob/mode capability; readiness is independently certified at commit.
+	bool admissionEnabled = false;
+	bool shardEncodeLocationMetadata = false;
+	bool enforcementStateValid = false;
+	Optional<UID> dataDistributorId;
+	Optional<bool> dataDistributorEncodesShardLocations;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           readiness,
+		           formatRevision,
+		           metadataVersion,
+		           admissionEnabled,
+		           shardEncodeLocationMetadata,
+		           enforcementStateValid,
+		           dataDistributorId,
+		           dataDistributorEncodesShardLocations);
+	}
+};
+
+struct RangeLockProxyStatusRequest {
+	constexpr static FileIdentifier file_identifier = 1384413;
+	bool includeBulkLoadConfiguration = false;
+	ReplyPromise<RangeLockProxyStatusReply> reply;
+
+	RangeLockProxyStatusRequest() = default;
+	explicit RangeLockProxyStatusRequest(bool includeBulkLoadConfiguration)
+	  : includeBulkLoadConfiguration(includeBulkLoadConfiguration) {}
+
+	bool verify() const { return true; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, includeBulkLoadConfiguration, reply);
 	}
 };
 

@@ -4256,16 +4256,8 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreUID", restore.getUid())
 				    .detail("Owner", "BulkLoad");
 
-				// TODO(BulkLoad): no precondition validation happens here today.
-				// submitBulkLoadJob() does not check that the cluster has
-				// shard_encode_location_metadata=1 and enable_read_lock_on_range=1, nor
-				// that the storage engine supports SST ingestion. If those preconditions
-				// are not met, setBulkLoadMode + submitBulkLoadJob both succeed but the
-				// Data Distributor never dispatches any tasks, leaving the restore in
-				// "State: running, Tasks: 0/0" indefinitely. Validation needs to live
-				// somewhere with real cluster-side knob visibility (DD or a commit proxy);
-				// it cannot be done from fdbclient because SERVER_KNOBS here are this
-				// process's local defaults, not the running cluster's actual config.
+				// Mode enablement and submission check live proxy/DD capabilities and durable range-lock readiness.
+				// Reject a currently incompatible dispatcher before accepting a job that it cannot process.
 
 				// Read the original BulkLoad mode from config (saved by StartFullRestoreTaskFunc before task creation).
 				// This is persisted in the database so we can restore the correct mode even after a crash.
@@ -7063,9 +7055,15 @@ public:
 			if (runnable) {
 				throw restore_duplicate_tag();
 			}
+		}
 
-			// Clear the old restore config
-			oldRestore.clear(tr);
+		if (!useRangeFileRestore) {
+			// Reject incompatible BulkLoad restores before queuing work or taking the database lock. Keep the
+			// readiness read in this submission transaction; an existing same-UID submission remains idempotent.
+			co_await checkBulkLoadConfiguration(&tr->getTransaction());
+		}
+		if (oldUidAndAborted.present()) {
+			RestoreConfig(oldUidAndAborted.get().first).clear(tr);
 		}
 
 		// Bulkload restore (useRangeFileRestore=false) overwrites each shard via the range-lock

@@ -17,6 +17,7 @@ In this document, we use "user" to represent the application or feature that use
 
 Range locks are a trusted administrative write-exclusion mechanism, not an authorization boundary.
 Transactions using ``LOCK_AWARE`` bypass range locks; registering an owner does not grant a separate database identity.
+The feature remains experimental. Enabling it on an existing database requires the upgrade and reconciliation procedure below.
 
 Comparison with general locking concepts
 ----------------------------------------
@@ -54,7 +55,7 @@ Currently, only the ExclusiveReadLock type is supported, but the design allows f
 ``ACTOR Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
 
 Release an exclusive read lock on a range. The range must be within the user key space, aka ``"" ~ \xff``.
-The release request is rejected with a range_lock_reject error if the range contains any existing lock with a different range, user, or lock type.
+The release request is rejected with a range_unlock_reject error if the range contains any existing lock with a different range, user, or lock type.
 
 ``ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
 
@@ -102,6 +103,8 @@ For ad-hoc operational use — inspecting active locks, releasing a lock left be
 
 ::
 
+    rangelock status
+    rangelock reconcile [<MIGRATION_ID>]
     rangelock register <OWNER_ID> <DESCRIPTION>
     rangelock unregister <OWNER_ID>
     rangelock owners
@@ -109,10 +112,33 @@ For ad-hoc operational use — inspecting active locks, releasing a lock left be
     rangelock release <BEGIN_KEY> <END_KEY> <OWNER_ID>
     rangelock release-all <OWNER_ID>
     rangelock list [<BEGIN_KEY> <END_KEY>]
+    rangelock force-release <BEGIN_KEY> <END_KEY> <OWNER_ID>
+    rangelock force-release-all <OWNER_ID>
 
-Range locks only take effect when commit proxies are started with ``knob_enable_read_lock_on_range=true``. ``rangelock take`` prints an advisory notice as a reminder, but cannot probe the server-side knob — the take itself succeeds either way; the lock simply has no effect when the knob is off.
+``rangelock status`` reports the durable readiness state and probes every currently advertised commit proxy. A new acquisition requires Ready state and ``knob_enable_read_lock_on_range=true`` on every current commit proxy. Unsupported modes or incomplete readiness return ``range_lock_not_ready`` (1256); a take does not report success merely because metadata was written. Turning the knob off stops new acquisitions but does not disable enforcement or prevent release of an existing lock.
 
 The bulkload-specific commands (``bulkload addlockowner`` / ``bulkload clearlock`` / ``bulkload printlockowner``) remain available; they are a constrained subset of the above scoped to the bulkload workflow.
+
+Activation, reconciliation, and downgrade
+----------------------------------------
+The system key ``\xff/rangeLockConfiguration`` records one of three states:
+
+* **Unknown:** the marker is absent, as on a database created by an older binary. Its transaction-state lock map may be incomplete or stale. New locks are rejected. With acquisition disabled, the absence of the marker does not itself stop ordinary writes; enabling acquisition before reconciliation makes ordinary writes fail closed.
+* **Migrating:** an exact database-lock UID and a durable cursor identify an interrupted or running reconciliation. Ordinary writes and unrelated range-lock changes are blocked.
+* **Ready:** the complete lock map has been initialized or reconciled. Existing locks are enforced independently of the acquisition knob.
+
+The durable marker alone is not sufficient if recovery detects malformed legacy lock boundaries. ``rangelock status`` also reports whether every current proxy has valid enforcement state. An invalid recovered map blocks ordinary writes and lock changes even with acquisition disabled, but leaves the guarded reconciliation path available. Reconciliation can repair bad transaction-state-only rows from valid storage metadata; malformed authoritative storage data requires operator investigation and is not silently discarded.
+
+New databases initialize Ready. For an existing database, use this rollout sequence:
+
+1. Stop new range-lock and BulkLoad submissions. Upgrade all commit proxies, resolvers, and cluster controllers to the new implementation. Keep the relevant server knobs consistent. This is a homogeneous transaction-system upgrade; the proxy status probe does not establish the versions of the other roles.
+2. Run ``rangelock status``. If the state is Unknown, run ``rangelock reconcile`` and retain the printed migration UID. Reconciliation takes a database-wide lock, rebuilds transaction-state metadata from the authoritative storage-server lock map in bounded transactions, and releases its database lock only after publishing Ready.
+3. If interrupted, resume with ``rangelock reconcile <MIGRATION_ID>``. The saved cursor survives recovery. Do not use a generic database unlock to bypass an unfinished migration.
+4. Enable ``knob_enable_read_lock_on_range=true`` consistently and check ``rangelock status`` before admitting new users. New acquisitions currently require version vectors and version-vector TLog unicast to be disabled. BulkLoad additionally checks shard-location metadata encoding on the current commit proxies and data distributor; keep that knob consistent on replacement roles as well.
+
+Reconciliation is also available for an already Ready database and with acquisition disabled. It preserves the logical storage-server map, including unlocked intervals, while repairing missing or stale transaction-state boundaries. A failure after migration begins deliberately leaves the database lock held for a same-UID resume. Repeating a completed migration with its original UID is safe. If recovery later finds invalid state in a Ready database, start a new reconciliation with a fresh UID; retrying an already-completed UID does not reset that state. An invalid in-progress migration retains its lock and cursor and requires operator investigation.
+
+This change does not bump the network protocol or make old binaries enforce the new readiness rules. Before downgrading to an older implementation, stop new acquisitions, finish or cancel protected jobs, release every lock, and complete any active reconciliation while all transaction-system roles still run the new code. Do not run active protected work through a mixed old/new transaction system.
 
 
 Example usage
@@ -127,52 +153,28 @@ Upon a bulk load task completes on a range, we unblock user write traffic on the
 
 Range Lock Design (Exclusive Read Lock)
 =======================================
-The range lock information is persisted in ``\xff/rangeLock/`` system key space.
-Users specify ranges to lock in ``\xff/rangeLock/`` system key space via a transaction. 
-The range lock can be only within user key space, aka ``"" ~ \xff``.
-The value within the key space is either empty or a set of locks.
-Note that the design is specific to the exclusive read lock, however the metadata is extensible to the non-exclusive read lock and the write lock.
-If a range has a lock, the cluster will block any transaction that writes to the range. 
-If the range value is empty, the cluster does not reject the traffic as the range is unlocked.
+The ``\xff/rangeLock/`` system-key range stores a key-range map over normal keys. Each interval contains an empty value or a set of locks. Lock identity is compared using the decoded owner, type, range, and, for fenced operations, acquisition ID. Display strings are not sufficient to establish ownership.
 
-The range lock API issues transactions to update the ``\xff/rangeLock/`` system metadata. 
-When the mutation arrives at commit proxies, each commit proxy keeps an in-memory key range map of range locking status,  
-and they update the maps when applying the metadata mutation.
-When following normal mutation arrives at the commit proxy, the commit proxy checks the range locking status in the in-memory map.
-If the mutation is within a locked range, the commit proxy rejects the transaction containing the mutation.
-This process happens in the phase of postResolution, where the commit proxy scans all transactions. 
-In addition, the lockRange mutation is also persisted to txnStateStore. When recovery, a new commit proxy will rebuild the in-memory lockRange 
-map based on the status persisted in txnStateStore.
+Every transaction-system context persists range-lock metadata into ``txnStateStore``, including when acquisition is disabled. Commit proxies rebuild their in-memory maps from that durable state during recovery. The maps retain the exact raw KRM boundaries: coalescing equal-valued boundaries would change the effect of a later raw boundary clear.
 
-When a locking mutation arrives at a commit proxy, 
-the lock takes effect on all mutations that arrive at any commit proxy after this locking mutation. 
-Note that it is possible that this locking mutation is batched with other mutations with the same commit version. 
-The locking mutation takes effect on all mutations after the locking mutation in the same batch.
-To achieve this, the locking transaction adds a write_conflict_range on the lock range.
-As a result, any following transactions in the batch that writes to the locked range will be marked as ``Conflict``.
+Ordinary mutation checks intersect the mutation range with normal keys, including a clear whose end is exactly ``\xff``. Transactions containing both transaction-system metadata and ordinary writes need an earlier decision: rejecting them only after applying metadata would violate atomicity. Such a transaction is checked against the proxy's known lock-state version and receives a resolver-0 read-conflict certificate. Every lock-map, readiness, or database-lock change writes the corresponding server-added fence. A stale certificate conflicts before metadata or resolver-private mutations take effect. A certified transaction is not retroactively rejected by a later lock in the same batch.
+
+Lock-management transactions must use ``LOCK_AWARE`` and must not contain ordinary-key mutations or ordinary-key read conflicts. Normal-key write conflicts remain allowed. The server validates readiness transitions and reconciliation pages before resolution; a raw metadata caller cannot skip the replay cursor or publish Ready early. In resolver-private-mutation mode, system-only management reads are decided by resolver 0 so another resolver cannot invalidate an already-applied management effect.
 
 Steady-state cost when no locks are held
 ----------------------------------------
-The per-mutation lookup described above runs only when at least one exclusive read lock is held cluster-wide. Each commit proxy tracks an ``anyExclusiveLockHeld_`` flag on its ``RangeLock`` struct, refreshed when the lock set changes (during ``consumePendingRequest`` and recovery's ``initKeyPoint``). When the flag is false — the steady state for any cluster running with ``--knob_enable_read_lock_on_range=1`` but no active bulkload — ``rejectMutationsForReadLockOnRange`` short-circuits at the top of the function and the per-mutation work is skipped entirely.
+When readiness permits ordinary writes and no exclusive read lock is held, ``rejectMutationsForReadLockOnRange`` skips its per-mutation loop. Each proxy maintains a count of exclusive-lock boundaries as raw KRM mutations are applied or recovered. A non-ready state that requires write rejection cannot take this fast path.
 
 Two ``ProxyMetrics`` counters expose which path the proxy took:
 
 * ``RangeLockFastPath`` increments once per commit batch when the early return fired (no locks held).
 * ``RangeLockSlowPath`` increments once per commit batch when the per-mutation check loop ran (at least one lock held).
 
-Operators can use these counters to confirm in production that the optimization is firing, and to detect the silent-degradation case where the flag fails to clear after a release. In normal operation only one counter advances at a time per proxy.
+Operators can use these counters to check that the fast path resumes after the last release. Each batch increments one of the two counters.
 
 Correctness across proxies
 --------------------------
-The ``anyExclusiveLockHeld_`` flag is per-proxy and never directly synchronized between proxies. Convergence comes from the ``txnStateStore`` mutation broadcast already used by the in-memory ``coreMap``: every proxy applies the same ``\xff/rangeLock/`` mutation stream in commit-version order, so each proxy's flag value at version V is a deterministic function of the same prefix of the log.
-
-* **Within a single batch.** ``applyMetadataMutations`` (Phase 3a) runs before ``rejectMutationsForReadLockOnRange`` (Phase 3b). If the batch took a lock, ``consumePendingRequest`` has already set the flag by the time the reject loop reads it. Mutations ordered after the lock in the same batch are caught by the existing ``write_conflict_range`` mechanism, not by the flag.
-
-* **Across batches.** A proxy never starts processing batch ``V+1`` until version ``V``\ 's metadata mutations are applied locally. So when batch ``V+1`` reaches Phase 3b, every lock taken at version ``<= V`` is reflected in the flag.
-
-* **During recovery.** ``initKeyPoint`` is monotonic-up — it only sets the flag to true. Combined with ``consumePendingRequest``\ 's post-coalesce full recompute at runtime, the flag can be temporarily stuck at true (harmless: the slow path runs, finds no locks, rejects nothing — extra CPU, no behavior change) but cannot be stuck at false while locks are actually held. Stuck-true is observable through the ``RangeLockFastPath`` counter; stuck-false would manifest as missing ``transaction_rejected_range_locked`` rejections, which existing simulation workloads (``tests/fast/RangeLocking.toml``, ``tests/fast/RangeLockCycle.toml``) already assert against.
-
-The flag is therefore a layer on top of an already-coordinated invariant — the consistency of ``coreMap`` itself across proxies — rather than introducing a new coordination requirement of its own.
+Every proxy applies the same committed transaction-state mutation stream in version order. Resolver certificates protect admission decisions made against an older local prefix of that stream. Recovery restores both the readiness marker and raw lock boundaries before normal commit processing. During reconciliation the database lock and server-side transition checks prevent ordinary writes from observing the temporarily incomplete rebuilt map.
 
 Support multiple range lock users
 ---------------------------------
@@ -185,15 +187,16 @@ The identity is persisted to the system metadata (``\xff/rangeLockOwner/``).
 
 Transaction error handling
 --------------------------
-If a transaction has a mutation accessing to a locked range, the proxy will mark the transaction as rejected and reply client with transaction_rejected_range_locked error. 
-Transaction.onError can automatically retry with this error code, similar to other mutation lock/throttling mechanisms.
+An ordinary transaction that mutates a locked range receives ``transaction_rejected_range_locked`` (1242). Its user and transaction-system metadata effects are rejected together. ``Transaction.onError`` can retry this error when ``TRANSACTION_LOCK_REJECTION_RETRIABLE`` is enabled. A caller should not assume the lock will expire automatically.
+
+``range_lock_not_ready`` (1256) means acquisition is disabled, readiness is incomplete, or a lock-management transition is invalid. Resolve the configuration or migration problem before retrying. A new BulkLoad submission reports an unmet readiness, admission, or shard-encoding prerequisite as ``bulkload_invalid_configuration`` (1250).
 
 Compatibility
 -------------
-* Database lock: RangeLock is transparent to the database lock. When the database lock is on, the rangeLock metadata transaction with LockAware can still update the rangeLock metadata, but rangeLock does not reject any transaction.
+* Database lock: ``LOCK_AWARE`` maintenance transactions retain their trusted bypass. Reconciliation additionally requires the exact database-lock UID and prevents unrelated unlocks until the final guarded transition.
 
-* Backup and restore: RangeLock can cause losing mutations when restoring. Restoring should automatically detect the failure due to rangeLock and self-retry from a clean state.
+* Backup and restore: non-lock-aware restores can encounter ordinary range-lock rejection. Lock-aware internal restore paths bypass the exclusion and must be coordinated with the protected operation. A new BulkLoad restore checks the live prerequisites before queuing work or acquiring the database lock. It accepts success only from matching-acquisition terminal Complete history, not merely from disappearance of the active job.
 
-* Version vector: Version vector has a different path of updating metadata at proxies than the default one. Therefore, rangeLock temporarily is not available when the version vector is on.
+* Version vectors: new acquisition is disabled while version vectors or version-vector TLog unicast are enabled. Already Ready locks remain enforced and can be released after such a mode change. Resolver-private mutations use the same admission and conflict-fence rules.
 
-* Encryption: Currently, RangeLock does not have a clear functionality in the context of encryption, so when encryption is enabled, we disable rangeLock for clarity.
+* BulkLoad: enabling dispatch requires Ready state and shard-location metadata encoding on the current commit proxies and data distributor; creating a new job also requires new-lock admission. An existing fenced job can be inspected and drained with acquisition disabled. Storage engines without direct SST ingestion can use the existing key/value ingestion path.

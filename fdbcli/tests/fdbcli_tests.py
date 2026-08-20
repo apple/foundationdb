@@ -227,6 +227,26 @@ def lockAndUnlock(logger):
 
 
 @enable_logging()
+def rangeLockConfiguration(logger):
+    status = run_fdbcli_command("rangelock", "status")
+    assert "Range-lock state: v1 ready" in status, status
+    for invalid_id in ("0" * 32, "g" * 32, "1" * 31, "1" * 33):
+        output = run_fdbcli_command("rangelock", "reconcile", invalid_id)
+        assert "MIGRATION_ID must be a nonzero 32-digit hexadecimal UID" in output
+
+    migration_id = "0123456789abcdef0123456789abcdef"
+    for _ in range(2):
+        output = run_fdbcli_command("rangelock", "reconcile", migration_id)
+        logger.debug(output)
+        assert f"reconciliation {migration_id} completed" in output, output
+        assert not get_value_from_status_json(
+            True, "cluster", "database_lock_state", "locked"
+        )
+    status = run_fdbcli_command("rangelock", "status")
+    assert f"migration={migration_id}" in status, status
+
+
+@enable_logging()
 def kill(logger):
     output1 = run_fdbcli_command("kill")
     lines = output1.split("\n")
@@ -1000,6 +1020,7 @@ if __name__ == "__main__":
         datadistribution()
         kill()
         lockAndUnlock()
+        rangeLockConfiguration()
         maintenance()
         profile()
         # TODO: re-enable once stable

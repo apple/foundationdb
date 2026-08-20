@@ -40,6 +40,7 @@ struct DataDistributorInterface {
 	RequestStream<struct DistributorSplitRangeRequest> distributorSplitRange;
 	RequestStream<struct GetStorageWigglerStateRequest> storageWigglerState;
 	RequestStream<struct TriggerAuditRequest> triggerAudit;
+	RequestStream<struct GetBulkLoadConfigurationRequest> bulkLoadConfiguration;
 
 	DataDistributorInterface() = default;
 	explicit DataDistributorInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
@@ -62,7 +63,35 @@ struct DataDistributorInterface {
 		           dataDistributorMetrics,
 		           distributorSplitRange,
 		           storageWigglerState,
-		           triggerAudit);
+		           triggerAudit,
+		           bulkLoadConfiguration);
+	}
+};
+
+// Point-in-time configuration of the serving DD. The mode can legitimately be off when a client asks whether
+// enabling BulkLoad is supported, so this reports capability rather than whether its actors are currently running.
+struct GetBulkLoadConfigurationReply {
+	constexpr static FileIdentifier file_identifier = 1384414;
+	UID ddId;
+	bool shardEncodeLocationMetadata = false;
+
+	GetBulkLoadConfigurationReply() = default;
+	GetBulkLoadConfigurationReply(UID ddId, bool shardEncodeLocationMetadata)
+	  : ddId(ddId), shardEncodeLocationMetadata(shardEncodeLocationMetadata) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ddId, shardEncodeLocationMetadata);
+	}
+};
+
+struct GetBulkLoadConfigurationRequest {
+	constexpr static FileIdentifier file_identifier = 1384415;
+	ReplyPromise<GetBulkLoadConfigurationReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

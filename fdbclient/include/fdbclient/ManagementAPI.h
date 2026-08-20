@@ -181,6 +181,10 @@ Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                UID auditId,
                                double timeoutSeconds);
 
+// Check the current range-lock and BulkLoad prerequisites without committing. The readiness read participates in
+// the caller's transaction. Set requireNewAcquisition=false only to dispatch an already-fenced job.
+Future<Void> checkBulkLoadConfiguration(Transaction* tr, bool requireNewAcquisition = true);
+
 // Set bulk load mode
 // When the mode is on, DD will periodically check if there is any bulkload task to do by scaning the metadata.
 Future<int> setBulkLoadMode(Database cx, int mode);
@@ -262,6 +266,8 @@ Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, BulkLoadJobHandle exp
 // There is at most one BulkLoad or one BulkDump job at a time.
 // If there is any existing BulkLoad or BulkDump job, reject the new job.
 // Set lockAware=true when submitting during database restore (when database is locked).
+// New submissions require reconciled range locks, enabled acquisition, and shard-location metadata on all current
+// commit proxies and the data distributor. Keep these prerequisites consistent across replacement roles.
 Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware = false);
 Future<BulkLoadJobHandle> submitBulkLoadJobWithLock(Database cx, BulkLoadJobState jobState, bool lockAware = false);
 

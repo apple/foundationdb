@@ -203,7 +203,20 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/RangeLocking.toml)
   add_fdb_test(TEST_FILES fast/RangeLockAtomicity.toml)
   add_fdb_test(TEST_FILES fast/RangeLockAtomicityResolverPrivateMutations.toml)
+  add_fdb_test(TEST_FILES fast/RangeLockAdmissionDisabled.toml)
+  add_fdb_test(TEST_FILES fast/RangeLockAdmissionWithoutShardEncoding.toml)
+  add_fdb_test(TEST_FILES fast/RangeLockReconciliation.toml)
+  add_fdb_test(TEST_FILES fast/RangeLockReconciliationResolverPrivateMutations.toml)
+  add_fdb_test(
+    TEST_FILES fast/RangeLockReconciliationRestart-1.toml
+    fast/RangeLockReconciliationRestart-2.toml)
   add_fdb_test(TEST_FILES fast/RangeLockLifecycle.toml)
+  add_fdb_test(
+    TEST_FILES fast/RangeLockDisableRestart-1.toml
+    fast/RangeLockDisableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES fast/RangeLockVersionVectorRestart-1.toml
+    fast/RangeLockVersionVectorRestart-2.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcEndToEnd.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcAssignmentPublication.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcSharedTag.toml)

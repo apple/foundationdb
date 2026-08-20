@@ -223,7 +223,7 @@ struct ExpectedIdempotencyIdCountForKey {
 	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
 };
 
-struct RangeLock;
+class RangeLock;
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
@@ -341,11 +341,9 @@ struct ProxyCommitData {
 		}
 	}
 
-	// RangeLock feature currently does not support version vector
-	// So, if the version vector is enabled, the RangeLock is automatically disabled
-	// RangeLock feature currently rely on processing private mutations in commit proxy
-	// So, if PROXY_USE_RESOLVER_PRIVATE_MUTATIONS is on, the RangeLock is automatically disabled.
-	bool rangeLockEnabled() {
+	// Admission is separate from enforcement. Existing durable locks remain
+	// active even when an operator disables acquisition or changes log modes.
+	bool rangeLockAdmissionEnabled() const {
 		return SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
 		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	}
@@ -382,93 +380,215 @@ struct ProxyCommitData {
 	// exposing the full ProxyCommitData type outside commitproxy.
 	ApplyMetadataProxyContext getApplyMetadataProxyContext();
 };
-struct RangeLock : ApplyMetadataRangeLock {
+class RangeLock final : public ApplyMetadataRangeLock {
 public:
-	explicit RangeLock(ProxyCommitData* const pProxyCommitData) : pProxyCommitData(pProxyCommitData) {
-		coreMap.insert(allKeys, RangeLockStateSet());
-		// anyExclusiveLockHeld_ stays false: the initial all-keys entry is empty.
-	}
-
+	RangeLock() = default;
 	~RangeLock() override = default;
 
-	bool pendingRequest() const override { return currentRangeLockStartKey.present(); }
+	// The raw KRM boundaries must not be coalesced: a subsequent raw clear
+	// can remove one of two equal-valued boundaries and expose its predecessor.
+	bool anyExclusiveLockHeld() const { return exclusiveBoundaryCount_ != 0; }
+	const RangeLockConfiguration& configuration() const { return configuration_; }
+	bool enforcementStateValid() const { return !invalidRecoveredState_; }
+	RangeLockReadiness effectiveReadiness() const {
+		return invalidRecoveredState_ ? RangeLockReadiness::Unknown : configuration_.readiness();
+	}
+	bool ordinaryWritesAllowed(bool acquisitionKnobEnabled) const {
+		return !invalidRecoveredState_ && !configuration_.isMigrating() &&
+		       (configuration_.isReady() || !acquisitionKnobEnabled);
+	}
 
-	// Cheap query for the commit hot path. True when at least one
-	// ExclusiveReadLock is currently held over a sub-range. When this is
-	// false, rejectMutationsForReadLockOnRange skips its per-mutation loop.
-	bool anyExclusiveLockHeld() const { return anyExclusiveLockHeld_; }
+	void setBoundary(const KeyRef& key, const ValueRef& value) override {
+		RangeLockStateSet state = decodeBoundary(key, value);
+		auto previous = boundaries_.find(key);
+		if (previous != boundaries_.end() && countsAsExclusive(previous->first, previous->second)) {
+			--exclusiveBoundaryCount_;
+		}
+		exclusiveBoundaryCount_ += countsAsExclusive(key, state);
+		boundaries_.insert_or_assign(Key(key), std::move(state));
+	}
 
-	void initKeyPoint(const Key& key, const Value& value) {
-		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
-		if (!value.empty()) {
-			RangeLockStateSet decoded = decodeRangeLockStateSet(value);
-			coreMap.rawInsert(key, decoded);
-			if (decoded.isLockedFor(RangeLockType::ExclusiveReadLock)) {
-				// Recovery init is monotonic-up: it only adds state.
-				anyExclusiveLockHeld_ = true;
-			}
-		} else {
-			coreMap.rawInsert(key, RangeLockStateSet());
+	void recoverBoundary(const KeyRef& key, const ValueRef& value) override {
+		try {
+			setBoundary(key, value);
+		} catch (Error& e) {
+			markInvalidRecoveredState(e);
 		}
 	}
 
-	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) override {
-		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
-		ASSERT(!pendingRequest());
-		currentRangeLockStartKey = std::make_pair(startKey, lockSetState);
-		return;
+	void finishRecovery() {
+		if (configuration_.isReady()) {
+			try {
+				validateBoundaryMap(boundaries_);
+			} catch (Error& e) {
+				markInvalidRecoveredState(e);
+			}
+		}
 	}
 
-	void consumePendingRequest(const Key& endKey) override {
-		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
-		ASSERT(pendingRequest());
-		ASSERT(endKey <= normalKeys.end);
-		ASSERT(currentRangeLockStartKey.get().first < endKey);
-		KeyRange lockRange = Standalone(KeyRangeRef(currentRangeLockStartKey.get().first, endKey));
-		RangeLockStateSet lockSetState = currentRangeLockStartKey.get().second;
-		coreMap.insert(lockRange, lockSetState);
-		coreMap.coalesce(allKeys);
-		currentRangeLockStartKey.reset();
-		// This path can transition locked -> unlocked when an empty
-		// RangeLockStateSet is inserted over a previously locked range, so we
-		// must rescan after coalesce to keep anyExclusiveLockHeld_ accurate.
-		recomputeAnyExclusiveLockHeld();
-		return;
+	// range is in the system-key KRM namespace; its end can be the prefix
+	// successor, which does not itself start with rangeLockPrefix.
+	void clearBoundaries(const KeyRangeRef& range) override {
+		exclusiveBoundaryCount_ -= clearBoundaryMap(boundaries_, range);
 	}
 
-	bool isLocked(const KeyRange& range) const {
-		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
+	void resetBoundaries() override {
+		boundaries_.clear();
+		exclusiveBoundaryCount_ = 0;
+		invalidRecoveredState_ = false;
+	}
+
+	void setConfiguration(const RangeLockConfiguration& configuration) override { configuration_ = configuration; }
+
+	static void validateBoundary(const KeyRef& key, const ValueRef& value) { decodeBoundary(key, value); }
+	void validateCompleteMap() const {
+		if (invalidRecoveredState_) {
+			throw range_lock_not_ready();
+		}
+		validateBoundaryMap(boundaries_);
+	}
+
+	bool isLocked(const KeyRangeRef& range) const {
 		const KeyRangeRef normalRange = range & normalKeys;
 		if (normalRange.empty()) {
 			return false;
 		}
-		for (auto lockRange : coreMap.intersectingRanges(normalRange)) {
-			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ExclusiveReadLock)) {
+		auto it = boundaries_.upper_bound(normalRange.begin);
+		if (it != boundaries_.begin()) {
+			--it;
+		}
+		for (; it != boundaries_.end() && it->first < normalRange.end; ++it) {
+			if (it->second.isLockedFor(RangeLockType::ExclusiveReadLock)) {
 				return true;
 			}
 		}
 		return false;
 	}
 
-private:
-	// Full rescan; only called on lock add/remove (rare, per-bulkload-job),
-	// not per-commit. Cost = O(coreMap entries), bounded by active lock count.
-	void recomputeAnyExclusiveLockHeld() {
-		for (auto it : coreMap.ranges()) {
-			if (it.value().isValid() && it.value().isLockedFor(RangeLockType::ExclusiveReadLock)) {
-				anyExclusiveLockHeld_ = true;
-				return;
+	// Validate actual metadata mutations and classify their semantic effect.
+	// A release's end boundary can preserve a neighboring lock; that is not a
+	// new acquisition. A changed acquisition ID is a new acquisition.
+	bool wouldAddLocks(const VectorRef<MutationRef>& mutations) const {
+		if (invalidRecoveredState_) {
+			throw range_lock_not_ready();
+		}
+		BoundaryMap after = boundaries_;
+		for (const auto& mutation : mutations) {
+			if (mutation.type == MutationRef::ClearRange) {
+				clearBoundaryMap(after, KeyRangeRef(mutation.param1, mutation.param2));
+			} else if (rangeLockKeys.contains(mutation.param1)) {
+				if (mutation.type != MutationRef::SetValue) {
+					throw range_lock_not_ready();
+				}
+				const KeyRef key = mutation.param1.removePrefix(rangeLockPrefix);
+				after.insert_or_assign(Key(key), decodeBoundary(key, mutation.param2));
 			}
 		}
-		anyExclusiveLockHeld_ = false;
+		validateBoundaryMap(after);
+		return containsNewLocks(boundaries_, after);
 	}
 
-	Optional<std::pair<Key, RangeLockStateSet>> currentRangeLockStartKey;
-	KeyRangeMap<RangeLockStateSet> coreMap;
-	ProxyCommitData* const pProxyCommitData;
-	// Per-proxy cached summary of coreMap. Each proxy derives this from the
-	// same txnStateStore content, so all proxies converge to the same value.
-	bool anyExclusiveLockHeld_ = false;
+private:
+	using BoundaryMap = std::map<Key, RangeLockStateSet, std::less<>>;
+
+	void markInvalidRecoveredState(const Error& error) {
+		if (error.code() == error_code_actor_cancelled) {
+			throw error;
+		}
+		// Preserve the durable bytes for an owner-checked reconciliation.
+		// Crashing recruitment here would make that repair impossible.
+		invalidRecoveredState_ = true;
+		TraceEvent(SevWarnAlways, "RangeLockInvalidRecoveredState").suppressFor(5.0).detail("ErrorCode", error.code());
+	}
+
+	static bool countsAsExclusive(const KeyRef& key, const RangeLockStateSet& state) {
+		return key < normalKeys.end && state.isLockedFor(RangeLockType::ExclusiveReadLock);
+	}
+
+	static RangeLockStateSet decodeBoundary(const KeyRef& key, const ValueRef& value) {
+		if (key > normalKeys.end) {
+			throw range_lock_not_ready();
+		}
+		RangeLockStateSet state = decodeRangeLockStateSetSafe(value);
+		if (!state.isValid() || state.getLocks().size() > 1) {
+			// ExclusiveReadLock is currently the only supported lock type.
+			// Raw metadata must preserve the same one-acquisition-per-interval
+			// invariant as RangeLockStateSet::insertIfNotExist.
+			throw range_lock_not_ready();
+		}
+		for (const auto& [name, lock] : state.getLocks()) {
+			if (lock.getRange().empty() || !normalKeys.contains(lock.getRange()) || !lock.getRange().contains(key) ||
+			    !lock.isLockedFor(RangeLockType::ExclusiveReadLock)) {
+				throw range_lock_not_ready();
+			}
+		}
+		return state;
+	}
+
+	static size_t clearBoundaryMap(BoundaryMap& boundaries, const KeyRangeRef& range) {
+		const KeyRangeRef intersection = range & rangeLockKeys;
+		if (intersection.empty()) {
+			return 0;
+		}
+		auto begin = boundaries.lower_bound(intersection.begin.removePrefix(rangeLockPrefix));
+		auto end = intersection.end.startsWith(rangeLockPrefix)
+		               ? boundaries.lower_bound(intersection.end.removePrefix(rangeLockPrefix))
+		               : boundaries.end();
+		size_t removedExclusive = 0;
+		for (auto it = begin; it != end; ++it) {
+			removedExclusive += countsAsExclusive(it->first, it->second);
+		}
+		boundaries.erase(begin, end);
+		return removedExclusive;
+	}
+
+	static void validateBoundaryMap(const BoundaryMap& boundaries) {
+		for (auto it = boundaries.begin(); it != boundaries.end() && it->first < normalKeys.end; ++it) {
+			const auto next = std::next(it);
+			const KeyRef end = next == boundaries.end() ? normalKeys.end : KeyRef(next->first);
+			const KeyRangeRef interval(it->first, end);
+			for (const auto& [name, lock] : it->second.getLocks()) {
+				if (!lock.getRange().contains(interval)) {
+					throw range_lock_not_ready();
+				}
+			}
+		}
+	}
+
+	static bool containsNewLocks(const BoundaryMap& before, const BoundaryMap& after) {
+		const RangeLockStateSet empty;
+		const RangeLockStateSet* beforeState = &empty;
+		const RangeLockStateSet* afterState = &empty;
+		auto beforeIt = before.begin();
+		auto afterIt = after.begin();
+		KeyRef cursor = normalKeys.begin;
+		while (cursor < normalKeys.end) {
+			while (beforeIt != before.end() && beforeIt->first <= cursor) {
+				beforeState = &beforeIt++->second;
+			}
+			while (afterIt != after.end() && afterIt->first <= cursor) {
+				afterState = &afterIt++->second;
+			}
+			for (const auto& [name, lock] : afterState->getLocks()) {
+				if (!beforeState->containsExactLock(lock)) {
+					return true;
+				}
+			}
+			cursor = normalKeys.end;
+			if (beforeIt != before.end()) {
+				cursor = std::min(cursor, KeyRef(beforeIt->first));
+			}
+			if (afterIt != after.end()) {
+				cursor = std::min(cursor, KeyRef(afterIt->first));
+			}
+		}
+		return false;
+	}
+
+	BoundaryMap boundaries_;
+	RangeLockConfiguration configuration_;
+	size_t exclusiveBoundaryCount_ = 0;
+	bool invalidRecoveredState_ = false;
 };
 
 inline ApplyMetadataProxyContext ProxyCommitData::getApplyMetadataProxyContext() {

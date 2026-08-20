@@ -30,6 +30,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/RangeLock.h"
+#include "fdbclient/RangeLockConfiguration.h"
 #include "flow/Error.h"
 #include "fmt/format.h"
 #include "fdbclient/Knobs.h"
@@ -2555,6 +2556,56 @@ Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
 	co_return auditId;
 }
 
+namespace {
+
+bool bulkLoadAdmissionAllowed(const RangeLockAdmissionStatus& status, bool requireNewAcquisition) {
+	return status.allProxiesHaveValidState && status.allProxiesEncodeShardLocations &&
+	       status.dataDistributorEncodesShardLocations.present() && status.dataDistributorEncodesShardLocations.get() &&
+	       (!requireNewAcquisition || status.allProxiesEnableAcquisition);
+}
+
+} // namespace
+
+Future<Void> checkBulkLoadConfiguration(Transaction* tr, bool requireNewAcquisition) {
+	try {
+		if (!(co_await getRangeLockConfiguration(tr)).isReady()) {
+			throw bulkload_invalid_configuration();
+		}
+		const RangeLockAdmissionStatus status = co_await getRangeLockAdmissionStatus(tr->getDatabase(), true);
+		if (!bulkLoadAdmissionAllowed(status, requireNewAcquisition)) {
+			throw bulkload_invalid_configuration();
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_range_lock_not_ready) {
+			throw bulkload_invalid_configuration();
+		}
+		throw;
+	}
+}
+
+TEST_CASE("/ManagementAPI/BulkLoadAdmission") {
+	RangeLockAdmissionStatus status;
+	ASSERT(!bulkLoadAdmissionAllowed(status, false));
+	status.allProxiesHaveValidState = true;
+	status.allProxiesEncodeShardLocations = true;
+	status.allProxiesEnableAcquisition = true;
+	ASSERT(!bulkLoadAdmissionAllowed(status, true));
+	status.dataDistributorEncodesShardLocations = false;
+	ASSERT(!bulkLoadAdmissionAllowed(status, false));
+	ASSERT(!bulkLoadAdmissionAllowed(status, true));
+	status.dataDistributorEncodesShardLocations = true;
+	ASSERT(bulkLoadAdmissionAllowed(status, true));
+	status.allProxiesEnableAcquisition = false;
+	ASSERT(bulkLoadAdmissionAllowed(status, false));
+	ASSERT(!bulkLoadAdmissionAllowed(status, true));
+	status.allProxiesEncodeShardLocations = false;
+	ASSERT(!bulkLoadAdmissionAllowed(status, false));
+	status.allProxiesEncodeShardLocations = true;
+	status.allProxiesHaveValidState = false;
+	ASSERT(!bulkLoadAdmissionAllowed(status, false));
+	co_return;
+}
+
 Future<int> setBulkLoadMode(Database cx, int mode) {
 	Transaction tr(cx);
 	BinaryWriter wr(Unversioned());
@@ -2565,6 +2616,10 @@ Future<int> setBulkLoadMode(Database cx, int mode) {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			if (mode == 1) {
+				// Dispatching an existing fenced job is allowed after new-lock admission is disabled.
+				co_await checkBulkLoadConfiguration(&tr, false);
+			}
 			int oldMode = 0;
 			Optional<Value> oldModeValue = co_await tr.get(bulkLoadModeKey);
 			if (oldModeValue.present()) {
@@ -3157,14 +3212,6 @@ Future<BulkLoadJobHandle> submitBulkLoadJobWithLock(Database cx, BulkLoadJobStat
 	ASSERT(jobState.getPhase() == BulkLoadJobPhase::Submitted);
 	BulkLoadJobAttempt attempt;
 
-	// TODO(BulkLoad): validate cluster preconditions before accepting the job.
-	// BulkLoad requires shard_encode_location_metadata=1 and enable_read_lock_on_range=1,
-	// plus a storage engine that supports SST ingestion. Without these, this function and
-	// setBulkLoadMode both succeed, but the Data Distributor never dispatches the job and
-	// any restore that triggered it stalls in "State: running, Tasks: 0/0" forever.
-	// This check must read live cluster knob state — SERVER_KNOBS in fdbclient is the
-	// caller's local defaults and tells us nothing about the cluster.
-
 	co_await registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad);
 	Transaction tr(cx);
 	while (true) {
@@ -3229,6 +3276,9 @@ Future<BulkLoadJobHandle> submitBulkLoadJobWithLock(Database cx, BulkLoadJobStat
 				throw bulkload_task_failed();
 			}
 			ASSERT(!jobState.getJobRange().empty());
+			// Check the live cluster before publishing any job/task metadata. The storage-server path has a
+			// KV-based fallback, so external SST ingestion support is not itself an admission requirement.
+			co_await checkBulkLoadConfiguration(&tr);
 			attempt.selectNew(jobState);
 			Optional<Value> ownerValue = co_await tr.get(rangeLockOwnerKeyFor(rangeLockNameForBulkLoad));
 			if (!ownerValue.present()) {
@@ -3252,6 +3302,9 @@ Future<BulkLoadJobHandle> submitBulkLoadJobWithLock(Database cx, BulkLoadJobStat
 			co_return attempt.getHandle();
 		} catch (Error& e) {
 			err = e;
+			if (e.code() == error_code_range_lock_not_ready) {
+				throw bulkload_invalid_configuration();
+			}
 			if (e.code() == error_code_commit_unknown_result || e.code() == error_code_commit_unknown_result_fatal) {
 				attempt.noteCommitUnknown();
 			}

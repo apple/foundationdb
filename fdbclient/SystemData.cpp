@@ -27,6 +27,8 @@
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
 
+#include <limits>
+
 const KeyRef systemKeysPrefix = "\xff"_sr;
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
 const KeyRangeRef systemKeys(systemKeysPrefix, "\xff\xff"_sr);
@@ -1506,11 +1508,189 @@ Value rangeLockStateSetValue(const RangeLockStateSet& rangeLockStateSet) {
 	return ObjectWriter::toValue(rangeLockStateSet, IncludeVersion());
 }
 
-RangeLockStateSet decodeRangeLockStateSet(const ValueRef& value) {
+namespace {
+
+// ObjectReader does not receive a buffer length. Verify the existing range-lock
+// schema before using it, rather than changing the persisted representation or
+// exposing its assertion-prone decoder to arbitrary system-key mutations.
+class RangeLockStateSetValueVerifier {
+public:
+	explicit RangeLockStateSetValueVerifier(const ValueRef& value)
+	  : value_(value), remainingMaterializationBytes_(value.size()) {}
+
+	void verify() {
+		const ProtocolVersion version(read<uint64_t>(0));
+		require(version.isValid() && version < minInvalidProtocolVersion);
+		require(read<FileIdentifier>(versionBytes + sizeof(uint32_t)) == RangeLockStateSet::file_identifier);
+
+		// ObjectWriter wraps its single argument in a one-field root table.
+		const Table root = table(versionBytes);
+		const auto stateSetField = field(root, 0, sizeof(uint32_t));
+		if (!stateSetField.present()) {
+			return;
+		}
+		const auto locksField = field(table(stateSetField.get()), 0, sizeof(uint32_t));
+		if (!locksField.present()) {
+			return;
+		}
+
+		// std::map is a vector of indirect pair(key, value) tables.
+		const size_t vector = indirect(locksField.get());
+		const uint32_t count = read<uint32_t>(vector);
+		const size_t entries = vector + sizeof(uint32_t);
+		require(count <= (size() - entries) / sizeof(uint32_t));
+		consumeMaterializationBytes(static_cast<size_t>(count) * sizeof(uint32_t));
+		for (uint32_t i = 0; i < count; ++i) {
+			const Table entry = table(entries + static_cast<size_t>(i) * sizeof(uint32_t));
+			bytes(field(entry, 0, sizeof(uint32_t))); // Preserve the original, possibly colliding map key.
+			const auto state = field(entry, 1, sizeof(uint32_t));
+			require(state.present());
+			verifyState(table(state.get()));
+		}
+	}
+
+private:
+	struct Table {
+		size_t object;
+		size_t vtable;
+		uint16_t objectBytes;
+		uint16_t vtableBytes;
+	};
+
+	static constexpr size_t versionBytes = sizeof(uint64_t);
+	static constexpr size_t headerBytes = versionBytes + sizeof(uint32_t) + sizeof(FileIdentifier);
+
+	static void require(bool condition) {
+		if (!condition) {
+			throw range_lock_not_ready();
+		}
+	}
+
+	size_t size() const { return static_cast<size_t>(value_.size()); }
+
+	void requireBytes(size_t offset, size_t length) const { require(offset <= size() && length <= size() - offset); }
+
+	template <class T>
+	T read(size_t offset) const {
+		requireBytes(offset, sizeof(T));
+		T result;
+		memcpy(&result, value_.begin() + offset, sizeof(T));
+		return result;
+	}
+
+	size_t indirect(size_t offset) const {
+		const uint32_t relative = read<uint32_t>(offset);
+		require(relative >= sizeof(uint32_t) && relative <= size() - offset);
+		const size_t target = offset + relative;
+		require(target >= headerBytes && target % sizeof(uint32_t) == 0);
+		requireBytes(target, sizeof(uint32_t));
+		return target;
+	}
+
+	Table table(size_t offset) const {
+		const size_t object = indirect(offset);
+		const int64_t vtableOffset = static_cast<int64_t>(object) - read<int32_t>(object);
+		require(vtableOffset >= static_cast<int64_t>(headerBytes));
+		const size_t vtable = static_cast<size_t>(vtableOffset);
+		require(vtable % sizeof(uint16_t) == 0);
+		const uint16_t vtableBytes = read<uint16_t>(vtable);
+		const uint16_t objectBytes = read<uint16_t>(vtable + sizeof(uint16_t));
+		require(vtableBytes >= 2 * sizeof(uint16_t) && vtableBytes % sizeof(uint16_t) == 0);
+		require(objectBytes >= sizeof(int32_t));
+		requireBytes(vtable, vtableBytes);
+		requireBytes(object, objectBytes);
+		require(vtable + vtableBytes <= object || object + objectBytes <= vtable);
+		return { object, vtable, objectBytes, vtableBytes };
+	}
+
+	Optional<size_t> field(const Table& table, size_t index, size_t width) const {
+		if (index >= (table.vtableBytes - 2 * sizeof(uint16_t)) / sizeof(uint16_t)) {
+			return {};
+		}
+		const uint16_t offset = read<uint16_t>(table.vtable + (index + 2) * sizeof(uint16_t));
+		if (offset == 0) {
+			return {};
+		}
+		require(offset >= sizeof(int32_t) && offset <= table.objectBytes && width <= table.objectBytes - offset);
+		return table.object + offset;
+	}
+
+	void consumeMaterializationBytes(size_t bytes) {
+		// ObjectWriter shares empty vectors, but never nonempty payloads. This
+		// bounds allocations even if a forged vector repeats the same large value.
+		require(bytes <= remainingMaterializationBytes_);
+		remainingMaterializationBytes_ -= bytes;
+	}
+
+	StringRef bytes(const Optional<size_t>& field) {
+		if (!field.present()) {
+			return {};
+		}
+		const size_t vector = indirect(field.get());
+		const uint32_t length = read<uint32_t>(vector);
+		const size_t data = vector + sizeof(uint32_t);
+		requireBytes(data, length);
+		// The existing writer includes up to three alignment bytes in every
+		// byte vector. Check them too, so a truncated writer-produced value is
+		// rejected even when the final missing bytes would only be padding.
+		const size_t padding = (sizeof(uint32_t) - length % sizeof(uint32_t)) % sizeof(uint32_t);
+		requireBytes(data, static_cast<size_t>(length) + padding);
+		consumeMaterializationBytes(length);
+		return value_.substr(static_cast<int>(data), static_cast<int>(length));
+	}
+
+	void verifyState(const Table& state) {
+		const StringRef owner = bytes(field(state, 0, sizeof(uint32_t)));
+		const auto type = field(state, 1, sizeof(uint8_t));
+		require(!owner.empty() && type.present() &&
+		        read<uint8_t>(type.get()) == static_cast<uint8_t>(RangeLockType::ExclusiveReadLock));
+		const auto rangeField = field(state, 2, sizeof(uint32_t));
+		require(rangeField.present());
+		const Table range = table(rangeField.get());
+		StringRef begin = bytes(field(range, 0, sizeof(uint32_t)));
+		StringRef end = bytes(field(range, 1, sizeof(uint32_t)));
+		// KeyRangeRef compresses [key, keyAfter(key)) to (keyAfter(key), "").
+		// Its ordinary deserializer ASSERTs on a malformed compressed key.
+		if (end.empty() && !begin.empty()) {
+			require(begin[begin.size() - 1] == '\x00');
+			end = begin;
+			begin = end.substr(0, end.size() - 1);
+		}
+		require(normalKeys.begin <= begin && begin < end && end <= normalKeys.end);
+		bytes(field(state, 3, sizeof(uint32_t))); // Absent/empty is a valid legacy acquisition ID.
+	}
+
+	const ValueRef value_;
+	size_t remainingMaterializationBytes_;
+};
+
+} // namespace
+
+RangeLockStateSet decodeRangeLockStateSetSafe(const ValueRef& value) {
+	if (value.empty()) {
+		return {};
+	}
+	RangeLockStateSetValueVerifier(value).verify();
+	// The generic reader casts vtable bytes to uint16_t*. A ValueRef may be an
+	// unaligned slice even when its relative offsets are correctly aligned.
+	Value aligned;
+	const uint8_t* data = value.begin();
+	if (reinterpret_cast<uintptr_t>(data) % alignof(uint32_t) != 0) {
+		if (value.size() > std::numeric_limits<int>::max() - static_cast<int>(alignof(uint32_t))) {
+			throw range_lock_not_ready();
+		}
+		aligned = makeAlignedString(alignof(uint32_t), value.size());
+		memcpy(mutateString(aligned), data, value.size());
+		data = aligned.begin();
+	}
 	RangeLockStateSet rangeLockStateSet;
-	ObjectReader reader(value.begin(), IncludeVersion());
+	ObjectReader reader(data, IncludeVersion());
 	reader.deserialize(rangeLockStateSet);
 	return rangeLockStateSet;
+}
+
+RangeLockStateSet decodeRangeLockStateSet(const ValueRef& value) {
+	return decodeRangeLockStateSetSafe(value);
 }
 
 const KeyRangeRef rangeLockOwnerKeys = KeyRangeRef("\xff/rangeLockOwner/"_sr, "\xff/rangeLockOwner0"_sr);

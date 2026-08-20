@@ -647,6 +647,9 @@ extern const KeyRef rangeLockPrefix;
 Value rangeLockStateValue(const RangeLockState& rangeLockState);
 RangeLockState decodeRangeLockState(const ValueRef& value);
 Value rangeLockStateSetValue(const RangeLockStateSet& rangeLockStateSet);
+// Reject malformed persisted values with range_lock_not_ready before ObjectReader can assert or read out of bounds.
+// The legacy encoding, including map keys, acquisition IDs, and additive/trailing data, is preserved.
+RangeLockStateSet decodeRangeLockStateSetSafe(const ValueRef& value);
 RangeLockStateSet decodeRangeLockStateSet(const ValueRef& value);
 
 extern const KeyRangeRef rangeLockOwnerKeys;

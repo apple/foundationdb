@@ -176,26 +176,44 @@ private:
 	void checkSetRangeLockPrefix(const MutationRef& m) {
 		if (!m.param1.startsWith(rangeLockPrefix)) {
 			return;
-		} else if (rangeLock == nullptr) {
-			TraceEvent(SevWarnAlways, "MutationHasRangeLockPrefixButFeatureIsOff")
-			    .detail("Mutation", m.toString())
-			    .detail("FeatureFlag", SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
+		}
+		if (!initialCommit) {
+			// Every role preserves the durable KRM, including a resolver that
+			// generates private mutations and a proxy with admission disabled.
+			txnStateStore->set(KeyValueRef(m.param1, m.param2));
+		}
+		if (rangeLock != nullptr) {
+			if (initialCommit) {
+				rangeLock->recoverBoundary(m.param1.removePrefix(rangeLockPrefix), m.param2);
+			} else {
+				rangeLock->setBoundary(m.param1.removePrefix(rangeLockPrefix), m.param2);
+			}
+		}
+	}
+
+	void checkSetRangeLockConfiguration(const MutationRef& m) {
+		if (m.param1 != rangeLockConfigurationKey) {
 			return;
 		}
-		ASSERT(!initialCommit);
-		// RangeLock is upated by KrmSetRange which updates a range with two successive mutations
-		if (rangeLock->pendingRequest()) {
-			// The second mutation
-			Key endKey = m.param1.removePrefix(rangeLockPrefix);
-			rangeLock->consumePendingRequest(endKey);
-		} else {
-			// The first mutation
-			RangeLockStateSet lockSetState = m.param2.empty() ? RangeLockStateSet() : decodeRangeLockStateSet(m.param2);
-			Key startKey = m.param1.removePrefix(rangeLockPrefix);
-			rangeLock->setPendingRequest(startKey, lockSetState);
+		const RangeLockConfiguration configuration = decodeRangeLockConfiguration(m.param2);
+		if (!initialCommit) {
+			const Optional<Value> previousValue = txnStateStore->readValue(rangeLockConfigurationKey).get();
+			const RangeLockConfiguration previous =
+			    previousValue.present() ? decodeRangeLockConfiguration(previousValue.get()) : RangeLockConfiguration();
+			if (classifyRangeLockConfigurationTransition(previous, configuration) ==
+			    RangeLockConfigurationTransition::Begin) {
+				// Reset only the transaction-state copy. Storage remains the
+				// authoritative source for the guarded, resumable KRM replay.
+				txnStateStore->clear(rangeLockKeys);
+				if (rangeLock != nullptr) {
+					rangeLock->resetBoundaries();
+				}
+			}
+			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		}
-		txnStateStore->set(KeyValueRef(m.param1, m.param2));
-		return;
+		if (rangeLock != nullptr) {
+			rangeLock->setConfiguration(configuration);
+		}
 	}
 
 	void checkSetKeyServersPrefix(MutationRef m) {
@@ -710,14 +728,27 @@ private:
 	}
 
 	void checkClearRangeLockPrefix(KeyRangeRef range) {
-		if (rangeLock == nullptr) {
-			return;
-		} else if (!rangeLockKeys.intersects(range)) {
+		if (!rangeLockKeys.intersects(range)) {
 			return;
 		}
-		ASSERT(!initialCommit);
-		txnStateStore->clear(range & rangeLockKeys);
-		return;
+		if (!initialCommit) {
+			txnStateStore->clear(range & rangeLockKeys);
+		}
+		if (rangeLock != nullptr) {
+			rangeLock->clearBoundaries(range);
+		}
+	}
+
+	void checkClearRangeLockConfiguration(KeyRangeRef range) {
+		if (!range.contains(rangeLockConfigurationKey)) {
+			return;
+		}
+		if (!initialCommit) {
+			txnStateStore->clear(singleKeyRange(rangeLockConfigurationKey));
+		}
+		if (rangeLock != nullptr) {
+			rangeLock->setConfiguration(RangeLockConfiguration());
+		}
 	}
 
 	void checkClearKeyServerKeys(KeyRangeRef range) {
@@ -1176,6 +1207,7 @@ public:
 
 			if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
 				checkSetRangeLockPrefix(m);
+				checkSetRangeLockConfiguration(m);
 				checkSetKeyServersPrefix(m);
 				checkSetServerKeysPrefix(m);
 				checkSetCheckpointKeys(m);
@@ -1197,6 +1229,7 @@ public:
 				KeyRangeRef range(m.param1, m.param2);
 
 				checkClearRangeLockPrefix(range);
+				checkClearRangeLockConfiguration(range);
 				checkClearKeyServerKeys(range);
 				checkClearConfigKeys(m, range);
 				checkClearServerListKeys(range);
@@ -1271,7 +1304,8 @@ void applyMetadataMutations(SpanContext const& spanContext,
 bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 	for (auto const& m : mutations) {
 		if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
-			if (m.param1.startsWith(globalKeysPrefix) || (m.param1.startsWith(configKeysPrefix)) ||
+			if (rangeLockKeys.contains(m.param1) || m.param1 == rangeLockConfigurationKey ||
+			    m.param1.startsWith(globalKeysPrefix) || (m.param1.startsWith(configKeysPrefix)) ||
 			    (m.param1.startsWith(serverListPrefix)) || (m.param1.startsWith(serverTagPrefix)) ||
 			    (m.param1.startsWith(tssMappingKeys.begin)) || (m.param1.startsWith(tssQuarantineKeys.begin)) ||
 			    (m.param1.startsWith(applyMutationsEndRange.begin)) ||
@@ -1285,7 +1319,8 @@ bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 			}
 		} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
 			KeyRangeRef range(m.param1, m.param2);
-			if ((keyServersKeys.intersects(range)) || (configKeys.intersects(range)) ||
+			if (rangeLockKeys.intersects(range) || range.contains(rangeLockConfigurationKey) ||
+			    (keyServersKeys.intersects(range)) || (configKeys.intersects(range)) ||
 			    (serverListKeys.intersects(range)) || (tagLocalityListKeys.intersects(range)) ||
 			    (serverTagKeys.intersects(range)) || (serverTagHistoryKeys.intersects(range)) ||
 			    (range.intersects(applyMutationsEndRange)) || (range.intersects(applyMutationsKeyVersionMapRange)) ||

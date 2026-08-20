@@ -1,0 +1,30 @@
+[configuration]
+config = 'single'
+singleRegion = true
+storageEngineExcludeTypes = [3, 4, 5]
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_read_lock_on_range = true
+transaction_lock_rejection_retriable = false
+proxy_use_resolver_private_mutations = false
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
+
+[[test]]
+testTitle = 'RangeLockReconciliationRestart'
+clearAfterTest = false
+runConsistencyCheck = false
+waitForQuiescenceBegin = false
+waitForQuiescenceEnd = false
+
+    [[test.workload]]
+    testName = 'RangeLockReconciliation'
+    phase = 'prepareRestart'
+
+    [[test.workload]]
+    testName = 'SaveAndKill'
+    restartInfoLocation = 'simfdb/restartInfo.ini'
+    testDuration = 20.0

@@ -31,6 +31,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
+#include "fdbclient/RangeLockConfiguration.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
@@ -46,9 +47,12 @@ class CDCRoutingTable;
 // definition from the commitproxy module.
 struct ApplyMetadataRangeLock {
 	virtual ~ApplyMetadataRangeLock() = default;
-	virtual bool pendingRequest() const = 0;
-	virtual void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) = 0;
-	virtual void consumePendingRequest(const Key& endKey) = 0;
+	// Set uses an unprefixed KRM boundary; clear uses the full system-key range.
+	virtual void setBoundary(const KeyRef& key, const ValueRef& value) = 0;
+	virtual void recoverBoundary(const KeyRef& key, const ValueRef& value) { setBoundary(key, value); }
+	virtual void clearBoundaries(const KeyRangeRef& range) = 0;
+	virtual void resetBoundaries() = 0;
+	virtual void setConfiguration(const RangeLockConfiguration& configuration) = 0;
 };
 
 struct ApplyMutationsData {

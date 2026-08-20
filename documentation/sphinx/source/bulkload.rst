@@ -96,11 +96,23 @@ BulkLoad uses FoundationDB's range locking mechanism to ensure data consistency:
 
 - ``registerRangeLockOwner()`` registers the BulkLoad system as a lock owner with name ``"BulkLoad"``
 - ``takeExclusiveReadLockOnRange()`` takes an exclusive read lock on the entire job range during ``submitBulkLoadJob()``
-- This prevents any concurrent transactions from modifying data in the target range
-- Lock-aware transactions can still read from the range during the load process
-- The lock is automatically released via ``releaseExclusiveReadLockOnRange()`` when the job completes, is cancelled, or errors
+- This prevents ordinary concurrent transactions from modifying data in the target range. Trusted ``LOCK_AWARE`` transactions bypass the lock and must be coordinated with the job
+- Each submission retains a unique range-lock acquisition, even when a source dump ID is reused
+- The exact acquisition is released when the job completes, is cancelled, or errors; stale work cannot release a replacement job's lock
 - Range locks are managed through the ``\\xff/rangeLock/`` keyspace with owner information in ``\\xff/rangeLockOwner/``
 - BulkLoad jobs will fail with ``range_lock_reject`` if the target range is already locked by another operation
+
+New submissions require Ready range-lock state, new-lock admission on every
+current commit proxy, and shard-location metadata encoding on both the commit
+proxies and current data distributor. An unmet prerequisite returns
+``bulkload_invalid_configuration`` before job, task, or lock metadata is
+committed. New BulkLoad restores check the same prerequisites before queuing
+restore work or acquiring the database lock. These are live checks, not a
+guarantee about future role replacements: keep the required knobs consistent
+across the cluster. Enabling
+BulkLoad dispatch can still drain an existing fenced job when new-lock
+admission is disabled. See :doc:`rangelock` for the homogeneous-upgrade and
+reconciliation procedure.
 
 Invariants
 ----------
@@ -126,7 +138,7 @@ Failure Handling
 ----------------
 - **DD Restart**: Tasks persist through DD restarts via ``\\xff/bulkLoadTask/`` metadata and are automatically resumed
 - **Task Retry**: Failed tasks are retried automatically by the BulkLoad engine up to configured limits
-- **Job Cancellation**: ``cancelBulkLoadJob()`` clears all metadata and releases range locks immediately
+- **Job Cancellation**: ``cancelBulkLoadJob()`` terminates the matching submission and releases only its exact range-lock acquisition. If the fence was replaced or partially removed, cleanup preserves replacement locks and records an unsuccessful outcome
 - **Data Movement Conflicts**: Tasks coordinate with data movement system through ``BulkLoadTaskCollection`` to handle shard reassignments
 - **Lock Conflicts**: Jobs fail immediately with ``range_lock_reject`` if the target range is already locked
 - **Manifest Download Failures**: Network/S3 failures during manifest download cause the job to error and move to history

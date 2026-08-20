@@ -645,6 +645,14 @@ struct RangeLocking : TestWorkload {
 				                           candidates[i]));
 			}
 		}
+		// The isolation assertions intentionally leave other owners locked.
+		// Release those locks before the harness clears the normal keyspace.
+		for (const auto& candidate : candidates) {
+			co_await releaseExclusiveReadLockByUser(cx, candidate);
+			co_await removeRangeLockOwner(cx, candidate);
+		}
+		const auto remainingLocks = co_await findExclusiveReadLockOnRange(cx, normalKeys);
+		ASSERT(remainingLocks.empty());
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -654,6 +662,7 @@ struct RangeLocking : TestWorkload {
 		co_await testNormalKeyspaceBoundary(cx);
 		co_await complexTest(this, cx);
 		co_await testUnlockByUser(this, cx);
+		co_await removeRangeLockOwner(cx, rangeLockOwnerName);
 	}
 };
 

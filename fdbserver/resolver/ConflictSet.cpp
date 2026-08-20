@@ -32,6 +32,7 @@
 #include "fdbrpc/PerfMetric.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/RangeLockConfiguration.h"
 #include "fdbclient/SystemData.h"
 #include "ConflictSet.h"
 #include "flow/UnitTest.h"
@@ -1266,6 +1267,56 @@ TEST_CASE("/fdbserver/resolver/RangeLock/ConflictFence") {
 	const auto tooOld = resolve(expiredHistory.get(), 120, 90, { makeCertificate(80) });
 	ASSERT(tooOld.first.empty());
 	ASSERT(tooOld.second == std::vector<int>{ 0 });
+	co_return;
+}
+
+TEST_CASE("/fdbserver/resolver/RangeLock/PrivateMetadataAuthority") {
+	Arena arena;
+	auto makeConflictSet = []() {
+		return std::unique_ptr<ConflictSet, decltype(&destroyConflictSet)>(newConflictSet(), destroyConflictSet);
+	};
+	auto resolve = [](ConflictSet* conflictSet,
+	                  Version commitVersion,
+	                  Version oldestVersion,
+	                  const std::vector<CommitTransactionRef>& transactions) {
+		ConflictBatch batch(conflictSet);
+		for (const auto& transaction : transactions) {
+			batch.addTransaction(transaction, oldestVersion);
+		}
+		std::pair<std::vector<int>, std::vector<int>> result;
+		batch.detectConflicts(commitVersion, oldestVersion, result.first, &result.second);
+		return result;
+	};
+	CommitTransactionRef systemWriter;
+	systemWriter.read_snapshot = 100;
+	systemWriter.write_conflict_ranges.push_back(arena, singleKeyRange(rangeLockConfigurationKey, arena));
+	CommitTransactionRef authority;
+	authority.read_snapshot = 100;
+	authority.read_conflict_ranges.push_back(arena, singleKeyRange(rangeLockConfigurationKey, arena));
+	authority.read_conflict_ranges.push_back(arena, singleKeyRange(databaseLockedKey, arena));
+	CommitTransactionRef otherResolver;
+	otherResolver.read_snapshot = 80;
+	otherResolver.write_conflict_ranges.push_back(arena, normalKeys);
+
+	// An earlier globally rejected transaction can leave a system-key write
+	// in only one resolver's local history. Broadcasting management reads
+	// would then permit R0's private effects before R1 rejected the commit.
+	auto resolverZero = makeConflictSet();
+	auto resolverOne = makeConflictSet();
+	ASSERT(resolve(resolverOne.get(), 110, 90, { systemWriter }).first == std::vector<int>{ 0 });
+	ASSERT(resolve(resolverZero.get(), 120, 90, { authority }).first == std::vector<int>{ 0 });
+	ASSERT(resolve(resolverOne.get(), 120, 90, { authority }).first.empty());
+
+	// The actual management routing gives non-authoritative resolvers only
+	// writes. They cannot conflict or be too old, even with divergent history.
+	const auto nonAuthoritative = resolve(resolverOne.get(), 130, 120, { otherResolver });
+	ASSERT(nonAuthoritative.first == std::vector<int>{ 0 });
+	ASSERT(nonAuthoritative.second.empty());
+
+	// Every genuinely committed system write also reached resolver 0, so its
+	// read conflict remains sufficient to reject an invalid certificate.
+	ASSERT(resolve(resolverZero.get(), 140, 90, { systemWriter }).first == std::vector<int>{ 0 });
+	ASSERT(resolve(resolverZero.get(), 150, 90, { authority }).first.empty());
 	co_return;
 }
 

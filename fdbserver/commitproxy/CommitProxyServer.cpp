@@ -19,6 +19,7 @@
  */
 
 #include <algorithm>
+#include <map>
 #include <string_view>
 #include <tuple>
 #include <variant>
@@ -53,6 +54,7 @@
 #include "ProxyCommitData.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/RecoveryState.h"
+#include "fdbserver/core/SeedShardServers.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/commitproxy/CommitProxyServer.h"
@@ -74,7 +76,7 @@ namespace {
 
 constexpr int internalReadConflictRange = -1;
 
-enum class RangeLockCommitCheck : uint8_t { NotRequired, Certified, Rejected };
+enum class RangeLockCommitCheck : uint8_t { NotRequired, Certified, Rejected, NotReady, DatabaseLockRejected };
 
 bool mutationIntersectsRange(const MutationRef& mutation, const KeyRangeRef& range) {
 	if (isSingleKeyMutation(static_cast<MutationRef::Type>(mutation.type))) {
@@ -83,23 +85,191 @@ bool mutationIntersectsRange(const MutationRef& mutation, const KeyRangeRef& ran
 	return mutation.type == MutationRef::ClearRange && range.intersects(KeyRangeRef(mutation.param1, mutation.param2));
 }
 
+bool mutationTouchesKey(const MutationRef& mutation, const KeyRef& key) {
+	if (mutation.type == MutationRef::ClearRange) {
+		return mutation.param1 <= key && key < mutation.param2;
+	}
+	return mutation.param1 == key;
+}
+
 class RangeLockMutationSummary {
 public:
 	void add(const MutationRef& mutation) {
 		hasMetadata = hasMetadata || isMetadataMutation(mutation);
 		hasNormalMutation = hasNormalMutation || mutationIntersectsRange(mutation, normalKeys);
 		changesLocks = changesLocks || mutationIntersectsRange(mutation, rangeLockKeys);
+		changesConfiguration = changesConfiguration || mutationTouchesKey(mutation, rangeLockConfigurationKey);
+		changesDatabaseLock = changesDatabaseLock || mutationTouchesKey(mutation, databaseLockedKey);
 	}
 
 	bool needsCertificate() const { return hasMetadata && hasNormalMutation; }
 	bool hasMetadataMutations() const { return hasMetadata; }
+	bool hasNormalMutations() const { return hasNormalMutation; }
 	bool changesRangeLocks() const { return changesLocks; }
+	bool changesRangeLockConfiguration() const { return changesConfiguration; }
+	bool changesDatabaseLockKey() const { return changesDatabaseLock; }
 
 private:
 	bool hasMetadata = false;
 	bool hasNormalMutation = false;
 	bool changesLocks = false;
+	bool changesConfiguration = false;
+	bool changesDatabaseLock = false;
 };
+
+RangeLockMutationSummary summarizeRangeLockMutations(const CommitTransactionRef& transaction) {
+	RangeLockMutationSummary summary;
+	for (const auto& mutation : transaction.mutations) {
+		summary.add(mutation);
+	}
+	return summary;
+}
+
+bool hasNonSystemReadConflict(const CommitTransactionRef& transaction) {
+	for (const auto& range : transaction.read_conflict_ranges) {
+		if (!range.empty() && !systemKeys.contains(range)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool rangeLockReadsUseResolverZero(const CommitTransactionRequest& request,
+                                   const RangeLockMutationSummary& summary,
+                                   bool resolverPrivateMutations,
+                                   bool requiresAdmissionCertificate) {
+	if (!resolverPrivateMutations || !requiresAdmissionCertificate) {
+		return false;
+	}
+	if (summary.changesRangeLocks() || summary.changesRangeLockConfiguration()) {
+		return true; // Admission has already required a system-only transaction.
+	}
+	// Reconciliation first acquires the database lock in a separate guarded
+	// transaction. Give this system-only shape the same authority, without
+	// dropping genuine normal-key reads from arbitrary database-lock callers.
+	return summary.changesDatabaseLockKey() && request.isLockAware() && !summary.hasNormalMutations() &&
+	       !hasNonSystemReadConflict(request.transaction);
+}
+
+bool isExactKeyClear(const MutationRef& mutation, const KeyRef& key) {
+	return mutation.type == MutationRef::ClearRange && mutation.param1 == key && mutation.param2 == keyAfter(key);
+}
+
+// Returns whether resolver 0 must certify the proxy's admission decision.
+// The only special initialization is the first database transaction, version 1.
+bool validateRangeLockAdmission(const CommitTransactionRequest& request,
+                                const RangeLockMutationSummary& summary,
+                                const RangeLock& rangeLock,
+                                const Optional<Value>& databaseLock,
+                                Version commitVersion,
+                                bool admissionEnabled,
+                                bool acquisitionKnobEnabled) {
+	const auto& transaction = request.transaction;
+	const auto& previous = rangeLock.configuration();
+	if (!request.isLockAware() && summary.hasNormalMutations() &&
+	    !rangeLock.ordinaryWritesAllowed(acquisitionKnobEnabled)) {
+		throw range_lock_not_ready();
+	}
+
+	if (summary.changesRangeLockConfiguration()) {
+		if (!request.isLockAware() || summary.hasNormalMutations()) {
+			throw range_lock_not_ready();
+		}
+		Optional<RangeLockConfiguration> next;
+		for (const auto& mutation : transaction.mutations) {
+			if (mutationTouchesKey(mutation, rangeLockConfigurationKey)) {
+				if (next.present() || mutation.type != MutationRef::SetValue ||
+				    mutation.param1 != rangeLockConfigurationKey) {
+					throw range_lock_not_ready();
+				}
+				next = decodeRangeLockConfiguration(mutation.param2);
+			}
+		}
+		ASSERT(next.present());
+		const auto transition = classifyRangeLockConfigurationTransition(previous, next.get(), commitVersion == 1);
+		if (transition == RangeLockConfigurationTransition::Initialize) {
+			// seedShardServers deliberately reads allKeys to establish the first
+			// transaction. It does not need a certificate from an earlier lock map.
+			return false;
+		}
+		if (transition == RangeLockConfigurationTransition::Invalid || hasNonSystemReadConflict(transaction)) {
+			throw range_lock_not_ready();
+		}
+		if (decodeRangeLockDatabaseLock(databaseLock) != Optional<UID>(next.get().migrationId())) {
+			throw database_locked();
+		}
+		if (!rangeLock.enforcementStateValid() && transition != RangeLockConfigurationTransition::Begin) {
+			// Only an authenticated Begin may discard poisoned transaction-state
+			// rows. Do not advance an already-corrupt migration's durable cursor.
+			throw range_lock_not_ready();
+		}
+		if (transition == RangeLockConfigurationTransition::Finish) {
+			rangeLock.validateCompleteMap();
+		}
+
+		bool sawClear = false;
+		int boundaries = 0;
+		Key lastBoundary;
+		const Key begin = previous.nextKey().withPrefix(rangeLockPrefix);
+		const Key end = next.get().nextKey().withPrefix(rangeLockPrefix);
+		for (const auto& mutation : transaction.mutations) {
+			if (mutation.param1 == rangeLockConfigurationKey && mutation.type == MutationRef::SetValue) {
+				continue;
+			}
+			if (transition == RangeLockConfigurationTransition::Finish && !sawClear &&
+			    isExactKeyClear(mutation, databaseLockedKey)) {
+				sawClear = true;
+				continue;
+			}
+			if (transition != RangeLockConfigurationTransition::Replay) {
+				throw range_lock_not_ready();
+			}
+			if (!sawClear && mutation.type == MutationRef::ClearRange && mutation.param1 == begin &&
+			    mutation.param2 == end) {
+				sawClear = true;
+				continue;
+			}
+			if (!sawClear || mutation.type != MutationRef::SetValue || mutation.param1 < begin ||
+			    mutation.param1 > end ||
+			    (boundaries == 0 ? mutation.param1 != begin : mutation.param1 <= lastBoundary)) {
+				throw range_lock_not_ready();
+			}
+			RangeLock::validateBoundary(mutation.param1.removePrefix(rangeLockPrefix), mutation.param2);
+			lastBoundary = mutation.param1;
+			++boundaries;
+		}
+		if ((transition == RangeLockConfigurationTransition::Replay &&
+		     (!sawClear || boundaries < 2 || lastBoundary != end)) ||
+		    (transition == RangeLockConfigurationTransition::Finish && !sawClear)) {
+			throw range_lock_not_ready();
+		}
+		return true;
+	}
+
+	if (summary.changesRangeLocks()) {
+		// Resolver-private metadata effects are generated before the other
+		// resolvers' replies are combined. Keep lock-management transactions
+		// system-only, and route their reads only to resolver 0 in that mode.
+		if (!request.isLockAware() || summary.hasNormalMutations() || hasNonSystemReadConflict(transaction) ||
+		    !previous.isReady() || !rangeLock.enforcementStateValid()) {
+			throw range_lock_not_ready();
+		}
+		for (const auto& mutation : transaction.mutations) {
+			if (mutation.type == MutationRef::ClearRange && mutationIntersectsRange(mutation, rangeLockKeys) &&
+			    !rangeLockKeys.contains(KeyRangeRef(mutation.param1, mutation.param2))) {
+				throw range_lock_not_ready();
+			}
+		}
+		if (rangeLock.wouldAddLocks(transaction.mutations) && !admissionEnabled) {
+			throw range_lock_not_ready();
+		}
+	}
+	if (summary.changesDatabaseLockKey() && previous.isMigrating()) {
+		// An unrelated unlock must not drop the migration's database lock.
+		throw range_lock_not_ready();
+	}
+	return summary.changesRangeLocks() || summary.changesDatabaseLockKey();
+}
 
 bool hasRangeLockedMutation(const CommitTransactionRef& transaction, const RangeLock& rangeLock) {
 	if (!rangeLock.anyExclusiveLockHeld()) {
@@ -127,11 +297,26 @@ void addRangeLockReadFence(CommitTransactionRef& transaction,
 	transaction.read_snapshot = std::min(transaction.read_snapshot, lockStateVersion);
 	transaction.read_conflict_ranges.push_back(arena, rangeLockKeys);
 	readConflictRangeIndexMap.push_back(internalReadConflictRange);
+	transaction.read_conflict_ranges.push_back(arena, singleKeyRange(rangeLockConfigurationKey, arena));
+	readConflictRangeIndexMap.push_back(internalReadConflictRange);
+	transaction.read_conflict_ranges.push_back(arena, singleKeyRange(databaseLockedKey, arena));
+	readConflictRangeIndexMap.push_back(internalReadConflictRange);
 }
 
 void addRangeLockWriteFence(CommitTransactionRef& transaction, Arena& arena) {
 	transaction.write_conflict_ranges.push_back(arena, rangeLockKeys);
 }
+
+// Wire-shaped fixture for invalid states the public insertion API refuses.
+struct RangeLockBoundaryTestSet {
+	constexpr static FileIdentifier file_identifier = RangeLockStateSet::file_identifier;
+	std::map<RangeLockUniqueString, RangeLockState> locks;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, locks);
+	}
+};
 
 } // namespace
 
@@ -170,11 +355,15 @@ TEST_CASE("/fdbserver/commitproxy/RangeLock/CertificateConstruction") {
 	std::vector<int> readIndices{ 7 };
 	addRangeLockReadFence(candidate, arena, 100, readIndices);
 	ASSERT_EQ(candidate.read_snapshot, 100);
-	ASSERT_EQ(candidate.read_conflict_ranges.size(), 2);
-	ASSERT(candidate.read_conflict_ranges.back() == rangeLockKeys);
-	ASSERT_EQ(readIndices.size(), 2);
+	ASSERT_EQ(candidate.read_conflict_ranges.size(), 4);
+	ASSERT(candidate.read_conflict_ranges[1] == rangeLockKeys);
+	ASSERT(candidate.read_conflict_ranges[2] == singleKeyRange(rangeLockConfigurationKey));
+	ASSERT(candidate.read_conflict_ranges[3] == singleKeyRange(databaseLockedKey));
+	ASSERT_EQ(readIndices.size(), 4);
 	ASSERT_EQ(readIndices[0], 7);
 	ASSERT_EQ(readIndices[1], internalReadConflictRange);
+	ASSERT_EQ(readIndices[2], internalReadConflictRange);
+	ASSERT_EQ(readIndices[3], internalReadConflictRange);
 
 	CommitTransactionRef olderCandidate;
 	olderCandidate.read_snapshot = 80;
@@ -187,6 +376,310 @@ TEST_CASE("/fdbserver/commitproxy/RangeLock/CertificateConstruction") {
 	addRangeLockWriteFence(noClientWriteConflicts, arena);
 	ASSERT_EQ(noClientWriteConflicts.write_conflict_ranges.size(), 1);
 	ASSERT(noClientWriteConflicts.write_conflict_ranges.front() == rangeLockKeys);
+	co_return;
+}
+
+TEST_CASE("/fdbserver/commitproxy/RangeLock/ReadinessAdmission") {
+	const UID owner(1, 2);
+	const Optional<Value> databaseLock(BinaryWriter::toValue(owner, Unversioned()).withPrefix("0123456789"_sr));
+	auto valueFor = [](KeyRange range, const std::string& name) {
+		RangeLockStateSet states;
+		states.insertIfNotExist(RangeLockState(RangeLockType::ExclusiveReadLock, name, range));
+		return rangeLockStateSetValue(states);
+	};
+	auto validate = [&](const CommitTransactionRequest& request,
+	                    const RangeLock& locks,
+	                    bool admission = false,
+	                    bool knob = false,
+	                    Version version = 100) {
+		return validateRangeLockAdmission(
+		    request, summarizeRangeLockMutations(request.transaction), locks, databaseLock, version, admission, knob);
+	};
+	auto rejection = [&](const CommitTransactionRequest& request,
+	                     const RangeLock& locks,
+	                     bool admission = false,
+	                     bool knob = false,
+	                     Version version = 100) {
+		try {
+			validate(request, locks, admission, knob, version);
+			return 0;
+		} catch (Error& e) {
+			return e.code();
+		}
+	};
+	auto management = []() {
+		CommitTransactionRequest request;
+		request.flags |= CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+		return request;
+	};
+	auto setConfiguration = [](CommitTransactionRequest& request, const RangeLockConfiguration& configuration) {
+		request.transaction.set(request.arena, rangeLockConfigurationKey, rangeLockConfigurationValue(configuration));
+	};
+
+	RangeLock locks;
+	CommitTransactionRequest ordinary;
+	ordinary.transaction.set(ordinary.arena, "b"_sr, "value"_sr);
+	ASSERT(!validate(ordinary, locks)); // Unknown + default-off preserves ordinary writes.
+	ASSERT_EQ(rejection(ordinary, locks, false, true), error_code_range_lock_not_ready);
+	locks.setConfiguration(RangeLockConfiguration::ready());
+	ASSERT(!validate(ordinary, locks, false, true));
+
+	const Value heldA = valueFor(KeyRangeRef("a"_sr, "m"_sr), "owner-a");
+	const Value heldM = valueFor(KeyRangeRef("m"_sr, normalKeys.end), "owner-m");
+	locks.setBoundary("a"_sr, heldA);
+	locks.setBoundary("b"_sr, heldA); // Equal-valued raw boundaries must survive.
+	locks.setBoundary("m"_sr, heldM);
+	locks.setBoundary(normalKeys.end, ""_sr);
+	ASSERT(locks.isLocked(normalKeys));
+	locks.clearBoundaries(singleKeyRange("a"_sr.withPrefix(rangeLockPrefix)));
+	ASSERT(!locks.isLocked(KeyRangeRef("a"_sr, "b"_sr)));
+	ASSERT(locks.isLocked(KeyRangeRef("b"_sr, "m"_sr)));
+	locks.setBoundary("a"_sr, heldA);
+
+	CommitTransactionRequest release = management();
+	release.transaction.clear(release.arena,
+	                          KeyRangeRef("a"_sr.withPrefix(rangeLockPrefix), "m"_sr.withPrefix(rangeLockPrefix)));
+	release.transaction.set(release.arena, "a"_sr.withPrefix(rangeLockPrefix), ""_sr);
+	release.transaction.set(release.arena, "m"_sr.withPrefix(rangeLockPrefix), heldM);
+	ASSERT(!locks.wouldAddLocks(release.transaction.mutations));
+	ASSERT(validate(release, locks)); // Preserving the neighboring lock is not an acquisition.
+
+	CommitTransactionRequest acquire = management();
+	acquire.transaction.set(
+	    acquire.arena, "c"_sr.withPrefix(rangeLockPrefix), valueFor(KeyRangeRef("c"_sr, "d"_sr), "new-owner"));
+	acquire.transaction.set(acquire.arena, "d"_sr.withPrefix(rangeLockPrefix), heldA);
+	ASSERT_EQ(rejection(acquire, locks), error_code_range_lock_not_ready);
+	ASSERT(validate(acquire, locks, true, true));
+	acquire.transaction.read_conflict_ranges.push_back(acquire.arena, KeyRangeRef("user"_sr, "user0"_sr));
+	ASSERT_EQ(rejection(acquire, locks, true, true), error_code_range_lock_not_ready);
+
+	CommitTransactionRequest outsideOriginalRange = management();
+	outsideOriginalRange.transaction.set(outsideOriginalRange.arena, "z"_sr.withPrefix(rangeLockPrefix), heldA);
+	ASSERT_EQ(rejection(outsideOriginalRange, locks, true, true), error_code_range_lock_not_ready);
+	CommitTransactionRequest nonemptyEnd = management();
+	nonemptyEnd.transaction.set(nonemptyEnd.arena, normalKeys.end.withPrefix(rangeLockPrefix), heldM);
+	ASSERT_EQ(rejection(nonemptyEnd, locks, true, true), error_code_range_lock_not_ready);
+	RangeLockBoundaryTestSet multipleAcquisitions;
+	multipleAcquisitions.locks.emplace(
+	    "legacy-key-a", RangeLockState(RangeLockType::ExclusiveReadLock, "owner-a", KeyRangeRef("a"_sr, "m"_sr)));
+	multipleAcquisitions.locks.emplace(
+	    "legacy-key-b", RangeLockState(RangeLockType::ExclusiveReadLock, "owner-b", KeyRangeRef("a"_sr, "m"_sr)));
+	CommitTransactionRequest nonexclusive = management();
+	nonexclusive.transaction.set(nonexclusive.arena,
+	                             "a"_sr.withPrefix(rangeLockPrefix),
+	                             ObjectWriter::toValue(multipleAcquisitions, IncludeVersion()));
+	ASSERT_EQ(rejection(nonexclusive, locks, true, true), error_code_range_lock_not_ready);
+	multipleAcquisitions.locks.erase("legacy-key-b");
+	RangeLock::validateBoundary("a"_sr, ObjectWriter::toValue(multipleAcquisitions, IncludeVersion()));
+	CommitTransactionRequest overextended = management();
+	overextended.transaction.clear(overextended.arena, singleKeyRange("m"_sr.withPrefix(rangeLockPrefix)));
+	ASSERT_EQ(rejection(overextended, locks, true, true), error_code_range_lock_not_ready);
+	CommitTransactionRequest fragmented = management();
+	fragmented.transaction.clear(fragmented.arena, singleKeyRange("a"_sr.withPrefix(rangeLockPrefix)));
+	ASSERT(validate(fragmented, locks)); // A surviving fragment stays within its original acquisition range.
+
+	auto initialRecovery = [&](bool locked) {
+		CommitTransactionRequest request = management();
+		seedShardServers(request.arena, request.transaction, {});
+		setConfiguration(request, RangeLockConfiguration::ready());
+		if (locked) {
+			MutationRef lockMutation(MutationRef::SetVersionstampedValue,
+			                         databaseLockedKey,
+			                         ValueRef(request.arena,
+			                                  BinaryWriter::toValue(owner, Unversioned())
+			                                      .withPrefix("0123456789"_sr)
+			                                      .withSuffix("\x00\x00\x00\x00"_sr)));
+			transformVersionstampMutation(lockMutation, &MutationRef::param2, 1, 0);
+			request.transaction.mutations.push_back(request.arena, lockMutation);
+		}
+		// ClusterRecovery overwrites the seed helper's read version, but keeps
+		// its allKeys read-conflict range unchanged.
+		request.transaction.read_snapshot = 1;
+		return request;
+	};
+	RangeLock initialLocks;
+	RangeLock hydratedInitialLocks;
+	hydratedInitialLocks.setConfiguration(RangeLockConfiguration::ready());
+	for (bool locked : { false, true }) {
+		const CommitTransactionRequest initialize = initialRecovery(locked);
+		const auto summary = summarizeRangeLockMutations(initialize.transaction);
+		ASSERT(hasNonSystemReadConflict(initialize.transaction));
+		ASSERT_EQ(summary.changesDatabaseLockKey(), locked);
+		const bool certifyAdmission = validate(initialize, initialLocks, false, false, 1);
+		ASSERT(!certifyAdmission);
+		ASSERT(!validate(initialize, hydratedInitialLocks, false, false, 1));
+		ASSERT(!rangeLockReadsUseResolverZero(initialize, summary, true, certifyAdmission));
+		ASSERT_EQ(initialize.transaction.read_conflict_ranges.size(), 1);
+		ASSERT(initialize.transaction.read_conflict_ranges.front() == allKeys);
+		ASSERT_EQ(rejection(initialize, initialLocks, false, false, 2), error_code_range_lock_not_ready);
+	}
+	CommitTransactionRequest notLockAware = initialRecovery(false);
+	notLockAware.flags &= ~CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+	ASSERT_EQ(rejection(notLockAware, initialLocks, false, false, 1), error_code_range_lock_not_ready);
+	CommitTransactionRequest mixedInitialize = initialRecovery(false);
+	mixedInitialize.transaction.set(mixedInitialize.arena, "ordinary"_sr, "value"_sr);
+	ASSERT_EQ(rejection(mixedInitialize, initialLocks, false, false, 1), error_code_range_lock_not_ready);
+	CommitTransactionRequest duplicateInitialize = initialRecovery(false);
+	setConfiguration(duplicateInitialize, RangeLockConfiguration::ready());
+	ASSERT_EQ(rejection(duplicateInitialize, initialLocks, false, false, 1), error_code_range_lock_not_ready);
+	CommitTransactionRequest clearingInitialize = initialRecovery(false);
+	clearingInitialize.transaction.clear(clearingInitialize.arena, singleKeyRange(rangeLockConfigurationKey));
+	ASSERT_EQ(rejection(clearingInitialize, initialLocks, false, false, 1), error_code_range_lock_not_ready);
+	CommitTransactionRequest completedMigration = management();
+	seedShardServers(completedMigration.arena, completedMigration.transaction, {});
+	setConfiguration(completedMigration, RangeLockConfiguration::ready(owner));
+	ASSERT_EQ(rejection(completedMigration, initialLocks, false, false, 1), error_code_range_lock_not_ready);
+
+	CommitTransactionRequest acquireDatabaseLock = management();
+	acquireDatabaseLock.transaction.set(acquireDatabaseLock.arena, databaseLockedKey, databaseLock.get());
+	acquireDatabaseLock.transaction.read_conflict_ranges.push_back(
+	    acquireDatabaseLock.arena, singleKeyRange(rangeLockConfigurationKey, acquireDatabaseLock.arena));
+	acquireDatabaseLock.transaction.read_conflict_ranges.push_back(
+	    acquireDatabaseLock.arena, singleKeyRange(databaseLockedKey, acquireDatabaseLock.arena));
+	acquireDatabaseLock.transaction.write_conflict_ranges.push_back(acquireDatabaseLock.arena, normalKeys);
+	ASSERT(rangeLockReadsUseResolverZero(
+	    acquireDatabaseLock, summarizeRangeLockMutations(acquireDatabaseLock.transaction), true, true));
+	ASSERT(validate(acquireDatabaseLock, locks));
+
+	const auto beginConfiguration = RangeLockConfiguration::migrating(owner, normalKeys.begin);
+	CommitTransactionRequest begin = management();
+	setConfiguration(begin, beginConfiguration);
+	ASSERT(validate(begin, locks));
+	CommitTransactionRequest wrongOwner = management();
+	setConfiguration(wrongOwner, RangeLockConfiguration::migrating(UID(3, 4), normalKeys.begin));
+	ASSERT_EQ(rejection(wrongOwner, locks), error_code_database_locked);
+	begin.transaction.set(begin.arena, metadataVersionKey, "unrelated"_sr);
+	ASSERT_EQ(rejection(begin, locks), error_code_range_lock_not_ready);
+
+	locks.resetBoundaries();
+	locks.setConfiguration(beginConfiguration);
+	ASSERT(!locks.anyExclusiveLockHeld());
+	ASSERT_EQ(rejection(ordinary, locks), error_code_range_lock_not_ready);
+	ASSERT_EQ(rejection(release, locks, true, true), error_code_range_lock_not_ready);
+	CommitTransactionRequest unlocked = management();
+	unlocked.transaction.clear(unlocked.arena, singleKeyRange(databaseLockedKey));
+	ASSERT_EQ(rejection(unlocked, locks), error_code_range_lock_not_ready);
+	ASSERT(rangeLockReadsUseResolverZero(unlocked, summarizeRangeLockMutations(unlocked.transaction), true, true));
+	ASSERT(!rangeLockReadsUseResolverZero(unlocked, summarizeRangeLockMutations(unlocked.transaction), false, true));
+	unlocked.transaction.read_conflict_ranges.push_back(unlocked.arena,
+	                                                    singleKeyRange(rangeLockConfigurationKey, unlocked.arena));
+	ASSERT(rangeLockReadsUseResolverZero(unlocked, summarizeRangeLockMutations(unlocked.transaction), true, true));
+	unlocked.transaction.read_conflict_ranges.push_back(unlocked.arena, KeyRangeRef("user"_sr, "user0"_sr));
+	ASSERT(!rangeLockReadsUseResolverZero(unlocked, summarizeRangeLockMutations(unlocked.transaction), true, true));
+
+	CommitTransactionRequest skip = management();
+	setConfiguration(skip, beginConfiguration.advance(normalKeys.end));
+	ASSERT_EQ(rejection(skip, locks), error_code_range_lock_not_ready);
+	CommitTransactionRequest replay = management();
+	replay.transaction.clear(replay.arena, KeyRangeRef(rangeLockPrefix, normalKeys.end.withPrefix(rangeLockPrefix)));
+	replay.transaction.set(replay.arena, rangeLockPrefix, ""_sr);
+	replay.transaction.set(replay.arena, "a"_sr.withPrefix(rangeLockPrefix), heldA);
+	replay.transaction.set(replay.arena, "m"_sr.withPrefix(rangeLockPrefix), heldM);
+	replay.transaction.set(replay.arena, normalKeys.end.withPrefix(rangeLockPrefix), ""_sr);
+	setConfiguration(replay, beginConfiguration.advance(normalKeys.end));
+	ASSERT(validate(replay, locks)); // Migration can restore locks with admission off.
+
+	CommitTransactionRequest finish = management();
+	setConfiguration(finish, RangeLockConfiguration::ready(owner));
+	finish.transaction.clear(finish.arena, singleKeyRange(databaseLockedKey));
+	ASSERT_EQ(rejection(finish, locks), error_code_range_lock_not_ready);
+	locks.setConfiguration(beginConfiguration.advance(normalKeys.end));
+	ASSERT(validate(finish, locks));
+	co_return;
+}
+
+TEST_CASE("/fdbserver/commitproxy/RangeLock/RecoverInvalidTxnState") {
+	const UID owner(5, 6);
+	const Optional<Value> databaseLock(BinaryWriter::toValue(owner, Unversioned()).withPrefix("0123456789"_sr));
+	RangeLockStateSet state;
+	state.insertIfNotExist(
+	    RangeLockState(RangeLockType::ExclusiveReadLock, "valid-storage", KeyRangeRef("a"_sr, "b"_sr)));
+	const Value held = rangeLockStateSetValue(state);
+	const RangeLockConfiguration unknown;
+	const auto ready = RangeLockConfiguration::ready();
+	const auto migrating = RangeLockConfiguration::migrating(owner, normalKeys.begin);
+
+	RangeLock invalidBoundary;
+	// A legacy identity collision or stale txnstate row can put valid bytes
+	// at a boundary outside the embedded acquisition's original range.
+	invalidBoundary.recoverBoundary("c"_sr, held);
+	invalidBoundary.finishRecovery();
+	ASSERT(!invalidBoundary.enforcementStateValid());
+	ASSERT(invalidBoundary.configuration() == unknown); // Do not rewrite durable readiness.
+	ASSERT(invalidBoundary.effectiveReadiness() == RangeLockReadiness::Unknown);
+	ASSERT(!invalidBoundary.ordinaryWritesAllowed(false));
+	RangeLock malformedBytes;
+	malformedBytes.recoverBoundary("a"_sr, "malformed"_sr);
+	malformedBytes.finishRecovery();
+	ASSERT(!malformedBytes.enforcementStateValid());
+	ASSERT(!malformedBytes.ordinaryWritesAllowed(false));
+
+	RangeLock invalidInterval;
+	invalidInterval.setConfiguration(ready);
+	invalidInterval.recoverBoundary("a"_sr, held);
+	invalidInterval.recoverBoundary(normalKeys.end, ""_sr);
+	invalidInterval.finishRecovery(); // The missing b boundary would overextend the lock.
+	ASSERT(!invalidInterval.enforcementStateValid());
+	ASSERT(!invalidInterval.ordinaryWritesAllowed(false));
+
+	CommitTransactionRequest begin;
+	begin.flags |= CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+	begin.transaction.set(begin.arena, rangeLockConfigurationKey, rangeLockConfigurationValue(migrating));
+	for (auto* locks : { &invalidBoundary, &malformedBytes, &invalidInterval }) {
+		ASSERT(validateRangeLockAdmission(
+		    begin, summarizeRangeLockMutations(begin.transaction), *locks, databaseLock, 100, false, false));
+		// These are the production callbacks issued by the authenticated Begin
+		// and the replay of a valid storage KRM, including its empty interval.
+		locks->resetBoundaries();
+		locks->setConfiguration(migrating);
+		locks->setBoundary(normalKeys.begin, ""_sr);
+		locks->setBoundary("a"_sr, held);
+		locks->setBoundary("b"_sr, ""_sr);
+		locks->setBoundary(normalKeys.end, ""_sr);
+		locks->setConfiguration(migrating.advance(normalKeys.end));
+		ASSERT(locks->enforcementStateValid());
+		ASSERT(!locks->ordinaryWritesAllowed(false));
+		CommitTransactionRequest finish;
+		finish.flags |= CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+		finish.transaction.set(
+		    finish.arena, rangeLockConfigurationKey, rangeLockConfigurationValue(RangeLockConfiguration::ready(owner)));
+		finish.transaction.clear(finish.arena, singleKeyRange(databaseLockedKey));
+		ASSERT(validateRangeLockAdmission(
+		    finish, summarizeRangeLockMutations(finish.transaction), *locks, databaseLock, 110, false, false));
+		locks->setConfiguration(RangeLockConfiguration::ready(owner));
+		ASSERT(locks->ordinaryWritesAllowed(false));
+		ASSERT(locks->isLocked(KeyRangeRef("a"_sr, "b"_sr)));
+		ASSERT(!locks->isLocked(KeyRangeRef("b"_sr, normalKeys.end)));
+	}
+
+	const auto middle = migrating.advance("m"_sr);
+	RangeLock poisonedMigration;
+	poisonedMigration.setConfiguration(middle);
+	poisonedMigration.recoverBoundary("c"_sr, held);
+	CommitTransactionRequest replay;
+	replay.flags |= CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+	replay.transaction.clear(
+	    replay.arena, KeyRangeRef("m"_sr.withPrefix(rangeLockPrefix), normalKeys.end.withPrefix(rangeLockPrefix)));
+	replay.transaction.set(replay.arena, "m"_sr.withPrefix(rangeLockPrefix), ""_sr);
+	replay.transaction.set(replay.arena, normalKeys.end.withPrefix(rangeLockPrefix), ""_sr);
+	replay.transaction.set(
+	    replay.arena, rangeLockConfigurationKey, rangeLockConfigurationValue(middle.advance(normalKeys.end)));
+	bool rejected = false;
+	try {
+		validateRangeLockAdmission(replay,
+		                           summarizeRangeLockMutations(replay.transaction),
+		                           poisonedMigration,
+		                           databaseLock,
+		                           120,
+		                           false,
+		                           false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_range_lock_not_ready);
+		rejected = true;
+	}
+	ASSERT(rejected);
+	ASSERT(poisonedMigration.configuration() == middle);
+	ASSERT(!poisonedMigration.enforcementStateValid());
 	co_return;
 }
 
@@ -273,11 +766,14 @@ struct ResolutionRequestBuilder {
 
 	// Returns a read conflict index map: [resolver_index][read_conflict_range_index_on_the_resolver]
 	// -> read_conflict_range's original index
-	std::vector<std::vector<int>> addReadConflictRanges(CommitTransactionRef& trIn, int clientReadConflictRangeCount) {
+	std::vector<std::vector<int>> addReadConflictRanges(CommitTransactionRef& trIn,
+	                                                    int clientReadConflictRangeCount,
+	                                                    bool resolverZeroOnly) {
 		std::vector<std::vector<int>> rCRIndexMap(requests.size());
 		for (int idx = 0; idx < trIn.read_conflict_ranges.size(); ++idx) {
 			const auto& r = trIn.read_conflict_ranges[idx];
-			for (int resolver : getResolversForRange(r, trIn.read_snapshot)) {
+			for (int resolver :
+			     resolverZeroOnly ? std::vector<int>{ 0 } : getResolversForRange(r, trIn.read_snapshot)) {
 				getOutTransaction(resolver, trIn.read_snapshot)
 				    .read_conflict_ranges.push_back(requests[resolver].arena, r);
 				rCRIndexMap[resolver].push_back(idx < clientReadConflictRangeCount ? idx : internalReadConflictRange);
@@ -293,6 +789,12 @@ struct ResolutionRequestBuilder {
 				    .write_conflict_ranges.push_back(requests[resolver].arena, r);
 			}
 		}
+	}
+
+	void omitTransaction(RangeLockCommitCheck reason) {
+		rangeLockChecks.push_back(reason);
+		transactionResolverMap.emplace_back();
+		txReadConflictRangeIndexMap.emplace_back(requests.size());
 	}
 
 	void addTransaction(CommitTransactionRequest& trRequest, Version ver, int transactionNumberInBatch) {
@@ -314,16 +816,34 @@ struct ResolutionRequestBuilder {
 			rangeLockSummary.add(m);
 		}
 
+		ASSERT(self->rangeLock != nullptr);
+		bool certifyAdmission = false;
+		try {
+			certifyAdmission = validateRangeLockAdmission(trRequest,
+			                                              rangeLockSummary,
+			                                              *self->rangeLock,
+			                                              rangeLockSummary.changesRangeLockConfiguration()
+			                                                  ? self->txnStateStore->readValue(databaseLockedKey).get()
+			                                                  : Optional<Value>(),
+			                                              ver,
+			                                              self->rangeLockAdmissionEnabled(),
+			                                              SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			omitTransaction(e.code() == error_code_database_locked ? RangeLockCommitCheck::DatabaseLockRejected
+			                                                       : RangeLockCommitCheck::NotReady);
+			return;
+		}
+
 		// Metadata is replicated from resolver verdicts, so mixed transactions
 		// need an unlocked view certified by resolver 0 before those verdicts.
-		const bool certifyRangeLock =
-		    self->rangeLock != nullptr && !trRequest.isLockAware() && rangeLockSummary.needsCertificate();
+		const bool certifyRangeLock = !trRequest.isLockAware() && rangeLockSummary.needsCertificate();
 		if (certifyRangeLock && hasRangeLockedMutation(trIn, *self->rangeLock)) {
 			// No part of a rejected metadata transaction may reach a resolver:
 			// it could otherwise become durable transaction state or a private mutation.
-			rangeLockChecks.push_back(RangeLockCommitCheck::Rejected);
-			transactionResolverMap.emplace_back();
-			txReadConflictRangeIndexMap.emplace_back(requests.size());
+			omitTransaction(RangeLockCommitCheck::Rejected);
 			return;
 		}
 		rangeLockChecks.push_back(certifyRangeLock ? RangeLockCommitCheck::Certified
@@ -348,18 +868,36 @@ struct ResolutionRequestBuilder {
 			trIn.read_conflict_ranges.push_back(trRequest.arena, KeyRangeRef(databaseLockedKey, databaseLockedKeyEnd));
 		}
 
-		std::vector<std::vector<int>> rCRIndexMap = addReadConflictRanges(trIn, clientReadConflictRangeCount);
-		if (certifyRangeLock) {
+		// In resolver-private mode every system-key write reaches resolver 0.
+		// Other resolvers may retain different phantom conflicts from globally
+		// rejected transactions. Giving them no reads makes resolver 0 the sole
+		// authority for these system-only management transactions (even too-old
+		// rejection requires a nonempty read-conflict list).
+		const bool resolverZeroOnly = rangeLockReadsUseResolverZero(
+		    trRequest, rangeLockSummary, SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS, certifyAdmission);
+		std::vector<std::vector<int>> rCRIndexMap =
+		    addReadConflictRanges(trIn, clientReadConflictRangeCount, resolverZeroOnly);
+		if (certifyRangeLock || certifyAdmission) {
 			addRangeLockReadFence(
 			    getOutTransaction(0, trIn.read_snapshot), requests[0].arena, rangeLockStateVersion, rCRIndexMap[0]);
 		}
 		txReadConflictRangeIndexMap.push_back(std::move(rCRIndexMap));
 
 		addWriteConflictRanges(trIn);
-		if (rangeLockSummary.changesRangeLocks()) {
+		if (rangeLockSummary.changesRangeLocks() || rangeLockSummary.changesRangeLockConfiguration()) {
 			// Resolver 0 owns the fence even if resolver ranges move. Derive it
 			// from mutations so suppressing client write conflicts cannot bypass it.
 			addRangeLockWriteFence(getOutTransaction(0, trIn.read_snapshot), requests[0].arena);
+		}
+		if (rangeLockSummary.changesRangeLockConfiguration()) {
+			getOutTransaction(0, trIn.read_snapshot)
+			    .write_conflict_ranges.push_back(requests[0].arena,
+			                                     singleKeyRange(rangeLockConfigurationKey, requests[0].arena));
+		}
+		if (rangeLockSummary.changesDatabaseLockKey()) {
+			getOutTransaction(0, trIn.read_snapshot)
+			    .write_conflict_ranges.push_back(requests[0].arena,
+			                                     singleKeyRange(databaseLockedKey, requests[0].arena));
 		}
 
 		if (isTXNStateTransaction) {
@@ -750,17 +1288,12 @@ struct CommitBatchContext {
 
 	void checkHotShards();
 
-	bool rangeLockEnabled();
 
 	Version lastShardMove;
 
 private:
 	void evaluateBatchSize();
 };
-
-bool CommitBatchContext::rangeLockEnabled() {
-	return pProxyCommitData->rangeLockEnabled();
-}
 
 void CommitBatchContext::checkHotShards() {
 	// removed expired hot shards
@@ -1307,6 +1840,35 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	// Thus, we use this nextTr to track the correct transaction index on each resolver.
 	self->nextTr.resize(self->resolution.size());
 	for (int t = 0; t < trs.size(); t++) {
+		if (self->rangeLockChecks[t] == RangeLockCommitCheck::NotReady ||
+		    self->rangeLockChecks[t] == RangeLockCommitCheck::DatabaseLockRejected) {
+			ASSERT(self->transactionResolverMap[t].empty());
+			self->committed[t] = ConflictBatchStatus::TransactionLockReject;
+			Error rejection = range_lock_not_ready();
+			try {
+				const auto summary = summarizeRangeLockMutations(trs[t].transaction);
+				validateRangeLockAdmission(trs[t],
+				                           summary,
+				                           *pProxyCommitData->rangeLock,
+				                           summary.changesRangeLockConfiguration()
+				                               ? pProxyCommitData->txnStateStore->readValue(databaseLockedKey).get()
+				                               : Optional<Value>(),
+				                           self->commitVersion,
+				                           pProxyCommitData->rangeLockAdmissionEnabled(),
+				                           SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
+				// The rejecting proxy was behind. Retry with its refreshed view.
+				rejection = not_committed();
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				if (e.code() == error_code_database_locked) {
+					rejection = database_locked();
+				}
+			}
+			trs[t].reply.sendError(rejection);
+			continue;
+		}
 		if (self->rangeLockChecks[t] == RangeLockCommitCheck::Rejected) {
 			ASSERT(self->transactionResolverMap[t].empty());
 			ASSERT(pProxyCommitData->rangeLock != nullptr);
@@ -1511,12 +2073,13 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 }
 
 void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
-	ASSERT(self->rangeLockEnabled());
 	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	ASSERT(pProxyCommitData->rangeLock != nullptr);
+	const bool ordinaryWritesAllowed =
+	    pProxyCommitData->rangeLock->ordinaryWritesAllowed(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
 	// Fast path: no exclusive locks held -> nothing to check, skip the
 	// per-mutation loop entirely. Steady state when no bulkload is running.
-	if (!pProxyCommitData->rangeLock->anyExclusiveLockHeld()) {
+	if (ordinaryWritesAllowed && !pProxyCommitData->rangeLock->anyExclusiveLockHeld()) {
 		++pProxyCommitData->stats.rangeLockFastPath;
 		return;
 	}
@@ -1531,6 +2094,11 @@ void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
 			// Resolver 0 already validated the lock-state certificate before
 			// recording metadata effects. A later lock in this batch must not
 			// retroactively reject the transaction.
+			continue;
+		}
+		if (!ordinaryWritesAllowed && summarizeRangeLockMutations(trs[i].transaction).hasNormalMutations()) {
+			self->committed[i] = ConflictBatchStatus::TransactionLockReject;
+			trs[i].reply.sendError(range_lock_not_ready());
 			continue;
 		}
 		if (hasRangeLockedMutation(trs[i].transaction, *pProxyCommitData->rangeLock)) {
@@ -1807,9 +2375,7 @@ Future<Void> postResolution(CommitBatchContext* self) {
 	// After applyed metadata change, this commit proxy has the latest view of locked ranges.
 	// If a transaction has any mutation accessing to the locked range, reject the transaction with
 	// error_code_transaction_rejected_range_locked
-	if (self->rangeLockEnabled()) {
-		rejectMutationsForReadLockOnRange(self);
-	}
+	rejectMutationsForReadLockOnRange(self);
 
 	// Second pass
 	co_await assignMutationsToStorageServers(self);
@@ -3023,11 +3589,8 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 				uniquify(info.tags);
 				keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
 			} else if (kv.key.startsWith(rangeLockPrefix)) {
-				if (pContext->pCommitData->rangeLockEnabled()) {
-					ASSERT(pContext->pCommitData->rangeLock != nullptr);
-					Key keyInsert = kv.key.removePrefix(rangeLockPrefix);
-					pContext->pCommitData->rangeLock->initKeyPoint(keyInsert, kv.value);
-				}
+				ASSERT(pContext->pCommitData->rangeLock != nullptr);
+				pContext->pCommitData->rangeLock->recoverBoundary(kv.key.removePrefix(rangeLockPrefix), kv.value);
 			} else {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
 				continue;
@@ -3053,6 +3616,7 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 		                       /* provisionalCommitProxy */ pContext->pCommitData->provisional);
 	}
 
+	pContext->pCommitData->rangeLock->finishRecovery();
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
 	pContext->pCommitData->locked = lockedKey.present() && !lockedKey.get().empty();
 	pContext->pCommitData->metadataVersion = pContext->pTxnStateStore->readValue(metadataVersionKey).get();
@@ -3297,6 +3861,49 @@ class CommitProxyServerCore {
 		}
 	}
 
+	Future<Void> replyRangeLockStatus(RangeLockProxyStatusRequest request) {
+		try {
+			co_await commitData.validState.getFuture();
+			RangeLockProxyStatusReply reply;
+			reply.readiness = commitData.rangeLock->effectiveReadiness();
+			reply.formatRevision = commitData.rangeLock->configuration().formatRevision();
+			reply.metadataVersion = commitData.version.get();
+			reply.admissionEnabled = commitData.rangeLockAdmissionEnabled();
+			reply.shardEncodeLocationMetadata = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+			reply.enforcementStateValid = commitData.rangeLock->enforcementStateValid();
+			if (request.includeBulkLoadConfiguration) {
+				if (!commitData.db->get().distributor.present()) {
+					throw range_lock_not_ready();
+				}
+				const DataDistributorInterface distributor = commitData.db->get().distributor.get();
+				const GetBulkLoadConfigurationReply configuration = co_await timeoutError(
+				    distributor.bulkLoadConfiguration.getReply(GetBulkLoadConfigurationRequest()), 5.0);
+				if (configuration.ddId != distributor.id() || !commitData.db->get().distributor.present() ||
+				    commitData.db->get().distributor.get().id() != distributor.id()) {
+					throw range_lock_not_ready();
+				}
+				reply.dataDistributorId = configuration.ddId;
+				reply.dataDistributorEncodesShardLocations = configuration.shardEncodeLocationMetadata;
+			}
+			request.reply.send(reply);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			request.reply.sendError(range_lock_not_ready());
+		}
+		co_return;
+	}
+
+	Future<Void> serveRangeLockStatusRequests() {
+		while (true) {
+			RangeLockProxyStatusRequest request = co_await proxy.rangeLockStatus.getFuture();
+			// A slow DD capability request must not delay generic range-lock
+			// status/reconciliation probes.
+			addActor.send(replyRangeLockStatus(std::move(request)));
+		}
+	}
+
 public:
 	CommitProxyServerCore(CommitProxyInterface proxy,
 	                      MasterInterface master,
@@ -3384,11 +3991,11 @@ public:
 		}
 		TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
-		// Initialize RangeLock
-		if (commitData.rangeLockEnabled()) {
-			commitData.rangeLock = std::make_shared<RangeLock>(&commitData);
-			TraceEvent(SevInfo, "CommitProxyRangeLockEnabled", commitData.dbgid);
-		}
+		// Preserve and enforce existing locks regardless of the local admission
+		// knob or version-vector/private-mutation mode.
+		commitData.rangeLock = std::make_shared<RangeLock>();
+		TraceEvent("CommitProxyRangeLockInitialized", commitData.dbgid)
+		    .detail("AdmissionEnabled", commitData.rangeLockAdmissionEnabled());
 
 		addActor.send(monitorRemoteCommitted(&commitData));
 		addActor.send(readRequestServer(proxy, addActor, &commitData));
@@ -3432,7 +4039,8 @@ public:
 		              serveProxySnapRequests(),
 		              serveExclusionSafetyCheckRequests(),
 		              serveTxnStateRequests(),
-		              serveSetThrottledShardRequests());
+		              serveSetThrottledShardRequests(),
+		              serveRangeLockStatusRequests());
 	}
 };
 

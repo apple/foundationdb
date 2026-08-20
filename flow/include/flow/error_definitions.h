@@ -165,12 +165,13 @@ ERROR( bulkload_manifest_decode_error, 1246, "Bulkload manifest string is failed
 ERROR( range_lock_reject, 1247, "Range lock is rejected" )
 ERROR( range_unlock_reject, 1248, "Range unlock is rejected" )
 ERROR( bulkload_dataset_not_cover_required_range, 1249, "Bulkload dataset does not cover the required range" )
-ERROR( bulkload_invalid_configuration, 1250, "BulkLoad requires cluster configuration with both shard_encode_location_metadata=1 and enable_read_lock_on_range=1" )
+ERROR( bulkload_invalid_configuration, 1250, "BulkLoad requires ready range-lock enforcement and shard_encode_location_metadata=1; new jobs also require range-lock admission" )
 ERROR( transaction_grv_queue_rejected, 1251, "GRV request rejected because estimated queue wait exceeds transaction limit" )
 ERROR( finish_move_keys_too_many_retries, 1252, "finishMoveKeys exceeded retry limit" )
 ERROR( start_move_keys_too_many_retries, 1253, "startMoveKeys exceeded retry limit" )
 ERROR( cdc_proxy_failed, 1254, "Cluster recovery terminating because a CDCProxy failed" )
 ERROR( cdc_tlog_peek_reply_too_large, 1255, "TLog CDC peek reply exceeds configured byte limit" )
+ERROR( range_lock_not_ready, 1256, "Range-lock enforcement is not ready or new acquisitions are disabled" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

@@ -5277,7 +5277,8 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 			                         di.distributorSnapReq.getFuture(),
 			                         di.distributorExclCheckReq.getFuture(),
 			                         di.storageWigglerState.getFuture(),
-			                         di.triggerAudit.getFuture());
+			                         di.triggerAudit.getFuture(),
+			                         di.bulkLoadConfiguration.getFuture());
 			if (res.index() == 0) {
 				// distributor or collection should never return
 				ASSERT(false);
@@ -5340,6 +5341,9 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 				} else {
 					actors.add(auditStorage(self, req));
 				}
+			} else if (res.index() == 7) {
+				GetBulkLoadConfigurationRequest req = std::get<7>(std::move(res));
+				req.reply.send(GetBulkLoadConfigurationReply(di.id(), SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA));
 			} else {
 				UNREACHABLE();
 			}

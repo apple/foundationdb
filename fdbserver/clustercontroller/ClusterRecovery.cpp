@@ -23,6 +23,7 @@
 #include <utility>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/RangeLockConfiguration.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/logsystem/ApplyMetadataMutation.h"
 #include "fdbserver/core/BackupProgress.h"
@@ -1899,6 +1900,9 @@ Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		// Recruit and seed initial shard servers
 		// This transaction must be the very first one in the database (version 1)
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
+		tr.set(recoveryCommitRequest.arena,
+		       rangeLockConfigurationKey,
+		       rangeLockConfigurationValue(RangeLockConfiguration::ready()));
 	}
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely

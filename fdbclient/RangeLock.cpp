@@ -25,6 +25,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/RangeLockConfiguration.h"
 #include "fdbclient/SystemData.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -305,6 +306,7 @@ Future<Optional<RangeLockState>> prepareExclusiveRangeLockOperation(Transaction*
                                                                     RangeLockState requestedLock,
                                                                     Optional<UID> expectedGeneration = Optional<UID>(),
                                                                     bool adoptLegacy = false) {
+	co_await requireRangeLockReadyForAcquisition(tr);
 	co_await checkRangeLockOwner(tr, requestedLock.getOwnerUniqueId(), expectedGeneration);
 	ExclusiveRangeLockScan scan = co_await scanExclusiveRangeLock(tr, requestedLock);
 	bool wrongAcquisition =
@@ -322,6 +324,9 @@ Future<Optional<RangeLockState>> prepareExclusiveRangeLockOperation(Transaction*
 }
 
 Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr, RangeLockState expectedLock) {
+	if (!(co_await getRangeLockConfiguration(tr)).isReady()) {
+		throw range_lock_not_ready();
+	}
 	co_await checkRangeLockOwner(tr, expectedLock.getOwnerUniqueId());
 	ExclusiveRangeLockScan scan = co_await scanExclusiveRangeLock(tr, expectedLock);
 	if (scan.conflicting || (scan.lock.present() && !expectedLock.getLockId().empty() &&
@@ -447,6 +452,9 @@ Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName owne
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if (!(co_await getRangeLockConfiguration(&tr)).isReady()) {
+				throw range_lock_not_ready();
+			}
 			if (!allowActiveBulkLoad) {
 				co_await checkNoActiveBulkLoadFence(&tr, normalKeys, ownerUniqueID);
 			}
