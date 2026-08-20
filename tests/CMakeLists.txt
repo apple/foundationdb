@@ -563,9 +563,8 @@ if(WITH_PYTHON)
     set(authz_venv_cmd "")
     string(APPEND authz_venv_cmd "${Python3_EXECUTABLE} -m venv ${authz_venv_dir} ")
     string(APPEND authz_venv_cmd "&& ${authz_venv_activate} ")
-    string(APPEND authz_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/authorization/requirements.txt ")
-	# NOTE: Here we are already in the venv so Python3_EXECUTABLE is not available anymore
-    string(APPEND authz_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 -m pip install .) ")
+    string(APPEND authz_venv_cmd "&& pip install --retries 9 -r ${CMAKE_SOURCE_DIR}/tests/authorization/requirements.txt ")
+    string(APPEND authz_venv_cmd "&& pip install ${CMAKE_BINARY_DIR}/bindings/python ")
     add_test(
       NAME authorization_venv_setup
       COMMAND bash -c ${authz_venv_cmd}
