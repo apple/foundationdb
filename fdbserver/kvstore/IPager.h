@@ -486,7 +486,7 @@ public:
 			XXHashEncoder::encode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
 			if (!legacyXorWith.present()) {
-				TraceEvent(SevWarnAlways, "LegacyXorCompatibilityNotInitialized");
+				TraceEvent(SevWarnAlways, "LegacyXorCompatibilityNotInitialized").writeEvent();
 				throw page_encoding_not_supported();
 			}
 			XOREncryptionEncoder::encode(page->getEncodingHeader(), legacyXorWith.get(), pPayload, payloadSize, pageID);
@@ -537,7 +537,7 @@ public:
 			XXHashEncoder::decode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly_DEPRECATED) {
 			if (!legacyXorWith.present()) {
-				TraceEvent(SevWarnAlways, "LegacyXorCompatibilityNotInitialized");
+				TraceEvent(SevWarnAlways, "LegacyXorCompatibilityNotInitialized").writeEvent();
 				throw page_encoding_not_supported();
 			}
 			XOREncryptionEncoder::decode(page->getEncodingHeader(), legacyXorWith.get(), pPayload, payloadSize, pageID);

@@ -1180,7 +1180,7 @@ Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 
 	co_await delay(scaledTimeout);
 
-	TraceEvent("InitializingTxnSystemTimeoutTriggered");
+	TraceEvent("InitializingTxnSystemTimeoutTriggered").writeEvent();
 	throw cluster_recovery_failed();
 }
 
@@ -1944,7 +1944,8 @@ Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
 	                                                     // window of the resolver(s)
 
-	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_EVENT_NAME).c_str(), self->dbgid);
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_EVENT_NAME).c_str(), self->dbgid)
+	    .writeEvent();
 
 	Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());

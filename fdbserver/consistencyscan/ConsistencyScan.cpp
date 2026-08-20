@@ -521,7 +521,7 @@ Future<int> consistencyCheckReadData(UID myId,
 			TraceEvent(SevError, "ConsistencyCheck_ShouldHaveFoundInjectedCorruption", myId);
 		} else {
 			CODE_PROBE(true, "consistency check potentially missed injected corruption due to failures");
-			TraceEvent(SevInfo, "ConsistencyCheck_MissedCorruptionDueToFailures");
+			TraceEvent(SevInfo, "ConsistencyCheck_MissedCorruptionDueToFailures").writeEvent();
 			fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
 			                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
 		}
@@ -1146,7 +1146,7 @@ void resetSimCorruptionCheckOnDeath(Reference<ConsistencyScanMemoryState> memSta
 	}
 	if (fdbSimulationPolicyState().consistencyScanCorruptor.present() &&
 	    fdbSimulationPolicyState().consistencyScanCorruptor.get().first == memState->csId) {
-		TraceEvent("ConsistencyScan_ResetCorruptionOnDeath");
+		TraceEvent("ConsistencyScan_ResetCorruptionOnDeath").writeEvent();
 		CODE_PROBE(true, "Consistency Scan skipped corruption check because scan died in the middle");
 		fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
 		                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
@@ -1174,7 +1174,7 @@ Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncV
 		    g_simulator->getProcessByAddress(fdbSimulationPolicyState().consistencyScanCorruptor.get().second)
 		        ->failed &&
 		    fdbSimulationPolicyState().consistencyScanState == FDBSimConsistencyScanState::Enabled_InjectCorruption) {
-			TraceEvent("ConsistencyScan_ResetCorruptionOnPreviousScanDeath");
+			TraceEvent("ConsistencyScan_ResetCorruptionOnPreviousScanDeath").writeEvent();
 			// noop if state isn't already Enabled_InjectCorruption
 			fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
 			                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);

@@ -224,7 +224,7 @@ struct StreamingRangeReadWorkload : KVWorkload {
 						res = Optional<KeyValue>();
 					}
 					if (cmp != res) {
-						TraceEvent(SevError, "RangeStreamMismatch");
+						TraceEvent(SevError, "RangeStreamMismatch").writeEvent();
 						ASSERT(false);
 					}
 					if (cmp.present()) {

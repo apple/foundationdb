@@ -103,7 +103,7 @@ Future<Void> clearData(Database cx) {
 			// TODO(gglass): the assert below is leftover from some tenant logic.  If it fails, take it out.
 			// If not, leave it in and take out this comment.
 			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
-			TraceEvent("TesterCheckDatabaseClearedDone", tr.trState->readOptions.get().debugID.get());
+			TraceEvent("TesterCheckDatabaseClearedDone", tr.trState->readOptions.get().debugID.get()).writeEvent();
 			TraceEvent("ClearData_Loop2_Success").detail("Phase", "Loop2_Complete");
 			break;
 		} catch (Error& e) {

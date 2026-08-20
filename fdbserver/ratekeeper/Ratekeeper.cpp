@@ -484,7 +484,7 @@ Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<Se
 	Promise<Void> err;
 	Future<Void> collection = actorCollection(self.addActor.getFuture());
 
-	TraceEvent("RatekeeperStarting", rkInterf.id());
+	TraceEvent("RatekeeperStarting", rkInterf.id()).writeEvent();
 	self.addActor.send(waitFailureServer(rkInterf.waitFailure.getFuture()));
 	self.addActor.send(self.configurationMonitor());
 

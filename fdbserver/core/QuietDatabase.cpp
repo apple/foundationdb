@@ -49,7 +49,7 @@ bool isDDPipelineControlEnabled() {
 }
 
 void disableDDPipelineControl() {
-	TraceEvent("DDPipelineControlDisabled");
+	TraceEvent("DDPipelineControlDisabled").writeEvent();
 	g_ddPipelineControlEnabled = false;
 }
 

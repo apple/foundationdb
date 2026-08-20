@@ -124,24 +124,24 @@ struct DcLagWorkload : TestWorkload {
 		StatusObjectReader statusObj(result);
 		StatusObjectReader statusObjCluster;
 		if (!statusObj.get("cluster", statusObjCluster)) {
-			TraceEvent("DcLagNoCluster");
+			TraceEvent("DcLagNoCluster").writeEvent();
 			co_return Optional<double>();
 		}
 
 		StatusObjectReader dcLag;
 		if (!statusObjCluster.get("datacenter_lag", dcLag)) {
-			TraceEvent("DcLagNoLagData");
+			TraceEvent("DcLagNoLagData").writeEvent();
 			co_return Optional<double>();
 		}
 
 		Version versions = 0;
 		double seconds = 0;
 		if (!dcLag.get("versions", versions)) {
-			TraceEvent("DcLagNoVersions");
+			TraceEvent("DcLagNoVersions").writeEvent();
 			co_return Optional<double>();
 		}
 		if (!dcLag.get("seconds", seconds)) {
-			TraceEvent("DcLagNoSeconds");
+			TraceEvent("DcLagNoSeconds").writeEvent();
 			co_return Optional<double>();
 		}
 		TraceEvent("DcLag").detail("Versions", versions).detail("Seconds", seconds);
@@ -181,7 +181,7 @@ struct DcLagWorkload : TestWorkload {
 					TraceEvent("DcLagDetected");
 				}
 				if (lagged && lag.present() && lag.get() < 5.0) {
-					TraceEvent("DcLagRecovered");
+					TraceEvent("DcLagRecovered").writeEvent();
 					self->unclogAll();
 					co_return;
 				}

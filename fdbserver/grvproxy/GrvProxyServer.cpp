@@ -872,7 +872,7 @@ Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<S
 					TraceEvent("DataDistributorChanged", db->get().id).detail("DDID", db->get().distributor.get().id());
 					nextRequestTimer = Void();
 				} else {
-					TraceEvent("DataDistributorDied", db->get().id);
+					TraceEvent("DataDistributorDied", db->get().id).writeEvent();
 					nextRequestTimer = Never();
 				}
 				nextReply = Never();
@@ -1001,7 +1001,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 
 	ASSERT(db->get().recoveryState >=
 	       RecoveryState::ACCEPTING_COMMITS); // else potentially we could return uncommitted read versions from master.
-	TraceEvent("GrvProxyReadyForTxnStarts", proxy.id());
+	TraceEvent("GrvProxyReadyForTxnStarts", proxy.id()).writeEvent();
 
 	while (true) {
 		co_await GRVTimer.getFuture();

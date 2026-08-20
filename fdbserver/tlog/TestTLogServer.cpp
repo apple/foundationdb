@@ -229,7 +229,7 @@ Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContext,
 	// inform other actors tLog is ready.
 	pTLogContext->TLogCreated.send(true);
 
-	TraceEvent("TestTLogServerInitializedTLog", pTLogContext->tLogID);
+	TraceEvent("TestTLogServerInitializedTLog", pTLogContext->tLogID).writeEvent();
 
 	// wait for either test completion or tLog failure.
 	auto choice = co_await race(tl, pTLogContext->TestTLogServerCompleted.getFuture());
@@ -245,7 +245,7 @@ Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContext,
 
 Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestContext) {
 
-	TraceEvent("TestTLogServerEnterPush", pTLogTestContext->workerID);
+	TraceEvent("TestTLogServerEnterPush", pTLogTestContext->workerID).writeEvent();
 
 	for (uint32_t logID = 0; logID < pTLogTestContext->numLogServers; ++logID) {
 		Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[logID];
@@ -422,7 +422,7 @@ Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 
 	uint32_t tLogIdx = 0;
 
-	TraceEvent("TestTLogServerEnterRecoveryTest");
+	TraceEvent("TestTLogServerEnterRecoveryTest").writeEvent();
 
 	// Create the first "old" generation of tLogs
 	for (tLogIdx = 0; tLogIdx < pTLogTestContextEpochOne->numLogServers; tLogIdx++) {

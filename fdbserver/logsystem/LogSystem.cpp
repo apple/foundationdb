@@ -275,7 +275,7 @@ Future<Version> minVersionWhenReady(Future<Void> f, std::vector<std::pair<UID, F
 		co_return minVersion;
 	} catch (Error& err) {
 		if (err.code() == error_code_operation_cancelled) {
-			TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "TLogPushCancelled");
+			TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "TLogPushCancelled").writeEvent();
 			int index = 0;
 			for (const auto& [tlogID, reply] : replies) {
 				if (reply.isReady()) {

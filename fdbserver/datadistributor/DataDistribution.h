@@ -423,7 +423,7 @@ private:
 			return;
 		}
 		requireTransition = true;
-		TraceEvent("PhysicalShardSetTransitionCheck");
+		TraceEvent("PhysicalShardSetTransitionCheck").writeEvent();
 		return;
 	}
 

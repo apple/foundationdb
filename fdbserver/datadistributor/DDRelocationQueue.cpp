@@ -1864,7 +1864,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after
 							// getting the destination team or we could miss failure notifications for the storage
 							// servers in the destination team
-							TraceEvent("BestTeamNotReady");
+							TraceEvent("BestTeamNotReady").writeEvent();
 							self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteBestTeamNotReady]++;
 							foundTeams = false;
 							break;

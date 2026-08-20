@@ -133,7 +133,7 @@ struct ClogRemoteTLog : TestWorkload {
 				return true;
 			}
 		}
-		TraceEvent(SevError, "ClogRemoteTLogCheckFailed");
+		TraceEvent(SevError, "ClogRemoteTLogCheckFailed").writeEvent();
 		return false;
 	}
 
@@ -145,11 +145,11 @@ struct ClogRemoteTLog : TestWorkload {
 		StatusObjectReader cluster;
 		StatusObjectReader processMap;
 		if (!reader.get("cluster", cluster)) {
-			TraceEvent("NoCluster");
+			TraceEvent("NoCluster").writeEvent();
 			co_return Optional<double>();
 		}
 		if (!cluster.get("processes", processMap)) {
-			TraceEvent("NoProcesses");
+			TraceEvent("NoProcesses").writeEvent();
 			co_return Optional<double>();
 		}
 		double maxSSLag{ -1 };
@@ -197,13 +197,13 @@ struct ClogRemoteTLog : TestWorkload {
 
 		StatusObjectReader client;
 		if (!reader.get("client", client)) {
-			TraceEvent("NoClient");
+			TraceEvent("NoClient").writeEvent();
 			return true;
 		}
 
 		StatusObjectReader cluster;
 		if (!reader.get("cluster", cluster)) {
-			TraceEvent("NoCluster");
+			TraceEvent("NoCluster").writeEvent();
 			return true;
 		}
 
@@ -233,7 +233,7 @@ struct ClogRemoteTLog : TestWorkload {
 		StatusArray messages = cluster["messages"].get_array();
 		for (StatusObjectReader message : messages) {
 			if (message.has("name") && message["name"].get_str() == "status_incomplete") {
-				TraceEvent("GrayFailureStatusIncomplete");
+				TraceEvent("GrayFailureStatusIncomplete").writeEvent();
 				return true;
 			}
 		}
@@ -280,7 +280,7 @@ struct ClogRemoteTLog : TestWorkload {
 		if (statusError(reader) || statusIncomplete(reader)) {
 			co_return GrayFailureCheckResult::Incomplete;
 		}
-		TraceEvent("NoGrayFailure");
+		TraceEvent("NoGrayFailure").writeEvent();
 		co_return GrayFailureCheckResult::Missing;
 	}
 

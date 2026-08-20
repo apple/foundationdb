@@ -471,7 +471,7 @@ static Future<bool> shouldBackupWorkerExitEarly(BackupData* self) {
 					co_return shouldExit;
 				}
 
-				TraceEvent("BackupWorkerEmptyStartKey", self->myId);
+				TraceEvent("BackupWorkerEmptyStartKey", self->myId).writeEvent();
 				if (self->endVersion.present()) {
 					co_return true;
 				}

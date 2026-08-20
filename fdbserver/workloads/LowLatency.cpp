@@ -79,12 +79,12 @@ struct LowLatencyWorkload : TestWorkload {
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						if (doCommit) {
-							TraceEvent("LowLatencyTransactionCommitStart");
+							TraceEvent("LowLatencyTransactionCommitStart").writeEvent();
 							tr.set(testKey, ""_sr);
 							co_await tr.commit();
 							TraceEvent("LowLatencyTransactionCommitFinish");
 						} else {
-							TraceEvent("LowLatencyTransactionGRVStart");
+							TraceEvent("LowLatencyTransactionGRVStart").writeEvent();
 							co_await tr.getReadVersion();
 							TraceEvent("LowLatencyTransactionGRVFinish");
 						}

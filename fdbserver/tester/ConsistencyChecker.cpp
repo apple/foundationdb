@@ -374,7 +374,7 @@ Future<std::vector<TesterInterface>> getTesters(Reference<AsyncVar<Optional<Clus
 			}
 			co_await delay(SERVER_KNOBS->WORKER_POLL_DELAY);
 		} else if (action == 3) {
-			TraceEvent(SevWarnAlways, "TesterRecruitmentTimeout");
+			TraceEvent(SevWarnAlways, "TesterRecruitmentTimeout").writeEvent();
 			throw timed_out();
 		}
 		// action == 2: cc changed, loop again
@@ -602,7 +602,7 @@ Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<Cluster
 		}
 		globalProgressMap.coalesce(allKeys);
 	} else {
-		TraceEvent(SevInfo, "ConsistencyCheckUrgent_FailedToLoadRangeFromKnob");
+		TraceEvent(SevInfo, "ConsistencyCheckUrgent_FailedToLoadRangeFromKnob").writeEvent();
 		globalProgressMap.insert(allKeys, false);
 	}
 

@@ -32,7 +32,7 @@ template <class T, class IndexType, IndexType CAPACITY>
 auto WriteOnlySet<T, IndexType, CAPACITY>::insert(const Reference<T>& lineage) -> Index {
 	Index res;
 	if (!freeQueue.pop(res)) {
-		TraceEvent(SevWarnAlways, "NoCapacityInWriteOnlySet");
+		TraceEvent(SevWarnAlways, "NoCapacityInWriteOnlySet").writeEvent();
 		return npos;
 	}
 	ASSERT(_set[res].load() == 0);

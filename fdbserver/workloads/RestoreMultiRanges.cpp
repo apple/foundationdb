@@ -117,7 +117,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 						co_return false;
 					}
 				}
-				TraceEvent("RestoreMultiRanges_VerifyPassed");
+				TraceEvent("RestoreMultiRanges_VerifyPassed").writeEvent();
 				co_return true;
 			} catch (Error& e) {
 				err = e;
@@ -127,7 +127,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 	}
 
 	Future<Void> _start(Database cx) {
-		TraceEvent("RestoreMultiRanges_StartBackup");
+		TraceEvent("RestoreMultiRanges_StartBackup").writeEvent();
 		co_await clearDatabase(cx);
 		co_await prepareDatabase(cx);
 
@@ -139,7 +139,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		std::string tagName = "default";
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef("a"_sr, "z"_sr));
-		TraceEvent("RestoreMultiRanges_SubmitBackup");
+		TraceEvent("RestoreMultiRanges_SubmitBackup").writeEvent();
 		try {
 			co_await backupAgent.submitBackup(cx,
 			                                  StringRef(backupContainer),
@@ -159,14 +159,14 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 				throw;
 		}
 
-		TraceEvent("RestoreMultiRanges_WaitBackup");
+		TraceEvent("RestoreMultiRanges_WaitBackup").writeEvent();
 		Reference<IBackupContainer> container;
 		co_await backupAgent.waitBackup(cx, tagName, StopWhenDone::True, &container);
 
-		TraceEvent("RestoreMultiRanges_ClearDatabase");
+		TraceEvent("RestoreMultiRanges_ClearDatabase").writeEvent();
 		co_await clearDatabase(cx);
 
-		TraceEvent("RestoreMultiRanges_Restore");
+		TraceEvent("RestoreMultiRanges_Restore").writeEvent();
 		Standalone<VectorRef<KeyRangeRef>> ranges;
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("a"_sr, "aaaaa"_sr));
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("bb"_sr, "bbbbb"_sr)); // Skip "b"

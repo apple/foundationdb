@@ -2785,7 +2785,7 @@ double disableConnectionFailures(std::string const& context, ForceDisable flag, 
 			// if remaining time is less than 0.001s, or forced to disable, disable now
 			g_simulator->connectionFailuresDisableDuration = duration;
 			g_simulator->speedUpSimulation = true;
-			TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
+			TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str()).writeEvent();
 			return 0;
 		}
 	}

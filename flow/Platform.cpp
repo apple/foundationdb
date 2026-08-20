@@ -3288,7 +3288,7 @@ void outOfMemory() {
 	g_traceBatch.dump();
 #endif
 
-	TraceEvent(SevWarn, "OutOfMemorySimpleCounterReportFollows");
+	TraceEvent(SevWarn, "OutOfMemorySimpleCounterReportFollows").writeEvent();
 	simpleCounterReport(SevWarn);
 
 	criticalError(FDB_EXIT_NO_MEM, "OutOfMemory", "Out of memory");

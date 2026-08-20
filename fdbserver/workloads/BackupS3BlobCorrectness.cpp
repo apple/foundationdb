@@ -378,7 +378,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			}
 
 			if (now() - startTime > maxWaitTime) {
-				TraceEvent(SevWarn, "BS3BCW_ObservabilityTimeout");
+				TraceEvent(SevWarn, "BS3BCW_ObservabilityTimeout").writeEvent();
 				co_return;
 			}
 
@@ -735,7 +735,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 					// Step 2: Clear the backup ranges before restoring (unless skipDirtyRestore is true)
 					if (!skipDirtyRestore) {
-						TraceEvent("BS3BCW_ClearingNormalKeys");
+						TraceEvent("BS3BCW_ClearingNormalKeys").writeEvent();
 						co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 							tr->setOption(FDBTransactionOptions::LOCK_AWARE);

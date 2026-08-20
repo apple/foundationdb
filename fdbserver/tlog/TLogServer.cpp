@@ -2990,7 +2990,7 @@ Future<Void> initPersistentState(TLogData* self, Reference<LogData> logData) {
 		updatePersistentPopped(self, logData, logData->getTagData(tag));
 	}
 
-	TraceEvent("TLogInitCommit", logData->logId);
+	TraceEvent("TLogInitCommit", logData->logId).writeEvent();
 	co_await self->persistentData->commit();
 }
 
@@ -3751,7 +3751,7 @@ Future<Void> checkEmptyQueue(TLogData* self) {
 }
 
 Future<Void> initPersistentStorage(TLogData* self) {
-	TraceEvent("TLogInitPersistentStorageStart", self->dbgid);
+	TraceEvent("TLogInitPersistentStorageStart", self->dbgid).writeEvent();
 
 	Reference<FlowLock> persistentDataCommitLock = self->persistentDataCommitLock;
 	co_await persistentDataCommitLock->take();
@@ -4372,7 +4372,7 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 	              enablePrimaryTxnSystemHealthCheck);
 	Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
-	TraceEvent("SharedTLog", tlogId);
+	TraceEvent("SharedTLog", tlogId).writeEvent();
 	try {
 		co_await ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit");
 

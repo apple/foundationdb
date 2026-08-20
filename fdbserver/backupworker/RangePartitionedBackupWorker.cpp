@@ -515,7 +515,7 @@ Future<Void> uploadPartitionList(RangePartitionedBackupData* self, PartitionMap 
 		it++;
 	}
 	if (fileFutures.empty()) {
-		TraceEvent("RangePartitionedBWNoContainers", self->myId);
+		TraceEvent("RangePartitionedBWNoContainers", self->myId).writeEvent();
 		co_return;
 	}
 
@@ -955,7 +955,7 @@ static Future<bool> shouldBackupWorkerExitEarly(RangePartitionedBackupData* self
 					co_return shouldExit;
 				}
 
-				TraceEvent("RangePartitionedBWEmptyStartKey", self->myId);
+				TraceEvent("RangePartitionedBWEmptyStartKey", self->myId).writeEvent();
 				Future<Void> watchFuture = tr.watch(backupStartedKey);
 				co_await tr.commit();
 				co_await watchFuture;

@@ -65,7 +65,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		Version newClusterVersion{ 0 };
 		Transaction tr1(cx);
 		Transaction tr2(extraDB);
-		TraceEvent("DifferentClustersSameRVWorkload");
+		TraceEvent("DifferentClustersSameRVWorkload").writeEvent();
 
 		// we want to advance the read version of both clusters so that they are roughly the same. This makes the test
 		// more effective (since it's more likely that we can read from both clusters with the same version).

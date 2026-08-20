@@ -2684,7 +2684,7 @@ TEST_CASE("/flow/coro/actor") {
 		                    "~LifetimeLogger(0). ");
 	}
 
-	TraceEvent("CoroNoThrowOnCancelTestStart");
+	TraceEvent("CoroNoThrowOnCancelTestStart").writeEvent();
 	{
 		NoThrowOnCancelRecorder recorder;
 		Promise<Void> signal;

@@ -3801,7 +3801,8 @@ Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest r
 					if (localShardInfoReadAtVersion != data->version.get()) {
 						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 						           "SSAuditStorageSsShardGRVMismatchError",
-						           data->thisServerID);
+						           data->thisServerID)
+						    .writeEvent();
 						throw audit_storage_cancelled();
 					}
 
@@ -3857,13 +3858,15 @@ Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest r
 					if (serverKeyReadAtVersion < localShardInfoReadAtVersion) {
 						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 						           "SSAuditStorageSsShardComparedVersionError",
-						           data->thisServerID);
+						           data->thisServerID)
+						    .writeEvent();
 						throw audit_storage_cancelled();
 					}
 					if (keyServerReadAtVersion != serverKeyReadAtVersion) {
 						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 						           "SSAuditStorageSsShardKSVersionMismatchError",
-						           data->thisServerID);
+						           data->thisServerID)
+						    .writeEvent();
 						throw audit_storage_cancelled();
 					}
 					try {
@@ -3904,14 +3907,16 @@ Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest r
 					if (claimRange.empty()) {
 						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 						           "SSAuditStorageSsShardOverlapRangeEmpty",
-						           data->thisServerID);
+						           data->thisServerID)
+						    .writeEvent();
 						throw audit_storage_cancelled();
 					}
 					claimRange = claimRange & keyServerCompleteRange;
 					if (claimRange.empty()) {
 						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 						           "SSAuditStorageSsShardOverlapRangeEmpty",
-						           data->thisServerID);
+						           data->thisServerID)
+						    .writeEvent();
 						throw audit_storage_cancelled();
 					}
 					// We only compare within claimRange
@@ -4043,7 +4048,8 @@ Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest r
 						if (!req.ddId.isValid()) {
 							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 							           "SSAuditStorageSsShardDDIdInvalid",
-							           data->thisServerID);
+							           data->thisServerID)
+							    .writeEvent();
 							throw audit_storage_cancelled();
 						}
 						res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
@@ -4057,7 +4063,8 @@ Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageRequest r
 						if (!req.ddId.isValid()) {
 							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 							           "SSAuditStorageSsShardDDIdInvalid",
-							           data->thisServerID);
+							           data->thisServerID)
+							    .writeEvent();
 							throw audit_storage_cancelled();
 						}
 						res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
@@ -4980,7 +4987,8 @@ Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRequest 
 						if (!req.ddId.isValid()) {
 							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 							           "SSAuditStorageShardReplicaDDIdInvalid",
-							           data->thisServerID);
+							           data->thisServerID)
+							    .writeEvent();
 							throw audit_storage_cancelled();
 						}
 						res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
@@ -4998,7 +5006,8 @@ Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRequest 
 							if (!req.ddId.isValid()) {
 								TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 								           "SSAuditStorageShardReplicaDDIdInvalid",
-								           data->thisServerID);
+								           data->thisServerID)
+								    .writeEvent();
 								throw audit_storage_cancelled();
 							}
 							res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
@@ -12120,7 +12129,7 @@ Future<Void> serveGetHotShardsRequests(StorageServer* self, FutureStream<GetHotS
 Future<Void> serveGetStorageCheckSumRequests(StorageServer* self, FutureStream<GetStorageCheckSumRequest> getCheckSum) {
 	while (true) {
 		GetStorageCheckSumRequest req = co_await getCheckSum;
-		TraceEvent(SevError, "GetStorageCheckSumHasNotImplemented", self->thisServerID);
+		TraceEvent(SevError, "GetStorageCheckSumHasNotImplemented", self->thisServerID).writeEvent();
 		req.reply.sendError(not_implemented());
 	}
 }
@@ -12663,11 +12672,11 @@ Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.bulkLoadFolder = joinPath(self.folder, serverBulkLoadFolder);
 
 	if (!directoryExists(self.checkpointFolder)) {
-		TraceEvent(SevWarnAlways, "SSRebootCheckpointDirNotExists", self.thisServerID);
+		TraceEvent(SevWarnAlways, "SSRebootCheckpointDirNotExists", self.thisServerID).writeEvent();
 		platform::createDirectory(self.checkpointFolder);
 	}
 	if (!directoryExists(self.fetchedCheckpointFolder)) {
-		TraceEvent(SevWarnAlways, "SSRebootFetchedCheckpointDirNotExists", self.thisServerID);
+		TraceEvent(SevWarnAlways, "SSRebootFetchedCheckpointDirNotExists", self.thisServerID).writeEvent();
 		platform::createDirectory(self.fetchedCheckpointFolder);
 	}
 

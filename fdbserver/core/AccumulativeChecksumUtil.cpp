@@ -362,7 +362,7 @@ TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
 	Standalone<MutationRef> acsDe;
 	acsRd >> acsDe;
 	if (acsDe.type != MutationRef::SetValue || acsDe.param1 != accumulativeChecksumKey || acsDe.param2 != param2) {
-		TraceEvent(SevError, "AcsMutationMismatch");
+		TraceEvent(SevError, "AcsMutationMismatch").writeEvent();
 		ASSERT(false);
 	}
 	ASSERT(acsDe.validateChecksum());

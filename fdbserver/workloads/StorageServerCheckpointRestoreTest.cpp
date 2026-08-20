@@ -78,7 +78,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		KeyRange testRange = KeyRangeRef(key, endKey);
 		std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
 
-		TraceEvent("TestCheckpointRestoreBegin");
+		TraceEvent("TestCheckpointRestoreBegin").writeEvent();
 		co_await setDDMode(cx, 0);
 		Version version = co_await self->writeAndVerify(self, cx, key, oldValue);
 
