@@ -1018,6 +1018,9 @@ public:
 		bool lastZeroHealthy = self->zeroHealthyTeams->get();
 		bool firstCheck = true;
 		bool firstHealthChangeTrace = true;
+		bool lastProcessingUnhealthy = self->processingUnhealthy->get();
+		bool retryDue = false;
+		Future<Void> retryTimer;
 		std::unordered_set<KeyRange> submittedShards;
 
 		Future<Void> zeroServerLeftLogger;
@@ -1086,14 +1089,23 @@ public:
 				    !healthy && self->shardsAffectedByTeamFailure->hasShards(
 				                    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 				if (retryUnhealthyShards) {
+					if (!retryTimer.isValid()) {
+						retryTimer = delay(checkTeamDelay, TaskPriority::DataDistributionLow);
+					} else if (retryTimer.isReady()) {
+						retryDue = true;
+						retryTimer = delay(checkTeamDelay, TaskPriority::DataDistributionLow);
+					}
 					change.push_back(self->processingUnhealthy->onChange());
 					change.push_back(self->pipelineFull->onChange());
-					// Partial moves can leave a merged shard associated with this team without another health change.
-					change.push_back(delay(checkTeamDelay, TaskPriority::DataDistributionLow));
+				} else {
+					retryTimer = Future<Void>();
+					retryDue = false;
 				}
 				const bool healthyTeamBecameAvailable = lastZeroHealthy && !self->zeroHealthyTeams->get();
 				const bool processingUnhealthy = self->processingUnhealthy->get();
 				const bool pipelineFull = self->pipelineFull->get();
+				const bool unhealthyDrained = lastProcessingUnhealthy && !processingUnhealthy;
+				lastProcessingUnhealthy = processingUnhealthy;
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            healthyTeamBecameAvailable || containsFailed || retryUnhealthyShards);
 				bool teamStateChanged = serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired ||
@@ -1260,10 +1272,15 @@ public:
 						std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 						    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 						if (teamStateChanged || !retryUnhealthyShards || healthyTeamBecameAvailable ||
-						    (!processingUnhealthy && !pipelineFull)) {
+						    unhealthyDrained || (retryDue && !processingUnhealthy && !pipelineFull)) {
 							// Undesired and explicitly failed relocations do not set processingUnhealthy. Keep
-							// retrying stranded ranges when the queue is idle and its pipeline can accept them.
+							// retrying stranded ranges at the polling interval when the queue can accept them.
+							// A transient pipeline-full edge must not clear the dedupe set and resubmit all ranges.
 							submittedShards.clear();
+							retryDue = false;
+							if (retryUnhealthyShards) {
+								retryTimer = delay(checkTeamDelay, TaskPriority::DataDistributionLow);
+							}
 						} else {
 							// An unchanged range may still be waiting behind the relocation pipeline gate. Only retry
 							// newly mapped ranges while unhealthy relocations remain in the queue, and forget ranges
@@ -1373,6 +1390,10 @@ public:
 					}
 				}
 
+				if (retryUnhealthyShards) {
+					// Partial moves can leave a merged shard associated with this team without another health change.
+					change.push_back(retryTimer);
+				}
 				// Wait for any of the machines to change status
 				co_await quorum(change, 1);
 				co_await yield();
@@ -7305,6 +7326,22 @@ public:
 		ASSERT(!relocations.isReady());
 		collection->pipelineFull->set(false);
 		co_await delay(0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(!relocations.isReady());
+
+		// A brief full/clear flap can be caused by a duplicate crossing the pipeline gate. It must not
+		// immediately clear submitted ranges and feed another duplicate back into the gate.
+		for (int i = 0; i < 3; ++i) {
+			collection->pipelineFull->set(true);
+			co_await delay(0.002);
+			collection->pipelineFull->set(false);
+			co_await delay(0.002);
+			ASSERT(!relocations.isReady());
+		}
+		co_await delay(checkTeamDelay + 0.01);
 		ASSERT(relocations.isReady());
 		ASSERT_EQ(relocations.pop().keys, mergedRange);
 		ASSERT(relocations.isReady());
