@@ -148,6 +148,49 @@ struct RangeLocking : TestWorkload {
 		}
 	}
 
+	Future<Void> expectClearRejected(Database cx, KeyRange range) {
+		bool rejected = false;
+		try {
+			co_await clearRange(cx, range);
+		} catch (Error& e) {
+			if (e.code() != error_code_transaction_rejected_range_locked) {
+				throw;
+			}
+			rejected = true;
+		}
+		ASSERT(rejected);
+	}
+
+	Future<Void> testNormalKeyspaceBoundary(Database cx) {
+		const Key lockedKey = "rangeLockBoundary/c"_sr;
+		const Key outsideKey = "rangeLockBoundary/z"_sr;
+		const Value value = "preserved"_sr;
+		const KeyRange middleRange = KeyRangeRef("rangeLockBoundary/b"_sr, "rangeLockBoundary/d"_sr);
+		const KeyRange suffixRange = KeyRangeRef(middleRange.begin, normalKeys.end);
+		co_await setKey(cx, lockedKey, value);
+		co_await setKey(cx, outsideKey, value);
+		co_await takeExclusiveReadLockOnRange(cx, middleRange, rangeLockOwnerName);
+		co_await expectClearRejected(cx, suffixRange);
+		co_await expectClearRejected(cx, normalKeys);
+		co_await clearRange(cx, KeyRangeRef(middleRange.end, normalKeys.end));
+		Optional<Value> lockedValue = co_await getKey(cx, lockedKey);
+		Optional<Value> outsideValue = co_await getKey(cx, outsideKey);
+		ASSERT(lockedValue.present() && lockedValue.get() == value);
+		ASSERT(!outsideValue.present());
+		co_await releaseExclusiveReadLockOnRange(cx, middleRange, rangeLockOwnerName);
+
+		co_await takeExclusiveReadLockOnRange(cx, suffixRange, rangeLockOwnerName);
+		co_await expectClearRejected(cx, suffixRange);
+		co_await releaseExclusiveReadLockOnRange(cx, suffixRange, rangeLockOwnerName);
+		co_await takeExclusiveReadLockOnRange(cx, normalKeys, rangeLockOwnerName);
+		co_await expectClearRejected(cx, normalKeys);
+		co_await releaseExclusiveReadLockOnRange(cx, normalKeys, rangeLockOwnerName);
+		co_await clearRange(cx, normalKeys);
+		lockedValue = co_await getKey(cx, lockedKey);
+		ASSERT(!lockedValue.present());
+		TraceEvent("RangeLockNormalKeyspaceBoundaryPassed");
+	}
+
 	std::string getLockRangesString(const std::vector<std::pair<KeyRange, RangeLockState>>& locks) {
 		std::string res = "";
 		int count = 0;
@@ -609,6 +652,7 @@ struct RangeLocking : TestWorkload {
 		if (clientId != 0) {
 			co_return;
 		}
+		co_await testNormalKeyspaceBoundary(cx);
 		co_await complexTest(this, cx);
 		co_await testUnlockByUser(this, cx);
 	}

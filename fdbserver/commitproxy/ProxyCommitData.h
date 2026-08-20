@@ -438,10 +438,11 @@ public:
 
 	bool isLocked(const KeyRange& range) const {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
-		if (range.end >= normalKeys.end) {
+		const KeyRangeRef normalRange = range & normalKeys;
+		if (normalRange.empty()) {
 			return false;
 		}
-		for (auto lockRange : coreMap.intersectingRanges(range)) {
+		for (auto lockRange : coreMap.intersectingRanges(normalRange)) {
 			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ExclusiveReadLock)) {
 				return true;
 			}
