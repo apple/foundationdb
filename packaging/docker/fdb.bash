@@ -70,7 +70,7 @@ function first_hostname_with_str() {
 }
 
 function create_server_environment() {
-    FDB_IP_VERSION=${FDB_IP_VERSION:-v4}
+    FDB_IP_VERSION=${FDB_IP_VERSION:-4}
 
     if [[ "$FDB_IP_VERSION" == '4' ]]; then
         export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'0.0.0.0'}
