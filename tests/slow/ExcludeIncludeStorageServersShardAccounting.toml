@@ -1,0 +1,35 @@
+[configuration]
+# Keep one spare machine per datacenter so excluding a storage server cannot exhaust a replicated team.
+extraMachineCountDC = 1
+
+[[knobs]]
+# Regression coverage for the graceful-exclude finalize stall: a relocation whose key range only partially
+# covers a tracked ShardsAffectedByTeamFailure range used to leave the drained server counted in that map,
+# which blocks removeStorageServer() indefinitely even though the server's on-disk serverKeys are empty.
+# moveShard() now splits the tracked range at the move boundary so the source team is erased, and the removal
+# gate reconciles any residual stale count against the on-disk truth. Either way the exclude must complete.
+#
+# The cap is pinned small (the buggified value) so the scenario is exercised on every run instead of
+# occasionally: holding relocation requests outside DDQueue, where its supersede logic cannot correct a range
+# that has gone stale, raises the rate of partial-range moves. It is not a precondition -- DDQueue's own
+# truncation and boundary-fragment launching produce them at any cap.
+#
+# To see the pre-fix behaviour locally: --knobs dd_split_tracked_shards_on_move=false, plus
+# dd_reconcile_shards_on_exclude=false to reproduce the hang itself rather than the repair.
+dd_max_pipeline_moves = 20
+# Large teams would let a shard be assigned more servers than the replication factor, adding a second unrelated
+# source of multi-team ranges; keep it off so the pipeline cap is the only variable under test.
+dd_max_shards_on_large_teams = 0
+
+[[test]]
+testTitle = 'ExcludeIncludeStorageServersShardAccounting'
+
+    # Continuously write and verify data so excluded storage servers actually own shards that must drain,
+    # generating the re-replication traffic that, under the small pipeline cap, reproduces the stranding.
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'ExcludeIncludeStorageServers'

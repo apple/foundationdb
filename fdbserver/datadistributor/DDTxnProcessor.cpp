@@ -854,13 +854,69 @@ class DDTxnProcessorImpl {
 				if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 					bool canRemove = co_await canRemoveStorageServer(tr, serverID);
 					auto shards = shardsAffectedByTeamFailure->getNumberOfShards(serverID);
-					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
+					// Polled every ALL_DATA_REMOVED_DELAY for every server under removal, so it is
+					// suppressed; the diagnostic signal is ShardsAffectedStrandedOnExclude below.
+					TraceEvent(SevInfo, "WaitForAllDataRemoved")
+					    .suppressFor(30.0)
 					    .detail("Server", serverID)
 					    .detail("CanRemove", canRemove)
 					    .detail("Shards", shards);
 					ASSERT_GE(shards, 0);
-					if (canRemove && shards == 0) {
-						co_return;
+					if (canRemove) {
+						if (shards == 0) {
+							co_return;
+						}
+						// canRemoveStorageServer() consults the authoritative on-disk serverKeys: when it is
+						// true the server owns no data, and DDTeamCollection.actor.cpp:5964 documents the
+						// matching in-memory invariant as a commented-out ASSERT -- no team containing the
+						// server should remain in ShardsAffectedByTeamFailure. Nothing enforces it. The count
+						// can be stranded > 0 by any move whose key range only partially covers a tracked
+						// range: moveShard()'s partial-overlap branch appends the destination team without
+						// erasing the drained source team, and only a later fully-covering move, a
+						// defineShard(), or a DD restart rewrites that entry. Such a stale count blocks
+						// removeStorageServer() indefinitely. Since the on-disk state is authoritative and
+						// already says the server is empty, reconcile the map to it and trace loudly rather
+						// than hang. moveShard() is range-safe as of DD_SPLIT_TRACKED_SHARDS_ON_MOVE; this
+						// stays as enforcement, because we cannot prove every source of partial-range moves
+						// has been found.
+						//
+						// This event repeating is the "still stranded" signal; it is the one trace that makes
+						// this failure mode diagnosable from logs alone.
+						TraceEvent(SevWarnAlways, "ShardsAffectedStrandedOnExclude")
+						    .suppressFor(60.0)
+						    .detail("Server", serverID)
+						    .detail("StrandedShards", shards)
+						    .detail("TotalTrackedShards", shardsAffectedByTeamFailure->getNumberOfShards())
+						    .detail("WillReconcile", SERVER_KNOBS->DD_RECONCILE_SHARDS_ON_EXCLUDE);
+						if (SERVER_KNOBS->DD_RECONCILE_SHARDS_ON_EXCLUDE) {
+							CODE_PROBE(true,
+							           "Reconciled a stranded ShardsAffectedByTeamFailure count on graceful "
+							           "exclude",
+							           probe::decoration::rare);
+							double start = now();
+							auto scrub = shardsAffectedByTeamFailure->scrubServer(serverID);
+							TraceEvent(SevWarnAlways, "ShardsAffectedReconciledOnExclude")
+							    .detail("Server", serverID)
+							    .detail("StrandedShards", shards)
+							    .detail("ShardsScanned", scrub.shardsScanned)
+							    .detail("ShardsRewritten", scrub.shardsRewritten)
+							    .detail("OwnerlessShards", scrub.ownerlessShards)
+							    .detail("SampleRange", scrub.sampleRange)
+							    .detail("Elapsed", now() - start);
+							auto remaining = shardsAffectedByTeamFailure->getNumberOfShards(serverID);
+							ASSERT_WE_THINK(remaining == 0);
+							if (remaining == 0) {
+								co_return;
+							}
+							// Unreachable by construction: scrubServer() drops every team naming the server,
+							// and only those teams contribute to the count. Rather than deregister a server
+							// the map still references, keep polling and make the anomaly loud.
+							TraceEvent(SevWarnAlways, "ShardsAffectedReconcileIncomplete")
+							    .detail("Server", serverID)
+							    .detail("RemainingShards", remaining);
+						}
+						// Knob disabled: fall through to the delay below and keep waiting for the count to
+						// reach 0 on its own (legacy behavior).
 					}
 				}
 

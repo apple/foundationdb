@@ -19,6 +19,7 @@
  */
 
 #include "ShardsAffectedByTeamFailure.h"
+#include "fdbserver/core/Knobs.h"
 
 std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) const {
 	std::vector<KeyRange> r;
@@ -116,6 +117,40 @@ void ShardsAffectedByTeamFailure::defineShard(KeyRangeRef keys) {
 	check();
 }
 
+void ShardsAffectedByTeamFailure::splitTrackedShardsAtBoundaries(KeyRangeRef keys) {
+	// Recreate only the boundary points of `keys`. defineShard() must not be used here: it would merge all
+	// tracked shards inside keys into one entry, losing the distinct destination teams of overlapping newer
+	// moves. team_shards is keyed by the EXACT (team, range) pair, so a tracked shard that straddles a
+	// boundary has to be removed from it before the split and its pieces re-added afterwards, or the
+	// team_shards <-> shard_teams invariant (see check()) breaks.
+	std::vector<KeyRange> rangesToSplit;
+	auto beginRange = shard_teams.rangeContaining(keys.begin);
+	if (beginRange->begin() != keys.begin) {
+		rangesToSplit.push_back(beginRange->range());
+	}
+	auto endRange = shard_teams.rangeContaining(keys.end);
+	if (endRange->begin() != keys.end && (rangesToSplit.empty() || rangesToSplit.back() != endRange->range())) {
+		rangesToSplit.push_back(endRange->range());
+	}
+	if (rangesToSplit.empty()) {
+		// Both boundaries already exist; modify() would be a no-op.
+		return;
+	}
+	for (const auto& range : rangesToSplit) {
+		for (const auto& team : shard_teams.rangeContaining(range.begin)->value().first) {
+			erase(team, range);
+		}
+	}
+	shard_teams.modify(keys);
+	for (const auto& range : rangesToSplit) {
+		for (auto splitRange : shard_teams.containedRanges(range)) {
+			for (const auto& team : splitRange.value().first) {
+				insert(team, splitRange.range());
+			}
+		}
+	}
+}
+
 void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> destinationTeams) {
 	/*TraceEvent("ShardsAffectedByTeamFailureMove")
 	    .detail("KeyBegin", keys.begin)
@@ -123,9 +158,31 @@ void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> 
 	    .detail("NewTeamSize", destinationTeam.size())
 	    .detail("NewTeam", describe(destinationTeam));*/
 
+	// A relocation is frequently launched for a STRICT SUB-RANGE of a tracked shard, for three independent
+	// reasons. (1) A relocation's keys are captured when it is created, so an intervening defineShard() --
+	// notably from a shard merge, which coarsens several tracked shards into one before sending its own
+	// relocation -- can widen the tracked shard underneath a request that is still queued. (2) DDQueue
+	// truncates already-queued relocations against overlapping newer ones (queueRelocation). (3)
+	// launchQueuedWork starts a relocator per range returned by getRangesAffectedByInsertion, which includes
+	// the pieces of a live relocator straddling the new range's boundaries, i.e. strict subsets of an older
+	// relocation's range. Without a boundary split such a move hits the partial-overlap branch below, which
+	// appends the destination team but never erases the drained source team -- so a source server stays counted
+	// in storageServerShards forever, and a gracefully excluded server is never removable because its removal
+	// gate requires getNumberOfShards(server) == 0. Splitting the tracked shard at the move's boundaries first
+	// makes every affected shard fully contained, so the source teams are erased for exactly the range that
+	// actually moved. The extra boundaries are transient: the next defineShard() from a shard-tracker
+	// split/merge over a coarser range merges them back.
+	if (SERVER_KNOBS->DD_SPLIT_TRACKED_SHARDS_ON_MOVE) {
+		splitTrackedShardsAtBoundaries(keys);
+	}
+
 	auto ranges = shard_teams.intersectingRanges(keys);
 	std::vector<std::pair<std::pair<std::vector<Team>, std::vector<Team>>, KeyRange>> modifiedShards;
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		// After splitTrackedShardsAtBoundaries() every intersecting range is contained in keys, so the
+		// partial-overlap branch below is unreachable. It is retained as a safety net rather than an assert
+		// because losing a destination team in production is worse than over-counting a source team.
+		ASSERT_WE_THINK(!SERVER_KNOBS->DD_SPLIT_TRACKED_SHARDS_ON_MOVE || keys.contains(it->range()));
 		if (keys.contains(it->range())) {
 			// erase the many teams that were associated with this one shard
 			for (auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
@@ -170,31 +227,9 @@ std::vector<KeyRange> ShardsAffectedByTeamFailure::cancelMove(KeyRangeRef keys,
                                                               const std::vector<Team>& destinationTeams,
                                                               const std::vector<Team>& sourceTeams) {
 	std::vector<KeyRange> restoredRanges;
-	// A later shard split or merge can leave the cancelled move range strictly inside a tracked shard. Recreate only
-	// the move's boundary points before removing its destinations. defineShard() would merge all tracked shards inside
-	// keys, losing the distinct destinations of overlapping newer moves.
-	std::vector<KeyRange> rangesToSplit;
-	auto beginRange = shard_teams.rangeContaining(keys.begin);
-	if (beginRange->begin() != keys.begin) {
-		rangesToSplit.push_back(beginRange->range());
-	}
-	auto endRange = shard_teams.rangeContaining(keys.end);
-	if (endRange->begin() != keys.end && (rangesToSplit.empty() || rangesToSplit.back() != endRange->range())) {
-		rangesToSplit.push_back(endRange->range());
-	}
-	for (const auto& range : rangesToSplit) {
-		for (const auto& team : shard_teams.rangeContaining(range.begin)->value().first) {
-			erase(team, range);
-		}
-	}
-	shard_teams.modify(keys);
-	for (const auto& range : rangesToSplit) {
-		for (auto splitRange : shard_teams.containedRanges(range)) {
-			for (const auto& team : splitRange.value().first) {
-				insert(team, splitRange.range());
-			}
-		}
-	}
+	// A later shard split or merge can leave the cancelled move range strictly inside a tracked shard, so
+	// recreate the move's boundary points before removing its destinations.
+	splitTrackedShardsAtBoundaries(keys);
 	auto ranges = shard_teams.containedRanges(keys);
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
 		std::vector<Team> retainedTeams;
@@ -309,6 +344,73 @@ void ShardsAffectedByTeamFailure::removeFailedServerForRange(KeyRangeRef keys, c
 		}
 	}
 	check();
+}
+
+ShardsAffectedByTeamFailure::ScrubResult ShardsAffectedByTeamFailure::scrubServer(const UID& serverID) {
+	auto containsServer = [&serverID](const std::vector<Team>& teams) {
+		return std::any_of(teams.begin(), teams.end(), [&serverID](const Team& t) { return t.hasServer(serverID); });
+	};
+	auto without = [&serverID](const std::vector<Team>& teams) {
+		std::vector<Team> retained;
+		for (const auto& t : teams) {
+			if (!t.hasServer(serverID)) {
+				retained.push_back(t);
+			}
+		}
+		return retained;
+	};
+
+	ScrubResult result;
+	std::vector<KeyRange> restartRanges;
+	// Values are mutated in place; no shard_teams range is inserted or erased, so the iteration stays valid.
+	auto rs = shard_teams.ranges();
+	for (auto it = rs.begin(); it != rs.end(); ++it) {
+		++result.shardsScanned;
+		auto& teams = it->value();
+		const bool inCurrent = containsServer(teams.first);
+		if (!inCurrent && !containsServer(teams.second)) {
+			continue;
+		}
+
+		const KeyRange range = it->range();
+		std::vector<Team> retained = without(teams.first);
+		std::vector<Team> retainedPrev = without(teams.second);
+
+		if (inCurrent) {
+			// Only the current-team list is mirrored in team_shards (and therefore in
+			// storageServerShards), so it is the only one that needs the erase/insert dance.
+			for (const auto& t : teams.first) {
+				erase(t, range);
+			}
+			if (retained.empty()) {
+				retained = retainedPrev;
+				retainedPrev.clear();
+			}
+			for (const auto& t : retained) {
+				insert(t, range);
+			}
+			teams.first = retained;
+			if (retained.empty()) {
+				++result.ownerlessShards;
+				restartRanges.push_back(range);
+			}
+		}
+		// getSourceServerIdsFor() prefers the previous-source list, so a drained server left there would
+		// still be handed out as a relocation source.
+		teams.second = retainedPrev;
+
+		if (result.shardsRewritten == 0) {
+			result.sampleRange = range;
+		}
+		++result.shardsRewritten;
+	}
+	check();
+
+	// Sent after the map is consistent: the receiver re-enters this object via defineShard().
+	for (const auto& range : restartRanges) {
+		restartShardTracker.send(range);
+	}
+	return result;
 }
 
 auto ShardsAffectedByTeamFailure::intersectingRanges(KeyRangeRef keyRange) const -> decltype(shard_teams)::ConstRanges {

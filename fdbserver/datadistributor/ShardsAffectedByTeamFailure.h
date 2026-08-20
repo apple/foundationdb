@@ -62,6 +62,14 @@ public:
 		std::string toString() const { return describe(servers); };
 	};
 
+	// Outcome of scrubServer(), for tracing.
+	struct ScrubResult {
+		int shardsScanned = 0; // shard_teams entries examined
+		int shardsRewritten = 0; // shard_teams entries whose team lists changed
+		int ownerlessShards = 0; // entries left with an empty current-team list (see scrubServer)
+		KeyRange sampleRange; // one rewritten range, for diagnosis
+	};
+
 	// This tracks the data distribution on the data distribution server so that teamTrackers can
 	//   relocate the right shards when a team is degraded.
 
@@ -72,10 +80,13 @@ public:
 	//       of what servers correspond to each shard is a copy or union of the shards already there
 	//   - The teams associated with each shard reflect either the sources for non-moving shards
 	//       or the destination team for in-flight shards (the change is atomic with respect to team selection).
-	//       moveShard() changes the servers associated with a shard and will never adjust the shard
-	//       boundaries. If a move is received for a shard that has been redefined (the exact shard is
-	//       no longer in the map), the servers will be set for all contained shards and added to all
-	//       intersecting shards.
+	//       moveShard() changes the servers associated with a shard. It splits the tracked shard at the move's
+	//       boundaries first (see DD_SPLIT_TRACKED_SHARDS_ON_MOVE) so that a move of a strict sub-range of a
+	//       tracked shard still erases the source teams for exactly the range that moved; the added boundaries
+	//       are merged away by the next defineShard() over a coarser range. Historically moveShard() never
+	//       adjusted boundaries, and a sub-range move instead added the destination to the whole enclosing
+	//       shard WITHOUT erasing the source -- which permanently over-counted the drained source servers in
+	//       storageServerShards and could block storage server removal indefinitely.
 
 	int getNumberOfShards(UID ssID) const;
 	int getNumberOfShards(Team team) const;
@@ -136,6 +147,10 @@ private:
 
 	bool removeFailedServerForSingleRange(ShardsAffectedByTeamFailure::Team& team, const UID& id, KeyRangeRef keys);
 
+	// Force tracked-shard boundaries at keys.begin and keys.end, leaving the teams attributed to every key
+	// unchanged. Used before a move or a move cancellation so the operation acts on fully-contained shards.
+	void splitTrackedShardsAtBoundaries(KeyRangeRef keys);
+
 public:
 	// return the iterator that traversing all ranges
 	auto getAllRanges() const -> decltype(shard_teams)::ConstRanges;
@@ -143,6 +158,24 @@ public:
 	// get total shards count
 	size_t getNumberOfShards() const;
 	void removeFailedServerForRange(KeyRangeRef keys, const UID& serverID);
+
+	// Reconcile the map to the authoritative on-disk fact that `serverID` stores nothing: drop every
+	// reference to a team that contains it, from both the current-team and previous-source lists.
+	// getNumberOfShards(serverID) is 0 on return.
+	//
+	// This deliberately removes the whole TEAM REFERENCE rather than editing team membership in place the
+	// way removeFailedServerForRange() does. Editing membership would leave behind a shrunken team (e.g. a
+	// 2-server team) that exists nowhere in DDTeamCollection -- DDTeamCollection::removeServer() deletes
+	// the teams containing a removed server rather than shrinking them -- and a shard attributed to a team
+	// that no team tracker owns is re-issued forever at PRIORITY_TEAM_REDUNDANT by
+	// DDTeamCollection::teamTracker()'s "team not found" path. In other words, editing membership would
+	// trade one accounting bug for a self-sustaining relocation loop.
+	//
+	// Where dropping the reference would leave a shard with no current team, the previous-source teams are
+	// promoted (the same fallback cancelMove() uses); if those are empty too the entry is left with an
+	// empty current-team list -- the state a freshly-initialized map is in -- and the shard tracker is
+	// asked to restart over that range. Those cases are counted in ScrubResult::ownerlessShards.
+	ScrubResult scrubServer(const UID& serverID);
 };
 
 #endif // FOUNDATIONDB_SHARDSAFFECTEDBYTEAMFAILURE_H
