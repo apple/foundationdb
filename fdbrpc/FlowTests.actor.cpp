@@ -1409,7 +1409,7 @@ struct Tracker {
 	int copied;
 	bool moved;
 	explicit Tracker(int copied = 0) : copied(copied), moved(false) {}
-	explicit(false) Tracker(Tracker&& other) : Tracker(other.copied) {
+	Tracker(Tracker&& other) : Tracker(other.copied) {
 		ASSERT(!other.moved);
 		other.moved = true;
 	}
@@ -1420,7 +1420,7 @@ struct Tracker {
 		this->copied = other.copied;
 		return *this;
 	}
-	explicit(false) Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
+	Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
 	Tracker& operator=(const Tracker& other) {
 		ASSERT(!other.moved);
 		this->moved = false;
