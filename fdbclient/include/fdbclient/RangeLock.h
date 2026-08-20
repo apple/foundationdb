@@ -117,11 +117,14 @@ public:
 
 	bool isLockedFor(RangeLockType inputLockType) const { return lockType == inputLockType; }
 
-	bool operator==(RangeLockState const& r) const {
+	bool hasSameLogicalIdentity(RangeLockState const& r) const {
 		return lockType == r.lockType && ownerUniqueId == r.ownerUniqueId && range == r.range;
 	}
 
-	// TODO: use lockId
+	bool operator==(RangeLockState const& r) const { return hasSameLogicalIdentity(r); }
+
+	// This legacy map key is persisted and can collide. Compare the lock fields for identity;
+	// changing this encoding requires migrating existing range-lock metadata.
 	RangeLockUniqueString getLockUniqueString() const {
 		return ownerUniqueId + rangeLockTypeString(lockType) + range.toString();
 	}
@@ -172,6 +175,15 @@ public:
 
 	const std::map<RangeLockUniqueString, RangeLockState>& getLocks() const { return locks; }
 
+	bool containsLogicalLock(const RangeLockState& inputLock) const {
+		for (const auto& [name, lock] : locks) {
+			if (lock.hasSameLogicalIdentity(inputLock)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	bool operator==(RangeLockStateSet const& r) const {
 		auto rLocks = r.getLocks();
 		if (locks.size() != rLocks.size()) {
@@ -191,18 +203,25 @@ public:
 
 	void insertIfNotExist(const RangeLockState& inputLock) {
 		ASSERT(inputLock.isValid());
-		if (inputLock.isLockedFor(RangeLockType::ExclusiveReadLock) && !locks.empty() &&
-		    locks.find(inputLock.getLockUniqueString()) == locks.end()) {
+		if (containsLogicalLock(inputLock)) {
+			return;
+		}
+		if (inputLock.isLockedFor(RangeLockType::ExclusiveReadLock) && !locks.empty()) {
 			throw range_lock_failed();
 		}
-		locks.insert({ inputLock.getLockUniqueString(), inputLock });
-		return;
+		if (!locks.insert({ inputLock.getLockUniqueString(), inputLock }).second) {
+			throw range_lock_failed();
+		}
 	}
 
 	void remove(const RangeLockState& inputLock) {
 		ASSERT(inputLock.isValid());
-		locks.erase(inputLock.getLockUniqueString());
-		return;
+		for (auto it = locks.begin(); it != locks.end(); ++it) {
+			if (it->second.hasSameLogicalIdentity(inputLock)) {
+				locks.erase(it);
+				return;
+			}
+		}
 	}
 
 	bool isLockedFor(RangeLockType lockType) const {
@@ -237,17 +256,17 @@ AsyncResult<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
 // Get a rangeLock owner by ownerUniqueID.
 Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
 
-// Block write traffic to a user range (the input range must be within normalKeys).
+// Block write traffic to a non-empty user range within normalKeys; otherwise throw range_lock_failed.
 // One transaction can call takeExclusiveReadLockOnRange at most one time.
 Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
 Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
-// Unblock a user range (the input range must be within normalKeys).
+// Unblock a non-empty user range within normalKeys; otherwise throw range_lock_failed.
 // One transaction can call releaseExclusiveReadLockOnRange at most one time.
 Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
 Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
-// Get locked ranges within the input range (the input range must be within normalKeys).
+// Get locked ranges within a non-empty range in normalKeys; otherwise throw range_lock_failed.
 Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(
     Database cx,
     KeyRange range,
