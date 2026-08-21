@@ -27,7 +27,10 @@
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/MonitorLeader.h"
+#include "flow/Buggify.h"
 #include "flow/CoroUtils.h"
+#include "flow/ScopeExit.h"
+#include "flow/UnitTest.h"
 #include "flow/Util.h"
 
 struct ReadYourWritesTransaction::RYWState {
@@ -1368,8 +1371,12 @@ public:
 				if (ryw->resetPromise.isSet())
 					throw ryw->resetPromise.getFuture().getError();
 				if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
-					simulateTimeoutInFlightCommit(Uncancellable(), ryw);
-					throw transaction_timed_out();
+					// A conflicting retry must be able to fence out this commit after the timeout is reported.
+					co_await ryw->getReadVersion();
+					if (ryw->options.timeoutInSeconds > 0) {
+						simulateTimeoutInFlightCommit(Uncancellable(), ryw);
+						throw transaction_timed_out();
+					}
 				}
 				co_await (ryw->resetPromise.getFuture() || ryw->tr.commit());
 
@@ -1392,8 +1399,12 @@ public:
 			}
 
 			if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
-				simulateTimeoutInFlightCommit(Uncancellable(), ryw);
-				throw transaction_timed_out();
+				// A conflicting retry must be able to fence out this commit after the timeout is reported.
+				co_await ryw->getReadVersion();
+				if (ryw->options.timeoutInSeconds > 0) {
+					simulateTimeoutInFlightCommit(Uncancellable(), ryw);
+					throw transaction_timed_out();
+				}
 			}
 			co_await (ryw->resetPromise.getFuture() || ryw->tr.commit());
 
@@ -2741,4 +2752,79 @@ void ReadYourWritesTransaction::debugTrace(BaseTraceEvent&& event) {
 
 void ReadYourWritesTransaction::debugPrint(std::string const& message) {
 	debugMessages.push_back(message);
+}
+
+TEST_CASE("/fdbclient/ReadYourWrites/inFlightTimeoutWaitsForGRV") {
+	const auto previousEnabled = P_CLIENT_ENABLED;
+	const auto previousActivation = P_CLIENT_BUGGIFIED_SECTION_ACTIVATED;
+	const auto previousFiring = P_CLIENT_BUGGIFIED_SECTION_FIRES;
+	auto previousSections = std::move(Client_SBVars);
+	const bool previousDebugUseTags = DatabaseContext::debugUseTags;
+	ScopeExit restore([&]() {
+		P_CLIENT_ENABLED = previousEnabled;
+		P_CLIENT_BUGGIFIED_SECTION_ACTIVATED = previousActivation;
+		P_CLIENT_BUGGIFIED_SECTION_FIRES = previousFiring;
+		Client_SBVars = std::move(previousSections);
+		DatabaseContext::debugUseTags = previousDebugUseTags;
+	});
+
+	disableClientBuggify();
+	Database db = DatabaseContext::create(
+	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
+	Client_SBVars.clear();
+	P_CLIENT_BUGGIFIED_SECTION_ACTIVATED = 1.0;
+	P_CLIENT_BUGGIFIED_SECTION_FIRES = 1.0;
+	enableClientBuggify();
+
+	enum class Finish { GrvError, TransactionCancel, CommitCancel, TimeoutDisabled };
+	const int64_t timeoutMs = 60'000;
+	// Do not yield while overriding the process-wide client-buggify settings.
+	for (bool disableRYW : { false, true }) {
+		for (Finish finish :
+		     { Finish::GrvError, Finish::TransactionCancel, Finish::CommitCancel, Finish::TimeoutDisabled }) {
+			Promise<Version> grv;
+			auto ryw = makeReference<ReadYourWritesTransaction>(db);
+			ScopeExit cancelOnExit([&]() { ryw->cancel(); });
+			if (disableRYW) {
+				ryw->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+			}
+			ryw->setOption(FDBTransactionOptions::TIMEOUT,
+			               StringRef(reinterpret_cast<const uint8_t*>(&timeoutMs), sizeof(timeoutMs)));
+			ryw->getTransaction().trState->readVersionFuture = grv.getFuture();
+			if (finish != Finish::TimeoutDisabled) {
+				ryw->clear(KeyRangeRef("a"_sr, "b"_sr));
+			}
+
+			Future<Void> committed = ryw->commit();
+			const bool pendingBeforeGRV = !committed.isReady();
+			Error expected = grv_proxy_memory_limit_exceeded();
+			if (finish == Finish::GrvError) {
+				grv.sendError(expected);
+			} else if (finish == Finish::TransactionCancel) {
+				expected = transaction_cancelled();
+				ryw->cancel();
+			} else if (finish == Finish::CommitCancel) {
+				expected = actor_cancelled();
+				committed.cancel();
+			} else {
+				const int64_t noTimeout = 0;
+				ryw->setOption(FDBTransactionOptions::TIMEOUT,
+				               StringRef(reinterpret_cast<const uint8_t*>(&noTimeout), sizeof(noTimeout)));
+				// An empty native commit can finish without a cluster once injection is bypassed.
+				grv.send(1);
+			}
+
+			// Stop an unfixed detached helper before a failed assertion unwinds the fixture.
+			ryw->cancel();
+			ASSERT(pendingBeforeGRV);
+			ASSERT(committed.isReady());
+			if (finish == Finish::TimeoutDisabled) {
+				ASSERT(!committed.isError());
+			} else {
+				ASSERT(committed.isError());
+				ASSERT_EQ(committed.getError().code(), expected.code());
+			}
+		}
+	}
+	return Void();
 }
