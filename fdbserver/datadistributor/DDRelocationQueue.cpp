@@ -3021,13 +3021,14 @@ Future<Void> pipelineGateActor(Reference<DDQueue> self,
 	DeferredPipelineRelocations deferredRelocations;
 	std::map<int, std::deque<RelocateShard>, std::greater<int>> deferredFailureRecoveries;
 
-	auto hasPipelineCapacity = [&self](bool failureRecovery) {
+	auto hasPipelineCapacity = [&self, &pipelineSizeChanges](bool failureRecovery) {
 		if (!isDDPipelineControlEnabled()) {
 			return true;
 		}
 		int pipelineLimit = SERVER_KNOBS->DD_MAX_PIPELINE_MOVES;
 		int admissionLimit = failureRecovery ? pipelineLimit : std::max(1, pipelineLimit - 1);
-		return self->pipelineSize() < admissionLimit;
+		// Counter transfers can wake the gate inline before the queue mutation finishes.
+		return std::max(self->pipelineSize(), pipelineSizeChanges->get()) < admissionLimit;
 	};
 
 	auto failureRecoveryPriority = [](RelocateShard const& relocation) {
@@ -3061,8 +3062,10 @@ Future<Void> pipelineGateActor(Reference<DDQueue> self,
 		};
 	};
 
-	auto forwardRelocation = [&self, &output](RelocateShard relocation) {
+	auto forwardRelocation = [&self, &output, &pipelineSizeChanges](RelocateShard relocation) {
+		int reservedPipelineSize = std::max(self->pipelineSize(), pipelineSizeChanges->get()) + 1;
 		++self->pendingGateRelocations;
+		pipelineSizeChanges->set(reservedPipelineSize);
 		self->updatePipelineFull();
 		output.send(std::move(relocation));
 	};
@@ -3147,6 +3150,7 @@ struct DDQueueImpl {
 		Reference<DDQueue> self;
 		std::set<UID> serversToLaunchFrom;
 		FutureStream<RelocateData> completedRelocations;
+		// Completed queue mutations publish occupancy; new gate reservations advance it until the next publication.
 		Reference<AsyncVar<int>> pipelineSizeChanges;
 		PromiseStream<KeyRange> rangesComplete;
 		PromiseStream<Void> launchQueuedWorkTrigger;
@@ -3216,10 +3220,10 @@ struct DDQueueImpl {
 			}
 			// This stream is triggered by queueRelocation(), which is triggered by sending self->input.
 			state->self->completeSourceFetch(results);
-			validate(state);
 			if (results.startTime != -1) {
 				state->self->launchQueuedWork(results, state->self->ddEnabledState);
 			}
+			validate(state);
 		}
 	}
 
@@ -3276,10 +3280,10 @@ struct DDQueueImpl {
 			KeyRange done = co_await rangesComplete;
 			co_await state->queueMutationLock.take(TaskPriority::DataDistributionLaunch);
 			FlowLock::Releaser lockGuard(state->queueMutationLock);
-			validate(state);
 			if (!done.empty()) {
 				state->self->launchQueuedWork(done, state->self->ddEnabledState);
 			}
+			validate(state);
 		}
 	}
 
@@ -3469,6 +3473,69 @@ Future<Void> DDQueue::run(Reference<DDQueue> self,
 	return DDQueueImpl::run(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount);
 }
 
+TEST_CASE("/DataDistribution/DDQueue/PipelineGateAccountsForPendingRecovery") {
+	const int pipelineLimit = SERVER_KNOBS->DD_MAX_PIPELINE_MOVES;
+	ASSERT_GT(pipelineLimit, 2);
+	ASSERT(isDDPipelineControlEnabled());
+
+	// Keep source lookups parked so only admission and queueing run in this test.
+	auto fetchSourceLock = makeReference<FlowLock>(1);
+	co_await fetchSourceLock->take();
+	FlowLock::Releaser fetchLockGuard(*fetchSourceLock);
+	auto self = makeReference<DDQueue>();
+	self->distributorId = UID(7, 0);
+	self->activeRelocations = pipelineLimit - 1;
+	self->queuedRelocations = 0;
+	self->pendingGateRelocations = 0;
+	self->unhealthyRelocations = 0;
+	self->rawProcessingUnhealthy = makeReference<AsyncVar<bool>>(false);
+	self->rawProcessingWiggle = makeReference<AsyncVar<bool>>(false);
+	self->pipelineFull = makeReference<AsyncVar<bool>>(false);
+	self->fetchSourceLock = fetchSourceLock;
+	self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] = self->activeRelocations;
+	DDQueueImpl::RunState state(self);
+
+	PromiseStream<RelocateShard> input;
+	PromiseStream<RelocateShard> output;
+	Future<Void> gate = pipelineGateActor(self, input.getFuture(), output, state.pipelineSizeChanges);
+	const KeyRange firstRange = KeyRangeRef("a"_sr, "b"_sr);
+	const KeyRange secondRange = KeyRangeRef("c"_sr, "d"_sr);
+	input.send(RelocateShard(firstRange, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY, RelocateReason::OTHER, UID(7, 1)));
+	input.send(RelocateShard(secondRange, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY, RelocateReason::OTHER, UID(7, 2)));
+	ASSERT_EQ(self->pendingGateRelocations, 1);
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+
+	Future<Void> consumer = DDQueueImpl::processGatedRelocations(&state, output.getFuture());
+	co_await delay(0.01);
+	ASSERT(!gate.isReady());
+	ASSERT(!consumer.isReady());
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+	ASSERT_EQ(self->pendingGateRelocations, 0);
+	ASSERT_EQ(self->queuedRelocations, 1);
+	ASSERT_EQ(self->fetchingSourcesQueue.size(), 1);
+	ASSERT(self->fetchingSourcesQueue.begin()->keys == firstRange);
+
+	--self->activeRelocations;
+	--self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM];
+	self->updatePipelineFull();
+	DDQueueImpl::validate(&state);
+	co_await delay(0.01);
+	ASSERT(!gate.isReady());
+	ASSERT(!consumer.isReady());
+	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
+	ASSERT_EQ(self->pendingGateRelocations, 0);
+	ASSERT_EQ(self->queuedRelocations, 2);
+	ASSERT_EQ(self->fetchingSourcesQueue.size(), 2);
+	ASSERT(std::any_of(self->fetchingSourcesQueue.begin(), self->fetchingSourcesQueue.end(), [&](auto const& rd) {
+		return rd.keys == secondRange;
+	}));
+
+	gate.cancel();
+	consumer.cancel();
+	self->getSourceActors.cancel(allKeys);
+	co_return;
+}
+
 TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 	const int pipelineLimit = SERVER_KNOBS->DD_MAX_PIPELINE_MOVES;
 	ASSERT_GT(pipelineLimit, 2);
@@ -3512,14 +3579,14 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 	ASSERT(self->pipelineFull->get());
 	ASSERT(!forwarded.isReady());
 
-	// The queue clears the pending count before recording the move. The reserved
-	// slot must prevent a reentrant ordinary admission during that accounting gap.
+	// An intermediate counter transfer is not a completed queue mutation.
 	--self->pendingGateRelocations;
 	self->updatePipelineFull();
 	ASSERT_EQ(self->pipelineSize(), pipelineLimit - 1);
 	ASSERT(!forwarded.isReady());
 	++self->activeRelocations;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
 
 	input.send(RelocateShard(explicitlyFailedRange, SERVER_KNOBS->PRIORITY_TEAM_FAILED, RelocateReason::OTHER));
@@ -3550,11 +3617,13 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 	ASSERT_EQ(self->pendingGateRelocations, 1);
 	--self->pendingGateRelocations;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
 	ASSERT(!forwarded.isReady());
 
 	--self->activeRelocations;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT(forwarded.isReady());
 	RelocateShard explicitlyFailed = forwarded.pop();
 	ASSERT(explicitlyFailed.keys == explicitlyFailedRange);
@@ -3565,6 +3634,7 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 
 	--self->pendingGateRelocations;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT(forwarded.isReady());
 	RelocateShard retriedExplicitFailure = forwarded.pop();
 	ASSERT(retriedExplicitFailure.keys == explicitlyFailedRetryRange);
@@ -3577,6 +3647,7 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 
 	--self->pendingGateRelocations;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT(forwarded.isReady());
 	RelocateShard retriedFailure = forwarded.pop();
 	ASSERT(retriedFailure.keys == retryRange);
@@ -3589,6 +3660,7 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 
 	--self->pendingGateRelocations;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT(forwarded.isReady());
 	RelocateShard retriedSplitFailure = forwarded.pop();
 	ASSERT(retriedSplitFailure.keys == splitDestinationFailureRange);
@@ -3603,6 +3675,7 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 	--self->pendingGateRelocations;
 	self->activeRelocations = 0;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT(forwarded.isReady());
 	ASSERT(forwarded.pop().keys == firstSplitRange);
 	ASSERT(forwarded.isReady());
@@ -3613,6 +3686,7 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateReservesFailedTeamRecovery") {
 
 	self->pendingGateRelocations = 0;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	gate.cancel();
 	ASSERT(gate.isReady());
 	ASSERT(gate.isError());
@@ -3725,6 +3799,7 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateOrdersFailedTeamRecoveries") {
 
 	--self->activeRelocations;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT(forwarded.isReady());
 	RelocateShard first = forwarded.pop();
 	ASSERT(first.keys == zeroLeftRetryRange);
@@ -3734,18 +3809,21 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateOrdersFailedTeamRecoveries") {
 
 	--self->pendingGateRelocations;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT(forwarded.isReady());
 	ASSERT(forwarded.pop().keys == failedRange);
 	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
 
 	--self->pendingGateRelocations;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT(forwarded.isReady());
 	ASSERT(forwarded.pop().keys == firstOneLeftRange);
 	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
 
 	--self->pendingGateRelocations;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT(forwarded.isReady());
 	RelocateShard second = forwarded.pop();
 	ASSERT(second.keys == secondOneLeftRange);
@@ -3755,6 +3833,7 @@ TEST_CASE("/DataDistribution/DDQueue/PipelineGateOrdersFailedTeamRecoveries") {
 
 	--self->pendingGateRelocations;
 	self->updatePipelineFull();
+	pipelineSizeChanges->set(self->pipelineSize());
 	ASSERT(forwarded.isReady());
 	ASSERT(forwarded.pop().keys == unhealthyRange);
 	ASSERT_EQ(self->pipelineSize(), pipelineLimit);
