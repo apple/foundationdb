@@ -160,14 +160,52 @@ std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId) {
 	return appendToPath(root, jobId.toString());
 }
 
-// Constructs a URL with the path modified to include "data/" prefix.
+static std::string removeBackupPrefixParameter(const std::string& query) {
+	std::string result;
+	std::string separatorAfterLastRetained;
+	bool retainedParameter = false;
+	size_t parameterStart = 0;
+	while (parameterStart <= query.size()) {
+		size_t separatorStart = query.find('&', parameterStart);
+		size_t parameterEnd = separatorStart == std::string::npos ? query.size() : separatorStart;
+		std::string parameter = query.substr(parameterStart, parameterEnd - parameterStart);
+		std::string separator;
+		if (separatorStart != std::string::npos) {
+			if (query.compare(separatorStart, 5, "&amp;") == 0) {
+				separator = "&amp;";
+				parameterStart = separatorStart + 5;
+			} else {
+				separator = "&";
+				parameterStart = separatorStart + 1;
+			}
+		}
+
+		size_t equals = parameter.find('=');
+		if (parameter.substr(0, equals) != "prefix") {
+			if (retainedParameter) {
+				result += separatorAfterLastRetained;
+			}
+			result += parameter;
+			separatorAfterLastRetained = separator;
+			retainedParameter = true;
+		}
+
+		if (separatorStart == std::string::npos) {
+			break;
+		}
+	}
+	return result;
+}
+
+// Constructs a direct object URL with the path modified to include the backup container's data tree.
 // This is used for BulkDump/BulkLoad to write under the backup container's data directory.
 // Input:  blobstore://creds@host/backup_container?bucket=... , "bulkdump_data"
 // Output: blobstore://creds@host/data/backup_container/bulkdump_data?bucket=...
 // If the URL carries a "prefix" parameter the data tree lives under that key prefix,
-// consistent with BackupContainerBlobStore's layout:
+// consistent with BackupContainerBlobStore's layout.  The prefix parameter is consumed because
+// it has already been materialized in the returned object's path:
 // Input:  blobstore://creds@host/backup_container?bucket=...&prefix=p , "bulkdump_data"
-// Output: blobstore://creds@host/p/data/backup_container/bulkdump_data?bucket=...&prefix=p
+// Output: blobstore://creds@host/p/data/backup_container/bulkdump_data?bucket=...
 std::string getBackupDataPath(const std::string& url, const std::string& suffix) {
 	std::smatch matches;
 	if (!std::regex_match(url, matches, BLOBSTORE_URL_PATTERN)) {
@@ -178,9 +216,8 @@ std::string getBackupDataPath(const std::string& url, const std::string& suffix)
 	// on the resource and on parameter semantics (last value of a repeated parameter wins,
 	// '&amp;' unescaping, raw values).
 	std::string resource;
-	std::string parseError;
 	IBlobStoreEndpoint::ParametersT backupParams;
-	IBlobStoreEndpoint::fromString(url, {}, &resource, &parseError, &backupParams);
+	IBlobStoreEndpoint::fromString(url, {}, &resource, nullptr, &backupParams);
 	std::string keyPrefix;
 	auto it = backupParams.find("prefix");
 	if (it != backupParams.end()) {
@@ -202,13 +239,20 @@ std::string getBackupDataPath(const std::string& url, const std::string& suffix)
 		newPath += resource + "/" + suffix;
 	}
 
-	// Reassemble the URL around the new path, keeping the host and query byte-for-byte.
+	// Reassemble the URL around the new path, preserving the credentials and all non-prefix parameters.
 	std::string rest = matches[3].str(); // <host>[:port][/<resource>][?<query>]
 	std::string hostPort = rest.substr(0, rest.find_first_of("/?"));
 	std::string query;
 	size_t queryStart = rest.find('?');
 	if (queryStart != std::string::npos) {
-		query = rest.substr(queryStart);
+		if (it == backupParams.end()) {
+			query = rest.substr(queryStart);
+		} else {
+			std::string parameters = removeBackupPrefixParameter(rest.substr(queryStart + 1));
+			if (!parameters.empty()) {
+				query = "?" + parameters;
+			}
+		}
 	}
 	return matches[1].str() + matches[2].str() + hostPort + "/" + newPath + query;
 }
@@ -254,30 +298,35 @@ TEST_CASE("/bulkload/getBackupDataPath/prefix") {
 	// Without a prefix parameter the data tree stays at the bucket root.
 	ASSERT(getBackupDataPath("blobstore://host:80/some/container?bucket=b&region=r", "bulkdump_data") ==
 	       "blobstore://host:80/data/some/container/bulkdump_data?bucket=b&region=r");
+	ASSERT(getBackupDataPath("blobstore://host:80/c?bucket=b&amp;region=r", "d") ==
+	       "blobstore://host:80/data/c/d?bucket=b&amp;region=r");
 	// With a prefix parameter the data tree lives under the prefix, matching
 	// BackupContainerBlobStore's layout.
 	ASSERT(getBackupDataPath("blobstore://host:80/some/container?bucket=b&region=r&prefix=p1/p2", "bulkdump_data") ==
-	       "blobstore://host:80/p1/p2/data/some/container/bulkdump_data?bucket=b&region=r&prefix=p1/p2");
+	       "blobstore://host:80/p1/p2/data/some/container/bulkdump_data?bucket=b&region=r");
 	// The prefix value is normalized the same way the backup container normalizes it.
 	ASSERT(getBackupDataPath("blobstore://host:80/c?bucket=b&region=r&prefix=/p/", "d") ==
-	       "blobstore://host:80/p/data/c/d?bucket=b&region=r&prefix=/p/");
+	       "blobstore://host:80/p/data/c/d?bucket=b&region=r");
 	// Parameter semantics match the backup container's URL parsing: the last value of a
-	// repeated parameter wins, and HTML-encoded '&amp;' separators are unescaped.
-	ASSERT(getBackupDataPath("blobstore://host:80/c?bucket=b&region=r&prefix=p1&prefix=p2", "d") ==
-	       "blobstore://host:80/p2/data/c/d?bucket=b&region=r&prefix=p1&prefix=p2");
-	ASSERT(getBackupDataPath("blobstore://host:80/c?bucket=b&region=r&amp;prefix=p", "d") ==
-	       "blobstore://host:80/p/data/c/d?bucket=b&region=r&amp;prefix=p");
+	// repeated parameter wins, all consumed copies are removed, and HTML-encoded '&amp;'
+	// separators are recognized without changing the remaining parameters.
+	ASSERT(getBackupDataPath("blobstore://host:80/c?bucket=b&prefix=p1&region=r&prefix=p2&header=X:prefix=p", "d") ==
+	       "blobstore://host:80/p2/data/c/d?bucket=b&region=r&header=X:prefix=p");
+	ASSERT(getBackupDataPath("blobstore://host:80/c?bucket=b&amp;prefix=p&amp;region=r", "d") ==
+	       "blobstore://host:80/p/data/c/d?bucket=b&amp;region=r");
+	ASSERT(getBackupDataPath("blobstore://host:80/c?prefix=p&bucket=b&region=r", "d") ==
+	       "blobstore://host:80/p/data/c/d?bucket=b&region=r");
 	// Container names are used byte-for-byte, matching BackupContainerBlobStore::dataPath():
 	// leading slashes and empty path segments survive (joinPath() would collapse them) and a
 	// trailing slash suppresses the extra separator.
 	ASSERT(getBackupDataPath("blobstore://host:80//tenant?bucket=b&region=r&prefix=p", "d") ==
-	       "blobstore://host:80/p/data//tenant/d?bucket=b&region=r&prefix=p");
+	       "blobstore://host:80/p/data//tenant/d?bucket=b&region=r");
 	ASSERT(getBackupDataPath("blobstore://host:80/tenant//?bucket=b&region=r", "d") ==
 	       "blobstore://host:80/data/tenant//d?bucket=b&region=r");
 	ASSERT(getBackupDataPath("blobstore://host:80/tenant//?bucket=b&region=r&prefix=p", "d") ==
-	       "blobstore://host:80/p/data/tenant//d?bucket=b&region=r&prefix=p");
+	       "blobstore://host:80/p/data/tenant//d?bucket=b&region=r");
 	// The credentials part of the URL is preserved byte-for-byte.
 	ASSERT(getBackupDataPath("blobstore://AKID:secRet+/=:toKen+/=@host:80/c?bucket=b&region=r&prefix=p", "d") ==
-	       "blobstore://AKID:secRet+/=:toKen+/=@host:80/p/data/c/d?bucket=b&region=r&prefix=p");
+	       "blobstore://AKID:secRet+/=:toKen+/=@host:80/p/data/c/d?bucket=b&region=r");
 	return Void();
 }
