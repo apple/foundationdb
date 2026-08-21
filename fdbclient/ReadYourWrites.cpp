@@ -1368,7 +1368,7 @@ public:
 				if (ryw->resetPromise.isSet())
 					throw ryw->resetPromise.getFuture().getError();
 				if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
-					co_await ryw->getReadVersion();
+					co_await getReadVersion(ryw);
 					simulateTimeoutInFlightCommit(Uncancellable(), ryw);
 					throw transaction_timed_out();
 				}
@@ -1393,7 +1393,7 @@ public:
 			}
 
 			if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
-				co_await ryw->getReadVersion();
+				co_await getReadVersion(ryw);
 				simulateTimeoutInFlightCommit(Uncancellable(), ryw);
 				throw transaction_timed_out();
 			}

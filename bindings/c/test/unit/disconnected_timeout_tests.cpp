@@ -23,9 +23,11 @@
 #define FDB_USE_LATEST_API_VERSION
 #include <foundationdb/fdb_c.h>
 
+#include <charconv>
 #include <chrono>
 #include <iostream>
 #include <string.h>
+#include <string_view>
 #include <thread>
 
 #define DOCTEST_CONFIG_IMPLEMENT
@@ -53,6 +55,27 @@ static FDBDatabase* timeoutDb = nullptr;
 fdb_error_t wait_future(fdb::Future& f) {
 	fdb_check(f.block_until_ready());
 	return f.get_error();
+}
+
+fdb_error_t wait_future_bounded(fdb::Future& f) {
+	auto waitUntilReady = [&f] {
+		auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+		while (!f.is_ready() && std::chrono::steady_clock::now() < deadline) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		return f.is_ready();
+	};
+
+	if (!waitUntilReady()) {
+		CHECK_MESSAGE(false, "Future did not complete within five seconds");
+		// Cancel and drain the operation before its transaction is destroyed.
+		f.cancel();
+		if (!waitUntilReady()) {
+			std::cerr << "Future cancellation did not complete within five seconds" << std::endl;
+			std::abort();
+		}
+	}
+	return wait_future(f);
 }
 
 void validateTimeoutDuration(double expectedSeconds, std::chrono::time_point<std::chrono::steady_clock> start) {
@@ -91,8 +114,31 @@ TEST_CASE("500ms_commit_timeout_with_client_buggify") {
 	tr.set("key", "value");
 	fdb::EmptyFuture commitFuture = tr.commit();
 
-	CHECK(wait_future(commitFuture) == 1031);
+	CHECK(wait_future_bounded(commitFuture) == 1031);
 	validateTimeoutDuration(timeout / 1000.0, start);
+}
+
+TEST_CASE("commit_cancel_with_client_buggify") {
+	fdb::Transaction tr(db);
+
+	SUBCASE("read_your_writes_enabled") {}
+	SUBCASE("read_your_writes_disabled") {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+	}
+
+	int64_t timeout = 30000;
+	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	tr.set("key", "value");
+	fdb::EmptyFuture commitFuture = tr.commit();
+
+	// A local-only operation queued after commit ensures it has reached the blocked GRV wait.
+	fdb::Transaction barrierTr(db);
+	fdb::Int64Future barrierFuture = barrierTr.get_approximate_size();
+	CHECK(wait_future_bounded(barrierFuture) == 0);
+	CHECK_FALSE(commitFuture.is_ready());
+
+	tr.cancel();
+	CHECK(wait_future_bounded(commitFuture) == 1025);
 }
 
 TEST_CASE("500ms_transaction_timeout_after_op") {
@@ -269,11 +315,25 @@ TEST_CASE("transaction_set_timeout_and_destroy_repeatedly") {
 int main(int argc, char** argv) {
 	if (argc < 2) {
 		std::cout << "Disconnected timeout unit tests for the FoundationDB C API.\n"
-		          << "Usage: disconnected_timeout_tests <unavailableClusterFile> [externalClient] [doctest args]"
+		          << "Usage: disconnected_timeout_tests <unavailableClusterFile> [externalClient] "
+		             "[--api-version=VERSION] [doctest args]"
 		          << std::endl;
 		return 1;
 	}
-	fdb_check(fdb_select_api_version(FDB_API_VERSION));
+	int apiVersion = FDB_API_VERSION;
+	for (int i = 2; i < argc; ++i) {
+		std::string_view arg(argv[i]);
+		constexpr std::string_view prefix = "--api-version=";
+		if (arg.starts_with(prefix)) {
+			auto value = arg.substr(prefix.size());
+			auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), apiVersion);
+			if (error != std::errc() || end != value.data() + value.size()) {
+				std::cerr << "Invalid API version: " << value << std::endl;
+				return 1;
+			}
+		}
+	}
+	fdb_check(fdb_select_api_version(apiVersion));
 	if (argc >= 3) {
 		std::string externalClientLibrary = argv[2];
 		if (externalClientLibrary.substr(0, 2) != "--") {
