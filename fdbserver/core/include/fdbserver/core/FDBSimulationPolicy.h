@@ -102,6 +102,8 @@ struct FDBSimulationPolicyState {
 	std::map<NetworkAddress, bool> corruptWorkerMap;
 	FDBTSSMode tssMode = FDBTSSMode::Disabled;
 
+	void setRegionConfiguration(StatusArray const& regions, std::string const& primaryDc, std::string const& remoteDc);
+
 	bool updateConsistencyScanState(FDBSimConsistencyScanState expectedCurrent, FDBSimConsistencyScanState desired) {
 		if (consistencyScanState == expectedCurrent && desired > consistencyScanState) {
 			consistencyScanState = desired;
