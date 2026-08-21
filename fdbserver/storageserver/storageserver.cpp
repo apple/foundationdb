@@ -2448,12 +2448,6 @@ Optional<Future<Void>> getValueQDispatched(StorageServer* data, StorageServer::G
 	GetValueRequest& req = query.getRequest();
 	int64_t resultSize = 0;
 	try {
-		// Sampled and debug reads preserve the regular span lifetime and DoRead/AfterVersion event ordering.
-		if (req.spanContext.isSampled() || (req.options.present() && req.options.get().debugID.present())) {
-			Span span("SS:getValue"_loc, req.spanContext);
-			return getValueQImpl(data, std::move(query), std::move(span), true);
-		}
-
 		Optional<PriorityMultiLock::Releaser> readLock = data->tryGetReadLock(req.options);
 		if (!readLock.present()) {
 			Span span("SS:getValue"_loc, req.spanContext);
@@ -11902,6 +11896,12 @@ Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueReq
 		if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key)) {
 			req.reply.send(GetValueReply());
 		} else if (self->shouldRead(req)) {
+			// Start spans before the priority delay and preserve debug event ordering.
+			if (req.spanContext.isSampled() || (req.options.present() && req.options.get().debugID.present())) {
+				self->actors.add(getValueQ(self, std::move(req)));
+				return;
+			}
+
 			StorageServer::GetValueQuery query(std::move(req), self->counters);
 			beginGetValueQ(self, query.getRequest());
 			bool lowPriority = self->useLowPriorityRead();
