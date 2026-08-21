@@ -192,6 +192,7 @@ ENV FDB_COORDINATOR=""
 ENV FDB_COORDINATOR_PORT=4500
 ENV FDB_CLUSTER_FILE_CONTENTS=""
 ENV FDB_PROCESS_CLASS=unset
+ENV FDB_IP_VERSION=4
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/var/fdb/scripts/fdb.bash"]
 
 FROM foundationdb-base AS mako
