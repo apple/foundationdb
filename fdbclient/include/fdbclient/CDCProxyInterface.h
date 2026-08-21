@@ -228,7 +228,7 @@ struct SetCDCProxyPopsPausedRequest {
 };
 
 struct CDCProxyStreamStatus {
-	constexpr static FileIdentifier file_identifier = 9800211;
+	constexpr static FileIdentifier file_identifier = 15201296;
 	CDCStreamId streamId = 0;
 	bool present = false;
 	bool initialized = false;
@@ -257,7 +257,7 @@ struct CDCProxyStreamStatus {
 };
 
 struct CDCProxyStatusReply {
-	constexpr static FileIdentifier file_identifier = 9800212;
+	constexpr static FileIdentifier file_identifier = 10905;
 	Version latestCommittedVersion = invalidVersion;
 	int64_t bufferedBytes = 0;
 	int64_t activePermits = 0;
@@ -290,7 +290,7 @@ struct CDCProxyStatusReply {
 };
 
 struct GetCDCProxyStatusRequest {
-	constexpr static FileIdentifier file_identifier = 9800213;
+	constexpr static FileIdentifier file_identifier = 1468588;
 	constexpr static int MAX_STREAMS = 256;
 	std::vector<CDCStreamId> streamIds;
 	ReplyPromise<CDCProxyStatusReply> reply;
