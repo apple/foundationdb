@@ -2594,7 +2594,7 @@ THREAD_FUNC_RETURN runNetworkThread(void* param) {
 		TraceEvent(SevError, "ExternalRunNetworkError").error(unknown_error());
 	}
 
-	TraceEvent("ExternalNetworkThreadTerminating").writeEvent();
+	TraceEvent("ExternalNetworkThreadTerminating");
 	THREAD_RETURN;
 }
 
@@ -2633,7 +2633,7 @@ void MultiVersionApi::runNetwork() {
 		waitThread(h);
 	}
 
-	TraceEvent("MultiVersionRunNetworkTerminating").writeEvent();
+	TraceEvent("MultiVersionRunNetworkTerminating");
 	closeTraceFile();
 }
 
@@ -2645,7 +2645,7 @@ void MultiVersionApi::stopNetwork() {
 	}
 	lock.leave();
 
-	TraceEvent("MultiVersionStopNetwork").writeEvent();
+	TraceEvent("MultiVersionStopNetwork");
 	localClient->api->stopNetwork();
 
 	if (!bypassMultiClientApi) {

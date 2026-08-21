@@ -365,7 +365,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 	Future<Void> _setup(HTTPKeyValueStoreWorkload* self) {
 		ASSERT(g_network->isSimulated());
 		if (self->clientId == 0) {
-			TraceEvent("SimHTTPKeyValueStoreRegistering").writeEvent();
+			TraceEvent("SimHTTPKeyValueStoreRegistering");
 			if (DEBUG_HTTPKV) {
 				fmt::print("Registering sim http kv server\n");
 			}
@@ -377,7 +377,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 			TraceEvent("SimHTTPKeyValueStoreRegistered");
 		}
 
-		TraceEvent("SimHTTPKeyValueStoreLoading").writeEvent();
+		TraceEvent("SimHTTPKeyValueStoreLoading");
 
 		for (int i = 0; i < self->nodeCount; i++) {
 			co_await self->put(self, self->getKey(i), self->randomValue());
@@ -404,12 +404,12 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 			self->conn.clear();
 		}
 
-		TraceEvent("SimHTTPKeyValueStoreWorkloadChecking").writeEvent();
+		TraceEvent("SimHTTPKeyValueStoreWorkloadChecking");
 		for (int i = 0; i < self->nodeCount; i++) {
 			co_await self->get(self, self->getKey(i), true);
 		}
 
-		TraceEvent("SimHTTPKeyValueStoreWorkloadChecked").writeEvent();
+		TraceEvent("SimHTTPKeyValueStoreWorkloadChecked");
 		// tear down connection after test
 		if (self->conn) {
 			self->conn->close();
@@ -427,7 +427,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 	}
 
 	Future<Void> httpKeyValueClient(HTTPKeyValueStoreWorkload* self) {
-		TraceEvent("SimHTTPKeyValueStoreWorkloadStarting").writeEvent();
+		TraceEvent("SimHTTPKeyValueStoreWorkloadStarting");
 		double last = now();
 		while (true) {
 			Future<Void> waitNextOp = poisson(&last, 1.0 / self->opsPerSecond);

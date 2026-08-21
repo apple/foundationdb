@@ -1567,12 +1567,12 @@ struct TrackRunningStorage {
 	                    std::unordered_map<UID, StorageDiskCleaner>* storageCleaners)
 	  : self(self), storeType(storeType), locality(locality), filename(filename), runningStorages(runningStorages),
 	    storageCleaners(storageCleaners) {
-		TraceEvent("StorageServerAddedToRunningStorage", self).writeEvent();
+		TraceEvent("StorageServerAddedToRunningStorage", self);
 		runningStorages->emplace(self, storeType);
 	}
 	~TrackRunningStorage() {
 		runningStorages->erase(std::make_pair(self, storeType));
-		TraceEvent("StorageServerRemoveFromRunningStorage", self).writeEvent();
+		TraceEvent("StorageServerRemoveFromRunningStorage", self);
 
 		// Start a disk cleaner except for tss data store
 		try {
@@ -2987,7 +2987,7 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	Future<Void> grpc = registerWorkerGrpcServices(interf.id(), connRecord);
 
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
-		TraceEvent(SevInfo, "ChaosFeaturesEnabled").writeEvent();
+		TraceEvent(SevInfo, "ChaosFeaturesEnabled");
 		chaosMetricsActor = chaosMetricsLogger();
 	}
 
@@ -3247,7 +3247,7 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		Promise<Void> recoveredDiskFiles;
 		Future<Void> recoverDiskFiles = trigger(
 		    [=]() {
-			    TraceEvent("DiskFileRecoveriesComplete", interf.id()).writeEvent();
+			    TraceEvent("DiskFileRecoveriesComplete", interf.id());
 			    recoveredDiskFiles.send(Void());
 		    },
 		    waitForAll(recoveries));

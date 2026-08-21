@@ -275,7 +275,7 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	Future<Void> _start(Database cx) {
-		TraceEvent("ValidateStorageTestBegin").writeEvent();
+		TraceEvent("ValidateStorageTestBegin");
 		std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
 		                           { "TestKeyB"_sr, "TestValueB"_sr },
 		                           { "TestKeyC"_sr, "TestValueC"_sr },
@@ -293,31 +293,31 @@ struct ValidateStorage : TestWorkload {
 		}
 
 		testStringToAuditPhaseFunctionality();
-		TraceEvent("TestAuditStorageStringToAuditPhaseFuncionalityDone").writeEvent();
+		TraceEvent("TestAuditStorageStringToAuditPhaseFuncionalityDone");
 
 		co_await testSSUserDataValidation(this, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr));
-		TraceEvent("TestAuditStorageValidateValueDone").writeEvent();
+		TraceEvent("TestAuditStorageValidateValueDone");
 
 		co_await testAuditStorageFunctionality(this, cx);
-		TraceEvent("TestAuditStorageFunctionalityDone").writeEvent();
+		TraceEvent("TestAuditStorageFunctionalityDone");
 
 		co_await testAuditStorageIDGenerator(this, cx);
-		TraceEvent("TestAuditStorageIDGeneratorDone").writeEvent();
+		TraceEvent("TestAuditStorageIDGeneratorDone");
 
 		co_await testAuditStorageConcurrentRunForDifferentType(this, cx);
-		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeDone").writeEvent();
+		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeDone");
 
 		co_await testAuditStorageConcurrentRunForSameType(this, cx);
-		TraceEvent("TestAuditStorageConcurrentRunForSameTypeDone").writeEvent();
+		TraceEvent("TestAuditStorageConcurrentRunForSameTypeDone");
 
 		co_await testAuditStorageCancellation(this, cx);
-		TraceEvent("TestAuditStorageCancellationDone").writeEvent();
+		TraceEvent("TestAuditStorageCancellationDone");
 
 		co_await testAuditStorageProgress(this, cx);
-		TraceEvent("TestAuditStorageProgressDone").writeEvent();
+		TraceEvent("TestAuditStorageProgressDone");
 
 		co_await testAuditStorageWhenDDSecurityMode(this, cx);
-		TraceEvent("TestAuditStorageWhenDDSecurityModeDone").writeEvent();
+		TraceEvent("TestAuditStorageWhenDDSecurityModeDone");
 
 		co_await testAuditStorageWhenDDBackToNormalMode(this, cx);
 		TraceEvent("TestAuditStorageWhenDDBackToNormalModeDone");
@@ -475,16 +475,16 @@ struct ValidateStorage : TestWorkload {
 	Future<Void> testAuditStorageFunctionality(ValidateStorage* self, Database cx) {
 		UID auditIdA =
 		    co_await self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageFunctionality");
-		TraceEvent("TestFunctionalityHADone", auditIdA).writeEvent();
+		TraceEvent("TestFunctionalityHADone", auditIdA);
 		UID auditIdB =
 		    co_await self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestAuditStorageFunctionality");
-		TraceEvent("TestFunctionalityReplicaDone", auditIdB).writeEvent();
+		TraceEvent("TestFunctionalityReplicaDone", auditIdB);
 		UID auditIdC = co_await self->auditStorageForType(
 		    self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageFunctionality");
-		TraceEvent("TestFunctionalityShardLocationMetadataDone", auditIdC).writeEvent();
+		TraceEvent("TestFunctionalityShardLocationMetadataDone", auditIdC);
 		UID auditIdD = co_await self->auditStorageForType(
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageFunctionality");
-		TraceEvent("TestFunctionalitySSShardInfoDone", auditIdD).writeEvent();
+		TraceEvent("TestFunctionalitySSShardInfoDone", auditIdD);
 		co_await self->testGetAuditStateWhenNoOngingAudit(self, cx);
 		TraceEvent("TestGetAuditStateDone");
 	}
@@ -556,20 +556,20 @@ struct ValidateStorage : TestWorkload {
 
 	Future<Void> testGetAuditStateWhenNoOngingAudit(ValidateStorage* self, Database cx) {
 		co_await self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateHA);
-		TraceEvent("TestGetAuditStateHADone").writeEvent();
+		TraceEvent("TestGetAuditStateHADone");
 
 		co_await self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateReplica);
-		TraceEvent("TestGetAuditStateReplicaDone").writeEvent();
+		TraceEvent("TestGetAuditStateReplicaDone");
 
 		co_await self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateLocationMetadata);
-		TraceEvent("TestGetAuditStateShardLocationMetadataDone").writeEvent();
+		TraceEvent("TestGetAuditStateShardLocationMetadataDone");
 
 		co_await self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateStorageServerShard);
 		TraceEvent("TestGetAuditStateSSShardInfoDone");
 	}
 
 	Future<Void> testAuditStorageConcurrentRunForDifferentType(ValidateStorage* self, Database cx) {
-		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeBegin").writeEvent();
+		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeBegin");
 		std::vector<Future<Void>> fs;
 		std::vector<UID> auditIds = { UID(), UID(), UID(), UID() };
 		fs.push_back(
@@ -590,7 +590,7 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	Future<Void> testAuditStorageConcurrentRunForSameType(ValidateStorage* self, Database cx) {
-		TraceEvent("TestAuditStorageConcurrentRunForSameTypeBegin").writeEvent();
+		TraceEvent("TestAuditStorageConcurrentRunForSameTypeBegin");
 		std::vector<Future<Void>> fs;
 		std::vector<UID> auditIds = { UID(), UID(), UID(), UID() };
 		fs.push_back(store(
@@ -614,7 +614,7 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	Future<Void> testAuditStorageCancellation(ValidateStorage* self, Database cx) {
-		TraceEvent("TestAuditStorageCancellationBegin").writeEvent();
+		TraceEvent("TestAuditStorageCancellationBegin");
 		UID auditId = co_await self->triggerAuditStorageForType(cx, AuditType::ValidateHA, "TestAuditCancellation");
 		std::vector<Future<Void>> fs;
 		fs.push_back(self->waitCancelAuditStorageUntilComplete(cx, AuditType::ValidateHA, auditId));
@@ -676,7 +676,7 @@ struct ValidateStorage : TestWorkload {
 
 	// Test audit progress persist invariant
 	Future<Void> testAuditStorageProgress(ValidateStorage* self, Database cx) {
-		TraceEvent("TestAuditStorageProgressBegin").writeEvent();
+		TraceEvent("TestAuditStorageProgressBegin");
 		UID auditId = deterministicRandom()->randomUniqueID();
 		AuditType auditType = AuditType::ValidateHA;
 		UID ddId = deterministicRandom()->randomUniqueID();
@@ -731,38 +731,38 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	Future<Void> testAuditStorageWhenDDSecurityMode(ValidateStorage* self, Database cx) {
-		TraceEvent("TestAuditStorageWhenDDSecurityModeBegin").writeEvent();
+		TraceEvent("TestAuditStorageWhenDDSecurityModeBegin");
 		co_await setDDMode(cx, 2);
 		UID auditIdA =
 		    co_await self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageWhenDDSecurityMode");
-		TraceEvent("TestFunctionalityHADoneWhenDDSecurityMode", auditIdA).writeEvent();
+		TraceEvent("TestFunctionalityHADoneWhenDDSecurityMode", auditIdA);
 		UID auditIdB = co_await self->auditStorageForType(
 		    self, cx, AuditType::ValidateReplica, "TestAuditStorageWhenDDSecurityMode");
-		TraceEvent("TestFunctionalityReplicaDoneWhenDDSecurityMode", auditIdB).writeEvent();
+		TraceEvent("TestFunctionalityReplicaDoneWhenDDSecurityMode", auditIdB);
 		UID auditIdC = co_await self->auditStorageForType(
 		    self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageWhenDDSecurityMode");
-		TraceEvent("TestFunctionalityShardLocationMetadataDoneWhenDDSecurityMode", auditIdC).writeEvent();
+		TraceEvent("TestFunctionalityShardLocationMetadataDoneWhenDDSecurityMode", auditIdC);
 		UID auditIdD = co_await self->auditStorageForType(
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageWhenDDSecurityMode");
-		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDSecurityMode", auditIdD).writeEvent();
+		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDSecurityMode", auditIdD);
 		TraceEvent("TestAuditStorageWhenDDSecurityModeEnd");
 	}
 
 	Future<Void> testAuditStorageWhenDDBackToNormalMode(ValidateStorage* self, Database cx) {
-		TraceEvent("TestAuditStorageWhenDDBackToNormalModeBegin").writeEvent();
+		TraceEvent("TestAuditStorageWhenDDBackToNormalModeBegin");
 		co_await setDDMode(cx, 1);
 		UID auditIdA = co_await self->auditStorageForType(
 		    self, cx, AuditType::ValidateHA, "TestAuditStorageWhenDDBackToNormalMode");
-		TraceEvent("TestFunctionalityHADoneWhenDDBackToNormalMode", auditIdA).writeEvent();
+		TraceEvent("TestFunctionalityHADoneWhenDDBackToNormalMode", auditIdA);
 		UID auditIdB = co_await self->auditStorageForType(
 		    self, cx, AuditType::ValidateReplica, "TestAuditStorageWhenDDBackToNormalMode");
-		TraceEvent("TestFunctionalityReplicaDoneWhenDDBackToNormalMode", auditIdB).writeEvent();
+		TraceEvent("TestFunctionalityReplicaDoneWhenDDBackToNormalMode", auditIdB);
 		UID auditIdC = co_await self->auditStorageForType(
 		    self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageWhenDDBackToNormalMode");
-		TraceEvent("TestFunctionalityShardLocationMetadataDoneWhenDDBackToNormalMode", auditIdC).writeEvent();
+		TraceEvent("TestFunctionalityShardLocationMetadataDoneWhenDDBackToNormalMode", auditIdC);
 		UID auditIdD = co_await self->auditStorageForType(
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageWhenDDBackToNormalMode");
-		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDBackToNormalMode", auditIdD).writeEvent();
+		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDBackToNormalMode", auditIdD);
 		TraceEvent("TestAuditStorageWhenDDBackToNormalModeEnd");
 	}
 

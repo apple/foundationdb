@@ -307,7 +307,7 @@ struct BulkLoading : TestWorkload {
 	                                           std::vector<KeyRange> loadedRanges) {
 		std::vector<KeyValue> res;
 		Transaction tr(cx);
-		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBStart").writeEvent();
+		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBStart");
 		while (true) {
 			Error err;
 			try {
@@ -328,7 +328,7 @@ struct BulkLoading : TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
-		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBDone").writeEvent();
+		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBDone");
 		co_return res;
 	}
 
@@ -529,7 +529,7 @@ struct BulkLoading : TestWorkload {
 
 	// Issue three non-overlapping tasks and check data consistency and correctness
 	Future<Void> simpleTest(BulkLoading* self, Database cx) {
-		TraceEvent("BulkLoadingWorkLoadSimpleTestBegin").writeEvent();
+		TraceEvent("BulkLoadingWorkLoadSimpleTestBegin");
 		int oldBulkLoadMode = 0;
 		std::vector<BulkLoadTaskState> bulkLoadTaskStates;
 		std::vector<KeyRange> taskRanges;
@@ -552,14 +552,14 @@ struct BulkLoading : TestWorkload {
 			ASSERT(succeed);
 		}
 
-		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks").writeEvent();
+		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
 		oldBulkLoadMode = co_await setBulkLoadMode(cx, 1);
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		std::vector<BulkLoadTaskState> errorTasks = co_await self->waitUntilAllTaskCompleteOrError(self, cx);
 		for (const auto& errorTask : errorTasks) {
 			errorRanges.push_back(errorTask.getRange());
 		}
-		TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete").writeEvent();
+		TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
 
 		// Check data
 		oldBulkLoadMode = co_await setBulkLoadMode(cx, 0);

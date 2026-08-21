@@ -287,7 +287,7 @@ static Future<Void> checkMoveKeysLockForAudit(Transaction* tr,
 		Optional<Value> readVal = co_await tr->get(moveKeysLockWriteKey);
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 		if (lastWrite != lock.prevWrite) {
-			TraceEvent(SevDebug, "ConflictWithPreviousOwner").writeEvent();
+			TraceEvent(SevDebug, "ConflictWithPreviousOwner");
 			throw movekeys_conflict(); // need a new name
 		}
 		// Take the lock
@@ -331,7 +331,7 @@ Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, Move
 	Transaction tr(cx);
 	UID auditId;
 	AuditStorageState latestExistingAuditState;
-	TraceEvent(SevDebug, "AuditUtilPersistedNewAuditStateStart", auditId).writeEvent();
+	TraceEvent(SevDebug, "AuditUtilPersistedNewAuditStateStart", auditId);
 	try {
 		while (true) {
 			Error err;
@@ -1155,7 +1155,7 @@ Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Tran
 		                                   CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
 		Future<Version> grvF = tr->getReadVersion();
 		if (!grvF.isReady()) {
-			TraceEvent(SevWarnAlways, "AuditUtilReadServerKeysGRVError", serverID).writeEvent();
+			TraceEvent(SevWarnAlways, "AuditUtilReadServerKeysGRVError", serverID);
 			throw audit_storage_cancelled();
 		}
 		Version readAtVersion = grvF.get();
@@ -1218,13 +1218,12 @@ Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Trans
 		if (UIDtoTagMap.more || UIDtoTagMap.size() >= CLIENT_KNOBS->TOO_MANY) {
 			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 			           "AuditUtilReadKeyServersReadTagError",
-			           auditServerId)
-			    .writeEvent();
+			           auditServerId);
 			throw audit_storage_cancelled();
 		}
 		Future<Version> grvF = tr->getReadVersion();
 		if (!grvF.isReady()) {
-			TraceEvent(SevWarnAlways, "AuditUtilReadKeyServersGRVError", auditServerId).writeEvent();
+			TraceEvent(SevWarnAlways, "AuditUtilReadKeyServersGRVError", auditServerId);
 			throw audit_storage_cancelled();
 		}
 		Version readAtVersion = grvF.get();

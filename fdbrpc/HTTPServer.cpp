@@ -115,7 +115,7 @@ Future<Void> listenActor(Reference<HTTP::SimServerContext> server,
 		while (true) {
 			Reference<IConnection> conn = co_await listener->accept();
 			if (!server->running) {
-				TraceEvent("HTTPServerExitedAfterAccept", server->dbgid).writeEvent();
+				TraceEvent("HTTPServerExitedAfterAccept", server->dbgid);
 				break;
 			}
 			if (conn) {

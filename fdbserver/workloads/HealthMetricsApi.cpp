@@ -81,7 +81,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			// It's not valid to fail a sanity check of metrics which have never been received.
 			// Yes, this encodes a blatant "got" vs "have" usage error.  The intent is to show
 			// up on any case insensitive search for "gotmetrics".
-			TraceEvent("HealthMetricsCheckPassedBecauseWeDontGotMetrics").writeEvent();
+			TraceEvent("HealthMetricsCheckPassedBecauseWeDontGotMetrics");
 			return true;
 		}
 		if (healthMetricsStoppedUpdating) {
@@ -192,7 +192,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 				traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);
 			}
 			if (!gotMetrics && gotStorageStats && gotTLogQueue) {
-				TraceEvent("HealthMetricsGotFullResult").writeEvent();
+				TraceEvent("HealthMetricsGotFullResult");
 				gotMetrics = true;
 			}
 		};

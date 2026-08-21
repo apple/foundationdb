@@ -1367,7 +1367,7 @@ public:
 			}
 			return workers;
 		}
-		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "PolicyEngineNotOptimized").writeEvent();
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "PolicyEngineNotOptimized");
 		return getWorkersForTlogsBackup(
 		    conf, required, desired, policy, id_used, checkStable, dcIds, exclusionWorkerIds);
 	}

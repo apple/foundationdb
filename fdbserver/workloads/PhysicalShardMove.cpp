@@ -139,7 +139,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		std::vector<KeyRange> checkpointRanges;
 		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyAC"_sr));
 		co_await checkpointRestore(this, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs);
-		TraceEvent(SevDebug, "TestCheckpointRestored1").writeEvent();
+		TraceEvent(SevDebug, "TestCheckpointRestored1");
 
 		// Move range [TestKeyD, TestKeyF) to sh0;
 		includes.insert(teamA.begin(), teamA.end());
@@ -176,7 +176,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
 		checkpointRanges.push_back(KeyRangeRef("TestKeyD"_sr, "TestKeyE"_sr));
 		co_await checkpointRestore(this, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs);
-		TraceEvent(SevDebug, "TestCheckpointRestored2").writeEvent();
+		TraceEvent(SevDebug, "TestCheckpointRestored2");
 
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
 		currentRange = KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr);
@@ -214,7 +214,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		restoreRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
 		restoreRanges.push_back(KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr));
 		co_await checkpointRestore(this, cx, checkpointRanges, restoreRanges, CheckpointAsKeyValues::True, &kvs);
-		TraceEvent(SevDebug, "TestCheckpointRestored3").writeEvent();
+		TraceEvent(SevDebug, "TestCheckpointRestored3");
 
 		currentRange = KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr);
 		std::vector<UID> teamC = co_await moveShard(
@@ -268,7 +268,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				for (int i = 0; i < checkpointIds.size(); ++i) {
 					const auto& value = checkpointValues[i];
 					if (!value.present()) {
-						TraceEvent(SevWarnAlways, "CheckpointNotFound").writeEvent();
+						TraceEvent(SevWarnAlways, "CheckpointNotFound");
 						continue;
 					}
 					CheckpointMetaData checkpoint = decodeCheckpointValue(value.get());

@@ -27,7 +27,7 @@
 // ---- FlowGrpc definitions ------
 
 void FlowGrpc::init(TLSConfig* tls_config, const std::optional<NetworkAddress>& server_addr) {
-	TraceEvent("FlowGrpcInit").writeEvent();
+	TraceEvent("FlowGrpcInit");
 	FlowGrpc* fg = new FlowGrpc();
 	g_network->setGlobal(INetwork::enGrpcState, (flowGlobalType)fg);
 

@@ -145,7 +145,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		StatusObjectReader statusObj(result);
 		StatusObjectReader statusObjCluster;
 		if (!statusObj.get("cluster", statusObjCluster)) {
-			TraceEvent("SSLagNoCluster").writeEvent();
+			TraceEvent("SSLagNoCluster");
 			co_return Optional<Version>();
 		}
 
@@ -153,7 +153,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		Version tlogLagInVersions = 0;
 		double tlogLagInSeconds = 0;
 		if (!fetchLagFromStatusObject("logserver_lag", statusObjCluster, tlogLagInVersions, tlogLagInSeconds)) {
-			TraceEvent("NoLogServerLagData").writeEvent();
+			TraceEvent("NoLogServerLagData");
 			co_return Optional<Version>();
 		}
 
@@ -161,7 +161,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		Version ssLagInVersions = 0;
 		double ssLagInSeconds = 0;
 		if (!fetchLagFromStatusObject("storageserver_lag", statusObjCluster, ssLagInVersions, ssLagInSeconds)) {
-			TraceEvent("NoStorageServerLagData").writeEvent();
+			TraceEvent("NoStorageServerLagData");
 			co_return Optional<Version>();
 		}
 
@@ -169,7 +169,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		Version dcLagInVersions = 0;
 		double dcLagInSeconds = 0;
 		if (!fetchLagFromStatusObject("datacenter_lag", statusObjCluster, dcLagInVersions, dcLagInSeconds)) {
-			TraceEvent("NoDataCenterLagData").writeEvent();
+			TraceEvent("NoDataCenterLagData");
 			co_return Optional<Version>();
 		}
 

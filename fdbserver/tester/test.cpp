@@ -313,25 +313,25 @@ Future<bool> runTest(Database cx,
 			// Run auditStorage at the end of simulation
 			if (ok && quiescent && g_network->isSimulated()) {
 				try {
-					TraceEvent("AuditStorageStart").writeEvent();
+					TraceEvent("AuditStorageStart");
 					TraceEvent("TestProgress")
 					    .log("runTest: calling auditStorageCorrectness(dbinfo, ValidateHA, 1500.0)");
 					co_await timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 1500.0);
-					TraceEvent("AuditStorageCorrectnessHADone").writeEvent();
+					TraceEvent("AuditStorageCorrectnessHADone");
 					TraceEvent("TestProgress")
 					    .log("runTest: calling auditStorageCorrectness(dbinfo, ValidateReplica, 1500.0)");
 					co_await timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateReplica), 1500.0);
-					TraceEvent("AuditStorageCorrectnessReplicaDone").writeEvent();
+					TraceEvent("AuditStorageCorrectnessReplicaDone");
 					TraceEvent("TestProgress")
 					    .log("runTest: calling auditStorageCorrectness(dbinfo, ValidateLocationMetadata, 1500.0)");
 					co_await timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateLocationMetadata), 1500.0);
 
-					TraceEvent("AuditStorageCorrectnessLocationMetadataDone").writeEvent();
+					TraceEvent("AuditStorageCorrectnessLocationMetadataDone");
 					TraceEvent("TestProgress")
 					    .log("runTest: calling auditStorageCorrectness(dbinfo, ValidateSTorageServerShard, 1500.0)");
 					co_await timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard),
 					                      1500.0);
-					TraceEvent("AuditStorageCorrectnessStorageServerShardDone").writeEvent();
+					TraceEvent("AuditStorageCorrectnessStorageServerShardDone");
 					TraceEvent("TestProgress").log("runTest: storage audits completed.");
 				} catch (Error& e) {
 					ok = false;
@@ -749,9 +749,9 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 			TraceEvent("TestProgress")
 			    .log("runTests7: useDB && waitForQuiescenceEnd ==> invoking checkConsistencyScanAfterTest()");
 			printf("Waiting for DD to end...\n");
-			TraceEvent("QuietDatabaseEndStart").writeEvent();
+			TraceEvent("QuietDatabaseEndStart");
 			try {
-				TraceEvent("QuietDatabaseEndWait").writeEvent();
+				TraceEvent("QuietDatabaseEndWait");
 				ranConsistencyScan = true;
 				Future<Void> waitConsistencyScanEnd = checkConsistencyScanAfterTest(cx, &consistencyScanState);
 				Future<Void> waitQuietDatabaseEnd =

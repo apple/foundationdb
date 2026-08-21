@@ -1025,7 +1025,7 @@ Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<Initial
 
 	// DDInitDone bookends DDInitRunning — marks DD fully operational. Uses DD* prefix so
 	// the full startup sequence can be queried with Type="DDInit*" in trace logs.
-	TraceEvent("DDInitDone", self->distributorId).writeEvent();
+	TraceEvent("DDInitDone", self->distributorId);
 	self->maxShardSizeUpdater = updateMaxShardSize(self->dbSizeEstimate, self->maxShardSize);
 }
 

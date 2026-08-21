@@ -677,7 +677,7 @@ Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 }
 
 Future<Void> runSimHTTPServer() {
-	TraceEvent("SimHTTPServerStarting").writeEvent();
+	TraceEvent("SimHTTPServerStarting");
 	auto context = makeReference<HTTP::SimServerContext>();
 	g_simulator->addSimHTTPProcess(context);
 

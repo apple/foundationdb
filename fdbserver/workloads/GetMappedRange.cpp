@@ -452,13 +452,13 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			int64_t queryQueueMax = 0;
 			int waitInterval = 2;
 			if (!statusObj.get("cluster", statusObjCluster)) {
-				TraceEvent("NoCluster").writeEvent();
+				TraceEvent("NoCluster");
 				co_await delay(waitInterval);
 				continue;
 			}
 
 			if (!statusObjCluster.get("processes", processesMap)) {
-				TraceEvent("NoProcesses").writeEvent();
+				TraceEvent("NoProcesses");
 				co_await delay(waitInterval);
 				continue;
 			}
@@ -518,11 +518,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			    reportMetric(cx), submitSmallRequestIndefinitely(cx, 10, 490, mapper, this), delay(seconds));
 			if (choice.index() == 0) {
 
-				TraceEvent(SevError, "Error: ReportMetric has ended").writeEvent();
+				TraceEvent(SevError, "Error: ReportMetric has ended");
 				co_return;
 			} else if (choice.index() == 1) {
 
-				TraceEvent(SevError, "Error: submitSmallRequestIndefinitely has ended").writeEvent();
+				TraceEvent(SevError, "Error: submitSmallRequestIndefinitely has ended");
 				co_return;
 			} else if (choice.index() == 2) {
 

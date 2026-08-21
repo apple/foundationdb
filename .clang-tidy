@@ -20,7 +20,6 @@ Checks: >
   bugprone-suspicious-stringview-data-usage,
   bugprone-too-small-loop-variable,
   bugprone-unique-ptr-array-mismatch,
-  bugprone-unused-raii,
   bugprone-use-after-move,
   cppcoreguidelines-avoid-capturing-lambda-coroutines,
   misc-coroutine-hostile-raii,

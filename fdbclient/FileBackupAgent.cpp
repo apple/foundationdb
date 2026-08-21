@@ -106,7 +106,7 @@ Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeout
 Future<bool> verifyBulkDumpDatasetCompleteness(Reference<IBackupContainer> bc, std::string bulkDumpJobId) {
 	try {
 		if (bulkDumpJobId.empty()) {
-			TraceEvent(SevWarn, "BulkLoadVerifyDatasetEmptyJobId").writeEvent();
+			TraceEvent(SevWarn, "BulkLoadVerifyDatasetEmptyJobId");
 			co_return false;
 		}
 

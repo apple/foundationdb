@@ -64,7 +64,7 @@ template <class T>
 Future<T> traceAfter(Future<T> what, std::string type, bool traceErrors = true, ExplicitVoid = {}) {
 	try {
 		T val = co_await what;
-		TraceEvent(type.c_str()).writeEvent();
+		TraceEvent(type.c_str());
 		co_return val;
 	} catch (Error& e) {
 		// Don't trace operation_cancelled as it's a normal control flow mechanism, not an error

@@ -1437,7 +1437,7 @@ Future<Void> bulkLoadTaskCore(Reference<DataDistributor> self, Future<Void> read
 	co_await readyToStart;
 	Database cx = self->txnProcessor->context();
 	co_await registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad);
-	TraceEvent(SevInfo, "DDBulkLoadTaskCoreStart", self->ddId).writeEvent();
+	TraceEvent(SevInfo, "DDBulkLoadTaskCoreStart", self->ddId);
 	while (true) {
 		try {
 			co_await scheduleBulkLoadTasks(self);
@@ -2215,7 +2215,7 @@ Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 	Database cx = self->txnProcessor->context();
 	Optional<BulkLoadJobState> job = co_await getRunningBulkLoadJob(cx);
 	if (!job.present()) {
-		TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadJobManagerNoJobExist", self->ddId).writeEvent();
+		TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadJobManagerNoJobExist", self->ddId);
 		self->bulkLoadJobManager.reset(); // set to empty
 		self->bulkLoadTaskCollection->removeBulkLoadJobRange();
 		co_return;
@@ -2323,7 +2323,7 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
 
-	TraceEvent(SevInfo, "DDBulkLoadModeMonitorStarted", self->ddId).writeEvent();
+	TraceEvent(SevInfo, "DDBulkLoadModeMonitorStarted", self->ddId);
 
 	// Wait for mode to be enabled
 	while (true) {
@@ -2363,7 +2363,7 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 	}
 
 	// Mode is now enabled - run the bulkload actors directly
-	TraceEvent(SevInfo, "DDBulkLoadModeActorsSpawning", self->ddId).writeEvent();
+	TraceEvent(SevInfo, "DDBulkLoadModeActorsSpawning", self->ddId);
 
 	std::vector<Future<Void>> bulkLoadActors;
 	if (self->configuration.usableRegions > 1) {
@@ -2374,7 +2374,7 @@ Future<Void> monitorBulkLoadModeAndSpawnActors(Reference<DataDistributor> self, 
 		bulkLoadActors.push_back(bulkLoadJobCore(self, readyToStart));
 	}
 
-	TraceEvent(SevInfo, "DDBulkLoadModeActorsSpawned", self->ddId).writeEvent();
+	TraceEvent(SevInfo, "DDBulkLoadModeActorsSpawned", self->ddId);
 
 	// Wait for all bulkload actors (they run forever unless cancelled)
 	co_await waitForAll(bulkLoadActors);
@@ -2748,7 +2748,7 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
 	co_await readyToStart;
 	Database cx = self->txnProcessor->context();
-	TraceEvent(SevInfo, "DDBulkDumpCoreStart", self->ddId).writeEvent();
+	TraceEvent(SevInfo, "DDBulkDumpCoreStart", self->ddId);
 	while (true) {
 		// Dynamically check if BulkDump mode is enabled
 		int currentMode = co_await getBulkDumpMode(cx);
@@ -5219,10 +5219,10 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 	std::map<UID, DistributorSnapRequest> ddSnapReqMap;
 	std::map<UID, ErrorOr<Void>> ddSnapReqResultMap;
 
-	TraceEvent("DataDistributorRunning", di.id()).writeEvent();
+	TraceEvent("DataDistributorRunning", di.id());
 	// DDInitRunning duplicates the above with DDInit* prefix so the full startup sequence
 	// can be queried with Type="DDInit*" in trace logs
-	TraceEvent("DDInitRunning", di.id()).writeEvent();
+	TraceEvent("DDInitRunning", di.id());
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
 	self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));

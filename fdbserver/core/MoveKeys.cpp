@@ -215,7 +215,7 @@ Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID
 	for (int i = 0; i < checkpointIds.size(); ++i) {
 		const auto& value = checkpointValues[i];
 		if (!value.present()) {
-			TraceEvent(SevWarnAlways, "CheckpointNotFound", dataMoveId).writeEvent();
+			TraceEvent(SevWarnAlways, "CheckpointNotFound", dataMoveId);
 			continue;
 		}
 		CheckpointMetaData checkpoint = decodeCheckpointValue(value.get());
@@ -1017,7 +1017,7 @@ static Future<Void> startMoveKeys(Database occ,
 	FlowLock::Releaser releaser(*startMoveKeysLock);
 	bool loadedTssMapping = false;
 
-	TraceEvent(SevDebug, interval.begin(), relocationIntervalId).writeEvent();
+	TraceEvent(SevDebug, interval.begin(), relocationIntervalId);
 
 	try {
 		Key begin = keys.begin;

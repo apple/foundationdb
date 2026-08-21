@@ -459,7 +459,7 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
 Future<Void> disableBackupWorker(Database cx) {
 	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
 	if (!configuration.backupWorkerEnabled) {
-		TraceEvent("BackupWorkerAlreadyDisabled").writeEvent();
+		TraceEvent("BackupWorkerAlreadyDisabled");
 		co_return;
 	}
 	ConfigurationResult res = co_await ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=0", true);
@@ -472,7 +472,7 @@ Future<Void> disableBackupWorker(Database cx) {
 Future<Void> enableBackupWorker(Database cx) {
 	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
 	if (configuration.backupWorkerEnabled) {
-		TraceEvent("BackupWorkerAlreadyEnabled").writeEvent();
+		TraceEvent("BackupWorkerAlreadyEnabled");
 		co_return;
 	}
 	ConfigurationResult res = co_await ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true);
@@ -485,7 +485,7 @@ Future<Void> enableBackupWorker(Database cx) {
 Future<Void> enableRangePartitionedBackupWorker(Database cx) {
 	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
 	if (configuration.rangePartitionedBackupWorkerEnabled) {
-		TraceEvent("RangePartitionedBWAlreadyEnabled").writeEvent();
+		TraceEvent("RangePartitionedBWAlreadyEnabled");
 		co_return;
 	}
 	ConfigurationResult res =
@@ -499,7 +499,7 @@ Future<Void> enableRangePartitionedBackupWorker(Database cx) {
 Future<Void> disableRangePartitionedBackupWorker(Database cx) {
 	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
 	if (!configuration.rangePartitionedBackupWorkerEnabled) {
-		TraceEvent("RangePartitionedBWAlreadyDisabled").writeEvent();
+		TraceEvent("RangePartitionedBWAlreadyDisabled");
 		co_return;
 	}
 	ConfigurationResult res =
@@ -2730,7 +2730,7 @@ Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState)
 		for (int i = 0; i < jobHistoryResult.size(); i++) {
 			ASSERT_WE_THINK(!jobHistoryResult[i].value.empty());
 			if (jobHistoryResult[i].value.empty()) {
-				TraceEvent(SevError, "DDBulkLoadJobHistoryHasEmptyValue", jobState.getJobId()).writeEvent();
+				TraceEvent(SevError, "DDBulkLoadJobHistoryHasEmptyValue", jobState.getJobId());
 				continue;
 			}
 			BulkLoadJobState jobStateInHistory = decodeBulkLoadJobState(jobHistoryResult[i].value);
