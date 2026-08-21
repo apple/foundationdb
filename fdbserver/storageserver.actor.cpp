@@ -951,6 +951,235 @@ struct TenantSSInfo {
 struct StorageServer : public IStorageMetricsService {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
+	// counters must be declared before any member that can own an actor, since actor cancellation may increment counters
+	struct Counters {
+		CounterCollection cc;
+		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
+		    getRangeStreamQueries, finishedQueries, lowPriorityQueries, rowsQueried, bytesQueried, watchQueries,
+		    emptyQueries, feedRowsQueried, feedBytesQueried, feedStreamQueries, rejectedFeedStreamQueries,
+		    feedVersionQueries;
+
+		// counters related to getMappedRange queries
+		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
+		    finishedGetMappedRangeQueries;
+
+		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
+		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
+		Counter bytesInput;
+		// Bytes pulled from TLogs, it counts the size of the key value pairs, e.g., key-value pair ("a", "b") is
+		// counted as 2 Bytes.
+		Counter logicalBytesInput;
+		// Bytes pulled from TLogs for moving-in shards, it counts the mutations sent to the moving-in shard during
+		// Fetching and Waiting phases.
+		Counter logicalBytesMoveInOverhead;
+		// Bytes committed to the underlying storage engine by SS, it counts the size of key value pairs.
+		Counter kvCommitLogicalBytes;
+		// Count of all clearRange operations to the storage engine.
+		Counter kvClearRanges;
+		// Count of all clearRange operations on a singlekeyRange(key delete) to the storage engine.
+		Counter kvClearSingleKey;
+		// ClearRange operations issued by FDB, instead of from users, e.g., ClearRange operations to remove a shard
+		// from a storage server, as in removeDataRange().
+		Counter kvSystemClearRanges;
+		// Bytes of the mutations that have been removed from memory because they durable. The counting is same as
+		// bytesInput, instead of the actual bytes taken in the storages, so that (bytesInput - bytesDurable) can
+		// reflect the current memory footprint of MVCC.
+		Counter bytesDurable;
+		// Bytes fetched by fetchKeys() for data movements. The size is counted as a collection of KeyValueRef.
+		Counter bytesFetched;
+		// Like bytesInput but without MVCC accounting. The size is counted as how much it takes when serialized. It
+		// is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
+		// and the lengths of both parameters.
+		Counter mutationBytes;
+		// Count of all fetchKey clearRange operations to the storage engine.
+		Counter kvClearRangesInFetchKeys;
+
+		// Bytes fetched by fetchChangeFeed for data movements.
+		Counter feedBytesFetched;
+
+		Counter sampledBytesCleared;
+		// The number of key-value pairs fetched by fetchKeys()
+		Counter kvFetched;
+		Counter mutations, setMutations, clearRangeMutations, atomicMutations, changeFeedMutations,
+		    changeFeedMutationsDurable;
+		Counter updateBatches, updateVersions;
+		Counter loops;
+		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
+		Counter readsRejected;
+		Counter wrongShardServer;
+		Counter fetchedVersions;
+		Counter fetchesFromLogs;
+		// The following counters measure how many of lookups in the getMappedRangeQueries are effective. "Miss"
+		// means fallback if fallback is enabled, otherwise means failure (so that another layer could implement
+		// fallback).
+		Counter quickGetValueHit, quickGetValueMiss, quickGetKeyValuesHit, quickGetKeyValuesMiss;
+
+		// The number of logical bytes returned from storage engine, in response to readRange operations.
+		Counter kvScanBytes;
+		// The number of logical bytes returned from storage engine, in response to readValue operations.
+		Counter kvGetBytes;
+		// The number of keys read from storage engine by eagerReads.
+		Counter eagerReadsKeys;
+		// The count of readValue operation to the storage engine.
+		Counter kvGets;
+		// The count of readValue operation to the storage engine.
+		Counter kvScans;
+		// The count of commit operation to the storage engine.
+		Counter kvCommits;
+		// The count of change feed reads that hit disk
+		Counter changeFeedDiskReads;
+		// The count of ChangeServerKeys actions.
+		Counter changeServerKeysAssigned;
+		Counter changeServerKeysUnassigned;
+
+		// The count of 'set' inserted to pTree. The actual ptree.insert() number could be higher, because of the range
+		// clear split, see metric pTreeClearSplits.
+		Counter pTreeSets;
+		// The count of clear range inserted to pTree
+		Counter pTreeClears;
+		// If set is within a range of clear, the clear is split. It's tracking the number of splits, the split could be
+		// expensive.
+		Counter pTreeClearSplits;
+
+		LatencySample readLatencySample;
+		LatencySample readKeyLatencySample;
+		LatencySample readValueLatencySample;
+		LatencySample readRangeLatencySample;
+		LatencySample readVersionWaitSample;
+		LatencySample readQueueWaitSample;
+		LatencySample kvReadRangeLatencySample;
+		LatencySample updateLatencySample;
+
+		LatencyBands readLatencyBands;
+		LatencySample mappedRangeSample; // Samples getMappedRange latency
+		LatencySample mappedRangeRemoteSample; // Samples getMappedRange remote subquery latency
+		LatencySample mappedRangeLocalSample; // Samples getMappedRange local subquery latency
+
+		Counters(StorageServer* self)
+		  : cc("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
+		    systemKeyQueries("SystemKeyQueries", cc), getKeyQueries("GetKeyQueries", cc),
+		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
+		    getRangeSystemKeyQueries("GetRangeSystemKeyQueries", cc),
+		    getMappedRangeQueries("GetMappedRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
+		    finishedQueries("FinishedQueries", cc), lowPriorityQueries("LowPriorityQueries", cc),
+		    rowsQueried("RowsQueried", cc), bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc),
+		    emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
+		    feedBytesQueried("FeedBytesQueried", cc), feedStreamQueries("FeedStreamQueries", cc),
+		    rejectedFeedStreamQueries("RejectedFeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
+		    bytesInput("BytesInput", cc), logicalBytesInput("LogicalBytesInput", cc),
+		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
+		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
+		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
+		    bytesDurable("BytesDurable", cc), bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc),
+		    feedBytesFetched("FeedBytesFetched", cc), sampledBytesCleared("SampledBytesCleared", cc),
+		    kvFetched("KVFetched", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
+		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
+		    changeFeedMutations("ChangeFeedMutations", cc),
+		    changeFeedMutationsDurable("ChangeFeedMutationsDurable", cc), updateBatches("UpdateBatches", cc),
+		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
+		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
+		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
+		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
+		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
+		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
+		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvScanBytes("KVScanBytes", cc),
+		    kvGetBytes("KVGetBytes", cc), eagerReadsKeys("EagerReadsKeys", cc), kvGets("KVGets", cc),
+		    kvScans("KVScans", cc), kvCommits("KVCommits", cc), changeFeedDiskReads("ChangeFeedDiskReads", cc),
+		    getMappedRangeBytesQueried("GetMappedRangeBytesQueried", cc),
+		    finishedGetMappedRangeQueries("FinishedGetMappedRangeQueries", cc),
+		    finishedGetMappedRangeSecondaryQueries("FinishedGetMappedRangeSecondaryQueries", cc),
+		    pTreeSets("PTreeSets", cc), pTreeClears("PTreeClears", cc), pTreeClearSplits("PTreeClearSplits", cc),
+		    changeServerKeysAssigned("ChangeServerKeysAssigned", cc),
+		    changeServerKeysUnassigned("ChangeServerKeysUnassigned", cc),
+		    kvClearRangesInFetchKeys("KvClearRangesInFetchKeys", cc),
+		    readLatencySample("ReadLatencyMetrics",
+		                      self->thisServerID,
+		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    readKeyLatencySample("GetKeyMetrics",
+		                         self->thisServerID,
+		                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    readValueLatencySample("GetValueMetrics",
+		                           self->thisServerID,
+		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    readRangeLatencySample("GetRangeMetrics",
+		                           self->thisServerID,
+		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    readVersionWaitSample("ReadVersionWaitMetrics",
+		                          self->thisServerID,
+		                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    readQueueWaitSample("ReadQueueWaitMetrics",
+		                        self->thisServerID,
+		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+		    mappedRangeSample("GetMappedRangeMetrics",
+		                      self->thisServerID,
+		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    mappedRangeRemoteSample("GetMappedRangeRemoteMetrics",
+		                            self->thisServerID,
+		                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    mappedRangeLocalSample("GetMappedRangeLocalMetrics",
+		                           self->thisServerID,
+		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    kvReadRangeLatencySample("KVGetRangeMetrics",
+		                             self->thisServerID,
+		                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    updateLatencySample("UpdateLatencyMetrics",
+		                        self->thisServerID,
+		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
+			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
+			specialCounter(cc, "Version", [self]() { return self->version.get(); });
+			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
+			specialCounter(cc, "DurableVersion", [self]() { return self->durableVersion.get(); });
+			specialCounter(cc, "DesiredOldestVersion", [self]() { return self->desiredOldestVersion.get(); });
+			specialCounter(cc, "VersionLag", [self]() { return self->versionLag; });
+			specialCounter(cc, "LocalRate", [self] { return int64_t(self->currentRate() * 100); });
+
+			specialCounter(cc, "BytesReadSampleCount", [self]() { return self->metrics.bytesReadSample.queue.size(); });
+			specialCounter(
+			    cc, "FetchKeysFetchActive", [self]() { return self->fetchKeysParallelismLock.activePermits(); });
+			specialCounter(cc, "FetchKeysWaiting", [self]() { return self->fetchKeysParallelismLock.waiters(); });
+			specialCounter(cc, "FetchKeysChangeFeedFetchActive", [self]() {
+				return self->fetchKeysParallelismChangeFeedLock.activePermits();
+			});
+			specialCounter(cc, "FetchKeysFullFetchWaiting", [self]() {
+				return self->fetchKeysParallelismChangeFeedLock.waiters();
+			});
+			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
+				return self->serveFetchCheckpointParallelismLock.activePermits();
+			});
+			specialCounter(cc, "ServeFetchCheckpointWaiting", [self]() {
+				return self->serveFetchCheckpointParallelismLock.waiters();
+			});
+			specialCounter(cc, "ServeValidateStorageActive", [self]() {
+				return self->serveAuditStorageParallelismLock.activePermits();
+			});
+			specialCounter(cc, "ServeValidateStorageWaiting", [self]() {
+				return self->serveAuditStorageParallelismLock.waiters();
+			});
+			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
+			specialCounter(cc, "BytesStored", [self]() { return self->metrics.byteSample.getEstimate(allKeys); });
+			specialCounter(cc, "ActiveWatches", [self]() { return self->numWatches; });
+			specialCounter(cc, "WatchBytes", [self]() { return self->watchBytes; });
+			specialCounter(cc, "KvstoreSizeTotal", [self]() { return std::get<0>(self->storage.getSize()); });
+			specialCounter(cc, "KvstoreNodeTotal", [self]() { return std::get<1>(self->storage.getSize()); });
+			specialCounter(cc, "KvstoreInlineKey", [self]() { return std::get<2>(self->storage.getSize()); });
+			specialCounter(cc, "ActiveChangeFeeds", [self]() { return self->uidChangeFeed.size(); });
+			specialCounter(cc, "ActiveChangeFeedQueries", [self]() { return self->activeFeedQueries; });
+			specialCounter(cc, "ChangeFeedMemoryBytes", [self]() { return self->changeFeedMemoryBytes; });
+		}
+	} counters;
+
 private:
 	// versionedData contains sets and clears.
 
@@ -1310,234 +1539,6 @@ public:
 	Key sk;
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	Database cx;
-
-	struct Counters {
-		CounterCollection cc;
-		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
-		    getRangeStreamQueries, finishedQueries, lowPriorityQueries, rowsQueried, bytesQueried, watchQueries,
-		    emptyQueries, feedRowsQueried, feedBytesQueried, feedStreamQueries, rejectedFeedStreamQueries,
-		    feedVersionQueries;
-
-		// counters related to getMappedRange queries
-		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
-		    finishedGetMappedRangeQueries;
-
-		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
-		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
-		Counter bytesInput;
-		// Bytes pulled from TLogs, it counts the size of the key value pairs, e.g., key-value pair ("a", "b") is
-		// counted as 2 Bytes.
-		Counter logicalBytesInput;
-		// Bytes pulled from TLogs for moving-in shards, it counts the mutations sent to the moving-in shard during
-		// Fetching and Waiting phases.
-		Counter logicalBytesMoveInOverhead;
-		// Bytes committed to the underlying storage engine by SS, it counts the size of key value pairs.
-		Counter kvCommitLogicalBytes;
-		// Count of all clearRange operations to the storage engine.
-		Counter kvClearRanges;
-		// Count of all clearRange operations on a singlekeyRange(key delete) to the storage engine.
-		Counter kvClearSingleKey;
-		// ClearRange operations issued by FDB, instead of from users, e.g., ClearRange operations to remove a shard
-		// from a storage server, as in removeDataRange().
-		Counter kvSystemClearRanges;
-		// Bytes of the mutations that have been removed from memory because they durable. The counting is same as
-		// bytesInput, instead of the actual bytes taken in the storages, so that (bytesInput - bytesDurable) can
-		// reflect the current memory footprint of MVCC.
-		Counter bytesDurable;
-		// Bytes fetched by fetchKeys() for data movements. The size is counted as a collection of KeyValueRef.
-		Counter bytesFetched;
-		// Like bytesInput but without MVCC accounting. The size is counted as how much it takes when serialized. It
-		// is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
-		// and the lengths of both parameters.
-		Counter mutationBytes;
-		// Count of all fetchKey clearRange operations to the storage engine.
-		Counter kvClearRangesInFetchKeys;
-
-		// Bytes fetched by fetchChangeFeed for data movements.
-		Counter feedBytesFetched;
-
-		Counter sampledBytesCleared;
-		// The number of key-value pairs fetched by fetchKeys()
-		Counter kvFetched;
-		Counter mutations, setMutations, clearRangeMutations, atomicMutations, changeFeedMutations,
-		    changeFeedMutationsDurable;
-		Counter updateBatches, updateVersions;
-		Counter loops;
-		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
-		Counter readsRejected;
-		Counter wrongShardServer;
-		Counter fetchedVersions;
-		Counter fetchesFromLogs;
-		// The following counters measure how many of lookups in the getMappedRangeQueries are effective. "Miss"
-		// means fallback if fallback is enabled, otherwise means failure (so that another layer could implement
-		// fallback).
-		Counter quickGetValueHit, quickGetValueMiss, quickGetKeyValuesHit, quickGetKeyValuesMiss;
-
-		// The number of logical bytes returned from storage engine, in response to readRange operations.
-		Counter kvScanBytes;
-		// The number of logical bytes returned from storage engine, in response to readValue operations.
-		Counter kvGetBytes;
-		// The number of keys read from storage engine by eagerReads.
-		Counter eagerReadsKeys;
-		// The count of readValue operation to the storage engine.
-		Counter kvGets;
-		// The count of readValue operation to the storage engine.
-		Counter kvScans;
-		// The count of commit operation to the storage engine.
-		Counter kvCommits;
-		// The count of change feed reads that hit disk
-		Counter changeFeedDiskReads;
-		// The count of ChangeServerKeys actions.
-		Counter changeServerKeysAssigned;
-		Counter changeServerKeysUnassigned;
-
-		// The count of 'set' inserted to pTree. The actual ptree.insert() number could be higher, because of the range
-		// clear split, see metric pTreeClearSplits.
-		Counter pTreeSets;
-		// The count of clear range inserted to pTree
-		Counter pTreeClears;
-		// If set is within a range of clear, the clear is split. It's tracking the number of splits, the split could be
-		// expensive.
-		Counter pTreeClearSplits;
-
-		LatencySample readLatencySample;
-		LatencySample readKeyLatencySample;
-		LatencySample readValueLatencySample;
-		LatencySample readRangeLatencySample;
-		LatencySample readVersionWaitSample;
-		LatencySample readQueueWaitSample;
-		LatencySample kvReadRangeLatencySample;
-		LatencySample updateLatencySample;
-
-		LatencyBands readLatencyBands;
-		LatencySample mappedRangeSample; // Samples getMappedRange latency
-		LatencySample mappedRangeRemoteSample; // Samples getMappedRange remote subquery latency
-		LatencySample mappedRangeLocalSample; // Samples getMappedRange local subquery latency
-
-		Counters(StorageServer* self)
-		  : cc("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
-		    systemKeyQueries("SystemKeyQueries", cc), getKeyQueries("GetKeyQueries", cc),
-		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
-		    getRangeSystemKeyQueries("GetRangeSystemKeyQueries", cc),
-		    getMappedRangeQueries("GetMappedRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
-		    finishedQueries("FinishedQueries", cc), lowPriorityQueries("LowPriorityQueries", cc),
-		    rowsQueried("RowsQueried", cc), bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc),
-		    emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
-		    feedBytesQueried("FeedBytesQueried", cc), feedStreamQueries("FeedStreamQueries", cc),
-		    rejectedFeedStreamQueries("RejectedFeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
-		    bytesInput("BytesInput", cc), logicalBytesInput("LogicalBytesInput", cc),
-		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
-		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
-		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
-		    bytesDurable("BytesDurable", cc), bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc),
-		    feedBytesFetched("FeedBytesFetched", cc), sampledBytesCleared("SampledBytesCleared", cc),
-		    kvFetched("KVFetched", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
-		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
-		    changeFeedMutations("ChangeFeedMutations", cc),
-		    changeFeedMutationsDurable("ChangeFeedMutationsDurable", cc), updateBatches("UpdateBatches", cc),
-		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
-		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
-		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
-		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
-		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
-		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
-		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvScanBytes("KVScanBytes", cc),
-		    kvGetBytes("KVGetBytes", cc), eagerReadsKeys("EagerReadsKeys", cc), kvGets("KVGets", cc),
-		    kvScans("KVScans", cc), kvCommits("KVCommits", cc), changeFeedDiskReads("ChangeFeedDiskReads", cc),
-		    getMappedRangeBytesQueried("GetMappedRangeBytesQueried", cc),
-		    finishedGetMappedRangeQueries("FinishedGetMappedRangeQueries", cc),
-		    finishedGetMappedRangeSecondaryQueries("FinishedGetMappedRangeSecondaryQueries", cc),
-		    pTreeSets("PTreeSets", cc), pTreeClears("PTreeClears", cc), pTreeClearSplits("PTreeClearSplits", cc),
-		    changeServerKeysAssigned("ChangeServerKeysAssigned", cc),
-		    changeServerKeysUnassigned("ChangeServerKeysUnassigned", cc),
-		    kvClearRangesInFetchKeys("KvClearRangesInFetchKeys", cc),
-		    readLatencySample("ReadLatencyMetrics",
-		                      self->thisServerID,
-		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    readKeyLatencySample("GetKeyMetrics",
-		                         self->thisServerID,
-		                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    readValueLatencySample("GetValueMetrics",
-		                           self->thisServerID,
-		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    readRangeLatencySample("GetRangeMetrics",
-		                           self->thisServerID,
-		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    readVersionWaitSample("ReadVersionWaitMetrics",
-		                          self->thisServerID,
-		                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    readQueueWaitSample("ReadQueueWaitMetrics",
-		                        self->thisServerID,
-		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
-		    mappedRangeSample("GetMappedRangeMetrics",
-		                      self->thisServerID,
-		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    mappedRangeRemoteSample("GetMappedRangeRemoteMetrics",
-		                            self->thisServerID,
-		                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    mappedRangeLocalSample("GetMappedRangeLocalMetrics",
-		                           self->thisServerID,
-		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    kvReadRangeLatencySample("KVGetRangeMetrics",
-		                             self->thisServerID,
-		                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    updateLatencySample("UpdateLatencyMetrics",
-		                        self->thisServerID,
-		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
-			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
-			specialCounter(cc, "Version", [self]() { return self->version.get(); });
-			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
-			specialCounter(cc, "DurableVersion", [self]() { return self->durableVersion.get(); });
-			specialCounter(cc, "DesiredOldestVersion", [self]() { return self->desiredOldestVersion.get(); });
-			specialCounter(cc, "VersionLag", [self]() { return self->versionLag; });
-			specialCounter(cc, "LocalRate", [self] { return int64_t(self->currentRate() * 100); });
-
-			specialCounter(cc, "BytesReadSampleCount", [self]() { return self->metrics.bytesReadSample.queue.size(); });
-			specialCounter(
-			    cc, "FetchKeysFetchActive", [self]() { return self->fetchKeysParallelismLock.activePermits(); });
-			specialCounter(cc, "FetchKeysWaiting", [self]() { return self->fetchKeysParallelismLock.waiters(); });
-			specialCounter(cc, "FetchKeysChangeFeedFetchActive", [self]() {
-				return self->fetchKeysParallelismChangeFeedLock.activePermits();
-			});
-			specialCounter(cc, "FetchKeysFullFetchWaiting", [self]() {
-				return self->fetchKeysParallelismChangeFeedLock.waiters();
-			});
-			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
-				return self->serveFetchCheckpointParallelismLock.activePermits();
-			});
-			specialCounter(cc, "ServeFetchCheckpointWaiting", [self]() {
-				return self->serveFetchCheckpointParallelismLock.waiters();
-			});
-			specialCounter(cc, "ServeValidateStorageActive", [self]() {
-				return self->serveAuditStorageParallelismLock.activePermits();
-			});
-			specialCounter(cc, "ServeValidateStorageWaiting", [self]() {
-				return self->serveAuditStorageParallelismLock.waiters();
-			});
-			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
-			specialCounter(cc, "BytesStored", [self]() { return self->metrics.byteSample.getEstimate(allKeys); });
-			specialCounter(cc, "ActiveWatches", [self]() { return self->numWatches; });
-			specialCounter(cc, "WatchBytes", [self]() { return self->watchBytes; });
-			specialCounter(cc, "KvstoreSizeTotal", [self]() { return std::get<0>(self->storage.getSize()); });
-			specialCounter(cc, "KvstoreNodeTotal", [self]() { return std::get<1>(self->storage.getSize()); });
-			specialCounter(cc, "KvstoreInlineKey", [self]() { return std::get<2>(self->storage.getSize()); });
-			specialCounter(cc, "ActiveChangeFeeds", [self]() { return self->uidChangeFeed.size(); });
-			specialCounter(cc, "ActiveChangeFeedQueries", [self]() { return self->activeFeedQueries; });
-			specialCounter(cc, "ChangeFeedMemoryBytes", [self]() { return self->changeFeedMemoryBytes; });
-		}
-	} counters;
 
 	ActorCollection actors;
 
