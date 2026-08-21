@@ -235,7 +235,7 @@ struct GetValueRequest : TimedRequest {
 	                Optional<TagSet> tags,
 	                Optional<ReadOptions> options,
 	                VersionVector latestCommitVersions)
-	  : spanContext(std::move(spanContext)), key(key), version(ver), tags(std::move(tags)), options(std::move(options)),
+	  : spanContext(spanContext), key(key), version(ver), tags(std::move(tags)), options(options),
 	    ssLatestCommitVersions(std::move(latestCommitVersions)) {}
 
 	template <class Ar>
@@ -498,8 +498,8 @@ struct GetKeyRequest : TimedRequest {
 	              Optional<TagSet> tags,
 	              Optional<ReadOptions> options,
 	              VersionVector latestCommitVersions)
-	  : spanContext(std::move(spanContext)), sel(sel), version(version), tags(std::move(tags)),
-	    options(std::move(options)), ssLatestCommitVersions(std::move(latestCommitVersions)) {}
+	  : spanContext(spanContext), sel(sel), version(version), tags(std::move(tags)), options(options),
+	    ssLatestCommitVersions(std::move(latestCommitVersions)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

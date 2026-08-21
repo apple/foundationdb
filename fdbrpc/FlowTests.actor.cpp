@@ -394,9 +394,9 @@ struct Int {
 
 template <class T>
 SAV<T>* replyPromiseState(ReplyPromise<T>& promise) {
-	auto* state = promise.extractRawPointer();
-	promise = ReplyPromise<T>(state);
-	return state;
+	auto* rawState = promise.extractRawPointer();
+	promise = ReplyPromise<T>(rawState);
+	return rawState;
 }
 
 struct ReplyPromiseReuseRequest {

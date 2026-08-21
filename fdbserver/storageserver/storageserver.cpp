@@ -2331,6 +2331,7 @@ Future<Void> getValueQStorageRead(StorageServer* data,
                                   Version version,
                                   uint64_t changeCounter,
                                   Future<Optional<Value>> valueFuture) {
+	Span activeSpan(std::move(span));
 	StorageServer::GetValueQuery activeQuery(std::move(query));
 	GetValueRequest& req = activeQuery.getRequest();
 	int64_t resultSize = 0;
@@ -2352,6 +2353,8 @@ Future<Void> getValueQImpl(StorageServer* data,
                            Span span,
                            bool externallyDispatched,
                            Optional<PriorityMultiLock::Releaser> immediateReadLock = {}) {
+	// A completed Future can outlive the operation, so keep the active span in body scope.
+	Span activeSpan(std::move(span));
 	StorageServer::GetValueQuery activeQuery(std::move(query));
 	GetValueRequest& req = activeQuery.getRequest();
 	int64_t resultSize = 0;

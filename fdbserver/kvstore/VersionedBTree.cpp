@@ -7518,7 +7518,7 @@ public:
 			             false,
 			             !options.present() || options.get().cacheResult || path.back().btPage()->height != 2);
 			if (!pageFuture.isReady()) {
-				return pushChildPageSlow(std::move(pageFuture), std::move(linkCopy));
+				return pushChildPageSlow(std::move(pageFuture), linkCopy);
 			}
 			if (pageFuture.isError()) {
 				return pageFuture.getError();
@@ -7564,7 +7564,7 @@ public:
 		                  BTreeNodeLink root) {
 			btree = btree_in;
 			reason = reason_in;
-			options = std::move(options_in);
+			options = options_in;
 			pager = std::move(pager_in);
 			path.clear();
 			path.reserve(6);
@@ -7816,7 +7816,7 @@ public:
 			root = *snapshot->extra.getPtr<BTreeNodeLink>();
 		}
 
-		return cursor->init(this, reason, std::move(options), std::move(snapshot), root);
+		return cursor->init(this, reason, options, std::move(snapshot), root);
 	}
 };
 

@@ -1250,7 +1250,7 @@ static coro::DetachedCoroutine deliverAfterDelay(TransportData* self,
                                                  bool isTrustedPeer,
                                                  Future<Void> disconnect) {
 	co_await orderedDelay(0, priority);
-	deliverNow(self, destination, std::move(reader), peerAddress, isTrustedPeer, std::move(disconnect));
+	deliverNow(self, destination, std::move(reader), peerAddress, isTrustedPeer, disconnect);
 }
 
 static void deliver(TransportData* self,

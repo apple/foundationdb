@@ -493,6 +493,7 @@ TEST_CASE("/flow/Tracing/MoveConstructionPreservesAttributes") {
 	ASSERT_EQ(source.attributes.size(), 2);
 
 	Span moved(std::move(source));
+	// NOLINTNEXTLINE(bugprone-use-after-move): The move constructor explicitly resets the source attributes.
 	ASSERT_EQ(source.attributes.size(), 0);
 	ASSERT_EQ(moved.attributes.size(), 2);
 	ASSERT_EQ(moved.attributes[0].key, "address"_sr);
