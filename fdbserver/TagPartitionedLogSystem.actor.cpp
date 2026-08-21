@@ -519,18 +519,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 						}
 					}
 				}
-				// Monitor changes of backup workers for old epochs.
-				for (const auto& worker : old.tLogs[0]->backupWorkers) {
-					if (worker->get().present()) {
-						backupFailed.push_back(waitFailureClient(worker->get().interf().waitFailure,
-						                                         SERVER_KNOBS->BACKUP_TIMEOUT,
-						                                         -SERVER_KNOBS->BACKUP_TIMEOUT /
-						                                             SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-						                                         /*trace=*/true));
-					} else {
-						changes.push_back(worker->onChange());
-					}
-				}
+				// Old-epoch backup workers are stateless and persist their progress. We intentionally do not
+				// start a transaction-system recovery on their failure, since repeated recoveries could stall
+				// recovery and hurt availability.
 			}
 		}
 
