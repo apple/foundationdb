@@ -26,7 +26,7 @@
 #include "flow/Optional.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 struct TxnTimeout : TestWorkload {
 	static constexpr auto NAME = "TxnTimeout";
@@ -68,7 +68,8 @@ struct TxnTimeout : TestWorkload {
 			return Void();
 		}
 
-		return timeout(reportErrors(workload(this, db), "TxnTimeoutError"), testDuration, Void());
+		// Let in-flight transactions drain so the final success count includes every attempted transaction.
+		return reportErrors(workload(this, db), "TxnTimeoutError");
 	}
 
 	Future<bool> check(const Database& db) override {

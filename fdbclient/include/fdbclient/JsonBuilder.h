@@ -10,7 +10,7 @@
 class JsonBuilder;
 class JsonBuilderObject;
 class JsonBuilderArray;
-typedef JsonBuilder JsonString;
+using JsonString = JsonBuilder;
 template <typename T>
 class JsonBuilderObjectSetter;
 
@@ -22,7 +22,7 @@ class JsonBuilder {
 protected:
 	enum EType { NULLVALUE, OBJECT, ARRAY };
 
-	typedef VectorRef<char> VString;
+	using VString = VectorRef<char>;
 
 public:
 	// Default value is null, which will be considered "empty"

@@ -24,7 +24,7 @@
 
 class IRateControl {
 public:
-	virtual ~IRateControl() {}
+	virtual ~IRateControl() = default;
 	// Future is Ready once you can use n units;
 	virtual Future<Void> getAllowance(unsigned int n) = 0;
 	// If all of the allowance is not used the unused units can be given back.
@@ -98,7 +98,7 @@ private:
 // An IRateControl implementation that enforces no limit
 class Unlimited final : public IRateControl, ReferenceCounted<Unlimited> {
 public:
-	Unlimited() {}
+	Unlimited() = default;
 	~Unlimited() override = default;
 	void addref() override { ReferenceCounted<Unlimited>::addref(); }
 	void delref() override { ReferenceCounted<Unlimited>::delref(); }

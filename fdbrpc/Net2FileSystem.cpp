@@ -20,6 +20,8 @@
 
 #include "fdbrpc/Net2FileSystem.h"
 
+#include <algorithm>
+
 // Define boost::asio::io_service
 #ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
@@ -55,10 +57,11 @@ Future<Void> runAsyncFileKAIOTestOps(Reference<IAsyncFile> f, int numIterations,
 		std::vector<Future<Void>> futures;
 		for (int numOps = deterministicRandom()->randomInt(1, 20); numOps > 0; --numOps) {
 			if (deterministicRandom()->coinflip()) {
-				futures.push_back(
-				    success(f->read(buf, 4096, deterministicRandom()->randomInt(0, fileSize) / 4096 * 4096)));
+				futures.push_back(success(f->read(
+				    buf, 4096, static_cast<int64_t>(deterministicRandom()->randomInt(0, fileSize)) / 4096 * 4096)));
 			} else {
-				futures.push_back(f->write(buf, 4096, deterministicRandom()->randomInt(0, fileSize) / 4096 * 4096));
+				futures.push_back(f->write(
+				    buf, 4096, static_cast<int64_t>(deterministicRandom()->randomInt(0, fileSize)) / 4096 * 4096));
 			}
 		}
 		for (int fIndex = 0; fIndex < futures.size(); ++fIndex) {
@@ -116,6 +119,7 @@ TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
 		} catch (Error& e) {
 			err = e;
 		}
+		AsyncFileKAIO::setTimeout(0.0);
 		if (err.present()) {
 			if (f) {
 				co_await AsyncFileEIO::deleteFile(f->getFilename(), true);
@@ -133,10 +137,13 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 #ifdef __linux__
 	if (checkFileSystem) {
 		dev_t fileDeviceId = getDeviceId(filename);
-		if (fileDeviceId != this->fileSystemDeviceId) {
-			TraceEvent(SevError, "DeviceIdMismatched")
-			    .detail("FileSystemDeviceId", this->fileSystemDeviceId)
-			    .detail("FileDeviceId", fileDeviceId);
+		if (std::find(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end(), fileDeviceId) ==
+		    this->fileSystemDeviceIds.end()) {
+			TraceEvent te(SevError, "DeviceIdMismatched");
+			te.detail("FileDeviceId", fileDeviceId);
+			for (size_t i = 0; i < this->fileSystemDeviceIds.size(); ++i) {
+				te.detail(format("AllowedFileSystemDeviceId%zu", i).c_str(), this->fileSystemDeviceIds[i]);
+			}
 			throw io_error();
 		}
 	}
@@ -159,15 +166,18 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 		f = AsyncFileKAIO::open(filename, flags, mode, nullptr);
 	else
 #endif
+	{
 		f = Net2AsyncFile::open(
 		    filename,
 		    flags,
 		    mode,
 		    static_cast<boost::asio::io_service*>((void*)g_network->global(INetwork::enASIOService)));
-	if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
+	}
+	if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0) {
 		f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> {
 			return makeReference<AsyncFileWriteChecker>(r);
 		});
+	}
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
 		f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> { return makeReference<AsyncFileChaos>(r); });
 	return f;
@@ -189,36 +199,52 @@ ActorLineageSet& Net2FileSystem::getActorLineageSet() {
 }
 #endif
 
-void Net2FileSystem::newFileSystem(double ioTimeout, const std::string& fileSystemPath) {
-	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Net2FileSystem(ioTimeout, fileSystemPath));
+void Net2FileSystem::newFileSystem(double ioTimeout, const std::vector<std::string>& fileSystemPaths) {
+	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Net2FileSystem(ioTimeout, fileSystemPaths));
 }
 
-Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPath) {
+void Net2FileSystem::newFileSystem(double ioTimeout, const std::string& fileSystemPath) {
+	newFileSystem(ioTimeout,
+	              fileSystemPath.empty() ? std::vector<std::string>() : std::vector<std::string>{ fileSystemPath });
+}
+
+Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPath)
+  : Net2FileSystem(ioTimeout,
+                   fileSystemPath.empty() ? std::vector<std::string>() : std::vector<std::string>{ fileSystemPath }) {}
+
+Net2FileSystem::Net2FileSystem(double ioTimeout, const std::vector<std::string>& fileSystemPaths) {
 	Net2AsyncFile::init();
 #ifdef __linux__
 	if (!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
 		AsyncFileKAIO::init(Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout);
 
-	if (fileSystemPath.empty()) {
+	if (fileSystemPaths.empty()) {
 		checkFileSystem = false;
 	} else {
 		checkFileSystem = true;
 
-		try {
-			this->fileSystemDeviceId = getDeviceId(fileSystemPath);
-			if (fileSystemPath != "/") {
-				dev_t fileSystemParentDeviceId = getDeviceId(parentDirectory(fileSystemPath));
-				if (this->fileSystemDeviceId == fileSystemParentDeviceId) {
-					criticalError(FDB_EXIT_ERROR,
-					              "FileSystemError",
-					              format("`%s' is not a mount point", fileSystemPath.c_str()).c_str());
+		for (const auto& fileSystemPath : fileSystemPaths) {
+			try {
+				dev_t fileSystemDeviceId = getDeviceId(fileSystemPath);
+				if (fileSystemPath != "/") {
+					dev_t fileSystemParentDeviceId = getDeviceId(parentDirectory(fileSystemPath));
+					if (fileSystemDeviceId == fileSystemParentDeviceId) {
+						criticalError(FDB_EXIT_ERROR,
+						              "FileSystemError",
+						              format("`%s' is not a mount point", fileSystemPath.c_str()).c_str());
+					}
 				}
+				this->fileSystemDeviceIds.push_back(fileSystemDeviceId);
+			} catch (Error&) {
+				criticalError(FDB_EXIT_ERROR,
+				              "FileSystemError",
+				              format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
 			}
-		} catch (Error&) {
-			criticalError(FDB_EXIT_ERROR,
-			              "FileSystemError",
-			              format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
 		}
+
+		std::sort(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end());
+		this->fileSystemDeviceIds.erase(std::unique(this->fileSystemDeviceIds.begin(), this->fileSystemDeviceIds.end()),
+		                                this->fileSystemDeviceIds.end());
 	}
 #endif
 }

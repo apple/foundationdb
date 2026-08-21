@@ -349,7 +349,8 @@ class UpgradeTest:
             print(traceback.format_exc())
             self.kill_tester_if_alive(workload_thread, False)
         finally:
-            workload_thread.join(5)
+            # 30s to allow ASAN builds time to complete shutdown cleanup
+            workload_thread.join(30)
             reader_thread.join(5)
             self.kill_tester_if_alive(workload_thread, True)
             if test_retcode == 0:

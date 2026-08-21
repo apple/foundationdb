@@ -240,11 +240,12 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 
 			// state Future<Void> d = delay( 1/25. * (.75 + 0.5*deterministicRandom()->random01()) );
 			int64_t offset;
-			if (unbufferedIO)
+			if (unbufferedIO) {
 				offset = (int64_t)(deterministicRandom()->random01() * (fileSize - 1) / AsyncFileWorkload::_PAGE_SIZE) *
 				         AsyncFileWorkload::_PAGE_SIZE;
-			else
+			} else {
 				offset = (int64_t)(deterministicRandom()->random01() * (fileSize - 1));
+			}
 
 			writeFlag = deterministicRandom()->random01() < writeFraction;
 			if (writeFlag)
@@ -289,12 +290,13 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 					// If the file is exhausted, start over at the beginning
 					if (offset >= self->fileSize)
 						offset = 0;
-				} else if (self->unbufferedIO)
+				} else if (self->unbufferedIO) {
 					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1) /
 					                   AsyncFileWorkload::_PAGE_SIZE) *
 					         AsyncFileWorkload::_PAGE_SIZE;
-				else
+				} else {
 					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1));
+				}
 
 				// Perform the read.  Don't allow it to be cancelled (because the underlying IO may not be cancellable)
 				// and don't allow objects that the read uses to be deleted
@@ -305,7 +307,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 			}
 
 			co_await waitForAll(self->readFutures);
-			self->bytesRead += self->readSize * self->numParallelReads;
+			self->bytesRead += static_cast<int64_t>(self->readSize) * self->numParallelReads;
 
 			self->readFutures.clear();
 

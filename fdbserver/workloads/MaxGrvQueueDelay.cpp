@@ -23,7 +23,7 @@
 #include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 // This workload validates the MAX_GRV_QUEUE_DELAY transaction option end-to-end.
 // The test file lowers GRV ratekeeper limits so a burst of uncached GRV requests
@@ -48,7 +48,7 @@ struct MaxGrvQueueDelayWorkload : TestWorkload {
 	PerfIntCounter rejected;
 	PerfIntCounter unexpectedErrors;
 
-	MaxGrvQueueDelayWorkload(WorkloadContext const& wcx)
+	explicit MaxGrvQueueDelayWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), requests("Requests"), successes("Successes"), rejected("Rejected"),
 	    unexpectedErrors("UnexpectedErrors") {
 		requestCount = getOption(options, "requestCount"_sr, 50);

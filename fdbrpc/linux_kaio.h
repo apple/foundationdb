@@ -20,7 +20,7 @@
 
 // AIO system calls
 
-typedef struct io_context* io_context_t;
+using io_context_t = struct io_context*;
 
 enum { IO_CMD_PREAD = 0, IO_CMD_PWRITE = 1, IO_CMD_FSYNC = 2, IO_CMD_FDSYNC = 3 };
 

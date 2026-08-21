@@ -35,7 +35,7 @@ import traceback
 import weakref
 
 import fdb
-from fdb.tuple import pack, int2byte
+from fdb.tuple import int2byte
 
 from fdb import fdboptions as _opts
 

@@ -36,6 +36,7 @@
 #include "fdbbackup/FileConverter.h"
 #include "fdbbackup/Decode.h"
 #include "fdbclient/BackupAgent.h"
+#include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/CommitTransaction.h"

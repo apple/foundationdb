@@ -43,7 +43,7 @@ struct RangeResultBlock {
 	// rounded up to the nearest 1M), to ensure that no versions out of this RangeResultBlock can be in between.
 	Standalone<RangeResultRef> consume();
 
-	bool empty() { return indexToRead == result.size(); }
+	bool empty() const { return indexToRead == result.size(); }
 
 	bool operator<(const RangeResultBlock& r) const {
 		// We want a min heap. The standard C++ priority queue is a max heap.
@@ -61,7 +61,6 @@ public:
 
 	void startReading(Database cx);
 	Future<Void> getNext(Database cx);
-	static Future<Void> getNext_impl(PipelinedReader* self, Database cx);
 
 	void release() { readerLimit.release(); }
 
@@ -109,15 +108,14 @@ public:
 	                                                   Key beginKey,
 	                                                   unsigned pd) {
 		Reference<MutationLogReader> self(new MutationLogReader(cx, bv, ev, uid, beginKey, pd));
-		co_await self->initializePQ(self.getPtr());
+		co_await self->initializePQ();
 		co_return self;
 	}
 
 	Future<Standalone<RangeResultRef>> getNext();
 
 private:
-	static Future<Void> initializePQ(MutationLogReader* self);
-	static Future<Standalone<RangeResultRef>> getNext_impl(MutationLogReader* self);
+	Future<Void> initializePQ();
 
 	std::vector<std::unique_ptr<mutation_log_reader::PipelinedReader>> pipelinedReaders;
 	std::priority_queue<mutation_log_reader::RangeResultBlock> priorityQueue;

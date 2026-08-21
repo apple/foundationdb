@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 
 Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> in,
                                      Reference<AsyncVar<Optional<ClusterInterface>>> out) {

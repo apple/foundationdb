@@ -22,19 +22,38 @@
 #define FLOW_UNIT_TEST_RUNNER_H
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
+
+#include "flow/flow.h"
 
 class UnitTestRunnerConfig {
 public:
-	explicit UnitTestRunnerConfig(std::string_view sourceSubDir);
+	using SimulationInitializer = std::function<Future<Void>()>;
+	using NetworkInitializer = std::function<void()>;
+
+	explicit UnitTestRunnerConfig(std::string_view sourceSubDir,
+	                              SimulationInitializer simulationInitializer = {},
+	                              NetworkInitializer networkInitializer = {},
+	                              std::vector<std::string> normalTestsIgnored = {},
+	                              std::vector<std::string> simulationTestsIgnored = {});
 
 	std::string_view suiteName() const;
 	std::string dataDir() const;
 	std::string traceName() const;
+	bool supportsSimulation() const;
+	Future<Void> initializeSimulation() const;
+	void initializeNetwork() const;
+	const std::vector<std::string>& defaultTestsIgnored(bool simulation) const;
 
 private:
 	std::string_view sourceSubDir;
+	SimulationInitializer simulationInitializer;
+	NetworkInitializer networkInitializer;
+	std::vector<std::string> normalTestsIgnored;
+	std::vector<std::string> simulationTestsIgnored;
 };
 
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config);

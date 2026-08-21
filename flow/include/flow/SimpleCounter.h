@@ -107,7 +107,7 @@ public:
 	inline const std::string& name(void) const { return name_; }
 
 	static inline SimpleCounter<T>* makeCounter(std::string_view name) {
-		SimpleCounter<T>* rv = new SimpleCounter<T>(name);
+		auto* rv = new SimpleCounter<T>(name);
 
 		std::lock_guard<std::mutex> lock(mutex());
 		std::vector<SimpleCounter<T>*>& v = counters();

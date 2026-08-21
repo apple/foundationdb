@@ -24,11 +24,9 @@ import argparse
 import inspect
 import sys
 
-import rate_model
 import workload_model
 import proxy_model
 import ratekeeper_model
-from priority import Priority
 from plot import Plotter
 
 parser = argparse.ArgumentParser()

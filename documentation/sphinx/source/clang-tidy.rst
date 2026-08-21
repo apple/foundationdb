@@ -3,20 +3,23 @@ Clang-Tidy
 ##########
 
 ``clang-tidy`` is a static analysis tool that detects common programming errors, enforces coding standards, and suggests modern C++ improvements.
-It runs as part of CI on every pull request targeting a branch that has a ``.clang-tidy`` file (currently only ``main``). Findings are reported in the build log but do not currently fail the build. To enforce failures, add ``WarningsAsErrors: '*'`` to ``.clang-tidy``.
+It runs as part of CI on pull requests targeting ``main``. CI checks eligible changed C/C++ files with ``--warnings-as-errors='*'``, so findings fail the clang-tidy job. The workflow currently describes this job as non-required.
 
 This guide explains how to run ``clang-tidy`` locally so you can fix issues before pushing.
 
 What clang-tidy checks
 ======================
 
-FoundationDB enables 13 checks configured in the ``.clang-tidy`` file at the repository root. The
-intent is to enable more as we go forward. Here are some example rules:
+FoundationDB configures 37 named checks in the ``.clang-tidy`` file at the repository root. The
+active set depends on the clang-tidy version and can be inspected with ``clang-tidy --list-checks``.
+The intent is to enable more as we go forward. Here are some example rules:
 
-* **3 Bugprone rules** -- catch potential runtime errors (e.g., ``bugprone-use-after-move``)
+* **20 Bugprone rules** -- catch potential runtime errors, including dangling returned references, incorrect erase/remove calls, and arithmetic widened after the calculation
+* **1 C++ Core Guidelines rule** -- catch unsafe captures in coroutine lambdas (``cppcoreguidelines-avoid-capturing-lambda-coroutines``)
+* **2 Misc rules** -- catch redundant expressions and RAII objects held across coroutine suspension points
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
-* **1 Performance rule** -- avoid unnecessary copies (``performance-for-range-copy``)
-* **5 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
+* **3 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, and pointless moves (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-move-const-arg``)
+* **7 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
 
 Basic examples of ``clang-tidy`` style and performance improvement changes:
 
@@ -168,7 +171,12 @@ Optional CMake variables:
 Known limitations
 -----------------
 
-**``.actor.cpp`` files cannot be analyzed.** These files use FoundationDB's custom actor compiler syntax (``ACTOR``, ``wait()``, ``state``) that ``clang-tidy`` cannot parse. Exclude them from your diff when running locally:
+**``.actor.cpp`` files cannot be analyzed.** These files use FoundationDB's custom actor compiler syntax (``ACTOR``, ``wait()``, ``state``) that ``clang-tidy`` cannot parse. With CMake 3.27 or newer, build-integrated clang-tidy skips generated ``.actor.g.cpp`` outputs using CMake's ``SKIP_LINTING`` property. This automatic suppression is unavailable with the minimum supported CMake version, 3.24.2. Exclude actor inputs from your diff when running locally.
+
+Build-integrated clang-tidy also skips bundled external-library targets, including ``crc32``, ``libb64``, ``md5``, ``libeio``, and ``libcoroutine``.
+
+``readability-simplify-boolean-expr`` is not enabled because it diagnoses ordinary
+uses of FoundationDB's ``ASSERT`` macro after macro expansion.
 
 Quick reference
 ===============

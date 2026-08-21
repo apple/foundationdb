@@ -35,7 +35,7 @@ import traceback
 import weakref
 
 import fdb
-from fdb.tuple import pack, int2byte
+from fdb.tuple import int2byte
 
 from fdb import fdboptions as _opts
 
@@ -162,6 +162,7 @@ def add_operation(fname, v):
     )
     setattr(globals()["Database"], fname, f)
     setattr(globals()["Transaction"], fname, f)
+
 
 def fill_operations():
     _dict = getattr(_opts, "MutationType")
@@ -541,17 +542,29 @@ class TransactionRead(_FDBBase):
             )
         )
 
-    def get_range_split_points(self, begin_key, end_key, chunk_size):
+    def get_range_split_points(self, begin_key, end_key, chunk_size, limit=-1):
         if begin_key is None or end_key is None or chunk_size <= 0:
             raise Exception("Invalid begin key, end key or chunk size")
+        if limit < 0:
+            return FutureKeyArray(
+                self.capi.fdb_transaction_get_range_split_points(
+                    self.tpointer,
+                    begin_key,
+                    len(begin_key),
+                    end_key,
+                    len(end_key),
+                    chunk_size,
+                )
+            )
         return FutureKeyArray(
-            self.capi.fdb_transaction_get_range_split_points(
+            self.capi.fdb_transaction_get_range_split_points_with_limit(
                 self.tpointer,
                 begin_key,
                 len(begin_key),
                 end_key,
                 len(end_key),
                 chunk_size,
+                limit,
             )
         )
 
@@ -1487,7 +1500,8 @@ def read_pth_file():
 
 for pth in [
     lambda: os.path.join(this_dir, capi_name),
-    # lambda: os.path.join(this_dir, "../../lib", capi_name),  # For compatibility with existing unix installation process... should be removed
+    # For compatibility with existing unix installation process... should be removed
+    # lambda: os.path.join(this_dir, "../../lib", capi_name),
     read_pth_file,
 ]:
     p = pth()
@@ -1792,6 +1806,17 @@ def init_c_api():
         ctypes.c_int,
     ]
     _capi.fdb_transaction_get_range_split_points.restype = ctypes.c_void_p
+
+    _capi.fdb_transaction_get_range_split_points_with_limit.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_int64,
+        ctypes.c_int,
+    ]
+    _capi.fdb_transaction_get_range_split_points_with_limit.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_add_conflict_range.argtypes = [
         ctypes.c_void_p,

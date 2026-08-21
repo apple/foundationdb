@@ -51,7 +51,7 @@
 #include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include "flow/TaskQueue.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/ChaosMetrics.h"
 #include "flow/TDMetric.h"
 #include "flow/AsioReactor.h"
@@ -60,7 +60,7 @@
 #include "flow/SendBufferIterator.h"
 #include "flow/TLSConfig.h"
 #include "flow/WatchFile.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Util.h"
 #include "flow/UnitTest.h"
 #include "flow/ScopeExit.h"
@@ -206,7 +206,7 @@ public:
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
+			onMainThreadVoid([this, fn = std::move(fn)]() mutable { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
 	bool isSimulated() const override { return false; }
@@ -383,8 +383,8 @@ public:
 	  : errContext(errContext), errID(errID), peerAddr(peerAddr) {}
 	BindPromise(AuditedEvent auditedEvent, UID errID, NetworkAddress peerAddr)
 	  : errContext(auditedEvent), errID(errID), peerAddr(peerAddr) {}
-	explicit(false) BindPromise(BindPromise const& r) = default;
-	explicit(false) BindPromise(BindPromise&& r) noexcept
+	BindPromise(BindPromise const& r) = default;
+	BindPromise(BindPromise&& r) noexcept
 	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
@@ -420,8 +420,9 @@ public:
 				}
 
 				p.sendError(connection_failed());
-			} else
+			} else {
 				p.send(Void());
+			}
 		} catch (Error& e) {
 			p.sendError(e);
 		} catch (...) {
@@ -525,11 +526,12 @@ public:
 			// positive so check explicitly.
 			ASSERT(limit > 0);
 			bool notEmpty = false;
-			for (auto p = data; p; p = p->next)
+			for (auto p = data; p; p = p->next) {
 				if (p->bytes_written - p->bytes_sent > 0) {
 					notEmpty = true;
 					break;
 				}
+			}
 			ASSERT(notEmpty);
 
 			if (err == boost::asio::error::would_block) {
@@ -577,13 +579,14 @@ private:
 	void closeSocket() {
 		boost::system::error_code error;
 		socket.close(error);
-		if (error)
+		if (error) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("PeerAddr", peer_address)
 			    .detail("PeerAddress", peer_address)
 			    .detail("ErrorCode", error.value())
 			    .detail("Message", error.message());
+		}
 	}
 
 	void onReadError(const boost::system::error_code& error) {
@@ -614,9 +617,8 @@ class ReadPromise {
 
 public:
 	ReadPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
-	explicit(false) ReadPromise(ReadPromise const& other) = default;
-	explicit(false) ReadPromise(ReadPromise&& other)
-	  : p(std::move(other.p)), errContext(other.errContext), errID(other.errID) {}
+	ReadPromise(ReadPromise const& other) = default;
+	ReadPromise(ReadPromise&& other) : p(std::move(other.p)), errContext(other.errContext), errID(other.errID) {}
 
 	std::shared_ptr<udp::endpoint>& getEndpoint() { return endpoint; }
 
@@ -757,11 +759,12 @@ private:
 	void closeSocket() {
 		boost::system::error_code error;
 		socket.close(error);
-		if (error)
+		if (error) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("ErrorCode", error.value())
 			    .detail("Message", error.message());
+		}
 	}
 
 	void onReadError(const boost::system::error_code& error) {
@@ -807,19 +810,14 @@ public:
 	void delref() override { ReferenceCounted<Listener>::delref(); }
 
 	// Returns one incoming connection when it is available
-	Future<Reference<IConnection>> accept() override { return doAccept(this); }
-
-	NetworkAddress getListenAddress() const override { return listenAddress; }
-
-private:
-	static Future<Reference<IConnection>> doAccept(Listener* self) {
-		Reference<Connection> conn(new Connection(self->io_service));
+	Future<Reference<IConnection>> accept() override {
+		Reference<Connection> conn(new Connection(io_service));
 		tcp::acceptor::endpoint_type peer_endpoint;
 		try {
 			// Peer address not known until accept succeeds
 			BindPromise p("N2_AcceptError", UID(), NetworkAddress());
 			auto f = p.getFuture();
-			self->acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
+			acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
 			co_await f;
 			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
 			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
@@ -831,6 +829,8 @@ private:
 			throw;
 		}
 	}
+
+	NetworkAddress getListenAddress() const override { return listenAddress; }
 };
 
 using ssl_socket = boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>;
@@ -918,7 +918,8 @@ public:
 	static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
 	                                              Reference<ReferencedObject<boost::asio::ssl::context>> context,
 	                                              NetworkAddress addr,
-	                                              tcp::socket* existingSocket = nullptr) {
+	                                              tcp::socket* existingSocket = nullptr,
+	                                              std::string hostname = {}) {
 		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
@@ -945,6 +946,7 @@ public:
 
 		Reference<SSLConnection> self(new SSLConnection(*ios, context));
 		self->peer_address = addr;
+		self->sni_hostname = std::move(hostname);
 		try {
 			auto to = tcpEndpoint(self->peer_address);
 			BindPromise p("N2_ConnectError", self->id, self->peer_address);
@@ -952,51 +954,6 @@ public:
 			self->socket.async_connect(to, std::move(p));
 
 			co_await onConnected;
-			self->init();
-			co_return self;
-		} catch (Error&) {
-			// Either the connection failed, or was cancelled by the caller
-			self->closeSocket();
-			throw;
-		}
-	}
-
-	// Connect with hostname for SNI (Server Name Indication) support
-	static Future<Reference<IConnection>> connectWithHostname(
-	    boost::asio::io_service* ios,
-	    Reference<ReferencedObject<boost::asio::ssl::context>> context,
-	    NetworkAddress addr,
-	    std::string hostname) {
-		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
-		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-			if (now() < iter->second.second) {
-				if (iter->second.first >= FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS) {
-					TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", addr);
-					co_await delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
-					throw connection_failed();
-				}
-			} else {
-				g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
-			}
-		}
-
-		Reference<SSLConnection> self(new SSLConnection(*ios, context));
-		self->peer_address = addr;
-		self->sni_hostname = hostname; // Store hostname for SNI during handshake
-
-		// Store hostname for SNI use during handshake
-
-		try {
-			auto to = tcpEndpoint(self->peer_address);
-			BindPromise p("N2_ConnectError", self->id, self->peer_address);
-			Future<Void> onConnected = p.getFuture();
-			self->socket.async_connect(to, std::move(p));
-
-			co_await onConnected;
-
-			// SNI will be set later in doConnectHandshake before SSL handshake
-
 			self->init();
 			co_return self;
 		} catch (Error&) {
@@ -1274,11 +1231,12 @@ public:
 			// positive so check explicitly.
 			ASSERT(limit > 0);
 			bool notEmpty = false;
-			for (auto p = data; p; p = p->next)
+			for (auto p = data; p; p = p->next) {
 				if (p->bytes_written - p->bytes_sent > 0) {
 					notEmpty = true;
 					break;
 				}
+			}
 			ASSERT(notEmpty);
 
 			if (err == boost::asio::error::would_block) {
@@ -1378,19 +1336,14 @@ public:
 	void delref() override { ReferenceCounted<SSLListener>::delref(); }
 
 	// Returns one incoming connection when it is available
-	Future<Reference<IConnection>> accept() override { return doAccept(this); }
-
-	NetworkAddress getListenAddress() const override { return listenAddress; }
-
-private:
-	static Future<Reference<IConnection>> doAccept(SSLListener* self) {
-		Reference<SSLConnection> conn(new SSLConnection(self->io_service, self->contextVar->get()));
+	Future<Reference<IConnection>> accept() override {
+		Reference<SSLConnection> conn(new SSLConnection(io_service, contextVar->get()));
 		tcp::acceptor::endpoint_type peer_endpoint;
 		try {
 			// Peer address not known until accept succeeds
 			BindPromise p("N2_AcceptError", UID(), NetworkAddress());
 			auto f = p.getFuture();
-			self->acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
+			acceptor.async_accept(conn->getSocket(), peer_endpoint, std::move(p));
 			co_await f;
 			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
 			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
@@ -1403,6 +1356,8 @@ private:
 			throw;
 		}
 	}
+
+	NetworkAddress getListenAddress() const override { return listenAddress; }
 };
 
 // 5MB for loading files into memory
@@ -1892,13 +1847,14 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, T
 			sampleRate = 1; // Always include slow task events that could show up in our slow task profiling.
 		}
 
-		if (!DEBUG_DETERMINISM && (nondeterministicRandom()->random01() < sampleRate))
+		if (!DEBUG_DETERMINISM && (nondeterministicRandom()->random01() < sampleRate)) {
 			TraceEvent(elapsed > warnThreshold ? SevWarnAlways : SevInfo, "SlowTask")
 			    .detail("TaskID", priority)
 			    .detail("MClocks", elapsed / 1e6)
 			    .detail("Duration", duration)
 			    .detail("SampleRate", sampleRate)
 			    .detail("NumYields", numYields);
+		}
 	}
 }
 
@@ -2014,7 +1970,7 @@ Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr) {
 Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr, const std::string& hostname) {
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
-		return SSLConnection::connectWithHostname(&this->reactor.ios, this->sslContextVar.get(), toAddr, hostname);
+		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, nullptr, hostname);
 	}
 	return connect(toAddr);
 }
@@ -2076,7 +2032,7 @@ static Future<Void> coordinatorDNSCacheRefresh(Net2* self) {
 	if (!FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
 		co_return;
 	}
-	loop {
+	while (true) {
 		co_await delay(FLOW_KNOBS->COORDINATOR_DNS_CACHE_REFRESH_INTERVAL);
 		std::vector<std::string> keys = self->dnsCache.getKeys();
 		for (int i = 0; i < keys.size(); i++) {

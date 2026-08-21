@@ -114,7 +114,7 @@ public:
 
 struct Counter final : public ICounter, NonCopyable {
 public:
-	typedef int64_t Value;
+	using Value = int64_t;
 
 	Counter(std::string const& name, CounterCollection& collection, bool skipTraceOnSilentInterval = false);
 
@@ -161,6 +161,26 @@ struct Traceable<Counter> : std::true_type {
 	static std::string toString(Counter const& counter) {
 		return Traceable<ICounter*>::toString((ICounter const*)&counter);
 	}
+};
+
+// Increments one counter at construction, and another at destruction;
+// intended to be used to mark the beginning and end of some scope, without
+// the possibility of forgetting to increment the exit counter on exceptions.
+class CountedSection final : public NonCopyable {
+public:
+	CountedSection() : end(nullptr) {}
+	CountedSection(Counter& start, Counter& end) : end(&end) { ++start; }
+	CountedSection& operator=(CountedSection&& other) {
+		std::swap(end, other.end);
+		return *this;
+	}
+	~CountedSection() {
+		if (end)
+			++*end;
+	}
+
+private:
+	Counter* end;
 };
 
 template <class F>
@@ -220,7 +240,7 @@ public:
 	    double loggingInterval,
 	    std::function<void(TraceEvent&)> const& decorator = [](auto&) {});
 
-	explicit(false) LatencyBands(LatencyBands&&) = default;
+	LatencyBands(LatencyBands&&) = default;
 	LatencyBands& operator=(LatencyBands&&) = default;
 
 	void addThreshold(double value);

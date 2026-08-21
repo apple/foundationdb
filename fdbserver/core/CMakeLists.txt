@@ -10,6 +10,8 @@ endif()
 add_flow_target(STATIC_LIBRARY NAME fdbserver_core SRCS ${FDBSERVER_CORE_SRCS})
 add_fdbserver_link_test(fdbserver_corelinktest
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_core_test core
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_core)
 target_include_directories(fdbserver_core
@@ -17,8 +19,7 @@ target_include_directories(fdbserver_core
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
   PRIVATE
-    ${CMAKE_SOURCE_DIR}/fdbserver/include
-    ${CMAKE_BINARY_DIR}/fdbserver/include)
+    ${CMAKE_SOURCE_DIR}/fdbserver/include)
 target_link_libraries(fdbserver_core PUBLIC fdbclient)
 
 if(WITH_ROCKSDB)

@@ -22,9 +22,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/core/QuietDatabase.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PingWorkloadInterface {
 	RequestStream<LoadedPingRequest> payloadPing;

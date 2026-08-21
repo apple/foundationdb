@@ -27,7 +27,6 @@ from bindingtester import Result
 
 from bindingtester.tests import (
     Test,
-    Instruction,
     ThreadedInstructionSet,
     ResultSpecification,
 )

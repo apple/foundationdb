@@ -25,9 +25,7 @@
 #include "fdbclient/Tuple.h"
 #include "flow/Error.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/genericactors.h"
 
 const KeyRef fdbClientInfoTxnSampleRate = "config/fdb_client_info/client_txn_sample_rate"_sr;
 const KeyRef fdbClientInfoTxnSizeLimit = "config/fdb_client_info/client_txn_size_limit"_sr;
@@ -159,7 +157,7 @@ Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 	erase(KeyRangeRef(""_sr, "\xff"_sr));
 
 	Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
-	loop {
+	while (true) {
 		Error err;
 		try {
 			GlobalConfigRefreshReply reply =
@@ -189,7 +187,7 @@ Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 // Applies updates to the local copy of the global configuration when this
 // process receives an updated history.
 Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
-	loop {
+	while (true) {
 		Error err;
 		try {
 			if (initialized.canBeSet()) {
@@ -202,9 +200,11 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 				cx->delref();
 			}
 
-			loop {
+			while (true) {
 				// run one iteration at the beginning
 				co_await delay(0);
+				// Subscribe before processing history so a reentrant DB info update cannot be lost.
+				Future<Void> nextDbInfoChange = dbInfoChanged.onTrigger();
 				if (!dbInfo->history.empty()) {
 					if (lastUpdate < dbInfo->history[0].version) {
 						// This process missed too many global configuration
@@ -245,7 +245,7 @@ Future<Void> GlobalConfig::updater(const ClientDBInfo* dbInfo) {
 				}
 				// In case this actor is canceled in the d'tor of GlobalConfig we can exit here.
 				co_await delay(0);
-				co_await dbInfoChanged.onTrigger();
+				co_await nextDbInfoChange;
 			}
 		} catch (Error& e) {
 			err = e;

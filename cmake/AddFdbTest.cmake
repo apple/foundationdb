@@ -428,6 +428,7 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
     add_dependencies(${target_name} fdb_go_tester fdb_go)
     add_custom_command(
       TARGET ${target_name}
+      POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/go/bin/_stacktester ${build_directory}/tests/go/build/bin/_stacktester
       COMMAND ${CMAKE_COMMAND} -E make_directory ${build_directory}/tests/go/src/fdb/
       COMMAND ${CMAKE_COMMAND} -E copy
@@ -614,11 +615,9 @@ endif()
 set(test_venv_cmd "")
 string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
 string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
-string(APPEND test_venv_cmd "&& pip install --upgrade pip ")
-string(APPEND test_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt")
-string(APPEND test_venv_cmd "&& pip install -e ${CMAKE_SOURCE_DIR}/tests/TestRunner ")
-# NOTE: At this stage we are in the virtual environment and Python3_EXECUTABLE is not available anymore
-string(APPEND test_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 -m pip install .) ")
+string(APPEND test_venv_cmd "&& pip install --retries 9 -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt ")
+string(APPEND test_venv_cmd "&& pip install ${CMAKE_SOURCE_DIR}/tests/TestRunner ")
+string(APPEND test_venv_cmd "&& pip install ${CMAKE_BINARY_DIR}/bindings/python ")
 add_test(
   NAME test_venv_setup
   COMMAND bash -c ${test_venv_cmd}

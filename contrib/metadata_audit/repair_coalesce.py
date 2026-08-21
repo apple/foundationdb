@@ -35,7 +35,7 @@ import struct
 
 from fdb_metadata_utils import (
     SERVER_KEYS_PREFIX, SERVER_LIST_PREFIX, KEY_SERVERS_PREFIX,
-    SERVER_KEYS_END, SERVER_LIST_END, KEY_SERVERS_END,
+    SERVER_LIST_END, KEY_SERVERS_END,
     strinc, take_movekeys_lock, release_movekeys_lock,
     set_read_transaction_options, set_write_transaction_options,
     update_movekeys_lock_write,

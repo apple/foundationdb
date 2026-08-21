@@ -143,7 +143,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 	int lastStoredKeysLoaded = 0;
 	uint64_t keysLoaded = 0;
 	uint64_t bytesStored = 0;
-	while (jobs->size()) {
+	while (!jobs->empty()) {
 		std::pair<uint64_t, uint64_t> job = jobs->back();
 		jobs->pop_back();
 		nextStart = now() + (job.second - job.first) / maxKeyInsertRate;
@@ -156,7 +156,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 			keysLoaded += job.second - job.first;
 			bytesStored += numBytes;
 
-			if (keysLoaded - lastStoredKeysLoaded >= keySaveIncrement || jobs->size() == 0) {
+			if (keysLoaded - lastStoredKeysLoaded >= keySaveIncrement || jobs->empty()) {
 				Transaction tr(cx);
 				Error err;
 				setAuthToken(*workload, tr);
@@ -308,7 +308,7 @@ Future<Void> bulkSetup(Database cx,
 
 	Future<std::vector<std::pair<uint64_t, double>>> insertionTimes = std::vector<std::pair<uint64_t, double>>();
 
-	if (insertionCountsToMeasure.size() > 0) {
+	if (!insertionCountsToMeasure.empty()) {
 		std::sort(insertionCountsToMeasure.begin(), insertionCountsToMeasure.end());
 		for (int i = 0; i < insertionCountsToMeasure.size(); i++) {
 			if (insertionCountsToMeasure[i] > nodeCount) {

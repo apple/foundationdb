@@ -428,7 +428,7 @@ class BinaryWriter : NonCopyable {
 public:
 	static const int isDeserializing = 0;
 	static constexpr bool isSerializing = true;
-	typedef BinaryWriter WRITER;
+	using WRITER = BinaryWriter;
 
 	void serializeBytes(StringRef bytes) { serializeBytes(bytes.begin(), bytes.size()); }
 	void serializeBytes(const void* data, int bytes) {
@@ -452,7 +452,7 @@ public:
 	explicit BinaryWriter(VersionOptions vo) : data(nullptr), size(0), allocated(0) {
 		vo.write(*this);
 	}
-	explicit(false) BinaryWriter(BinaryWriter&& rhs)
+	BinaryWriter(BinaryWriter&& rhs)
 	  : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated),
 	    m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
@@ -596,7 +596,7 @@ struct SplitBuffer {
 // A writer that can serialize to a SplitBuffer
 class OverWriter {
 public:
-	typedef OverWriter WRITER;
+	using WRITER = OverWriter;
 
 	template <class VersionOptions>
 	explicit OverWriter(SplitBuffer buf, VersionOptions vo) : len(std::numeric_limits<int>::max()), buf(buf) {
@@ -885,7 +885,7 @@ public:
 struct PacketWriter {
 	static constexpr int isDeserializing = 0;
 	static constexpr bool isSerializing = true;
-	typedef PacketWriter WRITER;
+	using WRITER = PacketWriter;
 
 	PacketBuffer* buffer;
 	struct ReliablePacket*

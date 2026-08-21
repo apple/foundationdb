@@ -32,7 +32,7 @@ protected:
 
 public:
 	virtual void send(MetricCollection*) = 0;
-	virtual ~IMetricClient() {}
+	virtual ~IMetricClient() = default;
 };
 
 class UDPMetricClient : public IMetricClient {

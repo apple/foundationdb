@@ -479,7 +479,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			    co_await race(testCleanerOneIteration(db, &actors, minAgeSeconds, maxTimestampDelta, &createdTimes),
 			                  actors.getResult());
 			if (choice.index() == 0) {
-				bool done = std::get<0>(std::move(choice));
+				bool done = std::get<0>(choice);
 
 				if (done) {
 					break;

@@ -1,3 +1,7 @@
+[[knobs]]
+# Keep custom large-team recovery from blocking storage migration in this restart test.
+dd_max_shards_on_large_teams = 0
+
 [configuration]
 storageEngineExcludeTypes=[5]
 extraMachineCountDC = 2

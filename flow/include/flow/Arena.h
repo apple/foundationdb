@@ -47,7 +47,6 @@
 #include <unordered_set>
 #include <type_traits>
 #include <sstream>
-#include <string_view>
 #include <fmt/format.h>
 
 // TrackIt is a zero-size class for tracking constructions, destructions, and assignments of instances
@@ -61,7 +60,7 @@
 // of a class without producing an "inaccessible due to ambiguity" error.
 template <class T>
 struct TrackIt {
-	typedef TrackIt<T> TrackItType;
+	using TrackItType = TrackIt<T>;
 // Put TRACKIT_ASSIGN into any operator= functions for which you want assignments tracked
 #define TRACKIT_ASSIGN(o) *(TrackItType*)this = *(TrackItType*)&(o)
 
@@ -77,8 +76,8 @@ struct TrackIt {
 	}
 
 	TrackIt() { printf("TrackItCreate\t%s\t%p\t%s\n", __trackit__type(), this, platform::get_backtrace().c_str()); }
-	explicit(false) TrackIt(const TrackIt& o) : TrackIt() {}
-	explicit(false) TrackIt(const TrackIt&& o) : TrackIt() {}
+	TrackIt(const TrackIt& o) : TrackIt() {}
+	TrackIt(const TrackIt&& o) : TrackIt() {}
 	TrackIt& operator=(const TrackIt& o) {
 		printf("TrackItAssigned\t%s\t%p<%p\t%s\n", __trackit__type(), this, &o, platform::get_backtrace().c_str());
 		return *this;
@@ -91,7 +90,7 @@ class NonCopyable {
 protected:
 	NonCopyable() = default;
 	~NonCopyable() = default; /// Protected non-virtual destructor
-	explicit(false) NonCopyable(NonCopyable&&) = default;
+	NonCopyable(NonCopyable&&) = default;
 	NonCopyable& operator=(NonCopyable&&) = default;
 	NonCopyable(const NonCopyable&) = delete;
 	NonCopyable& operator=(const NonCopyable&) = delete;
@@ -112,8 +111,8 @@ public:
 	Arena();
 	explicit Arena(size_t reservedSize);
 	//~Arena();
-	explicit(false) Arena(const Arena&);
-	explicit(false) Arena(Arena&& r) noexcept;
+	Arena(const Arena&);
+	Arena(Arena&& r) noexcept;
 	Arena& operator=(const Arena&);
 	Arena& operator=(Arena&&) noexcept;
 
@@ -305,7 +304,7 @@ public:
 	T& contents() { return *(T*)this; }
 	T const& contents() const { return *(T const*)this; }
 
-	Standalone() {}
+	Standalone() = default;
 	explicit(false) Standalone(const T& t) : Arena(t.expectedSize()), T(arena(), t) {}
 	Standalone<T>& operator=(const T& t) {
 		Arena old = std::move(arena()); // We want to defer the destruction of the arena until after we have copied t,
@@ -316,9 +315,9 @@ public:
 	}
 
 	Standalone(const T& t, const Arena& arena) : Arena(arena), T(t) {}
-	explicit(false) Standalone(const Standalone<T>&) = default;
+	Standalone(const Standalone<T>&) = default;
 	Standalone<T>& operator=(const Standalone<T>&) = default;
-	explicit(false) Standalone(Standalone<T>&&) = default;
+	Standalone(Standalone<T>&&) = default;
 	Standalone<T>& operator=(Standalone<T>&&) = default;
 	~Standalone() = default;
 
@@ -394,10 +393,10 @@ public:
 	// constructor — which is the actual use-after-free case this guards against.
 	// Precondition: str is not null.
 	explicit StringRef(const char* str) : StringRef(str, strlen(str)) {}
-	StringRef(std::nullptr_t) = delete;
+	explicit StringRef(std::nullptr_t) = delete;
 	// Reject integer literals (e.g. StringRef(0)), which would otherwise pick the const char*
 	// overload via null-pointer conversion and crash in strlen.
-	StringRef(int) = delete;
+	explicit StringRef(int) = delete;
 	explicit(false) StringRef(const std::string& s) : data((const uint8_t*)s.c_str()), length((int)s.size()) {
 		if (s.size() > std::numeric_limits<int>::max())
 			abort();
@@ -782,7 +781,7 @@ struct dynamic_size_traits<StringRef> : std::true_type {
 };
 
 inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
-	if (lhs.size() == 0 && rhs.size() == 0) {
+	if (lhs.empty() && rhs.empty()) {
 		return true;
 	}
 	ASSERT(lhs.size() >= 0);
@@ -818,7 +817,7 @@ inline bool operator>=(const StringRef& lhs, const StringRef& rhs) {
 	return !(lhs < rhs);
 }
 
-typedef uint64_t Word;
+using Word = uint64_t;
 // Get the number of prefix bytes that are the same between a and b, up to their common length of cl
 static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int cl) {
 	int i = 0;
@@ -883,7 +882,7 @@ enum class VecSerStrategy { FlatBuffers, String };
 
 template <class T, VecSerStrategy>
 struct VectorRefPreserializer {
-	VectorRefPreserializer() {}
+	VectorRefPreserializer() = default;
 	explicit(false) VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {}
 	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
 		return *this;
@@ -905,7 +904,7 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 	string_serialized_traits<T> _string_traits;
 
 	VectorRefPreserializer() : _cached_size(0) {}
-	explicit(false) VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept
 	  : _cached_size(other._cached_size) {}
 	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept {
 		_cached_size = other._cached_size;
@@ -1311,15 +1310,10 @@ public:
 
 public: // Construction
 	static_assert(std::is_trivially_destructible_v<T>);
-	SmallVectorRef() {}
-	explicit(false) SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
+	SmallVectorRef() = default;
+	SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
 	  : m_size(other.m_size), arr(other.arr), data(other.data) {}
-	SmallVectorRef& operator=(const SmallVectorRef<T, InlineMembers>& other) {
-		m_size = other.m_size;
-		arr = other.arr;
-		data = other.data;
-		return *this;
-	}
+	SmallVectorRef& operator=(const SmallVectorRef<T, InlineMembers>&) = default;
 
 	template <class T2 = T, int IM = InlineMembers>
 	    requires(!flow_ref<T2>::value)

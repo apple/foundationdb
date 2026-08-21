@@ -5,22 +5,32 @@ set(SPHINX_DOCUMENT_DIR "${CMAKE_SOURCE_DIR}/documentation/sphinx")
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(Sphinx)
+# find_package(Sphinx) does not check version, but STRLESS is good enough (no 6.10+ before 7.x)
+if(Sphinx_FOUND AND Sphinx_VERSION STRLESS "6.2")
+  message(STATUS "Found Sphinx version ${Sphinx_VERSION} but required version is \"6.2\"")
+  unset(Sphinx_FOUND)
+  unset(Sphinx_VERSION)
+  unset(Sphinx_EXECUTABLE CACHE)
+endif()
 if(NOT Sphinx_FOUND)
-  message(STATUS "Sphinx not found, setting up sphinx virtual environment")
+  message(STATUS "Setting up Sphinx virtual environment")
   set(SPHINX_VENV_DIR "${CMAKE_BINARY_DIR}/sphinx-venv")
   execute_process(COMMAND "${Python3_EXECUTABLE}" -m venv ${SPHINX_VENV_DIR})
   find_program(
     VENV_Python3_EXECUTABLE
-    NAMES python3 python3.exe
-    PATHS ${SPHINX_VENV_DIR}/Scripts ${SPHINX_VENV_DIR}/bin REQUIRED
-    NO_DEFAULT_PATH NO_CACHE
+    NAMES python3 python3.exe python.exe
+    PATHS ${SPHINX_VENV_DIR}/Scripts ${SPHINX_VENV_DIR}/bin
+    REQUIRED NO_DEFAULT_PATH NO_CACHE
     DOC "Checking Python3 executable in virtual environment")
-  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m ensurepip COMMAND_ERROR_IS_FATAL ANY)
-  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install --upgrade pip COMMAND_ERROR_IS_FATAL ANY)
   execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install -r "${SPHINX_DOCUMENT_DIR}/requirements.txt" COMMAND_ERROR_IS_FATAL ANY)
-  set(Sphinx_ROOT "${SPHINX_VENV_DIR}")
-  unset(Sphinx_FOUND)
-  find_package(Sphinx REQUIRED)
+  # find_package(Sphinx) only works with default search order, so use find_program()
+  find_program(
+    Sphinx_EXECUTABLE sphinx-build
+    PATHS ${SPHINX_VENV_DIR}/Scripts ${SPHINX_VENV_DIR}/bin NO_DEFAULT_PATH)
+  execute_process(
+    COMMAND ${Sphinx_EXECUTABLE} --version
+    COMMAND cut "-d " -f2
+    OUTPUT_VARIABLE Sphinx_VERSION)
 endif()
 
 message(

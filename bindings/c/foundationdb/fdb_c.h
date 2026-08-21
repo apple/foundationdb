@@ -70,6 +70,8 @@
 extern "C" {
 #endif
 
+/* Keep typedef syntax in this public C header. */
+
 DLLEXPORT const char* fdb_get_error(fdb_error_t code);
 
 DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_error_t code);
@@ -184,6 +186,50 @@ typedef struct keyrange {
 	const uint8_t* end_key;
 	int end_key_length;
 } FDBKeyRange;
+
+/*
+ * Raw mutation types returned by CDC. The numeric values match
+ * MutationRef::Type and, for atomic operations, FDBMutationType.
+ */
+typedef enum {
+	FDB_CDC_MUTATION_TYPE_SET_VALUE = 0,
+	FDB_CDC_MUTATION_TYPE_CLEAR_RANGE = 1,
+	FDB_CDC_MUTATION_TYPE_ADD = 2,
+	FDB_CDC_MUTATION_TYPE_AND = 6,
+	FDB_CDC_MUTATION_TYPE_OR = 7,
+	FDB_CDC_MUTATION_TYPE_XOR = 8,
+	FDB_CDC_MUTATION_TYPE_APPEND_IF_FITS = 9,
+	FDB_CDC_MUTATION_TYPE_MAX = 12,
+	FDB_CDC_MUTATION_TYPE_MIN = 13,
+	FDB_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY = 14,
+	FDB_CDC_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE = 15,
+	FDB_CDC_MUTATION_TYPE_BYTE_MIN = 16,
+	FDB_CDC_MUTATION_TYPE_BYTE_MAX = 17,
+	FDB_CDC_MUTATION_TYPE_MIN_V2 = 18,
+	FDB_CDC_MUTATION_TYPE_AND_V2 = 19,
+	FDB_CDC_MUTATION_TYPE_COMPARE_AND_CLEAR = 20
+} FDBCdcMutationType;
+
+typedef struct cdc_stream_info {
+	FDBKey name;
+	uint64_t stream_id;
+	FDBKeyRange key_range;
+	int64_t min_version;
+} FDBCdcStreamInfo;
+
+typedef struct cdc_mutation {
+	/* FDBCdcMutationType */ uint8_t type;
+	const uint8_t* param1;
+	int param1_length;
+	const uint8_t* param2;
+	int param2_length;
+} FDBCdcMutation;
+
+typedef struct cdc_versioned_mutations {
+	int64_t version;
+	const FDBCdcMutation* mutations;
+	int mutation_count;
+} FDBCdcVersionedMutations;
 
 /*
  * TODO: delete the following "blob granule" and "tenant" related data types
@@ -351,6 +397,18 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_keyrange_array(FDBFuture
                                                                        FDBKeyRange const** out_ranges,
                                                                        int* out_count);
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_cdc_stream_info_array(FDBFuture* f,
+                                                                              FDBCdcStreamInfo const** out_streams,
+                                                                              int* out_count);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_cdc_consumer(FDBFuture* f, FDBCdcConsumer** out_consumer);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+fdb_future_get_cdc_versioned_mutations(FDBFuture* f,
+                                       FDBCdcVersionedMutations const** out_mutations,
+                                       int* out_count,
+                                       int64_t* out_last_consumed_version);
+
 /* FDBResult is a synchronous computation result, as opposed to a future that is asynchronous. */
 DLLEXPORT void fdb_result_destroy(FDBResult* r);
 
@@ -375,6 +433,38 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_set_option(FDBDatabase* d,
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
                                                                          FDBTransaction** out_transaction);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* db,
+                                                                         uint8_t const* name,
+                                                                         int name_length,
+                                                                         uint8_t const* begin_key,
+                                                                         int begin_key_length,
+                                                                         uint8_t const* end_key,
+                                                                         int end_key_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* db,
+                                                                       uint8_t const* name,
+                                                                       int name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_list_cdc_streams(FDBDatabase* db);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_create_cdc_consumer(FDBDatabase* db,
+                                                                         uint8_t const* name,
+                                                                         int name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_resume_cdc_consumer(FDBDatabase* db,
+                                                                         uint64_t stream_id,
+                                                                         int64_t last_consumed_version);
+
+DLLEXPORT void fdb_cdc_consumer_destroy(FDBCdcConsumer* consumer);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_cdc_consumer_consume(FDBCdcConsumer* consumer);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_cdc_consumer_acknowledge(FDBCdcConsumer* consumer);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_cdc_consumer_get_position(FDBCdcConsumer* consumer,
+                                                                       uint64_t* out_stream_id,
+                                                                       int64_t* out_last_consumed_version);
 
 /*
  * Dummy versions of tenant-related functions are needed in the FDB C library
@@ -556,6 +646,14 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_split_points(F
                                                                                uint8_t const* end_key_name,
                                                                                int end_key_name_length,
                                                                                int64_t chunk_size);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_split_points_with_limit(FDBTransaction* tr,
+                                                                                          uint8_t const* begin_key_name,
+                                                                                          int begin_key_name_length,
+                                                                                          uint8_t const* end_key_name,
+                                                                                          int end_key_name_length,
+                                                                                          int64_t chunk_size,
+                                                                                          int limit);
 
 #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
 #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0

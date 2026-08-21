@@ -79,7 +79,7 @@ template <class Key,
           class MetricFunc = ConstantMetric<Metric>>
 class RangeMap {
 private:
-	typedef MapPair<Key, Val> pair_type;
+	using pair_type = MapPair<Key, Val>;
 	// Applications may decrement an iterator before ranges begin, or increment after ranges end, but once in this state
 	// cannot do further incrementing or decrementing
 	template <bool isConst>
@@ -90,12 +90,12 @@ private:
 		using value_type = std::conditional_t<isConst,
 		                                      typename Map<Key, Val, pair_type, Metric>::const_iterator,
 		                                      typename Map<Key, Val, pair_type, Metric>::iterator>;
-		typedef std::forward_iterator_tag iterator_category;
+		using iterator_category = std::forward_iterator_tag;
 		using difference_type = int;
 		using pointer = self_t*;
 		using reference = self_t&;
 
-		IteratorImpl() {} // singular
+		IteratorImpl() = default; // singular
 		explicit IteratorImpl<isConst>(const value_type it) : it(it) {}
 
 		Key const& begin() { return it->key; }
@@ -211,7 +211,7 @@ public:
 
 	void operator=(RangeMap&& r) noexcept { map = std::move(r.map); }
 
-	explicit(false) RangeMap(RangeMap&& source) = default;
+	RangeMap(RangeMap&& source) = default;
 	// void clear( const Val& value ) { ranges.clear(); ranges.insert(std::make_pair(Key(),value)); }
 	void clear() { map.clear(); }
 

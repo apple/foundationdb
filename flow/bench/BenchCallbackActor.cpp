@@ -23,7 +23,7 @@
 #include <vector>
 
 #include "flow/flow.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 
 template <size_t Size>
 static Future<Void> increment(Future<Void> f, uint32_t* sum) {

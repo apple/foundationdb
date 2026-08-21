@@ -71,8 +71,8 @@ public:
 	void addref() override = 0;
 	void delref() override = 0;
 
-	BackupContainerFileSystem() {}
-	~BackupContainerFileSystem() override {}
+	BackupContainerFileSystem() = default;
+	~BackupContainerFileSystem() override = default;
 
 	// Create the container
 	Future<Void> create() override = 0;

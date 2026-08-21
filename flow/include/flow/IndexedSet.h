@@ -60,8 +60,8 @@ class StringRef;
 
 template <class T, class Metric>
 struct IndexedSet {
-	typedef T value_type;
-	typedef T key_type;
+	using value_type = T;
+	using key_type = T;
 
 private: // Forward-declare IndexedSet::Node because Clang is much stricter about this ordering.
 	struct Node : FastAllocated<Node> {
@@ -151,7 +151,7 @@ public:
 
 	IndexedSet() : root(nullptr) {};
 	~IndexedSet() { delete root; }
-	explicit(false) IndexedSet(IndexedSet&& r) noexcept : root(r.root) { r.root = nullptr; }
+	IndexedSet(IndexedSet&& r) noexcept : root(r.root) { r.root = nullptr; }
 	IndexedSet& operator=(IndexedSet&& r) noexcept {
 		delete root;
 		root = r.root;
@@ -311,7 +311,7 @@ public:
 
 private:
 	// Copy operations unimplemented.  SOMEDAY: Implement and make public.
-	explicit(false) IndexedSet(const IndexedSet&);
+	IndexedSet(const IndexedSet&);
 	IndexedSet& operator=(const IndexedSet&);
 
 	Node* root;
@@ -357,7 +357,7 @@ public: // but testonly
 
 class NoMetric {
 public:
-	NoMetric() {}
+	NoMetric() = default;
 	explicit(false) NoMetric(int) {} // NoMetric(1)
 	NoMetric operator+(NoMetric const&) const { return NoMetric(); }
 	NoMetric operator-(NoMetric const&) const { return NoMetric(); }
@@ -376,9 +376,9 @@ public:
 		key = rhs.key;
 		value = rhs.value;
 	}
-	explicit(false) MapPair(MapPair const& rhs) : key(rhs.key), value(rhs.value) {}
+	MapPair(MapPair const& rhs) : key(rhs.key), value(rhs.value) {}
 
-	explicit(false) MapPair(MapPair&& r) noexcept : key(std::move(r.key)), value(std::move(r.value)) {}
+	MapPair(MapPair&& r) noexcept : key(std::move(r.key)), value(std::move(r.value)) {}
 	void operator=(MapPair&& r) noexcept {
 		key = std::move(r.key);
 		value = std::move(r.value);
@@ -423,10 +423,10 @@ bool operator<(CompatibleWithKey const& l, MapPair<Key, Value> const& r) {
 template <class Key, class Value, class Pair = MapPair<Key, Value>, class Metric = NoMetric>
 class Map {
 public:
-	typedef typename IndexedSet<Pair, Metric>::iterator iterator;
-	typedef typename IndexedSet<Pair, Metric>::const_iterator const_iterator;
+	using iterator = typename IndexedSet<Pair, Metric>::iterator;
+	using const_iterator = typename IndexedSet<Pair, Metric>::const_iterator;
 
-	Map() {}
+	Map() = default;
 	const_iterator begin() const { return set.begin(); }
 	iterator begin() { return set.begin(); }
 	const_iterator cbegin() const { return begin(); }
@@ -531,7 +531,7 @@ public:
 
 	static int getElementBytes() { return IndexedSet<Pair, Metric>::getElementBytes(); }
 
-	explicit(false) Map(Map&& r) noexcept : set(std::move(r.set)) {}
+	Map(Map&& r) noexcept : set(std::move(r.set)) {}
 	void operator=(Map&& r) noexcept { set = std::move(r.set); }
 
 	Future<Void> clearAsync();
@@ -1246,8 +1246,9 @@ void IndexedSet<T, Metric>::erase(iterator toErase) {
 				break;
 			}
 			rebalanceNode = *parent;
-		} else if (rebalanceNode->balance) // +/- 1, we are done
+		} else if (rebalanceNode->balance) { // +/- 1, we are done
 			break;
+		}
 
 		if (!rebalanceNode->parent)
 			break;

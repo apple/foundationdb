@@ -34,7 +34,7 @@ enum TransactionType { NATIVE, READ_YOUR_WRITES, THREAD_SAFE, MULTI_VERSION };
 // A wrapper interface for dealing with different Transaction implementations
 struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 
-	virtual ~TransactionWrapper() {}
+	virtual ~TransactionWrapper() = default;
 
 	// Sets a key-value pair in the database
 	virtual void set(KeyRef& key, ValueRef& value) = 0;
@@ -102,7 +102,7 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 			transaction = T(extraDB);
 		}
 	}
-	~FlowTransactionWrapper() override {}
+	~FlowTransactionWrapper() override = default;
 
 	// Sets a key-value pair in the database
 	void set(KeyRef& key, ValueRef& value) override { transaction.set(key, value); }
@@ -177,7 +177,7 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 
 	ThreadTransactionWrapper(Reference<IDatabase> db, Reference<IDatabase> extraDB, bool useExtraDB)
 	  : transaction(db->createTransaction()) {}
-	~ThreadTransactionWrapper() override {}
+	~ThreadTransactionWrapper() override = default;
 
 	// Sets a key-value pair in the database
 	void set(KeyRef& key, ValueRef& value) override { transaction->set(key, value); }
@@ -238,7 +238,7 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 
 // A factory interface for creating different kinds of TransactionWrappers
 struct TransactionFactoryInterface : public ReferenceCounted<TransactionFactoryInterface> {
-	virtual ~TransactionFactoryInterface() {}
+	virtual ~TransactionFactoryInterface() = default;
 
 	// Creates a new transaction
 	virtual Reference<TransactionWrapper> createTransaction() = 0;
@@ -255,7 +255,7 @@ struct TransactionFactory : public TransactionFactoryInterface {
 
 	TransactionFactory(DB dbHandle, DB extraDbHandle, bool useExtraDB)
 	  : dbHandle(dbHandle), extraDbHandle(extraDbHandle), useExtraDB(useExtraDB) {}
-	~TransactionFactory() override {}
+	~TransactionFactory() override = default;
 
 	// Creates a new transaction
 	Reference<TransactionWrapper> createTransaction() override {

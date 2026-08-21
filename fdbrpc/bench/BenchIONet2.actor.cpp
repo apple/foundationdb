@@ -25,10 +25,24 @@
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/network.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/IAsyncFile.h"
 
-static Future<Void> increment(TaskPriority priority, uint32_t* sum, NoThrowOnCancel = {}) {
+#include "flow/actorcompiler.h" // This must be the last #include.
+
+ACTOR static Future<Void> incrementActor(TaskPriority priority, uint32_t* sum) {
+	wait(delay(0, priority));
+	DeterministicRandom rand(1);
+	int randSum = 0;
+	for (int i = 0; i < 1e6; ++i) {
+		randSum += rand.randomInt(0, 3);
+	}
+	benchmark::DoNotOptimize(randSum);
+	++(*sum);
+	return Void();
+}
+
+static Future<Void> incrementCoroutine(TaskPriority priority, uint32_t* sum, NoThrowOnCancel = {}) {
 	co_await delay(0, priority);
 	DeterministicRandom rand(1);
 	int randSum = 0;
@@ -43,25 +57,53 @@ static inline TaskPriority getRandomTaskPriority(DeterministicRandom& rand) {
 	return static_cast<TaskPriority>(rand.randomInt(0, 100));
 }
 
-static Future<Void> benchIONet2Actor(benchmark::State* benchState) {
-	size_t actorCount = benchState->range(0);
-	uint32_t sum{ 0 };
-	uint64_t seed = platform::getRandomSeed();
-	std::unique_ptr<char[]> data(new char[4096]);
-	// The actor version declared this as state inside the loop, so keep these futures across iterations.
-	std::vector<Future<Void>> futures;
-	futures.reserve(actorCount);
+ACTOR static Future<Void> benchIONet2Actor(benchmark::State* benchState) {
+	state size_t actorCount = benchState->range(0);
+	state uint32_t sum;
+	state uint64_t seed = 1;
+	state std::unique_ptr<char[]> data(new char[4096]);
 	memset(data.get(), 0, 4096);
 	while (benchState->KeepRunning()) {
 		sum = 0;
+		state std::vector<Future<Void>> futures;
+		futures.reserve(actorCount);
 		DeterministicRandom rand(seed);
 		for (int i = 0; i < actorCount; ++i) {
-			futures.push_back(increment(getRandomTaskPriority(rand), &sum));
+			futures.push_back(incrementActor(getRandomTaskPriority(rand), &sum));
 		}
-		Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
+		state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
 		    "/tmp/__test-benchmark-file__",
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
-		    0600);
+		    0600));
+		wait(f->write(data.get(), 4096, 0));
+		wait(f->sync());
+		benchmark::DoNotOptimize(sum);
+	}
+	benchState->SetItemsProcessed(actorCount * static_cast<long>(benchState->iterations()));
+	return Void();
+}
+
+static Future<Void> benchIONet2Coroutine(benchmark::State* benchState) {
+	size_t actorCount = benchState->range(0);
+	uint32_t sum = 0;
+	uint64_t seed = 1;
+	std::unique_ptr<char[]> data(new char[4096]);
+	// Match the ACTOR state lifetimes. Releasing f between iterations evicts the
+	// cached file, so the next open would create another atomic-write file.
+	std::vector<Future<Void>> futures;
+	Reference<IAsyncFile> f;
+	memset(data.get(), 0, 4096);
+	while (benchState->KeepRunning()) {
+		sum = 0;
+		futures.reserve(actorCount);
+		DeterministicRandom rand(seed);
+		for (int i = 0; i < actorCount; ++i) {
+			futures.push_back(incrementCoroutine(getRandomTaskPriority(rand), &sum));
+		}
+		f = co_await IAsyncFileSystem::filesystem()->open("/tmp/__test-benchmark-file__",
+		                                                  IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
+		                                                      IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
+		                                                  0600);
 		co_await f->write(data.get(), 4096, 0);
 		co_await f->sync();
 		benchmark::DoNotOptimize(sum);
@@ -69,8 +111,13 @@ static Future<Void> benchIONet2Actor(benchmark::State* benchState) {
 	benchState->SetItemsProcessed(actorCount * static_cast<long>(benchState->iterations()));
 }
 
-static void bench_ionet2(benchmark::State& benchState) {
+static void bench_ionet2_actor(benchmark::State& benchState) {
 	onMainThread([&benchState] { return benchIONet2Actor(&benchState); }).blockUntilReady();
 }
 
-BENCHMARK(bench_ionet2)->Range(1, 1 << 16)->ReportAggregatesOnly(true);
+static void bench_ionet2_coroutine(benchmark::State& benchState) {
+	onMainThread([&benchState] { return benchIONet2Coroutine(&benchState); }).blockUntilReady();
+}
+
+BENCHMARK(bench_ionet2_actor)->Range(1, 1 << 16)->ReportAggregatesOnly(true);
+BENCHMARK(bench_ionet2_coroutine)->Range(1, 1 << 16)->ReportAggregatesOnly(true);

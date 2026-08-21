@@ -29,6 +29,7 @@
 #include <sstream>
 #include <vector>
 
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
@@ -56,17 +57,15 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/coordinator/CoordinationServer.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/kvstore/KVFileUtils.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/tester.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/worker/Worker.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #ifdef WITH_ROCKSDB
@@ -78,6 +77,7 @@
 #include "flow/ProtocolVersion.h"
 #include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
+#include "flow/MemoryTracker.h"
 #include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
@@ -127,11 +127,11 @@ using namespace std::literals;
 
 // clang-format off
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_TLOG_SPILL_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_RESEED_TIME, OPT_KEY, OPT_MEMLIMIT, OPT_VMEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
-	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
+	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_TLOG_SPILL_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_DEPRECATED_CONFIG_PATH, OPT_DEPRECATED_USE_TEST_CONFIG_DB, OPT_DEPRECATED_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_IP_TRUSTED_MASK,
 	OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION, OPT_CONSISTENCY_CHECK_URGENT_MODE,
@@ -151,10 +151,12 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_LISTEN,                "--listen-address",            SO_REQ_SEP },
 #ifdef __linux__
 	{ OPT_FILESYSTEM,           "--data-filesystem",            SO_REQ_SEP },
+	{ OPT_TLOG_SPILL_FILESYSTEM, "--tlog-spill-filesystem",     SO_REQ_SEP },
 	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                    SO_REQ_SEP },
 #endif
 	{ OPT_DATAFOLDER,            "-d",                          SO_REQ_SEP },
 	{ OPT_DATAFOLDER,            "--datadir",                   SO_REQ_SEP },
+	{ OPT_TLOG_SPILL_DATAFOLDER, "--tlog-spill-datadir",        SO_REQ_SEP },
 	{ OPT_LOGFOLDER,             "-L",                          SO_REQ_SEP },
 	{ OPT_LOGFOLDER,             "--logdir",                    SO_REQ_SEP },
 	{ OPT_ROLLSIZE,              "-Rs",                         SO_REQ_SEP },
@@ -314,7 +316,7 @@ public:
 	boost::interprocess::permissions permission;
 
 private:
-	explicit(false) WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
+	WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
 #ifdef _WIN32
 	SECURITY_ATTRIBUTES sa;
 #endif
@@ -357,10 +359,11 @@ UID getSharedMemoryMachineId() {
 			} catch (boost::interprocess::interprocess_exception& ex) {
 				// Retry in case the shared memory was deleted in between the call to open_or_create and open_read_only
 				// Don't keep trying forever in case this is caused by some other problem
-				if (++numTries == 10)
+				if (++numTries == 10) {
 					criticalError(FDB_EXIT_ERROR,
 					              "SharedMemoryError",
 					              format("Could not open shared memory - %s", ex.what()).c_str());
+				}
 			}
 		}
 	}
@@ -406,68 +409,6 @@ Future<Void> metricsReport() {
 
 		simpleCounterReport();
 	}
-}
-
-void testSerializationSpeed() {
-	double tstart;
-	double build = 0, serialize = 0, deserialize = 0, copy = 0, deallocate = 0;
-	double bytes = 0;
-	double testBegin = timer();
-	for (int a = 0; a < 10000; a++) {
-		{
-			tstart = timer();
-
-			Arena batchArena;
-			VectorRef<CommitTransactionRef> batch;
-			batch.resize(batchArena, 1000);
-			for (int t = 0; t < batch.size(); t++) {
-				CommitTransactionRef& tr = batch[t];
-				tr.read_snapshot = 0;
-				for (int i = 0; i < 2; i++)
-					tr.mutations.push_back_deep(batchArena,
-					                            MutationRef(MutationRef::SetValue, "KeyABCDE"_sr, "SomeValu"_sr));
-				tr.mutations.push_back_deep(batchArena,
-				                            MutationRef(MutationRef::ClearRange, "BeginKey"_sr, "EndKeyAB"_sr));
-			}
-
-			build += timer() - tstart;
-
-			tstart = timer();
-
-			BinaryWriter wr(IncludeVersion());
-			wr << batch;
-
-			bytes += wr.getLength();
-
-			serialize += timer() - tstart;
-
-			for (int i = 0; i < 1; i++) {
-				tstart = timer();
-				Arena arena;
-				StringRef data(arena, StringRef((const uint8_t*)wr.getData(), wr.getLength()));
-				copy += timer() - tstart;
-
-				tstart = timer();
-				ArenaReader rd(arena, data, IncludeVersion());
-				VectorRef<CommitTransactionRef> batch2;
-				rd >> arena >> batch2;
-
-				deserialize += timer() - tstart;
-			}
-
-			tstart = timer();
-		}
-		deallocate += timer() - tstart;
-	}
-	double elapsed = (timer() - testBegin);
-	printf("Test speed: %0.1f MB/sec (%0.0f/sec)\n", bytes / 1e6 / elapsed, 1000000 / elapsed);
-	printf("  Build: %0.1f MB/sec\n", bytes / 1e6 / build);
-	printf("  Serialize: %0.1f MB/sec\n", bytes / 1e6 / serialize);
-	printf("  Copy: %0.1f MB/sec\n", bytes / 1e6 / copy);
-	printf("  Deserialize: %0.1f MB/sec\n", bytes / 1e6 / deserialize);
-	printf("  Deallocate: %0.1f MB/sec\n", bytes / 1e6 / deallocate);
-	printf("  Bytes: %0.1f MB\n", bytes / 1e6);
-	printf("\n");
 }
 
 void memoryTest();
@@ -600,10 +541,16 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " mounted at the specified PATH. This checks that the device at PATH"
 	                 " is currently mounted and that any data files get written to the"
 	                 " same device.");
+	printOptionUsage("--tlog-spill-filesystem PATH",
+	                 " Allows tlog spill data files to be written to an additional drive"
+	                 " mounted at the specified PATH when --data-filesystem is used.");
 #endif
 	printOptionUsage("-d PATH, --datadir PATH",
 	                 " Store data files in the given folder (must be unique for each"
 	                 " fdbserver instance on a given machine).");
+	printOptionUsage("--tlog-spill-datadir PATH",
+	                 " Store tlog spill data files in the given folder. The default is"
+	                 " --datadir. The folder must be unique for each fdbserver instance.");
 	printOptionUsage("-L PATH, --logdir PATH", " Store log files in the given folder (default is `.').");
 	printOptionUsage("--logsize SIZE",
 	                 "Roll over to a new log file after the current log file"
@@ -759,54 +706,9 @@ static void printUsage(const char* name, bool devhelp) {
 
 extern bool g_crashOnError;
 
-#if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-void* operator new(std::size_t size) {
-	void* p = malloc(size);
-	if (!p)
-		throw std::bad_alloc();
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete(void* ptr) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// scalar, nothrow new and it matching delete
-void* operator new(std::size_t size, const std::nothrow_t&) throw() {
-	void* p = malloc(size);
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete(void* ptr, const std::nothrow_t&) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// array throwing new and matching delete[]
-void* operator new[](std::size_t size) {
-	void* p = malloc(size);
-	if (!p)
-		throw std::bad_alloc();
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete[](void* ptr) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// array, nothrow new and matching delete[]
-void* operator new[](std::size_t size, const std::nothrow_t&) throw() {
-	void* p = malloc(size);
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete[](void* ptr, const std::nothrow_t&) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-#endif
+// The global operator new / operator delete replacements (both the legacy
+// ALLOC_INSTRUMENTATION accounting hooks and the sampled memory tracker) live in
+// fdbserver/GlobalNewDelete.cpp.
 
 Optional<bool> checkBuggifyOverride(const char* testFile) {
 	std::ifstream ifs;
@@ -819,7 +721,7 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 	while (ifs.good()) {
 		getline(ifs, cline);
 		std::string line = removeWhitespace(std::string(cline));
-		if (!line.size() || line.find(';') == 0)
+		if (line.empty() || line.find(';') == 0)
 			continue;
 
 		size_t found = line.find('=');
@@ -860,7 +762,7 @@ Optional<bool> checkFaultInjectionOverride(const char* testFile) {
 	while (ifs.good()) {
 		getline(ifs, cline);
 		std::string line = removeWhitespace(std::string(cline));
-		if (!line.size() || line.find(';') == 0)
+		if (line.empty() || line.find(';') == 0)
 			continue;
 
 		size_t found = line.find('=');
@@ -896,7 +798,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
     IClusterConnectionRecord& connectionRecord,
     const std::vector<std::string>& publicAddressStrs,
     std::vector<std::string>& listenAddressStrs) {
-	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
+	if (!listenAddressStrs.empty() && publicAddressStrs.size() != listenAddressStrs.size()) {
 		fprintf(stderr,
 		        "ERROR: Listen addresses (if provided) should be equal to the number of public addresses in order.\n");
 		flushAndExit(FDB_EXIT_ERROR);
@@ -1057,8 +959,8 @@ enum class ServerRole {
 };
 struct CLIOptions {
 	std::string commandLine;
-	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString,
-	    logFolder = ".", metricsConnFile, metricsPrefix, newClusterKey, authzPublicKeyFile;
+	std::string fileSystemPath, tLogSpillFileSystemPath, dataFolder, tLogSpillDataFolder, connFile, seedConnFile,
+	    seedConnString, logFolder = ".", metricsConnFile, metricsPrefix, newClusterKey, authzPublicKeyFile;
 	std::string logGroup = "default";
 	uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
 	bool rollsizeSet = false;
@@ -1389,6 +1291,10 @@ private:
 				fileSystemPath = args.OptionArg();
 				break;
 			}
+			case OPT_TLOG_SPILL_FILESYSTEM: {
+				tLogSpillFileSystemPath = args.OptionArg();
+				break;
+			}
 			case OPT_PROFILER_RSS_SIZE: {
 				const char* a = args.OptionArg();
 				char* end;
@@ -1403,6 +1309,9 @@ private:
 #endif
 			case OPT_DATAFOLDER:
 				dataFolder = args.OptionArg();
+				break;
+			case OPT_TLOG_SPILL_DATAFOLDER:
+				tLogSpillDataFolder = args.OptionArg();
 				break;
 			case OPT_LOGFOLDER:
 				logFolder = args.OptionArg();
@@ -1765,9 +1674,9 @@ private:
 			StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
 			do {
 				StringRef file = t.eat(":");
-				if (file.size() != 0)
+				if (!file.empty())
 					blobCredentials.push_back(file.toString());
-			} while (t.size() != 0);
+			} while (!t.empty());
 		}
 
 		// Sets up proxy from ENV if it is not set by arg.
@@ -1791,15 +1700,15 @@ private:
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (seedConnString.length() && seedConnFile.length()) {
+		if (!seedConnString.empty() && !seedConnFile.empty()) {
 			fprintf(
 			    stderr, "%s\n", "--seed-cluster-file and --seed-connection-string may not both be specified at once.");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		bool seedSpecified = seedConnFile.length() || seedConnString.length();
+		bool seedSpecified = !seedConnFile.empty() || !seedConnString.empty();
 
-		if (seedSpecified && !connFile.length()) {
+		if (seedSpecified && connFile.empty()) {
 			fprintf(stderr,
 			        "%s\n",
 			        "If -seed-cluster-file or --seed-connection-string is specified, -C must be specified as well.");
@@ -1809,7 +1718,7 @@ private:
 		if (metricsConnFile == connFile)
 			metricsConnFile = "";
 
-		if (metricsConnFile != "" && metricsPrefix == "") {
+		if (!metricsConnFile.empty() && metricsPrefix.empty()) {
 			fprintf(stderr, "If a metrics cluster file is specified, a metrics prefix is required.\n");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
@@ -1824,9 +1733,9 @@ private:
 		    autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
-				std::string connectionString = seedConnString.length() ? seedConnString : "";
+				std::string connectionString = !seedConnString.empty() ? seedConnString : "";
 				ClusterConnectionString ccs;
-				if (seedConnFile.length()) {
+				if (!seedConnFile.empty()) {
 					try {
 						connectionString = readFileBytes(seedConnFile, MAX_CLUSTER_FILE_BYTES);
 					} catch (Error& e) {
@@ -1874,7 +1783,7 @@ private:
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (role == ServerRole::NetworkTestClient && !testServersStr.size()) {
+		if (role == ServerRole::NetworkTestClient && testServersStr.empty()) {
 			fprintf(stderr, "ERROR: please specify --testservers\n");
 			printHelpTeaser(argv[0]);
 			flushAndExit(FDB_EXIT_ERROR);
@@ -1882,7 +1791,7 @@ private:
 
 		if (role == ServerRole::ChangeClusterKey) {
 			bool error = false;
-			if (!newClusterKey.size()) {
+			if (newClusterKey.empty()) {
 				fprintf(stderr, "ERROR: please specify --new-cluster-key\n");
 				error = true;
 			} else if (connectionFile->getConnectionString().clusterKey() == newClusterKey) {
@@ -1975,7 +1884,7 @@ int main(int argc, char* argv[]) {
 		const auto role = opts.role;
 
 		if (role == ServerRole::Simulation) {
-			printf("Random seed is %llu...\n", opts.randomSeed);
+			printf("Random seed is %" PRIu64 "...\n", opts.randomSeed);
 			bindDeterministicRandomToOpenssl();
 		}
 
@@ -2001,6 +1910,13 @@ int main(int argc, char* argv[]) {
 		setServerKnob("server_mem_limit", KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		initializeServerKnobs(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+
+		// Knobs are now final; initialize the sampled memory tracker from them on
+		// this (soon-to-be network) thread, before any serving role starts. Reading
+		// the sample-inverse knob explicitly here — rather than inferring it from
+		// the first allocation — keeps early startup allocations from latching the
+		// tracker off before the knobs were configured. See design/memory-tracker.md.
+		memTrackerInit();
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
@@ -2138,9 +2054,20 @@ int main(int argc, char* argv[]) {
 				}
 			}
 
+			if (!opts.tLogSpillFileSystemPath.empty() && opts.fileSystemPath.empty()) {
+				fprintf(stderr, "ERROR: --tlog-spill-filesystem requires --data-filesystem\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			std::vector<std::string> fileSystemPaths;
+			if (!opts.fileSystemPath.empty()) {
+				fileSystemPaths.push_back(opts.fileSystemPath);
+			}
+			if (!opts.tLogSpillFileSystemPath.empty()) {
+				fileSystemPaths.push_back(opts.tLogSpillFileSystemPath);
+			}
 			// Use a negative ioTimeout to indicate warn-only
 			Net2FileSystem::newFileSystem(opts.fileIoWarnOnly ? -opts.fileIoTimeout : opts.fileIoTimeout,
-			                              opts.fileSystemPath);
+			                              fileSystemPaths);
 			g_network->initMetrics();
 			FlowTransport::transport().initMetrics();
 		}
@@ -2160,7 +2087,7 @@ int main(int argc, char* argv[]) {
 		for (const std::string& knobOption : getEnvironmentKnobOptions()) {
 			environmentKnobOptions += knobOption + " ";
 		}
-		if (environmentKnobOptions.length()) {
+		if (!environmentKnobOptions.empty()) {
 			environmentKnobOptions.pop_back();
 		}
 
@@ -2171,14 +2098,16 @@ int main(int argc, char* argv[]) {
 		    .detail("Version", FDB_VT_VERSION)
 		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
 		    .detail("FileSystem", opts.fileSystemPath)
+		    .detail("TLogSpillFileSystem", opts.tLogSpillFileSystemPath)
 		    .detail("DataFolder", opts.dataFolder)
+		    .detail("TLogSpillDataFolder", opts.tLogSpillDataFolder)
 		    .detail("WorkingDirectory", cwd)
 		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->toString() : "")
 		    .detail("ConnectionString",
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 		    .setMaxFieldLength(10000)
-		    .detail("EnvironmentKnobOptions", environmentKnobOptions.length() ? environmentKnobOptions : "none")
+		    .detail("EnvironmentKnobOptions", !environmentKnobOptions.empty() ? environmentKnobOptions : "none")
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
@@ -2216,7 +2145,7 @@ int main(int argc, char* argv[]) {
 			FLOW_KNOBS->trace();
 			SERVER_KNOBS->trace();
 
-			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
+			auto dataFolder = !opts.dataFolder.empty() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
 			const std::set<std::string> allowedDirectories = { ".",       "..",       "backups",  "unittests",
 				                                               "fdbblob", "bulkdump", "bulkload", "mocks3" };
@@ -2224,7 +2153,12 @@ int main(int argc, char* argv[]) {
 			// mocks3 folder is used by MockS3 persistence for post-test analysis
 
 			for (const auto& dir : directories) {
-				if (dir.size() != 32 && !allowedDirectories.contains(dir) && dir.find("snap") == std::string::npos) {
+				// Simulation may create one tlog spill sibling for each process data directory.
+				StringRef tLogSpillFolderSuffix = "-tlog-spill"_sr;
+				bool isTLogSpillFolder =
+				    dir.size() == 32 + tLogSpillFolderSuffix.size() && StringRef(dir).endsWith(tLogSpillFolderSuffix);
+				if (dir.size() != 32 && !isTLogSpillFolder && !allowedDirectories.contains(dir) &&
+				    dir.find("snap") == std::string::npos) {
 
 					TraceEvent(SevError, "IncompatibleDirectoryFound")
 					    .detail("DataFolder", dataFolder)
@@ -2303,7 +2237,7 @@ int main(int argc, char* argv[]) {
 						}
 						// remove empty/partial snap directories
 						std::vector<std::string> childrenList = platform::listFiles(dirSrc);
-						if (childrenList.size() == 0) {
+						if (childrenList.empty()) {
 							TraceEvent("RemovingEmptySnapDirectory").detail("DirBeingDeleted", dirSrc);
 							platform::eraseDirectoryRecursive(dirSrc);
 							continue;
@@ -2368,8 +2302,9 @@ int main(int argc, char* argv[]) {
 			setupRunLoopProfiler();
 
 			auto dataFolder = opts.dataFolder;
-			if (!dataFolder.size())
+			if (dataFolder.empty())
 				dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+			auto tLogSpillDataFolder = opts.tLogSpillDataFolder.empty() ? dataFolder : opts.tLogSpillDataFolder;
 
 			std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 
@@ -2377,6 +2312,7 @@ int main(int argc, char* argv[]) {
 			                      opts.localities,
 			                      opts.processClass,
 			                      dataFolder,
+			                      tLogSpillDataFolder,
 			                      dataFolder,
 			                      opts.storageMemLimit,
 			                      opts.metricsConnFile,
@@ -2388,7 +2324,7 @@ int main(int argc, char* argv[]) {
 			actors.push_back(metricsReport());
 
 #ifdef FLOW_GRPC_ENABLED
-			if (opts.grpcAddressStrs.size() > 0) {
+			if (!opts.grpcAddressStrs.empty()) {
 				FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
 				actors.push_back(GrpcServer::instance()->run());
 			}

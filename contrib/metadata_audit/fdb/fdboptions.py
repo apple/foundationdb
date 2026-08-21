@@ -19,7 +19,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import types
 NetworkOption = {
     "local_address" : (10, "Deprecated", type(''), "IP:PORT"),
     "cluster_file" : (20, "Deprecated", type(''), "path to cluster file"),

@@ -86,9 +86,10 @@ struct QueuePushWorkload : TestWorkload {
 		if (sscanf(value.substr(0, 8).toString().c_str(), "%x", &base) &&
 		    sscanf(value.substr(8, 8).toString().c_str(), "%x", &offset)) {
 			return std::make_pair(base, offset);
-		} else
+		} else {
 			// SOMEDAY: what should this really be?  Should we rely on exceptions for control flow here?
 			throw client_invalid_operation();
+		}
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -127,12 +128,13 @@ struct QueuePushWorkload : TestWorkload {
 
 					std::pair<int, int> unpacked = valuesForKey(lastKey);
 
-					if (self->forward)
+					if (self->forward) {
 						tr.set(keyForIndex(unpacked.first + unpacked.second, deterministicRandom()->randomInt(1, 1000)),
 						       StringRef(self->valueString));
-					else
+					} else {
 						tr.set(keyForIndex(unpacked.first - unpacked.second, deterministicRandom()->randomInt(1, 1000)),
 						       StringRef(self->valueString));
+					}
 
 					start = now();
 					co_await tr.commit();

@@ -36,7 +36,7 @@ public:
 	void addref() override { ReferenceCounted<AsyncFileWriteChecker>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileWriteChecker>::delref(); }
 
-	virtual StringRef getClassName() override { return "AsyncFileWriteChecker"_sr; }
+	StringRef getClassName() override { return "AsyncFileWriteChecker"_sr; }
 
 	// For read() and write(), the data buffer must remain valid until the future is ready
 	Future<int> read(void* data, int length, int64_t offset) override {
@@ -141,7 +141,7 @@ public:
 		}
 
 		uint32_t randomPage() {
-			if (keyToStep.size() == 0) {
+			if (keyToStep.empty()) {
 				return 0;
 			}
 			auto it = keyToStep.begin();
@@ -166,7 +166,7 @@ public:
 		}
 
 		uint32_t leastRecentlyUsedPage() {
-			if (stepToKey.size() == 0) {
+			if (stepToKey.empty()) {
 				return 0;
 			}
 			return stepToKey.begin()->second;

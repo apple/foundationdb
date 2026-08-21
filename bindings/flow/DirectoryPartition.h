@@ -41,22 +41,22 @@ public:
 	    parentDirectoryLayer(parentDirectoryLayer) {
 		this->directoryLayer->path = path;
 	}
-	virtual ~DirectoryPartition() {}
+	~DirectoryPartition() override = default;
 
-	virtual Key key() const { throw cannot_use_partition_as_subspace(); }
-	virtual bool contains(KeyRef const& key) const { throw cannot_use_partition_as_subspace(); }
+	Key key() const override { throw cannot_use_partition_as_subspace(); }
+	bool contains(KeyRef const& key) const override { throw cannot_use_partition_as_subspace(); }
 
-	virtual Key pack(Tuple const& tuple = Tuple()) const { throw cannot_use_partition_as_subspace(); }
-	virtual Tuple unpack(KeyRef const& key) const { throw cannot_use_partition_as_subspace(); }
-	virtual KeyRange range(Tuple const& tuple = Tuple()) const { throw cannot_use_partition_as_subspace(); }
+	Key pack(Tuple const& tuple = Tuple()) const override { throw cannot_use_partition_as_subspace(); }
+	Tuple unpack(KeyRef const& key) const override { throw cannot_use_partition_as_subspace(); }
+	KeyRange range(Tuple const& tuple = Tuple()) const override { throw cannot_use_partition_as_subspace(); }
 
-	virtual Subspace subspace(Tuple const& tuple) const { throw cannot_use_partition_as_subspace(); }
-	virtual Subspace get(Tuple const& tuple) const { throw cannot_use_partition_as_subspace(); }
+	Subspace subspace(Tuple const& tuple) const override { throw cannot_use_partition_as_subspace(); }
+	Subspace get(Tuple const& tuple) const override { throw cannot_use_partition_as_subspace(); }
 
 protected:
 	Reference<DirectoryLayer> parentDirectoryLayer;
 
-	virtual Reference<DirectoryLayer> getDirectoryLayerForPath(Path const& path) const {
+	Reference<DirectoryLayer> getDirectoryLayerForPath(Path const& path) const override {
 		return path.empty() ? parentDirectoryLayer : directoryLayer;
 	}
 };

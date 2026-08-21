@@ -26,7 +26,7 @@
 #include <flow/flow.h>
 #include <flow/FastAlloc.h>
 #include <flow/ThreadPrimitives.h>
-#include <flow/ThreadHelper.actor.h>
+#include <flow/ThreadHelper.h>
 #include <flow/ScopeExit.h>
 
 // NOTE: Currently futures should only be used from main thread.
@@ -184,9 +184,9 @@ public:
 
 	virtual void destroy() { delete this; }
 	virtual void cancel() {}
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
-	virtual void fire(T&&) override { ASSERT(false); }
+	void unwait() override { delFutureRef(); }
+	void fire(T const&) override { ASSERT(false); }
+	void fire(T&&) override { ASSERT(false); }
 
 protected:
 	bool shouldFireImmediatelyUnsafe() { return SingleCallback<T>::next != this; }
@@ -196,8 +196,8 @@ template <class T>
 class ThreadFutureStream {
 public:
 	ThreadFutureStream() : queue(nullptr) {}
-	explicit(false) ThreadFutureStream(const ThreadFutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
-	explicit(false) ThreadFutureStream(ThreadFutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	ThreadFutureStream(const ThreadFutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
+	ThreadFutureStream(ThreadFutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	explicit ThreadFutureStream(ThreadNotifiedQueue<T>* queue) : queue(queue) {}
 	~ThreadFutureStream() {
 		if (queue)
@@ -256,9 +256,7 @@ class ThreadReturnPromiseStream {
 public:
 	ThreadReturnPromiseStream() : queue(new ThreadNotifiedQueue<T>(0, 1)) {}
 	ThreadReturnPromiseStream(const ThreadReturnPromiseStream& rhs) = delete;
-	explicit(false) ThreadReturnPromiseStream(ThreadReturnPromiseStream&& rhs) noexcept : queue(rhs.queue) {
-		rhs.queue = 0;
-	}
+	ThreadReturnPromiseStream(ThreadReturnPromiseStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	~ThreadReturnPromiseStream() {
 		if (queue)
 			queue->delPromiseRef();

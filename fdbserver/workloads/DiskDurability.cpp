@@ -40,10 +40,10 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 			int size = pages * _PAGE_SIZE;
 
 			int64_t newData = 0;
-			if (lastData == 0)
+			if (lastData == 0) {
 				newData = deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(),
 				                                             std::numeric_limits<int64_t>::max());
-			else {
+			} else {
 				++newData;
 				int readBytes = co_await file->file->read(buffer->buffer, size, offset);
 				ASSERT(readBytes == size);
@@ -85,7 +85,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	explicit DiskDurabilityWorkload(WorkloadContext const& wcx) : AsyncFileWorkload(wcx) {
 		writers = getOption(options, "writers"_sr, 1);
 		filePages = getOption(options, "filePages"_sr, 1000000);
-		fileSize = filePages * _PAGE_SIZE;
+		fileSize = static_cast<int64_t>(filePages) * _PAGE_SIZE;
 		unbufferedIO = true;
 		uncachedIO = true;
 		fillRandom = false;

@@ -26,7 +26,7 @@
 
 class ICheckpointByteSampleReader {
 public:
-	virtual ~ICheckpointByteSampleReader() {}
+	virtual ~ICheckpointByteSampleReader() = default;
 
 	virtual KeyValue next() = 0;
 
@@ -41,7 +41,7 @@ public:
 
 	virtual bool finish() = 0;
 
-	virtual ~IRocksDBSstFileWriter() {}
+	virtual ~IRocksDBSstFileWriter() = default;
 };
 
 class IRocksDBSstFileReader {
@@ -54,7 +54,7 @@ public:
 
 	virtual RangeResult getRange(const KeyRange& range) = 0;
 
-	virtual ~IRocksDBSstFileReader() {}
+	virtual ~IRocksDBSstFileReader() = default;
 };
 
 struct CheckpointFile {

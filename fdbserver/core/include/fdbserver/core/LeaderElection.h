@@ -50,11 +50,11 @@ Future<Void> changeLeaderCoordinators(ServerCoordinators const& coordinators, Va
 #pragma region Implementation
 #endif // __INTEL_COMPILER
 
-Future<Void> tryBecomeLeaderInternal(ServerCoordinators const& coordinators,
-                                     Value const& proposedSerializedInterface,
-                                     Reference<AsyncVar<Value>> const& outSerializedLeader,
-                                     bool const& hasConnected,
-                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo);
+Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
+                                     Value proposedSerializedInterface,
+                                     Reference<AsyncVar<Value>> outSerializedLeader,
+                                     bool hasConnected,
+                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo);
 
 template <class LeaderInterface>
 Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators,

@@ -30,10 +30,10 @@
 // it should not be modified locally.
 template <typename KeyType, typename ValueType>
 struct KeyRangeMapSnapshot : public ReferenceCounted<KeyRangeMapSnapshot<KeyType, ValueType>> {
-	typedef std::map<KeyType, ValueType> Map;
+	using Map = std::map<KeyType, ValueType>;
 
 	// A default constructed map snapshot can't be used to look anything up because no ranges are covered.
-	KeyRangeMapSnapshot() {}
+	KeyRangeMapSnapshot() = default;
 
 	// Initialize map with a single range from min to max with a given ValueType
 	KeyRangeMapSnapshot(const KeyType& min, const KeyType& max, const ValueType& val = {}) {
@@ -116,11 +116,11 @@ template <typename KeyType,
           typename ValueCodec = TupleCodec<ValueType>>
 class KeyBackedRangeMap {
 public:
-	typedef KeyBackedMap<KeyType, ValueType, KeyCodec, ValueCodec> Map;
-	typedef typename Map::KeySelector KeySelector;
-	typedef typename Map::RangeResultType RangeResultType;
-	typedef KeyRangeMapSnapshot<KeyType, ValueType> LocalSnapshot;
-	typedef typename LocalSnapshot::RangeValue RangeValue;
+	using Map = KeyBackedMap<KeyType, ValueType, KeyCodec, ValueCodec>;
+	using KeySelector = typename Map::KeySelector;
+	using RangeResultType = typename Map::RangeResultType;
+	using LocalSnapshot = KeyRangeMapSnapshot<KeyType, ValueType>;
+	using RangeValue = typename LocalSnapshot::RangeValue;
 
 	KeyBackedRangeMap(KeyRef prefix, Optional<WatchableTrigger> trigger, ValueCodec valueCodec)
 	  : kvMap(prefix, trigger, valueCodec) {}
@@ -176,7 +176,7 @@ public:
 		// rangeEnd is past end so the result will include end if it exists
 		KeySelector rangeEnd = KeySelector::firstGreaterThan(end);
 
-		int readSize = BUGGIFY ? 1 : 100000;
+		int readSize = buggify() ? 1 : 100000;
 		Future<RangeResultType> boundariesFuture =
 		    self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 
@@ -320,11 +320,11 @@ public:
 		// rangeEnd is past end so the result will include end if it exists
 		KeySelector rangeEnd = KeySelector::firstGreaterThan(end);
 
-		int readSize = BUGGIFY ? 1 : 100000;
+		int readSize = buggify() ? 1 : 100000;
 		Future<RangeResultType> boundariesFuture =
 		    self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 
-		Reference<LocalSnapshot> result = makeReference<LocalSnapshot>();
+		auto result = makeReference<LocalSnapshot>();
 		while (true) {
 			kbt_debug("RANGEMAP snapshot loop\n");
 			RangeResultType boundaries = co_await boundariesFuture;

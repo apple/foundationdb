@@ -44,7 +44,7 @@ json_spirit::mValue DDConfiguration::toJSON(RangeConfigMapSnapshot const& config
 			range["begin"] = rv.range().begin.toString();
 			range["end"] = rv.range().end.toString();
 			range["configuration"] = rv.value().toJSON();
-			ranges.push_back(std::move(range));
+			ranges.push_back(range);
 		}
 	}
 

@@ -75,7 +75,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 
 std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>>
 BackupProgress::getUnfinishedRangePartitionedBackup() {
-	return getUnfinishedBackup(tagLocalityRangeBackup);
+	return getUnfinishedBackup(tagLocalityRangePartitionedBackup);
 }
 
 std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgress::getUnfinishedBackup(
@@ -127,8 +127,6 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 					}
 				}
 				if (savedMore > 0) {
-					// The tags are the same
-					// ASSERT(info.tags == epochTags[rit->first]);
 					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, adjustedBeginVersion, epoch);
 					if (tags.empty())
 						break;

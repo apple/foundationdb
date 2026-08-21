@@ -531,11 +531,11 @@ Reference<DirectoryLayer> DirectoryLayer::getDirectoryLayer() {
 	return Reference<DirectoryLayer>::addRef(this);
 }
 
-const Standalone<StringRef> DirectoryLayer::getLayer() const {
+Standalone<StringRef> DirectoryLayer::getLayer() const {
 	return StringRef();
 }
 
-const IDirectory::Path DirectoryLayer::getPath() const {
+IDirectory::Path DirectoryLayer::getPath() const {
 	return path;
 }
 } // namespace FDB

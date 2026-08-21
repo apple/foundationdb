@@ -68,7 +68,7 @@ struct AsyncFileWorkload : TestWorkload {
 	std::string path;
 
 	explicit(false) AsyncFileWorkload(WorkloadContext const&);
-	~AsyncFileWorkload() override {}
+	~AsyncFileWorkload() override = default;
 
 	// Allocates a buffer of a given size.  If necessary, the buffer will be aligned to 4K
 	Reference<AsyncFileBuffer> allocateBuffer(size_t size);
@@ -84,7 +84,7 @@ struct AsyncFileWorkload : TestWorkload {
 			co_await delay(0.1);
 		}
 
-		bool fileCreated = self->path.length() == 0;
+		bool fileCreated = self->path.empty();
 		if (fileCreated) {
 			self->path = "asyncfile." + deterministicRandom()->randomUniqueID().toString();
 			flags &= ~IAsyncFile::OPEN_READONLY;

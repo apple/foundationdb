@@ -37,7 +37,7 @@ struct ClientStatusInfo {
 	Standalone<VectorRef<ClientVersionRef>> versions;
 	Standalone<VectorRef<StringRef>> issues;
 
-	ClientStatusInfo() {}
+	ClientStatusInfo() = default;
 	ClientStatusInfo(Key const& traceLogGroup,
 	                 Standalone<VectorRef<ClientVersionRef>> versions,
 	                 Standalone<VectorRef<StringRef>> issues)

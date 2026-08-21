@@ -64,6 +64,8 @@ public:
 #endif
 	}
 	void enter() {
+		// The architecture-specific body is selected by the preprocessor.
+		// NOLINTNEXTLINE(readability-braces-around-statements)
 		while (isLocked.test_and_set(std::memory_order_acquire))
 #if defined(__aarch64__)
 			__asm__ volatile("isb");
@@ -118,13 +120,13 @@ public:
 
 #if FLOW_THREAD_SAFE
 
-typedef ThreadSpinLock SpinLock;
-typedef ThreadSpinLockHolder SpinLockHolder;
+using SpinLock = ThreadSpinLock;
+using SpinLockHolder = ThreadSpinLockHolder;
 
 #else
 
-typedef ThreadUnsafeSpinLock SpinLock;
-typedef ThreadUnsafeSpinLockHolder SpinLockHolder;
+using SpinLock = ThreadUnsafeSpinLock;
+using SpinLockHolder = ThreadUnsafeSpinLockHolder;
 
 #endif
 

@@ -540,16 +540,18 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 			exit(0);
 #endif
 
-		if (getegid() != gid)
+		if (getegid() != gid) {
 			if (setgid(gid) != 0) {
 				fprintf(stderr, "Unable to set GID to %d (setgid error %d: %s)\n", gid, errno, strerror(errno));
 				exit(1);
 			}
-		if (geteuid() != uid)
+		}
+		if (geteuid() != uid) {
 			if (setuid(uid) != 0) {
 				fprintf(stderr, "Unable to set UID to %d (setuid error %d: %s)\n", uid, errno, strerror(errno));
 				exit(1);
 			}
+		}
 
 #ifdef __linux__
 		/* death of our parent raises SIGHUP */
@@ -658,8 +660,9 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 				return;
 			}
 			_uid = pw->pw_uid;
-		} else
+		} else {
 			_uid = geteuid();
+		}
 
 		if (group) {
 			errno = 0;
@@ -669,8 +672,9 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 				return;
 			}
 			_gid = gr->gr_gid;
-		} else
+		} else {
 			_gid = getegid();
+		}
 
 		/* Any change to uid or gid requires the process to be restarted to take effect */
 		if (uid != _uid || gid != _gid) {

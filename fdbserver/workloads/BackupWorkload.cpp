@@ -147,7 +147,7 @@ struct BackupWorkload : TestWorkload {
 		Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
 		co_await delay(startDelay);
 
-		if (startDelay || BUGGIFY) {
+		if (startDelay || buggify()) {
 			TraceEvent("BW_DoBackupAbortBackup1", randomID)
 			    .detail("Tag", printable(tag))
 			    .detail("StartDelay", startDelay);
@@ -197,7 +197,7 @@ struct BackupWorkload : TestWorkload {
 			    .detail("DifferentialAfter", stopDifferentialDelay);
 
 			try {
-				if (BUGGIFY) {
+				if (buggify()) {
 					KeyBackedTag backupTag = makeBackupTag(tag.toString());
 					TraceEvent("BW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName);
 
@@ -308,7 +308,7 @@ struct BackupWorkload : TestWorkload {
 		    .detail("DifferentialAfter", stopDifferentialAfter);
 
 		UID randomID = nondeterministicRandom()->randomUniqueID();
-		if (allowPauses && BUGGIFY) {
+		if (allowPauses && buggify()) {
 			cp = changePaused(cx, &backupAgent);
 		} else {
 			cp = resumeAgent(cx, &backupAgent);

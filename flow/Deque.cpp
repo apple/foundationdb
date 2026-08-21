@@ -84,7 +84,7 @@ struct RandomlyThrows {
 	RandomlyThrows() = default;
 	explicit RandomlyThrows(int data) : data(data) {}
 	~RandomlyThrows() = default;
-	explicit(false) RandomlyThrows(const RandomlyThrows& other) : data(other.data) { randomlyThrow(); }
+	RandomlyThrows(const RandomlyThrows& other) : data(other.data) { randomlyThrow(); }
 	RandomlyThrows& operator=(const RandomlyThrows& other) {
 		data = other.data;
 		randomlyThrow();
@@ -102,7 +102,7 @@ private:
 TEST_CASE("/flow/Deque/grow_exception_safety") {
 	Deque<RandomlyThrows> q;
 	for (int i = 0; i < 100; ++i) {
-		loop {
+		while (true) {
 			try {
 				q.push_back(RandomlyThrows{ i });
 				break;

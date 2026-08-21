@@ -1,4 +1,5 @@
 add_library(crc32 STATIC crc32.S crc32_wrapper.c crc32c.cpp)
+set_target_properties(crc32 PROPERTIES C_CLANG_TIDY "" CXX_CLANG_TIDY "")
 if (CLANG)
 	# This is necessary for clang since the compiler reports that crc32_align is
 	# defined but not used. With -Werror, crc32 will not compile.

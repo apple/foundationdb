@@ -27,7 +27,7 @@
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/IRandom.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include <compare>
 #include <vector>
 #include <unordered_map>
@@ -37,6 +37,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/ProxyLoadBalanceMetrics.h"
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbrpc/QueueModel.h"
@@ -65,18 +66,15 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
 	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
 	  : Locations(v) {}
-	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
-	  : Locations(v), hasCaches(hasCaches) {}
 	LocationInfo(const LocationInfo&) = delete;
 	LocationInfo(LocationInfo&&) = delete;
 	LocationInfo& operator=(const LocationInfo&) = delete;
 	LocationInfo& operator=(LocationInfo&&) = delete;
-	bool hasCaches = false;
 	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
 };
 
-using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
-using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
+using CommitProxyInfo = ModelInterface<CommitProxyInterface, ProxyCpuMetric>;
+using GrvProxyInfo = ModelInterface<GrvProxyInterface, ProxyGrvMetric>;
 
 class ClientTagThrottleData : NonCopyable {
 private:
@@ -170,7 +168,7 @@ struct KeyRangeLocationInfo {
 	KeyRange range;
 	Reference<LocationInfo> locations;
 
-	KeyRangeLocationInfo() {}
+	KeyRangeLocationInfo() = default;
 	KeyRangeLocationInfo(KeyRange range, Reference<LocationInfo> locations) : range(range), locations(locations) {}
 };
 
@@ -370,7 +368,7 @@ public:
 	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
 	UID proxiesLastChange;
 	LocalityData clientLocality;
-	QueueModel queueModel;
+	StorageServerQueueModel queueModel;
 	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::False };
 
 	struct VersionRequest {
@@ -547,8 +545,6 @@ public:
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 
-	Future<Void> cacheListMonitor;
-	AsyncTrigger updateCache;
 	std::vector<std::unique_ptr<SpecialKeyRangeReadImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
 	void registerSpecialKeysImpl(SpecialKeySpace::MODULE module,

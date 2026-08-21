@@ -39,6 +39,7 @@
 #include "flow/FastRef.h"
 
 class AccumulativeChecksumBuilder;
+class CDCRoutingTable;
 
 // applyMetadataMutations() is shared with resolver/clustercontroller code, so
 // it depends on a narrow commit-proxy view instead of the full ProxyCommitData
@@ -60,6 +61,7 @@ struct ApplyMetadataProxyContext {
 	UID dbgid;
 	IKeyValueStore* txnStateStore = nullptr;
 	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
+	CDCRoutingTable* cdcRouting = nullptr;
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
 	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
 	PublicRequestStream<CommitTransactionRequest> commit;
@@ -112,7 +114,7 @@ inline bool isMetadataMutation(MutationRef const& m) {
 	// FIXME: This is conservative - not everything in system keyspace is necessarily processed by
 	// applyMetadataMutations
 	if (m.type == MutationRef::SetValue) {
-		return (m.param1.size() && m.param1[0] == systemKeys.begin[0] &&
+		return (!m.param1.empty() && m.param1[0] == systemKeys.begin[0] &&
 		        !m.param1.startsWith(nonMetadataSystemKeys.begin));
 	} else if (m.type == MutationRef::ClearRange) {
 		return m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0] &&

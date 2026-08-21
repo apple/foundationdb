@@ -260,8 +260,8 @@ private:
 
 		// Compare the contents of the original and downloaded files
 		// Paths are now inside uniqueRunDir
-		std::string originalContent = readFileBytes(credentials, 1024 * 1024); // 1MB max size
-		std::string downloadedContent = readFileBytes(download, 1024 * 1024); // 1MB max size
+		std::string originalContent = readFileBytes(credentials, size_t{ 1024 } * 1024); // 1MB max size
+		std::string downloadedContent = readFileBytes(download, size_t{ 1024 } * 1024); // 1MB max size
 		if (originalContent != downloadedContent) {
 			TraceEvent(SevError, "S3ClientWorkloadContentMismatch")
 			    .detailf("OriginalSize", "%zu", originalContent.size())

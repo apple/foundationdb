@@ -6,6 +6,7 @@ testTitle="ClientTransactionProfilingCorrectness"
 clearAfterTest=true
 timeout=2100
 runSetup=true
+waitForQuiescenceBegin=false
 
     [[test.workload]]
     testName="ApiCorrectness"

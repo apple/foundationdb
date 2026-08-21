@@ -3,10 +3,14 @@ storageEngineExcludeTypes=[3,4,5]
 logAntiQuorum=0
 encryptModes=['disabled']
 tenantModes=['disabled']
+# Snapshot restore only supports one region; keep the 7.3 step from creating remote or satellite TLogs.
+generateFearless=false
+datacenters=1
 
 [[test]]
 testTitle="SnapTestPre"
 clearAfterTest=false
+disabledFailureInjectionWorkloads='Attrition'
 
         [[test.workload]]
         testName="SnapTest"
@@ -17,6 +21,7 @@ clearAfterTest=false
 [[test]]
 testTitle="SnapTestTakeSnap"
 clearAfterTest=false
+disabledFailureInjectionWorkloads='Attrition'
 
         [[test.workload]]
         testName="ReadWrite"
@@ -44,6 +49,7 @@ clearAfterTest=false
 [[test]]
 testTitle="SnapTestPost"
 clearAfterTest=false
+disabledFailureInjectionWorkloads='Attrition'
 
         [[test.workload]]
         testName="SnapTest"

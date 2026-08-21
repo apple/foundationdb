@@ -656,9 +656,8 @@ class LineageReference : public Reference<ActorLineage> {
 public:
 	LineageReference() : Reference<ActorLineage>(nullptr), actorName_(""), allocated_(false) {}
 	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
-	explicit(false) LineageReference(const LineageReference& r)
-	  : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
-	explicit(false) LineageReference(LineageReference&& r)
+	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
+	LineageReference(LineageReference&& r)
 	  : Reference<ActorLineage>(r.getPtr()), actorName_(r.actorName_), allocated_(r.allocated_) {
 		r.setPtrUnsafe(nullptr);
 		r.actorName_ = "";
@@ -858,8 +857,9 @@ public:
 			promises = 0;
 			if (!futures)
 				destroy();
-		} else
+		} else {
 			--promises;
+		}
 	}
 	void delFutureRef() {
 		if (!--futures) {
@@ -1239,8 +1239,9 @@ struct NotifiedQueue : private SingleCallback<T>
 		if (!--promises) {
 			if (futures) {
 				sendError(broken_promise());
-			} else
+			} else {
 				destroy();
+			}
 		}
 	}
 	void delFutureRef() {
@@ -1262,9 +1263,9 @@ struct NotifiedQueue : private SingleCallback<T>
 		ASSERT(SingleCallback<T>::next == this);
 		cb->insert(this);
 	}
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
-	virtual void fire(T&&) override { ASSERT(false); }
+	void unwait() override { delFutureRef(); }
+	void fire(T const&) override { ASSERT(false); }
+	void fire(T&&) override { ASSERT(false); }
 
 protected:
 	T popImpl() {
@@ -1532,13 +1533,13 @@ struct Actor<void> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	virtual void fire(ValueType const& value) override {
+	void fire(ValueType const& value) override {
 #ifdef ENABLE_SAMPLING
 		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 #endif
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
-	virtual void error(Error e) override {
+	void error(Error e) override {
 #ifdef ENABLE_SAMPLING
 		LineageScope _(static_cast<ActorType*>(this)->lineageAddr());
 #endif
@@ -1601,5 +1602,5 @@ void bindDeterministicRandomToOpenssl();
 #endif
 
 #include "flow/Coroutines.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #endif

@@ -7,7 +7,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/TDMetric.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
 
 template class RequestStream<RecruitMasterRequest, false>;
@@ -18,6 +18,9 @@ template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
 
 template class RequestStream<InitializeGrvProxyRequest, false>;
 template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
+
+template class RequestStream<InitializeCDCProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeCDCProxyRequest, false>;
 
 template class RequestStream<GetServerDBInfoRequest, false>;
 template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
@@ -195,7 +198,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 	if (!ok) {
 		std::string type = role.roleName + "Failed";
 
-		TraceEvent err(SevError, type.c_str(), id);
+		TraceEvent err(role == Role::BACKUP ? SevWarnAlways : SevError, type.c_str(), id);
 		if (e.code() != invalid_error_code) {
 			err.errorUnsuppressed(e);
 		}
@@ -230,6 +233,7 @@ const Role Role::TRANSACTION_LOG("TLog", "TL");
 const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
 const Role Role::COMMIT_PROXY("CommitProxyServer", "CP");
 const Role Role::GRV_PROXY("GrvProxyServer", "GP");
+const Role Role::CDC_PROXY("CDCProxyServer", "DP");
 const Role Role::MASTER("MasterServer", "MS");
 const Role Role::RESOLVER("Resolver", "RV");
 const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");

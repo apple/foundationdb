@@ -35,8 +35,8 @@ void forceLinkJsonWebKeySetTests();
 void forceLinkVersionVectorTests();
 void forceLinkRESTClientTests();
 void forceLinkRESTUtilsTests();
+void forceLinkMemoryTrackerTests();
 void forceLinkCompressedIntTests();
-void forceLinkCompressionUtilsTest();
 void forceLinkAtomicTests();
 void forceLinkIdempotencyIdTests();
 void forceLinkActorCollectionTests();
@@ -52,11 +52,14 @@ void forceLinkLogSystemRecoveryTests();
 void forceLinkIPagerTests();
 void forceLinkMockS3ServerTests();
 void forceLinkAuditUtilsTests();
+void forceLinkShardsAffectedByTeamFailureTests();
 void forceLinkClusterHealthMonitorTests();
 void forceLinkGrvQueueDelayTests();
-// TODO akanksha: Remove once a production caller of backupWorkerRangePartitioned() is wired up;
-// this only exists to keep TEST_CASEs in BackupWorkerRangePartitioned.cpp from being dead-stripped.
-void forceLinkBackupWorkerRangePartitionedTests();
+void forceLinkGrvProxyStarvationTests();
+// TODO akanksha: Remove once a production caller of rangePartitionedBackupWorker() is wired up;
+// this only exists to keep TEST_CASEs in RangePartitionedBackupWorker.cpp from being dead-stripped.
+void forceLinkRangePartitionedBackupWorkerTests();
+void forceLinkCountedSectionTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -114,8 +117,8 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionVectorTests();
 		forceLinkRESTClientTests();
 		forceLinkRESTUtilsTests();
+		forceLinkMemoryTrackerTests();
 		forceLinkCompressedIntTests();
-		forceLinkCompressionUtilsTest();
 		forceLinkAtomicTests();
 		forceLinkIdempotencyIdTests();
 		forceLinkActorCollectionTests();
@@ -128,11 +131,14 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkIPagerTests();
 		forceLinkMockS3ServerTests();
 		forceLinkAuditUtilsTests();
+		forceLinkShardsAffectedByTeamFailureTests();
 		forceLinkClusterHealthMonitorTests();
 		forceLinkGrvQueueDelayTests();
-		// TODO akanksha: Remove once a production caller of backupWorkerRangePartitioned() is wired up;
-		// this only exists to keep TEST_CASEs in BackupWorkerRangePartitioned.cpp from being dead-stripped.
-		forceLinkBackupWorkerRangePartitionedTests();
+		forceLinkGrvProxyStarvationTests();
+		// TODO akanksha: Remove once a production caller of rangePartitionedBackupWorker() is wired up;
+		// this only exists to keep TEST_CASEs in RangePartitionedBackupWorker.cpp from being dead-stripped.
+		forceLinkRangePartitionedBackupWorkerTests();
+		forceLinkCountedSectionTests();
 
 #ifdef FLOW_GRPC_ENABLED
 		forceLinkGrpcTests();

@@ -91,13 +91,10 @@ struct DDConfiguration : public KeyBackedClass {
 	explicit DDConfiguration(KeyRef prefix = SystemKey("\xff\x02/ddconfig/"_sr)) : KeyBackedClass(prefix) {}
 
 	// RangeConfigMap is a  KeyBackedRangeMap of DDRangeConfig values describing various option overrides for key ranges
-	typedef KeyBackedRangeMap<Key,
-	                          DDRangeConfig,
-	                          TupleCodec<Key>,
-	                          ObjectCodec<DDRangeConfig, decltype(IncludeVersion())>>
-	    RangeConfigMap;
+	using RangeConfigMap =
+	    KeyBackedRangeMap<Key, DDRangeConfig, TupleCodec<Key>, ObjectCodec<DDRangeConfig, decltype(IncludeVersion())>>;
 
-	typedef RangeConfigMap::LocalSnapshot RangeConfigMapSnapshot;
+	using RangeConfigMapSnapshot = RangeConfigMap::LocalSnapshot;
 
 	// Range configuration options set by Users
 	RangeConfigMap userRangeConfig() const { return { subspace.pack(__FUNCTION__sr), trigger, IncludeVersion() }; }

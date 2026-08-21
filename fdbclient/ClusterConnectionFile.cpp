@@ -113,10 +113,11 @@ std::pair<std::string, bool> ClusterConnectionFile::lookupClusterFileName(std::s
 		// If this is set but points to a file that does not
 		// exist, we will not fallback to any other methods
 		isDefaultFile = false;
-	} else if (fileExists("fdb.cluster"))
+	} else if (fileExists("fdb.cluster")) {
 		f = "fdb.cluster";
-	else
+	} else {
 		f = platform::getDefaultClusterFilePath();
+	}
 
 	return std::make_pair(f, isDefaultFile);
 }
@@ -128,15 +129,16 @@ std::string ClusterConnectionFile::getErrorString(std::pair<std::string, bool> c
 	if (e.code() == error_code_connection_string_invalid) {
 		return format("Invalid cluster file `%s': %d %s", resolvedClusterFile.first.c_str(), e.code(), e.what());
 	} else if (e.code() == error_code_no_cluster_file_found) {
-		if (isDefault)
+		if (isDefault) {
 			return format("Unable to read cluster file `./fdb.cluster' or `%s' and %s unset: %d %s",
 			              platform::getDefaultClusterFilePath().c_str(),
 			              CLUSTER_FILE_ENV_VAR_NAME,
 			              e.code(),
 			              e.what());
-		else
+		} else {
 			return format(
 			    "Unable to read cluster file `%s': %d %s", resolvedClusterFile.first.c_str(), e.code(), e.what());
+		}
 	} else {
 		return format(
 		    "Unexpected error loading cluster file `%s': %d %s", resolvedClusterFile.first.c_str(), e.code(), e.what());

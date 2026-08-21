@@ -158,8 +158,8 @@ public:
 	explicit ReplyPromise(const PeerCompatibilityPolicy& policy) : ReplyPromise() {
 		sav->setPeerCompatibilityPolicy(policy);
 	}
-	explicit(false) ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
-	explicit(false) ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
+	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
+	ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 	~ReplyPromise() {
 		if (sav)
 			sav->delPromiseRef();
@@ -237,6 +237,8 @@ struct serializable_traits<ReplyPromise<T>> : std::true_type {
 
 template <class Reply>
 ReplyPromise<Reply> const& getReplyPromise(ReplyPromise<Reply> const& p) {
+	// The returned reference borrows p without changing its promise reference count.
+	// NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
 	return p;
 }
 
@@ -280,7 +282,7 @@ void setReplyPriority(const ReplyPromise<Reply>& p, TaskPriority taskID) {
 struct ReplyPromiseStreamReply {
 	Optional<UID> acknowledgeToken;
 	uint16_t sequence;
-	ReplyPromiseStreamReply() {}
+	ReplyPromiseStreamReply() = default;
 };
 
 struct AcknowledgementReply {
@@ -503,13 +505,13 @@ public:
 		return FutureStream<T>(queue);
 	}
 	ReplyPromiseStream() : queue(new NetNotifiedQueueWithAcknowledgements<T>(0, 1)), errors(new SAV<Void>(0, 1)) {}
-	explicit(false) ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
+	ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
 		queue->addPromiseRef();
 		if (errors) {
 			errors->addPromiseRef();
 		}
 	}
-	explicit(false) ReplyPromiseStream(ReplyPromiseStream&& rhs) noexcept : queue(rhs.queue), errors(rhs.errors) {
+	ReplyPromiseStream(ReplyPromiseStream&& rhs) noexcept : queue(rhs.queue), errors(rhs.errors) {
 		rhs.queue = nullptr;
 		rhs.errors = nullptr;
 	}
@@ -736,8 +738,9 @@ public:
 	void send(U&& value) const {
 		if (queue->isRemoteEndpoint()) {
 			FlowTransport::transport().sendUnreliable(SerializeSource<T>(std::forward<U>(value)), getEndpoint(), true);
-		} else
+		} else {
 			queue->send(std::forward<U>(value));
+		}
 	}
 
 	/*void sendError(const Error& error) const {
@@ -840,8 +843,7 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			if (disc.isReady() ||
-			    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01))) {
+			if (disc.isReady() || (g_network->isSimulated() && !g_simulator->speedUpSimulation && buggify(0.01))) {
 				if (disc.isReady() && IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint())) {
 					p.sendError(unauthorized_attempt());
 				} else {
@@ -907,8 +909,8 @@ public:
 	explicit RequestStream(PeerCompatibilityPolicy policy) : RequestStream() {
 		queue->setPeerCompatibilityPolicy(policy);
 	}
-	explicit(false) RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	explicit(false) RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
+	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const RequestStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)

@@ -24,18 +24,32 @@ function create_cluster_file() {
     FDB_CLUSTER_FILE=${FDB_CLUSTER_FILE:-/etc/foundationdb/fdb.cluster}
     mkdir -p "$(dirname $FDB_CLUSTER_FILE)"
 
-    if [[ -n "$FDB_CLUSTER_FILE_CONTENTS" ]]; then
-        echo "$FDB_CLUSTER_FILE_CONTENTS" > "$FDB_CLUSTER_FILE"
-    elif [[ -n $FDB_COORDINATOR ]]; then
+    if [[ -n $FDB_COORDINATOR ]]; then
         coordinator_ip=$(dig +short "$FDB_COORDINATOR")
         if [[ -z "$coordinator_ip" ]]; then
             echo "Failed to look up coordinator address for $FDB_COORDINATOR" 1>&2
             exit 1
         fi
         coordinator_port=${FDB_COORDINATOR_PORT:-4500}
-        echo "docker:docker@$coordinator_ip:$coordinator_port" > "$FDB_CLUSTER_FILE"
+        FDB_CLUSTER_FILE_CONTENTS="docker:docker@$coordinator_ip:$coordinator_port"
+    fi
+
+    if [[ -n "$FDB_CLUSTER_FILE_CONTENTS" ]]; then
+        if [[ -w "$FDB_CLUSTER_FILE" ]]; then
+            echo "Overwriting existing clusterfile." 1>&2
+        fi
+        echo "$FDB_CLUSTER_FILE_CONTENTS" > "$FDB_CLUSTER_FILE"
+    elif [[ ! -w "$FDB_CLUSTER_FILE" ]]; then
+        # fdbserver requires write permissions to clusterfile, or it may *eventually* fail due to cluster migrations.
+        # https://apple.github.io/foundationdb/administration.html#required-permissions
+        echo "Clusterfile at \"$FDB_CLUSTER_FILE\" is not writable." 1>&2
+        exit 1
     else
-        echo "FDB_COORDINATOR environment variable not defined" 1>&2
+        echo "Using existing clusterfile at \"$FDB_CLUSTER_FILE\"." 1>&2
+    fi
+
+    if (( $? != 0 )); then
+        echo "Unable to write to FDB_CLUSTER_FILE." 1>&2
         exit 1
     fi
 }
@@ -53,7 +67,9 @@ function create_server_environment() {
     fi
 
     echo "export PUBLIC_IP=$public_ip" > $env_file
-    if [[ -z $FDB_COORDINATOR && -z "$FDB_CLUSTER_FILE_CONTENTS" ]]; then
+    # Set default cluster file contents only if no other configuration is specified.
+    if [[ (! -s "$FDB_CLUSTER_FILE") && -z "$FDB_CLUSTER_FILE_CONTENTS" && -z "$FDB_COORDINATOR" ]]; then
+        echo "Warning: No configuration available, falling back to self-coordinated." 1>&2
         FDB_CLUSTER_FILE_CONTENTS="docker:docker@$public_ip:$FDB_PORT"
     fi
 
@@ -65,4 +81,5 @@ source /var/fdb/.fdbenv
 echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT"
 fdbserver --listen-address 0.0.0.0:"$FDB_PORT" --public-address "$PUBLIC_IP:$FDB_PORT" \
     --datadir /var/fdb/data --logdir /var/fdb/logs \
-    --locality-zoneid="$(hostname)" --locality-machineid="$(hostname)" --class "$FDB_PROCESS_CLASS" --knob_disable_posix_kernel_aio=1
+    --locality-zoneid="$(hostname)" --locality-machineid="$(hostname)" --class "$FDB_PROCESS_CLASS" --knob_disable_posix_kernel_aio=1 \
+    "$@"

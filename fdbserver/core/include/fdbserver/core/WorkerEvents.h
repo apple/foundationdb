@@ -25,7 +25,7 @@
 #include <string>
 
 #include "flow/ITrace.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 

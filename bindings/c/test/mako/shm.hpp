@@ -76,7 +76,7 @@ class Access {
 	                                                int num_workers,
 	                                                int process_idx,
 	                                                int thread_idx) noexcept {
-		ThreadStatistics* thread_stat_base =
+		auto* thread_stat_base =
 		    reinterpret_cast<ThreadStatistics*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
 		                                        sizeof(WorkflowStatistics) * num_processes * num_workers);
 
@@ -89,7 +89,7 @@ class Access {
 	                                                  int num_workers,
 	                                                  int process_idx) noexcept {
 
-		ProcessStatistics* proc_stat_base =
+		auto* proc_stat_base =
 		    reinterpret_cast<ProcessStatistics*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
 		                                         sizeof(WorkflowStatistics) * num_processes * num_workers +
 		                                         sizeof(ThreadStatistics) * num_processes * num_threads);
@@ -110,14 +110,16 @@ public:
 
 	void initMemory() noexcept {
 		new (&header()) Header{};
-		for (auto i = 0; i < num_processes; i++)
+		for (auto i = 0; i < num_processes; i++) {
 			for (auto j = 0; j < num_workers; j++) {
 				new (&workerStatsSlot(i, j)) WorkflowStatistics();
 			}
-		for (auto i = 0; i < num_processes; i++)
+		}
+		for (auto i = 0; i < num_processes; i++) {
 			for (auto j = 0; j < num_threads; j++) {
 				new (&threadStatsSlot(i, j)) ThreadStatistics();
 			}
+		}
 		for (auto i = 0; i < num_processes; i++) {
 			new (&processStatsSlot(i)) ProcessStatistics();
 		}

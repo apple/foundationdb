@@ -30,9 +30,101 @@
 #include "flow/flow.h"
 
 // So that tests are not optimized out. :/
+void forceLinkGrpcTests() {}
 void forceLinkGrpcTests2() {}
 
 namespace fdbrpc_test {
+
+TEST_CASE("/fdbrpc/grpc/basic_sync_client") {
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50001"));
+	GrpcServer server(addr);
+	server.registerService(make_shared<TestEchoServiceImpl>());
+	Future<Void> server_actor = server.run();
+	co_await server.onRunning();
+
+	EchoClient client(grpc::CreateChannel(addr.toString(), grpc::InsecureChannelCredentials()));
+	std::string reply = client.Echo("Ping!");
+	std::cout << "Echo received: " << reply << std::endl;
+	ASSERT_EQ(reply, "Echo: Ping!");
+
+	co_await server.shutdown();
+	co_await server_actor;
+}
+
+TEST_CASE("/fdbrpc/grpc/basic_async_client") {
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50003"));
+	GrpcServer server(addr);
+	server.registerService(make_shared<TestEchoServiceImpl>());
+	Future<Void> _ = server.run();
+	co_await server.onRunning();
+
+	auto pool = make_shared<AsyncTaskExecutor>(4);
+	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+
+	try {
+		EchoRequest request;
+		request.set_message("Ping!");
+		EchoResponse response = co_await client.call(&TestEchoService::Stub::Echo, request);
+		std::cout << "Echo received: " << response.message() << std::endl;
+		ASSERT_EQ(response.message(), "Echo: Ping!");
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_grpc_error);
+		ASSERT(false);
+	}
+}
+
+TEST_CASE("/fdbrpc/grpc/actor_basic_stream_server") {
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50002"));
+	GrpcServer server(addr);
+	server.registerService(make_shared<TestEchoServiceImpl>());
+	Future<Void> _ = server.run();
+	co_await server.onRunning();
+
+	auto pool = make_shared<AsyncTaskExecutor>(4);
+	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+
+	int count = 0;
+	try {
+		EchoRequest request;
+		request.set_message("Ping!");
+		auto stream = client.call(&TestEchoService::Stub::EchoRecvStream10, request);
+		while (true) {
+			auto response = co_await stream;
+			ASSERT_EQ(response.message(), "Echo: Ping!");
+			count += 1;
+		}
+	} catch (Error& e) {
+		std::cout << "Error: " << e.name() << std::endl;
+		if (e.code() == error_code_end_of_stream) {
+			ASSERT_EQ(count, 10); // Should send 10 reponses.
+			co_return;
+		}
+		ASSERT(false);
+	}
+}
+
+TEST_CASE("/fdbrpc/grpc/no_server_running") {
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50004"));
+	auto pool = make_shared<AsyncTaskExecutor>(4);
+	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+
+	try {
+		EchoRequest request;
+		request.set_message("Ping!");
+		EchoResponse response = co_await client.call(&TestEchoService::Stub::Echo, request);
+		ASSERT(false); // RPC should fail as there is no server running.;
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_grpc_error);
+	}
+}
+
+TEST_CASE("/fdbrpc/grpc/destroy_server_without_shutdown") {
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50005"));
+	GrpcServer server(addr);
+	server.registerService(make_shared<TestEchoServiceImpl>());
+	Future<Void> _ = server.run();
+	co_await server.onRunning();
+}
 
 void generate_random_string(std::string* buffer, int size) {
 	buffer->clear();

@@ -1,0 +1,141 @@
+name: CodeBuild Comment Cleanup
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  cleanup:
+    if: >
+      github.event.issue.pull_request &&
+      github.event.comment.user.login == 'foundationdb-ci'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Minimize Outdated Comments
+        uses: actions/github-script@v9
+        with:
+          script: |
+            // Example header: ### Result of foundationdb-pr-clang on Linux RHEL 9
+            // Check if header is at beginning of trimmed body
+            const commentBody = context.payload.comment.body.trimStart();
+            const match = commentBody.match(/^### Result of (.*) on (.*)$/m);
+            if (!match || commentBody.indexOf(match[0]) !== 0) {
+              console.log("Comment does not start with the expected header format. Skipping.");
+              return;
+            }
+            const header = match[0].trim();
+
+            // Get PR info to find the head SHA
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner:       context.repo.owner,
+              repo:        context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const headSha = pullRequest.head.sha;
+            console.log(`Current PR head SHA: ${headSha}`);
+
+            const allOldComments = [];
+            const commentsToMinimize = [];
+            let oldCommentAtHead = null;
+
+            console.log(`Searching for previous comments with header: "${header}"`);
+            const query = `
+              query($owner: String!, $repo: String!, $prNumber: Int!, $cursor: String) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $prNumber) {
+                    comments(first: 100, after: $cursor) {
+                      pageInfo {
+                        hasNextPage
+                        endCursor
+                      }
+                      nodes {
+                        id
+                        databaseId
+                        body
+                        isMinimized
+                        author {
+                          login
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+            let hasNextPage = true;
+            let cursor = null;
+
+            while (hasNextPage) {
+              const result = await github.graphql(query, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                prNumber: context.issue.number,
+                cursor: cursor
+              });
+              const prComments = result.repository.pullRequest.comments;
+
+              for (const comment of prComments.nodes) {
+                if (
+                  comment.author &&
+                  comment.author.login === 'foundationdb-ci' &&
+                  comment.databaseId !== context.payload.comment.id &&
+                  comment.body.trimStart().startsWith(header)
+                ) {
+                  allOldComments.push(comment);
+                  // Check for older comment matching PR head commit, in case reports came out-of-order.
+                  // Default sort is by created ascending, newest matching head commit wins.
+                  const m = comment.body.match(/^\* Commit ID: ([a-f0-9]+)/m);
+                  if (m && m[1] === headSha) {
+                    oldCommentAtHead = comment;
+                  }
+                }
+              }
+              hasNextPage = prComments.pageInfo.hasNextPage;
+              cursor = prComments.pageInfo.endCursor;
+            }
+            const newCommentM = commentBody.match(/^\* Commit ID: ([a-f0-9]+)/m);
+            const newCommentSha = newCommentM ? newCommentM[1] : null;
+            if (newCommentSha && newCommentSha !== headSha && oldCommentAtHead) {
+              console.log(`New comment is for old commit (${newCommentSha}), but an older comment exists for the head commit (${headSha})`);
+              commentsToMinimize.push({
+                id: context.payload.comment.node_id,
+                databaseId: context.payload.comment.id,
+                isMinimized: false // new comment must not be minimized yet
+              });
+              for (const old of allOldComments) {
+                if (old.id !== oldCommentAtHead.id) {
+                  commentsToMinimize.push(old);
+                }
+              }
+            } else {
+              commentsToMinimize.push(...allOldComments);
+            }
+            console.log(`Found ${commentsToMinimize.length} comments to evaluate.`);
+            for (const comment of commentsToMinimize) {
+              if (comment.isMinimized) {
+                console.log(`Comment ${comment.databaseId} is already minimized.`);
+                continue;
+              }
+              console.log(`Minimizing comment ${comment.databaseId}`);
+              const minimizeMutation = `
+                mutation($id: ID!, $classifier: ReportedContentClassifiers!) {
+                  minimizeComment(input: { subjectId: $id, classifier: $classifier }) {
+                    minimizedComment {
+                      isMinimized
+                    }
+                  }
+                }
+              `;
+              try {
+                await github.graphql(minimizeMutation, {
+                  id: comment.id,
+                  classifier: 'OUTDATED'
+                });
+              } catch (error) {
+                console.error(`Failed to minimize comment ${comment.databaseId}:`, error);
+              }
+            }

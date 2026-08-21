@@ -34,7 +34,7 @@ struct KVPair {
 	// KVPair<K,V> is ordered only by K and described by V
 	K k;
 	V v;
-	KVPair() {}
+	KVPair() = default;
 	KVPair(K const& k, V const& v) : k(k), v(v) {}
 	KVPair(K&& k, V&& v) : k(std::move(k)), v(std::move(v)) {}
 };
@@ -67,7 +67,7 @@ struct ReferencedInterface : public ReferenceCounted<ReferencedInterface<T>> {
 		                                                            LBLocalityData<T>::getAddress(interf))
 		                                      : LBDistance::DISTANT;
 	}
-	virtual ~ReferencedInterface() {}
+	virtual ~ReferencedInterface() = default;
 
 	static bool sort_by_distance(Reference<ReferencedInterface<T>> r1, Reference<ReferencedInterface<T>> r2) {
 		return r1->distance < r2->distance;
@@ -91,16 +91,12 @@ struct AlternativeInfo {
 	bool operator==(double const& r) const { return cumulativeProbability == r; }
 };
 
-FDB_BOOLEAN_PARAM(BalanceOnRequests);
-
-template <class T>
-class ModelInterface : public ReferenceCounted<ModelInterface<T>> {
+// Metric supplies static int decode(int) and static double minimumTotal(std::size_t).
+// Decoding at each update allows the policy to consult its current configuration.
+template <class T, class Metric>
+class ModelInterface : public ReferenceCounted<ModelInterface<T, Metric>> {
 public:
-	// If balanceOnRequests is true, the client will load balance based on the number of GRVs released by each proxy
-	// If balanceOnRequests is false, the client will load balance based on the CPU usage of each proxy
-	// Only requests which take from the GRV budget on the proxy should set balanceOnRequests to true
-	explicit ModelInterface(const std::vector<T>& v, BalanceOnRequests balanceOnRequests = BalanceOnRequests::False)
-	  : balanceOnRequests(balanceOnRequests) {
+	explicit ModelInterface(const std::vector<T>& v) {
 		for (int i = 0; i < v.size(); i++) {
 			alternatives.push_back(AlternativeInfo(v[i], 1.0 / v.size(), (i + 1.0) / v.size()));
 		}
@@ -126,24 +122,20 @@ public:
 	void updateProbabilities() {
 		double totalBusy = 0;
 		for (auto& it : alternatives) {
-			int busyMetric = balanceOnRequests ? it.processBusyTime / FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION
-			                                   : it.processBusyTime % FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION;
+			int busyMetric = Metric::decode(it.processBusyTime);
 			totalBusy += busyMetric;
 			if (now() - it.lastUpdate > FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / 2.0) {
 				return;
 			}
 		}
 
-		if ((balanceOnRequests && totalBusy < FLOW_KNOBS->BASIC_LOAD_BALANCE_MIN_REQUESTS * alternatives.size()) ||
-		    (!balanceOnRequests && totalBusy < FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION *
-		                                           FLOW_KNOBS->BASIC_LOAD_BALANCE_MIN_CPU * alternatives.size())) {
+		if (totalBusy < Metric::minimumTotal(alternatives.size())) {
 			return;
 		}
 
 		double totalProbability = 0;
 		for (auto& it : alternatives) {
-			int busyMetric = balanceOnRequests ? it.processBusyTime / FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION
-			                                   : it.processBusyTime % FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION;
+			int busyMetric = Metric::decode(it.processBusyTime);
 			it.probability +=
 			    (1.0 / alternatives.size() - (busyMetric / totalBusy)) * FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_CHANGE;
 			it.probability =
@@ -172,14 +164,13 @@ public:
 	T const& getInterface(int index) { return alternatives[index].interf; }
 	UID getId(int index) const { return alternatives[index].interf.id(); }
 
-	virtual ~ModelInterface() {}
+	virtual ~ModelInterface() = default;
 
 	std::string description() { return describe(alternatives); }
 
 private:
 	std::vector<AlternativeInfo<T>> alternatives;
 	Future<Void> updater;
-	bool balanceOnRequests;
 };
 
 template <class T>
@@ -189,7 +180,7 @@ class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
 		ASSERT(false);
 	}
 
-	virtual ~MultiInterface() {}
+	virtual ~MultiInterface() = default;
 };
 
 template <class T>
@@ -241,7 +232,7 @@ public:
 
 	const Reference<ReferencedInterface<T>>& operator[](int i) const { return alternatives[i]; }
 
-	virtual ~MultiInterface() {}
+	virtual ~MultiInterface() = default;
 
 	std::string description() { return describe(alternatives); }
 
@@ -255,8 +246,8 @@ template <class Ar, class T>
 void load(Ar& ar, Reference<MultiInterface<T>>&) {
 	ASSERT(false);
 } //< required for Future<T>
-template <class Ar, class T>
-void load(Ar& ar, Reference<ModelInterface<T>>&) {
+template <class Ar, class T, class Metric>
+void load(Ar& ar, Reference<ModelInterface<T, Metric>>&) {
 	ASSERT(false);
 } //< required for Future<T>
 

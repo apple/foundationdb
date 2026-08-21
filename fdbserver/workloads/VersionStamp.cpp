@@ -173,7 +173,7 @@ struct VersionStampWorkload : TestWorkload {
 			co_await tr.onError(err);
 		}
 
-		if (BUGGIFY) {
+		if (buggify()) {
 			if (deterministicRandom()->random01() < 0.5) {
 				while (true) {
 					Error err;

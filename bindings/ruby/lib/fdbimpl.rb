@@ -89,6 +89,7 @@ module FDB
       attach_function :fdb_future_get_key, [ :pointer, :pointer, :pointer ], :fdb_error
       attach_function :fdb_future_get_value, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
       attach_function :fdb_future_get_keyvalue_array, [ :pointer, :pointer, :pointer, :pointer ], :fdb_error
+      attach_function :fdb_future_get_key_array, [ :pointer, :pointer, :pointer ], :fdb_error
       attach_function :fdb_future_get_string_array, [ :pointer, :pointer, :pointer ], :fdb_error
 
       attach_function :fdb_create_database, [ :string, :pointer ], :fdb_error
@@ -485,7 +486,7 @@ module FDB
 
       ks = FFI::MemoryPointer.new :pointer
       count = FFI::MemoryPointer.new :int
-      FDBC.check_error FDBC.fdb_future_get_key_array(@fpointer, kvs, count)
+      FDBC.check_error FDBC.fdb_future_get_key_array(@fpointer, ks, count)
       ks = ks.read_pointer
 
       (0..count.read_int-1).map{|i|

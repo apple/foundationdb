@@ -83,7 +83,7 @@ public:
  */
 class SimBugInjector {
 public:
-	explicit SimBugInjector() {}
+	explicit SimBugInjector() = default;
 	/**
 	 * Globally enable SimBugInjector
 	 *

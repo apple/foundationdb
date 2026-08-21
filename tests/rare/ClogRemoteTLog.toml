@@ -33,7 +33,6 @@ testName = 'Cycle'
 nodeCount = 30
 transactionsPerSecond = 250.0
 testDuration = 360.0
-expectedRate = 0
 
 [[test.workload]]
 testName = 'ClogRemoteTLog'

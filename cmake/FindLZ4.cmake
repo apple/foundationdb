@@ -37,7 +37,7 @@ find_path(
   DOC "lz4 include directory")
 find_library(
   LZ4_LIBRARY
-  NAMES lz4 liblz4
+  NAMES liblz4.a lz4  # prefer static
   HINTS ${LZ4_ROOT}
   DOC "lz4 library")
 

@@ -80,7 +80,7 @@ public:
 	Optional<Credentials> credentials;
 	bool lookupKey;
 	bool lookupSecret;
-	bool simulatedTokenError = false; // Set by simulateRequestFailure for BUGGIFY testing
+	bool simulatedTokenError = false; // Set by simulateRequestFailure for buggify() testing
 
 	// Calculates the authentication string from the secret key
 	static std::string hmac_sha1(Credentials const& creds, std::string const& msg);

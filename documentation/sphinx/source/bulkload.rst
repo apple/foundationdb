@@ -69,6 +69,27 @@ Workflow
 - Tasks complete and are marked as ``BulkLoadPhase::Complete`` or ``BulkLoadPhase::Error``
 - When all tasks finish, the job is finalized and moved to job history, and the range lock is released
 
+Per-Task Range Clear
+--------------------
+Before ingesting SST files for a task, the storage server clears the target
+shard range and waits for the clear to durably commit. This ensures that
+stale data is not retained when the new SST files are ingested over an
+existing range. The clear-then-ingest sequence is performed per shard inside
+the SS (see ``storageserver.cpp``):
+
+1. ``getKeyValueStore()->clear(keys)`` — clear the target range
+2. Wait on ``durableVersion`` so the clear is committed before ingest
+3. ``compactRange(keys)`` to optimize storage before bulk insert
+4. ``ingestSSTFiles(localBulkLoadFileSets)`` — ingest the new data
+
+Because the SS clears each shard internally, BulkLoad does not require the
+destination cluster or range to be empty when the job starts. The exclusive
+range lock taken during ``submitBulkLoadJob()`` (see below) ensures no
+concurrent writes can race with the clear-and-ingest sequence. As a result,
+``fdbrestore start --mode bulkload`` is permitted to run against a
+non-empty destination database — unlike rangefile restore, which requires
+an empty destination.
+
 Range Locking
 -------------
 BulkLoad uses FoundationDB's range locking mechanism to ensure data consistency:
@@ -119,3 +140,34 @@ Performance Considerations
 - **Network Bandwidth**: Large SST files may saturate network bandwidth during downloads
 - **Storage Engine Impact**: Direct SST ingestion bypasses normal write paths for better performance
 - **Memory Usage**: SST files are typically loaded into memory for validation before application
+- **DD Pipeline Headroom**: ``DD_MAX_PIPELINE_MOVES`` must stay well above the cluster's peak relocation demand, or bulkload data moves are starved. See below.
+
+DD Pipeline Headroom
+~~~~~~~~~~~~~~~~~~~~
+``DD_MAX_PIPELINE_MOVES`` caps the total relocations DD tracks at once, queued plus in-flight.
+Bulkload is the workload most exposed to that cap, for three reasons that do not apply to ordinary data movement.
+
+**Bulkload moves are not throttled by source servers.**
+They read from blob storage rather than from source storage servers, so ``canLaunchSrc()`` admits them unconditionally and they consume no source work factor.
+Every other relocation is self-limiting through the per-server busyness ledger; bulkload is not, which can leave a pipeline cap as the only thing gating it.
+
+**Bulkload moves run at a low priority.**
+They use ``PRIORITY_TEAM_HEALTHY`` (140), while shard splits use ``PRIORITY_SPLIT_SHARD`` (950).
+Unlike other low-priority movement such as background rebalance, a bulkload job has a caller waiting on it.
+
+**A bulkload restore generates its own higher-priority competition.**
+Loading a large dataset into a previously empty, contiguous range causes DD to split that range, producing thousands of split relocations that then occupy the pipeline ahead of the bulkload moves that created them.
+
+``pipelineGateActor`` is priority-blind, so once the cap binds, admission becomes first-come-first-served in arrival order and a bulkload move cannot be reordered ahead of the splits it caused.
+This is an admission delay rather than a capacity limit: raising the cap adds no concurrency, which fetch, team and per-server budgets continue to bound, it only stops work being parked where the scheduler cannot see it.
+
+Measured on a 1B-key restore with the cap at 1000, no bulkload data move launched for 1h54m, 43% of the run, with ``InQueue`` 893 plus ``InFlight`` 107 pinned at exactly the cap.
+With headroom the first move launched in 7.15s, and in-flight moves were essentially unchanged at 107 to 114, showing the capacity to run them had been available throughout.
+A 3B-key restore reached 6041 to 6815 queued relocations during the same phase, roughly six times the default of 1000.
+
+**Raise the knob before starting a large bulkload job.**
+The default of 1000 corresponds to roughly 500 storage servers at two concurrent moves each, which a large load exceeds.
+Size it above the job's expected relocation demand but below what the data distributor can hold in memory: DD resident memory grows at roughly 4 GB plus 0.11 GB per 1000 tracked relocations, and in-flight moves converge on the cap while data movement is storming, so an excessive value stops functioning as a backstop.
+At 100000 the distributor needs roughly 15 GB and can exhaust an 8 GB or 12 GB memory limit before the cap ever engages, whereas 20000 costs roughly 6.2 GB and leaves ample headroom over the demand measured above.
+
+The symptom of an undersized cap is ``DDPipelineFull`` trace events during a load, with ``InQueue`` plus ``InFlight`` sitting at exactly the cap.

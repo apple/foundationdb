@@ -5,7 +5,6 @@ testTitle = 'Clogged'
     testName = 'Cycle'
     transactionsPerSecond = 2500.0
     testDuration = 10.0
-    expectedRate = 0
 
     [[test.workload]]
     testName = 'RandomClogging'
@@ -37,4 +36,3 @@ testTitle = 'Unclogged'
     testName = 'Cycle'
     transactionsPerSecond = 250.0
     testDuration = 10.0
-    expectedRate = 0.80

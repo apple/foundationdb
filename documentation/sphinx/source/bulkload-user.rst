@@ -17,6 +17,13 @@ Quickstart
 =============
 Below we run a simple bulkdump, a clear of the cluster, and then a bulkload to repopulate the cluster.
 
+.. note::
+   The ``clearrange`` step below is illustrative — it shows that the cluster starts
+   empty before the bulkload populates it. It is **not required**. BulkLoad clears
+   each shard internally before ingesting SST files (see "Per-Task Range Clear" in
+   :doc:`bulkload`), and ``fdbrestore start --mode bulkload`` is permitted against
+   a non-empty destination.
+
 Start a cluster::
 
     <FDB_SRC_FOLDER>/tests/loopback_cluster/run_custom_cluster.sh . --storage_count 8 \
@@ -244,3 +251,5 @@ Troubleshooting
 As for backup, enable '--knob_http_verbose_level 10' to debug connection issues: the http request/response will be dumped on STDOUT.
 
 To watch your job in operation, search 'DDBulkLoad*', 'SSBulkLoad*', 'DDBulkDump*', 'SSBulkDump*', 'S3Client*' in trace events to see more details. 
+
+If a job makes no progress and you see 'DDPipelineFull' trace events, the data distribution pipeline is full and bulkload moves are waiting for admission rather than for capacity. Raise '--knob_dd_max_pipeline_moves' above the job's expected relocation demand, but keep it low enough that the data distributor can hold that many relocations in memory; see :doc:`bulkload` under "DD Pipeline Headroom" for sizing. A load into a previously empty range generates enough shard splits to fill a pipeline sized at the default of 1000.

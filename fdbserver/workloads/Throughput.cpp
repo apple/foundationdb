@@ -21,7 +21,7 @@
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/Smoother.h"
@@ -270,10 +270,11 @@ struct MeasurePeriodically : IMeasurer {
 		std::string prefix = format("T=%04.0fs:", t);
 		std::vector<PerfMetric> m;
 		msp.getMetrics(m);
-		for (auto i = m.begin(); i != m.end(); ++i)
+		for (auto i = m.begin(); i != m.end(); ++i) {
 			if (includeMetrics.contains(i->name())) {
 				accumulatedMetrics.push_back(i->withPrefix(prefix));
 			}
+		}
 
 		// reset stats
 		msp = msp0;

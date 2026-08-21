@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ActorFuzz.h"
+#include "ActorFuzz.h"
 #include "flow/UnitTest.h"
 
 // Only used to link unit tests

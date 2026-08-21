@@ -52,9 +52,6 @@ Key keyForInboxCacheByIDPrefix(uint64_t inbox) {
 Key keyForInboxCacheByID(uint64_t inbox, uint64_t messageId) {
 	return StringRef(format("i/%016llx/cid/%016llx", inbox, messageId));
 }
-Key keyForInboxCacheByFeedPrefix(uint64_t inbox) {
-	return StringRef(format("i/%016llx/cf/", inbox));
-}
 Key keyForInboxCacheByFeed(uint64_t inbox, uint64_t feed) {
 	return StringRef(format("i/%016llx/cf/%016llx", inbox, feed));
 }
@@ -212,7 +209,7 @@ Future<bool> PubSub::createSubscription(uint64_t feed, uint64_t inbox) {
 //  the highest-numbered inbox that we've cleared from the watchers list and
 //  make sure that further requests start after this inbox.
 Future<Void> updateFeedWatchers(Transaction* tr, uint64_t feed) {
-	StringRef watcherPrefix = keyForFeedWatcherPrefix(feed);
+	Key watcherPrefix = keyForFeedWatcherPrefix(feed);
 	uint64_t highestInbox{ 0 };
 	bool first = true;
 	while (true) {
@@ -333,7 +330,7 @@ Future<int> singlePassInboxCacheUpdate(Database cx, uint64_t inbox, int swath) {
 			if (staleFeeds.empty())
 				// If there are no stale feeds, return.
 				co_return 0;
-			StringRef stalePrefix = keyForInboxStalePrefix(inbox);
+			Key stalePrefix = keyForInboxStalePrefix(inbox);
 			for (int idx = 0; idx < staleFeeds.size(); idx++) {
 				StringRef feedStr = staleFeeds[idx].key.removePrefix(stalePrefix);
 				// printf("  --> clearing stale entry: %s\n", feedStr.toString().c_str());
@@ -388,7 +385,7 @@ Future<MessageId> getFeedLatestAtOrAfter(Transaction* tr, Feed feed, MessageId p
 	if (lastMessageRange.empty())
 		co_return uint64_t(0);
 	KeyValueRef m = lastMessageRange[0];
-	StringRef prefix = keyForFeedMessagePrefix(feed);
+	Key prefix = keyForFeedMessagePrefix(feed);
 	StringRef mIdStr = m.key.removePrefix(prefix);
 	co_return valueToUInt64(mIdStr);
 }
@@ -409,7 +406,7 @@ Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbox, int
 Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbox, int count, uint64_t cursor) {
 	TraceEvent("PubSubListInbox").detail("Inbox", inbox).detail("Count", count).detail("Cursor", cursor);
 	co_await updateInboxCache(cx, inbox);
-	StringRef perIdPrefix = keyForInboxCacheByIDPrefix(inbox);
+	Key perIdPrefix = keyForInboxCacheByIDPrefix(inbox);
 	while (true) {
 		Transaction tr(cx);
 		std::vector<Message> messages;

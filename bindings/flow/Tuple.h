@@ -26,13 +26,13 @@
 #include "bindings/flow/fdb_flow.h"
 #include "fdbclient/TupleVersionstamp.h"
 
-typedef TupleVersionstamp Versionstamp;
+using Versionstamp = TupleVersionstamp;
 
 namespace FDB {
 struct Uuid {
 	const static size_t SIZE;
 
-	Uuid(StringRef const& data);
+	explicit Uuid(StringRef const& data);
 
 	StringRef getData() const;
 
@@ -49,7 +49,7 @@ private:
 };
 
 struct Tuple {
-	Tuple() {}
+	Tuple() = default;
 
 	static Tuple unpack(StringRef const& str);
 
@@ -118,7 +118,7 @@ private:
 	// It has additional 2 bytes user code than the internal VERSIONTAMP of size 10 bytes
 	static const uint8_t VERSIONSTAMP_96_CODE;
 
-	Tuple(const StringRef& data);
+	explicit Tuple(const StringRef& data);
 	Tuple(Standalone<VectorRef<uint8_t>> data, std::vector<size_t> offsets);
 	Standalone<VectorRef<uint8_t>> data;
 	std::vector<size_t> offsets;

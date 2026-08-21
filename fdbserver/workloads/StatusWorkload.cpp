@@ -24,7 +24,7 @@
 #include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/Schemas.h"
-#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/StatusSchema.h"
 
 struct StatusWorkload : TestWorkload {
 	static constexpr auto NAME = "Status";
@@ -106,8 +106,9 @@ struct StatusWorkload : TestWorkload {
 					if (skv.second.get_obj().contains("$enum")) {
 						for (auto& enum_item : skv.second.get_obj().at("$enum").get_array())
 							schemaCoverage(spath + ".$enum." + enum_item.get_str(), false);
-					} else
+					} else {
 						schemaCoverageRequirements(skv.second.get_obj(), spath);
+					}
 				}
 			}
 		} catch (std::exception& e) {

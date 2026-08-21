@@ -33,6 +33,7 @@ namespace {
 class FakeWorkerEventProvider final : public IWorkerEventProvider, public ReferenceCounted<FakeWorkerEventProvider> {
 	Optional<RecoveryState> recoveryState;
 	bool storageTeamOneReplicaLeftIsCritical = false;
+	Optional<bool> allCoordinatorsReachable;
 	std::map<std::string, LatestWorkerEvents> latestEventsByName;
 	std::map<std::string, LatestWorkerEvents> latestRatekeeperEventsByName;
 	std::map<std::string, LatestWorkerEvents> latestDataDistributorEventsByName;
@@ -51,6 +52,10 @@ public:
 
 	void setStorageTeamOneReplicaLeftIsCritical(bool storageTeamOneReplicaLeftIsCritical) {
 		this->storageTeamOneReplicaLeftIsCritical = storageTeamOneReplicaLeftIsCritical;
+	}
+
+	void setAllCoordinatorsReachable(bool allCoordinatorsReachable) {
+		this->allCoordinatorsReachable = allCoordinatorsReachable;
 	}
 
 	void setLatestRatekeeperEvents(std::string eventName, LatestWorkerEvents latestEvents) {
@@ -80,6 +85,8 @@ public:
 	Optional<RecoveryState> getRecoveryState() const override { return recoveryState; }
 
 	bool shouldTreatStorageTeamOneReplicaLeftAsCritical() const override { return storageTeamOneReplicaLeftIsCritical; }
+
+	AsyncResult<Optional<bool>> areAllCoordinatorsReachable() const override { co_return allCoordinatorsReachable; }
 
 	AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override {
 		auto it = latestRatekeeperEventsByName.find(eventName);
@@ -329,6 +336,24 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/RecoveryStateFactor
 	provider->setRecoveryState(RecoveryState::FULLY_RECOVERED);
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
+
+	auto missingProvider = makeReference<FakeWorkerEventProvider>();
+	level = co_await factor.fetchLevel(missingProvider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::METRICS_MISSING);
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/CoordinatorReachabilityFactor") {
+	CoordinatorReachabilityFactor factor;
+	auto provider = makeReference<FakeWorkerEventProvider>();
+	Level level;
+
+	provider->setAllCoordinatorsReachable(true);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::HEALTHY);
+
+	provider->setAllCoordinatorsReachable(false);
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::INTERVENTION_REQUIRED);
 
 	auto missingProvider = makeReference<FakeWorkerEventProvider>();
 	level = co_await factor.fetchLevel(missingProvider, TrackCodeProbes::False);

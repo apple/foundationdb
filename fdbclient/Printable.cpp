@@ -81,10 +81,12 @@ std::string unprintable(std::string const& val) {
 					ASSERT(false);
 				s += char((unhex(val[i + 1]) << 4) + unhex(val[i + 2]));
 				i += 2;
-			} else
+			} else {
 				ASSERT(false);
-		} else
+			}
+		} else {
 			s += c;
+		}
 	}
 	return s;
 }

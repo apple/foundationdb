@@ -1,3 +1,15 @@
+"""Ensemble-level CODE_PROBE coverage + statistics reporter.
+
+This is a SEPARATE, opt-in analysis run manually as `python3 -m
+test_harness.results <ensemble_id>`. It does NOT participate in Joshua's
+per-run pass/fail: an individual test run passes or fails on its own result
+(errors, ASSERTs, timeouts) in app.py, and an unhit CODE_PROBE never fails a
+run or the ensemble. This script only summarizes per-probe HitCounts across an
+ensemble after the fact. Its non-zero exit on missed coverage (see bottom)
+matters only to a caller that deliberately invokes it as a coverage gate;
+app.py / joshua.py do not call it.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -37,6 +49,12 @@ class EnsembleResults:
             )
         else:
             coverage_dict = collections.OrderedDict()
+        self.stats: List[Tuple[str, int, int]] = []
+        for k, v in self.statistics.stats.items():
+            self.global_statistics.total_test_runs += v.run_count
+            self.global_statistics.total_cpu_time += v.runtime
+            self.stats.append((k, v.runtime, v.run_count))
+        self.stats.sort(key=lambda x: x[1], reverse=True)
         self.coverage: List[Tuple[Coverage, int]] = []
         self.min_coverage_hit: int | None = None
         self.ratio = self.global_statistics.total_test_runs / config.hit_per_runs_ratio
@@ -54,12 +72,6 @@ class EnsembleResults:
             if self.min_coverage_hit is None or self.min_coverage_hit > count:
                 self.min_coverage_hit = count
         self.coverage.sort(key=lambda x: (x[1], x[0].file, x[0].line))
-        self.stats: List[Tuple[str, int, int]] = []
-        for k, v in self.statistics.stats.items():
-            self.global_statistics.total_test_runs += v.run_count
-            self.global_statistics.total_cpu_time += v.runtime
-            self.stats.append((k, v.runtime, v.run_count))
-        self.stats.sort(key=lambda x: x[1], reverse=True)
         if not self.code_probe_tracking_enabled:
             self.coverage_ok = True
         elif self.min_coverage_hit is not None:
@@ -178,4 +190,7 @@ if __name__ == "__main__":
     results = EnsembleResults(config.cluster_file, args.ensemble_id)
     results.dump("  " if config.pretty_print else "")
     write_footer()
+    # Exit code reflects this report's own coverage_ok only; it has no effect on
+    # whether the ensemble's test runs passed. Only a caller using this script as
+    # an explicit coverage gate observes it.
     exit(0 if results.coverage_ok else 1)

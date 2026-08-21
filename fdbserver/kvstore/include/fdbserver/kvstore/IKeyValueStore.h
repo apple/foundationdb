@@ -168,7 +168,7 @@ public:
 	}
 
 protected:
-	virtual ~IKeyValueStore() {}
+	virtual ~IKeyValueStore() = default;
 };
 
 FDB_BOOLEAN_PARAM(CheckChecksums);

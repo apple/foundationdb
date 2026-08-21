@@ -19,8 +19,9 @@
  */
 
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/datadistributor/DDTeamCollection.h"
-#include "fdbserver/datadistributor/TCInfo.h"
+#include "fdbserver/core/ProcessClassRecruitment.h"
+#include "DDTeamCollection.h"
+#include "TCInfo.h"
 #include "flow/CoroUtils.h"
 
 class TCServerInfoImpl {
@@ -129,17 +130,6 @@ public:
 			                    TaskPriority::DataDistributionLaunch);
 			lastUpdate = now();
 		}
-	}
-};
-
-class TCTeamInfoImpl {
-public:
-	static Future<Void> updateStorageMetrics(TCTeamInfo* self) {
-		std::vector<Future<Void>> updates;
-		updates.reserve(self->servers.size());
-		for (int i = 0; i < self->servers.size(); i++)
-			updates.push_back(TCServerInfo::updateServerMetrics(self->servers[i]));
-		co_await waitForAll(updates);
 	}
 };
 
@@ -559,7 +549,8 @@ bool TCTeamInfo::hasHealthyAvailableSpace(double minRatio) const {
 
 bool TCTeamInfo::isOptimal() const {
 	for (const auto& server : servers) {
-		if (server->getLastKnownClass().machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
+		if (recruitment::machineClassFitness(server->getLastKnownClass(), recruitment::Storage) >
+		    recruitment::UnsetFit) {
 			return false;
 		}
 	}
@@ -602,5 +593,9 @@ int64_t TCTeamInfo::getLoadAverage() const {
 }
 
 Future<Void> TCTeamInfo::updateStorageMetrics() {
-	return TCTeamInfoImpl::updateStorageMetrics(this);
+	std::vector<Future<Void>> updates;
+	updates.reserve(servers.size());
+	for (int i = 0; i < servers.size(); i++)
+		updates.push_back(TCServerInfo::updateServerMetrics(servers[i]));
+	co_await waitForAll(updates);
 }

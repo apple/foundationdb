@@ -18,12 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbserver/datadistributor/DDSharedContext.h"
-#include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/core/MoveKeys.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbclient/VersionedMap.h"
@@ -77,6 +75,11 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 			co_return;
 		}
 		std::vector<StorageServerInterface> storageServers = co_await getStorageServers(cx);
+		// Rejected recruitments are idle during their retry delay, so a quiet database may not have a spare yet.
+		for (int retries = 0; storageServers.size() <= 3 && retries < 5; ++retries) {
+			co_await delay(20.0);
+			storageServers = co_await getStorageServers(cx);
+		}
 		// The test should have enough storage servers to exclude.
 		ASSERT(storageServers.size() > 3);
 

@@ -5,6 +5,10 @@ add_fdbserver_link_test(fdbserver_commitproxylinktest
   fdbserver_commitproxy
   fdbserver_logsystem
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_commitproxy_test commitproxy
+  fdbserver_commitproxy
+  fdbserver_logsystem
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_commitproxy)
 target_include_directories(fdbserver_commitproxy
@@ -12,6 +16,5 @@ target_include_directories(fdbserver_commitproxy
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(fdbserver_commitproxy
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR})
+    ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(fdbserver_commitproxy PRIVATE fdbserver_core fdbserver_kvstore fdbserver_logsystem)

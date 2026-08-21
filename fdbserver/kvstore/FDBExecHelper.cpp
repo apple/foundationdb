@@ -36,10 +36,8 @@
 #include "flow/Trace.h"
 #include "flow/Platform.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
-#include "fdbrpc/simulator.h"
-#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/IClosable.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/CoroFlow.h"
@@ -63,7 +61,7 @@ void ExecCmdValueString::setCmdValueString(StringRef pCmdValueString) {
 }
 
 StringRef ExecCmdValueString::getCmdValueString() const {
-	return cmdValueString.toString();
+	return cmdValueString;
 }
 
 StringRef ExecCmdValueString::getBinaryPath() const {
@@ -103,19 +101,6 @@ void ExecCmdValueString::dbgPrint() const {
 		te.detail(format("Arg", ++i).c_str(), elem.toString());
 	}
 	return;
-}
-
-Future<Void> destroyChildProcess(Uncancellable,
-                                 Future<Void> parentSSClosed,
-                                 ISimulator::ProcessInfo* childInfo,
-                                 std::string message) {
-	// This code path should be bug free
-	co_await parentSSClosed;
-	TraceEvent(SevDebug, message.c_str()).log();
-	// This one is root cause for most failures, make sure it's okay to destroy
-	g_simulator->destroyProcess(childInfo);
-	// Explicitly reset the connection with the child process in case re-spawn very quickly
-	FlowTransport::transport().resetConnection(childInfo->address);
 }
 
 #if defined(_WIN32) || defined(__APPLE__) || defined(__INTEL_COMPILER)
@@ -278,7 +263,11 @@ Future<int> spawnProcess(std::string path,
 }
 #endif
 
-static Future<int> execHelperImpl(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {
+static Future<int> execHelperImpl(ExecCmdValueString* execArg,
+                                  UID snapUID,
+                                  std::string folder,
+                                  std::string role,
+                                  Optional<std::string> tLogSpillFolder) {
 	Standalone<StringRef> uidStr(snapUID.toString());
 	int err = 0;
 	Future<int> cmdErr;
@@ -296,6 +285,10 @@ static Future<int> execHelperImpl(ExecCmdValueString* execArg, UID snapUID, std:
 		// get additional arguments
 		paramList.push_back("--path");
 		paramList.push_back(folder);
+		if (tLogSpillFolder.present()) {
+			paramList.push_back("--tlog-spill-path");
+			paramList.push_back(tLogSpillFolder.get());
+		}
 		const char* version = FDB_VT_VERSION;
 		paramList.push_back("--version");
 		paramList.push_back(version);
@@ -332,8 +325,12 @@ static Future<int> execHelperImpl(ExecCmdValueString* execArg, UID snapUID, std:
 	co_return err;
 }
 
-Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {
-	return execHelperImpl(execArg, snapUID, folder, role);
+Future<int> execHelper(ExecCmdValueString* execArg,
+                       UID snapUID,
+                       std::string folder,
+                       std::string role,
+                       Optional<std::string> tLogSpillFolder) {
+	return execHelperImpl(execArg, snapUID, folder, role, tLogSpillFolder);
 }
 
 struct StorageVersionInfo {

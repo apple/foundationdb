@@ -87,7 +87,7 @@ struct MoveKeysParams {
 
 	Optional<BulkLoadTaskState> bulkLoadTaskState;
 
-	MoveKeysParams() {}
+	MoveKeysParams() = default;
 
 	MoveKeysParams(UID dataMoveId,
 	               const KeyRange& keys,

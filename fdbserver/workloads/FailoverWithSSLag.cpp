@@ -20,7 +20,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
@@ -194,7 +194,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 				// Fetch SS lag every 5s.
 				ssLag = fetchStorageServerLag(cx);
 			} else if (choice.index() == 1) {
-				Optional<Version> versionLag = std::get<1>(std::move(choice));
+				Optional<Version> versionLag = std::get<1>(choice);
 
 				if (versionLag.present() && versionLag.get() >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
 					TraceEvent("SSLag").detail("Versions", versionLag.get());

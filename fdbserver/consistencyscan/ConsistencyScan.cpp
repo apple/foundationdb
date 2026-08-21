@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#include <cmath>
+#include <limits>
+
 #include "fdbclient/JSONDoc.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
@@ -25,7 +28,7 @@
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/FailureMonitor.h"
@@ -46,6 +49,7 @@
 #include "fdbserver/core/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/CoroUtils.h"
 
 #define DEBUG_SCAN_PROGRESS false
@@ -217,7 +221,7 @@ Future<int> consistencyCheckReadData(UID myId,
 	req.tags = TagSet();
 
 	// buggify read limits in simulation
-	if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+	if (g_network->isSimulated() && buggify(0.01)) {
 		if (deterministicRandom()->coinflip()) {
 			req.limit = deterministicRandom()->randomInt(2, 10);
 		}
@@ -516,9 +520,7 @@ Future<int> consistencyCheckReadData(UID myId,
 			// should for sure have found it
 			TraceEvent(SevError, "ConsistencyCheck_ShouldHaveFoundInjectedCorruption", myId);
 		} else {
-			CODE_PROBE(true,
-			           "consistency check potentially missed injected corruption due to failures",
-			           probe::decoration::rare);
+			CODE_PROBE(true, "consistency check potentially missed injected corruption due to failures");
 			TraceEvent(SevInfo, "ConsistencyCheck_MissedCorruptionDueToFailures");
 			fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
 			                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
@@ -1115,7 +1117,7 @@ Future<Void> sometimesRandomlyClearStatsInSim(Database db, Reference<Consistency
 	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	ConsistencyScanState cs;
 
-	if (BUGGIFY_WITH_PROB(0.1) && !g_simulator->speedUpSimulation) {
+	if (buggify(0.1) && !g_simulator->speedUpSimulation) {
 		TraceEvent("ConsistencyScan_RandomStatClearWaiting", memState->csId).log();
 		co_await delay(deterministicRandom()->randomInt(1, 60));
 
@@ -1145,8 +1147,7 @@ void resetSimCorruptionCheckOnDeath(Reference<ConsistencyScanMemoryState> memSta
 	if (fdbSimulationPolicyState().consistencyScanCorruptor.present() &&
 	    fdbSimulationPolicyState().consistencyScanCorruptor.get().first == memState->csId) {
 		TraceEvent("ConsistencyScan_ResetCorruptionOnDeath");
-		CODE_PROBE(
-		    true, "Consistency Scan skipped corruption check because scan died in the middle", probe::decoration::rare);
+		CODE_PROBE(true, "Consistency Scan skipped corruption check because scan died in the middle");
 		fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
 		                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
 	}
@@ -1201,6 +1202,150 @@ Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncV
 // Everything below this line is not relevant to the ConsistencyScan Role anymore.
 // It is only used by workloads/ConsistencyCheck
 
+namespace {
+
+class ShardSampleMoments {
+public:
+	void add(ByteSampleInfo const& sample) {
+		const double probability = sample.probability;
+		const double complement = 1.0 - probability;
+		const double sampledSize = static_cast<double>(sample.sampledSize);
+		const double variance = probability * complement * std::pow(sampledSize, 2);
+
+		variance_ += variance;
+		thirdAbsoluteMoment_ += variance * sampledSize * (probability * probability + complement * complement);
+		if (probability < 1.0) {
+			expectedConditionalSamples_ += probability;
+		}
+	}
+
+	[[nodiscard]] double variance() const { return variance_; }
+	[[nodiscard]] double thirdAbsoluteMoment() const { return thirdAbsoluteMoment_; }
+	[[nodiscard]] double expectedConditionalSamples() const { return expectedConditionalSamples_; }
+
+	[[nodiscard]] double normalEffectiveSamples() const {
+		if (!std::isfinite(variance_) || !std::isfinite(thirdAbsoluteMoment_) || variance_ <= 0.0 ||
+		    thirdAbsoluteMoment_ <= 0.0) {
+			return 0.0;
+		}
+
+		const double normalRatio = std::sqrt(variance_) / (thirdAbsoluteMoment_ / variance_);
+		if (!std::isfinite(normalRatio)) {
+			return 0.0;
+		}
+
+		const double effectiveSamples = normalRatio * normalRatio;
+		return std::isfinite(effectiveSamples) ? effectiveSamples : std::numeric_limits<double>::max();
+	}
+
+private:
+	double variance_ = 0.0;
+	double thirdAbsoluteMoment_ = 0.0;
+	double expectedConditionalSamples_ = 0.0;
+};
+
+} // namespace
+
+TEST_CASE("/fdbserver/ConsistencyCheck/ShardEstimate/heterogeneousSamples") {
+	ShardSampleMoments moments;
+	int sampledKeysWithProb = 0;
+	int64_t actualBytes = 0;
+	int64_t sampledBytes = 0;
+	const ByteSampleInfo smallSample = isKeyValueInSample("0000000000"_sr, 10);
+
+	auto addSample = [&](ByteSampleInfo const& sample) {
+		moments.add(sample);
+		actualBytes += sample.size;
+		if (sample.inSample) {
+			sampledBytes += sample.sampledSize;
+			sampledKeysWithProb += sample.probability < 1.0;
+		}
+	};
+
+	for (int i = 0; i < 100000; ++i) {
+		const std::string key = format("%010d", i);
+		addSample(isKeyValueInSample(StringRef(key), key.size()));
+	}
+
+	std::string largeKey(10000, 'x');
+	largeKey[0] = 'z';
+	largeKey[1] = '\0';
+	largeKey[2] = 'W';
+	const ByteSampleInfo largeSample = isKeyValueInSample(StringRef(largeKey), largeKey.size());
+	addSample(largeSample);
+
+	ASSERT_EQ(actualBytes, 1010000);
+	ASSERT_EQ(sampledBytes, 41 * smallSample.sampledSize + largeSample.sampledSize);
+	ASSERT_EQ(sampledKeysWithProb, 42);
+	ASSERT_GT(std::abs(static_cast<double>(actualBytes - sampledBytes)), 7.0 * std::sqrt(moments.variance()));
+	ASSERT_LT(moments.normalEffectiveSamples(), 30.0);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConsistencyCheck/ShardEstimate/nearCertainSamples") {
+	ShardSampleMoments moments;
+	int sampledKeysWithProb = 0;
+	int64_t actualBytes = 0;
+	int64_t sampledBytes = 0;
+
+	auto addKey = [&](int index) {
+		std::string key(100, 'x');
+		key[0] = 'y';
+		key[1] = static_cast<char>(index >> 24);
+		key[2] = static_cast<char>(index >> 16);
+		key[3] = static_cast<char>(index >> 8);
+		key[4] = static_cast<char>(index);
+
+		const ByteSampleInfo sample = isKeyValueInSample(StringRef(key), 49995);
+		moments.add(sample);
+		actualBytes += sample.size;
+		if (sample.inSample) {
+			sampledBytes += sample.sampledSize;
+			sampledKeysWithProb += sample.probability < 1.0;
+		}
+	};
+
+	for (int i = 0; i < 33; ++i) {
+		addKey(i);
+	}
+	addKey(9222);
+
+	ASSERT_EQ(actualBytes, 1699830);
+	ASSERT_EQ(sampledBytes, 1650000);
+	ASSERT_EQ(sampledKeysWithProb, 33);
+	ASSERT_GT(std::abs(static_cast<double>(actualBytes - sampledBytes)), 7.0 * std::sqrt(moments.variance()));
+	ASSERT_LT(moments.normalEffectiveSamples(), 30.0);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConsistencyCheck/ShardEstimate/normalSamples") {
+	const ByteSampleInfo smallSample = isKeyValueInSample("0000000000"_sr, 10);
+	ShardSampleMoments homogeneous;
+	for (int i = 0; i < 100000; ++i) {
+		homogeneous.add(smallSample);
+	}
+
+	ASSERT_EQ(smallSample.sampledSize,
+	          static_cast<int64_t>(static_cast<double>(smallSample.size) / smallSample.probability));
+	ASSERT_GT(std::abs(1000000.0 - 79.0 * smallSample.sampledSize), 7.0 * std::sqrt(homogeneous.variance()));
+	ASSERT_GT(homogeneous.normalEffectiveSamples(), 30.0);
+
+	ShardSampleMoments fair;
+	const ByteSampleInfo fairSample{ true, 1, 0.5, 2 };
+	for (int i = 0; i < 30; ++i) {
+		fair.add(fairSample);
+	}
+	ASSERT_LE(fair.normalEffectiveSamples(), 30.0);
+	fair.add(fairSample);
+	ASSERT_GT(fair.normalEffectiveSamples(), 30.0);
+
+	ShardSampleMoments deterministic;
+	deterministic.add(ByteSampleInfo{ false, 0, 0.0, 0 });
+	deterministic.add(ByteSampleInfo{ true, 1, 1.0, 1 });
+	ASSERT_EQ(deterministic.normalEffectiveSamples(), 0.0);
+	return Void();
+}
+
 // Gets a version at which to read from the storage servers
 Future<Version> getStorageServerReadVersion(Database cx) {
 	while (true) {
@@ -1245,14 +1390,14 @@ Future<bool> getKeyServers(
 	std::vector<Future<ErrorOr<GetKeyServerLocationsReply>>> keyServerLocationFutures;
 	Key begin = kr.begin;
 	Key end = kr.end;
-	int limitKeyServers = BUGGIFY ? 1 : 100;
+	int limitKeyServers = buggify() ? 1 : 100;
 	Span span(SpanContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64()),
 	          "WL:ConsistencyCheck"_loc);
 
 	while (begin < end) {
 		Reference<CommitProxyInfo> commitProxyInfo = co_await cx->getCommitProxiesFuture(UseProvisionalProxies::False);
 		keyServerLocationFutures.clear();
-		for (int i = 0; i < commitProxyInfo->size(); i++)
+		for (int i = 0; i < commitProxyInfo->size(); i++) {
 			keyServerLocationFutures.push_back(
 			    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
 			        .getReplyUnlessFailedFor(
@@ -1260,6 +1405,7 @@ Future<bool> getKeyServers(
 			                span.context, begin, end, limitKeyServers, false, latestVersion, Arena()),
 			            2,
 			            0));
+		}
 
 		bool keyServersInsertedForThisIteration = false;
 
@@ -1600,10 +1746,20 @@ Future<Void> checkDataConsistency(Database cx,
 		std::vector<UID> sourceStorageServers;
 		std::vector<UID> destStorageServers;
 		Transaction tr(cx);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		int bytesReadInRange = 0;
 
-		RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+		RangeResult UIDtoTagMap;
+		while (true) {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Error err;
+			try {
+				UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
 		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 		decodeKeyServersValue(UIDtoTagMap, keyLocations[shard].value, sourceStorageServers, destStorageServers, false);
 
@@ -1686,8 +1842,9 @@ Future<Void> checkDataConsistency(Database cx,
 		if (firstClient && performQuiescentChecks &&
 		    ((configuration.usableRegions == 1 && (sourceStorageServers.size() > expectedReplicas ||
 		                                           sourceStorageServers.size() < configuration.storageTeamSize)) ||
-		     sourceStorageServers.size() < configuration.usableRegions * configuration.storageTeamSize ||
-		     sourceStorageServers.size() > configuration.usableRegions * expectedReplicas)) {
+		     sourceStorageServers.size() <
+		         static_cast<size_t>(configuration.usableRegions) * configuration.storageTeamSize ||
+		     sourceStorageServers.size() > static_cast<size_t>(configuration.usableRegions) * expectedReplicas)) {
 			TraceEvent("ConsistencyCheck_InvalidTeamSize")
 			    .detail("ShardBegin", printable(range.begin))
 			    .detail("ShardEnd", printable(range.end))
@@ -1720,11 +1877,12 @@ Future<Void> checkDataConsistency(Database cx,
 				for (int s = 0; s < serverListValues.size(); s++) {
 					if (serverListValues[s].present())
 						storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
-					else if (performQuiescentChecks)
+					else if (performQuiescentChecks) {
 						testFailure("/FF/serverList changing in a quiescent database",
 						            performQuiescentChecks,
 						            success,
 						            failureIsError);
+					}
 				}
 
 				break;
@@ -1759,13 +1917,13 @@ Future<Void> checkDataConsistency(Database cx,
 
 		if (firstClient) {
 			// If there was an error retrieving shard estimated size
-			if (performQuiescentChecks && estimatedBytes.empty())
+			if (performQuiescentChecks && estimatedBytes.empty()) {
 				testFailure("Error fetching storage metrics", performQuiescentChecks, success, failureIsError);
-
-			// If running a distributed test, storage server size is an accumulation of shard estimates
-			else if (distributed && firstClient)
+			} else if (distributed) {
+				// If running a distributed test, storage server size is an accumulation of shard estimates
 				for (int j = 0; j < storageServers.size(); j++)
 					storageServerSizes[storageServers[j]] += std::max(estimatedBytes[j], (int64_t)0);
+			}
 		}
 
 		// The first client may need to skip the rest of the loop contents if it is just processing this shard to
@@ -1778,7 +1936,7 @@ Future<Void> checkDataConsistency(Database cx,
 			int firstKeySampledBytes = 0;
 			int sampledKeys = 0;
 			int sampledKeysWithProb = 0;
-			double shardVariance = 0;
+			ShardSampleMoments shardSampleMoments;
 			bool canSplit = false;
 			Key lastSampleKey;
 			Key lastStartSampleKey;
@@ -1862,10 +2020,7 @@ Future<Void> checkDataConsistency(Database cx,
 							ASSERT_GE(sampleInfo.probability, 0);
 							ASSERT_LE(sampleInfo.probability, 1);
 
-							// Variance of a single Bernoulli trial, for which X=n with probability p,
-							// is p * (1-p) * n^2.
-							shardVariance += sampleInfo.probability * (1 - sampleInfo.probability) *
-							                 pow((double)sampleInfo.sampledSize, 2);
+							shardSampleMoments.add(sampleInfo);
 
 							if (sampleInfo.inSample) {
 								sampledBytes += sampleInfo.sampledSize;
@@ -2000,6 +2155,7 @@ Future<Void> checkDataConsistency(Database cx,
 
 			// Compute the difference between the shard size estimate and its actual size.  If it is sufficiently
 			// large, then fail
+			const double shardVariance = shardSampleMoments.variance();
 			double stdDev = sqrt(shardVariance);
 
 			double failErrorNumStdDev = 7;
@@ -2009,6 +2165,7 @@ Future<Void> checkDataConsistency(Database cx,
 			// normal distribution
 			if (sampledKeysWithProb > 30 && estimateError > failErrorNumStdDev * stdDev) {
 				double numStdDev = estimateError / sqrt(shardVariance);
+				const double normalEffectiveSamples = shardSampleMoments.normalEffectiveSamples();
 				TraceEvent("ConsistencyCheck_InaccurateShardEstimate")
 				    .detail("Min", shardBounds.min.bytes)
 				    .detail("Max", shardBounds.max.bytes)
@@ -2016,6 +2173,13 @@ Future<Void> checkDataConsistency(Database cx,
 				    .detail("Actual", shardBytes)
 				    .detail("NumStdDev", numStdDev)
 				    .detail("Variance", shardVariance)
+				    .detail("AbsoluteThirdMoment", shardSampleMoments.thirdAbsoluteMoment())
+				    .detail("NormalEffectiveSamples", normalEffectiveSamples)
+				    .detail("ExpectedConditionalSamples", shardSampleMoments.expectedConditionalSamples())
+				    .detail("StorageServerEstimate", estimatedBytes.empty() ? int64_t{ -1 } : estimatedBytes.front())
+				    .detail("StorageEstimateMatchesSample",
+				            !estimatedBytes.empty() && estimatedBytes.front() == sampledBytes)
+				    .detail("PerformQuiescentChecks", performQuiescentChecks)
 				    .detail("StdDev", stdDev)
 				    .detail("ShardBegin", printable(range.begin))
 				    .detail("ShardEnd", printable(range.end))
@@ -2023,10 +2187,12 @@ Future<Void> checkDataConsistency(Database cx,
 				    .detail("NumSampledKeys", sampledKeys)
 				    .detail("NumSampledKeysWithProb", sampledKeysWithProb);
 
-				testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev),
-				            performQuiescentChecks,
-				            success,
-				            failureIsError);
+				if (normalEffectiveSamples > 30.0) {
+					testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev),
+					            performQuiescentChecks,
+					            success,
+					            failureIsError);
+				}
 			}
 
 			TraceEvent("ConsistencyCheck_CheckSplits").detail("Range", range).detail("CanSplit", canSplit);
@@ -2124,7 +2290,7 @@ Future<Void> checkDataConsistency(Database cx,
 	}
 
 	if (customReplicatedShards == SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS && underReplicatedShards > 0) {
-		CODE_PROBE(true, "Reached max shard on large team limit");
+		CODE_PROBE(true, "Reached max shard on large team limit", probe::decoration::rare);
 	}
 
 	*bytesReadInPrevRound = bytesReadInthisRound;

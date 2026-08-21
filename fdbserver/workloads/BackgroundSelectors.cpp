@@ -177,25 +177,29 @@ struct BackgroundSelectorWorkload : TestWorkload {
 
 						if (rangeResult.size() < self->resultLimit && startResult != allKeys.begin &&
 						    startResult != allKeys.end) {
-							if (startResult != rangeResult[0].key)
+							if (startResult != rangeResult[0].key) {
 								TraceEvent(SevError, "BackgroundSelectorError")
 								    .detail("Diff", diff)
 								    .detail("ResultSize", rangeResult.size())
 								    .detail("StartResult", printable(startResult))
 								    .detail("RangeResult", printable(rangeResult[0].key));
-						} else
+							}
+						} else {
 							restartProcess = true;
+						}
 
 						if (rangeResult.size() < self->resultLimit && endResult != allKeys.begin &&
 						    endResult != allKeys.end) {
-							if (endResult != rangeResult[rangeResult.size() - 1].key)
+							if (endResult != rangeResult[rangeResult.size() - 1].key) {
 								TraceEvent(SevError, "BackgroundSelectorError")
 								    .detail("Diff", diff)
 								    .detail("ResultSize", rangeResult.size())
 								    .detail("EndResult  ", printable(endResult))
 								    .detail("RangeResult", printable(rangeResult[rangeResult.size() - 1].key));
-						} else
+							}
+						} else {
 							restartProcess = true;
+						}
 
 						diff = std::min(rangeResult.size() - 1, self->maxDiff);
 						startKey = rangeResult[0].key;

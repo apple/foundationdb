@@ -5,6 +5,10 @@ add_fdbserver_link_test(fdbserver_backupworkerlinktest
   fdbserver_backupworker
   fdbserver_logsystem
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_backupworker_test backupworker
+  fdbserver_backupworker
+  fdbserver_logsystem
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_backupworker)
 target_include_directories(fdbserver_backupworker

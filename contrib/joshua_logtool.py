@@ -15,7 +15,6 @@ import subprocess
 import tempfile
 import sys
 
-import fdb
 import joshua.joshua_model as joshua
 
 from typing import List, Union

@@ -21,7 +21,7 @@
 #include "benchmark/benchmark.h"
 
 #include "flow/flow.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/PriorityMultiLock.h"
 #include <deque>
 #include "fmt/printf.h"

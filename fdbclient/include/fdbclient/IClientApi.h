@@ -24,16 +24,17 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/NativeCdcClient.h"
 #include "fdbclient/Tracing.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 
 struct VersionVector;
 
 // An interface that represents a transaction created by a client
 class ITransaction {
 public:
-	virtual ~ITransaction() {}
+	virtual ~ITransaction() = default;
 
 	virtual void cancel() = 0;
 	virtual void setVersion(Version v) = 0;
@@ -74,7 +75,8 @@ public:
 	virtual void addReadConflictRange(const KeyRangeRef& keys) = 0;
 	virtual ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
-	                                                                        int64_t chunkSize) = 0;
+	                                                                        int64_t chunkSize,
+	                                                                        int limit = -1) = 0;
 
 	virtual void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) = 0;
 	virtual void set(const KeyRef& key, const ValueRef& value) = 0;
@@ -125,7 +127,7 @@ public:
 // An interface that represents a connection to a cluster made by a client
 class IDatabase {
 public:
-	virtual ~IDatabase() {}
+	virtual ~IDatabase() = default;
 
 	virtual Reference<ITransaction> createTransaction() = 0;
 	virtual void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
@@ -152,6 +154,15 @@ public:
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
 
+	// Native CDC operations. These values are intentionally independent from
+	// NativeAPI so multi-version client wrappers can forward them without
+	// depending on the native client implementation.
+	virtual ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) = 0;
+	virtual ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) = 0;
+	virtual ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() = 0;
+	virtual ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) = 0;
+	virtual ThreadFuture<Reference<INativeCdcConsumer>> resumeNativeCdcConsumer(const NativeCdcCursor& cursor) = 0;
+
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;
 	virtual void setSharedState(DatabaseSharedState* p) = 0;
@@ -169,7 +180,7 @@ public:
 // operations use ThreadFutures and implementations should be thread safe.
 class IClientApi {
 public:
-	virtual ~IClientApi() {}
+	virtual ~IClientApi() = default;
 
 	virtual void selectApiVersion(int apiVersion) = 0;
 	virtual const char* getClientVersion() = 0;

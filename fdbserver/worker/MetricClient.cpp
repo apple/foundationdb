@@ -135,7 +135,7 @@ void UDPMetricClient::send(MetricCollection* metrics) {
 		for (const auto& msg : metrics->statsd_message) {
 			// Account for max udp packet size (+1 since we add '\n')
 			if (messages.size() + msg.size() + 1 < IUDPSocket::MAX_PACKET_SIZE) {
-				messages += (std::move(msg) + '\n');
+				messages += (msg + '\n');
 			} else {
 				send_packet(socket_fd, buf.buffer.get(), buf.data_size);
 			}

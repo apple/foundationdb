@@ -40,7 +40,7 @@
 #include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/resolver/Resolver.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "ConflictSet.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
@@ -70,7 +70,7 @@ public:
 		                              recentStateTransactions.upper_bound(oldestVersion));
 
 		int64_t stateBytes = 0;
-		while (recentStateTransactionSizes.size() && recentStateTransactionSizes.front().first <= oldestVersion) {
+		while (!recentStateTransactionSizes.empty() && recentStateTransactionSizes.front().first <= oldestVersion) {
 			stateBytes += recentStateTransactionSizes.front().second;
 			recentStateTransactionSizes.pop_front();
 		}
@@ -225,7 +225,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Version prevVersion) {
 	while (true) {
-		if (self->recentStateTransactionsInfo.size() &&
+		if (!self->recentStateTransactionsInfo.empty() &&
 		    proxyInfo->lastVersion <= self->recentStateTransactionsInfo.firstVersion()) {
 			self->neededVersion.set(std::max(self->neededVersion.get(), prevVersion));
 		}
@@ -272,8 +272,16 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 
 	if (req.debugID.present()) {
 		debugID = nondeterministicRandom()->randomUniqueID();
-		g_traceBatch.addAttach("CommitAttachID", req.debugID.get().first(), debugID.get().first());
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.Before");
+		g_traceBatch.addAttach("CommitAttachID",
+		                       req.debugID.get().first(),
+		                       debugID.get().first(),
+		                       req.spanContext.traceID,
+		                       req.spanContext.spanID);
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "Resolver.resolveBatch.Before",
+		                      req.spanContext.traceID,
+		                      req.spanContext.spanID);
 	}
 
 	/* TraceEvent("ResolveBatchStart", self->dbgid).detail("From", proxyAddress).detail("Version",
@@ -283,7 +291,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 	   self->recentStateTransactionsInfo.firstVersion()) .detail("ResolverVersion", self->version.get()); */
 
 	while (self->totalStateBytes.get() > SERVER_KNOBS->RESOLVER_STATE_MEMORY_LIMIT &&
-	       self->recentStateTransactionsInfo.size() &&
+	       !self->recentStateTransactionsInfo.empty() &&
 	       proxyInfo.lastVersion > self->recentStateTransactionsInfo.firstVersion() &&
 	       req.version > self->neededVersion.get()) {
 		/* TraceEvent("ResolveBatchDelay").detail("From", proxyAddress).detail("StateBytes",
@@ -295,7 +303,11 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 	}
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterQueueSizeCheck");
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "Resolver.resolveBatch.AfterQueueSizeCheck",
+		                      req.spanContext.traceID,
+		                      req.spanContext.spanID);
 	}
 
 	co_await versionReady(self.getPtr(), &proxyInfo, req.prevVersion);
@@ -327,8 +339,13 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 		Version firstUnseenVersion = proxyInfo.lastVersion + 1;
 		proxyInfo.lastVersion = req.version;
 
-		if (req.debugID.present())
-			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterOrderer");
+		if (req.debugID.present()) {
+			g_traceBatch.addEvent("CommitDebug",
+			                      debugID.get().first(),
+			                      "Resolver.resolveBatch.AfterOrderer",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
+		}
 
 		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
 		reply.writtenTags = req.writtenTags;
@@ -371,7 +388,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 		self->transactionsConflicted += req.transactions.size() - commitList.size() - tooOldList.size();
 
 		ASSERT(req.prevVersion >= 0 ||
-		       req.txnStateTransactions.size() == 0); // The master's request should not have any state transactions
+		       req.txnStateTransactions.empty()); // The master's request should not have any state transactions
 
 		auto& stateTransactionsPair = self->recentStateTransactionsInfo.getStateTransactionsRef(req.version);
 		auto& stateTransactions = stateTransactionsPair.second;
@@ -387,7 +404,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 			toCommit.reset(new LogPushData(self->logSystem, self->localTLogCount));
 			if (shouldApplyResolverPrivateMutations) {
 				auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
-				isLocked = lockedKey.present() && lockedKey.get().size();
+				isLocked = lockedKey.present() && !lockedKey.get().empty();
 				resolverData.reset(new ResolverData(self->dbgid,
 				                                    self->logSystemConsumer,
 				                                    self->txnStateStore,
@@ -496,7 +513,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 				// NOTE: Ignore log router tags (in "req.writtenTags") while doing this check, because log router
 				// tags get added to all commit messages in HA mode.
 				bool isEmpty = !hasNonLogRouterTags(req.writtenTags);
-				if (req.lastShardMove < self->lastShardMove || shardChanged || req.txnStateTransactions.size() ||
+				if (req.lastShardMove < self->lastShardMove || shardChanged || !req.txnStateTransactions.empty() ||
 				    isEmpty) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
@@ -529,8 +546,13 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 		const double endComputeTime = g_network->timer();
 		self->computeTimeDist->sampleSeconds(endComputeTime - beginComputeTime);
 
-		if (req.debugID.present())
-			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.After");
+		if (req.debugID.present()) {
+			g_traceBatch.addEvent("CommitDebug",
+			                      debugID.get().first(),
+			                      "Resolver.resolveBatch.After",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
+		}
 	} else {
 		CODE_PROBE(true, "Duplicate resolve batch request");
 		//TraceEvent("DupResolveBatchReq", self->dbgid).detail("From", proxyAddress);
@@ -543,7 +565,7 @@ Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchReque
 		if (batchItr != proxyInfoItr->second.outstandingBatches.end()) {
 			req.reply.send(batchItr->second);
 		} else {
-			CODE_PROBE(true, "No outstanding batches for version on proxy", probe::decoration::rare);
+			CODE_PROBE(true, "No outstanding batches for version on proxy");
 			req.reply.send(Never());
 		}
 	} else {
@@ -645,7 +667,7 @@ Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveConte
 		    pContext->pTxnStateStore
 		        ->readRange(txnKeys, SERVER_KNOBS->BUGGIFIED_ROW_LIMIT, SERVER_KNOBS->APPLY_MUTATION_BYTES)
 		        .get();
-		if (!data.size())
+		if (data.empty())
 			break;
 
 		((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);

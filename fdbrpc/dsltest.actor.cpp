@@ -23,9 +23,9 @@
 #include "flow/FastRef.h"
 #undef ERROR
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/ActorFuzz.h"
+#include "ActorFuzz.h"
 #include "flow/DeterministicRandom.h"
-#include "flow/ThreadHelper.actor.h"
+#include "flow/ThreadHelper.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 //
@@ -1101,25 +1101,6 @@ ACTOR [[flow_allow_discard]] Future<Void> cycleTime(int nodes, int times) {
 
 	printf("Ring test: %d nodes, %d total ops, %.3f seconds\n", nodes, total, timer() - startT);
 	return Void();
-}
-
-void sleeptest() {
-#ifdef __linux__
-	int times[] = { 0, 100, 500, 1000, 5000, 100000, 500000, 1000000 };
-	for (int j = 0; j < 8; j++) {
-		double b = timer();
-		int n = std::min(100, 4000000 / (1 + times[j]));
-		for (int i = 0; i < n; i++) {
-			timespec ts;
-			ts.tv_sec = times[j] / 1000000;
-			ts.tv_nsec = (times[j] % 1000000) * 1000;
-			clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, nullptr);
-			// nanosleep(&ts, nullptr);
-		}
-		double t = timer() - b;
-		printf("Sleep test (%dus x %d): %0.1f\n", times[j], n, double(t) / n * 1e6);
-	}
-#endif
 }
 
 void asyncMapTest() {

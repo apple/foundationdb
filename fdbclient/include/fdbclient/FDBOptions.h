@@ -59,7 +59,7 @@ struct FDBOptionInfo {
 	  : name(name), comment(comment), parameterComment(parameterComment), hasParameter(hasParameter), hidden(hidden),
 	    persistent(persistent), sensitive(sensitive), defaultFor(defaultFor), paramType(paramType) {}
 
-	FDBOptionInfo() {}
+	FDBOptionInfo() = default;
 };
 
 template <class T>
@@ -90,7 +90,7 @@ public:
 template <class T>
 class UniqueOrderedOptionList {
 public:
-	typedef std::list<std::pair<typename T::Option, Optional<Standalone<StringRef>>>> OptionList;
+	using OptionList = std::list<std::pair<typename T::Option, Optional<Standalone<StringRef>>>>;
 
 private:
 	OptionList options;

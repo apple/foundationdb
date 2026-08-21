@@ -114,9 +114,9 @@ const int NUM_MAJOR_LEVELS_OF_EVENTS = SevMaxUsed / 10 + 1;
 class TraceEventFields {
 public:
 	constexpr static FileIdentifier file_identifier = 11262274;
-	typedef std::pair<std::string, std::string> Field;
-	typedef std::vector<Field> FieldContainer;
-	typedef FieldContainer::const_iterator FieldIterator;
+	using Field = std::pair<std::string, std::string>;
+	using FieldContainer = std::vector<Field>;
+	using FieldIterator = FieldContainer::const_iterator;
 
 	TraceEventFields();
 
@@ -180,20 +180,26 @@ inline void save(Archive& ar, const TraceEventFields& value) {
 
 class TraceBatch {
 public:
-	void addEvent(const char* name, uint64_t id, const char* location);
-	void addAttach(const char* name, uint64_t id, uint64_t to);
+	void addEvent(const char* name, uint64_t id, const char* location, UID traceID = UID(), uint64_t spanID = 0);
+	void addAttach(const char* name, uint64_t id, uint64_t to, UID traceID = UID(), uint64_t spanID = 0);
 	void addBuggify(int activated, int line, std::string file);
 	void dump();
 
 private:
 	struct EventInfo {
 		TraceEventFields fields;
-		EventInfo(double time, double monotonicTime, const char* name, uint64_t id, const char* location);
+		EventInfo(double time,
+		          double monotonicTime,
+		          const char* name,
+		          uint64_t id,
+		          const char* location,
+		          UID traceID = UID(),
+		          uint64_t spanID = 0);
 	};
 
 	struct AttachInfo {
 		TraceEventFields fields;
-		AttachInfo(double time, const char* name, uint64_t id, uint64_t to);
+		AttachInfo(double time, const char* name, uint64_t id, uint64_t to, UID traceID = UID(), uint64_t spanID = 0);
 	};
 
 	struct BuggifyInfo {
@@ -205,6 +211,12 @@ private:
 	std::vector<AttachInfo> attachBatch;
 	std::vector<BuggifyInfo> buggifyBatch;
 	static bool dumpImmediately();
+};
+
+struct BatchDebugIDs {
+	UID debugID;
+	UID debugTraceID;
+	uint64_t debugSpanID;
 };
 
 struct DynamicEventMetric;
@@ -337,8 +349,8 @@ protected:
 				value = Type::FORCED;
 		}
 
-		explicit(false) State(const State& other) noexcept = default;
-		explicit(false) State(State&& other) noexcept : value(other.value) { other.value = Type::DISABLED; }
+		State(const State& other) noexcept = default;
+		State(State&& other) noexcept : value(other.value) { other.value = Type::DISABLED; }
 		State& operator=(const State& other) noexcept = default;
 		State& operator=(State&& other) noexcept {
 			if (this != &other) {
@@ -480,7 +492,7 @@ protected:
 // The TraceEvent class provides the implementation for BaseTraceEvent. The only functions that should be implemented
 // here are those that must be called first in a trace event call sequence, such as the suppression functions.
 struct SWIFT_CXX_IMPORT_OWNED TraceEvent : public BaseTraceEvent {
-	TraceEvent() {}
+	TraceEvent() = default;
 	TraceEvent(const char* type, UID id = UID()); // Assumes SevInfo severity
 	TraceEvent(Severity, const char* type, UID id = UID());
 	TraceEvent(struct TraceInterval&, UID id = UID());

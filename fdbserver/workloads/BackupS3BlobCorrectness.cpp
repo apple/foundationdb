@@ -221,7 +221,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		} else {
 			// Add backup ranges
 			std::set<std::string> rangeEndpoints;
-			while (rangeEndpoints.size() < backupRangesCount * 2) {
+			while (rangeEndpoints.size() < static_cast<size_t>(backupRangesCount) * 2) {
 				rangeEndpoints.insert(deterministicRandom()->randomAlphaNumeric(
 				    deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
 			}
@@ -356,7 +356,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("ExpectedBackupUID", expectedBackupUID)
 		    .detail("BackupTag", backupTag);
 
-		loop {
+		while (true) {
 			Optional<BulkDumpProgress> progressOpt = co_await getBulkDumpProgress(cx);
 
 			if (progressOpt.present()) {
@@ -446,9 +446,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		co_await delay(startDelay);
 
 		// S3-specific: Conditional cleanup matching original BackupCorrectness behavior
-		// Only abort existing backups on first call (startDelay > 0) or randomly (BUGGIFY)
+		// Only abort existing backups on first call (startDelay > 0) or randomly (buggify())
 		// This prevents excessive cleanup on test restarts that caused timeouts
-		if (startDelay || BUGGIFY) {
+		if (startDelay || buggify()) {
 			TraceEvent("BS3BCW_DoBackupAbortBackup1", randomID)
 			    .detail("Tag", printable(tag))
 			    .detail("StartDelay", startDelay);

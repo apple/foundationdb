@@ -26,7 +26,7 @@ The latest stable releases are (were) versions that are recommended for producti
 
 | Branch   |     Latest Production Release      |  Notes |
 |:--------:|:-------------:|------:|
-| 7.3      |  [7.3.69](https://github.com/apple/foundationdb/releases/tag/7.3.69) | Supported |
+| 7.3      |  [7.3.77](https://github.com/apple/foundationdb/releases/tag/7.3.77) | Supported |
 | 7.2      |   | Experimental |
 | 7.1      |  [7.1.57](https://github.com/apple/foundationdb/releases/tag/7.1.57)   |   Bug fixes |
 | 7.0      |           |   Experimental |
@@ -140,7 +140,7 @@ Building FoundationDB requires at least 8GB of memory. More memory is needed whe
 
 ### macOS
 
-The build under macOS will work the same way as on Linux. [Homebrew](https://brew.sh/) can be used to install the `boost` library and the `ninja` build tool. Be carefull, curent main branch use boost 1.86, do install this version or just let cmake download one. Also, if swift binding is not interest, use -DBUILD_SWIFT_BINDING=OFF.
+The build under macOS will work the same way as on Linux. [Homebrew](https://brew.sh/) can be used to install the `boost` library and the `ninja` build tool. Be careful, current main branch uses boost 1.86, do install this version or just let cmake download one. Also, if the Swift binding is not of interest, use -DBUILD_SWIFT_BINDING=OFF.
 
 ```sh
 cmake -G Ninja <FDB_SOURCE_DIR> -B <BUILD_DIR>

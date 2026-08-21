@@ -79,6 +79,38 @@ replay -h | --help         # Show help
 alias r=replay
 ```
 
+### Colors on a light terminal
+
+The palette has a light and a dark variant, and which one gets used is worked
+out by asking the terminal what its background color is.
+
+Inside `tmux` that takes some care. The question is an OSC escape sequence, and
+`termenv` never sends it when `TERM` starts with `screen` or `tmux`, because a
+multiplexer can be attached from several terminals at once with different
+backgrounds. So `replay` asks the outer terminal directly instead, wrapping the
+query in tmux's DCS passthrough, which tmux forwards verbatim to the terminal it
+is attached to. Terminals that answer it (iTerm2 does) get the right palette
+inside tmux with nothing to configure.
+
+If your terminal does not answer, the background cannot be determined and dark
+is assumed. `replay` prints a hint when that happens, and you can say what the
+background is:
+
+```bash
+REPLAY_THEME=light replay    # force the light-background palette
+REPLAY_THEME=dark replay     # force the dark-background palette
+```
+
+Set it once in your shell config to stop thinking about it:
+
+```bash
+set -gx REPLAY_THEME light   # fish
+export REPLAY_THEME=light    # bash/zsh
+```
+
+`REPLAY_THEME` always wins, and setting it skips the query entirely.
+`$COLORFGBG` is also honored, since `termenv` consults it.
+
 ## Why
 
 The main motivation is to be **fast in debugging simulation issues**, as well as **understanding how FDB works**.
@@ -227,6 +259,7 @@ Press `f` to open the filter configuration popup. Filters allow you to focus on 
 | `x` | Health view | Show network latencies, degraded peers, connections |
 | `h` | Help | Show all keyboard shortcuts |
 | `f` | Filter | Configure event filters |
+| `l` | Layout | Cycle: 2-column / events only / topology only |
 
 **Config View (`c`):**
 - Shows full JSON configuration at current time
@@ -246,6 +279,20 @@ The left pane shows the **cluster topology** at the current time:
 - Testers shown separately
 - Each machine shows its roles (StorageServer, TLog, Coordinator, etc.)
 - Roles show ID and epoch where applicable: `TLog [abc123] (e=5)`
+- Roles that process versions also show the latest version seen for them:
+  `TLog [abc123] (e=5 v=1,234,567)`. Sourced from `TLogMetrics`,
+  `LogRouterMetrics`, and `StorageMetrics`.
+- Roles that pull data from another role show where they pull from:
+  - `StorageServer [abc123] (v=1,234,567 ←TL:def45678)` - the TLog this SS
+    peeks from, sourced from `StorageServerSourceTLogID`
+  - `LogRouter [abc123] (e=5 v=1,234,567 ←TL:def45678)` - the TLog this LR
+    peeks from, sourced from `LogRouterPeekLocation` (falling back to
+    `PrimaryPeekLocation` on `LogRouterMetrics`)
+  - `TLog [abc123] (e=5 ←LR:def45678,89abcdef)` - for a remote TLog, the
+    LogRouters it pulls from, sourced from `TLogPeekRemoteBestOnly`
+  - The arrow points in the direction data is received from. References are
+    only shown if the referenced role is still present in the topology at the
+    current time, so recruited-away roles do not leave dangling IDs.
 - Current event's machine is highlighted with `->` arrow
 - Current event's role is highlighted if ID matches
 
@@ -342,7 +389,7 @@ The bottom of the screen shows:
 
 **cluster.go** (~265 lines)
 - **Worker**: Machine with roles and DC membership
-- **RoleInfo**: Role name, ID, and epoch
+- **RoleInfo**: Role name, ID, epoch, latest version, and peek-source (buddy) references
 - **ClusterState**: Map of all workers
 - **BuildClusterState()**: Replays Role events to reconstruct topology
 - Address parsing for DC identification (handles both IPv4 and IPv6 formats)

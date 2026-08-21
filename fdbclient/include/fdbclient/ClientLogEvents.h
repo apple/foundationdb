@@ -24,14 +24,15 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
+#include <inttypes.h>
 
 // NOTE: data structures defined in this file and serialization thereof represent
 // persistent format state internal to FDB. Changes that render old values unreadable
 // will break upgrade simulation tests.
 
 // Local defines for removed types that linger on in metadata created in older systems.
-typedef StringRef LegacyTenantNameRef;
-typedef Standalone<LegacyTenantNameRef> LegacyTenantName;
+using LegacyTenantNameRef = StringRef;
+using LegacyTenantName = Standalone<LegacyTenantNameRef>;
 
 namespace FdbClientLogEvents {
 enum class EventType {
@@ -53,7 +54,7 @@ struct Event {
 		if (dc.present())
 			dcId = dc.get();
 	}
-	Event() {}
+	Event() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -65,11 +66,19 @@ struct Event {
 	Key dcId{};
 	Optional<LegacyTenantName> legacyEmptyTenant{};
 
-	void logEvent(std::string id, int maxFieldLength) const {}
+	void logEvent(std::string id, int maxFieldLength, SpanContext spanContext) const {}
+	void augmentTraceEvent(TraceEvent& event, SpanContext spanContext) const {
+		if (spanContext.traceID.isValid()) {
+			event.detail("TraceID", spanContext.traceID.toString());
+		}
+		if (spanContext.spanID != 0) {
+			event.detail("SpanID", format("%016" PRIx64, spanContext.spanID));
+		}
+	}
 };
 
 struct EventGetVersion : public Event {
-	EventGetVersion() {}
+	EventGetVersion() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -81,15 +90,16 @@ struct EventGetVersion : public Event {
 
 	double latency;
 
-	void logEvent(std::string id, int maxFieldLength) const {
+	void logEvent(std::string id, int maxFieldLength, SpanContext spanContext) const {
 		TraceEvent event("TransactionTrace_GetVersion");
 		event.detail("TransactionID", id).detail("Latency", latency);
+		augmentTraceEvent(event, spanContext);
 	}
 };
 
 // Version V2 of EventGetVersion starting at 6.2
 struct EventGetVersion_V2 : public Event {
-	EventGetVersion_V2() {}
+	EventGetVersion_V2() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -102,9 +112,10 @@ struct EventGetVersion_V2 : public Event {
 	double latency;
 	TransactionPriorityType priorityType{ TransactionPriorityType::UNSET };
 
-	void logEvent(std::string id, int maxFieldLength) const {
+	void logEvent(std::string id, int maxFieldLength, SpanContext spanContext) const {
 		TraceEvent event("TransactionTrace_GetVersion");
 		event.detail("TransactionID", id).detail("Latency", latency).detail("PriorityType", priorityType);
+		augmentTraceEvent(event, spanContext);
 	}
 };
 
@@ -132,7 +143,7 @@ struct EventGetVersion_V3 : public Event {
 			ASSERT(false);
 		}
 	}
-	EventGetVersion_V3() {}
+	EventGetVersion_V3() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -146,19 +157,20 @@ struct EventGetVersion_V3 : public Event {
 	TransactionPriorityType priorityType{ TransactionPriorityType::UNSET };
 	Version readVersion;
 
-	void logEvent(std::string id, int maxFieldLength) const {
+	void logEvent(std::string id, int maxFieldLength, SpanContext spanContext) const {
 		TraceEvent event("TransactionTrace_GetVersion");
 		event.detail("TransactionID", id)
 		    .detail("Latency", latency)
 		    .detail("PriorityType", priorityType)
 		    .detail("ReadVersion", readVersion);
+		augmentTraceEvent(event, spanContext);
 	}
 };
 
 struct EventGet : public Event {
 	EventGet(double ts, const Optional<Standalone<StringRef>>& dcId, double lat, int size, const KeyRef& in_key)
 	  : Event(EventType::GET_LATENCY, ts, dcId), latency(lat), valueSize(size), key(in_key) {}
-	EventGet() {}
+	EventGet() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -172,7 +184,7 @@ struct EventGet : public Event {
 	int valueSize;
 	Key key;
 
-	void logEvent(std::string id, int maxFieldLength) const {
+	void logEvent(std::string id, int maxFieldLength, SpanContext spanContext) const {
 		TraceEvent event("TransactionTrace_Get");
 		event.setMaxEventLength(-1)
 		    .detail("TransactionID", id)
@@ -180,6 +192,7 @@ struct EventGet : public Event {
 		    .detail("ValueSizeBytes", valueSize)
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("Key", key);
+		augmentTraceEvent(event, spanContext);
 	}
 };
 
@@ -192,7 +205,7 @@ struct EventGetRange : public Event {
 	              const KeyRef& end_key)
 	  : Event(EventType::GET_RANGE_LATENCY, ts, dcId), latency(lat), rangeSize(size), startKey(start_key),
 	    endKey(end_key) {}
-	EventGetRange() {}
+	EventGetRange() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -207,7 +220,7 @@ struct EventGetRange : public Event {
 	Key startKey;
 	Key endKey;
 
-	void logEvent(std::string id, int maxFieldLength) const {
+	void logEvent(std::string id, int maxFieldLength, SpanContext spanContext) const {
 		TraceEvent event("TransactionTrace_GetRange");
 		event.setMaxEventLength(-1)
 		    .detail("TransactionID", id)
@@ -216,11 +229,12 @@ struct EventGetRange : public Event {
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("StartKey", startKey)
 		    .detail("EndKey", endKey);
+		augmentTraceEvent(event, spanContext);
 	}
 };
 
 struct EventCommit : public Event {
-	EventCommit() {}
+	EventCommit() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -236,7 +250,7 @@ struct EventCommit : public Event {
 	CommitTransactionRequest
 	    req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
-	void logEvent(std::string id, int maxFieldLength) const {
+	void logEvent(std::string id, int maxFieldLength, SpanContext spanContext) const {
 		for (auto& read_range : req.transaction.read_conflict_ranges) {
 			TraceEvent ev1("TransactionTrace_Commit_ReadConflictRange");
 			ev1.setMaxEventLength(-1)
@@ -244,6 +258,7 @@ struct EventCommit : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", read_range.begin)
 			    .detail("End", read_range.end);
+			augmentTraceEvent(ev1, spanContext);
 		}
 
 		for (auto& write_range : req.transaction.write_conflict_ranges) {
@@ -253,6 +268,7 @@ struct EventCommit : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", write_range.begin)
 			    .detail("End", write_range.end);
+			augmentTraceEvent(ev2, spanContext);
 		}
 
 		for (auto& mutation : req.transaction.mutations) {
@@ -261,6 +277,7 @@ struct EventCommit : public Event {
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Mutation", mutation);
+			augmentTraceEvent(ev3, spanContext);
 		}
 
 		TraceEvent ev4("TransactionTrace_Commit");
@@ -268,6 +285,7 @@ struct EventCommit : public Event {
 		    .detail("Latency", latency)
 		    .detail("NumMutations", numMutations)
 		    .detail("CommitSizeBytes", commitBytes);
+		augmentTraceEvent(ev4, spanContext);
 	}
 };
 
@@ -282,15 +300,16 @@ struct EventCommit_V2 : public Event {
 	               const CommitTransactionRequest& commit_req)
 	  : Event(EventType::COMMIT_LATENCY, ts, dcId), latency(lat), numMutations(mut), commitBytes(bytes),
 	    commitVersion(version), req(commit_req) {}
-	EventCommit_V2() {}
+	EventCommit_V2() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
-		if (!ar.isDeserializing)
+		if (!ar.isDeserializing) {
 			return serializer(
 			    Event::serialize(ar), latency, numMutations, commitBytes, commitVersion, req.transaction, req.arena);
-		else
+		} else {
 			return serializer(ar, latency, numMutations, commitBytes, commitVersion, req.transaction, req.arena);
+		}
 	}
 
 	double latency;
@@ -300,7 +319,7 @@ struct EventCommit_V2 : public Event {
 	CommitTransactionRequest
 	    req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
-	void logEvent(std::string id, int maxFieldLength) const {
+	void logEvent(std::string id, int maxFieldLength, SpanContext spanContext) const {
 		for (auto& read_range : req.transaction.read_conflict_ranges) {
 			TraceEvent ev1("TransactionTrace_Commit_ReadConflictRange");
 			ev1.setMaxEventLength(-1)
@@ -308,6 +327,7 @@ struct EventCommit_V2 : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", read_range.begin)
 			    .detail("End", read_range.end);
+			augmentTraceEvent(ev1, spanContext);
 		}
 
 		for (auto& write_range : req.transaction.write_conflict_ranges) {
@@ -317,6 +337,7 @@ struct EventCommit_V2 : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", write_range.begin)
 			    .detail("End", write_range.end);
+			augmentTraceEvent(ev2, spanContext);
 		}
 
 		for (auto& mutation : req.transaction.mutations) {
@@ -325,6 +346,7 @@ struct EventCommit_V2 : public Event {
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Mutation", mutation);
+			augmentTraceEvent(ev3, spanContext);
 		}
 
 		TraceEvent ev4("TransactionTrace_Commit");
@@ -333,13 +355,14 @@ struct EventCommit_V2 : public Event {
 		    .detail("Latency", latency)
 		    .detail("NumMutations", numMutations)
 		    .detail("CommitSizeBytes", commitBytes);
+		augmentTraceEvent(ev4, spanContext);
 	}
 };
 
 struct EventGetError : public Event {
 	EventGetError(double ts, const Optional<Standalone<StringRef>>& dcId, int err_code, const KeyRef& in_key)
 	  : Event(EventType::ERROR_GET, ts, dcId), errCode(err_code), key(in_key) {}
-	EventGetError() {}
+	EventGetError() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -352,13 +375,14 @@ struct EventGetError : public Event {
 	int errCode;
 	Key key;
 
-	void logEvent(std::string id, int maxFieldLength) const {
+	void logEvent(std::string id, int maxFieldLength, SpanContext spanContext) const {
 		TraceEvent event("TransactionTrace_GetError");
 		event.setMaxEventLength(-1)
 		    .detail("TransactionID", id)
 		    .detail("ErrCode", errCode)
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("Key", key);
+		augmentTraceEvent(event, spanContext);
 	}
 };
 
@@ -369,7 +393,7 @@ struct EventGetRangeError : public Event {
 	                   const KeyRef& start_key,
 	                   const KeyRef& end_key)
 	  : Event(EventType::ERROR_GET_RANGE, ts, dcId), errCode(err_code), startKey(start_key), endKey(end_key) {}
-	EventGetRangeError() {}
+	EventGetRangeError() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -383,7 +407,7 @@ struct EventGetRangeError : public Event {
 	Key startKey;
 	Key endKey;
 
-	void logEvent(std::string id, int maxFieldLength) const {
+	void logEvent(std::string id, int maxFieldLength, SpanContext spanContext) const {
 		TraceEvent event("TransactionTrace_GetRangeError");
 		event.setMaxEventLength(-1)
 		    .detail("TransactionID", id)
@@ -391,6 +415,7 @@ struct EventGetRangeError : public Event {
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("StartKey", startKey)
 		    .detail("EndKey", endKey);
+		augmentTraceEvent(event, spanContext);
 	}
 };
 
@@ -400,7 +425,7 @@ struct EventCommitError : public Event {
 	                 int err_code,
 	                 const CommitTransactionRequest& commit_req)
 	  : Event(EventType::ERROR_COMMIT, ts, dcId), errCode(err_code), req(commit_req) {}
-	EventCommitError() {}
+	EventCommitError() = default;
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
@@ -414,7 +439,7 @@ struct EventCommitError : public Event {
 	CommitTransactionRequest
 	    req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
-	void logEvent(std::string id, int maxFieldLength) const {
+	void logEvent(std::string id, int maxFieldLength, SpanContext spanContext) const {
 		for (auto& read_range : req.transaction.read_conflict_ranges) {
 			TraceEvent ev1("TransactionTrace_CommitError_ReadConflictRange");
 			ev1.setMaxEventLength(-1)
@@ -422,6 +447,7 @@ struct EventCommitError : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", read_range.begin)
 			    .detail("End", read_range.end);
+			augmentTraceEvent(ev1, spanContext);
 		}
 
 		for (auto& write_range : req.transaction.write_conflict_ranges) {
@@ -431,6 +457,7 @@ struct EventCommitError : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", write_range.begin)
 			    .detail("End", write_range.end);
+			augmentTraceEvent(ev2, spanContext);
 		}
 
 		for (auto& mutation : req.transaction.mutations) {
@@ -439,10 +466,12 @@ struct EventCommitError : public Event {
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Mutation", mutation);
+			augmentTraceEvent(ev3, spanContext);
 		}
 
 		TraceEvent ev4("TransactionTrace_CommitError");
 		ev4.detail("TransactionID", id).detail("ErrCode", errCode);
+		augmentTraceEvent(ev4, spanContext);
 	}
 };
 } // namespace FdbClientLogEvents

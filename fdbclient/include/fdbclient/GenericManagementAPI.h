@@ -31,10 +31,9 @@ the contents of the system key space.
 #include <map>
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/ProcessClass.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/Subspace.h"
-#include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/StorageWiggleMetrics.h"
 
@@ -65,7 +64,7 @@ enum class ConfigurationResult {
 	DATABASE_IS_REGISTERED,
 	INVALID_STORAGE_TYPE,
 	BACKUP_WORKER_ENABLED_RESTRICTED,
-	RANGE_BACKUP_WORKER_ENABLED_RESTRICTED
+	RANGE_PARTITIONED_BACKUP_WORKER_ENABLED_RESTRICTED
 };
 
 enum class CoordinatorsResult {
@@ -175,13 +174,13 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 	StringRef initIdKey = "\xff/init_id"_sr;
 	Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	if (!m.size()) {
+	if (m.empty()) {
 		co_return ConfigurationResult::NO_OPTIONS_PROVIDED;
 	}
 
 	// make sure we have essential configuration options
 	std::string initKey = configKeysPrefix.toString() + "initialized";
-	bool creating = m.count(initKey) != 0;
+	bool creating = m.contains(initKey);
 	Optional<UID> locked;
 	{
 		auto iter = m.find(databaseLockedKey.toString());
@@ -236,19 +235,19 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					DatabaseConfiguration oldConfig;
 					oldConfig.fromKeyValues((VectorRef<KeyValueRef>)fConfig.get());
 					DatabaseConfiguration newConfig = oldConfig;
-					for (auto kv : m) {
+					for (const auto& kv : m) {
 						newConfig.set(kv.first, kv.second);
 					}
 					if (!newConfig.isValid()) {
 						co_return ConfigurationResult::INVALID_CONFIGURATION;
 					}
 
-					if (newConfig.tLogPolicy->attributeKeys().count("dcid") && newConfig.regions.size() > 0) {
+					if (newConfig.tLogPolicy->attributeKeys().contains("dcid") && !newConfig.regions.empty()) {
 						co_return ConfigurationResult::REGION_REPLICATION_MISMATCH;
 					}
 
 					oldReplicationUsesDcId =
-					    oldReplicationUsesDcId || oldConfig.tLogPolicy->attributeKeys().count("dcid");
+					    oldReplicationUsesDcId || oldConfig.tLogPolicy->attributeKeys().contains("dcid");
 
 					if (oldConfig.usableRegions != newConfig.usableRegions) {
 						// cannot change region configuration
@@ -257,7 +256,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 							dcId_priority[it.dcId] = it.priority;
 						}
 						for (auto& it : oldConfig.regions) {
-							if (!dcId_priority.count(it.dcId) || dcId_priority[it.dcId] != it.priority) {
+							if (!dcId_priority.contains(it.dcId) || dcId_priority[it.dcId] != it.priority) {
 								co_return ConfigurationResult::REGIONS_CHANGED;
 							}
 						}
@@ -277,7 +276,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					typename DB::TransactionT::template FutureT<RangeResult> fServerListF =
 					    tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 					Future<RangeResult> fServerList =
-					    (newConfig.regions.size()) ? safeThreadFutureToFuture(fServerListF) : Future<RangeResult>();
+					    !newConfig.regions.empty() ? safeThreadFutureToFuture(fServerListF) : Future<RangeResult>();
 
 					if (newConfig.usableRegions == 2) {
 						if (oldReplicationUsesDcId) {
@@ -300,7 +299,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 							}
 
 							for (auto& it : newConfig.regions) {
-								if (localityDcIds.count(it.dcId) == 0) {
+								if (!localityDcIds.contains(it.dcId)) {
 									co_return ConfigurationResult::DCID_MISSING;
 								}
 							}
@@ -327,7 +326,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						}
 					}
 
-					if (newConfig.regions.size()) {
+					if (!newConfig.regions.empty()) {
 						// all storage servers must be in one of the regions
 						co_await (success(fServerList) || tooLong);
 						if (!fServerList.isReady()) {
@@ -343,7 +342,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						std::set<Optional<Key>> missingDcIds;
 						for (auto& s : serverList) {
 							auto ssi = decodeServerListValue(s.value);
-							if (!ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get())) {
+							if (!ssi.locality.dcId().present() || !newDcIds.contains(ssi.locality.dcId().get())) {
 								missingDcIds.insert(ssi.locality.dcId());
 							}
 						}
@@ -357,10 +356,10 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						co_return ConfigurationResult::DATABASE_UNAVAILABLE;
 					}
 
-					if (newConfig.regions.size()) {
+					if (!newConfig.regions.empty()) {
 						std::map<Optional<Key>, std::set<Optional<Key>>> dcId_zoneIds;
 						for (auto& it : fWorkers.get()) {
-							if (it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit) {
+							if (it.processClass.canBecomeStorageServer()) {
 								dcId_zoneIds[it.locality.dcId()].insert(it.locality.zoneId());
 							}
 						}
@@ -382,7 +381,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					} else {
 						std::set<Optional<Key>> zoneIds;
 						for (auto& it : fWorkers.get()) {
-							if (it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit) {
+							if (it.processClass.canBecomeStorageServer()) {
 								zoneIds.insert(it.locality.zoneId());
 							}
 						}
@@ -410,7 +409,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			if (creating) {
 				tr->setOption(FDBTransactionOptions::INITIALIZE_NEW_DATABASE);
 				tr->addReadConflictRange(singleKeyRange(initIdKey));
-			} else if (m.size()) {
+			} else if (!m.empty()) {
 				// might be used in an emergency transaction, so make sure it is retry-self-conflicting and
 				// CAUSAL_WRITE_RISKY
 				tr->setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
@@ -443,9 +442,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 				}
 
 				// Clear range partitioned backup progress when range partitioned backup workers are disabled
-				if (i->first == rangeBackupWorkerEnabledKey && i->second == "0") {
+				if (i->first == rangePartitionedBackupWorkerEnabledKey && i->second == "0") {
 					tr->clear(backupProgressKeys);
-					TraceEvent("RangePartitionedBackupWorkerProgressCleared");
+					TraceEvent("RangePartitionedBWProgressCleared");
 				}
 			}
 
@@ -515,7 +514,7 @@ Future<ConfigurationResult> autoConfig(Reference<DB> db, ConfigureAutoResult con
 	Reference<typename DB::TransactionT> tr = db->createTransaction();
 	Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
 
-	if (!conf.address_class.size())
+	if (conf.address_class.empty())
 		co_return ConfigurationResult::INCOMPLETE_CONFIGURATION; // FIXME: correct return type
 
 	while (true) {
@@ -543,7 +542,7 @@ Future<ConfigurationResult> autoConfig(Reference<DB> db, ConfigureAutoResult con
 				}
 			}
 
-			if (conf.address_class.size())
+			if (!conf.address_class.empty())
 				tr->set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
 
 			if (conf.auto_logs != conf.old_logs)
@@ -602,7 +601,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db,
                                          std::vector<StringRef> const& modes,
                                          Optional<ConfigureAutoResult> const& conf,
                                          bool force) {
-	if (modes.size() && modes[0] == "auto"_sr && conf.present()) {
+	if (!modes.empty() && modes[0] == "auto"_sr && conf.present()) {
 		return autoConfig(db, conf.get());
 	}
 

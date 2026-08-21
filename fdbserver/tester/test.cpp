@@ -32,7 +32,7 @@
 #include "flow/Platform.h"
 #include "flow/ProcessEvents.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/DataDistributionConfig.h"
@@ -41,9 +41,9 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
-#include "fdbserver/tester/KnobProtectiveGroups.h"
+#include "KnobProtectiveGroups.h"
 #include "ConsistencyChecker.h"
 #include "DatabaseMaintenance.h"
 #include "TestSpecParser.h"
@@ -414,10 +414,11 @@ Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFu
 			gotInfo.myLocality = locality;
 			dbInfo->set(gotInfo);
 		} else if (action == 2) {
-			if (ccInterface->get().present())
+			if (ccInterface->get().present()) {
 				TraceEvent("GotCCInterfaceChange")
 				    .detail("CCID", ccInterface->get().get().id())
 				    .detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
+			}
 		}
 	}
 }

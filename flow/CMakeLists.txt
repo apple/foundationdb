@@ -1,15 +1,6 @@
 find_package(Threads REQUIRED)
 
-option(FLOW_USE_ZSTD "Enable zstd compression in flow" OFF)
-
 fdb_find_sources(FLOW_SRCS)
-
-if(FLOW_USE_ZSTD)
-  # NOTE: To enable boost::iostreams with zstd library support, manually add
-  # zstd.cpp to source files is required. Ref:
-  # https://www.boost.org/doc/libs/1_79_0/libs/iostreams/doc/installation.html
-  list(APPEND FLOW_SRCS ../contrib/boost_zstd/zstd.cpp)
-endif()
 
 # Remove files with `main` defined so we can create a link test executable.
 list(REMOVE_ITEM FLOW_SRCS LinkTest.cpp)
@@ -52,13 +43,8 @@ if(NOT Jinja2_FOUND)
     VENV_Python3_EXECUTABLE
     NAMES python3 python3.exe python.exe
     PATHS ${PROTOCOL_VERSION_VENV_DIR}/Scripts ${PROTOCOL_VERSION_VENV_DIR}/bin
-          REQUIRED
-    NO_DEFAULT_PATH NO_CACHE
+    REQUIRED NO_DEFAULT_PATH NO_CACHE
     DOC "Checking Python3 executable in virtual environment")
-  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m ensurepip
-                          COMMAND_ERROR_IS_FATAL ANY)
-  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install --upgrade
-                          pip COMMAND_ERROR_IS_FATAL ANY)
   execute_process(
     COMMAND
       "${VENV_Python3_EXECUTABLE}" -m pip install -r
@@ -104,14 +90,6 @@ add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 add_dependencies(flow ProtocolVersion)
 add_dependencies(flow_sampling ProtocolVersion)
 
-if(FLOW_USE_ZSTD)
-  include(CompileZstd)
-  compile_zstd()
-
-  target_link_libraries(flow PRIVATE libzstd_static)
-  target_compile_definitions(flow PUBLIC ZSTD_LIB_SUPPORTED)
-endif()
-
 # When creating a static or shared library, undefined symbols will be ignored.
 # Since we want to ensure no symbols from other modules are used, create an
 # executable so the linker will throw errors if it can't find the declaration of
@@ -121,7 +99,7 @@ target_link_libraries(flowlinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>" 
 
 add_flow_target(EXECUTABLE NAME flow_test SRCS FlowTest.cpp)
 set_target_properties(flow_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
-target_link_libraries(flow_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>")
+target_link_libraries(flow_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>" fdbrpc)
 
 set(IS_ARM_MAC NO)
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
@@ -136,9 +114,6 @@ foreach(ft flow flow_sampling flowlinktest flow_test)
            "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
-  if(FLOW_USE_ZSTD)
-    target_include_directories(${ft} PRIVATE SYSTEM ${ZSTD_LIB_INCLUDE_DIR})
-  endif()
   if(USE_JEMALLOC)
     target_include_directories(${ft} PRIVATE ${jemalloc_INCLUDE_DIRS})
     if(ft STREQUAL "flowlinktest" OR ft STREQUAL "flow_test")

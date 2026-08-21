@@ -37,6 +37,7 @@
 #include <exception>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #ifndef _WIN32
@@ -53,6 +54,7 @@ struct UnitTestRunnerOptions {
 	int maxTestCases = -1;
 	bool cleanupAfterTests = true;
 	bool listTests = false;
+	bool simulation = false;
 	bool showHelp = false;
 };
 
@@ -71,6 +73,7 @@ enum UnitTestRunnerOption {
 	OPT_MAX_TEST_CASES,
 	OPT_NO_CLEANUP,
 	OPT_LIST,
+	OPT_SIMULATION,
 };
 
 CSimpleOpt::SOption unitTestRunnerOptions[] = { { OPT_HELP, "-h", SO_NONE },
@@ -83,6 +86,7 @@ CSimpleOpt::SOption unitTestRunnerOptions[] = { { OPT_HELP, "-h", SO_NONE },
 	                                            { OPT_MAX_TEST_CASES, "--max-test-cases", SO_REQ_SEP },
 	                                            { OPT_NO_CLEANUP, "--no-cleanup", SO_NONE },
 	                                            { OPT_LIST, "--list", SO_NONE },
+	                                            { OPT_SIMULATION, "--simulation", SO_NONE },
 	                                            SO_END_OF_OPTIONS };
 
 void printUsage(const char* program, const UnitTestRunnerConfig& config) {
@@ -99,6 +103,7 @@ void printUsage(const char* program, const UnitTestRunnerConfig& config) {
 	           "      --max-test-cases N    Stop after N matching tests\n"
 	           "      --no-cleanup          Keep the data directory after each test\n"
 	           "      --list                Print matching test names without running them\n"
+	           "      --simulation          Run using Sim2; apply default simulation exclusions unless filtered\n"
 	           "  -h, --help                Show this help\n",
 	           program,
 	           config.suiteName(),
@@ -181,6 +186,9 @@ bool parseArgs(int argc, char** argv, UnitTestRunnerOptions* options) {
 		case OPT_LIST:
 			options->listTests = true;
 			break;
+		case OPT_SIMULATION:
+			options->simulation = true;
+			break;
 		default:
 			fmt::print(stderr, "ERROR: Unknown option id {}\n", args.OptionId());
 			return false;
@@ -213,9 +221,23 @@ bool pathComponentMatches(std::string_view path, std::string_view component) {
 	return false;
 }
 
-bool testMatched(const UnitTestRunnerOptions& options, std::string_view testName) {
+bool testMatched(const UnitTestRunnerOptions& options, const UnitTestRunnerConfig& config, std::string_view testName) {
 	if (!startsWith(testName, options.testPattern)) {
 		return false;
+	}
+
+	if (options.testPattern.empty()) {
+		if ((options.simulation && startsWith(testName, "noSim/")) || startsWith(testName, ":") ||
+		    startsWith(testName, "#") || startsWith(testName, "L") || startsWith(testName, "perf/") ||
+		    startsWith(testName, "performance/")) {
+			return false;
+		}
+
+		for (const auto& ignorePattern : config.defaultTestsIgnored(options.simulation)) {
+			if (startsWith(testName, ignorePattern)) {
+				return false;
+			}
+		}
 	}
 
 	for (const auto& ignorePattern : options.testsIgnored) {
@@ -227,13 +249,37 @@ bool testMatched(const UnitTestRunnerOptions& options, std::string_view testName
 	return true;
 }
 
+TEST_CASE("/flow/UnitTestRunner/defaultSelection") {
+	UnitTestRunnerOptions options;
+	UnitTestRunnerConfig config("flow", {}, {}, { "normal-only/" }, { "simulation-only/" });
+
+	ASSERT(testMatched(options, config, "/flow/regular"));
+	ASSERT(testMatched(options, config, "/redwood/correctness/btreeCloseWithQueuedCommits"));
+	ASSERT(testMatched(options, config, "noSim/flow/regular"));
+	ASSERT(!testMatched(options, config, "normal-only/test"));
+	ASSERT(!testMatched(options, config, "Lflow/longRunningCorrectness"));
+	ASSERT(!testMatched(options, config, "performance/flow/test"));
+
+	options.simulation = true;
+	ASSERT(testMatched(options, config, "/flow/regular"));
+	ASSERT(testMatched(options, config, "/redwood/correctness/btreeCloseWithQueuedCommits"));
+	ASSERT(!testMatched(options, config, "noSim/flow/regular"));
+	ASSERT(!testMatched(options, config, "simulation-only/test"));
+	ASSERT(!testMatched(options, config, "Lflow/longRunningCorrectness"));
+
+	options.testPattern = "Lflow/";
+	ASSERT(testMatched(options, config, "Lflow/longRunningCorrectness"));
+
+	return Void();
+}
+
 std::vector<UnitTest*> collectTests(const UnitTestRunnerOptions& options, const UnitTestRunnerConfig& config) {
 	std::vector<UnitTest*> tests;
 	for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
 		if (!pathComponentMatches(test->file, config.suiteName())) {
 			continue;
 		}
-		if (testMatched(options, test->name)) {
+		if (testMatched(options, config, test->name)) {
 			tests.push_back(test);
 		}
 	}
@@ -317,6 +363,14 @@ Future<Void> runTests(const UnitTestRunnerOptions& options,
 	}
 }
 
+Future<Void> runTestsAfterInitialization(Future<Void> initialization,
+                                         const UnitTestRunnerOptions& options,
+                                         const UnitTestRunnerConfig& config,
+                                         UnitTestRunnerResult* result) {
+	co_await initialization;
+	co_await runTests(options, config, result);
+}
+
 Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int* exitCode) {
 	try {
 		co_await what;
@@ -335,7 +389,14 @@ Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int
 
 } // namespace
 
-UnitTestRunnerConfig::UnitTestRunnerConfig(std::string_view sourceSubDir) : sourceSubDir(sourceSubDir) {}
+UnitTestRunnerConfig::UnitTestRunnerConfig(std::string_view sourceSubDir,
+                                           SimulationInitializer simulationInitializer,
+                                           NetworkInitializer networkInitializer,
+                                           std::vector<std::string> normalTestsIgnored,
+                                           std::vector<std::string> simulationTestsIgnored)
+  : sourceSubDir(sourceSubDir), simulationInitializer(std::move(simulationInitializer)),
+    networkInitializer(std::move(networkInitializer)), normalTestsIgnored(std::move(normalTestsIgnored)),
+    simulationTestsIgnored(std::move(simulationTestsIgnored)) {}
 
 std::string_view UnitTestRunnerConfig::suiteName() const {
 	return sourceSubDir;
@@ -347,6 +408,26 @@ std::string UnitTestRunnerConfig::dataDir() const {
 
 std::string UnitTestRunnerConfig::traceName() const {
 	return std::string(sourceSubDir) + "_test";
+}
+
+bool UnitTestRunnerConfig::supportsSimulation() const {
+	return static_cast<bool>(simulationInitializer);
+}
+
+Future<Void> UnitTestRunnerConfig::initializeSimulation() const {
+	return simulationInitializer();
+}
+
+void UnitTestRunnerConfig::initializeNetwork() const {
+	if (networkInitializer) {
+		networkInitializer();
+	} else {
+		g_network = newNet2(TLSConfig());
+	}
+}
+
+const std::vector<std::string>& UnitTestRunnerConfig::defaultTestsIgnored(bool simulation) const {
+	return simulation ? simulationTestsIgnored : normalTestsIgnored;
 }
 
 int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
@@ -365,11 +446,18 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 		printUsage(argv[0], config);
 		return 0;
 	}
+	if (options.simulation && !config.supportsSimulation()) {
+		fmt::print(stderr, "ERROR: Simulation mode is not supported by the {} test target\n", config.suiteName());
+		return 1;
+	}
 
 	if (options.randomSeed == 0) {
 		options.randomSeed = platform::getRandomSeed();
 	}
 	setThreadLocalDeterministicRandomSeed(options.randomSeed);
+	if (options.simulation) {
+		bindDeterministicRandomToOpenssl();
+	}
 	fmt::print(stdout, "Random seed is {}\n", options.randomSeed);
 
 	const std::string traceName = config.traceName();
@@ -380,13 +468,23 @@ int runUnitTests(int argc, char** argv, const UnitTestRunnerConfig& config) {
 		fmt::print(stderr, "ERROR: Could not chdir to {}\n", runDirectory);
 		return 1;
 	}
+	if (!options.simulation) {
+		options.dataDir = abspath(options.dataDir);
+	}
 
-	g_network = newNet2(TLSConfig());
+	Future<Void> initialization = Void();
+	if (options.simulation) {
+		initialization = config.initializeSimulation();
+	} else {
+		config.initializeNetwork();
+	}
 	openTraceFile({}, 10 << 20, 10 << 20, ".", traceName);
 
 	int exitCode = 0;
 	UnitTestRunnerResult result;
-	Future<Void> done = stopNetworkAfter(runTests(options, config, &result), traceName, &exitCode);
+	Future<Void> tests = options.simulation ? runTestsAfterInitialization(initialization, options, config, &result)
+	                                        : runTests(options, config, &result);
+	Future<Void> done = stopNetworkAfter(tests, traceName, &exitCode);
 	g_network->run();
 	flushTraceFileVoid();
 

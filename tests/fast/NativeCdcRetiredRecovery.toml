@@ -1,0 +1,29 @@
+[configuration]
+config = 'single'
+singleRegion = true
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 1
+
+[[test]]
+testTitle = 'NativeCdcRetiredRecovery'
+useDB = true
+runConsistencyCheck = false
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 2
+    minStreamCount = 2
+    maxStreamCount = 2
+    keyCount = 4
+    writesPerRound = 1
+    rounds = 1
+    testRetiredRecovery = true
+    drainProbability = 1.0
+    delayBetweenRounds = 0.0
+    operationTimeout = 180.0

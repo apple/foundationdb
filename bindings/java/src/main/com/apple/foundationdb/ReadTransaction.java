@@ -505,6 +505,18 @@ public interface ReadTransaction extends ReadTransactionContext {
 	CompletableFuture<KeyArrayResult> getRangeSplitPoints(byte[] begin, byte[] end, long chunkSize);
 
 	/**
+	 * Gets at most <code>limit</code> interior split points, including shard boundaries.
+	 * The start and end keys of the given range are always included.
+	 *
+	 * @param begin the beginning of the range (inclusive)
+	 * @param end the end of the range (exclusive)
+	 * @param chunkSize the target estimated byte size of each chunk
+	 * @param limit the maximum number of interior split points, or a negative value for no limit
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<KeyArrayResult> getRangeSplitPoints(byte[] begin, byte[] end, long chunkSize, int limit);
+
+	/**
 	 * Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code>chunkSize</code>
 	 * Note: the returned split points contain the start key and end key of the given range.
 	 *
@@ -514,6 +526,17 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize);
+
+	/**
+	 * Gets at most <code>limit</code> interior split points, including shard boundaries.
+	 * The start and end keys of the given range are always included.
+	 *
+	 * @param range the range of the keys
+	 * @param chunkSize the target estimated byte size of each chunk
+	 * @param limit the maximum number of interior split points, or a negative value for no limit
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize, int limit);
 
 	/**
 	 * Returns a set of options that can be set on a {@code Transaction}

@@ -30,7 +30,6 @@ connectionFailuresDisableDuration = 90
     # so Cycle gets database_locked errors (retriable) instead of missing keys.
     # After restore unlocks, Cycle continues normally on restored data.
     testDuration = 30.0
-    expectedRate = 0
 
     [[test.workload]]
     testName = 'BackupS3BlobCorrectness'

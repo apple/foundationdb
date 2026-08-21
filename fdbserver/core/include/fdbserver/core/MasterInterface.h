@@ -97,7 +97,7 @@ struct ChangeCoordinatorsRequest {
 	ReplyPromise<Void> reply; // normally throws even on success!
 	UID masterId;
 
-	ChangeCoordinatorsRequest() {}
+	ChangeCoordinatorsRequest() = default;
 	ChangeCoordinatorsRequest(Standalone<StringRef> newConnectionString, UID masterId)
 	  : newConnectionString(newConnectionString), masterId(masterId) {}
 
@@ -153,7 +153,7 @@ struct SWIFT_CXX_IMPORT_OWNED GetCommitVersionRequest {
 	UID requestingProxy;
 	ReplyPromise<GetCommitVersionReply> reply;
 
-	GetCommitVersionRequest() {}
+	GetCommitVersionRequest() = default;
 	GetCommitVersionRequest(SpanContext spanContext,
 	                        uint64_t requestNum,
 	                        uint64_t mostRecentProcessedRequestNum,
@@ -169,7 +169,7 @@ struct SWIFT_CXX_IMPORT_OWNED GetCommitVersionRequest {
 
 struct GetTLogPrevCommitVersionReply {
 	constexpr static FileIdentifier file_identifier = 16683183;
-	GetTLogPrevCommitVersionReply() {}
+	GetTLogPrevCommitVersionReply() = default;
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar);
@@ -288,7 +288,7 @@ struct CommitProxyVersionReplies {
 	MAP_UInt64_GetCommitVersionReply replies;
 	NotifiedVersion latestRequestNum;
 
-	explicit(false) CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
+	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
 	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
 
 	void operator=(CommitProxyVersionReplies&& r) noexcept {

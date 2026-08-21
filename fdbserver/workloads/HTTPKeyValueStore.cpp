@@ -277,7 +277,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 				    HTTP::doRequest(self->conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 5.0);
 
 				// sometimes randomly close connection anyway
-				if (BUGGIFY_WITH_PROB(0.1)) {
+				if (buggify(0.1)) {
 					ASSERT(self->conn.isValid());
 					self->conn->close();
 					self->conn.clear();

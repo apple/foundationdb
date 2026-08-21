@@ -2,11 +2,12 @@ name: Windows Boost CONFIG Test
 
 on:
   pull_request:
+    branches:
+      - main
   push:
     branches:
-      - 'test-*'
+      - main
       - 'boost-*'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,31 +15,31 @@ permissions:
 jobs:
   test-windows-boost:
     name: Test Boost CONFIG Mode on Windows
-    runs-on: windows-latest
-    
+    runs-on: windows-2025
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Setup CMake
-        uses: lukka/get-cmake@latest
-      
+
       - name: Install Boost via vcpkg
-        run: |
-          vcpkg install boost-filesystem:x64-windows boost-iostreams:x64-windows boost-serialization:x64-windows boost-system:x64-windows boost-program-options:x64-windows boost-url:x64-windows boost-context:x64-windows lz4:x64-windows
         shell: cmd
-        
-      - name: Configure and Build FoundationDB (without Swift)
+        run: |
+          vcpkg install boost-filesystem:x64-windows      ^
+                        boost-iostreams:x64-windows       ^
+                        boost-serialization:x64-windows   ^
+                        boost-system:x64-windows          ^
+                        boost-program-options:x64-windows ^
+                        boost-url:x64-windows             ^
+                        boost-context:x64-windows         ^
+                        lz4:x64-windows
+
+      - name: Configure and Build FoundationDB
+        shell: cmd
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%\scripts\buildsystems\vcpkg.cmake -DCMAKE_BUILD_TYPE=Release -DWITH_SWIFT=OFF -DBUILD_TESTING=OFF -DBUILD_DOCUMENTATION=OFF -DWITH_CSHARP=OFF
-        shell: cmd
-      
-      - name: Verify Build Success
-        run: |
-          echo "Build completed successfully - Boost CONFIG mode works on Windows!"
-        shell: cmd
-      
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%\scripts\buildsystems\vcpkg.cmake ^
+                   -DCMAKE_BUILD_TYPE=Release -DWITH_SWIFT=OFF -DBUILD_TESTING=OFF -DBUILD_DOCUMENTATION=OFF -DWITH_CSHARP=OFF
+
       - name: Report Success
         run: echo "✓ Boost CONFIG mode working on Windows!"

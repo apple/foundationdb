@@ -37,8 +37,9 @@ Error Error::fromUnvalidatedCode(int code) {
 		Error e = Error::fromCode(error_code_unknown_error);
 		TraceEvent(SevWarn, "ConvertedUnvalidatedErrorCode").error(e).detail("OriginalCode", code);
 		return e;
-	} else
+	} else {
 		return Error::fromCode(code);
+	}
 }
 
 bool Error::isDiskError() const {

@@ -125,6 +125,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	    testCases;
 
 	double testDuration;
+	double workloadDeadline = 0.0;
 	int numOps;
 	bool rarelyCommit, adjacentKeys;
 	int minNode, nodes;
@@ -169,7 +170,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		numTenants = 0;
 
 		// See https://github.com/apple/foundationdb/issues/2424
-		if (BUGGIFY) {
+		if (buggify()) {
 			enableClientBuggify();
 		}
 
@@ -303,6 +304,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	Future<Void> loadAndRun(FuzzApiCorrectnessWorkload* self, Database cx) {
 		double startTime = now();
+		self->workloadDeadline = startTime + self->testDuration;
 		int nodesPerTenant = std::max<int>(1, self->nodes / (self->numTenants + 1));
 		int keysPerBatch =
 		    std::min<int64_t>(1000,
@@ -502,7 +504,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					co_await unsafeThreadFutureToFuture(*i);
 				}
 
-				co_await timeoutError(ready(future), 1000);
+				co_await timeoutError(ready(future), self->operationTimeout());
 
 				if (future.isError()) {
 					err = future.getError();
@@ -534,6 +536,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		virtual ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) = 0;
+		virtual double operationTimeout() const { return 1000.0; }
 		virtual Void errorCheck(Reference<ITransaction> tr, value_type result) { return Void(); }
 		virtual void augmentTrace(TraceEvent& e) const { e.detail("Id", id); }
 
@@ -554,11 +557,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				return Key();
 
 			int64_t key_size;
-			if (ksrv < 0.5)
+			if (ksrv < 0.5) {
 				key_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->KEY_SIZE_LIMIT + 1) +
 				           CLIENT_KNOBS->KEY_SIZE_LIMIT;
-			else
+			} else {
 				key_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->KEY_SIZE_LIMIT + 1);
+			}
 
 			std::string skey;
 			skey.reserve(key_size);
@@ -580,11 +584,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				return Value();
 
 			int64_t value_size;
-			if (vrv < 0.5)
+			if (vrv < 0.5) {
 				value_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1) +
 				             CLIENT_KNOBS->VALUE_SIZE_LIMIT;
-			else
+			} else {
 				value_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1);
+			}
 
 			std::string svalue;
 			svalue.reserve(value_size);
@@ -1293,6 +1298,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override { return tr->watch(key); }
+		double operationTimeout() const override {
+			return std::min(1000.0, std::max(0.0, workload->workloadDeadline - now()));
+		}
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);

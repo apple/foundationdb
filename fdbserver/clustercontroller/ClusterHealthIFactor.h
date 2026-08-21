@@ -74,6 +74,13 @@ public:
 	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider, TrackCodeProbes) override;
 };
 
+// Evaluates whether every configured coordinator is reachable.
+class CoordinatorReachabilityFactor final : public IFactor {
+public:
+	std::string_view getName() const override;
+	Future<Level> fetchLevel(Reference<IWorkerEventProvider const> workerEventProvider, TrackCodeProbes) override;
+};
+
 // Evaluates whether any worker is currently reporting a latest process error.
 class ProcessErrorsFactor final : public IFactor {
 public:

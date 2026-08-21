@@ -83,6 +83,12 @@ if(WITH_ACAC)
   add_compile_definitions(WITH_ACAC)
 endif()
 
+option(FDB_MEMORY_TRACKER "Compile in the sampled per-call-site memory tracker (flow/MemoryTracker)" ON)
+if(NOT FDB_MEMORY_TRACKER)
+  message(STATUS "Building FoundationDB with the memory tracker compiled out")
+  add_compile_definitions(FDB_MEMORY_TRACKER=0)
+endif()
+
 ###############################################################################
 # Packages used for bindings
 ###############################################################################
@@ -281,6 +287,12 @@ set(SEED
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   include_directories(/usr/local/include)
 endif()
+
+# Defined here (not in tests/CMakeLists.txt) so that subdirectories processed
+# before tests/ — fdbclient, fdbbackup — can apply it to their add_test() calls.
+set(SANITIZER_OPTIONS
+  "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions;LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/lsan.suppressions"
+  CACHE STRING "Environment variables setting sanitizer options")
 
 include(CompileBoost)
 include(GetFmt)
