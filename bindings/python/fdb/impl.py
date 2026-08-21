@@ -23,9 +23,11 @@
 import atexit
 import ctypes
 import ctypes.util
+import enum
 import functools
 import inspect
 import multiprocessing
+import operator
 import os
 import platform
 import struct
@@ -33,6 +35,7 @@ import sys
 import threading
 import traceback
 import weakref
+from typing import NamedTuple, Tuple
 
 import fdb
 from fdb.tuple import int2byte
@@ -42,6 +45,7 @@ from fdb import fdboptions as _opts
 
 _network_thread = None
 _network_thread_reentrant_lock = threading.RLock()
+_cdc_c_api_initialized = False
 
 _open_file = open
 
@@ -891,6 +895,81 @@ class FutureStringArray(Future):
         return list(strings[0 : count.value])
 
 
+class FutureCdcStreamInfoArray(Future):
+    def wait(self):
+        self.block_until_ready()
+        streams = ctypes.POINTER(CdcStreamInfoStruct)()
+        count = ctypes.c_int()
+        self.capi.fdb_future_get_cdc_stream_info_array(
+            self.fpointer, ctypes.byref(streams), ctypes.byref(count)
+        )
+        return [
+            CdcStreamInfo(
+                ctypes.string_at(stream.name.key, stream.name.key_length),
+                stream.stream_id,
+                ctypes.string_at(
+                    stream.key_range.begin_key, stream.key_range.begin_key_length
+                ),
+                ctypes.string_at(
+                    stream.key_range.end_key, stream.key_range.end_key_length
+                ),
+                stream.min_version,
+            )
+            for stream in streams[: count.value]
+        ]
+
+
+class FutureCdcConsumer(Future):
+    def __init__(self, fpointer):
+        super().__init__(fpointer)
+        self._consumer = None
+        self._lock = threading.Lock()
+
+    def wait(self):
+        self.block_until_ready()
+        with self._lock:
+            if self._consumer is None:
+                consumer = CdcConsumer()
+                self.capi.fdb_future_get_cdc_consumer(
+                    self.fpointer, ctypes.byref(consumer._pointer)
+                )
+                # Each C getter call transfers a reference. Keep one Python
+                # owner even when callbacks or callers retrieve the result again.
+                self._consumer = consumer
+            return self._consumer
+
+
+class FutureCdcConsumeResult(Future):
+    def wait(self):
+        self.block_until_ready()
+        groups = ctypes.POINTER(CdcVersionedMutationsStruct)()
+        count = ctypes.c_int()
+        last_consumed_version = ctypes.c_int64()
+        self.capi.fdb_future_get_cdc_versioned_mutations(
+            self.fpointer,
+            ctypes.byref(groups),
+            ctypes.byref(count),
+            ctypes.byref(last_consumed_version),
+        )
+        return CdcConsumeResult(
+            tuple(
+                CdcVersionedMutations(
+                    group.version,
+                    tuple(
+                        CdcMutation(
+                            mutation.type,
+                            ctypes.string_at(mutation.param1, mutation.param1_length),
+                            ctypes.string_at(mutation.param2, mutation.param2_length),
+                        )
+                        for mutation in group.mutations[: group.mutation_count]
+                    ),
+                )
+                for group in groups[: count.value]
+            ),
+            last_consumed_version.value,
+        )
+
+
 class replaceable_property(object):
     def __get__(self, obj, cls=None):
         return self.method(obj)
@@ -1342,8 +1421,199 @@ class Database(_TransactionCreator):
     def get_client_status(self):
         return Key(self.capi.fdb_database_get_client_status(self.dpointer))
 
+    def register_cdc_stream(self, name, begin_key, end_key):
+        """Register a named CDC range and return a future containing its stream ID."""
+        _require_cdc_api_version()
+        name = keyToBytes(name)
+        begin_key = keyToBytes(begin_key)
+        end_key = keyToBytes(end_key)
+        return FutureUInt64(
+            self.capi.fdb_database_register_cdc_stream(
+                self.dpointer,
+                name,
+                len(name),
+                begin_key,
+                len(begin_key),
+                end_key,
+                len(end_key),
+            )
+        )
+
+    def remove_cdc_stream(self, name):
+        """Remove a stream and relinquish its unread history; return a void future."""
+        _require_cdc_api_version()
+        name = keyToBytes(name)
+        return FutureVoid(
+            self.capi.fdb_database_remove_cdc_stream(self.dpointer, name, len(name))
+        )
+
+    def list_cdc_streams(self):
+        """Return a future containing a list of CdcStreamInfo records."""
+        _require_cdc_api_version()
+        return FutureCdcStreamInfoArray(
+            self.capi.fdb_database_list_cdc_streams(self.dpointer)
+        )
+
+    def create_cdc_consumer(self, name):
+        """Return a future containing a consumer for an existing stream name."""
+        _require_cdc_api_version()
+        name = keyToBytes(name)
+        return FutureCdcConsumer(
+            self.capi.fdb_database_create_cdc_consumer(self.dpointer, name, len(name))
+        )
+
+    def resume_cdc_consumer(self, cursor):
+        """Return a consumer future from a durably checkpointed CdcCursor.
+
+        The native client validates the stream and position on consume or
+        acknowledge, not when constructing the handle.
+        """
+        _require_cdc_api_version()
+        stream_id = operator.index(cursor.stream_id)
+        version = operator.index(cursor.last_consumed_version)
+        if not 0 <= stream_id < 2**64:
+            raise ValueError("stream_id must fit in an unsigned 64-bit integer")
+        if not -(2**63) <= version < 2**63:
+            raise ValueError(
+                "last_consumed_version must fit in a signed 64-bit integer"
+            )
+        return FutureCdcConsumer(
+            self.capi.fdb_database_resume_cdc_consumer(
+                self.dpointer, stream_id, version
+            )
+        )
+
 
 fill_operations()
+
+
+class CdcMutationType(enum.IntEnum):
+    """Known raw CDC mutation codes; a reply may also contain unknown codes."""
+
+    SET_VALUE = 0
+    CLEAR_RANGE = 1
+    ADD = 2
+    AND = 6
+    OR = 7
+    XOR = 8
+    APPEND_IF_FITS = 9
+    MAX = 12
+    MIN = 13
+    SET_VERSIONSTAMPED_KEY = 14
+    SET_VERSIONSTAMPED_VALUE = 15
+    BYTE_MIN = 16
+    BYTE_MAX = 17
+    MIN_V2 = 18
+    AND_V2 = 19
+    COMPARE_AND_CLEAR = 20
+
+
+class CdcCursor(NamedTuple):
+    """A stream's stable ID and delivered position, suitable for checkpointing."""
+
+    stream_id: int
+    last_consumed_version: int
+
+
+class CdcStreamInfo(NamedTuple):
+    """A registered stream and its durable minimum required version."""
+
+    name: bytes
+    stream_id: int
+    begin_key: bytes
+    end_key: bytes
+    min_version: int
+
+
+class CdcMutation(NamedTuple):
+    """One raw mutation with Python-owned parameter bytes."""
+
+    type: int
+    param1: bytes
+    param2: bytes
+
+
+class CdcVersionedMutations(NamedTuple):
+    """A complete group of mutations sharing one commit version."""
+
+    version: int
+    mutations: Tuple[CdcMutation, ...]
+
+
+class CdcConsumeResult(NamedTuple):
+    """Copied mutation groups and the delivered watermark, even for empty replies."""
+
+    mutations: Tuple[CdcVersionedMutations, ...]
+    last_consumed_version: int
+
+
+class CdcConsumer(_FDBBase):
+    """An owned native CDC consumer handle.
+
+    Only one consume or acknowledge operation may be outstanding per handle.
+    Acknowledgements affect the whole stream, which must have only one active
+    logical consumer. Closing a handle does not acknowledge or remove its stream.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._pointer = ctypes.c_void_p()
+
+    def __del__(self):
+        if getattr(self, "_pointer", None):
+            self.close()
+
+    def _check_open(self):
+        if not self._pointer:
+            raise ValueError("CDC consumer is closed")
+
+    def close(self):
+        """Release this handle without acknowledging or removing the stream."""
+        with self._lock:
+            if self._pointer:
+                pointer = self._pointer
+                self._pointer = None
+                self.capi.fdb_cdc_consumer_destroy(pointer)
+
+    def __enter__(self):
+        with self._lock:
+            self._check_open()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def consume(self):
+        """Long-poll for complete commit groups; return a CdcConsumeResult future.
+
+        Consumption advances the delivered cursor, not durable retention. Do not
+        consume again until the previous reply has been durably processed.
+        """
+        with self._lock:
+            self._check_open()
+            return FutureCdcConsumeResult(
+                self.capi.fdb_cdc_consumer_consume(self._pointer)
+            )
+
+    def acknowledge(self):
+        """Durably acknowledge the current delivered position; return a void future.
+
+        Call only after durably processing every mutation through that position.
+        """
+        with self._lock:
+            self._check_open()
+            return FutureVoid(self.capi.fdb_cdc_consumer_acknowledge(self._pointer))
+
+    def get_position(self):
+        """Return the current CdcCursor; this does not acknowledge the position."""
+        with self._lock:
+            self._check_open()
+            stream_id = ctypes.c_uint64()
+            version = ctypes.c_int64()
+            self.capi.fdb_cdc_consumer_get_position(
+                self._pointer, ctypes.byref(stream_id), ctypes.byref(version)
+            )
+            return CdcCursor(stream_id.value, version.value)
 
 
 class Cluster(_FDBBase):
@@ -1436,6 +1706,46 @@ class KeyValueStruct(ctypes.Structure):
 class KeyStruct(ctypes.Structure):
     _fields_ = [("key", ctypes.POINTER(ctypes.c_byte)), ("key_length", ctypes.c_int)]
     _pack_ = 4
+
+
+class KeyRangeStruct(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [
+        ("begin_key", ctypes.POINTER(ctypes.c_byte)),
+        ("begin_key_length", ctypes.c_int),
+        ("end_key", ctypes.POINTER(ctypes.c_byte)),
+        ("end_key_length", ctypes.c_int),
+    ]
+
+
+class CdcStreamInfoStruct(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [
+        ("name", KeyStruct),
+        ("stream_id", ctypes.c_uint64),
+        ("key_range", KeyRangeStruct),
+        ("min_version", ctypes.c_int64),
+    ]
+
+
+class CdcMutationStruct(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [
+        ("type", ctypes.c_uint8),
+        ("param1", ctypes.POINTER(ctypes.c_byte)),
+        ("param1_length", ctypes.c_int),
+        ("param2", ctypes.POINTER(ctypes.c_byte)),
+        ("param2_length", ctypes.c_int),
+    ]
+
+
+class CdcVersionedMutationsStruct(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [
+        ("version", ctypes.c_int64),
+        ("mutations", ctypes.POINTER(CdcMutationStruct)),
+        ("mutation_count", ctypes.c_int),
+    ]
 
 
 class KeyValue(object):
@@ -1556,6 +1866,16 @@ def optionalParamToBytes(v):
     else:
         v = paramToBytes(v)
         return (v, len(v))
+
+
+def _require_cdc_api_version():
+    global _cdc_c_api_initialized
+    if fdb.get_api_version() < 800:
+        raise RuntimeError("Native CDC requires API version 800 or later")
+    with _network_thread_reentrant_lock:
+        if not _cdc_c_api_initialized:
+            _init_cdc_c_api()
+            _cdc_c_api_initialized = True
 
 
 _FDBBase.capi = _capi
@@ -1908,6 +2228,89 @@ def init_c_api():
 
     _capi.fdb_transaction_reset.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_reset.restype = None
+
+
+def _init_cdc_c_api():
+    # Older libraries may support API 800 without these experimental symbols.
+    # Resolve the whole surface before using it, and leave non-CDC users alone.
+    signatures = (
+        (
+            "fdb_future_get_cdc_stream_info_array",
+            [
+                ctypes.c_void_p,
+                ctypes.POINTER(ctypes.POINTER(CdcStreamInfoStruct)),
+                ctypes.POINTER(ctypes.c_int),
+            ],
+            ctypes.c_int,
+        ),
+        (
+            "fdb_future_get_cdc_consumer",
+            [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)],
+            ctypes.c_int,
+        ),
+        (
+            "fdb_future_get_cdc_versioned_mutations",
+            [
+                ctypes.c_void_p,
+                ctypes.POINTER(ctypes.POINTER(CdcVersionedMutationsStruct)),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int64),
+            ],
+            ctypes.c_int,
+        ),
+        (
+            "fdb_database_register_cdc_stream",
+            [
+                ctypes.c_void_p,
+                ctypes.c_void_p,
+                ctypes.c_int,
+                ctypes.c_void_p,
+                ctypes.c_int,
+                ctypes.c_void_p,
+                ctypes.c_int,
+            ],
+            ctypes.c_void_p,
+        ),
+        (
+            "fdb_database_remove_cdc_stream",
+            [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int],
+            ctypes.c_void_p,
+        ),
+        ("fdb_database_list_cdc_streams", [ctypes.c_void_p], ctypes.c_void_p),
+        (
+            "fdb_database_create_cdc_consumer",
+            [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int],
+            ctypes.c_void_p,
+        ),
+        (
+            "fdb_database_resume_cdc_consumer",
+            [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_int64],
+            ctypes.c_void_p,
+        ),
+        ("fdb_cdc_consumer_destroy", [ctypes.c_void_p], None),
+        ("fdb_cdc_consumer_consume", [ctypes.c_void_p], ctypes.c_void_p),
+        ("fdb_cdc_consumer_acknowledge", [ctypes.c_void_p], ctypes.c_void_p),
+        (
+            "fdb_cdc_consumer_get_position",
+            [
+                ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_uint64),
+                ctypes.POINTER(ctypes.c_int64),
+            ],
+            ctypes.c_int,
+        ),
+    )
+    try:
+        functions = [getattr(_capi, name) for name, _, _ in signatures]
+    except AttributeError as error:
+        raise RuntimeError(
+            "The loaded FoundationDB C library does not support native CDC"
+        ) from error
+    for function, (_, argtypes, restype) in zip(functions, signatures):
+        function.argtypes = argtypes
+        function.restype = restype
+        if restype is ctypes.c_int:
+            function.errcheck = check_error_code
 
 
 if hasattr(ctypes.pythonapi, "Py_IncRef"):

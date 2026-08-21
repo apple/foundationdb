@@ -455,7 +455,200 @@ Database options
 .. method:: Database.options.set_snapshot_ryw_disable()
 
     |option-db-snapshot-ryw-disable-blurb|
-    
+
+.. _api-python-cdc:
+
+Native change data capture (CDC)
+================================
+
+CDC provides durable, named streams of committed mutations for a non-empty,
+half-open user-key range. Select API version 800 or later with
+:func:`api_version` before using this interface. New stream registration also
+requires the cluster's ``ENABLE_NATIVE_CDC`` admission knob. Existing streams
+can still be listed or removed while admission is disabled; consumer creation,
+resume, consumption, and acknowledgement also remain available. Repeating an
+existing same-name, same-range registration remains idempotent.
+
+Unlike the synchronous database key-value methods, the CDC database methods
+and the consumer's ``consume()`` and ``acknowledge()`` methods return
+:ref:`futures <api-python-future>`. Use their usual ``wait()``, ``on_ready()``,
+or ``result()`` interfaces to observe completion and errors. These operations
+are not methods on :class:`Transaction`, and cannot be made atomic with
+application writes by using :func:`transactional`.
+
+.. warning::
+
+    A stream has one shared acknowledgement frontier, not one per handle.
+    Use only one active logical consumer per stream. Each handle permits only
+    one outstanding ``consume()`` or ``acknowledge()`` operation at a time.
+    Acknowledge only after every mutation through the delivered position and
+    the corresponding application checkpoint are durable. Neither consuming
+    nor closing a handle acknowledges automatically. An abandoned stream can
+    retain unread log history indefinitely until acknowledged or removed.
+
+Stream management
+-----------------
+
+.. method:: Database.register_cdc_stream(name, begin_key, end_key)
+
+    Registers the byte-string ``name`` for ``[begin_key, end_key)`` in normal
+    user key space. The name and range must be non-empty. Repeating the same
+    name and range is idempotent; reusing a name with another range fails.
+    Returns a future whose value is the unsigned 64-bit stream ID as a Python
+    ``int``. Register long-lived streams rather than a stream per request.
+
+.. method:: Database.remove_cdc_stream(name)
+
+    Removes the byte-string stream name and relinquishes its unread history.
+    Removing a missing name succeeds. Returns a future whose value is
+    ``None``. Removal is terminal for existing consumers; registering the
+    same name again does not redirect their cursors to the new stream.
+
+.. method:: Database.list_cdc_streams()
+
+    Returns a future whose value is a list of :class:`CdcStreamInfo` records.
+
+.. method:: Database.create_cdc_consumer(name)
+
+    Returns a future whose value is a :class:`CdcConsumer` for the existing
+    byte-string stream name at its initial position.
+
+.. method:: Database.resume_cdc_consumer(cursor)
+
+    Returns a future whose value is a :class:`CdcConsumer` constructed from
+    a checkpointed :class:`CdcCursor`. The cursor contains no process-local
+    state. Stream existence and cursor validity are checked when consuming
+    or acknowledging, not by this method. Resume only from a durably processed
+    checkpoint. Before the first consume, reissue :meth:`CdcConsumer.acknowledge`
+    and wait for it to complete to reconcile a possibly interrupted
+    acknowledgement. Unacknowledged mutations may be redelivered after CDC
+    proxy replacement, so processing must tolerate replay.
+
+Result types
+------------
+
+The following records are immutable tuples with named fields. Returned names,
+keys, and mutation parameters are Python-owned ``bytes``, copied from the
+native result. They remain valid after the future or consumer is released.
+
+.. class:: CdcCursor(stream_id, last_consumed_version)
+
+    A stable unsigned 64-bit stream ID and the signed 64-bit version through
+    which mutations have been delivered. Both fields are Python ``int``
+    values. A delivered cursor is not proof of processing or acknowledgement.
+
+.. class:: CdcStreamInfo(name, stream_id, begin_key, end_key, min_version)
+
+    A stream's byte-string name, integer ID, half-open registered key range,
+    and durable minimum required version. ``min_version`` is a retention
+    frontier, not a snapshot version for the registered key range.
+
+.. class:: CdcMutation(type, param1, param2)
+
+    One raw mutation. ``type`` is an integer, including for unrecognized
+    mutation types; ``param1`` and ``param2`` are byte strings. For
+    ``SET_VALUE`` they are the key and value; for ``CLEAR_RANGE`` they are
+    the begin and end keys, clipped to the registered range; for atomic
+    mutations they are the key and operand. CDC returns raw mutation
+    operations, not a materialized post-mutation value for every key.
+
+.. class:: CdcMutationType
+
+    An ``enum.IntEnum`` of known raw mutation type values, matching the C API
+    constants without the ``FDB_CDC_MUTATION_TYPE_`` prefix: ``SET_VALUE``,
+    ``CLEAR_RANGE``, ``ADD``, ``AND``, ``OR``, ``XOR``, ``APPEND_IF_FITS``,
+    ``MAX``, ``MIN``, ``SET_VERSIONSTAMPED_KEY``, ``SET_VERSIONSTAMPED_VALUE``,
+    ``BYTE_MIN``, ``BYTE_MAX``, ``MIN_V2``, ``AND_V2``, and ``COMPARE_AND_CLEAR``.
+    These constants are not exhaustive. Compare ``mutation.type`` to known
+    constants, but handle unknown integers without assuming that constructing
+    ``CdcMutationType(mutation.type)`` will succeed.
+
+.. class:: CdcVersionedMutations(version, mutations)
+
+    One complete commit-version group, with an integer ``version`` and a
+    tuple of :class:`CdcMutation` records. Preserve this grouping when
+    processing a reply.
+
+.. class:: CdcConsumeResult(mutations, last_consumed_version)
+
+    ``mutations`` is a tuple of :class:`CdcVersionedMutations` groups;
+    ``last_consumed_version`` is the integer delivered cursor after the reply.
+    The cursor may advance across commit-version gaps with no returned
+    mutations. Even an empty reply can advance the cursor; do not infer it
+    from the last mutation group or skip checkpointing and acknowledgement
+    solely because ``mutations`` is empty.
+
+Consumer lifecycle
+------------------
+
+.. class:: CdcConsumer
+
+    An owned native consumer handle, obtained from a database create or resume
+    future. It remains valid independently of that future. Use it as a
+    context manager or call :meth:`CdcConsumer.close` when finished.
+
+.. method:: CdcConsumer.consume()
+
+    Long-polls for the next delivered position and complete commit-version
+    groups. Returns a future whose value is :class:`CdcConsumeResult`.
+    Successful consumption advances the in-memory position, but does not
+    release durable retention. Finish processing a reply before consuming
+    again if that reply may need to be retried. Following proxy replacement,
+    the client may rewind to its last successful durable acknowledgement and
+    redeliver unacknowledged mutations.
+
+.. method:: CdcConsumer.acknowledge()
+
+    Durably acknowledges the handle's current delivered position, allowing
+    history through that position to be released. Returns a future whose
+    value is ``None``. Wait for it before starting another consume or
+    acknowledgement. This is not atomic with writes to a downstream system
+    or an application checkpoint.
+
+.. method:: CdcConsumer.get_position()
+
+    Returns the current :class:`CdcCursor` synchronously.
+
+.. method:: CdcConsumer.close()
+
+    Releases the local handle. Repeated calls are harmless. It does not
+    acknowledge the delivered position or remove the stream. Exiting the
+    consumer's context manager calls this method, including on exceptions.
+
+For example, the following loop supports both an initial start and a restart.
+The application-supplied ``load_checkpoint`` returns a durable
+:class:`CdcCursor`, or ``None`` on the first start. ``apply_and_checkpoint``
+must durably apply complete version groups and record the cursor consistently,
+and must tolerate replay without repeating non-idempotent side effects. It
+must also handle an empty reply. If it raises, the loop does not acknowledge
+the reply::
+
+    import fdb
+
+    fdb.api_version(800)
+    db = fdb.open()
+    db.register_cdc_stream(b"orders", b"order/", b"order0").wait()
+
+    saved_cursor = load_checkpoint()
+    if saved_cursor is None:
+        consumer_future = db.create_cdc_consumer(b"orders")
+    else:
+        consumer_future = db.resume_cdc_consumer(saved_cursor)
+
+    with consumer_future.wait() as consumer:
+        if saved_cursor is not None:
+            consumer.acknowledge().wait()
+        while True:
+            reply = consumer.consume().wait()
+            apply_and_checkpoint(reply.mutations, consumer.get_position())
+            consumer.acknowledge().wait()
+
+The acknowledgement immediately after resume closes the crash gap between
+persisting the checkpoint and completing its acknowledgement; reissuing an
+already durable acknowledgement is safe. This requires a cursor whose
+mutations are known to have been durably processed. Never invent a cursor or
+advance a checkpoint or acknowledgement beyond that position.
+
 Transactional decoration
 ========================
 
