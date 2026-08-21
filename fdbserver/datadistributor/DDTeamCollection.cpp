@@ -373,7 +373,7 @@ public:
 	// portion of teams that have longer storage queues
 	// A team storage queue size is defined as the longest storage queue size among all SSes of the team
 	static int64_t calculateTeamStorageQueueThreshold(const std::vector<Reference<TCTeamInfo>>& teams) {
-		if (teams.size() == 0) {
+		if (teams.empty()) {
 			return std::numeric_limits<int64_t>::max(); // disable this funcationality
 		}
 		std::vector<int64_t> queueLengthList;
@@ -538,7 +538,7 @@ public:
 
 			// self->teams.size() can be 0 under the ConfigureTest.txt test when we change configurations
 			// The situation happens rarely. We may want to eliminate this situation someday
-			if (!self->teams.size()) {
+			if (self->teams.empty()) {
 				req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
 				co_return;
 			}
@@ -779,7 +779,7 @@ public:
 							self->addTeam(servers, IsInitialTeam::True);
 						} else {
 							tempSet->clear();
-							for (auto it : servers) {
+							for (const auto& it : servers) {
 								tempMap->add(it->getLastKnownInterface().locality, &it->getId());
 							}
 
@@ -797,7 +797,7 @@ public:
 						}
 					} else {
 						serverIds.clear();
-						for (auto it : servers) {
+						for (const auto& it : servers) {
 							serverIds.push_back(it->getId());
 						}
 						TraceEvent(SevWarnAlways, "CannotAddSubset", self->distributorId)
@@ -837,10 +837,8 @@ public:
 			}
 		}
 
-		std::set<std::vector<UID>>::iterator teamIter =
-		    self->primary ? initTeams->primaryTeams.begin() : initTeams->remoteTeams.begin();
-		std::set<std::vector<UID>>::iterator teamIterEnd =
-		    self->primary ? initTeams->primaryTeams.end() : initTeams->remoteTeams.end();
+		auto teamIter = self->primary ? initTeams->primaryTeams.begin() : initTeams->remoteTeams.begin();
+		auto teamIterEnd = self->primary ? initTeams->primaryTeams.end() : initTeams->remoteTeams.end();
 		for (; teamIter != teamIterEnd; ++teamIter) {
 			self->addTeam(*teamIter, IsInitialTeam::True);
 			co_await yield();
@@ -938,7 +936,7 @@ public:
 				// a team is added as an initial team
 				int addedTeams = self->addTeamsBestOf(teamsToBuild, desiredTeams, maxTeams);
 
-				if (addedTeams <= 0 && self->teams.size() == 0) {
+				if (addedTeams <= 0 && self->teams.empty()) {
 					TraceEvent(SevWarn, "NoTeamAfterBuildTeam", self->distributorId)
 					    .detail("ServerTeamNum", self->teams.size())
 					    .detail("Debug", "Check information below");
@@ -1299,7 +1297,7 @@ public:
 									// t is the team in primary DC or the remote DC
 									auto& t =
 									    j < teams.first.size() ? teams.first[j] : teams.second[j - teams.first.size()];
-									if (!t.servers.size()) {
+									if (t.servers.empty()) {
 										maxPriority = std::max(maxPriority, SERVER_KNOBS->PRIORITY_POPULATE_REGION);
 										break;
 									}
@@ -1483,8 +1481,9 @@ public:
 								            self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->getId()));
 
 								status.isUndesired = true;
-							} else
+							} else {
 								wakeUpTrackers.push_back(i.second->wakeUpTracker);
+							}
 						}
 					}
 				}
@@ -1557,13 +1556,14 @@ public:
 						break;
 					}
 					AddressExclusion testAddr;
-					if (i == 0)
+					if (i == 0) {
 						testAddr = AddressExclusion(a.ip);
-					else if (i == 1)
+					} else if (i == 1) {
 						testAddr = AddressExclusion(server->getLastKnownInterface().secondaryAddress().get().ip,
 						                            server->getLastKnownInterface().secondaryAddress().get().port);
-					else if (i == 2)
+					} else if (i == 2) {
 						testAddr = AddressExclusion(server->getLastKnownInterface().secondaryAddress().get().ip);
+					}
 					DDTeamCollection::Status testStatus = self->excludedServers.get(testAddr);
 
 					if (testStatus == DDTeamCollection::Status::WIGGLING &&
@@ -1749,7 +1749,7 @@ public:
 						self->resetLocalitySet();
 
 						bool addedNewBadTeam = false;
-						for (auto it : newBadTeams) {
+						for (const auto& it : newBadTeams) {
 							if (self->removeTeam(it)) {
 								self->addTeam(it->getServers(), IsInitialTeam::True);
 								addedNewBadTeam = true;
@@ -1933,7 +1933,7 @@ public:
 		co_await self->waitUntilHealthy();
 		co_await self->addSubsetComplete.getFuture();
 		TraceEvent("DDRemovingBadServerTeams", self->distributorId).detail("Primary", self->primary);
-		for (auto it : self->badTeams) {
+		for (const auto& it : self->badTeams) {
 			it->tracker.cancel();
 		}
 		self->badTeams.clear();
@@ -2133,7 +2133,7 @@ public:
 
 					// Check if a server will have 0 team after the team is removed
 					for (auto& s : team->getServers()) {
-						if (s->getTeams().size() == 0) {
+						if (s->getTeams().empty()) {
 							TraceEvent(SevError, "MachineTeamRemoverTooAggressive", self->distributorId)
 							    .detail("Server", s->getId())
 							    .detail("ServerTeam", team->getDesc());
@@ -3072,8 +3072,7 @@ public:
 					// if we need to get rid of some TSS processes, signal to either cancel recruitment or kill existing
 					// TSS processes
 					if (!pendingTSSCheck && (tssToRecruit < 0 || self->zeroHealthyTeams->get()) &&
-					    (self->isTssRecruiting ||
-					     (self->zeroHealthyTeams->get() && self->tss_info_by_pair.size() > 0))) {
+					    (self->isTssRecruiting || (self->zeroHealthyTeams->get() && !self->tss_info_by_pair.empty()))) {
 						checkTss = self->initialFailureReactionDelay;
 					}
 				}
@@ -3222,7 +3221,7 @@ public:
 						fCandidateWorker = Future<RecruitStorageReply>();
 					} else if (res.index() == 2) {
 						if (!pendingTSSCheck && self->zeroHealthyTeams->get() &&
-						    (self->isTssRecruiting || self->tss_info_by_pair.size() > 0)) {
+						    (self->isTssRecruiting || !self->tss_info_by_pair.empty())) {
 							checkTss = self->initialFailureReactionDelay;
 						}
 					} else if (res.index() == 3) {
@@ -3451,7 +3450,7 @@ public:
 		std::vector<std::pair<UID, StorageWiggleValue>> res =
 		    co_await readStorageWiggleValues(self->dbContext(), self->primary, false);
 
-		if (res.size() > 0) {
+		if (!res.empty()) {
 			// SOMEDAY: support wiggle multiple SS at once
 			ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
 
@@ -3608,7 +3607,7 @@ public:
 
 			self->traceTeamCollectionInfo();
 
-			if (self->includedDCs.size()) {
+			if (!self->includedDCs.empty()) {
 				// start this actor before any potential recruitments can happen
 				self->addActor.send(self->updateReplicasKey(self->includedDCs[0]));
 			}
@@ -3750,7 +3749,7 @@ public:
 			    .detail("Primary", self->isPrimary());
 
 			int i{ 0 };
-			std::map<UID, Reference<TCServerInfo>>::iterator server = server_info.begin();
+			auto server = server_info.begin();
 			for (i = 0; i < server_info.size(); i++) {
 				auto serverStats = server->second->getStorageStats();
 				TraceEvent("ServerInfo", self->getDistributorId())
@@ -3849,7 +3848,7 @@ public:
 			TraceEvent("MachineInfo", self->getDistributorId())
 			    .detail("Size", machine_info.size())
 			    .detail("Primary", self->isPrimary());
-			std::map<Standalone<StringRef>, Reference<TCMachineInfo>>::iterator machine = machine_info.begin();
+			auto machine = machine_info.begin();
 			bool isMachineHealthy = false;
 			for (i = 0; i < machine_info.size(); i++) {
 				Reference<TCMachineInfo> _machine = machine->second;
@@ -4554,7 +4553,7 @@ bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>
 	}
 
 	bool result = storageServerSet->selectReplicas(configuration.storagePolicy, forcedEntries, resultEntries);
-	return result && resultEntries.size() == 0;
+	return result && resultEntries.empty();
 }
 
 DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
@@ -4684,9 +4683,9 @@ std::vector<UID> DDTeamCollection::getRandomHealthyTeam(const UID& excludeServer
 	}
 
 	// Prefer a healthy team not containing excludeServer.
-	if (candidates.size() > 0) {
+	if (!candidates.empty()) {
 		return teams[candidates[deterministicRandom()->randomInt(0, candidates.size())]]->getServerIDs();
-	} else if (backup.size() > 0) {
+	} else if (!backup.empty()) {
 		// The backup choice is a team with at least one server besides excludeServer, in this
 		// case, the team will be possibly relocated to a healthy destination later by DD.
 		std::vector<UID> servers = teams[backup[deterministicRandom()->randomInt(0, backup.size())]]->getServerIDs();
@@ -5098,7 +5097,7 @@ Reference<TCMachineTeamInfo> DDTeamCollection::addMachineTeam(std::vector<Refere
 	machineTeams.push_back(machineTeamInfo);
 
 	// Assign machine teams to machine
-	for (auto machine : machines) {
+	for (const auto& machine : machines) {
 		// A machine's machineTeams vector should not hold duplicate machineTeam members
 		ASSERT_WE_THINK(std::count(machine->machineTeams.begin(), machine->machineTeams.end(), machineTeamInfo) == 0);
 		machine->machineTeams.push_back(machineTeamInfo);
@@ -5313,7 +5312,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			// Step 3: Create a representative process for each machine.
 			// Construct forcedAttribute from leastUsedMachines.
 			// We will use forcedAttribute to call existing function to form a team
-			if (leastUsedMachines.size()) {
+			if (!leastUsedMachines.empty()) {
 				forcedAttributes.clear();
 				// Randomly choose 1 least used machine
 				Reference<TCMachineInfo> tcMachineInfo = deterministicRandom()->randomChoice(leastUsedMachines);
@@ -5673,7 +5672,7 @@ bool DDTeamCollection::notEnoughTeamsForAServer() const {
 
 int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams) {
 	ASSERT_GE(teamsToBuild, 0);
-	ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
+	ASSERT_WE_THINK(!machine_info.empty() || server_info.empty());
 	ASSERT_WE_THINK(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 && configuration.storageTeamSize >= 1);
 
 	int addedTeams = 0;
@@ -5765,7 +5764,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 					++chosenServerCount;
 				} else {
 					std::vector<Reference<TCServerInfo>> healthyProcesses;
-					for (auto it : machine->serversOnMachine) {
+					for (const auto& it : machine->serversOnMachine) {
 						if (!server_status.get(it->getId()).isUnhealthy()) {
 							healthyProcesses.push_back(it);
 						}
@@ -6207,7 +6206,7 @@ void DDTeamCollection::removeServer(UID removedServer) {
 	// Remove machine if no server on it
 	// Note: Remove machine (and machine team) after server teams have been removed, because
 	// we remove a machine team only when the server teams on it have been removed
-	if (removedMachineInfo->serversOnMachine.size() == 0) {
+	if (removedMachineInfo->serversOnMachine.empty()) {
 		removeMachine(removedMachineInfo);
 	}
 
@@ -6650,14 +6649,14 @@ public:
 		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 		GetStorageMetricsReply mid_avail;
-		mid_avail.capacity.bytes = 1000 * 1024 * 1024;
-		mid_avail.available.bytes = 400 * 1024 * 1024;
-		mid_avail.load.bytes = 100 * 1024 * 1024;
+		mid_avail.capacity.bytes = 1000LL * 1024 * 1024;
+		mid_avail.available.bytes = 400LL * 1024 * 1024;
+		mid_avail.load.bytes = 100LL * 1024 * 1024;
 
 		GetStorageMetricsReply high_avail;
-		high_avail.capacity.bytes = 1000 * 1024 * 1024;
-		high_avail.available.bytes = 800 * 1024 * 1024;
-		high_avail.load.bytes = 90 * 1024 * 1024;
+		high_avail.capacity.bytes = 1000LL * 1024 * 1024;
+		high_avail.available.bytes = 800LL * 1024 * 1024;
+		high_avail.load.bytes = 90LL * 1024 * 1024;
 
 		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
 		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
@@ -6702,14 +6701,14 @@ public:
 		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 		GetStorageMetricsReply mid_avail;
-		mid_avail.capacity.bytes = 1000 * 1024 * 1024;
-		mid_avail.available.bytes = 400 * 1024 * 1024;
-		mid_avail.load.bytes = 100 * 1024 * 1024;
+		mid_avail.capacity.bytes = 1000LL * 1024 * 1024;
+		mid_avail.available.bytes = 400LL * 1024 * 1024;
+		mid_avail.load.bytes = 100LL * 1024 * 1024;
 
 		GetStorageMetricsReply high_avail;
-		high_avail.capacity.bytes = 1000 * 1024 * 1024;
-		high_avail.available.bytes = 800 * 1024 * 1024;
-		high_avail.load.bytes = 90 * 1024 * 1024;
+		high_avail.capacity.bytes = 1000LL * 1024 * 1024;
+		high_avail.available.bytes = 800LL * 1024 * 1024;
+		high_avail.load.bytes = 90LL * 1024 * 1024;
 
 		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
 		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
@@ -6756,14 +6755,14 @@ public:
 		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 		GetStorageMetricsReply mid_avail;
-		mid_avail.capacity.bytes = 1000 * 1024 * 1024;
-		mid_avail.available.bytes = 400 * 1024 * 1024;
-		mid_avail.load.bytes = 100 * 1024 * 1024;
+		mid_avail.capacity.bytes = 1000LL * 1024 * 1024;
+		mid_avail.available.bytes = 400LL * 1024 * 1024;
+		mid_avail.load.bytes = 100LL * 1024 * 1024;
 
 		GetStorageMetricsReply high_avail;
-		high_avail.capacity.bytes = 1000 * 1024 * 1024;
-		high_avail.available.bytes = 800 * 1024 * 1024;
-		high_avail.load.bytes = 90 * 1024 * 1024;
+		high_avail.capacity.bytes = 1000LL * 1024 * 1024;
+		high_avail.available.bytes = 800LL * 1024 * 1024;
+		high_avail.load.bytes = 90LL * 1024 * 1024;
 
 		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
 		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
@@ -6807,14 +6806,14 @@ public:
 		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 		GetStorageMetricsReply mid_avail;
-		mid_avail.capacity.bytes = 1000 * 1024 * 1024;
-		mid_avail.available.bytes = 400 * 1024 * 1024;
-		mid_avail.load.bytes = 100 * 1024 * 1024;
+		mid_avail.capacity.bytes = 1000LL * 1024 * 1024;
+		mid_avail.available.bytes = 400LL * 1024 * 1024;
+		mid_avail.load.bytes = 100LL * 1024 * 1024;
 
 		GetStorageMetricsReply high_avail;
-		high_avail.capacity.bytes = 1000 * 1024 * 1024;
-		high_avail.available.bytes = 800 * 1024 * 1024;
-		high_avail.load.bytes = 90 * 1024 * 1024;
+		high_avail.capacity.bytes = 1000LL * 1024 * 1024;
+		high_avail.available.bytes = 800LL * 1024 * 1024;
+		high_avail.load.bytes = 90LL * 1024 * 1024;
 
 		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
 		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
@@ -6859,12 +6858,12 @@ public:
 		GetStorageMetricsReply low_avail;
 		low_avail.capacity.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20;
 		low_avail.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE / 2;
-		low_avail.load.bytes = 90 * 1024 * 1024;
+		low_avail.load.bytes = 90LL * 1024 * 1024;
 
 		GetStorageMetricsReply high_avail;
-		high_avail.capacity.bytes = 2000 * 1024 * 1024;
-		high_avail.available.bytes = 800 * 1024 * 1024;
-		high_avail.load.bytes = 90 * 1024 * 1024;
+		high_avail.capacity.bytes = 2000LL * 1024 * 1024;
+		high_avail.available.bytes = 800LL * 1024 * 1024;
+		high_avail.load.bytes = 90LL * 1024 * 1024;
 
 		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
 		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
@@ -6911,15 +6910,15 @@ public:
 			low_avail.capacity.bytes =
 			    SERVER_KNOBS->MIN_AVAILABLE_SPACE * (2 / SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO);
 		} else {
-			low_avail.capacity.bytes = 2000 * 1024 * 1024;
+			low_avail.capacity.bytes = 2000LL * 1024 * 1024;
 		}
 		low_avail.available.bytes = (SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * 1.1) * low_avail.capacity.bytes;
-		low_avail.load.bytes = 90 * 1024 * 1024;
+		low_avail.load.bytes = 90LL * 1024 * 1024;
 
 		GetStorageMetricsReply high_avail;
-		high_avail.capacity.bytes = 2000 * 1024 * 1024;
-		high_avail.available.bytes = 800 * 1024 * 1024;
-		high_avail.load.bytes = 90 * 1024 * 1024;
+		high_avail.capacity.bytes = 2000LL * 1024 * 1024;
+		high_avail.available.bytes = 800LL * 1024 * 1024;
+		high_avail.load.bytes = 90LL * 1024 * 1024;
 
 		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
 		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
@@ -6961,12 +6960,12 @@ public:
 		int teamSize = 1;
 		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
-		int64_t capacity = 1000 * 1024 * 1024, available = 800 * 1024 * 1024;
+		int64_t capacity = 1000LL * 1024 * 1024, available = 800LL * 1024 * 1024;
 		std::vector<int64_t> read_bandwidths{
-			300 * 1024 * 1024, 100 * 1024 * 1024, 500 * 1024 * 1024, 100 * 1024 * 1024, 900 * 1024 * 1024
+			300LL * 1024 * 1024, 100LL * 1024 * 1024, 500LL * 1024 * 1024, 100LL * 1024 * 1024, 900LL * 1024 * 1024
 		};
 		std::vector<int64_t> load_bytes{
-			50 * 1024 * 1024, 600 * 1024 * 1024, 800 * 1024 * 1024, 200 * 1024 * 1024, 100 * 1024 * 1024
+			50LL * 1024 * 1024, 600LL * 1024 * 1024, 800LL * 1024 * 1024, 200LL * 1024 * 1024, 100LL * 1024 * 1024
 		};
 		GetStorageMetricsReply metrics[5];
 		for (int i = 0; i < 5; ++i) {
@@ -7034,14 +7033,14 @@ public:
 		int teamSize = 3;
 		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 		GetStorageMetricsReply mid_avail;
-		mid_avail.capacity.bytes = 1000 * 1024 * 1024;
-		mid_avail.available.bytes = 400 * 1024 * 1024;
-		mid_avail.load.bytes = 100 * 1024 * 1024;
+		mid_avail.capacity.bytes = 1000LL * 1024 * 1024;
+		mid_avail.available.bytes = 400LL * 1024 * 1024;
+		mid_avail.load.bytes = 100LL * 1024 * 1024;
 
 		GetStorageMetricsReply high_avail;
-		high_avail.capacity.bytes = 1000 * 1024 * 1024;
-		high_avail.available.bytes = 800 * 1024 * 1024;
-		high_avail.load.bytes = 90 * 1024 * 1024;
+		high_avail.capacity.bytes = 1000LL * 1024 * 1024;
+		high_avail.available.bytes = 800LL * 1024 * 1024;
+		high_avail.load.bytes = 90LL * 1024 * 1024;
 
 		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
 		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
@@ -7096,24 +7095,24 @@ public:
 		                         ForReadBalance::True);
 		collection->teamPivots.lastPivotValuesUpdate = -100;
 
-		int64_t capacity = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20, loadBytes = 90 * 1024 * 1024;
+		int64_t capacity = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20, loadBytes = 90LL * 1024 * 1024;
 		GetStorageMetricsReply high_s_high_r;
 		high_s_high_r.capacity.bytes = capacity;
 		high_s_high_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 5;
 		high_s_high_r.load.bytes = loadBytes;
-		high_s_high_r.load.opsReadPerKSecond = 7000 * 1000;
+		high_s_high_r.load.opsReadPerKSecond = 7000LL * 1000;
 
 		GetStorageMetricsReply high_s_low_r;
 		high_s_low_r.capacity.bytes = capacity;
 		high_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 5;
 		high_s_low_r.load.bytes = loadBytes;
-		high_s_low_r.load.opsReadPerKSecond = 100 * 1000;
+		high_s_low_r.load.opsReadPerKSecond = 100LL * 1000;
 
 		GetStorageMetricsReply low_s_low_r;
 		low_s_low_r.capacity.bytes = capacity;
 		low_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE / 2;
 		low_s_low_r.load.bytes = loadBytes;
-		low_s_low_r.load.opsReadPerKSecond = 100 * 1000;
+		low_s_low_r.load.opsReadPerKSecond = 100LL * 1000;
 
 		HealthMetrics::StorageStats low_cpu, mid_cpu, high_cpu;
 		// use constant cutoff value
