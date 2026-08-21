@@ -1,0 +1,47 @@
+[configuration]
+config = 'double commit_proxies=1 grv_proxies=1'
+singleRegion = true
+datacenters = 1
+machineCount = 16
+statelessProcessClassesPerDC = 4
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 2
+native_cdc_tag_balancing_enabled = true
+native_cdc_tag_sample_interval = 0.25
+native_cdc_tag_sample_timeout = 2.0
+native_cdc_tag_sample_max_age = 5.0
+native_cdc_tag_move_cooldown = 1.0
+native_cdc_tag_min_relative_improvement = 0.1
+native_cdc_tag_min_bytes_per_second_improvement = 100
+# Measure real producer writes deterministically within the bounded test window.
+storage_metrics_average_interval = 1.0
+storage_metrics_average_interval_per_kseconds = 1000.0
+bytes_written_units_per_sample = 1
+cdc_proxy_failure_coalesce_delay = 0.1
+cdc_proxy_consume_poll_timeout = 0.25
+
+[[test]]
+testTitle = 'NativeCdcThroughputRetagging'
+useDB = true
+runFailureWorkloads = false
+runConsistencyCheck = false
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+timeout = 600
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 4
+    minStreamCount = 4
+    maxStreamCount = 5
+    keyCount = 5
+    writesPerRound = 1
+    rounds = 0
+    testThroughputRetagging = true
+    memoryTestValueBytes = 512
+    delayBetweenRounds = 0.05
+    operationTimeout = 180.0
