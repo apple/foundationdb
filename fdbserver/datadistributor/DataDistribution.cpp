@@ -1136,6 +1136,27 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	});
 	int const half = manifests.size() / 2;
 
+	// Derive the children's ranges from the PARENT's range, not from their manifests' span. A task's range
+	// is its manifests' span intersected with the job range (see generateBulkLoadTaskRange), so a parent
+	// whose range was clipped is narrower than the data its manifests describe. Splitting on manifest
+	// min/max then yields children reaching outside the parent, handing them key space this task was never
+	// given -- observed as this function's own tiling assertion firing on BulkDumpingS3WithChaos. Splitting
+	// the parent's range makes the children tile it by construction. A task range narrower than its
+	// manifests is expected and handled: the storage server filters file content to the task range.
+	Key const boundary = manifests[half].getBeginKey();
+	if (boundary <= parent.getRange().begin || boundary >= parent.getRange().end) {
+		// The manifest boundary lies outside the parent's clipped range, so one child would be empty.
+		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", self->ddId)
+		    .detail("Reason", "Manifest split point lies outside the task's range")
+		    .detail("TaskRange", parent.getRange())
+		    .detail("TaskID", parent.getTaskId())
+		    .detail("Boundary", boundary)
+		    .detail("ManifestCount", manifests.size());
+		co_return false;
+	}
+	std::vector<KeyRange> childRanges = { Standalone(KeyRangeRef(parent.getRange().begin, boundary)),
+		                                  Standalone(KeyRangeRef(boundary, parent.getRange().end)) };
+
 	std::vector<BulkLoadTaskState> children;
 	for (int part = 0; part < 2; part++) {
 		int const from = part == 0 ? 0 : half;
@@ -1146,11 +1167,9 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 			ASSERT(added);
 		}
 		ASSERT(set.isValid());
-		children.push_back(
-		    BulkLoadTaskState(parent.getJobId(), set, KeyRangeRef(set.getMinBeginKey(), set.getMaxEndKey())));
+		children.push_back(BulkLoadTaskState(parent.getJobId(), set, childRanges[part]));
 	}
-	// The children must tile the parent exactly, or the two writes below would leave part of the range
-	// owned by nothing and its data would never be ingested.
+	// Tiling holds by construction now; these remain as cheap guards on that reasoning.
 	ASSERT(children[0].getRange().begin == parent.getRange().begin);
 	ASSERT(children[0].getRange().end == children[1].getRange().begin);
 	ASSERT(children[1].getRange().end == parent.getRange().end);
