@@ -207,6 +207,9 @@ std::string BackupContainerBlobStore::normalizePrefix(std::string prefix) {
 	// prefix always denotes a well-formed key path that cannot traverse upward.
 	std::string segment;
 	auto validSegment = [](const std::string& s) { return !s.empty() && s != "." && s != ".."; };
+	auto isAsciiAlphanumeric = [](char c) {
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+	};
 	for (auto c : prefix) {
 		if (c == '/') {
 			if (!validSegment(segment)) {
@@ -216,13 +219,19 @@ std::string BackupContainerBlobStore::normalizePrefix(std::string prefix) {
 			segment.clear();
 			continue;
 		}
-		if (!isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-' && c != '.') {
+		if (!isAsciiAlphanumeric(c) && c != '_' && c != '-' && c != '.') {
 			IBackupContainer::lastOpenError = format("Invalid 'prefix' parameter value: '%s'", prefix.c_str());
 			throw backup_invalid_url();
 		}
 		segment += c;
 	}
 	if (!validSegment(segment)) {
+		IBackupContainer::lastOpenError = format("Invalid 'prefix' parameter value: '%s'", prefix.c_str());
+		throw backup_invalid_url();
+	}
+	std::string firstSegment = prefix.substr(0, prefix.find('/'));
+	if (firstSegment == BackupContainerBlobStoreImpl::DATAFOLDER ||
+	    firstSegment == BackupContainerBlobStoreImpl::INDEXFOLDER) {
 		IBackupContainer::lastOpenError = format("Invalid 'prefix' parameter value: '%s'", prefix.c_str());
 		throw backup_invalid_url();
 	}
@@ -318,16 +327,28 @@ std::string BackupContainerBlobStore::getPrefix() const {
 
 TEST_CASE("/backup/containers/blobstore/prefix") {
 	// Normalization: leading/trailing slashes are stripped, empty selects the default layout.
-	ASSERT(BackupContainerBlobStore::normalizePrefix("") == "");
-	ASSERT(BackupContainerBlobStore::normalizePrefix("/") == "");
-	ASSERT(BackupContainerBlobStore::normalizePrefix("///") == "");
+	ASSERT(BackupContainerBlobStore::normalizePrefix("").empty());
+	ASSERT(BackupContainerBlobStore::normalizePrefix("/").empty());
+	ASSERT(BackupContainerBlobStore::normalizePrefix("///").empty());
 	ASSERT(BackupContainerBlobStore::normalizePrefix("a") == "a");
 	ASSERT(BackupContainerBlobStore::normalizePrefix("/a/b/") == "a/b");
+	ASSERT(BackupContainerBlobStore::normalizePrefix("tenant/data") == "tenant/data");
 	ASSERT(BackupContainerBlobStore::normalizePrefix("my_instance/backups") == "my_instance/backups");
 	ASSERT(BackupContainerBlobStore::normalizePrefix("v1/backups/backup-001.fdb") == "v1/backups/backup-001.fdb");
 
-	// Invalid values: empty, "." or ".." segments and characters outside the allowed set.
-	for (auto bad : { "a//b", ".", "..", "a/../b", "a/./b", "a b", "a?b", "a%2Fb" }) {
+	// Invalid values: reserved first segments, empty, "." or ".." segments and disallowed characters.
+	for (auto bad : { "data",
+	                  "/data/x/",
+	                  "backups",
+	                  "/backups/x/",
+	                  "a//b",
+	                  ".",
+	                  "..",
+	                  "a/../b",
+	                  "a/./b",
+	                  "a b",
+	                  "a?b",
+	                  "a%2Fb" }) {
 		try {
 			BackupContainerBlobStore::normalizePrefix(bad);
 			ASSERT(false);

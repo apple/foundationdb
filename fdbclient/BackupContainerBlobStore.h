@@ -63,7 +63,8 @@ public:
 
 	// Normalize and validate the value of the "prefix" URL parameter.  Strips leading and trailing
 	// slashes; an empty result selects the default bucket-root layout.  Throws backup_invalid_url
-	// if the prefix contains characters outside [A-Za-z0-9_-./] or an empty, "." or ".." path segment.
+	// if a path segment contains characters outside [A-Za-z0-9._-], a segment is empty, "." or "..",
+	// or the first segment is the reserved data or backups folder.
 	static std::string normalizePrefix(std::string prefix);
 
 	Future<Reference<IAsyncFile>> readFile(const std::string& path) final;
