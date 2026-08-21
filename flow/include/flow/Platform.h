@@ -95,6 +95,20 @@
 #error Missing force inline
 #endif
 
+// Keep a function un-inlined and (on GCC) un-cloned so its address stays stable
+// for return-address matching in tests. GCC -O3 IPA cloning (.constprop/.isra)
+// otherwise runs the code under a synthetic clone symbol at a different address
+// than &fn, so a captured frame won't fall in [&fn, &fn+size); noclone disables
+// it. clang lacks noclone and doesn't clone this way, so it gets noinline only;
+// empty elsewhere (e.g. MSVC, which we cannot compile-test).
+#if defined(__clang__)
+#define force_noinline __attribute__((noinline))
+#elif defined(__GNUC__)
+#define force_noinline __attribute__((noinline, noclone))
+#else
+#define force_noinline
+#endif
+
 /*
  * Visual Studio (.NET 2003 and beyond) has an __assume compiler
  * intrinsic to hint to the compiler that a given condition is true
