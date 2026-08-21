@@ -29,16 +29,6 @@ ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimula
 	initialize(randomize, clientKnobs, isSimulated);
 }
 
-// Returns a deterministically random transaction timeout value for simulation testing.
-// More weight is given to the famous 5s timeout, but [1, 10] range is returned with lower weight.
-int randomTxnTimeoutSeconds() {
-	if (deterministicRandom()->truePercent(90)) {
-		return 5;
-	} else {
-		return deterministicRandom()->randomInt(1, 11); // [1, 10]
-	}
-}
-
 void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
 	// clang-format off
 	init( ALLOW_DANGEROUS_KNOBS,                               isSimulated );
@@ -52,8 +42,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_VERSION_VECTOR_HA_OPTIMIZATION,               false );
 	init( ENABLE_VERSION_VECTOR_REPLY_RECOVERY,                false );
 
-	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (isSimulated) MAX_READ_TRANSACTION_LIFE_VERSIONS = randomTxnTimeoutSeconds() * VERSIONS_PER_SECOND;
-	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_WRITE_TRANSACTION_LIFE_VERSIONS=std::max<int>(1, 1 * VERSIONS_PER_SECOND);
+	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (isSimulated) MAX_READ_TRANSACTION_LIFE_VERSIONS = getSimulatedTxnTimeoutSeconds() * VERSIONS_PER_SECOND;
+	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND ); if (isSimulated) MAX_WRITE_TRANSACTION_LIFE_VERSIONS = clientKnobs->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 	init( MAX_COMMIT_BATCH_INTERVAL,                             2.0 ); if( randomize && BUGGIFY ) MAX_COMMIT_BATCH_INTERVAL = 0.5; // Each commit proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
 	MAX_COMMIT_BATCH_INTERVAL = std::min(MAX_COMMIT_BATCH_INTERVAL, MAX_READ_TRANSACTION_LIFE_VERSIONS/double(2*VERSIONS_PER_SECOND)); // Ensure that the proxy commits 2 times every MAX_READ_TRANSACTION_LIFE_VERSIONS, otherwise the master will not give out versions fast enough
 	MAX_COMMIT_BATCH_INTERVAL = std::min(MAX_COMMIT_BATCH_INTERVAL, MAX_WRITE_TRANSACTION_LIFE_VERSIONS/double(2*VERSIONS_PER_SECOND)); // Ensure that the proxy commits 2 times every MAX_WRITE_TRANSACTION_LIFE_VERSIONS, otherwise the master will not give out versions fast enough

@@ -26,6 +26,14 @@
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
 
+int getSimulatedTxnTimeoutSeconds() {
+	if (deterministicRandom()->truePercent(90)) {
+		return 5;
+	} else {
+		return deterministicRandom()->randomInt(1, 11); // [1, 10]
+	}
+}
+
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
 
 ClientKnobs::ClientKnobs(Randomize randomize, IsSimulated isSimulated) {
@@ -185,7 +193,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BACKUP_TASKS_PER_AGENT,                   10 );
 	init( BACKUP_POLL_PROGRESS_SECONDS,             10 );
 	init( VERSIONS_PER_SECOND,                     1e6 ); // Must be the same as SERVER_KNOBS->VERSIONS_PER_SECOND
-	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS, 5 * VERSIONS_PER_SECOND);  // Must be the same as SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS
+	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS, 5 * VERSIONS_PER_SECOND);  if (isSimulated) MAX_WRITE_TRANSACTION_LIFE_VERSIONS = getSimulatedTxnTimeoutSeconds() * VERSIONS_PER_SECOND;
 	init( SIM_BACKUP_TASKS_PER_AGENT,               10 );
 	init( BACKUP_RANGEFILE_BLOCK_SIZE,      1024 * 1024);
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
