@@ -237,6 +237,8 @@ struct serializable_traits<ReplyPromise<T>> : std::true_type {
 
 template <class Reply>
 ReplyPromise<Reply> const& getReplyPromise(ReplyPromise<Reply> const& p) {
+	// The returned reference borrows p without changing its promise reference count.
+	// NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
 	return p;
 }
 
