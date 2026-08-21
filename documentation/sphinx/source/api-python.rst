@@ -519,10 +519,15 @@ Stream management
     a checkpointed :class:`CdcCursor`. The cursor contains no process-local
     state. Stream existence and cursor validity are checked when consuming
     or acknowledging, not by this method. Resume only from a durably processed
-    checkpoint. Before the first consume, reissue :meth:`CdcConsumer.acknowledge`
-    and wait for it to complete to reconcile a possibly interrupted
-    acknowledgement. Unacknowledged mutations may be redelivered after CDC
-    proxy replacement, so processing must tolerate replay.
+    checkpoint. Before the first consume, wait until a fresh database read
+    version reaches ``cursor.last_consumed_version``, then reissue
+    :meth:`CdcConsumer.acknowledge` and wait for it to complete to reconcile a
+    possibly interrupted acknowledgement. A resumed handle lacks the original
+    handle's delivery proof, so an unacknowledged cursor ahead of that read
+    version is rejected with ``client_invalid_operation`` even if it was
+    previously delivered. Bound the read-version wait rather than retrying all
+    invalid-operation errors. Unacknowledged mutations may be redelivered after
+    CDC proxy replacement, so processing must tolerate replay.
 
 Result types
 ------------
@@ -623,6 +628,8 @@ and must tolerate replay without repeating non-idempotent side effects. It
 must also handle an empty reply. If it raises, the loop does not acknowledge
 the reply::
 
+    import time
+
     import fdb
 
     fdb.api_version(800)
@@ -637,13 +644,24 @@ the reply::
 
     with consumer_future.wait() as consumer:
         if saved_cursor is not None:
+            deadline = time.monotonic() + 30
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("CDC checkpoint is ahead of the read version")
+                tr = db.create_transaction()
+                tr.options.set_read_lock_aware()
+                tr.options.set_timeout(max(1, int(remaining * 1000)))
+                if tr.get_read_version().wait() >= saved_cursor.last_consumed_version:
+                    break
+                time.sleep(min(0.01, max(0, deadline - time.monotonic())))
             consumer.acknowledge().wait()
         while True:
             reply = consumer.consume().wait()
             apply_and_checkpoint(reply.mutations, consumer.get_position())
             consumer.acknowledge().wait()
 
-The acknowledgement immediately after resume closes the crash gap between
+The acknowledgement after the read-version wait closes the crash gap between
 persisting the checkpoint and completing its acknowledgement; reissuing an
 already durable acknowledgement is safe. This requires a cursor whose
 mutations are known to have been durably processed. Never invent a cursor or
