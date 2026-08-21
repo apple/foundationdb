@@ -24,6 +24,7 @@
 
 #include "fdbclient/DatabaseConfiguration.h"
 
+#include <cstdint>
 #include <limits>
 #include <map>
 #include <string>
@@ -32,6 +33,15 @@
 
 enum class FDBExtraDatabaseMode { Disabled, LocalOrSingle, Single, Local, Multiple };
 enum class FDBBackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
+enum class SimulationStorageEngine : uint8_t {
+	SSD = 0,
+	MEMORY = 1,
+	RADIX_TREE = 2,
+	REDWOOD = 3,
+	ROCKSDB = 4,
+	SHARDED_ROCKSDB = 5,
+	SIMULATION_STORAGE_ENGINE_INVALID_VALUE
+};
 // Order matters: all modes >= EnabledAddDelay are fault injection modes.
 enum class FDBTSSMode { Disabled, EnabledNormal, EnabledAddDelay, EnabledDropMutations };
 enum FDBSimConsistencyScanState {
@@ -113,5 +123,11 @@ FDBSimulationPolicyState& fdbSimulationPolicyState();
 FDBExtraDatabaseMode stringToFDBExtraDatabaseMode(const std::string& databaseMode);
 void updateFDBSimulationPolicy(DatabaseConfiguration const& configuration, bool restartingTest);
 void setFDBSimulationPolicyRemoteTLogPolicy(Reference<IReplicationPolicy> remoteTLogPolicy);
+void simulationSetupAndRun(std::string const& dataFolder,
+                           const char* const& testFile,
+                           bool const& rebooting,
+                           bool const& restoring,
+                           std::string const& whitelistBinPath,
+                           double const& reseedTime = -1.0);
 
 #endif

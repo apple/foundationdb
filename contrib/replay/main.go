@@ -5,9 +5,21 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func main() {
+	// Some terminals do not advertise 256-color support even though they have
+	// it, and lipgloss then degrades to 16 colors or to no color at all. Raise
+	// the profile when that happens, but never cap a terminal that can do
+	// better: in termenv a lower Profile value is the more capable one
+	// (TrueColor=0 < ANSI256=1 < ANSI=2 < Ascii=3).
+	if lipgloss.ColorProfile() > termenv.ANSI256 {
+		lipgloss.SetColorProfile(termenv.ANSI256)
+	}
+
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -22,6 +34,9 @@ func run() error {
 		printHelp()
 		return nil
 	}
+
+	// After the help check, since this can print a hint about the background.
+	applyTheme()
 
 	// Check command-line arguments
 	if len(os.Args) == 2 {
@@ -71,9 +86,17 @@ Arguments:
 Options:
   -h, --help        Show this help message
 
+Environment:
+  REPLAY_THEME      Force the color palette for a light or dark terminal
+                    background: "light" or "dark". Unset means the background
+                    is detected by asking the terminal, including through tmux.
+                    Set this if your terminal does not answer and the colors
+                    come out wrong.
+
 Examples:
   replay trace.xml              # Load specific trace file
   replay                        # Auto-load latest trace*.xml in current directory
+  REPLAY_THEME=light replay     # Force the light-background palette
 
 Tip:
   Create an alias for quick access: alias r=replay

@@ -307,7 +307,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 			}
 
 			co_await waitForAll(self->readFutures);
-			self->bytesRead += self->readSize * self->numParallelReads;
+			self->bytesRead += static_cast<int64_t>(self->readSize) * self->numParallelReads;
 
 			self->readFutures.clear();
 

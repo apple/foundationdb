@@ -22,7 +22,7 @@
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ProcessClass.h"
 #include "fdbserver/core/ProcessClassRecruitment.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 
 #include <any>
 #include <optional>

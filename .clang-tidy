@@ -2,7 +2,11 @@
 Checks: >
   -*,
   bugprone-dangling-handle,
+  bugprone-implicit-widening-of-multiplication-result,
+  bugprone-inaccurate-erase,
+  bugprone-misplaced-widening-cast,
   bugprone-redundant-branch-condition,
+  bugprone-return-const-ref-from-parameter,
   bugprone-shared-ptr-array-mismatch,
   bugprone-sizeof-container,
   bugprone-sizeof-expression,
@@ -14,14 +18,18 @@ Checks: >
   bugprone-suspicious-semicolon,
   bugprone-suspicious-string-compare,
   bugprone-suspicious-stringview-data-usage,
+  bugprone-too-small-loop-variable,
   bugprone-unique-ptr-array-mismatch,
   bugprone-use-after-move,
+  cppcoreguidelines-avoid-capturing-lambda-coroutines,
   misc-coroutine-hostile-raii,
+  misc-redundant-expression,
   modernize-use-auto,
   modernize-use-equals-default,
   modernize-use-override,
   modernize-use-using,
   performance-for-range-copy,
+  performance-implicit-conversion-in-loop,
   performance-move-const-arg,
   readability-braces-around-statements,
   readability-container-contains,
@@ -31,6 +39,8 @@ Checks: >
   readability-duplicate-include,
   readability-inconsistent-ifelse-braces
 CheckOptions:
+  - key: bugprone-dangling-handle.HandleClasses
+    value: 'std::basic_string_view;std::experimental::basic_string_view;std::span;StringRef'
   - key: modernize-use-auto.MinTypeNameLength
     value: '11'
   - key: readability-braces-around-statements.ShortStatementLines

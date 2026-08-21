@@ -1,9 +1,10 @@
 #include "fdbserver/logsystem/LogSystemConsumer.h"
+#include "LogSystemTypes.h"
 
 #include <algorithm>
 #include <utility>
 
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 namespace {
 bool shouldPopFromLogSet(Reference<LogSet> const& logSet, Tag tag, int8_t popLocality) {

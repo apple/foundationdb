@@ -269,13 +269,17 @@ echo "Executing TestHarness2 with seed ${JOSHUA_SEED}..." >&2
 
 # Run TestHarness - output goes to stdout via tee AND gets saved to file
 python3 -m test_harness.app "${PYTHON_CMD_ARGS[@]}" 2> "${PYTHON_APP_STDERR_FILE}" | tee "${PYTHON_APP_STDOUT_FILE}"
-PYTHON_EXIT_CODE=$?
+PIPE_EXIT_CODES=("${PIPESTATUS[@]}")
+PYTHON_EXIT_CODE=${PIPE_EXIT_CODES[0]}
+if [ "${PYTHON_EXIT_CODE}" -eq 0 ] && [ "${PIPE_EXIT_CODES[1]}" -ne 0 ]; then
+    PYTHON_EXIT_CODE=${PIPE_EXIT_CODES[1]}
+fi
 
 echo "TestHarness2 execution finished. Exit code: ${PYTHON_EXIT_CODE}" >&2
 
 # Check if stdout file is empty and generate fallback if needed
 # This ensures Joshua ALWAYS gets XML output, never empty string
-if [ ! -s "${PYTHON_APP_STDOUT_FILE}" ] || [ $(wc -c < "${PYTHON_APP_STDOUT_FILE}") -eq 0 ]; then
+if [ ! -s "${PYTHON_APP_STDOUT_FILE}" ]; then
     echo "WARNING: TestHarness2 produced no output - generating fallback XML" >&2
     ls -l "${PYTHON_APP_STDOUT_FILE}" >&2 2>/dev/null || true
 
@@ -287,7 +291,7 @@ if [ ! -s "${PYTHON_APP_STDOUT_FILE}" ] || [ $(wc -c < "${PYTHON_APP_STDOUT_FILE
     # - JoshuaSeed (from env var) is sufficient to identify the failed test in Joshua FDB:
     #   e.g. 'j tail ENSEMBLE_ID --raw | grep 5836554762367547606' (but unlikely to have
     #   any RandomSeed info, etc.)
-    echo "<Test TestFile=\"UNKNOWN\" RandomSeed=\"UNKNOWN\" BuggifyEnabled=\"UNKNOWN\" FaultInjectionEnabled=\"UNKNOWN\" JoshuaSeed=\"${JOSHUA_SEED}\" Ok=\"0\" CrashReason=\"TestHarnessProducedNoOutput\" PythonExitCode=\"${PYTHON_EXIT_CODE}\"><JoshuaMessage Severity=\"40\" Message=\"TestHarness2 crashed or timed out before producing any output. Seed=${JOSHUA_SEED}\"/></Test>"
+    echo "<Test TestFile=\"UNKNOWN\" RandomSeed=\"UNKNOWN\" BuggifyEnabled=\"UNKNOWN\" FaultInjectionEnabled=\"UNKNOWN\" JoshuaSeed=\"${JOSHUA_SEED}\" Ok=\"0\" CrashReason=\"TestHarnessProducedNoOutput\" PythonExitCode=\"${PYTHON_EXIT_CODE}\"><JoshuaMessage Severity=\"40\" Message=\"TestHarness2 crashed or timed out before producing any output. Seed=${JOSHUA_SEED}\"/></Test>" | tee "${PYTHON_APP_STDOUT_FILE}"
 fi
 
 # Note: stdout was already output via tee above (or fallback echo if empty)
@@ -303,7 +307,7 @@ fi
 
 # Exit with appropriate code
 if [ "${PYTHON_EXIT_CODE}" -ne 0 ]; then
-    exit ${PYTHON_EXIT_CODE}
+    exit "${PYTHON_EXIT_CODE}"
 elif [ "${TEST_FAILED}" = "true" ]; then
     exit 1
 else

@@ -305,7 +305,7 @@ Future<MoveKeysLock> readMoveKeysLock(Database cx) {
 			err = e;
 		}
 		co_await tr.onError(err);
-		CODE_PROBE(true, "readMoveKeysLock retry");
+		CODE_PROBE(true, "readMoveKeysLock retry", probe::decoration::rare);
 	}
 }
 
@@ -494,6 +494,9 @@ Future<bool> validateRangeAssignment(Database occ,
 			    .detail("Range", range)
 			    .detail("StorageServer", ssid);
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent(SevWarnAlways, "ValidateRangeAssignmentCorruptionDetectedButFailedToStopDD")
 			    .detail("DataMoveID", dataMoveId)
 			    .detail("Range", range)
@@ -1733,7 +1736,7 @@ static Future<bool> reverifyKeysDestAndCommit(Transaction* tr,
 	// than silently expand the commit past the verified end.
 	ASSERT(rereadEnd <= currentKeys->end);
 	if (rereadEnd < currentKeys->end) {
-		CODE_PROBE(true, "finishMoveKeys reread keyServers boundary shorter than planning", probe::decoration::rare);
+		CODE_PROBE(true, "finishMoveKeys reread keyServers boundary shorter than planning");
 		*currentKeys = KeyRangeRef(currentKeys->begin, rereadEnd);
 		*endKey = rereadEnd;
 	}
@@ -1950,7 +1953,7 @@ static Future<Void> finishMoveKeys(Database occ,
 					    .detail("TransactionTooOldRetries", consecutiveTransactionTooOldRetries)
 					    .detail("BackoffSeconds", backoff);
 					if (tooManyConsecutiveTransactionTooOldRetries) {
-						CODE_PROBE(true, "finishMoveKeys giving up after max retries");
+						CODE_PROBE(true, "finishMoveKeys giving up after max retries", probe::decoration::rare);
 						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysGivingUp", relocationIntervalId)
 						    .error(err)
 						    .detail("KeyBegin", keys.begin)
@@ -2716,7 +2719,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 	// end.
 	ASSERT(rereadEnd <= range->end);
 	if (rereadEnd < range->end) {
-		CODE_PROBE(true, "finishMoveShards reread keyServers boundary shorter than planning", probe::decoration::rare);
+		CODE_PROBE(true, "finishMoveShards reread keyServers boundary shorter than planning");
 		*range = KeyRangeRef(range->begin, rereadEnd);
 	}
 
@@ -3941,7 +3944,9 @@ Future<Void> rawStartMovement(Database occ,
                               const MoveKeysParams& params,
                               std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		if (!params.ranges.present()) {
+		// A relocation launched before the knob changed can still carry the old-path sentinel.
+		// Never persist it as a shard-encoded data move; restart DD with the new configuration.
+		if (!params.ranges.present() || params.dataMoveId == anonymousShardId) {
 			throw dd_config_changed();
 		}
 		ASSERT(params.ranges.present());

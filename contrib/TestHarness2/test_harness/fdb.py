@@ -57,12 +57,21 @@ def write_coverage_chunk(
         metadata_dir = fdb.directory.create_or_open(tr, metadata)
         v = tr[metadata_dir["initialized"]]
         initialized = v.present()
+    missing = []
+    if initialized:
+        for cov, covered in coverage:
+            if not covered:
+                key = cov_dir.pack((cov.file, cov.line, cov.comment, cov.rare))
+                missing.append((key, tr.snapshot[key]))
     for cov, covered in coverage:
         if not initialized or covered:
             tr.add(
                 cov_dir.pack((cov.file, cov.line, cov.comment, cov.rare)),
                 struct.pack("<I", 1 if covered else 0),
             )
+    for key, value in missing:
+        if not value.present():
+            tr.add(key, struct.pack("<I", 0))
     return initialized
 
 

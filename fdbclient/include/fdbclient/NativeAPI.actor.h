@@ -60,9 +60,6 @@ void addref(DatabaseContext* ptr);
 template <>
 void delref(DatabaseContext* ptr);
 
-void validateOptionValuePresent(Optional<StringRef> value);
-void validateOptionValueNotPresent(Optional<StringRef> value);
-
 void enableClientInfoLogging();
 
 struct NetworkOptions {
@@ -111,8 +108,8 @@ public:
 
 	Database() {} // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator=(Database const& rhs) { db = rhs.db; }
-	explicit(false) Database(Database const& rhs) : db(rhs.db) {}
-	explicit(false) Database(Database&& r) noexcept : db(std::move(r.db)) {}
+	Database(Database const& rhs) : db(rhs.db) {}
+	Database(Database&& r) noexcept : db(std::move(r.db)) {}
 	void operator=(Database&& r) noexcept { db = std::move(r.db); }
 
 	// For internal use by the native client:
@@ -209,10 +206,10 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
 
 	template <typename T>
-	void addLog(const T& event) {
+	void addLog(const T& event, SpanContext spanContext) {
 		if (logLocation & TRACE_LOG) {
 			ASSERT(!identifier.empty());
-			event.logEvent(identifier, maxFieldLength);
+			event.logEvent(identifier, maxFieldLength, spanContext);
 		}
 
 		if (flushed) {
@@ -425,7 +422,8 @@ public:
 
 	// Try to split the given range into equally sized chunks based on estimated size.
 	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
-	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
+	// A non-negative limit caps the number of interior split points, including shard boundaries.
+	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize, int limit = -1);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set(const KeyRef& key, const ValueRef& value, AddConflictRange = AddConflictRange::True);
@@ -544,10 +542,6 @@ Future<Void> Database::run(Fun fun) {
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext);
 Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys, int shardLimit);
-
-int64_t extractIntOption(Optional<StringRef> value,
-                         int64_t minValue = std::numeric_limits<int64_t>::min(),
-                         int64_t maxValue = std::numeric_limits<int64_t>::max());
 
 // Takes a snapshot of the cluster, specifically the following persistent
 // states: coordinator, TLog and storage state

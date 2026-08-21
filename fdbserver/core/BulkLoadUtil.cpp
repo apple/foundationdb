@@ -26,7 +26,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.h"
 #include "fdbserver/core/StorageMetrics.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/UnitTest.h"
 
 Future<Void> readBulkFileBytes(std::string path, int64_t maxLength, std::shared_ptr<std::string> output) {
@@ -575,7 +575,7 @@ Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 		throw file_too_large();
 	}
 
-	int64_t chunkSize = 64 * 1024; // 64KB chunks
+	int64_t chunkSize = 64LL * 1024; // 64KB chunks
 	std::string buffer;
 	int64_t offset = 0;
 	std::string leftover;

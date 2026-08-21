@@ -200,7 +200,7 @@ struct DDBalanceWorkload : TestWorkload {
 
 			tr = Transaction();
 			if (self->shouldRecord(clientBegin)) {
-				self->operations += 3 * moves;
+				self->operations += 3LL * moves;
 				double latency = now() - tstart;
 				self->latencies.addSample(latency);
 			}

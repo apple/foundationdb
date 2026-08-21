@@ -34,7 +34,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/backupworker/BackupWorker.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "flow/Error.h"
 
 #include "flow/IRandom.h"
@@ -443,8 +443,8 @@ struct BackupData {
 	}
 };
 
-// If the worker is on an old epoch and all backups starts a version >= the endVersion
-// it will exit early.
+// An old-epoch worker can exit when no backups are running or every backup
+// starts at or after the worker's end version.
 static Future<bool> shouldBackupWorkerExitEarly(BackupData* self) {
 	while (true) {
 		ReadYourWritesTransaction tr(self->cx);
@@ -472,6 +472,9 @@ static Future<bool> shouldBackupWorkerExitEarly(BackupData* self) {
 				}
 
 				TraceEvent("BackupWorkerEmptyStartKey", self->myId);
+				if (self->endVersion.present()) {
+					co_return true;
+				}
 				Future<Void> watchFuture = tr.watch(backupStartedKey);
 				co_await tr.commit();
 				co_await watchFuture;

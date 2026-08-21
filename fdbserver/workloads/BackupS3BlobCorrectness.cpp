@@ -221,7 +221,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		} else {
 			// Add backup ranges
 			std::set<std::string> rangeEndpoints;
-			while (rangeEndpoints.size() < backupRangesCount * 2) {
+			while (rangeEndpoints.size() < static_cast<size_t>(backupRangesCount) * 2) {
 				rangeEndpoints.insert(deterministicRandom()->randomAlphaNumeric(
 				    deterministicRandom()->randomInt(1, backupRangeLengthMax + 1)));
 			}
@@ -356,7 +356,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("ExpectedBackupUID", expectedBackupUID)
 		    .detail("BackupTag", backupTag);
 
-		loop {
+		while (true) {
 			Optional<BulkDumpProgress> progressOpt = co_await getBulkDumpProgress(cx);
 
 			if (progressOpt.present()) {

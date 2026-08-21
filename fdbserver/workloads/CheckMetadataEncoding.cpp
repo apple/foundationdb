@@ -164,7 +164,7 @@ struct CheckMetadataEncodingWorkload : TestWorkload {
 		// "not scanned" from "0 entries" by omitting the DataMoves detail.
 		bool dataMovesScanned = false;
 		if (self->requireRollbackComplete) {
-			loop {
+			while (true) {
 				Transaction tr(cx);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);

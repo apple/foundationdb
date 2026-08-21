@@ -37,9 +37,9 @@
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
-#include "fdbserver/datadistributor/DDSharedContext.h"
-#include "fdbserver/datadistributor/DDTeamCollection.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
+#include "DDSharedContext.h"
+#include "DDTeamCollection.h"
+#include "DataDistribution.h"
 #include "DDRelocationQueue.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
@@ -47,7 +47,6 @@
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/core/WorkloadKeys.h"
-#include "fdbserver/datadistributor/MockDataDistributor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Buggify.h"
@@ -57,7 +56,7 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/serialize.h"
 #include "flow/CoroUtils.h"
 
@@ -243,99 +242,6 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 	}
 }
 
-Future<Void> StorageWiggler::onCheck() const {
-	return delay(MIN_ON_CHECK_DELAY_SEC);
-}
-
-// add server to wiggling queue
-void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
-	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "
-	//           << teamCollection->isPrimary() << std::endl;
-	ASSERT(!pq_handles.contains(serverId));
-	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
-}
-
-void StorageWiggler::removeServer(const UID& serverId) {
-	// std::cout << "size: " << pq_handles.size() << " remove " << serverId.toString() << " DC: "
-	//           << teamCollection->isPrimary() << std::endl;
-	if (contains(serverId)) { // server haven't been popped
-		auto handle = pq_handles.at(serverId);
-		pq_handles.erase(serverId);
-		wiggle_pq.erase(handle);
-	}
-}
-
-void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataType& metadata) {
-	//	std::cout << "size: " << pq_handles.size() << " update " << serverId.toString()
-	//	          << " DC: " << teamCollection->isPrimary() << std::endl;
-	auto handle = pq_handles.at(serverId);
-	if ((*handle).first == metadata) {
-		return;
-	}
-	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
-}
-
-bool StorageWiggler::necessary(const UID& serverId, const StorageMetadataType& metadata) const {
-	return metadata.wrongConfiguredForWiggle ||
-	       (now() - metadata.createdTime > SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
-}
-
-Optional<UID> StorageWiggler::getNextServerId(bool necessaryOnly) {
-	if (!wiggle_pq.empty()) {
-		auto [metadata, id] = wiggle_pq.top();
-		if (necessaryOnly && !necessary(id, metadata)) {
-			return {};
-		}
-		wiggle_pq.pop();
-		pq_handles.erase(id);
-		return Optional<UID>(id);
-	}
-	return Optional<UID>();
-}
-
-Future<Void> StorageWiggler::resetStats() {
-	metrics.reset();
-	return runRYWTransaction(
-	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
-	    });
-}
-
-Future<Void> StorageWiggler::restoreStats() {
-	auto readFuture = wiggleData.storageWiggleMetrics(PrimaryRegion(teamCollection->isPrimary()))
-	                      .getD(teamCollection->dbContext().getReference(), Snapshot::False, metrics);
-	return store(metrics, readFuture);
-}
-
-Future<Void> StorageWiggler::startWiggle() {
-	metrics.last_wiggle_start = StorageMetadataType::currentTime();
-	if (shouldStartNewRound()) {
-		metrics.last_round_start = metrics.last_wiggle_start;
-	}
-	return runRYWTransaction(
-	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
-	    });
-}
-
-Future<Void> StorageWiggler::finishWiggle() {
-	metrics.last_wiggle_finish = StorageMetadataType::currentTime();
-	metrics.finished_wiggle += 1;
-	auto duration = metrics.last_wiggle_finish - metrics.last_wiggle_start;
-	metrics.smoothed_wiggle_duration.setTotal((double)duration);
-
-	if (shouldFinishRound()) {
-		metrics.last_round_finish = metrics.last_wiggle_finish;
-		metrics.finished_round += 1;
-		duration = metrics.last_round_finish - metrics.last_round_start;
-		metrics.smoothed_round_duration.setTotal((double)duration);
-	}
-	return runRYWTransaction(
-	    teamCollection->dbContext(), [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
-	    });
-}
-
 Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 	TraceEvent("DDTrackerStarting").log();
 	while (db->get().recoveryState < RecoveryState::ALL_LOGS_RECRUITED) {
@@ -414,41 +320,6 @@ Future<Void> monitorBackupPartitionRequired(Database cx, KeyRangeMap<ShardTracke
 				co_await tr.onError(err);
 			}
 		}
-	}
-}
-
-// Ensures that the serverKeys key space is properly coalesced
-// This method is only used for testing and is not implemented in a manner that is safe for large databases
-Future<Void> debugCheckCoalescing(Database cx) {
-	Transaction tr(cx);
-	while (true) {
-		Error err;
-		try {
-			RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-
-			int i{ 0 };
-			for (i = 0; i < serverList.size(); i++) {
-				UID id = decodeServerListValue(serverList[i].value).id();
-				RangeResult ranges = co_await krmGetRanges(&tr, serverKeysPrefixFor(id), allKeys);
-				ASSERT(ranges.end()[-1].key == allKeys.end);
-
-				for (int j = 0; j < ranges.size() - 2; j++) {
-					if (ranges[j].value == ranges[j + 1].value) {
-						TraceEvent(SevError, "UncoalescedValues", id)
-						    .detail("Key1", ranges[j].key)
-						    .detail("Key2", ranges[j + 1].key)
-						    .detail("Value", ranges[j].value);
-					}
-				}
-			}
-
-			TraceEvent("DoneCheckingCoalescing").log();
-			co_return;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr.onError(err);
 	}
 }
 
@@ -625,8 +496,7 @@ public:
 	}
 
 	void initDcInfo() {
-		Optional<Key> activePrimaryDcId =
-		    txnProcessor->isMocked() ? Optional<Key>() : dbInfo->get().master.locality.dcId();
+		Optional<Key> activePrimaryDcId = dbInfo->get().master.locality.dcId();
 		auto dcIds = getDataDistributorDcIds(configuration.regions, activePrimaryDcId);
 		primaryDcId = std::move(dcIds.primary);
 		remoteDcIds = std::move(dcIds.remote);
@@ -744,20 +614,14 @@ public:
 			// AuditStorage does not rely on DatabaseConfiguration
 			// AuditStorage read necessary info purely from system key space
 			if (!self->auditStorageInitStarted) {
-				// AuditStorage currently does not support DDMockTxnProcessor
-				if (!self->txnProcessor->isMocked()) {
-					// Avoid multiple initAuditStorages
-					self->addActor.send(self->initAuditStorage(self));
-				}
+				// Avoid multiple initAuditStorages
+				self->addActor.send(self->initAuditStorage(self));
 			}
 			// It is possible that an audit request arrives and then DDMode
 			// is set to 2 at this point
 			// No polling MoveKeyLock is running
 			// So, we need to check MoveKeyLock when waitUntilDataDistributorExitSecurityMode
-			if (!self->txnProcessor->isMocked()) {
-				// AuditStorage currently does not support DDMockTxnProcessor
-				co_await waitUntilDataDistributorExitSecurityMode(self); // Trap DDMode == 2
-			}
+			co_await waitUntilDataDistributorExitSecurityMode(self); // Trap DDMode == 2
 			// It is possible DDMode begins with 2 and passes
 			// waitDataDistributorEnabled and then set to 0 before
 			// waitUntilDataDistributorExitSecurityMode. For this case,
@@ -1089,9 +953,7 @@ public:
 		    .detail("ElapsedSeconds", now() - resumeStart);
 
 		// Trigger background cleanup for datamove tombstones
-		if (!self->txnProcessor->isMocked()) {
-			self->addActor.send(self->removeDataMoveTombstoneBackground(self));
-		}
+		self->addActor.send(self->removeDataMoveTombstoneBackground(self));
 	}
 
 	// Resume inflight relocations from the previous DD
@@ -1125,10 +987,6 @@ public:
 };
 
 Future<Void> DataDistributor::initDDConfigWatch() {
-	if (txnProcessor->isMocked()) {
-		onConfigChange = Never();
-		return Void();
-	}
 	onConfigChange = map(DDConfiguration().trigger.onChange(
 	                         SystemDBWriteLockedNow(txnProcessor->context().getReference()), {}, configChangeWatching),
 	                     [](Version v) {
@@ -2915,9 +2773,7 @@ Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> readyToS
 	}
 }
 
-// These actors read or write system keys through a real Database and are not part of MockDD's transaction
-// processor contract.
-void addProductionOnlyDataDistributionActors(Reference<DataDistributor> self, std::vector<Future<Void>>& actors) {
+void addDataDistributionActors(Reference<DataDistributor> self, std::vector<Future<Void>>& actors) {
 	if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
 		TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
 		    .detail("UsableRegions", self->configuration.usableRegions);
@@ -2952,16 +2808,10 @@ void addProductionOnlyDataDistributionActors(Reference<DataDistributor> self, st
 
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 Future<Void> dataDistribution(Reference<DataDistributor> self,
-                              PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                              IsMocked isMocked) {
-
-	if (!isMocked) {
-		Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
-		cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
-		self->txnProcessor = makeReference<DDTxnProcessor>(cx);
-	} else {
-		ASSERT(self->txnProcessor.isValid() && self->txnProcessor->isMocked());
-	}
+                              PromiseStream<GetMetricsListRequest> getShardMetricsList) {
+	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
+	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
+	self->txnProcessor = makeReference<DDTxnProcessor>(cx);
 
 	TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Start");
 
@@ -3029,9 +2879,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(self->pollMoveKeysLock());
-			if (!isMocked) {
-				actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
-			}
+			actors.push_back(monitorBackupPartitionRequired(self->txnProcessor->context(), &shards, self->ddId));
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
@@ -3101,13 +2949,12 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    getUnhealthyRelocationCount,
 			    getAverageShardBytes,
 			    triggerStorageQueueRebalance,
-			    self->bulkLoadTaskCollection });
+			    self->bulkLoadTaskCollection,
+			    self->context->ddQueue->pipelineFull });
 			teamCollectionsPtrs.push_back(self->context->primaryTeamCollection.getPtr());
-			Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage;
-			if (!isMocked) {
-				recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
-				    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
-			}
+			Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage =
+			    IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
+			        self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
 			if (self->configuration.usableRegions > 1) {
 				self->context->remoteTeamCollection = makeReference<DDTeamCollection>(
 				    DDTeamCollectionInitParams{ self->txnProcessor,
@@ -3128,7 +2975,8 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                getUnhealthyRelocationCount,
 				                                getAverageShardBytes,
 				                                triggerStorageQueueRebalance,
-				                                self->bulkLoadTaskCollection });
+				                                self->bulkLoadTaskCollection,
+				                                self->context->ddQueue->pipelineFull });
 				teamCollectionsPtrs.push_back(self->context->remoteTeamCollection.getPtr());
 				self->context->remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->remoteTeamCollection,
@@ -3158,11 +3006,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 				actors.push_back(monitorPhysicalShardStatus(self->physicalShardCollection));
 			}
 
-			if (isMocked) {
-				self->bulkLoadTaskCollection->removeBulkLoadJobRange();
-			} else {
-				addProductionOnlyDataDistributionActors(self, actors);
-			}
+			addDataDistributionActors(self, actors);
 
 			actors.push_back(monitorShardEncodeKnob(self->ddId));
 
@@ -3247,7 +3091,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 // from hitting asserts due to knob/path mismatch).
 Future<Void> monitorShardEncodeKnob(UID ddId) {
 	bool initial = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
-	loop {
+	while (true) {
 		co_await delay(5.0);
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA != initial) {
 			TraceEvent(SevInfo, "DDShardEncodeKnobChanged", ddId)
@@ -3594,6 +3438,9 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 				}
 				co_await waitForAll(enablePops);
 			} catch (Error& error) {
+				if (error.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				TraceEvent(SevDebug, "IgnoreEnableTLogPopFailure").log();
 			}
 		}
@@ -3980,6 +3827,9 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			    .detail("RetryCount", audit->retryCount)
 			    .detail("AuditState", audit->coreState.toString());
 		} catch (Error& err) {
+			if (err.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent(SevWarn, "DDAuditStorageCoreErrorWhenSetAuditFailed", self->ddId)
 			    .errorUnsuppressed(err)
 			    .detail("Context", audit->getDDAuditContext())
@@ -4552,6 +4402,9 @@ Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
 					co_return;
 				}
 			} catch (Error& err) {
+				if (err.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				// retry
 			}
 		}
@@ -5358,7 +5211,7 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 	}
 }
 
-Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDistributor> self, IsMocked isMocked) {
+Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDistributor> self) {
 	Future<Void> collection = actorCollection(self->addActor.getFuture());
 	PromiseStream<GetMetricsListRequest> getShardMetricsList;
 	Database cx;
@@ -5366,21 +5219,16 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 	std::map<UID, DistributorSnapRequest> ddSnapReqMap;
 	std::map<UID, ErrorOr<Void>> ddSnapReqResultMap;
 
-	TraceEvent("DataDistributorRunning", di.id()).detail("IsMocked", isMocked);
+	TraceEvent("DataDistributorRunning", di.id());
 	// DDInitRunning duplicates the above with DDInit* prefix so the full startup sequence
 	// can be queried with Type="DDInit*" in trace logs
 	TraceEvent("DDInitRunning", di.id());
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
 	self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
-	if (!isMocked) {
-		cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultDelay, LockAware::True);
-	}
-
-	Future<Void> distributor = reportErrorsExcept(dataDistribution(self, getShardMetricsList, isMocked),
-	                                              "DataDistribution",
-	                                              di.id(),
-	                                              &normalDataDistributorErrors());
+	cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultDelay, LockAware::True);
+	Future<Void> distributor = reportErrorsExcept(
+	    dataDistribution(self, getShardMetricsList), "DataDistribution", di.id(), &normalDataDistributorErrors());
 
 	try {
 		while (true) {
@@ -5416,7 +5264,9 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (ddSnapReqMap.contains(snapReq.snapUID)) {
-					CODE_PROBE(true, "Data distributor received a duplicate ongoing snapshot request");
+					CODE_PROBE(true,
+					           "Data distributor received a duplicate ongoing snapshot request",
+					           probe::decoration::rare);
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
 					// Discard the old request if a duplicate new request is received
@@ -5464,18 +5314,11 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 	}
 }
 
-Future<Void> MockDataDistributor::run(Reference<DDSharedContext> context, Reference<DDMockTxnProcessor> txnProcessor) {
-	auto dd =
-	    makeReference<DataDistributor>(Reference<AsyncVar<ServerDBInfo> const>(nullptr), context->ddId, context, "");
-	dd->txnProcessor = txnProcessor;
-	return dataDistributor_impl(context->interface, dd, IsMocked::True);
-}
-
 Future<Void> dataDistributor(DataDistributorInterface di,
                              Reference<AsyncVar<ServerDBInfo> const> db,
                              std::string folder) {
 	return dataDistributor_impl(
-	    di, makeReference<DataDistributor>(db, di.id(), makeReference<DDSharedContext>(di), folder), IsMocked::False);
+	    di, makeReference<DataDistributor>(db, di.id(), makeReference<DDSharedContext>(di), folder));
 }
 
 namespace data_distribution_test {
@@ -5499,24 +5342,6 @@ inline int getRandomShardCount() {
 }
 
 } // namespace data_distribution_test
-
-TEST_CASE("/DataDistribution/StorageWiggler/Order") {
-	StorageWiggler wiggler(nullptr);
-	double startTime = now() - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - 0.4;
-	wiggler.addServer(UID(1, 0), StorageMetadataType(startTime, KeyValueStoreType::SSD_BTREE_V2));
-	wiggler.addServer(UID(2, 0), StorageMetadataType(startTime + 0.1, KeyValueStoreType::MEMORY, true));
-	wiggler.addServer(UID(3, 0), StorageMetadataType(startTime + 0.2, KeyValueStoreType::SSD_ROCKSDB_V1, true));
-	wiggler.addServer(UID(4, 0), StorageMetadataType(startTime + 0.3, KeyValueStoreType::SSD_BTREE_V2));
-
-	std::vector<UID> correctOrder{ UID(2, 0), UID(3, 0), UID(1, 0), UID(4, 0) };
-	for (int i = 0; i < correctOrder.size(); ++i) {
-		auto id = wiggler.getNextServerId();
-		std::cout << "Get " << id.get().shortString() << "\n";
-		ASSERT(id == correctOrder[i]);
-	}
-	ASSERT(!wiggler.getNextServerId().present());
-	return Void();
-}
 
 TEST_CASE("/DataDistribution/Initialization/DcIds") {
 	RegionInfo configuredPrimary;

@@ -57,10 +57,11 @@ Future<Void> runAsyncFileKAIOTestOps(Reference<IAsyncFile> f, int numIterations,
 		std::vector<Future<Void>> futures;
 		for (int numOps = deterministicRandom()->randomInt(1, 20); numOps > 0; --numOps) {
 			if (deterministicRandom()->coinflip()) {
-				futures.push_back(
-				    success(f->read(buf, 4096, deterministicRandom()->randomInt(0, fileSize) / 4096 * 4096)));
+				futures.push_back(success(f->read(
+				    buf, 4096, static_cast<int64_t>(deterministicRandom()->randomInt(0, fileSize)) / 4096 * 4096)));
 			} else {
-				futures.push_back(f->write(buf, 4096, deterministicRandom()->randomInt(0, fileSize) / 4096 * 4096));
+				futures.push_back(f->write(
+				    buf, 4096, static_cast<int64_t>(deterministicRandom()->randomInt(0, fileSize)) / 4096 * 4096));
 			}
 		}
 		for (int fIndex = 0; fIndex < futures.size(); ++fIndex) {
@@ -118,6 +119,7 @@ TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
 		} catch (Error& e) {
 			err = e;
 		}
+		AsyncFileKAIO::setTimeout(0.0);
 		if (err.present()) {
 			if (f) {
 				co_await AsyncFileEIO::deleteFile(f->getFilename(), true);

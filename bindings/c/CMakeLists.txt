@@ -294,6 +294,10 @@ if(NOT WIN32)
       fdb
       ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
     )
+    # The CDC API test exercises both the direct and external-client paths.
+    # Enable admission on only these temporary clusters.
+    set_property(TEST fdb_c_unit_tests fdb_c_external_client_unit_tests APPEND PROPERTY ENVIRONMENT
+      "FDB_KNOB_enable_native_cdc=true")
     add_unavailable_fdbclient_test(
       NAME disconnected_timeout_unit_tests
       COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
@@ -552,6 +556,8 @@ elseif(NOT WIN32 AND NOT APPLE) # Linux Only
     --api-test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
     ${SHIM_LIB_TEST_EXTRA_OPTIONS}
     )
+  set_property(TEST fdb_c_shim_library_tests APPEND PROPERTY ENVIRONMENT
+    "FDB_KNOB_enable_native_cdc=true")
 
 endif() # End Linux only
 

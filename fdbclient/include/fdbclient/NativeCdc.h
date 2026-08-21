@@ -22,17 +22,9 @@
 #define FDBCLIENT_NATIVECDC_H
 #pragma once
 
-#include <vector>
-
 #include "fdbclient/CDCProxyInterface.h"
+#include "fdbclient/NativeCdcClient.h"
 #include "fdbclient/NativeAPI.actor.h"
-
-struct NativeCdcStreamInfo {
-	Key name;
-	CDCStreamId streamId = 0;
-	KeyRange keys;
-	Version minVersion = invalidVersion;
-};
 
 class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
 	static Future<CDCConsumeReply> consumeImpl(Reference<NativeCdcConsumer> self);

@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/logsystem/LogSystem.h"
+#include "LogSystemTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MutationTracking.h"
@@ -371,7 +372,7 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 				//
 				// A cursor for a log router can be delayed indefinitely during a network partition, so only fail
 				// simulation tests sufficiently far after we finish simulating network partitions.
-				CODE_PROBE(e.code() == error_code_timed_out, "peek cursor timed out");
+				CODE_PROBE(e.code() == error_code_timed_out, "peek cursor timed out", probe::decoration::rare);
 				if (g_network->isSimulated() && now() >= g_simulator->connectionFailureEnableTime +
 				                                             FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS +
 				                                             SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME) {
@@ -1077,9 +1078,7 @@ SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 	}
 	// Live CDC consumers wait for future mutations; finite recovery and tag-history reads must reach their end.
 	const bool tailingCDC = tag.locality == tagLocalityCDC && end == std::numeric_limits<Version>::max();
-	CODE_PROBE(tag.locality == tagLocalityCDC && !tailingCDC,
-	           "CDC finite-range peek returns without blocking",
-	           probe::decoration::rare);
+	CODE_PROBE(tag.locality == tagLocalityCDC && !tailingCDC, "CDC finite-range peek returns without blocking");
 	serverCursors.resize(logSets.size());
 	int maxServers = 0;
 	for (int i = 0; i < logSets.size(); i++) {
@@ -1529,8 +1528,7 @@ Version ReplayMultiCursor::getMinKnownCommittedVersion() const {
 	// gate delivery on committed progress.
 	const Version completedGenerationCommittedVersion = epochEnds.back().version - 1;
 	CODE_PROBE(cursorCommittedVersion < completedGenerationCommittedVersion,
-	           "Replay cursor advances the committed frontier through a completed generation",
-	           probe::decoration::rare);
+	           "Replay cursor advances the committed frontier through a completed generation");
 	return std::max(cursorCommittedVersion, completedGenerationCommittedVersion);
 }
 

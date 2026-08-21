@@ -2,9 +2,6 @@
 
 # iostreams can include support for different compression libraries,
 # but this boost build disables them all except for basic zlib.
-# If FLOW_USE_ZSTD enabled then "flow" subdir will build and link
-# the boost iostream zstd implementation, it is not built here.
-
 # To use a separate boost build for fdb, do not build with bzip2/lzma/zstd
 # enabled, or add appropriate link flags via cmake options.
 

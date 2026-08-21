@@ -54,7 +54,7 @@
  * against the source. Both restore and audit use LOCK_AWARE transactions, so they
  * work on a locked database.
  *
- * See fdbserver/storageserver.actor.cpp for detailed implementation docs.
+ * See fdbserver/storageserver/storageserver.cpp for detailed implementation docs.
  * ============================================================================
  */
 

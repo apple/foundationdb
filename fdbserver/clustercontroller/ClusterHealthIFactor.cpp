@@ -249,7 +249,9 @@ Future<Level> ProcessErrorsFactor::fetchLevel(Reference<IWorkerEventProvider con
 		CODE_PROBE(trackCodeProbes && hadSuccessfulRequest, "ClusterHealth ProcessErrorsFactor returns HEALTHY");
 		co_return hadSuccessfulRequest ? Level::HEALTHY : Level::METRICS_MISSING;
 	}
-	CODE_PROBE(trackCodeProbes, "ClusterHealth ProcessErrorsFactor returns CRITICAL_INTERVENTION_REQUIRED");
+	CODE_PROBE(trackCodeProbes,
+	           "ClusterHealth ProcessErrorsFactor returns CRITICAL_INTERVENTION_REQUIRED",
+	           probe::decoration::rare);
 	co_return Level::CRITICAL_INTERVENTION_REQUIRED;
 }
 

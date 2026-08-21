@@ -58,6 +58,12 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
+	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) override;
+	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
+	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;
+	ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) override;
+	ThreadFuture<Reference<INativeCdcConsumer>> resumeNativeCdcConsumer(const NativeCdcCursor& cursor) override;
+
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
@@ -123,7 +129,8 @@ public:
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
-	                                                                int64_t chunkSize) override;
+	                                                                int64_t chunkSize,
+	                                                                int limit = -1) override;
 
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 	void makeSelfConflicting();
@@ -156,7 +163,7 @@ public:
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(nullptr), initialized(std::make_shared<std::atomic_bool>(false)) {}
 	void operator=(ThreadSafeTransaction&& r) noexcept;
-	explicit(false) ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept;
+	ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept;
 
 	void reset() override;
 

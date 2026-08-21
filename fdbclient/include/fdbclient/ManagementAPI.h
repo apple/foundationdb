@@ -36,6 +36,25 @@ standard API and some knowledge of the contents of the system key space.
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/MonitorLeader.h"
 
+class IDatabase;
+
+namespace management_api {
+inline const KeyRangeRef excludedServersSpecialKeyRange("\xff\xff/management/excluded/"_sr,
+                                                        "\xff\xff/management/excluded0"_sr);
+inline const KeyRangeRef failedServersSpecialKeyRange("\xff\xff/management/failed/"_sr,
+                                                      "\xff\xff/management/failed0"_sr);
+inline const KeyRangeRef excludedLocalitySpecialKeyRange("\xff\xff/management/excluded_locality/"_sr,
+                                                         "\xff\xff/management/excluded_locality0"_sr);
+inline const KeyRangeRef failedLocalitySpecialKeyRange("\xff\xff/management/failed_locality/"_sr,
+                                                       "\xff\xff/management/failed_locality0"_sr);
+inline const KeyRef excludedForceOptionSpecialKey = "\xff\xff/management/options/excluded/force"_sr;
+inline const KeyRef failedForceOptionSpecialKey = "\xff\xff/management/options/failed/force"_sr;
+inline const KeyRef excludedLocalityForceOptionSpecialKey = "\xff\xff/management/options/excluded_locality/force"_sr;
+inline const KeyRef failedLocalityForceOptionSpecialKey = "\xff\xff/management/options/failed_locality/force"_sr;
+inline const KeyRangeRef exclusionInProgressSpecialKeyRange("\xff\xff/management/in_progress_exclusion/"_sr,
+                                                            "\xff\xff/management/in_progress_exclusion0"_sr);
+} // namespace management_api
+
 Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bool useSystemPriority = false);
 Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx, bool useSystemPriority = false);
 Future<Void> waitForFullReplication(Database cx);
@@ -56,6 +75,11 @@ Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change);
 Reference<IQuorumChange> autoQuorumChange(int desired = -1);
 Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other);
+
+// Return the suffixes of all keys in a management special-key range.
+Future<std::vector<std::string>> getManagementApiSpecialKeyValues(Reference<IDatabase> db,
+                                                                  KeyRange range,
+                                                                  const char* errorEvent = nullptr);
 
 // Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without
 // necessarily waiting for the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the

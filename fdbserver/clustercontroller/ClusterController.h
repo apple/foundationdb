@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <compare>
 #include <utility>
 
 #include "fdbclient/DatabaseContext.h"
@@ -27,11 +29,14 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
+#include "fdbrpc/simulator.h"
 #include "ClusterHealthMonitor.h"
 #include "RatekeeperMonitor.h"
+#include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ProcessClassRecruitment.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbrpc/Locality.h"
 #include "flow/CoroUtils.h"
 #include "flow/NetworkAddress.h"
@@ -42,17 +47,24 @@ struct WorkerInfo : NonCopyable {
 	ReplyPromise<RegisterWorkerReply> reply;
 	Generation gen;
 	int reboots;
+	// True after this exact worker interface answers a cluster controller liveness ping.
+	bool verified;
 	ProcessClass initialClass;
 	ClusterControllerPriorityInfo priorityInfo;
 	WorkerDetails details;
+	// Singleton interfaces reported by this exact worker registration. They are only reconciled into
+	// ServerDBInfo after the worker interface has been verified.
+	Optional<DataDistributorInterface> distributorInterf;
+	Optional<RatekeeperInterface> ratekeeperInterf;
+	Optional<ConsistencyScanInterface> consistencyScanInterf;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
 	Future<Void> haltConsistencyScan;
 	Standalone<VectorRef<StringRef>> issues;
 
 	WorkerInfo()
-	  : gen(-1), reboots(0), priorityInfo(recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {
-	}
+	  : gen(-1), reboots(0), verified(false),
+	    priorityInfo(recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	WorkerInfo(Future<Void> watcher,
 	           ReplyPromise<RegisterWorkerReply> reply,
 	           Generation gen,
@@ -63,22 +75,27 @@ struct WorkerInfo : NonCopyable {
 	           bool degraded,
 	           bool recoveredDiskFiles,
 	           Standalone<VectorRef<StringRef>> issues)
-	  : watcher(watcher), reply(reply), gen(gen), reboots(0), initialClass(initialClass), priorityInfo(priorityInfo),
-	    details(interf, processClass, degraded, recoveredDiskFiles), issues(issues) {}
+	  : watcher(watcher), reply(reply), gen(gen), reboots(0), verified(false), initialClass(initialClass),
+	    priorityInfo(priorityInfo), details(interf, processClass, degraded, recoveredDiskFiles), issues(issues) {}
 
-	explicit(false) WorkerInfo(WorkerInfo&& r) noexcept
-	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
+	WorkerInfo(WorkerInfo&& r) noexcept
+	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots), verified(r.verified),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
-	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor),
-	    haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
+	    distributorInterf(std::move(r.distributorInterf)), ratekeeperInterf(std::move(r.ratekeeperInterf)),
+	    consistencyScanInterf(std::move(r.consistencyScanInterf)), haltRatekeeper(r.haltRatekeeper),
+	    haltDistributor(r.haltDistributor), haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
 	void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
 		gen = r.gen;
 		reboots = r.reboots;
+		verified = r.verified;
 		initialClass = r.initialClass;
 		priorityInfo = r.priorityInfo;
 		details = std::move(r.details);
+		distributorInterf = std::move(r.distributorInterf);
+		ratekeeperInterf = std::move(r.ratekeeperInterf);
+		consistencyScanInterf = std::move(r.consistencyScanInterf);
 		haltRatekeeper = r.haltRatekeeper;
 		haltDistributor = r.haltDistributor;
 		issues = r.issues;
@@ -275,9 +292,11 @@ public:
 	};
 
 	bool workerAvailable(WorkerInfo const& worker, bool checkStable) const {
-		return (now() - startTime < 2 * FLOW_KNOBS->SERVER_REQUEST_INTERVAL) ||
-		       (IFailureMonitor::failureMonitor().getState(worker.details.interf.storage.getEndpoint()).isAvailable() &&
-		        (!checkStable || worker.reboots < 2));
+		return worker.verified && ((now() - startTime < 2 * FLOW_KNOBS->SERVER_REQUEST_INTERVAL) ||
+		                           (IFailureMonitor::failureMonitor()
+		                                .getState(worker.details.interf.storage.getEndpoint())
+		                                .isAvailable() &&
+		                            (!checkStable || worker.reboots < 2)));
 	}
 
 	bool isLongLivedStateless(Optional<Key> const& processId) const {
@@ -1506,7 +1525,17 @@ public:
 	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
 	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
 	    bool checkStable = false) {
-		std::map<std::tuple<recruitment::Fitness, int, bool, int>, std::vector<WorkerDetails>> fitness_workers;
+		struct WorkerFitnessKey {
+			recruitment::Fitness fitness;
+			int used;
+			bool unreliableBackup;
+			bool longLivedStateless;
+			int sharing;
+
+			std::strong_ordering operator<=>(WorkerFitnessKey const&) const = default;
+		};
+
+		std::map<WorkerFitnessKey, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		if (minWorker.present()) {
 			results.push_back(minWorker.get().worker);
@@ -1526,10 +1555,13 @@ public:
 			      (fitness < minWorker.get().fitness ||
 			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
 				auto sharing = preferredSharing.find(it.first);
-				fitness_workers[std::make_tuple(fitness,
-				                                id_used[it.first],
-				                                isLongLivedStateless(it.first),
-				                                sharing != preferredSharing.end() ? sharing->second : 1e6)]
+				fitness_workers[{ fitness,
+				                  id_used[it.first],
+				                  role == recruitment::Backup && g_network->isSimulated() &&
+				                      !g_simulator->getProcessByAddress(it.second.details.interf.address())
+				                           ->isReliable(),
+				                  isLongLivedStateless(it.first),
+				                  sharing != preferredSharing.end() ? sharing->second : 1'000'000 }]
 				    .push_back(it.second.details);
 			}
 		}
@@ -1673,6 +1705,14 @@ public:
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 
 		updateKnownIds(&id_used);
+		// Primary and satellite TLogs can share the remote DC. Account for their workers when placing log routers so
+		// recovery makes the same colocation choice that betterMasterExists() projects.
+		for (const auto& [processId, worker] : id_worker) {
+			if (std::find(req.exclusionWorkerIds.begin(), req.exclusionWorkerIds.end(), worker.details.interf.id()) !=
+			    req.exclusionWorkerIds.end()) {
+				id_used[processId]++;
+			}
+		}
 
 		if (req.dbgId.present()) {
 			TraceEvent(SevDebug, "FindRemoteWorkersForConf", req.dbgId.get())
@@ -2418,6 +2458,31 @@ public:
 		std::vector<WorkerDetails> backup_workers;
 		std::set<NetworkAddress> backup_addresses;
 
+		if (dbi.recoveryState == RecoveryState::FULLY_RECOVERED) {
+			for (const auto& oldLog : dbi.logSystemConfig.oldTLogs) {
+				for (const auto& logSet : oldLog.tLogs) {
+					for (const auto& tlog : logSet.tLogs) {
+						if (!tlog.present()) {
+							continue;
+						}
+
+						auto tlogWorker = std::find_if(id_worker.begin(), id_worker.end(), [&tlog](const auto& worker) {
+							return worker.second.details.interf.address() == tlog.interf().address();
+						});
+						const auto& locality = tlogWorker == id_worker.end()
+						                           ? tlog.interf().filteredLocality
+						                           : tlogWorker->second.details.interf.locality;
+						if (db.config.isExcludedServer(tlog.interf().addresses(), locality)) {
+							TraceEvent("BetterMasterExists", id)
+							    .detail("Reason", "OldTLogExcluded")
+							    .detail("ProcessID", locality.processId());
+							return true;
+						}
+					}
+				}
+			}
+		}
+
 		for (auto& logSet : dbi.logSystemConfig.tLogs) {
 			for (auto& it : logSet.tLogs) {
 				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
@@ -2430,6 +2495,12 @@ public:
 				if (tlogWorker->second.priorityInfo.isExcluded) {
 					TraceEvent("BetterMasterExists", id)
 					    .detail("Reason", "TLogExcluded")
+					    .detail("ProcessID", it.interf().filteredLocality.processId());
+					return true;
+				}
+				if (excludesFromTLogRecruitmentDueToLowDisk(tlogWorker->second.issues)) {
+					TraceEvent("BetterMasterExists", id)
+					    .detail("Reason", "TLogLowDisk")
 					    .detail("ProcessID", it.interf().filteredLocality.processId());
 					return true;
 				}
@@ -2922,6 +2993,10 @@ public:
 		if ((role != recruitment::DataDistributor && role != recruitment::Ratekeeper &&
 		     role != recruitment::ConsistencyScan) ||
 		    pid == masterProcessId.get()) {
+			return false;
+		}
+		auto masterWorker = id_worker.find(masterProcessId.get());
+		if (masterWorker == id_worker.end() || !workerAvailable(masterWorker->second, true)) {
 			return false;
 		}
 		return isUsedNotMaster(pid);

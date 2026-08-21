@@ -3,20 +3,22 @@ Clang-Tidy
 ##########
 
 ``clang-tidy`` is a static analysis tool that detects common programming errors, enforces coding standards, and suggests modern C++ improvements.
-It runs as part of CI on every pull request targeting a branch that has a ``.clang-tidy`` file (currently only ``main``). Findings are reported in the build log but do not currently fail the build. To enforce failures, add ``WarningsAsErrors: '*'`` to ``.clang-tidy``.
+It runs as part of CI on pull requests targeting ``main``. CI checks eligible changed C/C++ files with ``--warnings-as-errors='*'``, so findings fail the clang-tidy job. The workflow currently describes this job as non-required.
 
 This guide explains how to run ``clang-tidy`` locally so you can fix issues before pushing.
 
 What clang-tidy checks
 ======================
 
-FoundationDB enables 29 checks configured in the ``.clang-tidy`` file at the repository root. The
-intent is to enable more as we go forward. Here are some example rules:
+FoundationDB configures 37 named checks in the ``.clang-tidy`` file at the repository root. The
+active set depends on the clang-tidy version and can be inspected with ``clang-tidy --list-checks``.
+The intent is to enable more as we go forward. Here are some example rules:
 
-* **15 Bugprone rules** -- catch potential runtime errors (e.g., ``bugprone-use-after-move``, ``bugprone-suspicious-memory-comparison``)
-* **1 Misc rule** -- catch RAII objects held across coroutine suspension points (``misc-coroutine-hostile-raii``)
+* **20 Bugprone rules** -- catch potential runtime errors, including dangling returned references, incorrect erase/remove calls, and arithmetic widened after the calculation
+* **1 C++ Core Guidelines rule** -- catch unsafe captures in coroutine lambdas (``cppcoreguidelines-avoid-capturing-lambda-coroutines``)
+* **2 Misc rules** -- catch redundant expressions and RAII objects held across coroutine suspension points
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
-* **2 Performance rules** -- avoid unnecessary copies and pointless moves (e.g., ``performance-for-range-copy``, ``performance-move-const-arg``)
+* **3 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, and pointless moves (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-move-const-arg``)
 * **7 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
 
 Basic examples of ``clang-tidy`` style and performance improvement changes:

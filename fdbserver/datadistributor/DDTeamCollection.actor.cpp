@@ -19,14 +19,15 @@
  */
 
 #include <climits>
+#include <unordered_set>
 
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ProcessClassRecruitment.h"
-#include "fdbserver/datadistributor/DDTeamCollection.h"
-#include "fdbserver/datadistributor/DataDistributionTeam.h"
+#include "DDTeamCollection.h"
+#include "DataDistributionTeam.h"
 #include "TCInfo.h"
 #include "ExclusionTracker.h"
 #include "flow/IRandom.h"
@@ -759,43 +760,19 @@ public:
 
 		for (; idx < largeOrBadTeams.size(); idx++) {
 			servers.clear();
+			serverIds.clear();
 			for (const auto& server : largeOrBadTeams[idx]->getServers()) {
 				if (server->isInDesiredDC() && !self->server_status.get(server->getId()).isUnhealthy()) {
 					servers.push_back(server);
+					serverIds.push_back(server->getId());
 				}
 			}
 
 			// For the bad team that is too big (too many servers), we will try to find a subset of servers in the
 			// team to construct a new healthy team, so that moving data to the new healthy team will not cause too
 			// much data movement overhead
-			// FIXME: This code logic can be simplified.
 			if (servers.size() >= self->configuration.storageTeamSize) {
-				bool foundTeam = false;
-				for (int j = 0; j < servers.size() - self->configuration.storageTeamSize + 1 && !foundTeam; j++) {
-					auto const& serverTeams = servers[j]->getTeams();
-					for (int k = 0; k < serverTeams.size(); k++) {
-						auto& testTeam = serverTeams[k]->getServerIDs();
-						bool allInTeam = true; // All servers in testTeam belong to the healthy servers
-						for (int l = 0; l < testTeam.size(); l++) {
-							bool foundServer = false;
-							for (auto it : servers) {
-								if (it->getId() == testTeam[l]) {
-									foundServer = true;
-									break;
-								}
-							}
-							if (!foundServer) {
-								allInTeam = false;
-								break;
-							}
-						}
-						if (allInTeam) {
-							foundTeam = true;
-							break;
-						}
-					}
-				}
-				if (!foundTeam) {
+				if (!self->findTeamFromServers(serverIds, /*wantHealthy=*/false).present()) {
 					if (self->satisfiesPolicy(servers)) {
 						if (servers.size() == self->configuration.storageTeamSize ||
 						    self->satisfiesPolicy(servers, self->configuration.storageTeamSize)) {
@@ -1025,7 +1002,8 @@ public:
 	static Future<Void> teamTracker(DDTeamCollection* self,
 	                                Reference<TCTeamInfo> team,
 	                                IsBadTeam badTeam,
-	                                IsRedundantTeam redundantTeam) {
+	                                IsRedundantTeam redundantTeam,
+	                                double checkTeamDelay) {
 		int lastServersLeft = team->size();
 		bool lastAnyUndesired = false;
 		bool lastAnyWigglingServer = false;
@@ -1035,9 +1013,12 @@ public:
 		bool lastHealthy{ false };
 		bool lastOptimal{ false };
 		bool lastWrongConfiguration = team->isWrongConfiguration();
+		bool lastContainsFailed = false;
 		bool trackHealthyTeam = team->size() == self->configuration.storageTeamSize;
 		bool lastZeroHealthy = self->zeroHealthyTeams->get();
 		bool firstCheck = true;
+		bool firstHealthChangeTrace = true;
+		std::unordered_set<KeyRange> submittedShards;
 
 		Future<Void> zeroServerLeftLogger;
 
@@ -1050,14 +1031,6 @@ public:
 
 		try {
 			while (true) {
-				if (logTeamEvents) {
-					TraceEvent("ServerTeamHealthChangeDetected", self->distributorId)
-					    .detail("ServerTeam", team->getDesc())
-					    .detail("Primary", self->primary)
-					    .detail("IsReady", self->initialFailureReactionDelay.isReady());
-					self->traceTeamCollectionInfo();
-				}
-
 				// Check if the number of degraded machines has changed
 				std::vector<Future<Void>> change;
 				bool anyUndesired = false;
@@ -1099,14 +1072,44 @@ public:
 				if (!self->initialFailureReactionDelay.isReady()) {
 					change.push_back(self->initialFailureReactionDelay);
 				}
+				if (!badTeam) {
+					// SS failure suppression changes effective team health without changing server status.
+					change.push_back(self->healthyZone.onChange());
+				}
 				change.push_back(self->zeroHealthyTeams->onChange());
 
 				bool healthy = !badTeam && !anyUndesired && serversLeft == team->size();
 				team->setHealthy(healthy); // Unhealthy teams won't be chosen by bestTeam
 				bool optimal = team->isOptimal() && healthy;
 				bool containsFailed = self->teamContainsFailedServer(team);
+				bool retryUnhealthyShards =
+				    !healthy && self->shardsAffectedByTeamFailure->hasShards(
+				                    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
+				if (retryUnhealthyShards) {
+					change.push_back(self->processingUnhealthy->onChange());
+					change.push_back(self->pipelineFull->onChange());
+					// Partial moves can leave a merged shard associated with this team without another health change.
+					change.push_back(delay(checkTeamDelay, TaskPriority::DataDistributionLow));
+				}
+				const bool healthyTeamBecameAvailable = lastZeroHealthy && !self->zeroHealthyTeams->get();
+				const bool processingUnhealthy = self->processingUnhealthy->get();
+				const bool pipelineFull = self->pipelineFull->get();
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
-				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
+				                            healthyTeamBecameAvailable || containsFailed || retryUnhealthyShards);
+				bool teamStateChanged = serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired ||
+				                        anyWrongConfiguration != lastWrongConfiguration ||
+				                        anyWigglingServer != lastAnyWigglingServer ||
+				                        containsFailed != lastContainsFailed;
+				// A retry timer can wake many trackers at once; avoid collection-wide scans when team state is
+				// unchanged.
+				if (logTeamEvents && (firstHealthChangeTrace || teamStateChanged)) {
+					TraceEvent("ServerTeamHealthChangeDetected", self->distributorId)
+					    .detail("ServerTeam", team->getDesc())
+					    .detail("Primary", self->primary)
+					    .detail("IsReady", self->initialFailureReactionDelay.isReady());
+					self->traceTeamCollectionInfo();
+				}
+				firstHealthChangeTrace = false;
 
 				TraceEvent(SevVerbose, "TeamHealthChangeDetected", self->distributorId)
 				    .detail("Team", team->getDesc())
@@ -1140,9 +1143,7 @@ public:
 					lastOptimal = optimal;
 				}
 
-				if (serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired ||
-				    anyWrongConfiguration != lastWrongConfiguration || anyWigglingServer != lastAnyWigglingServer ||
-				    recheck) { // NOTE: do not check wrongSize
+				if (teamStateChanged || recheck) { // NOTE: do not check wrongSize
 					if (logTeamEvents) {
 						TraceEvent("ServerTeamHealthChanged", self->distributorId)
 						    .suppressFor(1.0)
@@ -1196,6 +1197,7 @@ public:
 					lastAnyUndesired = anyUndesired;
 					lastWrongConfiguration = anyWrongConfiguration;
 					lastAnyWigglingServer = anyWigglingServer;
+					lastContainsFailed = containsFailed;
 
 					int lastPriority = team->getPriority();
 					if (team->size() == 0) {
@@ -1257,6 +1259,24 @@ public:
 
 						std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 						    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
+						if (teamStateChanged || !retryUnhealthyShards || healthyTeamBecameAvailable ||
+						    (!processingUnhealthy && !pipelineFull)) {
+							// Undesired and explicitly failed relocations do not set processingUnhealthy. Keep
+							// retrying stranded ranges when the queue is idle and its pipeline can accept them.
+							submittedShards.clear();
+						} else {
+							// An unchanged range may still be waiting behind the relocation pipeline gate. Only retry
+							// newly mapped ranges while unhealthy relocations remain in the queue, and forget ranges
+							// that disappeared.
+							std::unordered_set<KeyRange> mappedShards(shards.begin(), shards.end());
+							for (auto it = submittedShards.begin(); it != submittedShards.end();) {
+								if (!mappedShards.contains(*it)) {
+									it = submittedShards.erase(it);
+								} else {
+									++it;
+								}
+							}
+						}
 
 						TraceEvent(SevVerbose, "ServerTeamRelocatingShards", self->distributorId)
 						    .detail("Info", team->getDesc())
@@ -1264,6 +1284,9 @@ public:
 						    .detail("Shards", shards.size());
 
 						for (int i = 0; i < shards.size(); i++) {
+							if (retryUnhealthyShards && !submittedShards.insert(shards[i]).second) {
+								continue;
+							}
 							// Make it high priority to move keys off failed server or else RelocateShards may never be
 							// addressed
 							int maxPriority = containsFailed ? SERVER_KNOBS->PRIORITY_TEAM_FAILED : team->getPriority();
@@ -1430,8 +1453,6 @@ public:
 				state std::vector<Future<Void>> otherChanges;
 				std::vector<Promise<Void>> wakeUpTrackers;
 				for (const auto& i : self->server_and_tss_info) {
-					if (self->db->isMocked())
-						continue;
 					if (i.second.getPtr() != server &&
 					    i.second->getLastKnownInterface().address() == server->getLastKnownInterface().address()) {
 						auto& statusInfo = self->server_status.get(i.first);
@@ -1940,13 +1961,13 @@ public:
 		    .detail("TotalBytesLost", bytesLost);
 	}
 
-	ACTOR static Future<Void> storageServerFailureTracker(DDTeamCollection* self,
-	                                                      TCServerInfo* server,
-	                                                      ServerStatus* status,
-	                                                      Version addedVersion) {
-		state StorageServerInterface interf = server->getLastKnownInterface();
-		loop {
-			state bool inHealthyZone = false; // healthChanged actor will be Never() if this flag is true
+	static Future<Void> storageServerFailureTracker(DDTeamCollection* self,
+	                                                TCServerInfo* server,
+	                                                ServerStatus* status,
+	                                                Version addedVersion) {
+		StorageServerInterface interf = server->getLastKnownInterface();
+		while (true) {
+			bool inHealthyZone = false; // healthChanged actor will be Never() if this flag is true
 			if (self->healthyZone.get().present()) {
 				if (interf.locality.zoneId() == self->healthyZone.get()) {
 					status->isFailed = false;
@@ -2004,46 +2025,49 @@ public:
 				                                        SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME,
 				                                        TaskPriority::DataDistribution);
 			}
-			choose {
-				when(wait(healthChanged)) {
-					status->isFailed = !status->isFailed;
-					if (status->isFailed && self->healthyZone.get().present()) {
-						if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
-							// Ignore the failed storage server
-							TraceEvent("SSFailureTracker", self->distributorId)
-							    .detail("IgnoredFailure", "InsideChooseWhen")
-							    .detail("ServerID", interf.id())
-							    .detail("Status", status->toString());
-							status->isFailed = false;
-						} else if (SERVER_KNOBS->DD_REMOVE_MAINTENANCE_ON_FAILURE &&
-						           self->clearHealthyZoneFuture.isReady()) {
-							self->clearHealthyZoneFuture = clearHealthyZone(self->dbContext());
-							TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
-							self->healthyZone.set(Optional<Key>());
-						}
+			// Avoid starting a removal transaction when the earlier health-change branch is ready.
+			auto res = co_await race(healthChanged,
+			                         !healthChanged.isReady() && status->isUnhealthy()
+			                             ? self->waitForAllDataRemoved(interf.id(), addedVersion)
+			                             : Future<Void>(Never()),
+			                         self->healthyZone.onChange());
+			if (res.index() == 0) {
+				status->isFailed = !status->isFailed;
+				if (status->isFailed && self->healthyZone.get().present()) {
+					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
+						// Ignore the failed storage server
+						TraceEvent("SSFailureTracker", self->distributorId)
+						    .detail("IgnoredFailure", "InsideChooseWhen")
+						    .detail("ServerID", interf.id())
+						    .detail("Status", status->toString());
+						status->isFailed = false;
+					} else if (SERVER_KNOBS->DD_REMOVE_MAINTENANCE_ON_FAILURE &&
+					           self->clearHealthyZoneFuture.isReady()) {
+						self->clearHealthyZoneFuture = clearHealthyZone(self->dbContext());
+						// For now we are not logging the duration here, e.g. in cases where another storage
+						// server outside of the maintenance zone failed.
+						TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
+						self->healthyZone.set(Optional<Key>());
 					}
-					if (!status->isUnhealthy()) {
-						// On server transition from unhealthy -> healthy, trigger buildTeam check,
-						// handles scenario when team building failed due to insufficient healthy servers.
-						// Operation cost is minimal if currentTeamCount == desiredTeamCount/maxTeamCount.
-						self->doBuildTeams = true;
-					}
+				}
+				if (!status->isUnhealthy()) {
+					// On server transition from unhealthy -> healthy, trigger buildTeam check,
+					// handles scenario when team building failed due to insufficient healthy servers.
+					// Operation cost is minimal if currentTeamCount == desiredTeamCount/maxTeamCount.
+					self->doBuildTeams = true;
+				}
 
-					TraceEvent(SevDebug, "StatusMapChange", self->distributorId)
-					    .detail("ServerID", interf.id())
-					    .detail("Status", status->toString())
-					    .detail(
-					        "Available",
-					        IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
-				}
-				when(wait(status->isUnhealthy() ? self->waitForAllDataRemoved(interf.id(), addedVersion) : Never())) {
-					break;
-				}
-				when(wait(self->healthyZone.onChange())) {}
+				TraceEvent(SevDebug, "StatusMapChange", self->distributorId)
+				    .detail("ServerID", interf.id())
+				    .detail("Status", status->toString())
+				    .detail("Available",
+				            IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
+			} else if (res.index() == 1) {
+				break;
 			}
 		}
 
-		return Void(); // Don't ignore failures
+		co_return; // Don't ignore failures
 	}
 
 	static Future<Void> machineTeamRemover(DDTeamCollection* self) {
@@ -2627,15 +2651,50 @@ public:
 		}
 	}
 
+	// Persists the version at which the current maintenance mode was started, so that a DD
+	// recruited mid-maintenance (see getOrRecordMaintenanceStart) can recover the true start.
+	static Version recordNewMaintenanceStart(ReadYourWritesTransaction* tr) {
+		Version version = tr->getReadVersion().get();
+		BinaryWriter bw(Unversioned());
+		bw << version;
+		tr->set(healthyZoneStartVersionKey, bw.toValue());
+		return version;
+	}
+
+	// Adopts the start version persisted by whichever DD instance first observed the current
+	// maintenance mode, for the case where this DD was (re)recruited while the maintenance was active.
+	// Falls back to recording a fresh start now if the key was never written.
+	static Future<Version> getOrRecordMaintenanceStart(ReadYourWritesTransaction* tr) {
+		Optional<Value> startVal = co_await tr->get(healthyZoneStartVersionKey);
+		if (startVal.present()) {
+			co_return BinaryReader::fromStringRef<Version>(startVal.get(), Unversioned());
+		}
+		co_return recordNewMaintenanceStart(tr);
+	}
+
+	// -1.0 if the start version was never established (should only happen if this DD instance
+	// raced a commit failure with a window's start/end); otherwise the elapsed window duration.
+	static double maintenanceDurationSeconds(ReadYourWritesTransaction* tr, Version startVersion) {
+		if (startVersion == invalidVersion) {
+			return -1.0;
+		}
+		return (tr->getReadVersion().get() - startVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+	}
+
 	static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
 		auto* counters = waitHealthyZoneChangeCounters();
 		ReadYourWritesTransaction tr(self->dbContext());
+		// maintenanceStartVersion tracks the version at which the current maintenance/disable-DD
+		// window began, durably persisted via healthyZoneStartVersionKey, so that
+		// MaintenanceZoneEnd*/DataDistributionDisabledForStorageServerFailuresEnd can report an
+		// accurate Duration even if this DD instance was recruited mid-window.
+		Version maintenanceStartVersion = invalidVersion;
 		while (true) {
 			counters->started->increment(1);
 			Error err;
 			bool hasErr = false;
 			try {
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = co_await tr.get(healthyZoneKey);
 				Future<Void> healthyZoneTimeout = Never();
@@ -2643,7 +2702,13 @@ public:
 					auto p = decodeHealthyZoneValue(val.get());
 					if (p.first == ignoreSSFailuresZoneString) {
 						// healthyZone is now overloaded for DD disabling purpose, which does not timeout
-						TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId).log();
+						if (self->healthyZone.get() != p.first) {
+							TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId)
+							    .log();
+							maintenanceStartVersion = recordNewMaintenanceStart(&tr);
+						} else if (maintenanceStartVersion == invalidVersion) {
+							maintenanceStartVersion = co_await getOrRecordMaintenanceStart(&tr);
+						}
 						healthyZoneTimeout = Never();
 						self->healthyZone.set(p.first);
 					} else if (p.second > tr.getReadVersion().get()) {
@@ -2656,20 +2721,30 @@ public:
 							    .detail("EndVersion", p.second)
 							    .detail("Duration", timeoutSeconds);
 							self->healthyZone.set(p.first);
+							maintenanceStartVersion = recordNewMaintenanceStart(&tr);
+						} else if (maintenanceStartVersion == invalidVersion) {
+							maintenanceStartVersion = co_await getOrRecordMaintenanceStart(&tr);
 						}
 					} else if (self->healthyZone.get().present()) {
 						// maintenance hits timeout
-						TraceEvent("MaintenanceZoneEndTimeout", self->distributorId).log();
+						TraceEvent("MaintenanceZoneEndTimeout", self->distributorId)
+						    .detail("Duration", maintenanceDurationSeconds(&tr, maintenanceStartVersion));
 						self->healthyZone.set(Optional<Key>());
+						tr.clear(healthyZoneStartVersionKey);
+						maintenanceStartVersion = invalidVersion;
 					}
 				} else if (self->healthyZone.get().present()) {
 					// `healthyZone` has been cleared
+					double duration = maintenanceDurationSeconds(&tr, maintenanceStartVersion);
 					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
-						TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId).log();
+						TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId)
+						    .detail("Duration", duration);
 					} else {
-						TraceEvent("MaintenanceZoneEndManualClear", self->distributorId).log();
+						TraceEvent("MaintenanceZoneEndManualClear", self->distributorId).detail("Duration", duration);
 					}
 					self->healthyZone.set(Optional<Key>());
+					tr.clear(healthyZoneStartVersionKey);
+					maintenanceStartVersion = invalidVersion;
 				}
 
 				Future<Void> watchFuture = tr.watch(healthyZoneKey);
@@ -2688,17 +2763,17 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
-		state bool recruiting = false;
-		state bool lastIsTss = false;
+	static Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
+		bool recruiting = false;
+		bool lastIsTss = false;
 		TraceEvent("StorageServerRecruitment", self->distributorId)
 		    .detail("State", "Idle")
 		    .detail("Primary", self->primary)
 		    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
-		loop {
+		while (true) {
 			if (!recruiting) {
 				while (self->recruitingStream.get() == 0) {
-					wait(self->recruitingStream.onChange());
+					co_await self->recruitingStream.onChange();
 				}
 				TraceEvent("StorageServerRecruitment", self->distributorId)
 				    .detail("State", "Recruiting")
@@ -2708,23 +2783,23 @@ public:
 				recruiting = true;
 				lastIsTss = self->isTssRecruiting;
 			} else {
-				loop {
-					choose {
-						when(wait(self->recruitingStream.onChange())) {
-							if (lastIsTss != self->isTssRecruiting) {
-								TraceEvent("StorageServerRecruitment", self->distributorId)
-								    .detail("State", "Recruiting")
-								    .detail("Primary", self->primary)
-								    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
-								    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
-								lastIsTss = self->isTssRecruiting;
-							}
+				while (true) {
+					auto res =
+					    co_await race(self->recruitingStream.onChange(),
+					                  self->recruitingStream.get() == 0
+					                      ? delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY, TaskPriority::DataDistribution)
+					                      : Future<Void>(Never()));
+					if (res.index() == 0) {
+						if (lastIsTss != self->isTssRecruiting) {
+							TraceEvent("StorageServerRecruitment", self->distributorId)
+							    .detail("State", "Recruiting")
+							    .detail("Primary", self->primary)
+							    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
+							    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
+							lastIsTss = self->isTssRecruiting;
 						}
-						when(wait(self->recruitingStream.get() == 0
-						              ? delay(SERVER_KNOBS->RECRUITMENT_IDLE_DELAY, TaskPriority::DataDistribution)
-						              : Future<Void>(Never()))) {
-							break;
-						}
+					} else {
+						break;
 					}
 				}
 				TraceEvent("StorageServerRecruitment", self->distributorId)
@@ -2743,6 +2818,7 @@ public:
 	                                      Reference<TSSPairState> tssState) {
 		// SOMEDAY: Cluster controller waits for availability, retry quickly if a server's Locality changes
 		self->recruitingStream.set(self->recruitingStream.get() + 1);
+		bool countedAsRecruiting = true;
 
 		const NetworkAddress& netAddr = candidateWorker.worker.stableAddress();
 		AddressExclusion workerAddr(netAddr.ip, netAddr.port);
@@ -2845,6 +2921,16 @@ public:
 					tssState->markComplete();
 					throw newServer.getError();
 				}
+				// A recruitment_failed reply is definitive that this request will not later deliver a successful
+				// reply, so do not report the cooldown as active recruitment. Unlike request_maybe_delivered,
+				// it is safe to release the ID: if startup reached serverList before failing, waitServerListChange
+				// must be able to discover that entry while the worker locality remains excluded during the retry
+				// delay.
+				if (newServer.isError(error_code_recruitment_failed)) {
+					self->recruitingIds.erase(interfaceId);
+					self->recruitingStream.set(self->recruitingStream.get() - 1);
+					countedAsRecruiting = false;
+				}
 				co_await delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution);
 			}
 
@@ -2943,7 +3029,9 @@ public:
 			CODE_PROBE(true, "SS with pair TSS recruitment failed for some reason");
 		}
 
-		self->recruitingStream.set(self->recruitingStream.get() - 1);
+		if (countedAsRecruiting) {
+			self->recruitingStream.set(self->recruitingStream.get() - 1);
+		}
 		self->restartRecruiting.trigger();
 	}
 
@@ -3267,60 +3355,50 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> waitServerListChange(DDTeamCollection* self,
-	                                               FutureStream<Void> serverRemoved,
-	                                               const DDEnabledState* ddEnabledState) {
-		state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
-		state Future<ServerWorkerInfos> serverListAndProcessClasses = Never();
-		state bool isFetchingResults = false;
-		loop {
-			choose {
-				when(wait(checkSignal)) {
-					checkSignal = Never();
-					isFetchingResults = true;
-					serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
-				}
-				when(ServerWorkerInfos infos = wait(serverListAndProcessClasses)) {
-					auto& servers = infos.servers;
-					serverListAndProcessClasses = Never();
-					isFetchingResults = false;
+	static Future<Void> waitServerListChange(DDTeamCollection* self,
+	                                         FutureStream<Void> serverRemoved,
+	                                         const DDEnabledState* ddEnabledState) {
+		Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
+		Future<ServerWorkerInfos> serverListAndProcessClasses = Never();
+		bool isFetchingResults = false;
+		while (true) {
+			auto res = co_await race(checkSignal, serverListAndProcessClasses, serverRemoved);
+			if (res.index() == 0) {
+				checkSignal = Never();
+				isFetchingResults = true;
+				serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
+			} else if (res.index() == 1) {
+				ServerWorkerInfos infos = std::get<1>(std::move(res));
+				auto& servers = infos.servers;
+				serverListAndProcessClasses = Never();
+				isFetchingResults = false;
 
-					for (int i = 0; i < servers.size(); i++) {
-						UID serverId = servers[i].first.id();
-						StorageServerInterface const& ssi = servers[i].first;
-						ProcessClass const& processClass = servers[i].second;
-						if (!self->shouldHandleServer(ssi)) {
-							continue;
-						} else if (self->server_and_tss_info.contains(serverId)) {
-							auto& serverInfo = self->server_and_tss_info[serverId];
-							if (ssi.getValue.getEndpoint() !=
-							        serverInfo->getLastKnownInterface().getValue.getEndpoint() ||
-							    processClass != serverInfo->getLastKnownClass().classType()) {
-								Promise<std::pair<StorageServerInterface, ProcessClass>> currentInterfaceChanged =
-								    serverInfo->interfaceChanged;
-								serverInfo->interfaceChanged =
-								    Promise<std::pair<StorageServerInterface, ProcessClass>>();
-								serverInfo->onInterfaceChanged =
-								    Future<std::pair<StorageServerInterface, ProcessClass>>(
-								        serverInfo->interfaceChanged.getFuture());
-								currentInterfaceChanged.send(std::make_pair(ssi, processClass));
-							}
-						} else if (!self->recruitingIds.contains(ssi.id())) {
-							self->addServer(ssi,
-							                processClass,
-							                self->serverTrackerErrorOut,
-							                infos.readVersion.get(),
-							                *ddEnabledState);
+				for (int i = 0; i < servers.size(); i++) {
+					UID serverId = servers[i].first.id();
+					StorageServerInterface const& ssi = servers[i].first;
+					ProcessClass const& processClass = servers[i].second;
+					if (!self->shouldHandleServer(ssi)) {
+						continue;
+					} else if (self->server_and_tss_info.contains(serverId)) {
+						auto& serverInfo = self->server_and_tss_info[serverId];
+						if (ssi.getValue.getEndpoint() != serverInfo->getLastKnownInterface().getValue.getEndpoint() ||
+						    processClass != serverInfo->getLastKnownClass().classType()) {
+							Promise<std::pair<StorageServerInterface, ProcessClass>> currentInterfaceChanged =
+							    serverInfo->interfaceChanged;
+							serverInfo->interfaceChanged = Promise<std::pair<StorageServerInterface, ProcessClass>>();
+							serverInfo->onInterfaceChanged = Future<std::pair<StorageServerInterface, ProcessClass>>(
+							    serverInfo->interfaceChanged.getFuture());
+							currentInterfaceChanged.send(std::make_pair(ssi, processClass));
 						}
+					} else if (!self->recruitingIds.contains(ssi.id())) {
+						self->addServer(
+						    ssi, processClass, self->serverTrackerErrorOut, infos.readVersion.get(), *ddEnabledState);
 					}
+				}
 
-					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
-				}
-				when(waitNext(serverRemoved)) {
-					if (isFetchingResults) {
-						serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
-					}
-				}
+				checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
+			} else if (isFetchingResults) {
+				serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
 			}
 		}
 	}
@@ -3528,14 +3606,12 @@ public:
 			// they are always running.
 			self->addActor.send(self->monitorHealthyTeams());
 
-			if (!self->db->isMocked()) {
-				self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
-				self->addActor.send(self->monitorStorageServerRecruitment());
-				self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
-				self->addActor.send(self->trackExcludedServers());
-				self->addActor.send(self->waitHealthyZoneChange());
-				self->addActor.send(self->monitorPerpetualStorageWiggle());
-			}
+			self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
+			self->addActor.send(self->monitorStorageServerRecruitment());
+			self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
+			self->addActor.send(self->trackExcludedServers());
+			self->addActor.send(self->waitHealthyZoneChange());
+			self->addActor.send(self->monitorPerpetualStorageWiggle());
 			// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
 			loop choose {
@@ -4153,8 +4229,9 @@ Future<Void> DDTeamCollection::buildTeams() {
 
 Future<Void> DDTeamCollection::teamTracker(Reference<TCTeamInfo> team,
                                            IsBadTeam isBadTeam,
-                                           IsRedundantTeam isRedundantTeam) {
-	return DDTeamCollectionImpl::teamTracker(this, team, isBadTeam, isRedundantTeam);
+                                           IsRedundantTeam isRedundantTeam,
+                                           double checkTeamDelay) {
+	return DDTeamCollectionImpl::teamTracker(this, team, isBadTeam, isRedundantTeam, checkTeamDelay);
 }
 
 Future<Void> DDTeamCollection::storageServerTracker(TCServerInfo* server,
@@ -4226,7 +4303,7 @@ double DDTeamCollection::loadBytesBalanceRatio(int64_t smallLoadThreshold) const
 	// avoid division-by-zero
 	double avgLoad = totalLoadBytes / count;
 	if (totalLoadBytes == 0 || avgLoad < smallLoadThreshold) {
-		CODE_PROBE(true, "The cluster load is small enough to ignore load bytes balance.");
+		CODE_PROBE(true, "The cluster load is small enough to ignore load bytes balance.", probe::decoration::rare);
 		return 1;
 	}
 
@@ -4358,7 +4435,6 @@ void DDTeamCollection::fixUnderReplication() {
 }
 
 Future<Void> DDTeamCollection::trackExcludedServers() {
-	ASSERT(!db->isMocked());
 	return DDTeamCollectionImpl::trackExcludedServers(this);
 }
 
@@ -4381,7 +4457,6 @@ Future<Void> DDTeamCollection::perpetualStorageWiggler(AsyncVar<bool>& stopSigna
 }
 
 Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle() {
-	ASSERT(!db->isMocked());
 	return DDTeamCollectionImpl::monitorPerpetualStorageWiggle(this);
 }
 
@@ -4391,7 +4466,6 @@ Future<Void> DDTeamCollection::waitServerListChange(FutureStream<Void> serverRem
 }
 
 Future<Void> DDTeamCollection::waitHealthyZoneChange() {
-	ASSERT(!db->isMocked());
 	return DDTeamCollectionImpl::waitHealthyZoneChange(this);
 }
 
@@ -4440,8 +4514,6 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 }
 
 Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
-	if (db->isMocked())
-		return Never();
 	return DDTeamCollectionImpl::updateStorageMetadata(this, server);
 }
 
@@ -4480,7 +4552,8 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0),
     zeroHealthyTeams(params.zeroHealthyTeams), optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false),
     includedDCs(params.includedDCs), otherTrackedDCs(params.otherTrackedDCs),
-    processingUnhealthy(params.processingUnhealthy), getAverageShardBytes(params.getAverageShardBytes),
+    processingUnhealthy(params.processingUnhealthy), pipelineFull(params.pipelineFull),
+    getAverageShardBytes(params.getAverageShardBytes),
     triggerStorageQueueRebalance(params.triggerStorageQueueRebalance), readyToStart(params.readyToStart),
     checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
@@ -4944,14 +5017,15 @@ void DDTeamCollection::addTeam(std::set<UID> const& team, IsInitialTeam isInitia
 
 void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
                                IsInitialTeam isInitialTeam,
-                               IsRedundantTeam redundantTeam) {
+                               IsRedundantTeam redundantTeam,
+                               double checkTeamDelay) {
 	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
 
 	// Move satisfiesPolicy to the end for performance benefit
 	auto badTeam = IsBadTeam{ redundantTeam || !satisfiesPolicy(teamInfo->getServers()) ||
 		                      (!ddLargeTeamEnabled() && teamInfo->size() != configuration.storageTeamSize) };
 
-	teamInfo->tracker = teamTracker(teamInfo, badTeam, redundantTeam);
+	teamInfo->tracker = teamTracker(teamInfo, badTeam, redundantTeam, checkTeamDelay);
 	// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
 	if (badTeam) {
 		badTeams.push_back(teamInfo);
@@ -6262,6 +6336,37 @@ Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection
 	return DDTeamCollectionImpl::printSnapshotTeamsInfo(self);
 }
 
+class DDTeamCollectionTestTxnProcessor final : public DDTxnProcessor {
+public:
+	explicit DDTeamCollectionTestTxnProcessor(Database database) : DDTxnProcessor(database) {}
+
+	Future<Void> waitForAllDataRemoved(const UID&,
+	                                   const Version&,
+	                                   Reference<ShardsAffectedByTeamFailure>) const override {
+		++dataRemovalCheckCount;
+		return Never();
+	}
+
+	Future<ServerWorkerInfos> getServerListAndProcessClasses() override {
+		serverListReplies.emplace_back();
+		return serverListReplies.back().getFuture();
+	}
+
+	int getDataRemovalCheckCount() const { return dataRemovalCheckCount; }
+
+	int getServerListFetchCount() const { return static_cast<int>(serverListReplies.size()); }
+
+	bool isServerListFetchActive(int index) const { return serverListReplies.at(index).getFutureReferenceCount() > 0; }
+
+	void completeServerListFetch(int index, ServerWorkerInfos result) {
+		serverListReplies.at(index).send(std::move(result));
+	}
+
+private:
+	mutable int dataRemovalCheckCount = 0;
+	std::vector<Promise<ServerWorkerInfos>> serverListReplies;
+};
+
 class DDTeamCollectionUnitTest {
 public:
 	static void setTestEndpoint(StorageServerInterface& interface, int id) {
@@ -7090,6 +7195,329 @@ public:
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 		ASSERT(expectedServers == selectedServers);
 	}
+
+	static Future<Void> InitializeStorage_RecruitmentFailedCooldownReleasesId() {
+		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 0);
+
+		RecruitStorageReply candidate;
+		const NetworkAddress workerAddress(IPAddress(0x01010101), 4500);
+		candidate.worker.tLog = RequestStream<InitializeTLogRequest>(Endpoint({ workerAddress }, UID(1, 2)));
+		candidate.worker.storage = RequestStream<InitializeStorageRequest>();
+
+		DDEnabledState ddEnabledState;
+		Future<Void> recruitment =
+		    collection->initializeStorage(candidate, ddEnabledState, false, makeReference<TSSPairState>());
+		InitializeStorageRequest request = co_await candidate.worker.storage.getFuture();
+
+		ASSERT(collection->recruitingStream.get() == 1);
+		ASSERT(collection->recruitingIds.contains(request.interfaceId));
+		ASSERT(collection->recruitingLocalities.contains(workerAddress));
+
+		Future<Void> countChanged = collection->recruitingStream.onChange();
+		request.reply.sendError(recruitment_failed());
+		co_await countChanged;
+
+		ASSERT(!recruitment.isReady());
+		ASSERT(collection->recruitingStream.get() == 0);
+		ASSERT(!collection->recruitingIds.contains(request.interfaceId));
+		ASSERT(collection->recruitingLocalities.contains(workerAddress));
+
+		recruitment.cancel();
+		co_await delay(0);
+	}
+
+	static Future<Void> StorageServerFailureTracker_ReadyRecoverySkipsRemovalCheck() {
+		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 1);
+		auto txnProcessor = makeReference<DDTeamCollectionTestTxnProcessor>(collection->dbContext());
+		collection->db = txnProcessor;
+
+		Reference<TCServerInfo> server = collection->server_info.at(UID(1, 0));
+		StorageServerInterface interface = server->getLastKnownInterface();
+		FutureStream<ReplyPromise<Void>> failureRequests = interface.waitFailure.getFuture();
+
+		NetworkAddress address = interface.waitFailure.getEndpoint().getPrimaryAddress();
+		IFailureMonitor& failureMonitor = IFailureMonitor::failureMonitor();
+		FailureStatus previousStatus = failureMonitor.getState(address);
+		failureMonitor.setStatus(address, FailureStatus(false));
+
+		collection->doBuildTeams = false;
+		ServerStatus status(IsFailed::True, IsUndesired::False, IsWiggling::False, interface.locality);
+		Future<Void> tracker = collection->storageServerFailureTracker(server.getPtr(), &status, 1);
+
+		ASSERT(!tracker.isReady());
+		ASSERT(failureRequests.isReady());
+		ASSERT(!status.isFailed);
+		ASSERT(!collection->server_status.get(server->getId()).isFailed);
+		ASSERT(collection->doBuildTeams);
+		ASSERT_EQ(txnProcessor->getDataRemovalCheckCount(), 0);
+
+		tracker.cancel();
+		failureMonitor.setStatus(address, previousStatus);
+		co_await delay(0);
+	}
+
+	static Future<Void> MonitorStorageServerRecruitment_TracksRecruitmentTransitions() {
+		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 0);
+		const std::string trackingKey = collection->storageServerRecruitmentEventHolder->trackingKey;
+		// Sim2 can delay the production timer independently of the test's timer.
+		const double idleWait = SERVER_KNOBS->RECRUITMENT_IDLE_DELAY + FLOW_KNOBS->MAX_BUGGIFIED_DELAY + 0.01;
+		Future<Void> monitor = collection->monitorStorageServerRecruitment();
+
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Idle");
+
+		collection->recruitingStream.set(1);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("IsTSS"), "False");
+
+		collection->isTssRecruiting = true;
+		collection->recruitingStream.set(2);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("IsTSS"), "True");
+
+		collection->recruitingStream.set(0);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
+		collection->recruitingStream.set(1);
+		co_await delay(idleWait, TaskPriority::DataDistribution);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Recruiting");
+
+		collection->recruitingStream.set(0);
+		co_await delay(idleWait, TaskPriority::DataDistribution);
+		ASSERT_EQ(latestEventCache.get(trackingKey).getValue("State"), "Idle");
+
+		monitor.cancel();
+		co_await delay(0);
+	}
+
+	static Future<Void> WaitServerListChange_RestartsFetchOnRemoval() {
+		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 0);
+		auto txnProcessor = makeReference<DDTeamCollectionTestTxnProcessor>(collection->dbContext());
+		collection->db = txnProcessor;
+
+		DDEnabledState ddEnabledState;
+		PromiseStream<Void> serverRemoved;
+		FutureStream<Void> removalEvents = serverRemoved.getFuture();
+		Future<Void> monitor = collection->waitServerListChange(removalEvents, ddEnabledState);
+
+		ASSERT_EQ(txnProcessor->getServerListFetchCount(), 0);
+		co_await delay(SERVER_KNOBS->SERVER_LIST_DELAY + FLOW_KNOBS->MAX_BUGGIFIED_DELAY + 0.01,
+		               TaskPriority::DataDistributionLaunch);
+		ASSERT_EQ(txnProcessor->getServerListFetchCount(), 1);
+		ASSERT(txnProcessor->isServerListFetchActive(0));
+
+		serverRemoved.send(Void());
+		ASSERT(!removalEvents.isReady());
+		ASSERT_EQ(txnProcessor->getServerListFetchCount(), 2);
+		ASSERT(!txnProcessor->isServerListFetchActive(0));
+		ASSERT(txnProcessor->isServerListFetchActive(1));
+
+		ServerWorkerInfos infos;
+		infos.readVersion = 1;
+		txnProcessor->completeServerListFetch(1, std::move(infos));
+		ASSERT(!txnProcessor->isServerListFetchActive(1));
+		ASSERT(!monitor.isReady());
+
+		monitor.cancel();
+		co_await delay(0);
+	}
+
+	static Future<Void> TeamTracker_RetriesMergedShardForUndesiredServer() {
+		constexpr double checkTeamDelay = 0.05;
+
+		auto shards = makeReference<ShardsAffectedByTeamFailure>();
+		shards->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+
+		const UID undesired(1, 0), leftServer(2, 0), rightServer(3, 0), healthy1(4, 0), healthy2(5, 0);
+		const ShardsAffectedByTeamFailure::Team left({ undesired, leftServer }, true);
+		const ShardsAffectedByTeamFailure::Team right({ undesired, rightServer }, true);
+		const ShardsAffectedByTeamFailure::Team healthy({ healthy1, healthy2 }, true);
+		const KeyRange mergedRange = KeyRangeRef("a"_sr, "c"_sr);
+		const KeyRange leftRange = KeyRangeRef("a"_sr, "b"_sr);
+		const KeyRange rightRange = KeyRangeRef("b"_sr, "c"_sr);
+
+		shards->assignRangeToTeams(leftRange, { left });
+		shards->assignRangeToTeams(rightRange, { right });
+
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(2, "zoneid", makeReference<PolicyOne>());
+		auto collection = testTeamCollection(2, policy, 5, shards);
+		collection->teamCollections = { collection.get() };
+		collection->initialFailureReactionDelay = Future<Void>(Void());
+		ASSERT(!collection->processingUnhealthy->get());
+		collection->teamCollectionInfoEventHolder =
+		    makeReference<EventCacheHolder>("TeamTrackerRetriesMergedShardForUndesiredServer");
+		collection->server_status.set(
+		    undesired,
+		    ServerStatus(IsFailed::False,
+		                 IsUndesired::True,
+		                 IsWiggling::False,
+		                 collection->server_info[undesired]->getLastKnownInterface().locality));
+		FutureStream<RelocateShard> relocations = collection->output.getFuture();
+
+		const int processingUnhealthyListenersWithoutTrackers =
+		    collection->processingUnhealthy->onChange().getFutureReferenceCount();
+		const int pipelineFullListenersWithoutTrackers = collection->pipelineFull->onChange().getFutureReferenceCount();
+		collection->addTeam({ collection->server_info[healthy1], collection->server_info[healthy2] },
+		                    IsInitialTeam::True,
+		                    IsRedundantTeam::False,
+		                    checkTeamDelay);
+		co_await delay(0.01);
+		ASSERT_EQ(collection->processingUnhealthy->onChange().getFutureReferenceCount(),
+		          processingUnhealthyListenersWithoutTrackers);
+		ASSERT_EQ(collection->pipelineFull->onChange().getFutureReferenceCount(), pipelineFullListenersWithoutTrackers);
+
+		collection->addTeam({ collection->server_info[undesired], collection->server_info[leftServer] },
+		                    IsInitialTeam::True,
+		                    IsRedundantTeam::False,
+		                    checkTeamDelay);
+		collection->addTeam({ collection->server_info[undesired], collection->server_info[rightServer] },
+		                    IsInitialTeam::True,
+		                    IsRedundantTeam::False,
+		                    checkTeamDelay);
+		co_await delay(0.01);
+
+		ASSERT(relocations.isReady());
+		RelocateShard initialLeft = relocations.pop();
+		ASSERT(relocations.isReady());
+		RelocateShard initialRight = relocations.pop();
+		ASSERT(!relocations.isReady());
+		ASSERT((initialLeft.keys == leftRange && initialRight.keys == rightRange) ||
+		       (initialLeft.keys == rightRange && initialRight.keys == leftRange));
+		TraceEventFields initialTeamCollectionInfo =
+		    latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey);
+		ASSERT_GT(initialTeamCollectionInfo.size(), 0);
+		const std::string initialTeamCollectionInfoTime = initialTeamCollectionInfo.getValue("Time");
+
+		shards->defineShard(mergedRange);
+		shards->moveShard(leftRange, { healthy });
+		shards->finishMove(leftRange);
+		shards->moveShard(rightRange, { healthy });
+		shards->finishMove(rightRange);
+		ASSERT_EQ(shards->getNumberOfShards(undesired), 2);
+
+		co_await delay(checkTeamDelay + 0.01);
+		ASSERT(relocations.isReady());
+		RelocateShard retryLeft = relocations.pop();
+		ASSERT(relocations.isReady());
+		RelocateShard retryRight = relocations.pop();
+		ASSERT(!relocations.isReady());
+		ASSERT(retryLeft.keys == mergedRange);
+		ASSERT(retryRight.keys == mergedRange);
+		ASSERT_EQ(retryLeft.priority, SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER);
+		ASSERT_EQ(retryRight.priority, SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER);
+
+		// Undesired relocations never make processingUnhealthy true, so unchanged stranded ranges
+		// must still be retried at the next polling interval.
+		co_await delay(checkTeamDelay + 0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(!relocations.isReady());
+		ASSERT(!collection->processingUnhealthy->get());
+
+		// A full pipeline must retain submitted ranges even when undesired relocations are not
+		// reflected in processingUnhealthy; otherwise every retry interval grows its input backlog.
+		collection->pipelineFull->set(true);
+		co_await delay(2 * checkTeamDelay + 0.01);
+		ASSERT(!relocations.isReady());
+		collection->pipelineFull->set(false);
+		co_await delay(0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(!relocations.isReady());
+
+		collection->processingUnhealthy->set(true);
+		co_await delay(checkTeamDelay + 0.01);
+		ASSERT(!relocations.isReady());
+		ASSERT_EQ(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
+		          initialTeamCollectionInfoTime);
+
+		collection->processingUnhealthy->set(false);
+		co_await delay(0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(!relocations.isReady());
+
+		collection->processingUnhealthy->set(true);
+		co_await delay(checkTeamDelay + 0.01);
+		ASSERT(!relocations.isReady());
+
+		collection->zeroHealthyTeams->set(true);
+		co_await delay(0.01);
+		ASSERT(!relocations.isReady());
+		collection->zeroHealthyTeams->set(false);
+		co_await delay(0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(!relocations.isReady());
+
+		co_await delay(checkTeamDelay + 0.01);
+		ASSERT(!relocations.isReady());
+
+		NetworkAddress failedAddress = collection->server_info[undesired]->getLastKnownInterface().address();
+		collection->excludedServers.set(AddressExclusion(failedAddress.ip, failedAddress.port),
+		                                DDTeamCollection::Status::FAILED);
+		co_await delay(checkTeamDelay + 0.01);
+		ASSERT(relocations.isReady());
+		RelocateShard failedLeft = relocations.pop();
+		ASSERT(relocations.isReady());
+		RelocateShard failedRight = relocations.pop();
+		ASSERT(!relocations.isReady());
+		ASSERT(failedLeft.keys == mergedRange);
+		ASSERT(failedRight.keys == mergedRange);
+		ASSERT_EQ(failedLeft.priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		ASSERT_EQ(failedRight.priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+
+		// Explicitly failed-team relocations are also absent from processingUnhealthy and must remain
+		// retryable after the tracked unhealthy queue is idle.
+		collection->processingUnhealthy->set(false);
+		co_await delay(0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		ASSERT(!relocations.isReady());
+
+		co_await delay(checkTeamDelay + 0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		ASSERT(!relocations.isReady());
+		ASSERT_NE(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
+		          initialTeamCollectionInfoTime);
+	}
+
+	static Future<Void> TeamTracker_RechecksHealthyZone() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		auto collection = testTeamCollection(3, policy, 3);
+		const UID failedServer(1, 0);
+
+		collection->healthyZone.set(ignoreSSFailuresZoneString);
+		collection->server_status.set(
+		    failedServer,
+		    ServerStatus(IsFailed::True,
+		                 IsUndesired::False,
+		                 IsWiggling::False,
+		                 collection->server_info[failedServer]->getLastKnownInterface().locality));
+		collection->addTeam(std::set<UID>({ failedServer, UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		co_await delay(0.1);
+
+		ASSERT_EQ(collection->teams.size(), 1);
+		ASSERT(collection->teams.front()->isHealthy());
+		ASSERT_EQ(collection->teams.front()->getPriority(), SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
+
+		collection->healthyZone.set(Optional<Key>());
+		co_await delay(0.1);
+
+		ASSERT(!collection->teams.front()->isHealthy());
+		ASSERT_EQ(collection->teams.front()->getPriority(), SERVER_KNOBS->PRIORITY_TEAM_2_LEFT);
+	}
 };
 
 TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
@@ -7246,5 +7674,35 @@ TEST_CASE("/DataDistribution/GetTeam/PreferWithinShardRange") {
 		return Void();
 	}
 	wait(DDTeamCollectionUnitTest::GetTeam_PreferShardsWithinLimit());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Recruitment/RecruitmentFailedCooldownReleasesId") {
+	wait(DDTeamCollectionUnitTest::InitializeStorage_RecruitmentFailedCooldownReleasesId());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/StorageServerFailureTracker/ReadyRecoverySkipsRemovalCheck") {
+	wait(DDTeamCollectionUnitTest::StorageServerFailureTracker_ReadyRecoverySkipsRemovalCheck());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Recruitment/MonitorTracksRecruitmentTransitions") {
+	wait(DDTeamCollectionUnitTest::MonitorStorageServerRecruitment_TracksRecruitmentTransitions());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/ServerList/RestartsFetchOnRemoval") {
+	wait(DDTeamCollectionUnitTest::WaitServerListChange_RestartsFetchOnRemoval());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/TeamTracker/RetriesMergedShardForUndesiredServer") {
+	wait(DDTeamCollectionUnitTest::TeamTracker_RetriesMergedShardForUndesiredServer());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/TeamTracker/RechecksHealthyZone") {
+	wait(DDTeamCollectionUnitTest::TeamTracker_RechecksHealthyZone());
 	return Void();
 }

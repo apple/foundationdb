@@ -29,6 +29,8 @@ timeout = 180
     rounds = 1
     assignmentPublicationChecks = 8
     testProxyReplacement = true
+    # Exercise the at-most-once halt retry without disabling replacement or failure-workload coverage.
+    injectUndeliveredProxyHalt = true
     drainProbability = 1.0
     delayBetweenRounds = 0.0
     operationTimeout = 60.0

@@ -37,7 +37,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/ActorCollection.h"
@@ -46,7 +46,7 @@
 #include "flow/Knobs.h"
 #include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 namespace {
 
@@ -77,6 +77,7 @@ struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	Optional<KeyRange> keys;
 	bool active = true;
 	bool initialized = false;
+	bool initializationPausedForTesting = false;
 	bool tooOld = false;
 	bool bufferLimitExceeded = false;
 	Version minVersion = invalidVersion;
@@ -285,6 +286,16 @@ bool isCurrentStreamInitialization(std::unordered_map<CDCStreamId, Reference<CDC
 	return stream->active && current != streams.end() && current->second.getPtr() == stream.getPtr();
 }
 
+bool isCurrentTagOwner(std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> const& streams,
+                       Tag const& tag,
+                       CDCStreamId streamId) {
+	const auto stream = streams.find(streamId);
+	return stream != streams.end() && stream->second->active &&
+	       std::any_of(stream->second->tagIntervals.begin(),
+	                   stream->second->tagIntervals.end(),
+	                   [&tag](CDCTagInterval const& interval) { return interval.tag == tag; });
+}
+
 // New TLogs retain every recovered tag until it is popped past the recovery boundary. An unshared retired tag has no
 // active consumer to advance it, so stopping at its pre-recovery removal version can keep the old generation forever.
 Version retiredTagPopTarget(Version retiredVersion, Optional<Version> safePopVersion, Optional<Version> recoveryEnd) {
@@ -316,8 +327,6 @@ class CDCProxy {
 	bool popsPausedForTesting = false;
 	bool popsPausedAfterSnapshotForTesting = false;
 	int64_t popSnapshotsPausedForTesting = 0;
-	bool popsPausedAfterIncompleteLogSystemForTesting = false;
-	int64_t popIncompleteLogSystemPausesForTesting = 0;
 	AsyncTrigger popPauseChangedForTesting;
 	bool logSystemInitialized = false;
 	bool lastLogSystemHasTLogs = false;
@@ -438,32 +447,36 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
+			Future<Optional<Value>> keysFuture = tr.get(cdcStreamKeyFor(streamId));
+			Future<Optional<Value>> minVersionFuture = tr.get(cdcMinVersionKeyFor(streamId));
+			Future<RangeResult> assignedProxiesFuture = tr.getRange(cdcProxyRangeFor(streamId), 2);
+			KeyRange tagHistoryRange = cdcTagHistoryRangeFor(streamId);
+			Future<RangeResult> historyFuture = tr.getRange(tagHistoryRange, CLIENT_KNOBS->TOO_MANY);
+
 			CDCStreamReadState result;
-			Optional<Value> keysValue = co_await tr.get(cdcStreamKeyFor(streamId));
+			Optional<Value> keysValue = co_await keysFuture;
 			if (keysValue.present()) {
 				result.keys = decodeCDCStreamKeysValue(keysValue.get());
 			} else if (requireKeys) {
 				throw client_invalid_operation();
 			}
 
-			Optional<Value> minVersionValue = co_await tr.get(cdcMinVersionKeyFor(streamId));
+			Optional<Value> minVersionValue = co_await minVersionFuture;
 			if (!minVersionValue.present()) {
 				throw client_invalid_operation();
 			}
 			result.minVersion = decodeCDCMinVersionValue(minVersionValue.get());
 
-			RangeResult assignedProxies = co_await tr.getRange(cdcProxyRangeFor(streamId), 2);
+			RangeResult assignedProxies = co_await assignedProxiesFuture;
 			if (assignedProxies.size() != 1 || decodeCDCProxyKey(assignedProxies[0].key).second != expectedProxyId) {
 				CODE_PROBE(true, "CDC proxy rejects request for stream owned elsewhere");
 				throw wrong_shard_server();
 			}
 
 			std::vector<std::pair<Version, Tag>> tagAssignments;
-			KeyRange tagHistoryRange = cdcTagHistoryRangeFor(streamId);
 			Key begin = tagHistoryRange.begin;
 			while (begin < tagHistoryRange.end) {
-				RangeResult history =
-				    co_await tr.getRange(KeyRangeRef(begin, tagHistoryRange.end), CLIENT_KNOBS->TOO_MANY);
+				RangeResult history = co_await historyFuture;
 				for (KeyValueRef const& kv : history) {
 					const CDCTagHistoryEntry historyEntry = decodeCDCTagHistoryKey(kv.key);
 					ASSERT_WE_THINK(historyEntry.streamId == streamId);
@@ -474,6 +487,10 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 					break;
 				}
 				begin = keyAfter(history.back().key);
+				if (begin >= tagHistoryRange.end) {
+					break;
+				}
+				historyFuture = tr.getRange(KeyRangeRef(begin, tagHistoryRange.end), CLIENT_KNOBS->TOO_MANY);
 			}
 			if (tagAssignments.empty()) {
 				throw client_invalid_operation();
@@ -598,7 +615,7 @@ void CDCProxy::markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, 
 		if (!rawPeekFailureBlocksStream(nextReadVersion, begin)) {
 			continue;
 		}
-		CODE_PROBE(true, "CDC proxy rejects a raw peek larger than its reservation", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy rejects a raw peek larger than its reservation");
 		TraceEvent(SevWarn, "CDCProxyRawPeekExceedsBufferLimit", id)
 		    .detail("Tag", tag->tag)
 		    .detail("StreamId", streamId)
@@ -930,7 +947,7 @@ CDCBufferSelection CDCProxy::selectBufferCandidatesForTag(Reference<CDCBufferedT
 		if (stream == streams.end() || !stream->second->active) {
 			continue;
 		}
-		CODE_PROBE(true, "CDC proxy rejects a version larger than its complete buffer budget");
+		CODE_PROBE(true, "CDC proxy rejects a version larger than its complete buffer budget", probe::decoration::rare);
 		TraceEvent(SevWarn, "CDCProxyVersionExceedsBufferLimit", id)
 		    .detail("Tag", tag->tag)
 		    .detail("StreamId", streamId)
@@ -1037,7 +1054,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 	const int64_t preferredBufferedBatch = limits.get().preferredBufferedBytes;
 	const int64_t passReservation = limits.get().reservationBytes;
 	if (bufferLock.available() < passReservation) {
-		CODE_PROBE(true, "CDC proxy applies shared buffer backpressure", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy applies shared buffer backpressure");
 		peekCapacityContended.trigger();
 	}
 	auto capacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, passReservation),
@@ -1090,9 +1107,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 
 	const Version peekThroughVersion = cursor->hasMessage() ? cursor->version().version : cursor->version().version - 1;
 	const Version throughVersion = committedPeekThrough(peekThroughVersion, cursor->getMinKnownCommittedVersion());
-	CODE_PROBE(throughVersion < peekThroughVersion,
-	           "CDC proxy waits for peeked mutations to become committed",
-	           probe::decoration::rare);
+	CODE_PROBE(throughVersion < peekThroughVersion, "CDC proxy waits for peeked mutations to become committed");
 	if (throughVersion < begin) {
 		co_return CDCBufferTagPassResult::WAIT_FOR_COMMIT;
 	}
@@ -1145,8 +1160,16 @@ Future<Void> CDCProxy::bufferTag(Reference<CDCBufferedTag> tag) {
 Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 	try {
 		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, stream->streamId, id, true);
+		if (popsPausedForTesting) {
+			stream->initializationPausedForTesting = true;
+			stream->changed.trigger();
+			while (popsPausedForTesting) {
+				co_await popPauseChangedForTesting.onTrigger();
+			}
+			stream->initializationPausedForTesting = false;
+		}
 		if (!isCurrentStreamInitialization(streams, stream)) {
-			CODE_PROBE(true, "CDC proxy discards stale stream initialization", probe::decoration::rare);
+			CODE_PROBE(true, "CDC proxy discards stale stream initialization");
 			co_return;
 		}
 		stream->keys = metadata.keys;
@@ -1165,7 +1188,7 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 		for (const auto& interval : stream->tagIntervals) {
 			auto tag = tags.find(interval.tag);
 			if (tag == tags.end()) {
-				Reference<CDCBufferedTag> newTag = makeReference<CDCBufferedTag>(interval.tag);
+				auto newTag = makeReference<CDCBufferedTag>(interval.tag);
 				tag = tags.emplace(interval.tag, newTag).first;
 				tag->second->streamIds.insert(stream->streamId);
 				actors.add(bufferTag(newTag));
@@ -1294,24 +1317,14 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		co_return;
 	}
 	while (!logSystem->get()) {
-		CODE_PROBE(true, "CDC proxy defers pops until a log system is available", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy defers pops until a log system is available");
 		co_await logSystem->onChange();
 	}
 	Reference<LogSystemConsumer> currentLogSystem = logSystem->get();
 	const LogSystemConfig popLogSystemConfig = lastLogSystemConfig;
 	const uint64_t popLogSystemRecoveryCount = lastLogSystemRecoveryCount;
-	if (popsPausedAfterIncompleteLogSystemForTesting && hasCompleteLogSystemConfig(popLogSystemConfig)) {
-		co_return;
-	}
 	if (!hasCompleteLogSystemConfig(popLogSystemConfig)) {
-		if (popsPausedAfterIncompleteLogSystemForTesting) {
-			++popIncompleteLogSystemPausesForTesting;
-			CODE_PROBE(true, "CDC proxy pauses after observing an incomplete log system");
-			while (popsPausedAfterIncompleteLogSystemForTesting) {
-				co_await popPauseChangedForTesting.onTrigger();
-			}
-		}
-		CODE_PROBE(true, "CDC proxy defers pops until every expected log set is published", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy defers pops until every expected log set is published");
 		co_return;
 	}
 	if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
@@ -1331,7 +1344,7 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		co_return;
 	}
 	if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
-		CODE_PROBE(true, "CDC proxy retries pops after log system topology changes", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy retries pops after log system topology changes");
 		requestAcknowledgedDataPop();
 		co_return;
 	}
@@ -1342,7 +1355,7 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		    stream->second->minVersion >= minVersion) {
 			continue;
 		}
-		CODE_PROBE(true, "CDC proxy scan reconciles a durable stream acknowledgement", probe::decoration::rare);
+		CODE_PROBE(true, "CDC proxy scan reconciles a durable stream acknowledgement");
 		reconcileStreamMinVersion(stream->second, minVersion);
 	}
 	const std::unordered_map<Tag, Version>& safePopVersions = popState.safePopVersions;
@@ -1362,7 +1375,8 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 			co_return;
 		}
 		if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
-			CODE_PROBE(true, "CDC proxy retries retired pops after log system topology changes");
+			CODE_PROBE(
+			    true, "CDC proxy retries retired pops after log system topology changes", probe::decoration::rare);
 			requestAcknowledgedDataPop();
 			co_return;
 		}
@@ -1386,7 +1400,9 @@ Future<Void> CDCProxy::popAcknowledgedData() {
 		}
 	}
 	if (!isCurrentCompletePopLogSystem(currentLogSystem, popLogSystemConfig, popLogSystemRecoveryCount)) {
-		CODE_PROBE(true, "CDC proxy preserves retired pop metadata after log system topology changes");
+		CODE_PROBE(true,
+		           "CDC proxy preserves retired pop metadata after log system topology changes",
+		           probe::decoration::rare);
 		requestAcknowledgedDataPop();
 		co_return;
 	}
@@ -1402,7 +1418,7 @@ Future<Void> CDCProxy::monitorAcknowledgedDataPops() {
 			co_await delay(SERVER_KNOBS->CDC_PROXY_POP_MIN_INTERVAL);
 		}
 		popAcknowledgedDataRequests.consume();
-		CODE_PROBE(periodicScan, "CDC proxy periodically scans durable acknowledgement state", probe::decoration::rare);
+		CODE_PROBE(periodicScan, "CDC proxy periodically scans durable acknowledgement state");
 		++popAttempts;
 		// Acknowledgements only make a completed snapshot more conservative, so they are coalesced for a later pass
 		// instead of canceling this one. A log-system config change can add targeted log sets, so it invalidates
@@ -1425,7 +1441,7 @@ void CDCProxy::reconcileStreams() {
 		if (proxyId == id) {
 			assignedStreams.insert(streamId);
 			if (!streams.contains(streamId)) {
-				Reference<CDCBufferedStream> stream = makeReference<CDCBufferedStream>(streamId);
+				auto stream = makeReference<CDCBufferedStream>(streamId);
 				streams.emplace(streamId, stream);
 				actors.add(initializeStream(stream));
 			}
@@ -1488,7 +1504,7 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 		if (stream->activeConsumes > 0) {
 			// A stream has one durable acknowledgement frontier, so concurrent logical consumers cannot be
 			// isolated. Reject overlapping server requests rather than duplicating an entire reply arena.
-			CODE_PROBE(true, "CDC proxy rejects concurrent consumers for one stream", probe::decoration::rare);
+			CODE_PROBE(true, "CDC proxy rejects concurrent consumers for one stream");
 			throw client_invalid_operation();
 		}
 		++stream->activeConsumes;
@@ -1497,9 +1513,7 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 			--stream->activeConsumes;
 		});
 		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, request.cursor.streamId, id, true);
-		CODE_PROBE(stream->minVersion < metadata.minVersion,
-		           "Native CDC consume reconciles a durable acknowledgement",
-		           probe::decoration::rare);
+		CODE_PROBE(stream->minVersion < metadata.minVersion, "Native CDC consume reconciles a durable acknowledgement");
 		reconcileStreamMinVersion(stream, metadata.minVersion);
 		if (request.cursor.lastConsumedVersion > stream->bufferedThrough) {
 			// A cursor is trusted only when this owner has delivered through it or when it is covered by the durable
@@ -1522,7 +1536,7 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 		auto buffered =
 		    co_await race(waitForBufferedVersion(stream, begin), delay(SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT));
 		if (buffered.index() == 1) {
-			CODE_PROBE(true, "CDC proxy expires an idle consume lease", probe::decoration::rare);
+			CODE_PROBE(true, "CDC proxy expires an idle consume lease");
 			CDCConsumeReply reply;
 			reply.lastConsumedVersion = request.cursor.lastConsumedVersion;
 			request.reply.send(reply);
@@ -1690,6 +1704,24 @@ Future<Void> CDCProxy::serveBufferStatusForTestingRequests(FutureStream<GetCDCPr
 			request.reply.sendError(client_invalid_operation());
 			continue;
 		}
+		while (popsPausedForTesting) {
+			Reference<CDCBufferedStream> pendingInitialization;
+			for (const auto& [streamId, stream] : streams) {
+				if (stream->active && !stream->initialized && !stream->initializationPausedForTesting) {
+					pendingInitialization = stream;
+					break;
+				}
+			}
+			if (!pendingInitialization) {
+				break;
+			}
+			co_await race(popPauseChangedForTesting.onTrigger(), pendingInitialization->changed.onTrigger());
+		}
+		for (const auto& [tag, bufferedTag] : tags) {
+			for (const CDCStreamId streamId : bufferedTag->streamIds) {
+				ASSERT(isCurrentTagOwner(streams, tag, streamId));
+			}
+		}
 		CDCProxyBufferStatus status;
 		status.bufferedBytes = bufferedBytes;
 		status.activePermits = bufferLock.activePermits();
@@ -1707,8 +1739,6 @@ Future<Void> CDCProxy::serveBufferStatusForTestingRequests(FutureStream<GetCDCPr
 		status.popsPaused = popsPausedForTesting;
 		status.popSnapshotsPaused = popSnapshotsPausedForTesting;
 		status.popsPausedAfterSnapshot = popsPausedAfterSnapshotForTesting;
-		status.popIncompleteLogSystemPauses = popIncompleteLogSystemPausesForTesting;
-		status.popsPausedAfterIncompleteLogSystem = popsPausedAfterIncompleteLogSystemForTesting;
 		request.reply.send(status);
 	}
 }
@@ -1720,11 +1750,10 @@ Future<Void> CDCProxy::serveSetPopsPausedForTestingRequests(FutureStream<SetCDCP
 			request.reply.sendError(client_invalid_operation());
 			continue;
 		}
-		popsPausedForTesting = request.paused && !request.afterSnapshot && !request.afterIncompleteLogSystem;
+		popsPausedForTesting = request.paused && !request.afterSnapshot;
 		popsPausedAfterSnapshotForTesting = request.paused && request.afterSnapshot;
-		popsPausedAfterIncompleteLogSystemForTesting = request.paused && request.afterIncompleteLogSystem;
 		popPauseChangedForTesting.trigger();
-		if (!request.paused || request.afterSnapshot || request.afterIncompleteLogSystem) {
+		if (!request.paused || request.afterSnapshot) {
 			requestAcknowledgedDataPop();
 		}
 		request.reply.send(Void());
@@ -1783,7 +1812,7 @@ Future<Void> CDCProxy::monitorDBInfo(CDCProxyInterface proxy, uint64_t recoveryC
 	while (true) {
 		co_await dbInfo->onChange();
 		if (dbInfo->get().recoveryCount < recoveryCount) {
-			CODE_PROBE(true, "CDC proxy ignores ServerDBInfo from an older recovery", probe::decoration::rare);
+			CODE_PROBE(true, "CDC proxy ignores ServerDBInfo from an older recovery");
 			continue;
 		}
 		const bool isPublished =
@@ -1987,18 +2016,31 @@ TEST_CASE("/NativeCDC/LagMetrics") {
 
 TEST_CASE("/NativeCDC/StreamInitializationLifecycle") {
 	std::unordered_map<CDCStreamId, Reference<CDCBufferedStream>> streams;
-	Reference<CDCBufferedStream> stream = makeReference<CDCBufferedStream>(1);
-	Reference<CDCBufferedStream> replacement = makeReference<CDCBufferedStream>(1);
+	auto stream = makeReference<CDCBufferedStream>(1);
+	auto replacement = makeReference<CDCBufferedStream>(1);
+	const Tag assignedTag(tagLocalityCDC, 1);
+	const Tag anotherTag(tagLocalityCDC, 2);
 
 	ASSERT(!isCurrentStreamInitialization(streams, stream));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
 	streams.emplace(stream->streamId, stream);
 	ASSERT(isCurrentStreamInitialization(streams, stream));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
+	stream->tagIntervals.emplace_back(assignedTag, 100, 200);
+	ASSERT(isCurrentTagOwner(streams, assignedTag, stream->streamId));
+	ASSERT(!isCurrentTagOwner(streams, anotherTag, stream->streamId));
 	stream->active = false;
 	ASSERT(!isCurrentStreamInitialization(streams, stream));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
 	stream->active = true;
 	streams.at(stream->streamId) = replacement;
 	ASSERT(!isCurrentStreamInitialization(streams, stream));
 	ASSERT(isCurrentStreamInitialization(streams, replacement));
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, stream->streamId));
+	replacement->tagIntervals.emplace_back(assignedTag, 200, 300);
+	ASSERT(isCurrentTagOwner(streams, assignedTag, replacement->streamId));
+	streams.erase(replacement->streamId);
+	ASSERT(!isCurrentTagOwner(streams, assignedTag, replacement->streamId));
 	return Void();
 }
 

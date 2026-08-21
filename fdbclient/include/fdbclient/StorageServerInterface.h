@@ -36,7 +36,7 @@
 #include "fdbrpc/LoadBalance.actor.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
-#include "fdbrpc/TSSComparison.h"
+#include "fdbclient/TSSComparison.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tracing.h"
@@ -781,14 +781,16 @@ struct SplitRangeRequest {
 	Arena arena;
 	KeyRangeRef keys;
 	int64_t chunkSize;
+	int limit = -1;
 	ReplyPromise<SplitRangeReply> reply;
 
 	SplitRangeRequest() = default;
-	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize) : keys(arena, keys), chunkSize(chunkSize) {}
+	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize, int limit = -1)
+	  : keys(arena, keys), chunkSize(chunkSize), limit(limit) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, chunkSize, reply, arena);
+		serializer(ar, keys, chunkSize, reply, limit, arena);
 	}
 };
 
@@ -1268,5 +1270,7 @@ inline int mvccStorageBytes(int mutationBytes) {
 	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
 	       (mutationBytes + MutationRef::OVERHEAD_BYTES) * 2;
 }
+
+#include "fdbclient/StorageServerLoadBalance.actor.h"
 
 #endif

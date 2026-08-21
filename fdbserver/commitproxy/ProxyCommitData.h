@@ -25,6 +25,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/logsystem/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/CDCRoutingTable.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"
@@ -437,10 +438,11 @@ public:
 
 	bool isLocked(const KeyRange& range) const {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
-		if (range.end >= normalKeys.end) {
+		const KeyRangeRef normalRange = range & normalKeys;
+		if (normalRange.empty()) {
 			return false;
 		}
-		for (auto lockRange : coreMap.intersectingRanges(range)) {
+		for (auto lockRange : coreMap.intersectingRanges(normalRange)) {
 			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ExclusiveReadLock)) {
 				return true;
 			}

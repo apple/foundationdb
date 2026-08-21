@@ -42,7 +42,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 
 **Key dynamic behavior:** Every server-side component is a collection of ACTOR coroutines scheduled on Net2's run loop. There is no threading within a process (except for disk I/O thread pools). All concurrency is cooperative, driven by Future resolution.
 
-**Principal files:** [`flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h), [`Arena.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Arena.h), [`Error.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Error.h), [`genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h), [`Net2.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.cpp), [`Trace.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Trace.cpp), [`serialize.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/serialize.h), [`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)
+**Principal files:** [`flow.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/flow.h), [`Arena.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Arena.h), [`Error.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Error.h), [`genericactors.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.h), [`Net2.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.cpp), [`Trace.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Trace.cpp), [`serialize.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/serialize.h), [`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)
 
 ---
 
@@ -97,7 +97,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - Coordinator state is persisted via `KeyValueStoreMemory` backed by a `DiskQueue` (`.fdq` files) -- the same engine used by TLogs.
 
 **Role recruitment:**
-- Worker processes register with CC via `registrationClient()` ([`worker.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/worker/worker.actor.cpp)).
+- Worker processes register with CC via `registrationClient()` ([`worker.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/worker/worker.cpp)).
 - CC maintains a pool of available workers with their `ProcessClass` and `LocalityData`.
 - When the transaction system needs to be (re)constituted, CC recruits: Master/Sequencer, CommitProxies, GrvProxies, Resolvers, TLogs.
 - Recruitment considers fitness (class match), locality (datacenter placement), and excludes failed/excluded processes.
@@ -107,7 +107,7 @@ Plus supporting code: [`fdbserver/worker/`](https://github.com/apple/foundationd
 - `ServerDBInfo` is the cluster-wide configuration broadcast. Contains: master interface, proxy lists, log system config, recovery state, latency band config.
 - Updated by CC and distributed to all workers. Workers react to changes (e.g., new proxy set).
 
-**Principal files:** [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp), `ClusterController.h`, [`Coordination.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.cpp), [`LeaderElection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.cpp), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`WorkerInterface.actor.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.actor.h)
+**Principal files:** [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp), `ClusterController.h`, [`Coordination.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.cpp), [`LeaderElection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.cpp), [`CoordinatedState.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/CoordinatedState.cpp), [`WorkerInterface.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/include/fdbserver/core/WorkerInterface.h)
 
 ---
 
@@ -188,7 +188,7 @@ Phase 4: REPLY                      CommitProxy
 
 **What it is:** The read path and durable key-value store. Storage servers serve client reads and maintain the materialized state of their assigned key ranges (shards).
 
-**Storage Server** ([`storageserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/storageserver/storageserver.actor.cpp)):
+**Storage Server** ([`storageserver.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/storageserver/storageserver.cpp)):
 - Each SS owns a set of key ranges (shards) and a version.
 - **Update loop**: continuously peeks its tag from the log system, deserializes mutations, applies them to the local KVStore, and advances its durable version.
 - **Read serving**: handles `GetKeyValuesRequest`, `GetKeyRequest`, `GetValueRequest`. Checks that the requested version is available (between oldest readable version and current version), that the shard is owned, and reads from the KVStore.
@@ -202,7 +202,7 @@ Phase 4: REPLY                      CommitProxy
 
 **Key dynamic behavior:** The storage server is *pull-based*. It pulls from the log system at its own pace. If a storage server falls behind, it catches up by reading more from TLogs. If it falls too far behind, it may be removed from its team and re-replicated. Reads at a given version are served from a snapshot — the SS maintains enough history to serve reads at any version between its oldest and current.
 
-**Principal files:** [`storageserver.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/storageserver/storageserver.actor.cpp), [`KeyValueStoreRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp), [`KeyValueStoreShardedRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp), [`KeyValueStoreSQLite.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreSQLite.cpp), [`KeyValueStoreMemory.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.cpp), [`IKeyValueStore.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/include/fdbserver/kvstore/IKeyValueStore.h), [`StorageMetrics.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/StorageMetrics.cpp)
+**Principal files:** [`storageserver.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/storageserver/storageserver.cpp), [`KeyValueStoreRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreRocksDB.actor.cpp), [`KeyValueStoreShardedRocksDB.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreShardedRocksDB.actor.cpp), [`KeyValueStoreSQLite.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreSQLite.cpp), [`KeyValueStoreMemory.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/KeyValueStoreMemory.cpp), [`IKeyValueStore.h`](https://github.com/apple/foundationdb/blob/main/fdbserver/kvstore/include/fdbserver/kvstore/IKeyValueStore.h), [`StorageMetrics.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/StorageMetrics.cpp)
 
 ---
 

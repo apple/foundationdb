@@ -19,7 +19,12 @@
  */
 
 #include "fdbclient/Knobs.h"
+#include "fdbrpc/FlowTransport.h"
+#include "fdbrpc/Net2FileSystem.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbrpc/simulator.h"
+#include "flow/TLSConfig.h"
 #include "flow/UnitTestRunner.h"
 
 namespace {
@@ -27,8 +32,25 @@ Future<Void> initializeSimulation() {
 	resetClientKnobs(Randomize::True, IsSimulated::True);
 	return startUnitTestSimulator();
 }
+
+void initializeNetwork() {
+	resetClientKnobs(Randomize::False, IsSimulated::False);
+	g_network = newNet2(TLSConfig());
+	g_network->addStopCallback(Net2FileSystem::stop);
+	Net2FileSystem::newFileSystem();
+	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	const NetworkAddress address = NetworkAddress::parse("127.0.0.1:0");
+	FlowTransport::transport().bind(address, address);
+}
 } // namespace
 
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig("fdbclient", initializeSimulation));
+	return runUnitTests(
+	    argc,
+	    argv,
+	    UnitTestRunnerConfig(
+	        "fdbclient",
+	        initializeSimulation,
+	        initializeNetwork,
+	        { "/fdbclient/MonitorLeader/PartialResolve", "/backup/containers/url", "/backup/containers_list" }));
 }

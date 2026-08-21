@@ -47,7 +47,7 @@ bool validNativeCdcTagCount(int tagCount) {
 
 void validateNativeCdcEnabled(bool enabled) {
 	if (!enabled) {
-		CODE_PROBE(true, "Native CDC registration rejected while feature disabled", probe::decoration::rare);
+		CODE_PROBE(true, "Native CDC registration rejected while feature disabled");
 		throw client_invalid_operation();
 	}
 }
@@ -111,23 +111,13 @@ Future<Optional<UID>> getNativeCdcProxyAssignment(Transaction* tr, CDCStreamId s
 }
 
 Future<Tag> getNativeCdcCurrentTag(Transaction* tr, CDCStreamId streamId) {
-	Optional<Tag> currentTag;
-	const KeyRange historyRange = cdcTagHistoryRangeFor(streamId);
-	Key begin = historyRange.begin;
-	while (begin < historyRange.end) {
-		RangeResult history = co_await tr->getRange(KeyRangeRef(begin, historyRange.end), CLIENT_KNOBS->TOO_MANY);
-		for (const auto& assignment : history) {
-			currentTag = decodeCDCTagHistoryKey(assignment.key).tag;
-		}
-		if (!history.more) {
-			break;
-		}
-		begin = keyAfter(history.back().key);
-	}
-	if (!currentTag.present()) {
+	// Tag-history keys sort by their big-endian assignment version, so the final
+	// key in this stream's prefix range contains its current tag.
+	RangeResult history = co_await tr->getRange(cdcTagHistoryRangeFor(streamId), 1, Snapshot::False, Reverse::True);
+	if (history.empty()) {
 		throw client_invalid_operation();
 	}
-	co_return currentTag.get();
+	co_return decodeCDCTagHistoryKey(history.front().key).tag;
 }
 
 // TODO: Persist current per-tag ownership so registration does not reconstruct it by scanning all active streams.
@@ -390,10 +380,12 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 					throw client_invalid_operation();
 				}
 				if (!(co_await getNativeCdcProxyAssignment(&tr, streamId)).present()) {
-					CODE_PROBE(true, "Native CDC registration restores missing stream owner");
+					CODE_PROBE(true, "Native CDC registration restores missing stream owner", probe::decoration::rare);
 					const Tag tag = co_await getNativeCdcCurrentTag(&tr, streamId);
 					Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
-					CODE_PROBE(sharedTagProxy.present(), "Native CDC shared-tag streams use one owner");
+					CODE_PROBE(sharedTagProxy.present(),
+					           "Native CDC shared-tag streams use one owner",
+					           probe::decoration::rare);
 					const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
 					tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
 					signalNativeCdcProxyAssignmentChange(&tr);
@@ -404,10 +396,12 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 
 			// Disabling CDC stops new admission, but existing registrations and
 			// owner repair must remain available so durable streams can drain.
-			validateNativeCdcEnabled(cx->clientInfo->get().nativeCdcEnabled);
+			const bool nativeCdcEnabled = cx->clientInfo->get().nativeCdcEnabled;
+			const int nativeCdcTagCount = cx->clientInfo->get().nativeCdcTagCount;
+			validateNativeCdcEnabled(nativeCdcEnabled);
 			NativeCdcIdentifierAllocator allocator;
 			co_await observeNativeCdcMetadata(&tr, &allocator);
-			const auto [streamId, tag] = allocator.allocate(cx->clientInfo->get().nativeCdcTagCount);
+			const auto [streamId, tag] = allocator.allocate(nativeCdcTagCount);
 			// The read version is a conservative lower bound for tag routing.
 			// The versionstamped minimum below is the commit version, and stream
 			// initialization takes their maximum before exposing mutations.
@@ -677,9 +671,7 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 		if (!registrationEnabled) {
 			Optional<CDCStreamId> existingStream = co_await findNativeCdcStreamId(cx, name);
 			if (cx->clientInfo->get().id != clientInfoId) {
-				CODE_PROBE(true,
-				           "Native CDC registration retries after client info changes during existence check",
-				           probe::decoration::rare);
+				CODE_PROBE(true, "Native CDC registration retries after client info changes during existence check");
 				continue;
 			}
 			if (!existingStream.present()) {
@@ -770,9 +762,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 			if (rewindUnacknowledgedCursorAfterProxyReplacement(
 			        &self->currentPosition, self->lastAcknowledgedVersion, &self->deliveryProxyId, proxy.id())) {
 				self->knownAvailableThrough = self->lastAcknowledgedVersion;
-				CODE_PROBE(true,
-				           "Native CDC consumer rewinds unacknowledged cursor after proxy replacement",
-				           probe::decoration::rare);
+				CODE_PROBE(true, "Native CDC consumer rewinds unacknowledged cursor after proxy replacement");
 			}
 			try {
 				CDCConsumeReply reply =
@@ -780,7 +770,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 				if (reply.lastConsumedVersion == self->currentPosition.lastConsumedVersion && reply.mutations.empty()) {
 					// The server lease bounds abandoned long polls. Renew it transparently so the public consume
 					// operation remains a long poll without accumulating server actors after client cancellation.
-					CODE_PROBE(true, "Native CDC consume renews an idle server lease", probe::decoration::rare);
+					CODE_PROBE(true, "Native CDC consume renews an idle server lease");
 					continue;
 				}
 				self->knownAvailableThrough = reply.lastConsumedVersion;
@@ -791,7 +781,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 				if (!retryNativeCdcProxyRequest(error)) {
 					throw;
 				}
-				CODE_PROBE(true, "Native CDC consume retries after proxy request failure", probe::decoration::rare);
+				CODE_PROBE(true, "Native CDC consume retries after proxy request failure");
 			}
 			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
 		}
@@ -803,7 +793,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 
 Future<CDCConsumeReply> NativeCdcConsumer::consume() {
 	if (operationOutstanding) {
-		CODE_PROBE(true, "Native CDC consumer rejects overlapping operations", probe::decoration::rare);
+		CODE_PROBE(true, "Native CDC consumer rejects overlapping operations");
 		return Future<CDCConsumeReply>(client_invalid_operation());
 	}
 	operationOutstanding = true;
@@ -850,7 +840,7 @@ Future<Void> NativeCdcConsumer::acknowledgeImpl(Reference<NativeCdcConsumer> sel
 
 Future<Void> NativeCdcConsumer::acknowledge() {
 	if (operationOutstanding) {
-		CODE_PROBE(true, "Native CDC consumer rejects overlapping operations", probe::decoration::rare);
+		CODE_PROBE(true, "Native CDC consumer rejects overlapping operations");
 		return Future<Void>(client_invalid_operation());
 	}
 	operationOutstanding = true;

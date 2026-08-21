@@ -207,6 +207,27 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                      "counter":0,
                      "roughness":0.0
                   },
+                  "active_watches":0,
+                  "total_watches":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "triggered_watches":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "timed_out_watches":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "errored_watches":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
                   "mutation_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -328,7 +349,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "type":"x",
                   "name":{
                      "$enum":[
-                        "file_open_error",
                         "incorrect_cluster_file_contents",
                         "trace_log_file_write_error",
                         "trace_log_could_not_create_file",

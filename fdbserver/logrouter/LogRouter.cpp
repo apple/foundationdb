@@ -21,10 +21,11 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/logsystem/LogSystem.h"
+#include "fdbserver/logsystem/LogSet.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logrouter/LogRouter.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "flow/ActorCollection.h"
@@ -46,7 +47,7 @@ struct LogRouterData {
 		TagData(Tag tag, Version popped, Version durableKnownCommittedVersion)
 		  : popped(popped), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
 
-		explicit(false) TagData(TagData&& r) noexcept
+		TagData(TagData&& r) noexcept
 		  : version_messages(std::move(r.version_messages)), popped(r.popped),
 		    durableKnownCommittedVersion(r.durableKnownCommittedVersion), tag(r.tag) {}
 		void operator=(TagData&& r) noexcept {

@@ -35,14 +35,14 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbrpc/sim_validation.h"
 #include "flow/Buggify.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 struct GrvProxyStats {
 	CounterCollection cc;
@@ -291,6 +291,9 @@ Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 			co_await tr->onError(err);
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		// Catch non-retryable errors (and do nothing).
 		TraceEvent(SevWarnAlways, "GlobalConfigMigrationError").error(e);
 	}
@@ -595,7 +598,9 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 				if (req.debugID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      req.debugID.get().first(),
-					                      "GrvProxyServer.queueTransactionStartRequests.Before");
+					                      "GrvProxyServer.queueTransactionStartRequests.Before",
+					                      req.spanContext.traceID,
+					                      req.spanContext.spanID);
 				}
 
 				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
@@ -682,10 +687,14 @@ Future<Void> lastCommitUpdater(GrvProxyData* self, PromiseStream<Future<Void>> a
 	}
 }
 
+Optional<UID> getDebugID(Optional<BatchDebugIDs> debugIDs) {
+	return debugIDs.present() ? Optional<UID>(debugIDs.get().debugID) : Optional<UID>();
+}
+
 Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spanContexts,
                                                     GrvProxyData* grvProxyData,
                                                     uint32_t flags,
-                                                    Optional<UID> debugID,
+                                                    Optional<BatchDebugIDs> debugIDs,
                                                     int transactionCount,
                                                     int systemTransactionCount,
                                                     int defaultPriTransactionCount,
@@ -702,6 +711,7 @@ Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spa
 	++grvProxyData->stats.txnStartBatch;
 
 	double grvStart = now();
+	Optional<UID> debugID = getDebugID(debugIDs);
 	Future<GetRawCommittedVersionReply> replyFromMasterFuture;
 	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
 	    GetRawCommittedVersionRequest(span.context, debugID, grvProxyData->ssVersionVectorCache.getMaxVersion()),
@@ -717,8 +727,11 @@ Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spa
 	double grvConfirmEpochLive = now();
 	grvProxyData->stats.grvConfirmEpochLiveDist->sampleSeconds(grvConfirmEpochLive - grvStart);
 	if (debugID.present()) {
-		g_traceBatch.addEvent(
-		    "TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.confirmEpochLive");
+		g_traceBatch.addEvent("TransactionDebug",
+		                      debugID.get().first(),
+		                      "GrvProxyServer.getLiveCommittedVersion.confirmEpochLive",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 
 	GetRawCommittedVersionReply repFromMaster =
@@ -745,8 +758,11 @@ Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spa
 	                                                 : g_network->networkInfo.metrics.lastRunLoopBusyness);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent(
-		    "TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.After");
+		g_traceBatch.addEvent("TransactionDebug",
+		                      debugID.get().first(),
+		                      "GrvProxyServer.getLiveCommittedVersion.After",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 
 	grvProxyData->stats.txnStartOut += transactionCount;
@@ -1013,7 +1029,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		std::vector<std::vector<GetReadVersionRequest>> start(
 		    2); // start[0] is transactions starting with !(flags&CAUSAL_READ_RISKY), start[1] is transactions starting
 		        // with flags&CAUSAL_READ_RISKY
-		Optional<UID> debugID;
+		Optional<BatchDebugIDs> debugIDs;
 
 		int requestsToStart = 0;
 
@@ -1043,10 +1059,17 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			}
 
 			if (req.debugID.present()) {
-				if (!debugID.present()) {
-					debugID = nondeterministicRandom()->randomUniqueID();
+				if (!debugIDs.present()) {
+					debugIDs = BatchDebugIDs{ nondeterministicRandom()->randomUniqueID(),
+						                      req.spanContext.traceID,
+						                      req.spanContext.spanID };
 				}
-				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
+				Optional<UID> debugID = getDebugID(debugIDs);
+				g_traceBatch.addAttach("TransactionAttachID",
+				                       req.debugID.get().first(),
+				                       debugID.get().first(),
+				                       req.spanContext.traceID,
+				                       req.spanContext.spanID);
 			}
 
 			transactionsStarted[req.flags & 1] += tc;
@@ -1121,10 +1144,13 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		                               systemQueue.empty() && defaultQueue.empty() && batchQueue.empty(),
 		                               elapsed);
 
-		if (debugID.present()) {
+		if (debugIDs.present()) {
+			Optional<UID> debugID = getDebugID(debugIDs);
 			g_traceBatch.addEvent("TransactionDebug",
 			                      debugID.get().first(),
-			                      "GrvProxyServer.transactionStarter.AskLiveCommittedVersionFromMaster");
+			                      "GrvProxyServer.transactionStarter.AskLiveCommittedVersionFromMaster",
+			                      debugIDs.get().debugTraceID,
+			                      debugIDs.get().debugSpanID);
 		}
 
 		int defaultGRVProcessed = 0;
@@ -1140,7 +1166,7 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(spanContexts,
 				                                                                       grvProxyData,
 				                                                                       i,
-				                                                                       debugID,
+				                                                                       debugIDs,
 				                                                                       transactionsStarted[i],
 				                                                                       systemTransactionsStarted[i],
 				                                                                       defaultPriTransactionsStarted[i],
@@ -1250,7 +1276,7 @@ Future<Void> grvProxyServer(GrvProxyInterface proxy,
 		ASSERT(e.code() !=
 		       error_code_broken_promise); // all broken_promise should be transformed to the correct error code
 		CODE_PROBE(e.code() == error_code_master_failed, "GrvProxyServer master failed");
-		CODE_PROBE(e.code() == error_code_tlog_failed, "GrvProxyServer tlog failed");
+		CODE_PROBE(e.code() == error_code_tlog_failed, "GrvProxyServer tlog failed", probe::decoration::rare);
 		CODE_PROBE(e.code() == error_code_failed_to_progress, "GRV proxy failed to progress");
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&

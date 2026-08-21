@@ -28,7 +28,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "flow/ThreadHelper.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 #define DEFINE_GRPC_HANDLER(rpcName, handlerName)                                                                      \
 	grpc::Status rpcName(grpc::ServerContext* context, const rpcName##Request* req, rpcName##Reply* rep) override {    \

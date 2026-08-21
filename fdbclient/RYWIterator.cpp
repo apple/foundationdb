@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbclient/RYWIterator.h"
+#include "RYWIterator.h"
+#include "fdbclient/RandomTestUtils.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "flow/UnitTest.h"
 

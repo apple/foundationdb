@@ -66,19 +66,18 @@ set(out_files "${out_files};${options_file};${apiversion_file}")
 
 # Create Python package in tar.gz format
 configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_CURRENT_BINARY_DIR}/LICENSE COPYONLY)
-find_program(pycodestyle pycodestyle)
-if (pycodestyle)
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/check_py_code_style
-    COMMAND ${pycodestyle} bindings/python --config=${CMAKE_CURRENT_SOURCE_DIR}/pycodestyle.cfg &&
-            ${CMAKE_COMMAND} -E ${CMAKE_CURRENT_BINARY_DIR}/check_py_code_style
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    DEPENDS ${out_files}
-    COMMENT "Check python code style")
-  add_custom_target(fdb_python_check DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/check_py_code_style)
-else()
-  add_custom_target(fdb_python_check COMMAND ${CMAKE_COMMAND} -E echo "Skipped Python style check! Missing: pycodestyle")
-endif()
 
+add_test(
+  NAME              python_pycodestyle
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  COMMAND sh -c "
+    if ! which pycodestyle >/dev/null; then
+      exit 66
+    fi
+    pycodestyle . --config=${CMAKE_CURRENT_SOURCE_DIR}/pycodestyle.cfg
+    "
+)
+set_tests_properties(python_pycodestyle PROPERTIES SKIP_RETURN_CODE 66)
 
 set(setup_file_name foundationdb-${FDB_PY_VERSION}.tar.gz)
 set(wheel_file_name foundationdb-${FDB_PY_VERSION}-py3-none-any.whl)
@@ -88,11 +87,28 @@ set(wheel_package_file ${CMAKE_BINARY_DIR}/packages/${wheel_file_name})
 # Build both source distribution and wheel
 # Note: foundationdb is a pure Python package (uses ctypes), so wheel is py3-none-any
 set(PYPKG_VENV_DIR "${CMAKE_BINARY_DIR}/pypkg-venv")
-set(PYPKG_PY3      "${PYPKG_VENV_DIR}/bin/python3")
+set(PYPKG_PY3       ${Python3_EXECUTABLE})
+execute_process(
+  COMMAND         ${PYPKG_PY3} -m build --version
+  RESULT_VARIABLE PY_BUILD_STATUS
+  OUTPUT_VARIABLE PY_BUILD_OUTPUT
+  ERROR_VARIABLE  PY_BUILD_OUTPUT
+)
+if(PY_BUILD_STATUS EQUAL 0)
+  message(STATUS "Found python ${PY_BUILD_OUTPUT}")
+else()
+  message(STATUS "Setting up python pkg build virtual environment")
+  execute_process(COMMAND ${Python3_EXECUTABLE} -m venv ${PYPKG_VENV_DIR} COMMAND_ERROR_IS_FATAL ANY)
+  find_program(
+    VENV_Python3_EXECUTABLE
+    NAMES python3 python3.exe python.exe
+    PATHS ${PYPKG_VENV_DIR}/Scripts ${PYPKG_VENV_DIR}/bin
+    REQUIRED NO_DEFAULT_PATH NO_CACHE
+    DOC "Checking Python3 executable in virtual environment")
+  set(PYPKG_PY3 ${VENV_Python3_EXECUTABLE})
+  execute_process(COMMAND "${PYPKG_PY3}" -m pip install build COMMAND_ERROR_IS_FATAL ANY)
+endif()
 add_custom_command(OUTPUT ${package_file} ${wheel_package_file}
-  COMMAND $<TARGET_FILE:Python3::Interpreter> -m venv "${PYPKG_VENV_DIR}"
-  COMMAND ${PYPKG_PY3} -m ensurepip
-  COMMAND ${PYPKG_PY3} -m pip install --upgrade build
   COMMAND ${PYPKG_PY3} -m build --sdist --wheel
   COMMAND ${CMAKE_COMMAND} -E copy dist/${setup_file_name} ${package_file}
   COMMAND ${CMAKE_COMMAND} -E copy dist/${wheel_file_name} ${wheel_package_file}
@@ -120,8 +136,7 @@ if(NOT OPEN_FOR_IDE AND NOT USE_SANITIZER)
       if ! [ -f '${package_file}' ]; then
         exit 66
       fi
-      $<TARGET_FILE:Python3::Interpreter> -m venv ${PYPKG_TEST_DIR}
-      ${PYPKG_TEST_PY3} -m ensurepip   # probably not needed, but for consistency
+      ${Python3_EXECUTABLE} -m venv ${PYPKG_TEST_DIR}
       ${PYPKG_TEST_PY3} -m pip install '${package_file}'
       ${PYPKG_TEST_PY3} -c 'import fdb'
       ${PYPKG_TEST_PY3} -m pip install '${wheel_package_file}'

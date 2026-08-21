@@ -28,10 +28,10 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/logsystem/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/CDCRoutingTable.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
-#include "flow/UnitTest.h"
 
 Reference<StorageInfo> getStorageInfo(UID id,
                                       std::map<UID, Reference<StorageInfo>>* storageCache,
@@ -47,74 +47,6 @@ Reference<StorageInfo> getStorageInfo(UID id,
 		storageInfo = cacheItr->second;
 	}
 	return storageInfo;
-}
-
-CDCRoutingTable::CDCRoutingTable() {
-	tagsByRange.insert(allKeys, std::set<Tag>());
-}
-
-void CDCRoutingTable::updateRange(CDCStreamId streamId, KeyRangeRef const& keys) {
-	streams[streamId].keys = KeyRange(keys);
-}
-
-bool CDCRoutingTable::updateTag(CDCStreamId streamId, Version version, Tag tag) {
-	ASSERT_EQ(tag.locality, tagLocalityCDC);
-	auto& existing = streams[streamId].tag;
-	if (!existing.present() || version >= existing.get().first) {
-		existing = std::make_pair(version, tag);
-		return true;
-	}
-	return false;
-}
-
-void CDCRoutingTable::rebuildRanges() {
-	tagsByRange.insert(allKeys, std::set<Tag>());
-	for (const auto& [streamId, state] : streams) {
-		if (!state.keys.present() || !state.tag.present()) {
-			continue;
-		}
-		for (auto range : tagsByRange.modify(state.keys.get())) {
-			range->value().insert(state.tag.get().second);
-		}
-	}
-	tagsByRange.coalesce(allKeys);
-}
-
-void CDCRoutingTable::setRange(CDCStreamId streamId, KeyRangeRef const& keys) {
-	updateRange(streamId, keys);
-	rebuildRanges();
-}
-
-void CDCRoutingTable::setTag(CDCStreamId streamId, Version version, Tag tag) {
-	if (updateTag(streamId, version, tag)) {
-		rebuildRanges();
-	}
-}
-
-void CDCRoutingTable::reload(IKeyValueStore* txnStateStore) {
-	streams.clear();
-	const RangeResult streamRows = txnStateStore->readRange(cdcStreamKeys).get();
-	for (const auto& kv : streamRows) {
-		updateRange(decodeCDCStreamKey(kv.key), decodeCDCStreamKeysValue(kv.value));
-	}
-	const RangeResult tagHistoryRows = txnStateStore->readRange(cdcTagHistoryKeys).get();
-	for (const auto& kv : tagHistoryRows) {
-		const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(kv.key);
-		updateTag(history.streamId, history.version, history.tag);
-	}
-	rebuildRanges();
-}
-
-const std::set<Tag>& CDCRoutingTable::tagsForKey(KeyRef const& key) const {
-	return tagsByRange.rangeContaining(key).value();
-}
-
-std::set<Tag> CDCRoutingTable::tagsForRange(KeyRangeRef const& keys) const {
-	std::set<Tag> tags;
-	for (auto range : tagsByRange.intersectingRanges(keys)) {
-		tags.insert(range.value().begin(), range.value().end());
-	}
-	return tags;
 }
 
 namespace {
@@ -1370,30 +1302,4 @@ bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 		}
 	}
 	return false;
-}
-
-TEST_CASE("/NativeCDC/RoutingTable") {
-	CDCRoutingTable table;
-	const Tag ordersTag(tagLocalityCDC, 1);
-	const Tag overlappingTag(tagLocalityCDC, 2);
-	const Tag rotatedOrdersTag(tagLocalityCDC, 3);
-
-	ASSERT(table.tagsForKey("b"_sr).empty());
-	ASSERT(table.tagsForRange(KeyRangeRef("b"_sr, "x"_sr)).empty());
-
-	table.setRange(1, KeyRangeRef("a"_sr, "m"_sr));
-	table.setTag(1, 100, ordersTag);
-	table.setRange(2, KeyRangeRef("g"_sr, "z"_sr));
-	table.setTag(2, 100, overlappingTag);
-
-	ASSERT_EQ(table.tagsForKey("b"_sr), std::set<Tag>{ ordersTag });
-	ASSERT_EQ(table.tagsForKey("h"_sr), (std::set<Tag>{ ordersTag, overlappingTag }));
-	ASSERT_EQ(table.tagsForKey("x"_sr), std::set<Tag>{ overlappingTag });
-	ASSERT_EQ(table.tagsForRange(KeyRangeRef("b"_sr, "x"_sr)), (std::set<Tag>{ ordersTag, overlappingTag }));
-
-	table.setTag(1, 200, rotatedOrdersTag);
-	ASSERT_EQ(table.tagsForKey("b"_sr), std::set<Tag>{ rotatedOrdersTag });
-	ASSERT_EQ(table.tagsForKey("h"_sr), (std::set<Tag>{ rotatedOrdersTag, overlappingTag }));
-
-	return Void();
 }

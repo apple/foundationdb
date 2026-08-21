@@ -23,8 +23,8 @@
 #include "fdbclient/ProcessClass.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/ReplicationTypes.h"
-#include "fdbserver/datadistributor/DDTxnProcessor.h"
-#include "fdbserver/datadistributor/DataDistributionTeam.h"
+#include "DDTxnProcessor.h"
+#include "DataDistributionTeam.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 
@@ -182,7 +182,6 @@ public:
 
 // TeamCollection's server team info.
 class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
-	friend class TCTeamInfoImpl;
 	std::vector<Reference<TCServerInfo>> servers;
 	std::vector<UID> serverIDs;
 	bool healthy;

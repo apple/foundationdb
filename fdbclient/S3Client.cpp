@@ -657,6 +657,7 @@ Future<Void> copyUpBulkDumpFileSet(std::string s3url,
 
 	TraceEvent(s3VerboseEventSev(), "S3ClientCopyUpBulkDumpFileSetStart")
 	    .detail("Bucket", bucket)
+	    .setMaxFieldLength(495)
 	    .detail("SourceFileSet", sourceFileSet.toString())
 	    .detail("DestinationFileSet", destinationFileSet.toString());
 	int pNumDeleted = 0;

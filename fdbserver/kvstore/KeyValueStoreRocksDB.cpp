@@ -1307,7 +1307,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		    rateLimiter(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0
 		                    ? rocksdb::NewGenericRateLimiter(
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
-		                          100 * 1000, // refill_period_us
+		                          100LL * 1000, // refill_period_us
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_FAIRNESS, // fairness
 		                          rocksdb::RateLimiter::Mode::kAllIo,
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE)

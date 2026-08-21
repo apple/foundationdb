@@ -258,7 +258,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	//Backup
 	init( BACKUP_LOCAL_FILE_WRITE_BLOCK,      024*1024 );
-	init( BACKUP_MANIFEST_WRITE_CHUNK_SIZE,  std::numeric_limits<int>::max() ); if( randomize && buggify() ) BACKUP_MANIFEST_WRITE_CHUNK_SIZE = 64;
+	init( BACKUP_MANIFEST_CHUNK_SIZE,  std::numeric_limits<int>::max() ); if( randomize && buggify() ) BACKUP_MANIFEST_CHUNK_SIZE = 64;
 	init( BACKUP_CONCURRENT_DELETES,               100 );
 	init( BACKUP_SIMULATED_LIMIT_BYTES,            1e6 ); if( randomize && buggify() ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
 	init( BACKUP_GET_RANGE_LIMIT_BYTES,            1e6 );

@@ -295,8 +295,9 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 				do {
 					// Generate random length and offset
 					if (unbufferedIO) {
-						info.length =
-						    deterministicRandom()->randomInt(1, maxOperationSize / _PAGE_SIZE + 1) * _PAGE_SIZE;
+						info.length = static_cast<uint64_t>(
+						                  deterministicRandom()->randomInt(1, maxOperationSize / _PAGE_SIZE + 1)) *
+						              _PAGE_SIZE;
 						info.offset =
 						    (int64_t)(deterministicRandom()->random01() * maxOffset / _PAGE_SIZE) * _PAGE_SIZE;
 					} else {

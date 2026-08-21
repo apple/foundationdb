@@ -363,7 +363,7 @@ UID LogSystem::getDebugID() const {
 void LogSystem::addPseudoLocality(int8_t locality) {
 	ASSERT(locality < 0);
 	pseudoLocalities.insert(locality);
-	for (uint16_t i = 0; i < logRouterTags; i++) {
+	for (int i = 0; i < logRouterTags; i++) {
 		pseudoLocalityPopVersion[Tag(locality, i)] = 0;
 	}
 }
@@ -372,7 +372,8 @@ Tag LogSystem::getPseudoPopTag(Tag tag, ProcessClass::ClassType type) const {
 	switch (type) {
 	case ProcessClass::LogRouterClass:
 		if (tag.locality == tagLocalityLogRouter) {
-			ASSERT(pseudoLocalities.contains(tagLocalityLogRouterMapped));
+			// A log router from an earlier multi-region epoch can still forward a delayed pop after the
+			// current epoch becomes single-region. Keep the mapped tag so the TLog can safely discard it.
 			tag.locality = tagLocalityLogRouterMapped;
 		}
 		break;
@@ -530,16 +531,6 @@ void LogSystem::purgeOldRecoveredGenerationsCoreState(DBCoreState& newState) {
 	}
 }
 
-void LogSystem::purgeOldRecoveredGenerationsInMemory(const DBCoreState& newState) {
-	auto generations = newState.oldTLogData.size();
-	if (generations < oldLogData.size()) {
-		TraceEvent("PurgeOldTLogGenerationsInMemory", dbgid)
-		    .detail("OldGenerations", oldLogData.size())
-		    .detail("NewGenerations", generations);
-		oldLogData.resize(generations);
-	}
-}
-
 void LogSystem::toCoreState(DBCoreState& newState) const {
 	if (recoveryComplete.isValid() && recoveryComplete.isError())
 		throw recoveryComplete.getError();
@@ -681,20 +672,8 @@ Future<Void> LogSystem::onError() const {
 						}
 					}
 				}
-				// Monitor changes of backup workers for old epochs.
-				for (const auto& worker : old.tLogs[0]->backupWorkers) {
-					if (worker->get().present()) {
-						backupFailed.push_back(
-						    waitFailureClient(worker->get().interf().waitFailure,
-						                      /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
-						                      /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
-						                          SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-						                      /* trace */ true,
-						                      /* traceMsg */ "OldBackupWorkerFailed"_sr));
-					} else {
-						changes.push_back(worker->onChange());
-					}
-				}
+				// Old-generation backup workers are stateless and persist their progress. A failure can retain
+				// this generation, but must not restart transaction-system recovery.
 			}
 		}
 
@@ -1137,10 +1116,12 @@ LogSystemConfig LogSystem::getLogSystemConfig() const {
 		}
 	}
 
-	if (!recoveryCompleteWrittenToCoreState.get()) {
-		for (const auto& oldData : oldLogData) {
-			logSystemConfig.oldTLogs.push_back(toOldTLogConf(oldData));
-		}
+	// ServerDBInfo uses oldTLogs to keep old-generation TLog roles from displacing
+	// themselves while this cluster controller is alive. Durable state/logsKey can
+	// drop recovered old generations earlier, but these roles may still be needed
+	// if this recovery has to run again.
+	for (const auto& oldData : oldLogData) {
+		logSystemConfig.oldTLogs.push_back(toOldTLogConf(oldData));
 	}
 	return logSystemConfig;
 }
@@ -1597,7 +1578,7 @@ void getTLogLocIds(const std::vector<Reference<LogSet>>& tLogs,
 		if (!it->isLocal) {
 			continue;
 		}
-		for (uint16_t i = 0; i < it->logServers.size(); i++) {
+		for (size_t i = 0; i < it->logServers.size(); i++) {
 			if (it->logServers[i]->get().present()) {
 				interfLocMap[it->logServers[i]->get().interf().id()] = location;
 			}

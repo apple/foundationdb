@@ -32,9 +32,11 @@ enum {
 	OP_GETRANGE,
 	OP_SGET,
 	OP_SGETRANGE,
+	OP_STATUSJSON,
 	OP_UPDATE,
 	OP_INSERT,
 	OP_INSERTRANGE,
+	OP_OVERWRITE,
 	OP_CLEAR,
 	OP_SETCLEAR,
 	OP_CLEARRANGE,
@@ -42,7 +44,7 @@ enum {
 	OP_COMMIT,
 	MAX_OP
 };
-enum { OP_COUNT, OP_RANGE };
+enum { OP_COUNT, OP_RANGE, OP_REVERSE };
 struct MakoWorkload : TestWorkload {
 	static constexpr auto NAME = "Mako";
 
@@ -58,7 +60,7 @@ struct MakoWorkload : TestWorkload {
 	std::vector<std::pair<uint64_t, double>> ratesAtKeyCounts;
 	std::string operationsSpec;
 	// store operations to execute
-	int operations[MAX_OP][2];
+	int operations[MAX_OP][3];
 	// used for periodically tracing
 	std::vector<PerfMetric> periodicMetrics;
 	// store latency of each operation with sampling
@@ -68,10 +70,10 @@ struct MakoWorkload : TestWorkload {
 	// key prefix of for all generated keys
 	std::string keyPrefix;
 	int KEYPREFIXLEN;
-	const std::array<std::string, MAX_OP> opNames = { "GRV",       "GET",      "GETRANGE",   "SGET",
-		                                              "SGETRANGE", "UPDATE",   "INSERT",     "INSERTRANGE",
-		                                              "CLEAR",     "SETCLEAR", "CLEARRANGE", "SETCLEARRANGE",
-		                                              "COMMIT" };
+	const std::array<std::string, MAX_OP> opNames = { "GRV",         "GET",           "GETRANGE", "SGET",
+		                                              "SGETRANGE",   "STATUSJSON",    "UPDATE",   "INSERT",
+		                                              "INSERTRANGE", "OVERWRITE",     "CLEAR",    "SETCLEAR",
+		                                              "CLEARRANGE",  "SETCLEARRANGE", "COMMIT" };
 	explicit MakoWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), loadTime(0.0), xacts("Transactions"), retries("Retries"), conflicts("Conflicts"),
 	    commits("Commits"), totalOps("Operations") {
@@ -127,14 +129,17 @@ struct MakoWorkload : TestWorkload {
 		// gr – GET RANGE
 		// sg – Snapshot GET
 		// sgr – Snapshot GET RANGE
+		// sj – GET special-key-space status JSON
 		// u – Update (= GET followed by SET)
 		// i – Insert (= SET with a new key)
 		// ir – Insert Range (Sequential)
+		// o – Overwrite (= blind SET on an existing key)
 		// c – CLEAR
 		// sc – SET & CLEAR
 		// cr – CLEAR RANGE
 		// scr – SET & CLEAR RANGE
 		// grv – GetReadVersion()
+		// A negative range on gr or sgr reads the selected keys in reverse order.
 		// Every transaction is committed unless it contains only GET / GET RANGE operations.
 		operationsSpec = getOption(options, "operations"_sr, "g100"_sr).contents().toString();
 		//  parse the sequence and extract operations to be executed
@@ -216,7 +221,8 @@ struct MakoWorkload : TestWorkload {
 			}
 
 			// Meaningful Latency metrics
-			const int opExecutedAtOnce[] = { OP_GETREADVERSION, OP_GET, OP_GETRANGE, OP_SGET, OP_SGETRANGE, OP_COMMIT };
+			const int opExecutedAtOnce[] = { OP_GETREADVERSION, OP_GET,        OP_GETRANGE, OP_SGET,
+				                             OP_SGETRANGE,      OP_STATUSJSON, OP_COMMIT };
 			for (const int& op : opExecutedAtOnce) {
 				m.emplace_back("Mean " + opNames[op] + " Latency (us)", 1e6 * opLatencies[op].mean(), Averaged::True);
 				m.emplace_back(
@@ -226,7 +232,7 @@ struct MakoWorkload : TestWorkload {
 			}
 			// Latency for local operations if needed
 			if (latencyForLocalOperation) {
-				const int localOp[] = { OP_INSERT, OP_CLEAR, OP_CLEARRANGE };
+				const int localOp[] = { OP_INSERT, OP_OVERWRITE, OP_CLEAR, OP_CLEARRANGE };
 				for (const int& op : localOp) {
 					TraceEvent(SevDebug, "LocalLatency")
 					    .detail("Name", opNames[op])
@@ -465,7 +471,7 @@ struct MakoWorkload : TestWorkload {
 
 						// used for mako-level consistency check
 						if (checksumVerification) {
-							if (i == OP_INSERT | i == OP_UPDATE | i == OP_CLEAR) {
+							if (i == OP_INSERT || i == OP_UPDATE || i == OP_OVERWRITE || i == OP_CLEAR) {
 								updateCSFlags(csChangedFlags, indBegin, indBegin + 1);
 							} else if (i == OP_CLEARRANGE) {
 								updateCSFlags(csChangedFlags, indBegin, indEnd);
@@ -477,14 +483,22 @@ struct MakoWorkload : TestWorkload {
 						} else if (i == OP_GET) {
 							co_await logLatency(tr.get(rkey, Snapshot::False), &opLatencies[i]);
 						} else if (i == OP_GETRANGE) {
-							co_await logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::False),
+							co_await logLatency(tr.getRange(rkeyRangeRef,
+							                                CLIENT_KNOBS->TOO_MANY,
+							                                Snapshot::False,
+							                                operations[i][OP_REVERSE] ? Reverse::True : Reverse::False),
 							                    &opLatencies[i]);
 						} else if (i == OP_SGET) {
 							co_await logLatency(tr.get(rkey, Snapshot::True), &opLatencies[i]);
 						} else if (i == OP_SGETRANGE) {
 							// do snapshot get range here
-							co_await logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::True),
+							co_await logLatency(tr.getRange(rkeyRangeRef,
+							                                CLIENT_KNOBS->TOO_MANY,
+							                                Snapshot::True,
+							                                operations[i][OP_REVERSE] ? Reverse::True : Reverse::False),
 							                    &opLatencies[i]);
+						} else if (i == OP_STATUSJSON) {
+							co_await logLatency(tr.get("\xff\xff/status/json"_sr, Snapshot::False), &opLatencies[i]);
 						} else if (i == OP_UPDATE) {
 							co_await logLatency(tr.get(rkey, Snapshot::False), &opLatencies[OP_GET]);
 							if (latencyForLocalOperation) {
@@ -520,6 +534,15 @@ struct MakoWorkload : TestWorkload {
 								} else {
 									tr.set(rkey, randomValue());
 								}
+							}
+							doCommit = true;
+						} else if (i == OP_OVERWRITE) {
+							if (latencyForLocalOperation) {
+								double opBegin = timer();
+								tr.set(rkey, rval);
+								opLatencies[OP_OVERWRITE].addSample(timer() - opBegin);
+							} else {
+								tr.set(rkey, rval);
 							}
 							doCommit = true;
 						} else if (i == OP_CLEAR) {
@@ -620,15 +643,18 @@ struct MakoWorkload : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			TraceEvent("FailedToExecOperations").error(err);
-			if (err.code() == error_code_operation_cancelled)
-				throw err;
-			else if (err.code() == error_code_not_committed)
-				++conflicts;
-			co_await tr.onError(err);
-			++retries;
+			if (err.isValid()) {
+				TraceEvent("FailedToExecOperations").error(err);
+				if (err.code() == error_code_operation_cancelled)
+					throw err;
+				else if (err.code() == error_code_not_committed)
+					++conflicts;
+				co_await tr.onError(err);
+				++retries;
+			}
 			// reset all the operations' counters to 0
 			std::fill(perOpCount.begin(), perOpCount.end(), 0);
+			std::fill(csChangedFlags.begin(), csChangedFlags.end(), false);
 			tr.reset();
 		}
 	}
@@ -678,6 +704,7 @@ struct MakoWorkload : TestWorkload {
 		for (op = 0; op < MAX_OP; op++) {
 			operations[op][OP_COUNT] = 0;
 			operations[op][OP_RANGE] = 0;
+			operations[op][OP_REVERSE] = 0;
 		}
 
 		op = 0;
@@ -699,6 +726,9 @@ struct MakoWorkload : TestWorkload {
 			} else if (strncmp(ptr, "sg", 2) == 0) {
 				op = OP_SGET;
 				ptr += 2;
+			} else if (strncmp(ptr, "sj", 2) == 0) {
+				op = OP_STATUSJSON;
+				ptr += 2;
 			} else if (strncmp(ptr, "u", 1) == 0) {
 				op = OP_UPDATE;
 				ptr++;
@@ -708,6 +738,9 @@ struct MakoWorkload : TestWorkload {
 				ptr += 2;
 			} else if (strncmp(ptr, "i", 1) == 0) {
 				op = OP_INSERT;
+				ptr++;
+			} else if (strncmp(ptr, "o", 1) == 0) {
+				op = OP_OVERWRITE;
 				ptr++;
 			} else if (strncmp(ptr, "cr", 2) == 0) {
 				op = OP_CLEARRANGE;
@@ -747,6 +780,12 @@ struct MakoWorkload : TestWorkload {
 					break;
 				} else {
 					ptr++; /* skip ':' */
+					if (*ptr == '-') {
+						operations[op][OP_REVERSE] = 1;
+						ptr++;
+					} else {
+						operations[op][OP_REVERSE] = 0;
+					}
 					num = 0;
 					if ((*ptr < '0') || (*ptr > '9')) {
 						error = 1;

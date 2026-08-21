@@ -45,6 +45,13 @@ struct AwaitCancelHandler {
 	virtual void cancelWait() = 0;
 };
 
+// Pass this as the first argument to a coroutine to record the exact frame
+// size that its promise allocator receives. The argument is consumed during
+// frame allocation, before the coroutine body begins.
+struct FrameSizeRecorder {
+	size_t* frameSize;
+};
+
 template <class F>
 struct FutureReturnType;
 
@@ -224,9 +231,12 @@ struct NoThrowOnCancelCoroActor final : Actor<std::conditional_t<std::is_void_v<
 	}
 
 	void cancel() override {
-		if (!SAV<ValType>::canBeSet()) {
+		if (!SAV<ValType>::canBeSet() || actorWaitStateIsCancelled(Actor<ValType>::actor_wait_state)) {
 			return;
 		}
+
+		// Detaching a waiter or destroying the frame can synchronously reenter cancellation.
+		Actor<ValType>::actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
 
 		if (cancelHandler) {
 			// The handler object is stored in the coroutine frame, so unregister
@@ -599,12 +609,58 @@ template <class Awaiter, class ValueType>
 struct AwaitableResume<Awaiter, ValueType, /* IsStream = */ true, /* ReturnsExplicitVoid = */ true>
   : AwaitableResume<Awaiter, ValueType, /* IsStream = */ true, /* ReturnsExplicitVoid = */ false> {};
 
+template <class Awaiter, class PromiseType>
+class AwaitableFutureState : public AwaitCancelHandler {
+public:
+	[[maybe_unused]] [[nodiscard]] bool await_ready() const {
+		auto* self = static_cast<const Awaiter*>(this);
+		if (actorWaitStateIsCancelled(self->pt->waitState())) {
+			self->pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
+			return true;
+		}
+		return self->future.isReady();
+	}
+
+	[[maybe_unused]] void await_suspend(n_coroutine::coroutine_handle<> handle) {
+		auto* self = static_cast<Awaiter*>(this);
+		self->pt->setHandle(handle);
+		self->pt->waitState() = ACTOR_WAIT_STATE_WAITING;
+
+		auto callbackFuture = self->getCallbackFuture();
+		callbackFuture.addCallbackAndClear(self);
+		self->pt->setCancelHandler(this);
+	}
+
+	// NoThrowOnCancel destroys the coroutine frame instead of resuming this
+	// awaiter, so detach its callback before destroying the frame.
+	void cancelWait() override { static_cast<Awaiter*>(this)->remove(); }
+
+	bool resumeImpl() {
+		auto* self = static_cast<Awaiter*>(this);
+		self->pt->clearCancelHandler(this);
+		switch (self->pt->waitState()) {
+		case ACTOR_WAIT_STATE_CANCELLED:
+			self->remove();
+		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
+			// await_ready() observed cancellation before callback registration.
+			throw actor_cancelled();
+		}
+
+		bool wasReady = self->pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
+		if (actorWaitStateIsWaiting(self->pt->waitState())) {
+			self->remove();
+			self->pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
+		}
+		return wasReady;
+	}
+};
+
 // Awaiter for `Future<T>` and `FutureStream<T>` values transformed through a
 // coroutine promise.
 template <class PromiseType, class ValueType, bool IsStream, bool ReturnsExplicitVoid = false>
 struct AwaitableFuture
   : std::conditional_t<IsStream, SingleCallback<ToFutureVal<ValueType>>, Callback<ToFutureVal<ValueType>>>,
-    AwaitCancelHandler,
+    AwaitableFutureState<AwaitableFuture<PromiseType, ValueType, IsStream, ReturnsExplicitVoid>, PromiseType>,
     AwaitableResume<AwaitableFuture<PromiseType, ValueType, IsStream, ReturnsExplicitVoid>,
                     ValueType,
                     IsStream,
@@ -643,60 +699,18 @@ struct AwaitableFuture
 		pt->resume();
 	}
 
-	[[maybe_unused]] [[nodiscard]] bool await_ready() const {
-		if (actorWaitStateIsCancelled(pt->waitState())) {
-			pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
-			return true;
-		}
-		return future.isReady();
-	}
-
-	[[maybe_unused]] void await_suspend(n_coroutine::coroutine_handle<> h) {
-		// Create a coroutine callback if it's the first time being suspended
-		pt->setHandle(h);
-
-		// Set wait_state and add callback
-		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
-
+	auto getCallbackFuture() {
 		if constexpr (IsStream) {
-			auto sf = std::move(future);
-			sf.addCallbackAndClear(this);
+			return std::move(future);
 		} else {
-			StrictFuture<FutureValue> sf = future;
-			sf.addCallbackAndClear(this);
+			return StrictFuture<FutureValue>(future);
 		}
-		pt->setCancelHandler(this);
-	}
-
-	// NoThrowOnCancel destroys the coroutine frame instead of resuming this
-	// awaiter, so detach the callback from the Future before that happens.
-	void cancelWait() override { this->remove(); }
-
-	bool resumeImpl() {
-		pt->clearCancelHandler(this);
-		// If actor is cancelled, then throw actor_cancelled()
-		switch (pt->waitState()) {
-		case ACTOR_WAIT_STATE_CANCELLED:
-			this->remove();
-		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
-			// await_ready() observed cancellation before await_suspend() registered a callback, so there is nothing to
-			// remove here.
-			throw actor_cancelled();
-		}
-
-		bool wasReady = pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
-		// Actor return from waiting, remove callback and reset wait_state.
-		if (actorWaitStateIsWaiting(pt->waitState())) {
-			this->remove();
-
-			pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
-		}
-		return wasReady;
 	}
 };
 
 template <class PromiseType, class ValueType>
-struct AwaitableFutureOwning : Callback<ToFutureVal<ValueType>>, AwaitCancelHandler {
+struct AwaitableFutureOwning : Callback<ToFutureVal<ValueType>>,
+                               AwaitableFutureState<AwaitableFutureOwning<PromiseType, ValueType>, PromiseType> {
 	using FutureValue = ToFutureVal<ValueType>;
 	Future<FutureValue> future;
 	PromiseType* pt = nullptr;
@@ -707,43 +721,7 @@ struct AwaitableFutureOwning : Callback<ToFutureVal<ValueType>>, AwaitCancelHand
 	void fire(FutureValue&&) override { pt->resume(); }
 	void error(Error) override { pt->resume(); }
 
-	[[maybe_unused]] [[nodiscard]] bool await_ready() const {
-		if (actorWaitStateIsCancelled(pt->waitState())) {
-			pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
-			return true;
-		}
-		return future.isReady();
-	}
-
-	[[maybe_unused]] void await_suspend(n_coroutine::coroutine_handle<> h) {
-		pt->setHandle(h);
-		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
-
-		StrictFuture<FutureValue> sf = future;
-		sf.addCallbackAndClear(this);
-		pt->setCancelHandler(this);
-	}
-
-	// NoThrowOnCancel destroys the coroutine frame instead of resuming this
-	// awaiter, so detach the callback from the Future before that happens.
-	void cancelWait() override { this->remove(); }
-
-	bool resumeImpl() {
-		pt->clearCancelHandler(this);
-		switch (pt->waitState()) {
-		case ACTOR_WAIT_STATE_CANCELLED:
-			this->remove();
-		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
-			throw actor_cancelled();
-		}
-
-		bool wasReady = pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
-		if (actorWaitStateIsWaiting(pt->waitState())) {
-			this->remove();
-			pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
-		}
-		return wasReady;
-	}
+	StrictFuture<FutureValue> getCallbackFuture() const { return future; }
 };
 
 template <class PromiseType, class ValueType>
@@ -795,7 +773,7 @@ struct AwaitableFutureErrorOr : AwaitableFutureOwning<PromiseType, SourceValue> 
 template <class PromiseType, class ValueType, bool ReturnsExplicitVoid = false>
 struct ThreadAwaitableFutureStream
   : SingleCallback<ToFutureVal<ValueType>>,
-    AwaitCancelHandler,
+    AwaitableFutureState<ThreadAwaitableFutureStream<PromiseType, ValueType, ReturnsExplicitVoid>, PromiseType>,
     AwaitableResume<ThreadAwaitableFutureStream<PromiseType, ValueType, ReturnsExplicitVoid>,
                     ValueType,
                     true,
@@ -822,53 +800,7 @@ struct ThreadAwaitableFutureStream
 		pt->resume();
 	}
 
-	[[maybe_unused]] [[nodiscard]] bool await_ready() const {
-		if (actorWaitStateIsCancelled(pt->waitState())) {
-			pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
-			// actor was cancelled
-			return true;
-		}
-		return future.isReady();
-	}
-
-	[[maybe_unused]] void await_suspend(n_coroutine::coroutine_handle<> h) {
-		// Create a coroutine callback if it's the first time being suspended
-		pt->setHandle(h);
-
-		// Set wait_state and add callback
-		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
-
-		auto sf = future;
-		sf.addCallbackAndClear(this);
-		pt->setCancelHandler(this);
-	}
-
-	// NoThrowOnCancel destroys the coroutine frame instead of resuming this
-	// awaiter, so detach the callback from the FutureStream before that happens.
-	void cancelWait() override { this->remove(); }
-
-	bool resumeImpl() {
-		pt->clearCancelHandler(this);
-		// If actor is cancelled, then throw actor_cancelled()
-		switch (pt->waitState()) {
-		case ACTOR_WAIT_STATE_CANCELLED:
-			this->remove();
-		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
-			// await_ready() observed cancellation before await_suspend() registered a callback, so there is nothing to
-			// remove here.
-			// if the wait_state is -1 we still have to throw, so we fall through to the -2 case
-			throw actor_cancelled();
-		}
-
-		bool wasReady = pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
-		// Actor return from waiting, remove callback and reset wait_state.
-		if (actorWaitStateIsWaiting(pt->waitState())) {
-			this->remove();
-
-			pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
-		}
-		return wasReady;
-	}
+	FutureType getCallbackFuture() const { return future; }
 };
 
 // Promise for fire-and-forget coroutines. It deliberately has no result SAV:
@@ -999,7 +931,16 @@ struct CoroPromiseBase : CoroReturn<T, Derived, ReturnsExplicitVoid> {
 	}
 
 	static void* operator new(size_t s) { return allocateFast(int(s)); }
+	template <class... Args>
+	static void* operator new(size_t s, FrameSizeRecorder recorder, Args&&...) {
+		*recorder.frameSize = s;
+		return allocateFast(int(s));
+	}
 	static void operator delete(void* p, size_t s) { freeFast(int(s), p); }
+	template <class... Args>
+	static void operator delete(void* p, size_t s, FrameSizeRecorder, Args&&...) {
+		freeFast(int(s), p);
+	}
 
 	template <class U>
 	void setReturnValue(U&& value) {

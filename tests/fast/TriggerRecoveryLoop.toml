@@ -1,0 +1,15 @@
+[[test]]
+testTitle = 'TriggerRecoveryLoop'
+runFailureWorkloads = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 250.0
+    testDuration = 20.0
+
+    [[test.workload]]
+    testName = 'TriggerRecoveryLoop'
+    startTime = 1.0
+    numRecoveries = 2
+    killAllProportion = 0.0
+    injectFailureAfterFirstRecovery = true

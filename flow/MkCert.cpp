@@ -264,7 +264,7 @@ CertSpecRef CertSpecRef::make(Arena& arena, CertKind kind) {
 	auto spec = CertSpecRef{};
 	spec.serialNumber = static_cast<long>(deterministicRandom()->randomInt64(0, 1e10));
 	spec.offsetNotBefore = 0; // now
-	spec.offsetNotAfter = 60 * 60 * 24 * 365; // 1 year from now
+	spec.offsetNotAfter = 60L * 60 * 24 * 365; // 1 year from now
 	auto& subject = spec.subjectName;
 	subject.push_back(arena, { "countryName"_sr, "DE"_sr });
 	subject.push_back(arena, { "localityName"_sr, "Berlin"_sr });

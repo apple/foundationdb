@@ -452,7 +452,7 @@ public:
 	explicit BinaryWriter(VersionOptions vo) : data(nullptr), size(0), allocated(0) {
 		vo.write(*this);
 	}
-	explicit(false) BinaryWriter(BinaryWriter&& rhs)
+	BinaryWriter(BinaryWriter&& rhs)
 	  : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated),
 	    m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;

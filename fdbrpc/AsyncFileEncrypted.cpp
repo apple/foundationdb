@@ -267,7 +267,6 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 		deterministicRandom()->randomBytes(writeBuffer.data(), bytes);
 	}
 	std::vector<unsigned char> readBuffer(bytes, 0);
-	ASSERT(g_network->isSimulated());
 	StreamCipherKey::initializeGlobalRandomTestKey();
 	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
 	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
@@ -283,6 +282,7 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 		bytesWritten += chunkSize;
 	}
 	co_await file->sync();
+	file = makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
 	int bytesRead = 0;
 	while (bytesRead < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesRead);

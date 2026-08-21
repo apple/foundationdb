@@ -1721,6 +1721,7 @@ const KeyRangeRef monitorConfKeys("\xff\x02/monitorConf/"_sr, "\xff\x02/monitorC
 
 const KeyRef healthyZoneKey = "\xff\x02/healthyZone"_sr;
 const StringRef ignoreSSFailuresZoneString = "IgnoreSSFailures"_sr;
+const KeyRef healthyZoneStartVersionKey = "\xff\x02/healthyZoneStartVersion"_sr;
 const KeyRef rebalanceDDIgnoreKey = "\xff\x02/rebalanceDDIgnored"_sr;
 
 Value healthyZoneValue(StringRef const& zoneId, Version version) {
@@ -1946,6 +1947,12 @@ TEST_CASE("/SystemData/NativeCDC") {
 	ASSERT_EQ(decodedTagHistory.version, minVersion);
 	ASSERT_EQ(decodedTagHistory.tag, tag);
 	ASSERT(cdcTagHistoryRangeFor(streamId).contains(tagHistoryKey));
+	// Current-tag lookup reads this range in reverse, so version ordering must
+	// remain lexicographic even across a byte boundary.
+	const Key earlierTagHistoryKey = cdcTagHistoryKeyFor(streamId, 255, Tag(tagLocalityCDC, 9));
+	const Key laterTagHistoryKey = cdcTagHistoryKeyFor(streamId, 256, Tag(tagLocalityCDC, 0));
+	ASSERT(earlierTagHistoryKey < laterTagHistoryKey);
+	ASSERT(cdcTagHistoryRangeFor(streamId).contains(laterTagHistoryKey));
 
 	const Value serializedTagHistory = ObjectWriter::toValue(decodedTagHistory, Unversioned());
 	const auto deserializedTagHistory =

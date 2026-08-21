@@ -281,7 +281,7 @@ if (f1.isReady()) {
 throw io_timeout();
 ```
 
-(The above could also be packed into a helper function in `genericactors.actor.h`).
+(The above could also be packed into a helper function in `genericactors.h`).
 
 ## Generators
 
@@ -607,7 +607,7 @@ out for things where destructors do semantically important work (like in `FlowLo
 
 ### Unnecessary Helper Actors
 
-In `flow/genericactors.actor.h` we have a number of useful helpers. Some of them are also useful with C++ coroutines,
+In `flow/genericactors.h` we have a number of useful helpers. Some of them are also useful with C++ coroutines,
 others add unnecessary overhead. Look out for those and remove calls to it. The most important ones are `success` and
 `store`.
 

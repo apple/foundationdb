@@ -790,4 +790,3 @@ public class StackTester {
 
 	private StackTester() {}
 }
-

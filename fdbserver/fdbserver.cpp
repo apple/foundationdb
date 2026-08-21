@@ -57,17 +57,15 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/coordinator/CoordinationServer.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/kvstore/KVFileUtils.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/tester.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/worker/Worker.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #ifdef WITH_ROCKSDB
@@ -79,6 +77,7 @@
 #include "flow/ProtocolVersion.h"
 #include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
+#include "flow/MemoryTracker.h"
 #include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
@@ -317,7 +316,7 @@ public:
 	boost::interprocess::permissions permission;
 
 private:
-	explicit(false) WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
+	WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
 #ifdef _WIN32
 	SECURITY_ATTRIBUTES sa;
 #endif
@@ -410,68 +409,6 @@ Future<Void> metricsReport() {
 
 		simpleCounterReport();
 	}
-}
-
-void testSerializationSpeed() {
-	double tstart;
-	double build = 0, serialize = 0, deserialize = 0, copy = 0, deallocate = 0;
-	double bytes = 0;
-	double testBegin = timer();
-	for (int a = 0; a < 10000; a++) {
-		{
-			tstart = timer();
-
-			Arena batchArena;
-			VectorRef<CommitTransactionRef> batch;
-			batch.resize(batchArena, 1000);
-			for (int t = 0; t < batch.size(); t++) {
-				CommitTransactionRef& tr = batch[t];
-				tr.read_snapshot = 0;
-				for (int i = 0; i < 2; i++)
-					tr.mutations.push_back_deep(batchArena,
-					                            MutationRef(MutationRef::SetValue, "KeyABCDE"_sr, "SomeValu"_sr));
-				tr.mutations.push_back_deep(batchArena,
-				                            MutationRef(MutationRef::ClearRange, "BeginKey"_sr, "EndKeyAB"_sr));
-			}
-
-			build += timer() - tstart;
-
-			tstart = timer();
-
-			BinaryWriter wr(IncludeVersion());
-			wr << batch;
-
-			bytes += wr.getLength();
-
-			serialize += timer() - tstart;
-
-			for (int i = 0; i < 1; i++) {
-				tstart = timer();
-				Arena arena;
-				StringRef data(arena, StringRef((const uint8_t*)wr.getData(), wr.getLength()));
-				copy += timer() - tstart;
-
-				tstart = timer();
-				ArenaReader rd(arena, data, IncludeVersion());
-				VectorRef<CommitTransactionRef> batch2;
-				rd >> arena >> batch2;
-
-				deserialize += timer() - tstart;
-			}
-
-			tstart = timer();
-		}
-		deallocate += timer() - tstart;
-	}
-	double elapsed = (timer() - testBegin);
-	printf("Test speed: %0.1f MB/sec (%0.0f/sec)\n", bytes / 1e6 / elapsed, 1000000 / elapsed);
-	printf("  Build: %0.1f MB/sec\n", bytes / 1e6 / build);
-	printf("  Serialize: %0.1f MB/sec\n", bytes / 1e6 / serialize);
-	printf("  Copy: %0.1f MB/sec\n", bytes / 1e6 / copy);
-	printf("  Deserialize: %0.1f MB/sec\n", bytes / 1e6 / deserialize);
-	printf("  Deallocate: %0.1f MB/sec\n", bytes / 1e6 / deallocate);
-	printf("  Bytes: %0.1f MB\n", bytes / 1e6);
-	printf("\n");
 }
 
 void memoryTest();
@@ -769,54 +706,9 @@ static void printUsage(const char* name, bool devhelp) {
 
 extern bool g_crashOnError;
 
-#if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-void* operator new(std::size_t size) {
-	void* p = malloc(size);
-	if (!p)
-		throw std::bad_alloc();
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete(void* ptr) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// scalar, nothrow new and it matching delete
-void* operator new(std::size_t size, const std::nothrow_t&) throw() {
-	void* p = malloc(size);
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete(void* ptr, const std::nothrow_t&) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// array throwing new and matching delete[]
-void* operator new[](std::size_t size) {
-	void* p = malloc(size);
-	if (!p)
-		throw std::bad_alloc();
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete[](void* ptr) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// array, nothrow new and matching delete[]
-void* operator new[](std::size_t size, const std::nothrow_t&) throw() {
-	void* p = malloc(size);
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete[](void* ptr, const std::nothrow_t&) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-#endif
+// The global operator new / operator delete replacements (both the legacy
+// ALLOC_INSTRUMENTATION accounting hooks and the sampled memory tracker) live in
+// fdbserver/GlobalNewDelete.cpp.
 
 Optional<bool> checkBuggifyOverride(const char* testFile) {
 	std::ifstream ifs;
@@ -2018,6 +1910,13 @@ int main(int argc, char* argv[]) {
 		setServerKnob("server_mem_limit", KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		initializeServerKnobs(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+
+		// Knobs are now final; initialize the sampled memory tracker from them on
+		// this (soon-to-be network) thread, before any serving role starts. Reading
+		// the sample-inverse knob explicitly here — rather than inferring it from
+		// the first allocation — keeps early startup allocations from latching the
+		// tracker off before the knobs were configured. See design/memory-tracker.md.
+		memTrackerInit();
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);

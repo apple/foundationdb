@@ -17,6 +17,9 @@
 #   - Transactions consistently stay open for the target duration (7 seconds)
 #   - Test passes even with concurrent Cycle workload providing background load
 
+[configuration]
+buggify = false
+
 [[knobs]]
 # Configure transaction lifetime to 15 seconds
 # At 1M versions/second rate, this equals 15,000,000 versions
