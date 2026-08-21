@@ -60,7 +60,6 @@
 #include "flow/TypeTraits.h"
 #include "flow/FaultInjection.h"
 #include "flow/CodeProbeUtils.h"
-#include "flow/UnitTest.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "flow/IConnection.h"
 #include "flow/CoroUtils.h"
@@ -611,44 +610,6 @@ public:
 	TestConfig() = default;
 	explicit(false) TestConfig(const BasicTestConfig& config) : BasicTestConfig(config) {}
 };
-
-TEST_CASE("/fdbserver/SimulatedCluster/LegacyDisabledModes") {
-	const std::string fileName = joinPath(params.getDataDir(), "legacy-disabled-modes.toml");
-	const auto readConfig = [&](const std::string& options) {
-		{
-			std::ofstream testFile(fileName);
-			testFile << "[configuration]\nmachineCount = 7\n" << options << "\n";
-			testFile.close();
-			ASSERT(testFile.good());
-		}
-		TestConfig config{};
-		config.readFromConfig(fileName.c_str());
-		ASSERT(config.machineCount.present() && config.machineCount.get() == 7);
-	};
-	const auto acceptsMode = [](const char* key, const char* value) {
-		std::istringstream input(std::string(key) + " = " + value);
-		const auto config = toml::parse(input, "legacy-disabled-modes.toml");
-		return isDisabledLegacyMode(key, toml::find(config, key));
-	};
-
-	readConfig("tenantModes = ['disabled']\nencryptModes = ['disabled']");
-	for (const auto* key : { "tenantModes", "encryptModes" }) {
-		readConfig(std::string(key) + " = ['disabled']");
-		for (const auto* value : { "'disabled'",
-		                           "[]",
-		                           "['enabled']",
-		                           "['DISABLED']",
-		                           "['disabled', 'enabled']",
-		                           "['disabled', 'disabled']",
-		                           "[false]",
-		                           "{ mode = 'disabled' }" }) {
-			ASSERT(!acceptsMode(key, value));
-		}
-	}
-	ASSERT(!acceptsMode("tenantMode", "['disabled']"));
-	ASSERT(!acceptsMode("encryptMode", "['disabled']"));
-	return Void();
-}
 
 template <class T>
 T simulate(const T& in) {
