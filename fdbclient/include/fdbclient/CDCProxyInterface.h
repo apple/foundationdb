@@ -227,6 +227,82 @@ struct SetCDCProxyPopsPausedRequest {
 	}
 };
 
+struct CDCProxyStreamStatus {
+	constexpr static FileIdentifier file_identifier = 9800211;
+	CDCStreamId streamId = 0;
+	bool present = false;
+	bool initialized = false;
+	Version minVersion = invalidVersion;
+	Version bufferedThrough = invalidVersion;
+	int64_t bufferedBytes = 0;
+	int readDemand = 0;
+	int activeConsumeRequests = 0;
+	bool tooOld = false;
+	bool bufferLimitExceeded = false;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           streamId,
+		           present,
+		           initialized,
+		           minVersion,
+		           bufferedThrough,
+		           bufferedBytes,
+		           readDemand,
+		           activeConsumeRequests,
+		           tooOld,
+		           bufferLimitExceeded);
+	}
+};
+
+struct CDCProxyStatusReply {
+	constexpr static FileIdentifier file_identifier = 9800212;
+	Version latestCommittedVersion = invalidVersion;
+	int64_t bufferedBytes = 0;
+	int64_t activePermits = 0;
+	int64_t bufferLimit = 0;
+	int waiters = 0;
+	int64_t popAttempts = 0;
+	int64_t popCompletions = 0;
+	int recoveryState = 0;
+	int64_t recoveryCount = 0;
+	Version recoveredAt = invalidVersion;
+	int oldLogGenerations = 0;
+	std::vector<CDCProxyStreamStatus> streams;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           latestCommittedVersion,
+		           bufferedBytes,
+		           activePermits,
+		           bufferLimit,
+		           waiters,
+		           popAttempts,
+		           popCompletions,
+		           recoveryState,
+		           recoveryCount,
+		           recoveredAt,
+		           oldLogGenerations,
+		           streams);
+	}
+};
+
+struct GetCDCProxyStatusRequest {
+	constexpr static FileIdentifier file_identifier = 9800213;
+	constexpr static int MAX_STREAMS = 256;
+	std::vector<CDCStreamId> streamIds;
+	ReplyPromise<CDCProxyStatusReply> reply;
+
+	bool verify() const { return true; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, streamIds, reply);
+	}
+};
+
 struct CDCProxyInterface {
 	constexpr static FileIdentifier file_identifier = 6689609;
 	enum { LocationAwareLoadBalance = 1 };
@@ -241,6 +317,7 @@ struct CDCProxyInterface {
 	RequestStream<HaltCDCProxyRequest> haltForTesting;
 	RequestStream<GetCDCProxyBufferStatusRequest> getBufferStatusForTesting;
 	RequestStream<SetCDCProxyPopsPausedRequest> setPopsPausedForTesting;
+	RequestStream<GetCDCProxyStatusRequest> getStatus;
 
 	UID id() const { return consume.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -263,6 +340,7 @@ struct CDCProxyInterface {
 			    RequestStream<GetCDCProxyBufferStatusRequest>(consume.getEndpoint().getAdjustedEndpoint(6));
 			setPopsPausedForTesting =
 			    RequestStream<SetCDCProxyPopsPausedRequest>(consume.getEndpoint().getAdjustedEndpoint(7));
+			getStatus = RequestStream<GetCDCProxyStatusRequest>(consume.getEndpoint().getAdjustedEndpoint(8));
 		}
 	}
 
@@ -276,6 +354,7 @@ struct CDCProxyInterface {
 		streams.push_back(haltForTesting.getReceiver());
 		streams.push_back(getBufferStatusForTesting.getReceiver());
 		streams.push_back(setPopsPausedForTesting.getReceiver());
+		streams.push_back(getStatus.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
