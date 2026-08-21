@@ -77,6 +77,24 @@ TEST_CASE("500ms_transaction_timeout") {
 	validateTimeoutDuration(timeout / 1000.0, start);
 }
 
+TEST_CASE("500ms_commit_timeout_with_client_buggify") {
+	auto start = std::chrono::steady_clock::now();
+	fdb::Transaction tr(db);
+
+	SUBCASE("read_your_writes_enabled") {}
+	SUBCASE("read_your_writes_disabled") {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+	}
+
+	int64_t timeout = 500;
+	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	tr.set("key", "value");
+	fdb::EmptyFuture commitFuture = tr.commit();
+
+	CHECK(wait_future(commitFuture) == 1031);
+	validateTimeoutDuration(timeout / 1000.0, start);
+}
+
 TEST_CASE("500ms_transaction_timeout_after_op") {
 	auto start = std::chrono::steady_clock::now();
 
@@ -269,6 +287,16 @@ int main(int argc, char** argv) {
 
 	doctest::Context context;
 	context.applyCommandLine(argc, argv);
+
+	// Force the in-flight commit injection while the disconnected database cannot supply a read version.
+	int64_t buggifyProbability = 100;
+	fdb_check(fdb_network_set_option(FDB_NET_OPTION_CLIENT_BUGGIFY_SECTION_ACTIVATED_PROBABILITY,
+	                                 reinterpret_cast<const uint8_t*>(&buggifyProbability),
+	                                 sizeof(buggifyProbability)));
+	fdb_check(fdb_network_set_option(FDB_NET_OPTION_CLIENT_BUGGIFY_SECTION_FIRED_PROBABILITY,
+	                                 reinterpret_cast<const uint8_t*>(&buggifyProbability),
+	                                 sizeof(buggifyProbability)));
+	fdb_check(fdb_network_set_option(FDB_NET_OPTION_CLIENT_BUGGIFY_ENABLE, nullptr, 0));
 
 	fdb_check(fdb_setup_network());
 	std::thread network_thread{ [] { fdb_check(fdb_run_network()); } };
