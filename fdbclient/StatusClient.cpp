@@ -20,6 +20,7 @@
 
 #include "flow/flow.h"
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/StatusClient.h"
@@ -305,7 +306,8 @@ void JSONDoc::mergeValueInto(json_spirit::mValue& dst, const json_spirit::mValue
 // Will not throw, will just return non-present Optional if error
 AsyncResult<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<IClusterConnectionRecord> connRecord,
                                                                     bool* quorum_reachable,
-                                                                    int* coordinatorsFaultTolerance) {
+                                                                    int* coordinatorsFaultTolerance,
+                                                                    double statusDeadline) {
 	try {
 		ClientCoordinators coord(connRecord);
 		StatusObject statusObj;
@@ -340,7 +342,7 @@ AsyncResult<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<IC
 
 		co_await (smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
 		              smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) ||
-		          delay(2.0));
+		          delay(std::min(2.0, std::max(0.0, statusDeadline - now()))));
 
 		statusObj["quorum_reachable"] = *quorum_reachable =
 		    quorum(leaderServers, leaderServers.size() / 2 + 1).isReady();
@@ -383,11 +385,12 @@ AsyncResult<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<IC
 AsyncResult<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecord> connRecord,
                                               StatusArray* messages,
                                               bool* quorum_reachable,
-                                              int* coordinatorsFaultTolerance) {
+                                              int* coordinatorsFaultTolerance,
+                                              double statusDeadline) {
 	StatusObject statusObj;
 
-	Optional<StatusObject> coordsStatusObj =
-	    co_await clientCoordinatorsStatusFetcher(connRecord, quorum_reachable, coordinatorsFaultTolerance);
+	Optional<StatusObject> coordsStatusObj = co_await clientCoordinatorsStatusFetcher(
+	    connRecord, quorum_reachable, coordinatorsFaultTolerance, statusDeadline);
 	bool contentsUpToDate = co_await connRecord->upToDate();
 
 	if (coordsStatusObj.present()) {
@@ -464,6 +467,45 @@ AsyncResult<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
 	co_return oStatusObj;
 }
 
+TEST_CASE("/fdbclient/status/clientCoordinatorTimeoutBudget") {
+	auto connRecord = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString("test:test@127.0.0.1:1"));
+	bool quorumReachable = false;
+	int coordinatorsFaultTolerance = 0;
+	double timeout = 0.2;
+	double startTime = now();
+
+	Optional<StatusObject> status = co_await clientCoordinatorsStatusFetcher(
+	    connRecord, &quorumReachable, &coordinatorsFaultTolerance, startTime + timeout);
+
+	double elapsed = now() - startTime;
+	ASSERT(status.present());
+	ASSERT(!quorumReachable);
+	ASSERT_GE(elapsed, timeout);
+	ASSERT_LT(elapsed, timeout + 0.05);
+	co_return;
+}
+
+TEST_CASE("/fdbclient/status/overallTimeoutBudget") {
+	ClusterInterface clusterInterface;
+	StatusArray messages;
+	double overallTimeout = 0.2;
+	double coordinatorProbeDuration = 0.1;
+	double startTime = now();
+	double statusDeadline = startTime + overallTimeout;
+
+	co_await delay(coordinatorProbeDuration);
+	Optional<StatusObject> status =
+	    co_await clusterStatusFetcher(clusterInterface, &messages, "", std::max(0.0, statusDeadline - now()));
+
+	double elapsed = now() - startTime;
+	ASSERT(!status.present());
+	ASSERT_EQ(messages.size(), 1);
+	ASSERT_EQ(messages.front().get_obj().at("name").get_str(), "status_incomplete_timeout");
+	ASSERT_GE(elapsed, overallTimeout);
+	ASSERT_LT(elapsed, overallTimeout + 0.05);
+	co_return;
+}
+
 // Create and return a database_status section.
 // Will not throw, will not return an empty section.
 StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectReader cluster) {
@@ -532,8 +574,8 @@ AsyncResult<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord> 
 	try {
 		int64_t clientTime = g_network->timer();
 
-		statusObjClient =
-		    co_await clientStatusFetcher(connRecord, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance);
+		statusObjClient = co_await clientStatusFetcher(
+		    connRecord, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance, statusDeadline);
 
 		if (clientTime != -1)
 			statusObjClient["timestamp"] = clientTime;
