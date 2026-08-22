@@ -81,7 +81,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SimulationCapabilities.h"
 #include "fdbclient/StatusClient.h"

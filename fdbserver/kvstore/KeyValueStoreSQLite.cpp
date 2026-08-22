@@ -33,7 +33,7 @@
 #include <array>
 
 // for unprintable
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 
 extern "C" {
 #include "sqliteInt.h"

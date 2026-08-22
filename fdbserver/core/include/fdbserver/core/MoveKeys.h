@@ -24,7 +24,7 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/SeedShardServers.h"
 #include "flow/BooleanParam.h"
