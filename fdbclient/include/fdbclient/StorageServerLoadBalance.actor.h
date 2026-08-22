@@ -28,7 +28,7 @@
 #elif !defined(FDBCLIENT_STORAGESERVERLOADBALANCE_ACTOR_H)
 #define FDBCLIENT_STORAGESERVERLOADBALANCE_ACTOR_H
 
-#include "fdbrpc/simulator.h"
+#include "fdbclient/SimulationCapabilities.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 enum ComparisonType { TSS_COMPARISON, REPLICA_COMPARISON };
@@ -100,9 +100,8 @@ Future<Void> tssComparison(Req req,
 			if (!TSS_doCompare(src.get(), tss.get().get())) {
 				CODE_PROBE(true, "TSS Mismatch");
 				state TraceEvent mismatchEvent(
-				    (simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
-				        ? SevWarnAlways
-				        : SevError,
+				    (fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch)) ? SevWarnAlways
+				                                                                                 : SevError,
 				    LB_mismatchTraceName(req, TSS_COMPARISON));
 				mismatchEvent.setMaxEventLength(FLOW_KNOBS->TSS_LARGE_TRACE_SIZE);
 				mismatchEvent.detail("TSSID", tssData.tssId);
@@ -165,7 +164,7 @@ Future<Void> tssComparison(Req req,
 						// record a summarized trace event instead
 						TraceEvent summaryEvent(
 						    (g_network->isSimulated() &&
-						     simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
+						     fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch))
 						        ? SevWarnAlways
 						        : SevError,
 						    LB_mismatchTraceName(req, TSS_COMPARISON));

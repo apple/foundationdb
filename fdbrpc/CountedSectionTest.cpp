@@ -62,3 +62,21 @@ TEST_CASE("/fdbrpc/countedsection/interrupted") {
 	ASSERT(tc.end.getValue() == 1);
 	co_return;
 }
+
+TEST_CASE("/fdbrpc/specialcounter/forwarding") {
+	int64_t namedValue = 7;
+	// The named callable must outlive the collection that borrows it.
+	auto named = [&namedValue] { return namedValue; };
+	CounterCollection counters("SpecialCounterForwardingTest");
+	specialCounter(counters, "Named", named);
+	specialCounter(counters, "Temporary", [value = int64_t{ 17 }] { return value; });
+	namedValue = 11;
+
+	TraceEvent event(SevWarnAlways, "SpecialCounterForwardingTest");
+	ASSERT(event.isEnabled());
+	counters.logToTraceEvent(event);
+	event.disable();
+	ASSERT(event.getFields().getInt64("Named") == 11);
+	ASSERT(event.getFields().getInt64("Temporary") == 17);
+	co_return;
+}
