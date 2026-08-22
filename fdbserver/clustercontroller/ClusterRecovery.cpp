@@ -531,6 +531,8 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		bool allLogs =
 		    newState.tLogs.size() ==
 		    configuration.expectedLogSets(!self->primaryDcId.empty() ? self->primaryDcId[0] : Optional<Key>());
+		// Anti-quorum recovery must still permit removing a lost region while its old history remains durable.
+		bool storageRecovered = newState.oldTLogData.empty() || self->logSystem->storageRecovered();
 		bool finalUpdate = newState.oldTLogData.empty() && allLogs;
 		TraceEvent("TrackTLogRecovery")
 		    .detail("FinalUpdate", finalUpdate)
@@ -565,7 +567,7 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			           self->dbgid)
 			    .detail("ActiveGenerations", 1)
 			    .trackLatest(self->clusterRecoveryGenerationsEventHolder->trackingKey);
-		} else if (newState.oldTLogData.empty() && self->recoveryState < RecoveryState::STORAGE_RECOVERED) {
+		} else if (storageRecovered && self->recoveryState < RecoveryState::STORAGE_RECOVERED) {
 			self->recoveryState = RecoveryState::STORAGE_RECOVERED;
 			TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
 			           self->dbgid)
