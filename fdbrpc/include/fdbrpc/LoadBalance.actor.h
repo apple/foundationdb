@@ -652,8 +652,8 @@ Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const void*);
 // If |alternativeChosen| is not null, then atMostOnce must be True, and if the returned future completes successfully
 // then *alternativeChosen will be the alternative to which the message was sent. *alternativeChosen must outlive the
 // returned future.
-ACTOR template <class Interface, class Request, class Multi, bool P>
-Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> alternatives,
+ACTOR template <class Interface, class Request, class Multi, bool P, class Metric>
+Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi, Metric>> alternatives,
                                              RequestStream<Request, P> Interface::* channel,
                                              Request request = Request(),
                                              TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
