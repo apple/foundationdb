@@ -4634,24 +4634,221 @@ Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 			err = e;
 		}
 		if (err.present()) {
-			if (err.get().code() == error_code_actor_cancelled) {
-				throw err.get();
+			Error e = err.get();
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			// Cancellation / outdated: reply to DD and exit without crashing the storage server.
+			if (e.code() == error_code_audit_storage_cancelled) {
+				req.reply.sendError(audit_storage_cancelled());
+				co_return;
+			}
+			if (e.code() == error_code_audit_storage_task_outdated) {
+				req.reply.sendError(audit_storage_task_outdated());
+				co_return;
 			}
 			// Send retryable errors back to DD so it can retry with correct SS
-			if (err.get().code() == error_code_wrong_shard_server) {
-				req.reply.sendError(err.get());
+			if (e.code() == error_code_wrong_shard_server) {
+				req.reply.sendError(e);
 				co_return;
 			}
 			res.setPhase(AuditPhase::Error);
-			res.error = err.get().what();
+			res.error = e.what();
 			res.range = req.range;
 			TraceEvent(SevWarn, "SSAuditRestoreError", data->thisServerID)
-			    .errorUnsuppressed(err.get())
+			    .errorUnsuppressed(e)
 			    .detail("AuditID", req.id)
 			    .detail("AuditRange", req.range);
 			res.ddId = req.ddId;
 			res.auditServerId = data->thisServerID;
+			// Guard the error-persist so a cancellation racing the persist can't escape and fail the SS.
+			try {
+				co_await persistAuditStateByRange(data->cx, res);
+			} catch (Error& e2) {
+				if (e2.code() == error_code_actor_cancelled) {
+					throw e2;
+				}
+				req.reply.sendError(e2.code() == error_code_audit_storage_cancelled ? audit_storage_cancelled()
+				                                                                    : audit_storage_failed());
+				co_return;
+			}
+		}
+	}
+
+	req.reply.send(res);
+}
+
+// RangeDigest audit: fold every key-value the storage server locally owns in req.range into an
+// additive content digest (see RangeDigest.h). No data leaves the server; only the 32-byte digest
+// plus kv/byte counts are persisted per range. DD combines the per-range digests into a cluster
+// root. Assumes a quiescent cluster (each batch reads the server's current version).
+Future<Void> auditRangeDigestQ(StorageServer* data, AuditStorageRequest req) {
+	ASSERT(req.getType() == AuditType::RangeDigest);
+	co_await data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield);
+	FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
+
+	TraceEvent(SevInfo, "SSAuditRangeDigestBegin", data->thisServerID)
+	    .detail("AuditID", req.id)
+	    .detail("AuditRange", req.range)
+	    .detail("AuditType", req.type);
+
+	// RangeDigest is only meaningful over user keys.
+	if (!normalKeys.contains(req.range)) {
+		TraceEvent(SevError, "SSAuditRangeDigestInvalidRange", data->thisServerID)
+		    .detail("AuditID", req.id)
+		    .detail("AuditRange", req.range)
+		    .detail("Error", "Range must be within normalKeys");
+		req.reply.sendError(audit_storage_failed());
+		co_return;
+	}
+
+	AuditStorageState res(req.id, req.getType());
+	RangeDigest digest; // additive accumulator over the whole of req.range
+	int64_t kvCount = 0;
+	int64_t byteCount = 0;
+	Version version{ 0 };
+	KeyRange rangeToRead = req.range;
+	Key rangeToReadBegin = req.range.begin;
+	int limit = SERVER_KNOBS->AUDIT_RESTORE_BATCH_KEY_LIMIT;
+	int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+	int64_t readBytes = 0;
+	bool complete = false;
+	double startTime = now();
+	Error nonRetryableError;
+	Reference<IRateControl> rateLimiter = makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
+
+	{
+		Optional<Error> err;
+		try {
+			while (true) {
+				try {
+					readBytes = 0;
+					rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
+					ASSERT(!rangeToRead.empty());
+
+					// Quiescent-cluster assumption: read this server's current version each batch.
+					version = data->version.get();
+
+					GetKeyValuesRequest localReq;
+					localReq.begin = firstGreaterOrEqual(rangeToRead.begin);
+					localReq.end = firstGreaterOrEqual(rangeToRead.end);
+					localReq.limit = limit;
+					localReq.limitBytes = limitBytes;
+					localReq.version = version;
+					localReq.tags = TagSet();
+					data->actors.add(getKeyValuesQ(data, localReq));
+					GetKeyValuesReply reply = co_await localReq.reply.getFuture();
+					if (reply.error.present()) {
+						throw reply.error.get();
+					}
+
+					for (int i = 0; i < reply.data.size(); ++i) {
+						const KeyValueRef& kv = reply.data[i];
+						digest.addKeyValue(kv.key, kv.value);
+						++kvCount;
+						byteCount += kv.key.size() + kv.value.size();
+					}
+					readBytes = reply.data.expectedSize();
+
+					co_await rateLimiter->getAllowance(readBytes);
+
+					if (!reply.more || reply.data.empty()) {
+						complete = true;
+						break;
+					}
+					rangeToReadBegin = keyAfter(reply.data.back().key);
+					if (rangeToReadBegin >= req.range.end) {
+						complete = true;
+						break;
+					}
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
+					nonRetryableError = e;
+				}
+				// co_await is not allowed inside a catch handler; handle retry here.
+				if (nonRetryableError.isValid() && nonRetryableError.code() != error_code_success) {
+					if (nonRetryableError.code() == error_code_future_version ||
+					    nonRetryableError.code() == error_code_transaction_too_old ||
+					    nonRetryableError.code() == error_code_server_overloaded) {
+						TraceEvent(SevWarn, "SSAuditRangeDigestRetryableError", data->thisServerID)
+						    .detail("AuditID", req.id)
+						    .detail("Error", nonRetryableError.what())
+						    .detail("Version", version)
+						    .detail("Range", rangeToRead);
+						nonRetryableError = Error();
+						co_await delay(1.0);
+						continue;
+					}
+					throw nonRetryableError;
+				}
+			}
+
+			res.setPhase(AuditPhase::Complete);
+			res.range = req.range;
+			res.digest = digest.bytes();
+			res.kvCount = kvCount;
+			res.byteCount = byteCount;
+			res.ddId = req.ddId;
+			res.auditServerId = data->thisServerID;
+			TraceEvent(SevInfo, "SSAuditRangeDigestComplete", data->thisServerID)
+			    .detail("AuditID", req.id)
+			    .detail("AuditRange", req.range)
+			    .detail("Complete", complete)
+			    .detail("KVCount", kvCount)
+			    .detail("Bytes", byteCount)
+			    .detail("Digest", digest.toHex())
+			    .detail("Duration", now() - startTime);
 			co_await persistAuditStateByRange(data->cx, res);
+
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.present()) {
+			Error e = err.get();
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			// Cancellation / outdated / ownership shift: reply to DD and exit WITHOUT crashing the
+			// storage server. Every other SS audit actor handles these at the top level the same way
+			// (see auditStorageServerShardQ / auditStorageShardReplicaQ); letting audit_storage_cancelled
+			// escape here would surface as a SevError StorageServerFailed.
+			if (e.code() == error_code_audit_storage_cancelled) {
+				req.reply.sendError(audit_storage_cancelled());
+				co_return;
+			}
+			if (e.code() == error_code_audit_storage_task_outdated) {
+				req.reply.sendError(audit_storage_task_outdated());
+				co_return;
+			}
+			// Let DD retry against the correct server if ownership shifted mid-audit.
+			if (e.code() == error_code_wrong_shard_server) {
+				req.reply.sendError(e);
+				co_return;
+			}
+			res.setPhase(AuditPhase::Error);
+			res.error = e.what();
+			res.range = req.range;
+			TraceEvent(SevWarn, "SSAuditRangeDigestError", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", req.id)
+			    .detail("AuditRange", req.range);
+			res.ddId = req.ddId;
+			res.auditServerId = data->thisServerID;
+			// Guard the error-persist: if the audit was cancelled while we were recording the error,
+			// persistAuditStateByRange throws audit_storage_cancelled. Swallow it (reply + exit) so it
+			// cannot escape the actor and fail the storage server.
+			try {
+				co_await persistAuditStateByRange(data->cx, res);
+			} catch (Error& e2) {
+				if (e2.code() == error_code_actor_cancelled) {
+					throw e2;
+				}
+				req.reply.sendError(e2.code() == error_code_audit_storage_cancelled ? audit_storage_cancelled()
+				                                                                    : audit_storage_failed());
+				co_return;
+			}
 		}
 	}
 
@@ -12058,6 +12255,8 @@ Future<Void> serveAuditStorageRequests(StorageServer* self, FutureStream<AuditSt
 			self->actors.add(auditStorageServerShardQ(self, req));
 		} else if (req.getType() == AuditType::ValidateRestore) {
 			self->actors.add(auditRestoreQ(self, req));
+		} else if (req.getType() == AuditType::RangeDigest) {
+			self->actors.add(auditRangeDigestQ(self, req));
 		} else {
 			req.reply.sendError(not_implemented());
 		}
