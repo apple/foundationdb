@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ServerKnobCollection.h"
+#include "flow/UnitTest.h"
 
 ServerKnobCollection::ServerKnobCollection(Randomize randomize, IsSimulated isSimulated)
   : clientKnobCollection(randomize, isSimulated),
@@ -48,9 +49,41 @@ Optional<KnobValue> ServerKnobCollection::tryParseKnobValue(std::string const& k
 }
 
 bool ServerKnobCollection::trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) {
-	return clientKnobCollection.trySetKnob(knobName, knobValue) || knobValue.visitSetKnob(knobName, serverKnobs);
+	// Do not short circuit by directly returning:
+	//     clientKnobCollection.trySetKnob(knobName, knobValue) || knobValue.visitSetKnob(knobName, serverKnobs)
+	// This is because some knobs have the same name in client and server e.g. MAX_WRITE_TRANSACTION_LIFE_VERSIONS
+	// When setting such knobs, we want both client and server knob to have their value updated
+	// Short circuiting would mean that server knob named FOO won't be updated if client knob FOO was updated
+	// Instead, we attempt setting client and server knobs in separate statements, and return true
+	// if at least one of the set attempts was succesful.
+	const bool setClientKnob = clientKnobCollection.trySetKnob(knobName, knobValue);
+	const bool setServerKnob = knobValue.visitSetKnob(knobName, serverKnobs);
+	return setClientKnob || setServerKnob;
 }
 
 bool ServerKnobCollection::isAtomic(std::string const& knobName) const {
 	return clientKnobCollection.isAtomic(knobName) || serverKnobs.isAtomic(knobName);
+}
+
+TEST_CASE("/fdbclient/knobs/shadowedKnobOverrideReachesEveryCollection") {
+	ServerKnobCollection knobs(Randomize::False, IsSimulated::False);
+
+	// max_write_transaction_life_versions is declared in both ClientKnobs and ServerKnobs, and
+	// ClientKnobs.h describes the client field as a "Copy of SERVER_KNOBS". Setting it has to reach
+	// both: trySetKnob used to stop once the client copy matched, leaving the ServerKnobs copy -- the
+	// one the resolver enforces -- at its old value while still reporting success. That silently made
+	// the `[[knobs]] max_write_transaction_life_versions = 5000000` override in
+	// tests/fast/DataLossRecovery.toml a no-op on the server side.
+	const ParsedKnobValue target{ int64_t(7) * knobs.getServerKnobs().VERSIONS_PER_SECOND };
+	ASSERT(knobs.trySetKnob("max_write_transaction_life_versions", KnobValueRef::create(target)));
+	ASSERT_EQ(knobs.getServerKnobs().MAX_WRITE_TRANSACTION_LIFE_VERSIONS, std::get<int64_t>(target));
+	ASSERT_EQ(knobs.getClientKnobs().MAX_WRITE_TRANSACTION_LIFE_VERSIONS, std::get<int64_t>(target));
+
+	// A name only one collection declares must still be settable, and an unknown name must still
+	// report failure so that IKnobCollection::setKnob keeps throwing invalid_option_value.
+	ASSERT(knobs.trySetKnob("max_read_transaction_life_versions", KnobValueRef::create(target)));
+	ASSERT_EQ(knobs.getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS, std::get<int64_t>(target));
+	ASSERT(!knobs.trySetKnob("this_knob_does_not_exist", KnobValueRef::create(target)));
+
+	return Void();
 }
