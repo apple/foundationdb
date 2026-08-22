@@ -112,41 +112,8 @@ struct ExclusionTracker {
 				RangeResult serverList = fServerList.get();
 				for (auto& s : serverList) {
 					auto decodedServer = decodeServerListValue(s.value);
-					// Check if the server is excluded based on a locality.
-					for (auto& excludedLocality : decodedExcludedLocalities) {
-						if (!decodedServer.locality.isPresent(excludedLocality.first)) {
-							continue;
-						}
-
-						if (decodedServer.locality.get(excludedLocality.first) != excludedLocality.second) {
-							continue;
-						}
-
-						auto addresses = decodedServer.getKeyValues.getEndpoint().addresses;
-						newExcluded.insert(AddressExclusion(addresses.address.ip, addresses.address.port));
-						if (addresses.secondaryAddress.present()) {
-							auto secondaryAddress = addresses.secondaryAddress.get();
-							newExcluded.insert(AddressExclusion(secondaryAddress.ip, secondaryAddress.port));
-						}
-					}
-
-					// Check if the server is excluded as failed based on a locality.
-					for (auto& failedLocality : decodedFailedLocalities) {
-						if (!decodedServer.locality.isPresent(failedLocality.first)) {
-							continue;
-						}
-
-						if (decodedServer.locality.get(failedLocality.first) != failedLocality.second) {
-							continue;
-						}
-
-						auto addresses = decodedServer.getKeyValues.getEndpoint().addresses;
-						newFailed.insert(AddressExclusion(addresses.address.ip, addresses.address.port));
-						if (addresses.secondaryAddress.present()) {
-							auto secondaryAddress = addresses.secondaryAddress.get();
-							newFailed.insert(AddressExclusion(secondaryAddress.ip, secondaryAddress.port));
-						}
-					}
+					appendAddressesMatchingLocalities(decodedServer, decodedExcludedLocalities, newExcluded);
+					appendAddressesMatchingLocalities(decodedServer, decodedFailedLocalities, newFailed);
 				}
 
 				bool foundChange = false;
@@ -180,6 +147,30 @@ struct ExclusionTracker {
 			if (hasErr) {
 				TraceEvent("ExclusionTrackerError").error(err);
 				co_await tr.onError(err);
+			}
+		}
+	}
+
+private:
+	friend class DDTeamCollectionUnitTest;
+
+	static void appendAddressesMatchingLocalities(StorageServerInterface const& server,
+	                                              std::vector<std::pair<std::string, std::string>> const& localities,
+	                                              std::set<AddressExclusion>& exclusions) {
+		for (auto const& locality : localities) {
+			if (!server.locality.isPresent(locality.first)) {
+				continue;
+			}
+
+			if (server.locality.get(locality.first) != locality.second) {
+				continue;
+			}
+
+			auto addresses = server.getKeyValues.getEndpoint().addresses;
+			exclusions.insert(AddressExclusion(addresses.address.ip, addresses.address.port));
+			if (addresses.secondaryAddress.present()) {
+				auto secondaryAddress = addresses.secondaryAddress.get();
+				exclusions.insert(AddressExclusion(secondaryAddress.ip, secondaryAddress.port));
 			}
 		}
 	}
