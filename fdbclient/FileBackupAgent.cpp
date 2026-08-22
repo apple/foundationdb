@@ -3687,7 +3687,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					TraceEvent(SevWarn, "BulkDumpTaskTimeout")
 					    .detail("BackupUID", config.getUid())
 					    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
-					    .detail("TimeoutDuration", 300.0);
+					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT);
 					Params.timeoutOccurred().set(task, true);
 				}
 
