@@ -1064,9 +1064,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 		const Version lastVersion = expected.back().version;
 
-		// Prime one proxy-owned retained buffer without acknowledging. The first consume starts with several complete
-		// TLog versions available, so it also exercises raw-peek truncation before the resumed consumer exercises the
-		// proxy-to-client reply bound.
+		// Prime one proxy-owned retained buffer without acknowledging. Several complete versions fit one TLog peek,
+		// but all versions exceed its bound; a batched reply proves one pass buffered multiple complete versions.
+		bool sawBatchedPrimingReply = false;
 		const double primeDeadline = now() + operationTimeout;
 		while (stream.consumer->position().lastConsumedVersion < lastVersion) {
 			const Version previous = stream.consumer->position().lastConsumedVersion;
@@ -1083,7 +1083,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				continue;
 			}
 			ASSERT_GT(reply.lastConsumedVersion, previous);
+			sawBatchedPrimingReply |= reply.mutations.size() > 1;
 		}
+		ASSERT(sawBatchedPrimingReply);
 
 		Reference<NativeCdcConsumer> resumed =
 		    resumeNativeCdcConsumer(cx, CDCCursor(stream.consumer->position().streamId, invalidVersion));

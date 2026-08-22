@@ -131,6 +131,60 @@ struct CDCBufferPassLimits {
 	int64_t reservationBytes;
 };
 
+// One committed prefix discovered in an already-reserved TLog reply. Each stream's estimate is kept separate so
+// shared-tag fanout remains subject to the existing stream-selection budget rather than prematurely truncating it.
+class CDCCommittedPrefix {
+	Version through;
+	int64_t byteLimit;
+	int versionLimit;
+	int versions = 0;
+	bool rejected = false;
+	std::unordered_map<CDCStreamId, int64_t> streamBytes;
+
+public:
+	CDCCommittedPrefix(Version through, int64_t byteLimit, int versionLimit)
+	  : through(through), byteLimit(byteLimit), versionLimit(versionLimit) {
+		ASSERT_GT(byteLimit, 0);
+		ASSERT_GT(versionLimit, 0);
+	}
+
+	bool includeVersion(Version version, std::unordered_map<CDCStreamId, int64_t> const& versionBytes) {
+		ASSERT_GT(version, through);
+		if (rejected || versions == versionLimit) {
+			rejected = true;
+			return false;
+		}
+		if (versions > 0) {
+			for (const auto& [streamId, bytes] : versionBytes) {
+				ASSERT_GE(bytes, 0);
+				const auto found = streamBytes.find(streamId);
+				const int64_t previous = found == streamBytes.end() ? 0 : found->second;
+				if (previous > byteLimit || bytes > byteLimit - previous) {
+					rejected = true;
+					return false;
+				}
+			}
+		}
+		for (const auto& [streamId, bytes] : versionBytes) {
+			ASSERT_GE(bytes, 0);
+			auto [found, inserted] = streamBytes.try_emplace(streamId, bytes);
+			if (!inserted) {
+				ASSERT_LE(bytes, std::numeric_limits<int64_t>::max() - found->second);
+				found->second += bytes;
+			}
+		}
+		through = version;
+		++versions;
+		return true;
+	}
+
+	void advanceGapThrough(Version version) { through = std::max(through, version); }
+	Version bufferedThrough() const { return through; }
+};
+
+constexpr int64_t CDC_PROXY_BUFFERED_PREFIX_BYTES = 64 << 10;
+constexpr int CDC_PROXY_BUFFERED_PREFIX_VERSIONS = 64;
+
 // The payload budget deliberately leaves room for RPC framing below PACKET_LIMIT. The estimate used for individual
 // versions is also conservative: it uses the stream's in-memory accounting, whose MutationRef storage is larger than
 // the serialized mutation envelope.
@@ -362,6 +416,11 @@ class CDCProxy {
 	                            Version throughVersion,
 	                            std::unordered_set<CDCStreamId> const* selectedStreamIds,
 	                            Visitor&& visitor);
+	Version committedBufferedPrefixThrough(Reference<CDCBufferedTag> tag,
+	                                       Reference<IReplayPeekCursor> cursor,
+	                                       Version begin,
+	                                       Version committedThrough,
+	                                       int64_t byteLimit);
 	std::unordered_map<CDCStreamId, int64_t> estimateBufferedBytes(Reference<CDCBufferedTag> tag,
 	                                                               Reference<IReplayPeekCursor> cursor,
 	                                                               Version throughVersion);
@@ -560,26 +619,30 @@ void CDCProxy::clearBufferedMutations(Reference<CDCBufferedStream> stream) {
 	stream->mutations.clear();
 }
 
+bool hasBufferedVersion(Reference<CDCBufferedStream> const& stream, Version version) {
+	const auto buffered = std::lower_bound(
+	    stream->mutations.begin(), stream->mutations.end(), version, [](const auto& mutation, Version version) {
+		    return mutation.version < version;
+	    });
+	return buffered != stream->mutations.end() && buffered->version == version;
+}
+
 void addMutationToBatch(Reference<CDCBufferedStream> stream,
                         CDCBufferedBatch* batch,
                         Version version,
                         MutationRef const& mutation) {
-	auto batchVersion = std::find_if(batch->mutations.begin(), batch->mutations.end(), [version](const auto& buffered) {
-		return buffered.version == version;
-	});
-	if (batchVersion == batch->mutations.end()) {
+	if (!batch->mutations.empty()) {
+		ASSERT_GE(version, batch->mutations.back().version);
+	}
+	if (batch->mutations.empty() || batch->mutations.back().version != version) {
 		batch->mutations.emplace_back();
-		batchVersion = std::prev(batch->mutations.end());
-		batchVersion->version = version;
-		const bool alreadyBuffered =
-		    std::any_of(stream->mutations.begin(), stream->mutations.end(), [version](const auto& buffered) {
-			    return buffered.version == version;
-		    });
-		if (!alreadyBuffered) {
+		batch->mutations.back().version = version;
+		if (!hasBufferedVersion(stream, version)) {
 			batch->bufferedBytes += sizeof(VersionedMutationsRef);
 		}
 	}
-	batchVersion->mutations.push_back_deep(batchVersion->arena(), mutation);
+	auto& batchVersion = batch->mutations.back();
+	batchVersion.mutations.push_back_deep(batchVersion.arena(), mutation);
 	batch->bufferedBytes += mutation.expectedSize() + sizeof(MutationRef);
 }
 
@@ -865,31 +928,64 @@ void CDCProxy::visitBufferedMutations(Reference<CDCBufferedTag> tag,
 	}
 }
 
+Version CDCProxy::committedBufferedPrefixThrough(Reference<CDCBufferedTag> tag,
+                                                 Reference<IReplayPeekCursor> cursor,
+                                                 Version begin,
+                                                 Version committedThrough,
+                                                 int64_t byteLimit) {
+	Reference<IReplayPeekCursor> scanCursor = cursor->cloneNoMore();
+	scanCursor->setProtocolVersion(g_network->protocolVersion());
+	CDCCommittedPrefix prefix(
+	    begin - 1, std::min(byteLimit, CDC_PROXY_BUFFERED_PREFIX_BYTES), CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
+	while (scanCursor->hasMessage()) {
+		const Version version = scanCursor->version().version;
+		prefix.advanceGapThrough(committedPeekThrough(version - 1, committedThrough));
+		if (version > committedThrough) {
+			return prefix.bufferedThrough();
+		}
+
+		std::unordered_map<CDCStreamId, int64_t> versionBytes;
+		visitBufferedMutations(
+		    tag,
+		    scanCursor,
+		    version,
+		    nullptr,
+		    [&versionBytes](Reference<CDCBufferedStream> stream, Version messageVersion, MutationRef const& mutation) {
+			    auto [found, inserted] = versionBytes.try_emplace(stream->streamId, 0);
+			    if (inserted && !hasBufferedVersion(stream, messageVersion)) {
+				    found->second += sizeof(VersionedMutationsRef);
+			    }
+			    found->second += mutation.expectedSize() + sizeof(MutationRef);
+		    });
+		if (!prefix.includeVersion(version, versionBytes)) {
+			return prefix.bufferedThrough();
+		}
+	}
+
+	prefix.advanceGapThrough(committedPeekThrough(scanCursor->version().version - 1, committedThrough));
+	return prefix.bufferedThrough();
+}
+
 std::unordered_map<CDCStreamId, int64_t> CDCProxy::estimateBufferedBytes(Reference<CDCBufferedTag> tag,
                                                                          Reference<IReplayPeekCursor> cursor,
                                                                          Version throughVersion) {
 	std::unordered_map<CDCStreamId, Version> lastMutationVersion;
 	std::unordered_map<CDCStreamId, int64_t> estimatedBytes;
-	visitBufferedMutations(
-	    tag,
-	    cursor,
-	    throughVersion,
-	    nullptr,
-	    [&lastMutationVersion,
-	     &estimatedBytes](Reference<CDCBufferedStream> stream, Version version, MutationRef const& mutation) {
-		    auto [lastVersion, inserted] = lastMutationVersion.emplace(stream->streamId, version);
-		    if (inserted || lastVersion->second != version) {
-			    lastVersion->second = version;
-			    const bool alreadyBuffered =
-			        std::any_of(stream->mutations.begin(), stream->mutations.end(), [version](const auto& buffered) {
-				        return buffered.version == version;
-			        });
-			    if (!alreadyBuffered) {
-				    estimatedBytes[stream->streamId] += sizeof(VersionedMutationsRef);
-			    }
-		    }
-		    estimatedBytes[stream->streamId] += mutation.expectedSize() + sizeof(MutationRef);
-	    });
+	visitBufferedMutations(tag,
+	                       cursor,
+	                       throughVersion,
+	                       nullptr,
+	                       [&lastMutationVersion, &estimatedBytes](
+	                           Reference<CDCBufferedStream> stream, Version version, MutationRef const& mutation) {
+		                       auto [lastVersion, inserted] = lastMutationVersion.emplace(stream->streamId, version);
+		                       if (inserted || lastVersion->second != version) {
+			                       lastVersion->second = version;
+			                       if (!hasBufferedVersion(stream, version)) {
+				                       estimatedBytes[stream->streamId] += sizeof(VersionedMutationsRef);
+			                       }
+		                       }
+		                       estimatedBytes[stream->streamId] += mutation.expectedSize() + sizeof(MutationRef);
+	                       });
 	return estimatedBytes;
 }
 
@@ -1099,15 +1195,17 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 	// A newly constructed replay cursor can already contain messages, especially after log-generation
 	// changes. Initialize its reader even when getMore() was unnecessary.
 	cursor->setProtocolVersion(g_network->protocolVersion());
-	latestCommittedVersion = std::max(latestCommittedVersion, cursor->getMinKnownCommittedVersion());
+	const Version committedThrough = cursor->getMinKnownCommittedVersion();
+	latestCommittedVersion = std::max(latestCommittedVersion, committedThrough);
 	if (cursor->popped() > begin) {
 		markPoppedTagStreamsTooOld(tag, cursor->popped());
 		co_return CDCBufferTagPassResult::RETRY;
 	}
 
-	const Version peekThroughVersion = cursor->hasMessage() ? cursor->version().version : cursor->version().version - 1;
-	const Version throughVersion = committedPeekThrough(peekThroughVersion, cursor->getMinKnownCommittedVersion());
-	CODE_PROBE(throughVersion < peekThroughVersion, "CDC proxy waits for peeked mutations to become committed");
+	const Version throughVersion =
+	    committedBufferedPrefixThrough(tag, cursor, begin, committedThrough, preferredBufferedBatch);
+	CODE_PROBE(cursor->hasMessage() && cursor->version().version > committedThrough,
+	           "CDC proxy waits for peeked mutations to become committed");
 	if (throughVersion < begin) {
 		co_return CDCBufferTagPassResult::WAIT_FOR_COMMIT;
 	}
@@ -1964,6 +2062,93 @@ TEST_CASE("/NativeCDC/ProxyBufferPassLimits") {
 	return Void();
 }
 
+TEST_CASE("/NativeCDC/ProxyBufferedBatch") {
+	const Version firstVersion = 100;
+	const Version retainedVersion = firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS / 2;
+	auto stream = makeReference<CDCBufferedStream>(1);
+	for (const Version version :
+	     { firstVersion - 1, retainedVersion, firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS }) {
+		stream->mutations.emplace_back();
+		stream->mutations.back().version = version;
+	}
+
+	ASSERT(hasBufferedVersion(stream, firstVersion - 1));
+	ASSERT(hasBufferedVersion(stream, retainedVersion));
+	ASSERT(hasBufferedVersion(stream, firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS));
+	ASSERT(!hasBufferedVersion(stream, firstVersion - 2));
+	ASSERT(!hasBufferedVersion(stream, firstVersion));
+	ASSERT(!hasBufferedVersion(stream, firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS + 1));
+
+	const MutationRef firstMutation(MutationRef::SetValue, "cdc/a"_sr, "first"_sr);
+	const MutationRef secondMutation(MutationRef::SetValue, "cdc/b"_sr, "second"_sr);
+	CDCBufferedBatch batch;
+	for (int offset = 0; offset < CDC_PROXY_BUFFERED_PREFIX_VERSIONS; ++offset) {
+		const Version version = firstVersion + offset;
+		addMutationToBatch(stream, &batch, version, firstMutation);
+		addMutationToBatch(stream, &batch, version, secondMutation);
+	}
+
+	ASSERT_EQ(batch.mutations.size(), CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
+	const int64_t mutationBytes =
+	    static_cast<int64_t>(firstMutation.expectedSize() + secondMutation.expectedSize() + 2 * sizeof(MutationRef));
+	const int64_t versionBytes =
+	    static_cast<int64_t>(CDC_PROXY_BUFFERED_PREFIX_VERSIONS - 1) * sizeof(VersionedMutationsRef);
+	ASSERT_EQ(batch.bufferedBytes, CDC_PROXY_BUFFERED_PREFIX_VERSIONS * mutationBytes + versionBytes);
+	for (int offset = 0; offset < CDC_PROXY_BUFFERED_PREFIX_VERSIONS; ++offset) {
+		const auto& versioned = batch.mutations[offset];
+		ASSERT_EQ(versioned.version, firstVersion + offset);
+		ASSERT_EQ(versioned.mutations.size(), 2);
+		ASSERT_EQ(versioned.mutations[0].param1, firstMutation.param1);
+		ASSERT_EQ(versioned.mutations[0].param2, firstMutation.param2);
+		ASSERT_EQ(versioned.mutations[1].param1, secondMutation.param1);
+		ASSERT_EQ(versioned.mutations[1].param2, secondMutation.param2);
+		ASSERT(versioned.mutations[0].param1.begin() != firstMutation.param1.begin());
+		ASSERT(versioned.mutations[1].param1.begin() != secondMutation.param1.begin());
+	}
+	ASSERT_EQ(stream->mutations.size(), 3);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ProxyCommittedBufferedPrefix") {
+	CDCCommittedPrefix batched(99, 100, 64);
+	ASSERT(batched.includeVersion(100, { { 1, 60 } }));
+	ASSERT(batched.includeVersion(102, { { 1, 40 } }));
+	ASSERT(!batched.includeVersion(104, { { 1, 1 } }));
+	ASSERT_EQ(batched.bufferedThrough(), 102);
+
+	CDCCommittedPrefix sharedTag(99, 100, 64);
+	ASSERT(sharedTag.includeVersion(100, { { 1, 80 }, { 2, 80 } }));
+	ASSERT(sharedTag.includeVersion(101, { { 1, 20 }, { 2, 20 } }));
+	ASSERT(!sharedTag.includeVersion(102, { { 1, 1 } }));
+	ASSERT_EQ(sharedTag.bufferedThrough(), 101);
+
+	CDCCommittedPrefix completeVersions(99, 100, 64);
+	ASSERT(completeVersions.includeVersion(100, { { 1, 40 } }));
+	ASSERT(!completeVersions.includeVersion(101, { { 1, 61 }, { 2, 10 } }));
+	ASSERT(!completeVersions.includeVersion(102, { { 1, 60 }, { 2, 90 } }));
+	ASSERT_EQ(completeVersions.bufferedThrough(), 100);
+
+	CDCCommittedPrefix oversizedFirst(99, 100, 64);
+	ASSERT(oversizedFirst.includeVersion(100, { { 1, 101 } }));
+	ASSERT(!oversizedFirst.includeVersion(101, { { 1, 1 } }));
+	ASSERT_EQ(oversizedFirst.bufferedThrough(), 100);
+
+	CDCCommittedPrefix boundedVersions(99, 100, 2);
+	ASSERT(boundedVersions.includeVersion(100, {}));
+	ASSERT(boundedVersions.includeVersion(101, {}));
+	ASSERT(!boundedVersions.includeVersion(102, {}));
+	ASSERT_EQ(boundedVersions.bufferedThrough(), 101);
+
+	CDCCommittedPrefix sparse(99, 100, 64);
+	sparse.advanceGapThrough(120);
+	ASSERT_EQ(sparse.bufferedThrough(), 120);
+	ASSERT(sparse.includeVersion(150, { { 1, 1 } }));
+	sparse.advanceGapThrough(160);
+	sparse.advanceGapThrough(155);
+	ASSERT_EQ(sparse.bufferedThrough(), 160);
+	return Void();
+}
+
 TEST_CASE("/NativeCDC/ProxyConsumeReplySelection") {
 	CDCConsumeReplySelection chunked;
 	ASSERT(selectCDCConsumeReplyVersion(&chunked, 100, 100, 60, 100));
@@ -1995,6 +2180,9 @@ TEST_CASE("/NativeCDC/CommittedDeliveryFrontier") {
 	ASSERT_EQ(committedPeekThrough(200, 150), 150);
 	ASSERT_EQ(committedPeekThrough(150, 200), 150);
 	ASSERT_EQ(committedPeekThrough(150, 150), 150);
+	ASSERT_EQ(committedPeekThrough(149, 120), 120);
+	ASSERT_EQ(committedPeekThrough(149, 200), 149);
+	ASSERT_EQ(committedPeekThrough(103, 102), 102);
 	return Void();
 }
 
