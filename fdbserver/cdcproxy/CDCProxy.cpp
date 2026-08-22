@@ -401,6 +401,7 @@ class CDCProxy {
 	Future<Void> serveAcknowledgeRequests(FutureStream<CDCAckRequest> requests);
 	Future<Void> serveRegisterStreamRequests(FutureStream<CDCRegisterStreamRequest> requests);
 	Future<Void> serveRemoveStreamRequests(FutureStream<CDCRemoveStreamRequest> requests);
+	Future<Void> serveStatusRequests(FutureStream<GetCDCProxyStatusRequest> requests);
 	Future<Void> serveHaltForTestingRequests(FutureStream<HaltCDCProxyRequest> requests);
 	Future<Void> serveBufferStatusForTestingRequests(FutureStream<GetCDCProxyBufferStatusRequest> requests);
 	Future<Void> serveSetPopsPausedForTestingRequests(FutureStream<SetCDCProxyPopsPausedRequest> requests);
@@ -1685,6 +1686,51 @@ Future<Void> CDCProxy::serveRemoveStreamRequests(FutureStream<CDCRemoveStreamReq
 		actors.add(removeStream(std::move(request)));
 	}
 }
+
+Future<Void> CDCProxy::serveStatusRequests(FutureStream<GetCDCProxyStatusRequest> requests) {
+	while (true) {
+		GetCDCProxyStatusRequest request = co_await requests;
+		if (request.streamIds.size() > GetCDCProxyStatusRequest::MAX_STREAMS) {
+			request.reply.sendError(client_invalid_operation());
+			continue;
+		}
+
+		CDCProxyStatusReply status;
+		status.latestCommittedVersion = latestCommittedVersion;
+		status.bufferedBytes = bufferedBytes;
+		status.activePermits = bufferLock.activePermits();
+		status.bufferLimit = SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES;
+		status.waiters = bufferLock.waiters();
+		status.popAttempts = popAttempts;
+		status.popCompletions = popCompletions;
+		const ServerDBInfo& info = dbInfo->get();
+		status.recoveryState = static_cast<int>(info.recoveryState);
+		status.recoveryCount = info.recoveryCount;
+		status.recoveredAt = info.logSystemConfig.recoveredAt.orDefault(invalidVersion);
+		status.oldLogGenerations = static_cast<int>(info.logSystemConfig.oldTLogs.size());
+		status.streams.reserve(request.streamIds.size());
+		for (const CDCStreamId streamId : request.streamIds) {
+			CDCProxyStreamStatus streamStatus;
+			streamStatus.streamId = streamId;
+			auto found = streams.find(streamId);
+			if (found != streams.end() && found->second->active) {
+				const auto& stream = found->second;
+				streamStatus.present = true;
+				streamStatus.initialized = stream->initialized;
+				streamStatus.minVersion = stream->minVersion;
+				streamStatus.bufferedThrough = stream->bufferedThrough;
+				streamStatus.bufferedBytes = stream->bufferedBytes;
+				streamStatus.readDemand = stream->readDemand;
+				streamStatus.activeConsumeRequests = stream->activeConsumes;
+				streamStatus.tooOld = stream->tooOld;
+				streamStatus.bufferLimitExceeded = stream->bufferLimitExceeded;
+			}
+			status.streams.push_back(streamStatus);
+		}
+		request.reply.send(status);
+	}
+}
+
 Future<Void> CDCProxy::serveHaltForTestingRequests(FutureStream<HaltCDCProxyRequest> requests) {
 	while (true) {
 		HaltCDCProxyRequest request = co_await requests;
@@ -1862,6 +1908,7 @@ Future<Void> CDCProxy::run(CDCProxyInterface proxy, uint64_t recoveryCount) {
 	actors.add(serveAcknowledgeRequests(proxy.ack.getFuture()));
 	actors.add(serveRegisterStreamRequests(proxy.registerStream.getFuture()));
 	actors.add(serveRemoveStreamRequests(proxy.removeStream.getFuture()));
+	actors.add(serveStatusRequests(proxy.getStatus.getFuture()));
 	actors.add(serveHaltForTestingRequests(proxy.haltForTesting.getFuture()));
 	actors.add(serveBufferStatusForTestingRequests(proxy.getBufferStatusForTesting.getFuture()));
 	actors.add(serveSetPopsPausedForTestingRequests(proxy.setPopsPausedForTesting.getFuture()));
