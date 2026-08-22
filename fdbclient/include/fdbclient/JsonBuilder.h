@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 #include <cmath>
@@ -87,6 +88,8 @@ protected:
 			return write(json_spirit::write_string(val));
 		};
 	}
+
+	void writeValue(std::nullptr_t) { write("null"); }
 
 	void writeValue(const bool& val) { write(val ? "true" : "false"); }
 

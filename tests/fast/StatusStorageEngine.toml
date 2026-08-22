@@ -1,0 +1,15 @@
+[configuration]
+config = 'single ssd-1 perpetual_storage_wiggle=0'
+singleRegion = true
+
+[[test]]
+testTitle = 'StatusStorageEngine'
+useDB = true
+disabledFailureInjectionWorkloads = 'Attrition'
+
+    [[test.workload]]
+    testName = 'Status'
+    testDuration = 10.0
+    requestsPerSecond = 2.0
+    enableLatencyBands = false
+    requireSimulationTelemetry = true

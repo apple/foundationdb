@@ -217,6 +217,33 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			}
 			tx->reset();
 		}
+		// Tester processes have no dcid; unforced locality exclusions must tolerate their null status values.
+		while (true) {
+			Error exclusionError;
+			try {
+				Optional<Value> localityVersion = co_await runExcludeAndGetVersionKey(
+				    tx, "locality_dcid:12345", "excludedlocality", excludedLocalityVersionKey);
+				ASSERT(localityVersion.present());
+				break;
+			} catch (Error& e) {
+				exclusionError = e;
+			}
+			if (exclusionError.code() == error_code_actor_cancelled) {
+				throw exclusionError;
+			}
+			if (exclusionError.code() == error_code_special_keys_api_failure) {
+				Optional<Value> errorMessage =
+				    co_await tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
+				ASSERT(errorMessage.present());
+				std::string message = readJSONStrictly(errorMessage.get().toString()).get_obj()["message"].get_str();
+				ASSERT(message.find("General exception raised.") == std::string::npos);
+				tx->reset();
+				co_await delay(0.1);
+			} else {
+				co_await tx->onError(exclusionError);
+			}
+		}
+		tx->reset();
 		// "setclass"
 		{
 			Error err;

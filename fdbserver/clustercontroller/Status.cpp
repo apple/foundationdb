@@ -3592,6 +3592,21 @@ TEST_CASE("/status/json/builder") {
 	JsonBuilder json;
 	ASSERT(checkJson(json, "null"));
 
+	JsonBuilderObject nullObject;
+	nullObject["missing"] = nullptr;
+	ASSERT(checkJson(nullObject, R"({"missing":null})"));
+
+	JsonBuilderArray nullArray;
+	nullArray.push_back(nullptr);
+	ASSERT(checkJson(nullArray, "[null]"));
+
+	LocalityData locality(Optional<Standalone<StringRef>>(),
+	                      Standalone<StringRef>("zone"_sr),
+	                      Standalone<StringRef>("machine"_sr),
+	                      Optional<Standalone<StringRef>>());
+	ASSERT(checkJson(locality.toJSON<JsonBuilderObject>(),
+	                 R"({"dcid":null,"machineid":"machine","processid":null,"zoneid":"zone"})"));
+
 	JsonBuilderArray array;
 	ASSERT(checkJson(array, "[]"));
 

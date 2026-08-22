@@ -989,8 +989,8 @@ Future<bool> checkExclusion(Database db,
 					// Iterate over all excluded localites and check if the process is excluded based on the locality.
 					for (const auto& [localityKey, localityVec] : parsedLocalities) {
 						std::string localityValue;
-						if (!localityObj.get(localityKey, localityValue)) {
-							// If the locality doesn't exist in the locality object skip over it.
+						if (!localityObj.tryGet(localityKey, localityValue)) {
+							// Missing or unset locality values cannot match an exclusion.
 							continue;
 						}
 
