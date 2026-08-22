@@ -1,0 +1,57 @@
+# BulkLoad retry when a data move loses its destination team
+#
+# An unhealthy destination team is recoverable -- another team can be chosen -- but a bulkload task's
+# key-values exist only in the dump until an attempt ingests them, so abandoning the task removes that
+# range from the database. Injects fewer failures than the re-dispatch budget allows, so retries win.
+#
+# BulkLoadingWorkload compares every restored key-value against what it wrote, and excludes ranges
+# whose task ended in Error, so the assertion is: the load terminates and surviving ranges are correct.
+#
+# See BulkLoadingDestTeamFailureExhausted.toml for the case where the budget runs out.
+# Shortening health_poll_time to widen the injection window does not work: at 0.1s the run's tail
+# stopped completing even with no injection.
+
+[configuration]
+storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] #FIXME: remove after allowing to do bulkloading with fetchKey and shardedrocksdb
+
+disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
+
+# See BulkLoading.toml: 'triple' keeps the simulator from picking a topology where bulk-load team
+# selection cannot find a disjoint candidate team, which would stall the load rather than test it.
+config = 'triple'
+
+machineCount = 10
+extraStorageMachineCountPerDC = 5
+datacenters = 1
+generateFearless = false
+
+[[knobs]]
+shard_encode_location_metadata = true
+
+# Rely on RangeLock
+enable_read_lock_on_range = true
+
+# Do not support version vector
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
+
+min_byte_sampling_probability = 0.5
+
+cc_enforce_use_unfit_dd_in_sim = true
+
+disable_audit_storage_final_replica_check_in_sim = true
+
+max_trace_lines = 5000000
+
+# Number of bulkload data moves told their destination team went unhealthy (0 elsewhere).
+bulkload_sim_inject_dest_team_failures = 3
+
+
+[[test]]
+testTitle = 'BulkLoadingDestTeamFailureWorkload'
+useDB = true
+waitForQuiescence = false
+
+    [[test.workload]]
+    testName = 'BulkLoadingWorkload'

@@ -434,6 +434,10 @@ public:
 	int BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE; // the block size when performing async read/write for bulkload
 	int MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK; // the max number of manifest that a bulkload task can process
 	bool BULKLOAD_SIM_FAILURE_INJECTION; // Set to true to inject failure in bulkload simulation
+	int BULKLOAD_SIM_INJECT_DEST_TEAM_FAILURES; // Simulation-only test hook: how many bulkload data moves to tell that
+	                                            // their destination team went unhealthy. Zero by default, so no other
+	                                            // test changes behaviour. Waiting for a real team to fail within the
+	                                            // window a bulkload move is in flight covers that path far too rarely
 	double DD_BULKLOAD_POWER_OF_D_RATIO; // When selecting the dest team, DD randomly chooses 1/D portion of all valid
 	                                     // teams as the candidates and the DD selects the team with the minimal number
 	                                     // of ongoing tasks from the candidates as the dest team.

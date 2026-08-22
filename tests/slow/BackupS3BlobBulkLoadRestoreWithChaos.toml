@@ -31,6 +31,13 @@ minimumRegions = 2
 # Ensure enough storage servers for non-overlapping BulkLoad teams
 # Triple replication needs 6+ servers (3 src + 3 different dest) to avoid overlapping
 extraMachineCountDC = 3
+# Dedicated storage-class machines so bulk-load team selection can find a team disjoint from the
+# source: it rejects any team sharing a server with the source (DDTeamCollection). Without these,
+# runs fail with DDBulkLoadEngineTaskGetTeamFailedToFindValidTeam reporting ValidTeamSize 0 with
+# every candidate team duplicated, the task is marked Error, and the restore is incomplete.
+# extraMachineCountDC below adds ordinary machines, which do not supply that capacity. Per DC, so
+# this holds for the multi-region variants too. See tests/fast/BulkLoading.toml for the same guard.
+extraStorageMachineCountPerDC = 5
 
 config = "triple usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
 

@@ -524,6 +524,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE,            1024*1024 ); if (isSimulated) BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE = deterministicRandom()->randomInt(1024, 10240);
 	init( MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK,                   10 ); if (isSimulated) MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK = deterministicRandom()->randomInt(1, 11);
 	init( BULKLOAD_SIM_FAILURE_INJECTION,                      false ); if (isSimulated) BULKLOAD_SIM_FAILURE_INJECTION = true;
+	init( BULKLOAD_SIM_INJECT_DEST_TEAM_FAILURES,                   0 );
 	init( DD_BULKLOAD_POWER_OF_D_RATIO,                          2.0 ); if (isSimulated) DD_BULKLOAD_POWER_OF_D_RATIO = deterministicRandom()->randomInt(1, 11);
 	init( DD_BULKLOAD_TASK_SUBMISSION_INTERVAL_SEC,             0.01 );
 
