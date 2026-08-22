@@ -6390,6 +6390,39 @@ public:
 		    PublicRequestStream<GetValueRequest>(Endpoint({ NetworkAddress(IPAddress(0x01010101), id) }, UID(id, 1)));
 	}
 
+	static void ExclusionTracker_LocalityAddresses() {
+		const NetworkAddress primary(IPAddress(0x01010102), 2);
+		const NetworkAddress secondary(IPAddress(0x01010102), 3);
+		StorageServerInterface server;
+		setTestEndpoint(server, 1);
+		server.getKeyValues = PublicRequestStream<GetKeyValuesRequest>(Endpoint({ primary, secondary }, UID(2, 1)));
+		server.locality.set("zoneid"_sr, "zone-a"_sr);
+		server.locality.set("dcid"_sr, "primary"_sr);
+		server.locality.set("unset"_sr, {});
+
+		std::set<AddressExclusion> excluded{ AddressExclusion(IPAddress(0x01010103), 4) };
+		const auto original = excluded;
+		ExclusionTracker::appendAddressesMatchingLocalities(server, {}, excluded);
+		ASSERT(excluded == original);
+		ExclusionTracker::appendAddressesMatchingLocalities(
+		    server, { { "absent", "zone-a" }, { "unset", "" }, { "zoneid", "zone-b" } }, excluded);
+		ASSERT(excluded == original);
+		ExclusionTracker::appendAddressesMatchingLocalities(
+		    server, { { "zoneid", "zone-a" }, { "dcid", "primary" }, { "zoneid", "zone-a" } }, excluded);
+		auto expected = original;
+		expected.insert(AddressExclusion(primary.ip, primary.port));
+		expected.insert(AddressExclusion(secondary.ip, secondary.port));
+		ASSERT(excluded == expected);
+
+		std::set<AddressExclusion> failed;
+		ExclusionTracker::appendAddressesMatchingLocalities(server, { { "zoneid", "zone-b" } }, failed);
+		ASSERT(failed.empty());
+		server.getKeyValues = PublicRequestStream<GetKeyValuesRequest>(Endpoint({ primary }, UID(3, 1)));
+		ExclusionTracker::appendAddressesMatchingLocalities(server, { { "zoneid", "zone-a" } }, failed);
+		ASSERT(failed == std::set<AddressExclusion>({ AddressExclusion(primary.ip, primary.port) }));
+		ASSERT(excluded == expected);
+	}
+
 	static std::unique_ptr<DDTeamCollection> testTeamCollection(
 	    int teamSize,
 	    Reference<IReplicationPolicy> policy,
@@ -7697,4 +7730,9 @@ TEST_CASE("/DataDistribution/TeamTracker/RetriesMergedShardForUndesiredServer") 
 
 TEST_CASE("/DataDistribution/TeamTracker/RechecksHealthyZone") {
 	co_await DDTeamCollectionUnitTest::TeamTracker_RechecksHealthyZone();
+}
+
+TEST_CASE("/DataDistribution/ExclusionTracker/LocalityAddresses") {
+	DDTeamCollectionUnitTest::ExclusionTracker_LocalityAddresses();
+	co_return;
 }
