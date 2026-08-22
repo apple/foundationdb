@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "fdbclient/BulkDumping.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/KeyRangeMap.h"
