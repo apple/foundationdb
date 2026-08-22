@@ -1102,6 +1102,12 @@ Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<Data
 	}
 }
 
+// Bounds one task's total re-dispatches from any recoverable cause, so a task that keeps failing the same
+// way cannot spin forever. Deliberately in code rather than a knob: it exists to terminate a loop, not to
+// be tuned per cluster. Giving up is only safe because a job ending in Error fails its restore rather than
+// reporting completion.
+constexpr int BULKLOAD_MAX_RETRYABLE_REDISPATCH = 20;
+
 // Replace a task with two tasks covering the same manifests, halving the key range each covers.
 //
 // This is the recovery for a placement failure the task's range itself causes: src is the union of the
@@ -1110,12 +1116,11 @@ Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<Data
 // attempt presents the same range and recomputes the same src. Narrower ranges span fewer shards and so
 // have narrower src.
 //
-// A task's range is exactly the span of its manifests, and the job's manifests tile the key space, so
-// splitting the manifest list in two yields adjacent sub-ranges that together cover the parent exactly.
-// The two writes therefore overwrite the parent's entry with no gap and nothing is ever persisted in an
-// invalid state: at every version the range is owned by tasks whose union is the parent. That is the
-// difference from erasing the task and relying on something to rebuild it, which drops the range's data
-// if nothing does.
+// The children's ranges tile the parent's and both writes land in one transaction, so no version exists in
+// which the parent's range is unowned, or owned by anything but tasks whose union is the parent. That is
+// the difference from erasing the task and relying on something to rebuild it, which drops the range's data
+// if nothing does. Because the job's manifests tile the key space, splitting the manifest list at the same
+// key that splits the range gives each child exactly the manifests covering its own range.
 //
 // Returns false if the task holds a single manifest, which is as narrow as a task can get; the caller
 // then has a genuinely unplaceable range. Halving also bounds recursion without a counter.
@@ -1134,8 +1139,11 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	std::sort(manifests.begin(), manifests.end(), [](BulkLoadManifest const& a, BulkLoadManifest const& b) {
 		return a.getBeginKey() < b.getBeginKey();
 	});
-	int const half = manifests.size() / 2;
 
+	// Split at a manifest boundary, because the job's manifests tile the key space: cutting the range at
+	// manifests[i].getBeginKey() puts manifests [0, i) wholly below the cut and [i, N) wholly at or above
+	// it, so neither child is missing data for its own range.
+	//
 	// Derive the children's ranges from the PARENT's range, not from their manifests' span. A task's range
 	// is its manifests' span intersected with the job range (see generateBulkLoadTaskRange), so a parent
 	// whose range was clipped is narrower than the data its manifests describe. Splitting on manifest
@@ -1143,17 +1151,34 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	// given -- observed as this function's own tiling assertion firing on BulkDumpingS3WithChaos. Splitting
 	// the parent's range makes the children tile it by construction. A task range narrower than its
 	// manifests is expected and handled: the storage server filters file content to the task range.
-	Key const boundary = manifests[half].getBeginKey();
-	if (boundary <= parent.getRange().begin || boundary >= parent.getRange().end) {
-		// The manifest boundary lies outside the parent's clipped range, so one child would be empty.
+	//
+	// For the same reason the cut must be chosen from the boundaries that fall strictly inside the parent's
+	// range. A task at a job-range edge can hold many manifests whose midpoint lies outside its clipped
+	// range; cutting there would leave one child empty, and declining would hand the caller the very
+	// unplaceable task this function exists to rescue.
+	std::vector<int> insideBoundaries;
+	int const manifestCount = static_cast<int>(manifests.size());
+	for (int i = 0; i < manifestCount; i++) {
+		Key const candidate = manifests[i].getBeginKey();
+		if (candidate > parent.getRange().begin && candidate < parent.getRange().end) {
+			insideBoundaries.push_back(i);
+		}
+	}
+	if (insideBoundaries.empty()) {
+		// Every manifest boundary is outside the parent's clipped range, so the range cannot be cut at one.
 		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", self->ddId)
-		    .detail("Reason", "Manifest split point lies outside the task's range")
+		    .detail("Reason", "No manifest split point lies inside the task's range")
 		    .detail("TaskRange", parent.getRange())
 		    .detail("TaskID", parent.getTaskId())
-		    .detail("Boundary", boundary)
 		    .detail("ManifestCount", manifests.size());
 		co_return false;
 	}
+	int const half = insideBoundaries[insideBoundaries.size() / 2];
+	// The parent's range starts at or after its first manifest's begin key, so that key can never be
+	// strictly inside the range and index 0 is never a candidate. Both children therefore hold manifests,
+	// which BulkLoadTaskState requires.
+	ASSERT(half > 0 && half < manifestCount);
+	Key const boundary = manifests[half].getBeginKey();
 	std::vector<KeyRange> childRanges = { Standalone(KeyRangeRef(parent.getRange().begin, boundary)),
 		                                  Standalone(KeyRangeRef(boundary, parent.getRange().end)) };
 
@@ -1363,12 +1388,12 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 			throw timed_out();
 		}
 		// restartCount advances on every re-trigger from any cause, so this bounds a task's total thrash,
-		// not destination team failures alone. Giving up is only safe because a job ending in Error now
-		// fails its restore rather than reporting completion. Bound in code, like the backstop above: it
-		// stops an endless loop and is not something to tune per cluster.
-		int const maxRetryableRedispatch = buggify() ? deterministicRandom()->randomInt(1, 4) : 20;
-		bool retriesExhausted = ack.retryableError && triggeredBulkLoadTask.restartCount >= maxRetryableRedispatch;
-		if (ack.retryableError && !retriesExhausted) {
+		// not destination team failures alone. See BULKLOAD_MAX_RETRYABLE_REDISPATCH.
+		int const maxRetryableRedispatch =
+		    buggify() ? deterministicRandom()->randomInt(1, 4) : BULKLOAD_MAX_RETRYABLE_REDISPATCH;
+		bool const retriesExhausted = ack.outcome == BulkLoadAck::Outcome::Retryable &&
+		                              triggeredBulkLoadTask.restartCount >= maxRetryableRedispatch;
+		if (ack.outcome == BulkLoadAck::Outcome::Retryable && !retriesExhausted) {
 			CODE_PROBE(true, "Bulkload task re-dispatched after a recoverable data move failure");
 			// Drop this task from the collection before exiting. publishTask refuses a task whose taskId
 			// is already published, deliberately, to stop a task being triggered twice -- so leaving the
@@ -1392,18 +1417,18 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 		}
 
 		// A range with no disjoint destination team cannot be placed by re-attempting it: src is recomputed
-		// from the same range every time. Narrow it instead. Note this arrives as an unretryable ack with
-		// restartCount still 0 -- the relocator gives bulkload no retries for this condition -- so it is
-		// reached without spending any of the re-dispatch budget above.
+		// from the same range every time. Narrow it instead. Note this arrives with restartCount still 0 --
+		// the relocator gives bulkload no retries for this condition -- so it is reached without spending
+		// any of the re-dispatch budget above.
 		bool taskSplit = false;
-		if (ack.destTeamNotFound || retriesExhausted) {
+		if (ack.outcome == BulkLoadAck::Outcome::Unplaceable || retriesExhausted) {
 			taskSplit = co_await splitBulkLoadTask(self, triggeredBulkLoadTask);
 		}
 		if (taskSplit) {
 			CODE_PROBE(true, "Bulkload task split because its range could not be placed");
 			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
 			    .detail("Phase", "Range could not be placed; task split")
-			    .detail("DestTeamNotFound", ack.destTeamNotFound)
+			    .detail("Outcome", BulkLoadAck::toString(ack.outcome))
 			    .detail("RetriesExhausted", retriesExhausted)
 			    .detail("CancelledDataMovePriority", ack.dataMovePriority)
 			    .detail("Range", range)
@@ -1414,7 +1439,10 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 			co_return;
 		}
 
-		if (ack.unretryableError || retriesExhausted) {
+		// An Unplaceable task that could not be narrowed is terminal, which is what the flag it replaced
+		// encoded by also setting the unretryable one.
+		if (ack.outcome == BulkLoadAck::Outcome::Terminal || ack.outcome == BulkLoadAck::Outcome::Unplaceable ||
+		    retriesExhausted) {
 			if (retriesExhausted) {
 				CODE_PROBE(true, "Bulkload task marked Error after exhausting recoverable retries");
 			}
