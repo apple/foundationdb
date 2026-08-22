@@ -104,6 +104,14 @@ constexpr bool hasRocksDB =
 #endif
     ;
 
+bool isDisabledLegacyMode(std::string_view key, const toml::value& value) {
+	if ((key != "tenantModes" && key != "encryptModes") || !value.is_array()) {
+		return false;
+	}
+	const auto& modes = value.as_array();
+	return modes.size() == 1 && modes.front().is_string() && modes.front().as_string() == "disabled";
+}
+
 } // anonymous namespace
 
 namespace probe {
@@ -328,6 +336,10 @@ class TestConfig : public BasicTestConfig {
 		void set(std::string_view key, const value_type& value) {
 			auto iter = confMap.find(key);
 			if (iter == confMap.end()) {
+				// Restart inputs shared with older binaries must keep these retired modes disabled.
+				if (isDisabledLegacyMode(key, value)) {
+					return;
+				}
 				std::cerr << "Unknown configuration attribute " << key << std::endl;
 				TraceEvent("UnknownConfigurationAttribute").detail("Name", std::string(key));
 				throw unknown_error();

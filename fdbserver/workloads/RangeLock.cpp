@@ -148,17 +148,21 @@ struct RangeLocking : TestWorkload {
 		}
 	}
 
-	Future<Void> expectClearRejected(Database cx, KeyRange range) {
+	Future<Void> expectOperationRejected(Future<Void> operation, int expectedError) {
 		bool rejected = false;
 		try {
-			co_await clearRange(cx, range);
+			co_await operation;
 		} catch (Error& e) {
-			if (e.code() != error_code_transaction_rejected_range_locked) {
+			if (e.code() != expectedError) {
 				throw;
 			}
 			rejected = true;
 		}
 		ASSERT(rejected);
+	}
+
+	Future<Void> expectClearRejected(Database cx, KeyRange range) {
+		return expectOperationRejected(clearRange(cx, range), error_code_transaction_rejected_range_locked);
 	}
 
 	Future<Void> testNormalKeyspaceBoundary(Database cx) {
@@ -189,6 +193,41 @@ struct RangeLocking : TestWorkload {
 		lockedValue = co_await getKey(cx, lockedKey);
 		ASSERT(!lockedValue.present());
 		TraceEvent("RangeLockNormalKeyspaceBoundaryPassed");
+	}
+
+	Future<Void> testLogicalIdentity(Database cx) {
+		const RangeLockOwnerName owner = "RangeLockIdentityA";
+		const RangeLockOwnerName collidingOwner = owner + "ExclusiveReadLock{ begin=X";
+		const KeyRange range = KeyRangeRef("XExclusiveReadLock{ begin=a"_sr, "z"_sr);
+		const KeyRange collidingRange = KeyRangeRef("a"_sr, "z"_sr);
+		const RangeLockState original(RangeLockType::ExclusiveReadLock, owner, range);
+		const RangeLockState colliding(RangeLockType::ExclusiveReadLock, collidingOwner, collidingRange);
+		const Key protectedKey = "m"_sr;
+		const Value value = "preserved"_sr;
+		ASSERT(original != colliding);
+		ASSERT(original.getLockUniqueString() == colliding.getLockUniqueString());
+		co_await registerRangeLockOwner(cx, owner, owner);
+		co_await registerRangeLockOwner(cx, collidingOwner, collidingOwner);
+		co_await setKey(cx, protectedKey, value);
+		co_await takeExclusiveReadLockOnRange(cx, range, owner);
+
+		co_await expectOperationRejected(takeExclusiveReadLockOnRange(cx, collidingRange, collidingOwner),
+		                                 error_code_range_lock_reject);
+		auto locks = co_await findExclusiveReadLockOnRange(cx, normalKeys);
+		ASSERT(locks.size() == 1 && locks[0].first == range && locks[0].second == original);
+		co_await expectOperationRejected(releaseExclusiveReadLockOnRange(cx, collidingRange, collidingOwner),
+		                                 error_code_range_unlock_reject);
+		locks = co_await findExclusiveReadLockOnRange(cx, normalKeys);
+		ASSERT(locks.size() == 1 && locks[0].first == range && locks[0].second == original);
+		co_await expectClearRejected(cx, collidingRange);
+		const Optional<Value> protectedValue = co_await getKey(cx, protectedKey);
+		ASSERT(protectedValue.present() && protectedValue.get() == value);
+
+		co_await releaseExclusiveReadLockOnRange(cx, range, owner);
+		co_await clearKey(cx, protectedKey);
+		co_await removeRangeLockOwner(cx, owner);
+		co_await removeRangeLockOwner(cx, collidingOwner);
+		TraceEvent("RangeLockLogicalIdentityPassed");
 	}
 
 	std::string getLockRangesString(const std::vector<std::pair<KeyRange, RangeLockState>>& locks) {
@@ -660,6 +699,7 @@ struct RangeLocking : TestWorkload {
 			co_return;
 		}
 		co_await testNormalKeyspaceBoundary(cx);
+		co_await testLogicalIdentity(cx);
 		co_await complexTest(this, cx);
 		co_await testUnlockByUser(this, cx);
 	}
