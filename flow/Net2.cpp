@@ -2295,7 +2295,7 @@ struct TestGVR {
 };
 
 template <class F>
-THREAD_HANDLE startThreadF(F&& func) {
+THREAD_HANDLE startThreadF(F func) {
 	struct Thing {
 		F f;
 		explicit Thing(F&& f) : f(std::move(f)) {}
@@ -2367,7 +2367,7 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 		auto& s = perThread[t];
 		doneProducing.push_back(s.doneProducing.getFuture());
 		total += s.toProduce;
-		s.handle = startThreadF([&queue, &s]() {
+		auto produce = [&queue, &s]() {
 			printf("Thread%d\n", s.threadId);
 			int nextYield = 0;
 			while (s.produced < s.toProduce) {
@@ -2379,7 +2379,8 @@ TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 			}
 			printf("T%dDone\n", s.threadId);
 			s.doneProducing.send(Void());
-		});
+		};
+		s.handle = startThreadF(produce);
 	}
 	int consumed = 0;
 	while (consumed < total) {
