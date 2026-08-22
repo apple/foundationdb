@@ -21,6 +21,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <compare>
 #include <utility>
 
@@ -105,11 +106,47 @@ struct WorkerInfo : NonCopyable {
 struct WorkerFitnessInfo {
 	WorkerDetails worker;
 	recruitment::Fitness fitness;
-	int used;
 
-	WorkerFitnessInfo() : fitness(recruitment::NeverAssign), used(0) {}
-	WorkerFitnessInfo(WorkerDetails worker, recruitment::Fitness fitness, int used)
-	  : worker(worker), fitness(fitness), used(used) {}
+	WorkerFitnessInfo() : fitness(recruitment::NeverAssign) {}
+	WorkerFitnessInfo(WorkerDetails worker, recruitment::Fitness fitness) : worker(worker), fitness(fitness) {}
+};
+
+class TransactionRolePlacement {
+public:
+	struct TieBreak {
+		// Prefer not to increase the load of earlier roles in the recruitment-fitness tuple.
+		std::array<bool, 3> assignedRoles{};
+		ProcessClass::ClassType processClass = ProcessClass::UnsetClass;
+
+		std::strong_ordering operator<=>(TieBreak const&) const = default;
+	};
+
+	TieBreak tieBreak(WorkerDetails const& worker) const {
+		auto it = assignedRoles.find(worker.interf.locality.processId());
+		return { it == assignedRoles.end() ? std::array<bool, 3>{} : it->second, worker.processClass.classType() };
+	}
+
+	void record(WorkerDetails const& worker, recruitment::ClusterRole role) {
+		auto& roles = assignedRoles[worker.interf.locality.processId()];
+		switch (role) {
+		case recruitment::CommitProxy:
+			roles[0] = true;
+			break;
+		case recruitment::GrvProxy:
+			roles[1] = true;
+			break;
+		case recruitment::Resolver:
+			roles[2] = true;
+			break;
+		default:
+			ASSERT(false);
+		}
+	}
+
+private:
+	// Equal usage counts can represent different roles. Keep role history and process class in randomized
+	// candidate groups so later placements cannot change an earlier role's fitness based on a random tie.
+	std::map<Optional<Standalone<StringRef>>, std::array<bool, 3>> assignedRoles;
 };
 
 inline bool hasWorkerIssue(const Standalone<VectorRef<StringRef>>& issues, StringRef issue) {
@@ -1485,8 +1522,11 @@ public:
 	                                               DatabaseConfiguration const& conf,
 	                                               std::map<Optional<Standalone<StringRef>>, int>& id_used,
 	                                               std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
-	                                               bool checkStable = false) {
-		std::map<std::tuple<recruitment::Fitness, int, bool, int>, std::vector<WorkerDetails>> fitness_workers;
+	                                               bool checkStable = false,
+	                                               TransactionRolePlacement* placement = nullptr) {
+		std::map<std::tuple<recruitment::Fitness, int, bool, int, TransactionRolePlacement::TieBreak>,
+		         std::vector<WorkerDetails>>
+		    fitness_workers;
 
 		for (auto& it : id_worker) {
 			auto fitness = recruitment::machineClassFitness(it.second.details.processClass, role);
@@ -1500,7 +1540,9 @@ public:
 				fitness_workers[std::make_tuple(fitness,
 				                                id_used[it.first],
 				                                isLongLivedStateless(it.first),
-				                                sharing != preferredSharing.end() ? sharing->second : 1e6)]
+				                                sharing != preferredSharing.end() ? sharing->second : 1'000'000,
+				                                placement ? placement->tieBreak(it.second.details)
+				                                          : TransactionRolePlacement::TieBreak{})]
 				    .push_back(it.second.details);
 			}
 		}
@@ -1508,9 +1550,11 @@ public:
 		if (!fitness_workers.empty()) {
 			auto worker = deterministicRandom()->randomChoice(fitness_workers.begin()->second);
 			id_used[worker.interf.locality.processId()]++;
+			if (placement) {
+				placement->record(worker, role);
+			}
 			return WorkerFitnessInfo(worker,
-			                         std::max(recruitment::GoodFit, std::get<0>(fitness_workers.begin()->first)),
-			                         std::get<1>(fitness_workers.begin()->first));
+			                         std::max(recruitment::GoodFit, std::get<0>(fitness_workers.begin()->first)));
 		}
 
 		throw no_more_servers();
@@ -1524,13 +1568,15 @@ public:
 	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
 	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
 	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
-	    bool checkStable = false) {
+	    bool checkStable = false,
+	    TransactionRolePlacement* placement = nullptr) {
 		struct WorkerFitnessKey {
 			recruitment::Fitness fitness;
 			int used;
 			bool unreliableBackup;
 			bool longLivedStateless;
 			int sharing;
+			TransactionRolePlacement::TieBreak placement;
 
 			std::strong_ordering operator<=>(WorkerFitnessKey const&) const = default;
 		};
@@ -1539,6 +1585,9 @@ public:
 		std::vector<WorkerDetails> results;
 		if (minWorker.present()) {
 			results.push_back(minWorker.get().worker);
+			if (placement) {
+				placement->record(minWorker.get().worker, role);
+			}
 		}
 		if (amount <= results.size()) {
 			return results;
@@ -1550,19 +1599,18 @@ public:
 			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    it.second.details.interf.locality.dcId() == dcId &&
-			    (!minWorker.present() ||
-			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
-			      (fitness < minWorker.get().fitness ||
-			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
+			    (!minWorker.present() || (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
+			                              fitness <= minWorker.get().fitness))) {
 				auto sharing = preferredSharing.find(it.first);
-				fitness_workers[{ fitness,
-				                  id_used[it.first],
-				                  role == recruitment::Backup && g_network->isSimulated() &&
-				                      !g_simulator->getProcessByAddress(it.second.details.interf.address())
-				                           ->isReliable(),
-				                  isLongLivedStateless(it.first),
-				                  sharing != preferredSharing.end() ? sharing->second : 1'000'000 }]
-				    .push_back(it.second.details);
+				fitness_workers
+				    [{ fitness,
+				       id_used[it.first],
+				       role == recruitment::Backup && g_network->isSimulated() &&
+				           !g_simulator->getProcessByAddress(it.second.details.interf.address())->isReliable(),
+				       isLongLivedStateless(it.first),
+				       sharing != preferredSharing.end() ? sharing->second : 1'000'000,
+				       placement ? placement->tieBreak(it.second.details) : TransactionRolePlacement::TieBreak{} }]
+				        .push_back(it.second.details);
 			}
 		}
 
@@ -1571,12 +1619,87 @@ public:
 			for (int i = 0; i < it.second.size(); i++) {
 				results.push_back(it.second[i]);
 				id_used[it.second[i].interf.locality.processId()]++;
+				if (placement) {
+					placement->record(it.second[i], role);
+				}
 				if (results.size() == amount)
 					return results;
 			}
 		}
 
 		return results;
+	}
+
+	struct TransactionSystemWorkers {
+		std::vector<WorkerDetails> commitProxies;
+		std::vector<WorkerDetails> grvProxies;
+		std::vector<WorkerDetails> resolvers;
+	};
+
+	// id_used contains the roles placed before commit proxies, GRV proxies, and resolvers.
+	TransactionSystemWorkers getWorkersForTransactionSystem(Optional<Standalone<StringRef>> const& dcId,
+	                                                        DatabaseConfiguration const& conf,
+	                                                        std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	                                                        bool checkStable = false) {
+		TransactionRolePlacement placement;
+		std::map<Optional<Standalone<StringRef>>, int> preferredSharing;
+		auto firstCommitProxy = getWorkerForRoleInDatacenter(dcId,
+		                                                     recruitment::CommitProxy,
+		                                                     recruitment::ExcludeFit,
+		                                                     conf,
+		                                                     id_used,
+		                                                     preferredSharing,
+		                                                     checkStable,
+		                                                     &placement);
+		preferredSharing[firstCommitProxy.worker.interf.locality.processId()] = 0;
+		auto firstGrvProxy = getWorkerForRoleInDatacenter(dcId,
+		                                                  recruitment::GrvProxy,
+		                                                  recruitment::ExcludeFit,
+		                                                  conf,
+		                                                  id_used,
+		                                                  preferredSharing,
+		                                                  checkStable,
+		                                                  &placement);
+		preferredSharing[firstGrvProxy.worker.interf.locality.processId()] = 1;
+		auto firstResolver = getWorkerForRoleInDatacenter(dcId,
+		                                                  recruitment::Resolver,
+		                                                  recruitment::ExcludeFit,
+		                                                  conf,
+		                                                  id_used,
+		                                                  preferredSharing,
+		                                                  checkStable,
+		                                                  &placement);
+		preferredSharing[firstResolver.worker.interf.locality.processId()] = 2;
+
+		TransactionSystemWorkers result;
+		result.commitProxies = getWorkersForRoleInDatacenter(dcId,
+		                                                     recruitment::CommitProxy,
+		                                                     conf.getDesiredCommitProxies(),
+		                                                     conf,
+		                                                     id_used,
+		                                                     preferredSharing,
+		                                                     firstCommitProxy,
+		                                                     checkStable,
+		                                                     &placement);
+		result.grvProxies = getWorkersForRoleInDatacenter(dcId,
+		                                                  recruitment::GrvProxy,
+		                                                  conf.getDesiredGrvProxies(),
+		                                                  conf,
+		                                                  id_used,
+		                                                  preferredSharing,
+		                                                  firstGrvProxy,
+		                                                  checkStable,
+		                                                  &placement);
+		result.resolvers = getWorkersForRoleInDatacenter(dcId,
+		                                                 recruitment::Resolver,
+		                                                 conf.getDesiredResolvers(),
+		                                                 conf,
+		                                                 id_used,
+		                                                 preferredSharing,
+		                                                 firstResolver,
+		                                                 checkStable,
+		                                                 &placement);
+		return result;
 	}
 
 	// Allows the comparison of two different recruitments to determine which one is better
@@ -1818,45 +1941,8 @@ public:
 			}
 		}
 
-		std::map<Optional<Standalone<StringRef>>, int> preferredSharing;
-		auto first_commit_proxy = getWorkerForRoleInDatacenter(
-		    dcId, recruitment::CommitProxy, recruitment::ExcludeFit, req.configuration, id_used, preferredSharing);
-		preferredSharing[first_commit_proxy.worker.interf.locality.processId()] = 0;
-		auto first_grv_proxy = getWorkerForRoleInDatacenter(
-		    dcId, recruitment::GrvProxy, recruitment::ExcludeFit, req.configuration, id_used, preferredSharing);
-		preferredSharing[first_grv_proxy.worker.interf.locality.processId()] = 1;
-		auto first_resolver = getWorkerForRoleInDatacenter(
-		    dcId, recruitment::Resolver, recruitment::ExcludeFit, req.configuration, id_used, preferredSharing);
-		preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
-
-		// If one of the first process recruitments is forced to share a process, allow all of next recruitments
-		// to also share a process.
-		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
-		first_commit_proxy.used = maxUsed;
-		first_grv_proxy.used = maxUsed;
-		first_resolver.used = maxUsed;
-
-		auto commit_proxies = getWorkersForRoleInDatacenter(dcId,
-		                                                    recruitment::CommitProxy,
-		                                                    req.configuration.getDesiredCommitProxies(),
-		                                                    req.configuration,
-		                                                    id_used,
-		                                                    preferredSharing,
-		                                                    first_commit_proxy);
-		auto grv_proxies = getWorkersForRoleInDatacenter(dcId,
-		                                                 recruitment::GrvProxy,
-		                                                 req.configuration.getDesiredGrvProxies(),
-		                                                 req.configuration,
-		                                                 id_used,
-		                                                 preferredSharing,
-		                                                 first_grv_proxy);
-		auto resolvers = getWorkersForRoleInDatacenter(dcId,
-		                                               recruitment::Resolver,
-		                                               req.configuration.getDesiredResolvers(),
-		                                               req.configuration,
-		                                               id_used,
-		                                               preferredSharing,
-		                                               first_resolver);
+		auto [commit_proxies, grv_proxies, resolvers] =
+		    getWorkersForTransactionSystem(dcId, req.configuration, id_used);
 		for (int i = 0; i < commit_proxies.size(); i++)
 			result.commitProxies.push_back(commit_proxies[i].interf);
 		for (int i = 0; i < grv_proxies.size(); i++)
@@ -2063,59 +2149,8 @@ public:
 					// SOMEDAY: recruitment in other DCs besides the clusterControllerDcID will not account for the
 					// processes used by the master and cluster controller properly.
 					auto used = id_used;
-					std::map<Optional<Standalone<StringRef>>, int> preferredSharing;
-					auto first_commit_proxy = getWorkerForRoleInDatacenter(dcId,
-					                                                       recruitment::CommitProxy,
-					                                                       recruitment::ExcludeFit,
-					                                                       req.configuration,
-					                                                       used,
-					                                                       preferredSharing);
-					preferredSharing[first_commit_proxy.worker.interf.locality.processId()] = 0;
-					auto first_grv_proxy = getWorkerForRoleInDatacenter(dcId,
-					                                                    recruitment::GrvProxy,
-					                                                    recruitment::ExcludeFit,
-					                                                    req.configuration,
-					                                                    used,
-					                                                    preferredSharing);
-					preferredSharing[first_grv_proxy.worker.interf.locality.processId()] = 1;
-					auto first_resolver = getWorkerForRoleInDatacenter(dcId,
-					                                                   recruitment::Resolver,
-					                                                   recruitment::ExcludeFit,
-					                                                   req.configuration,
-					                                                   used,
-					                                                   preferredSharing);
-					preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
-
-					// If one of the first process recruitments is forced to share a process, allow all of next
-					// recruitments to also share a process.
-					auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
-					first_commit_proxy.used = maxUsed;
-					first_grv_proxy.used = maxUsed;
-					first_resolver.used = maxUsed;
-
-					auto commit_proxies = getWorkersForRoleInDatacenter(dcId,
-					                                                    recruitment::CommitProxy,
-					                                                    req.configuration.getDesiredCommitProxies(),
-					                                                    req.configuration,
-					                                                    used,
-					                                                    preferredSharing,
-					                                                    first_commit_proxy);
-
-					auto grv_proxies = getWorkersForRoleInDatacenter(dcId,
-					                                                 recruitment::GrvProxy,
-					                                                 req.configuration.getDesiredGrvProxies(),
-					                                                 req.configuration,
-					                                                 used,
-					                                                 preferredSharing,
-					                                                 first_grv_proxy);
-
-					auto resolvers = getWorkersForRoleInDatacenter(dcId,
-					                                               recruitment::Resolver,
-					                                               req.configuration.getDesiredResolvers(),
-					                                               req.configuration,
-					                                               used,
-					                                               preferredSharing,
-					                                               first_resolver);
+					auto [commit_proxies, grv_proxies, resolvers] =
+					    getWorkersForTransactionSystem(dcId, req.configuration, used);
 
 					auto fitness = std::make_tuple(RoleFitness(commit_proxies, recruitment::CommitProxy, used),
 					                               RoleFitness(grv_proxies, recruitment::GrvProxy, used),
@@ -2811,59 +2846,8 @@ public:
 		RoleFitness oldGrvProxyFit(grvProxyClasses, recruitment::GrvProxy, old_id_used);
 		RoleFitness oldResolverFit(resolverClasses, recruitment::Resolver, old_id_used);
 
-		std::map<Optional<Standalone<StringRef>>, int> preferredSharing;
-		auto first_commit_proxy = getWorkerForRoleInDatacenter(clusterControllerDcId,
-		                                                       recruitment::CommitProxy,
-		                                                       recruitment::ExcludeFit,
-		                                                       db.config,
-		                                                       id_used,
-		                                                       preferredSharing,
-		                                                       true);
-		preferredSharing[first_commit_proxy.worker.interf.locality.processId()] = 0;
-		auto first_grv_proxy = getWorkerForRoleInDatacenter(clusterControllerDcId,
-		                                                    recruitment::GrvProxy,
-		                                                    recruitment::ExcludeFit,
-		                                                    db.config,
-		                                                    id_used,
-		                                                    preferredSharing,
-		                                                    true);
-		preferredSharing[first_grv_proxy.worker.interf.locality.processId()] = 1;
-		auto first_resolver = getWorkerForRoleInDatacenter(clusterControllerDcId,
-		                                                   recruitment::Resolver,
-		                                                   recruitment::ExcludeFit,
-		                                                   db.config,
-		                                                   id_used,
-		                                                   preferredSharing,
-		                                                   true);
-		preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
-		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
-		first_commit_proxy.used = maxUsed;
-		first_grv_proxy.used = maxUsed;
-		first_resolver.used = maxUsed;
-		auto commit_proxies = getWorkersForRoleInDatacenter(clusterControllerDcId,
-		                                                    recruitment::CommitProxy,
-		                                                    db.config.getDesiredCommitProxies(),
-		                                                    db.config,
-		                                                    id_used,
-		                                                    preferredSharing,
-		                                                    first_commit_proxy,
-		                                                    true);
-		auto grv_proxies = getWorkersForRoleInDatacenter(clusterControllerDcId,
-		                                                 recruitment::GrvProxy,
-		                                                 db.config.getDesiredGrvProxies(),
-		                                                 db.config,
-		                                                 id_used,
-		                                                 preferredSharing,
-		                                                 first_grv_proxy,
-		                                                 true);
-		auto resolvers = getWorkersForRoleInDatacenter(clusterControllerDcId,
-		                                               recruitment::Resolver,
-		                                               db.config.getDesiredResolvers(),
-		                                               db.config,
-		                                               id_used,
-		                                               preferredSharing,
-		                                               first_resolver,
-		                                               true);
+		auto [commit_proxies, grv_proxies, resolvers] =
+		    getWorkersForTransactionSystem(clusterControllerDcId, db.config, id_used, true);
 
 		RoleFitness newCommitProxyFit(commit_proxies, recruitment::CommitProxy, id_used);
 		RoleFitness newGrvProxyFit(grv_proxies, recruitment::GrvProxy, id_used);

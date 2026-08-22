@@ -4067,6 +4067,249 @@ TEST_CASE("/fdbserver/clustercontroller/avoidSatelliteTLogRouterColocation") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/clustercontroller/recruitStatelessProcessesOnOneMachine") {
+	const Key dcId = "stateless-dc"_sr;
+	LocalityData controllerLocality;
+	controllerLocality.set(LocalityData::keyDcId, dcId);
+	controllerLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "stateless-1" }));
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           controllerLocality,
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+
+	constexpr int workersPerClass = 3;
+	auto addWorkers = [&](ProcessClass::ClassType classType, std::string const& prefix, bool shareMachine) {
+		std::vector<WorkerInterface> workers;
+		for (int i = 0; i < workersPerClass; ++i) {
+			std::string processId = prefix + std::to_string(i);
+			std::string machineId = shareMachine ? "stateless-machine" : processId + "-machine";
+			LocalityData locality;
+			locality.set(LocalityData::keyDcId, dcId);
+			locality.set(LocalityData::keyProcessId, Standalone<StringRef>(processId));
+			locality.set(LocalityData::keyZoneId, Standalone<StringRef>(machineId));
+			locality.set(LocalityData::keyMachineId, Standalone<StringRef>(machineId));
+
+			WorkerInterface worker(locality);
+			worker.initEndpoints();
+			auto& info = data.id_worker[locality.processId()];
+			info.verified = true;
+			info.details.interf = worker;
+			info.details.processClass = ProcessClass(classType, ProcessClass::CommandLineSource);
+			info.details.recoveredDiskFiles = true;
+			workers.push_back(worker);
+		}
+		return workers;
+	};
+
+	const auto statelessWorkers = addWorkers(ProcessClass::StatelessClass, "stateless-", true);
+	addWorkers(ProcessClass::TransactionClass, "transaction-", false);
+	addWorkers(ProcessClass::StorageClass, "storage-", false);
+	data.masterProcessId = statelessWorkers[0].locality.processId();
+	data.clusterControllerProcessId = statelessWorkers[1].locality.processId();
+	data.gotFullyRecoveredConfig = true;
+	data.gotProcessClasses = true;
+
+	DatabaseConfiguration configuration;
+	configuration.initialized = true;
+	configuration.tLogReplicationFactor = workersPerClass;
+	configuration.desiredTLogCount = workersPerClass;
+	configuration.commitProxyCount = workersPerClass;
+	configuration.grvProxyCount = workersPerClass;
+	configuration.resolverCount = workersPerClass;
+	configuration.tLogPolicy = makeReference<PolicyAcross>(workersPerClass, "zoneid", makeReference<PolicyOne>());
+	data.db.config = configuration;
+	data.db.fullyRecoveredConfig = configuration;
+
+	RecruitFromConfigurationRequest request;
+	request.configuration = configuration;
+	request.recruitSeedServers = false;
+	request.maxOldLogRouters = 0;
+	auto recruited = data.findWorkersForConfigurationDispatch(request, false);
+
+	ASSERT_EQ(recruited.tLogs.size(), workersPerClass);
+	ASSERT_EQ(recruited.commitProxies.size(), workersPerClass);
+	ASSERT_EQ(recruited.grvProxies.size(), workersPerClass);
+	ASSERT_EQ(recruited.resolvers.size(), workersPerClass);
+
+	std::set<Optional<Standalone<StringRef>>> statelessProcessIds;
+	for (const auto& worker : statelessWorkers) {
+		ASSERT(worker.locality.machineId() == statelessWorkers[0].locality.machineId());
+		ASSERT(statelessProcessIds.insert(worker.locality.processId()).second);
+	}
+	auto assertDistinctStatelessWorkers = [&](const std::vector<WorkerInterface>& workers) {
+		std::set<Optional<Standalone<StringRef>>> processIds;
+		for (const auto& worker : workers) {
+			ASSERT(statelessProcessIds.contains(worker.locality.processId()));
+			ASSERT(processIds.insert(worker.locality.processId()).second);
+		}
+	};
+	assertDistinctStatelessWorkers(recruited.commitProxies);
+	assertDistinctStatelessWorkers(recruited.grvProxies);
+	assertDistinctStatelessWorkers(recruited.resolvers);
+	return Void();
+}
+
+static void checkTransactionRoleRecruitmentDeterminism(const std::vector<ProcessClass::ClassType>& processClasses,
+                                                       int backupCount,
+                                                       Optional<int> expectedCommitProxyWorstUsed = {}) {
+	using ProcessId = Optional<Standalone<StringRef>>;
+	using UsedMap = std::map<ProcessId, int>;
+	using RoleFitness = ClusterControllerData::RoleFitness;
+	using RecruitmentFitness = std::tuple<RoleFitness, RoleFitness, RoleFitness, RoleFitness, RoleFitness>;
+	constexpr int desiredCount = 3;
+	ASSERT_EQ(processClasses.size(), 6);
+	ASSERT(backupCount == 0 || backupCount >= desiredCount);
+
+	const Key dcId = "determinism-dc"_sr;
+	LocalityData controllerLocality;
+	controllerLocality.set(LocalityData::keyDcId, dcId);
+	controllerLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "C" }));
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           controllerLocality,
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+
+	std::vector<WorkerInterface> workers;
+	for (char name = 'A'; name <= 'F'; ++name) {
+		const Key processId = Standalone<StringRef>(std::string(1, name));
+		LocalityData locality;
+		locality.set(LocalityData::keyDcId, dcId);
+		locality.set(LocalityData::keyProcessId, processId);
+		locality.set(LocalityData::keyZoneId, processId);
+		locality.set(LocalityData::keyMachineId, processId);
+		WorkerInterface worker(locality);
+		worker.initEndpoints();
+		auto& info = data.id_worker[locality.processId()];
+		info.verified = true;
+		info.details.interf = worker;
+		info.details.processClass = ProcessClass(processClasses[name - 'A'], ProcessClass::CommandLineSource);
+		info.details.recoveredDiskFiles = true;
+		if (name < 'D') {
+			// Fix the initial TLog usage without excluding these workers from stateless roles.
+			info.issues.push_back_deep(info.issues.arena(), "exclude_from_tlog_recruitment_low_disk"_sr);
+		}
+		workers.push_back(worker);
+	}
+
+	data.masterProcessId = workers[1].locality.processId();
+	data.clusterControllerProcessId = workers[2].locality.processId();
+	data.db.setDistributor(DataDistributorInterface(workers[0].locality, UID(13731, 1)));
+	ASSERT(data.isLongLivedStateless(workers[0].locality.processId()));
+	data.gotFullyRecoveredConfig = true;
+	data.gotProcessClasses = true;
+
+	DatabaseConfiguration configuration;
+	configuration.initialized = true;
+	configuration.tLogReplicationFactor = desiredCount;
+	configuration.desiredTLogCount = desiredCount;
+	configuration.commitProxyCount = desiredCount;
+	configuration.grvProxyCount = desiredCount;
+	configuration.resolverCount = desiredCount;
+	configuration.backupWorkerEnabled = backupCount > 0;
+	configuration.tLogPolicy = makeReference<PolicyAcross>(desiredCount, "zoneid", makeReference<PolicyOne>());
+	data.db.config = configuration;
+	data.db.fullyRecoveredConfig = configuration;
+
+	RecruitFromConfigurationRequest request;
+	request.configuration = configuration;
+	request.recruitSeedServers = false;
+	request.maxOldLogRouters = backupCount;
+
+	const std::set<ProcessId> expectedTLogProcessIds{ workers[3].locality.processId(),
+		                                              workers[4].locality.processId(),
+		                                              workers[5].locality.processId() };
+	auto assertDistinctWorkers = [](const std::vector<WorkerInterface>& recruited) {
+		std::set<ProcessId> processIds;
+		for (const auto& worker : recruited) {
+			ASSERT(worker.locality.processId().present());
+			ASSERT(processIds.insert(worker.locality.processId()).second);
+		}
+	};
+	auto roleFitness =
+	    [&](const std::vector<WorkerInterface>& recruited, recruitment::ClusterRole role, const UsedMap& used) {
+		    std::vector<WorkerDetails> details;
+		    for (const auto& worker : recruited) {
+			    auto it = data.id_worker.find(worker.locality.processId());
+			    ASSERT(it != data.id_worker.end());
+			    details.push_back(it->second.details);
+		    }
+		    return RoleFitness(details, role, used);
+	    };
+
+	Optional<RecruitmentFitness> expectedFitness;
+	for (int attempt = 0; attempt < 128; ++attempt) {
+		const auto recruited = data.findWorkersForConfigurationDispatch(request, false);
+		ASSERT_EQ(recruited.tLogs.size(), desiredCount);
+		ASSERT_EQ(recruited.commitProxies.size(), desiredCount);
+		ASSERT_EQ(recruited.grvProxies.size(), desiredCount);
+		ASSERT_EQ(recruited.resolvers.size(), desiredCount);
+		ASSERT_EQ(recruited.backupWorkers.size(), backupCount);
+		assertDistinctWorkers(recruited.tLogs);
+		assertDistinctWorkers(recruited.commitProxies);
+		assertDistinctWorkers(recruited.grvProxies);
+		assertDistinctWorkers(recruited.resolvers);
+		assertDistinctWorkers(recruited.backupWorkers);
+		for (const auto& worker : recruited.tLogs) {
+			ASSERT(expectedTLogProcessIds.contains(worker.locality.processId()));
+		}
+
+		// Match the production comparison's usage snapshots: logs, all transaction roles, then backups.
+		UsedMap used;
+		data.updateKnownIds(&used);
+		data.updateIdUsed(recruited.tLogs, used);
+		const auto tLogFitness = roleFitness(recruited.tLogs, recruitment::TLog, used);
+		data.updateIdUsed(recruited.commitProxies, used);
+		data.updateIdUsed(recruited.grvProxies, used);
+		data.updateIdUsed(recruited.resolvers, used);
+		const auto commitProxyFitness = roleFitness(recruited.commitProxies, recruitment::CommitProxy, used);
+		const auto grvProxyFitness = roleFitness(recruited.grvProxies, recruitment::GrvProxy, used);
+		const auto resolverFitness = roleFitness(recruited.resolvers, recruitment::Resolver, used);
+		data.updateIdUsed(recruited.backupWorkers, used);
+		const auto backupFitness = roleFitness(recruited.backupWorkers, recruitment::Backup, used);
+		const auto fitness =
+		    std::make_tuple(tLogFitness, commitProxyFitness, grvProxyFitness, resolverFitness, backupFitness);
+		if (expectedCommitProxyWorstUsed.present()) {
+			ASSERT_EQ(commitProxyFitness.worstUsed, expectedCommitProxyWorstUsed.get());
+		}
+		if (expectedFitness.present()) {
+			const auto& [expectedTLog, expectedCommitProxy, expectedGrvProxy, expectedResolver, expectedBackup] =
+			    expectedFitness.get();
+			ASSERT(tLogFitness == expectedTLog);
+			ASSERT(commitProxyFitness == expectedCommitProxy);
+			ASSERT(grvProxyFitness == expectedGrvProxy);
+			ASSERT(resolverFitness == expectedResolver);
+			ASSERT(backupFitness == expectedBackup);
+		} else {
+			expectedFitness = fitness;
+		}
+	}
+}
+
+TEST_CASE("/fdbserver/clustercontroller/recruitUnsetProcessesDeterministically") {
+	checkTransactionRoleRecruitmentDeterminism({ ProcessClass::UnsetClass,
+	                                             ProcessClass::UnsetClass,
+	                                             ProcessClass::UnsetClass,
+	                                             ProcessClass::UnsetClass,
+	                                             ProcessClass::UnsetClass,
+	                                             ProcessClass::UnsetClass },
+	                                           0,
+	                                           Optional<int>(2));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/recruitBackupProcessesDeterministically") {
+	checkTransactionRoleRecruitmentDeterminism({ ProcessClass::DataDistributorClass,
+	                                             ProcessClass::BackupClass,
+	                                             ProcessClass::StorageClass,
+	                                             ProcessClass::LogClass,
+	                                             ProcessClass::LogClass,
+	                                             ProcessClass::LogClass },
+	                                           5);
+	return Void();
+}
+
 // Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth`
 // based on `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
