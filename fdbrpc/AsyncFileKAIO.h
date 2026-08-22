@@ -28,6 +28,7 @@
 #include <sys/stat.h>
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
+#include <type_traits>
 #include "linux_kaio.h"
 #include "flow/Knobs.h"
 #include "fdbrpc/Stats.h"
@@ -258,7 +259,7 @@ public:
 		nextFileSize = std::max(nextFileSize, offset + length);
 
 		enqueue(io, "write", this);
-		Future<int> result = io->result.getFuture();
+		Future<Void> result = io->writeResult.getFuture();
 
 #if KAIO_LOGGING
 		// result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
@@ -267,9 +268,8 @@ public:
 		// auto& actorLineageSet = IAsyncFileSystem::filesystem()->getActorLineageSet();
 		// auto index = actorLineageSet.insert(*currentLineage);
 		// ASSERT(index != ActorLineageSet::npos);
-		Future<Void> res = success(result);
 		// actorLineageSet.erase(index);
-		return res;
+		return result;
 	}
 // TODO(alexmiller): Remove when we upgrade the dev docker image to >14.10
 #ifndef FALLOC_FL_ZERO_RANGE
@@ -504,6 +504,7 @@ private:
 
 	struct IOBlock : linux_iocb, FastAllocated<IOBlock> {
 		Promise<int> result;
+		Promise<Void> writeResult;
 		Reference<AsyncFileKAIO> owner;
 		int64_t prio;
 		IOBlock* prev;
@@ -517,7 +518,10 @@ private:
 			bool operator()(IOBlock* a, IOBlock* b) { return a->prio < b->prio; }
 		};
 
-		IOBlock(int op, int fd) : prev(nullptr), next(nullptr), startTime(0) {
+		IOBlock(int op, int fd)
+		  : result(op == IO_CMD_PWRITE ? Promise<int>(nullptr) : Promise<int>()),
+		    writeResult(op == IO_CMD_PWRITE ? Promise<Void>() : Promise<Void>(nullptr)), prev(nullptr), next(nullptr),
+		    startTime(0) {
 			memset((linux_iocb*)this, 0, sizeof(linux_iocb));
 			aio_lio_opcode = op;
 			aio_fildes = fd;
@@ -528,12 +532,15 @@ private:
 
 		TaskPriority getTask() const { return static_cast<TaskPriority>((prio >> 32) + 1); }
 
-		static Future<Void> deliver(Uncancellable, Promise<int> result, bool failed, int r, TaskPriority task) {
+		template <class T>
+		static coro::DetachedCoroutine deliver(Promise<T> result, bool failed, int r, TaskPriority task) {
 			co_await delay(0, task);
 			if (failed)
 				result.sendError(io_timeout());
 			else if (r < 0)
 				result.sendError(io_error());
+			else if constexpr (std::is_same_v<T, Void>)
+				result.send(Void());
 			else
 				result.send(r);
 		}
@@ -554,7 +561,11 @@ private:
 				    .detail("Size", fst.st_size)
 				    .detail("Filename", owner->filename);
 			}
-			deliver(Uncancellable(), result, owner->failed, r, getTask());
+			if (aio_lio_opcode == IO_CMD_PWRITE) {
+				deliver(std::move(writeResult), owner->failed, r, getTask());
+			} else {
+				deliver(std::move(result), owner->failed, r, getTask());
+			}
 			delete this;
 		}
 

@@ -115,6 +115,11 @@ struct LoadBalanceRequestHooks {
 FDB_BOOLEAN_PARAM(AtMostOnce);
 FDB_BOOLEAN_PARAM(TriedAllOptions);
 
+inline const Future<Void>& neverSecondRequest() {
+	static const Future<Void> result = Never();
+	return result;
+}
+
 // Stores state for a request made by the load balancer
 template <class Request, class Interface, class Multi, class Model, bool P>
 struct RequestData : NonCopyable {
@@ -321,9 +326,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(
 	state RequestData<Request, Interface, Multi, Model, P> secondRequestData(compareReplicas);
 
 	state Optional<uint64_t> firstRequestEndpoint;
-	state Future<Void> secondDelay = Never();
-
-	state Promise<Void> requestFinished;
+	state Future<Void> secondDelay = neverSecondRequest();
 	state double startTime = now();
 
 	state TriedAllOptions triedAllOptions = TriedAllOptions::False;
@@ -428,7 +431,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(
 				secondDelay = delay(model->secondMultiplier * nextTime + FLOW_KNOBS->BASE_SECOND_REQUEST_TIME);
 			}
 		} else {
-			secondDelay = Never();
+			secondDelay = neverSecondRequest();
 		}
 	}
 
@@ -507,7 +510,8 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(
 			numAttempts = 0; // now that we've got a server back, reset the backoff
 		} else if (!stream) {
 			// Only the first location is available.
-			wait(success(firstRequestData.response));
+			ErrorOr<REPLY_TYPE(Request)> firstResponse = wait(firstRequestData.response);
+			(void)firstResponse;
 			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 				// Do consistency check, if requested.
 				wait(firstRequestData.maybeDoPostRequestComparison(
@@ -538,7 +542,9 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(
 			state bool secondRequestSuccessful = false;
 
 			loop choose {
-				when(wait(success(firstRequestData.response.isValid() ? firstRequestData.response : Never()))) {
+				when(ErrorOr<REPLY_TYPE(Request)> firstResponse =
+				         wait(firstRequestData.response.isValid() ? firstRequestData.response : Never())) {
+					(void)firstResponse;
 					if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 						firstRequestSuccessful = true;
 						break;
@@ -546,7 +552,8 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(
 
 					firstRequestEndpoint = Optional<uint64_t>();
 				}
-				when(wait(success(secondRequestData.response))) {
+				when(ErrorOr<REPLY_TYPE(Request)> secondResponse = wait(secondRequestData.response)) {
+					(void)secondResponse;
 					if (secondRequestData.checkAndProcessResult(atMostOnce)) {
 						secondRequestSuccessful = true;
 					}
@@ -590,7 +597,8 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(
 
 			loop {
 				choose {
-					when(wait(success(firstRequestData.response))) {
+					when(ErrorOr<REPLY_TYPE(Request)> firstResponse = wait(firstRequestData.response)) {
+						(void)firstResponse;
 						if (model) {
 							model->secondMultiplier =
 							    std::max(model->secondMultiplier - FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_DECAY, 1.0);
@@ -612,7 +620,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(
 						break;
 					}
 					when(wait(secondDelay)) {
-						secondDelay = Never();
+						secondDelay = neverSecondRequest();
 						if (model && model->secondBudget >= 1.0) {
 							model->secondMultiplier += FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_GROWTH;
 							model->secondBudget -= 1.0;
@@ -633,7 +641,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(
 		if (nextAlt == startAlt)
 			triedAllOptions = TriedAllOptions::True;
 		resetReply(request, taskID);
-		secondDelay = Never();
+		secondDelay = neverSecondRequest();
 	}
 }
 

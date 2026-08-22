@@ -59,3 +59,29 @@ TEST_CASE("/fdbrpc/ddsketch/correctness") {
 	ASSERT(p999 > 0 && p999 != std::numeric_limits<double>::infinity());
 	return Void{};
 }
+
+TEST_CASE("/fdbrpc/ddsketch/samplePair") {
+	DDSketch<double> expectedFirst;
+	DDSketch<double> expectedSecond;
+	DDSketch<double> actualFirst;
+	DDSketch<double> actualSecond;
+
+	for (int i = 0; i < 4000; ++i) {
+		double sample = i % 17 == 0 ? 0.0 : deterministicRandom()->random01() * 2.0;
+		expectedFirst.addSample(sample);
+		expectedSecond.addSample(sample);
+		actualFirst.addSamplePair(sample, actualSecond);
+	}
+
+	ASSERT(expectedFirst.getSamples() == actualFirst.getSamples());
+	ASSERT(expectedSecond.getSamples() == actualSecond.getSamples());
+	ASSERT_EQ(expectedFirst.getPopulationSize(), actualFirst.getPopulationSize());
+	ASSERT_EQ(expectedSecond.getPopulationSize(), actualSecond.getPopulationSize());
+	ASSERT_EQ(expectedFirst.getSum(), actualFirst.getSum());
+	ASSERT_EQ(expectedSecond.getSum(), actualSecond.getSum());
+	ASSERT_EQ(expectedFirst.min(), actualFirst.min());
+	ASSERT_EQ(expectedSecond.min(), actualSecond.min());
+	ASSERT_EQ(expectedFirst.max(), actualFirst.max());
+	ASSERT_EQ(expectedSecond.max(), actualSecond.max());
+	return Void();
+}
