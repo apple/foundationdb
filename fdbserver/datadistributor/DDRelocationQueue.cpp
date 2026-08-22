@@ -147,6 +147,22 @@ static bool shouldRetryDestinationTeamFailure(bool doBulkLoading, RelocateData c
 	return !doBulkLoading;
 }
 
+// See the declaration in DDRelocationQueue.h for why this state lives on the queue.
+bool DDQueue::injectBulkLoadDestinationTeamFailure(bool doBulkLoading, const RelocateData& rd) {
+	if (!doBulkLoading || !g_network->isSimulated() ||
+	    bulkLoadInjectedDestTeamFailures >= SERVER_KNOBS->BULKLOAD_SIM_INJECT_DEST_TEAM_FAILURES) {
+		return false;
+	}
+	UID const taskId = rd.bulkLoadTask.get().coreState.getTaskId();
+	if (!bulkLoadInjectionTargetTaskId.isValid()) {
+		bulkLoadInjectionTargetTaskId = taskId;
+	} else if (bulkLoadInjectionTargetTaskId != taskId) {
+		return false;
+	}
+	++bulkLoadInjectedDestTeamFailures;
+	return true;
+}
+
 static bool shouldYieldDestinationFailureRetry(RelocateData const& retry, RelocateData const& queued) {
 	bool isSplit = retry.reason == RelocateReason::SIZE_SPLIT || retry.reason == RelocateReason::WRITE_SPLIT;
 	return isSplit && retry.keys != queued.keys && retry.keys.contains(queued.keys);
@@ -2042,8 +2058,10 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 						    .detail("Priority", rd.priority)
 						    .detail("DataMoveReason", static_cast<int>(rd.dmReason));
 						if (rd.bulkLoadTask.get().completeAck.canBeSet()) {
-							// Unretriable error. So, we give up the task at this time.
-							rd.bulkLoadTask.get().completeAck.send(BulkLoadAck(/*unretryableError=*/true, rd.priority));
+							// No team is disjoint from src. Terminal for this data move, but the task can
+							// still be narrowed: see BulkLoadAck::Outcome::Unplaceable.
+							rd.bulkLoadTask.get().completeAck.send(
+							    BulkLoadAck(BulkLoadAck::Outcome::Unplaceable, rd.priority));
 							throw data_move_dest_team_not_found();
 							// This relocator should silently exit. Note that if this bulkload data move is
 							// a team unhealthy data move, the bulkload engine will issue a new data move on
@@ -2303,7 +2321,8 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							break;
 						}
 					} else if (res.index() == 1) {
-						if (!healthyDestinations.isHealthy()) {
+						if (!healthyDestinations.isHealthy() ||
+						    self->injectBulkLoadDestinationTeamFailure(doBulkLoading, rd)) {
 							if (!signalledTransferComplete) {
 								signalledTransferComplete = true;
 								self->dataTransferComplete.send(rd);
@@ -2317,8 +2336,13 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								    .detail("Range", rd.keys)
 								    .detail("Dest", describe(destIds));
 								if (doBulkLoading && rd.bulkLoadTask.get().completeAck.canBeSet()) {
+									CODE_PROBE(true, "Bulkload data move lost its destination team");
+									// Recoverable: the same task can succeed against a team chosen
+									// later. Terminal here would abandon the task, and its key-values
+									// exist only in the dump until an attempt ingests them, so the
+									// range would simply be missing from the restored database.
 									rd.bulkLoadTask.get().completeAck.send(
-									    BulkLoadAck(/*unretryableError=*/true, rd.priority));
+									    BulkLoadAck(BulkLoadAck::Outcome::Retryable, rd.priority));
 								}
 								retryAfterDestinationTeamFailure = shouldRetryDestinationTeamFailure(doBulkLoading, rd);
 								throw data_move_dest_team_not_found();

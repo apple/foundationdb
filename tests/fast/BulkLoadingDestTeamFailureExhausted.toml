@@ -1,0 +1,56 @@
+# BulkLoad give-up path when retries cannot clear a destination-team failure
+#
+# Complement of BulkLoadingDestTeamFailure.toml: injects more recoverable failures than the
+# re-dispatch budget allows, so one task exhausts it and is marked Error. What must not happen either
+# way is an endless retry loop, or a task reporting success without ingesting its data.
+#
+# The injection budget is spent on a single task, since the budget bounds one task's restartCount; a
+# budget spread across tasks retries each a few times and never reaches the give-up path.
+#
+# Covers the data distribution half only. That a restore whose job ends in Error fails with
+# restore_bulkload_failed rather than reporting success needs a restore-level test.
+
+[configuration]
+storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] #FIXME: remove after allowing to do bulkloading with fetchKey and shardedrocksdb
+
+disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
+
+# See BulkLoading.toml: 'triple' keeps the simulator from picking a topology where bulk-load team
+# selection cannot find a disjoint candidate team, which would stall the load rather than test it.
+config = 'triple'
+
+machineCount = 10
+extraStorageMachineCountPerDC = 5
+datacenters = 1
+generateFearless = false
+
+[[knobs]]
+shard_encode_location_metadata = true
+
+# Rely on RangeLock
+enable_read_lock_on_range = true
+
+# Do not support version vector
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
+
+min_byte_sampling_probability = 0.5
+
+cc_enforce_use_unfit_dd_in_sim = true
+
+disable_audit_storage_final_replica_check_in_sim = true
+
+max_trace_lines = 5000000
+
+# Exhaust the re-dispatch budget for one task.
+bulkload_sim_inject_dest_team_failures = 40
+
+
+[[test]]
+testTitle = 'BulkLoadingDestTeamFailureExhaustedWorkload'
+useDB = true
+waitForQuiescence = false
+
+    [[test.workload]]
+    testName = 'BulkLoadingWorkload'
