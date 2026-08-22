@@ -2170,6 +2170,13 @@ Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 	}
 }
 
+VersionHistory globalConfigHistoryForProtocolChange(ValueRef globalConfigVersion) {
+	BinaryReader versionReader(globalConfigVersion, Unversioned());
+	Version committedVersion;
+	versionReader >> committedVersion;
+	return VersionHistory(bigEndian64(committedVersion));
+}
+
 // Monitors the global configuration version key for changes. When changes are
 // made, the global configuration history is read and any updates are sent to
 // all processes in the system by updating the ClientDBInfo object. The
@@ -2204,12 +2211,12 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 							// If the protocol version has changed, the
 							// GlobalConfig actor should refresh its view by
 							// reading the entire global configuration key
-							// range.  Setting the version to the max int64_t
-							// will always cause the global configuration
-							// updater to refresh its view of the configuration
-							// keyspace.
+							// range. Preserve the actual committed version so
+							// refresh waits for a GRV proxy that has observed
+							// this configuration change.
 							clientInfo.history.clear();
-							clientInfo.history.emplace_back(std::numeric_limits<Version>::max());
+							clientInfo.history.push_back(
+							    globalConfigHistoryForProtocolChange(globalConfigVersion.get()));
 							break;
 						}
 
@@ -3601,6 +3608,17 @@ Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
 }
 
 namespace {
+
+TEST_CASE("/fdbserver/clustercontroller/globalConfigProtocolChangeUsesCommittedVersion") {
+	constexpr Version committedVersion = 0x0102030405060708;
+	BinaryWriter encodedVersion(Unversioned());
+	encodedVersion << bigEndian64(committedVersion) << uint16_t(7);
+
+	const VersionHistory history = globalConfigHistoryForProtocolChange(encodedVersion.toValue());
+	ASSERT_EQ(history.version, committedVersion);
+	ASSERT_EQ(history.mutations.size(), 0);
+	return Void();
+}
 
 void addProcessesToSameDC(ClusterControllerData& self, const std::vector<NetworkAddress>&& processes) {
 	LocalityData locality;
