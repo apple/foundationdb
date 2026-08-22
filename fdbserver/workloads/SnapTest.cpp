@@ -46,6 +46,9 @@ public: // variables
 	int retryLimit; // -1 if no limit
 	bool snapSucceeded = false; // When taking snapshot, tracks snapshot success
 	bool attemptDuplicateSnapshot = false;
+	double duplicateSnapshotDelay;
+	bool requireDuplicateSnapshot;
+	bool checkFinishedDuplicateSnapshot;
 
 public: // ctor & dtor
 	explicit SnapTestWorkload(WorkloadContext const& wcx)
@@ -60,6 +63,9 @@ public: // ctor & dtor
 		restartInfoLocation = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
 		// default behavior is to retry until success
 		retryLimit = getOption(options, "retryLimit"_sr, -1);
+		duplicateSnapshotDelay = getOption(options, "duplicateSnapshotDelay"_sr, -1.0);
+		requireDuplicateSnapshot = getOption(options, "requireDuplicateSnapshot"_sr, false);
+		checkFinishedDuplicateSnapshot = getOption(options, "checkFinishedDuplicateSnapshot"_sr, false);
 		fdbSimulationPolicyState().allowLogSetKills = false;
 		{
 			double duplicateSnapshotProbability = getOption(options, "duplicateSnapshotProbability"_sr, 0.1);
@@ -170,7 +176,8 @@ public: // workload functions
 
 					Future<Void> status = snapCreate(cx, snapCmdRef, snapUID);
 					if (attemptDuplicateSnapshot) {
-						co_await delay(deterministicRandom()->random01());
+						co_await delay(duplicateSnapshotDelay >= 0 ? duplicateSnapshotDelay
+						                                           : deterministicRandom()->random01());
 						duplicateSnapStatus = snapCreate(cx, snapCmdRef, snapUID);
 					}
 					ErrorOr<Void> statusErr = co_await errorOr(status);
@@ -179,9 +186,17 @@ public: // workload functions
 						// Any other errors should be thrown
 						throw statusErr.getError();
 					}
+					if (requireDuplicateSnapshot) {
+						ASSERT(attemptDuplicateSnapshot);
+						ASSERT(statusErr.isError());
+						ASSERT_EQ(statusErr.getError().code(), error_code_duplicate_snapshot_request);
+					}
 					if (attemptDuplicateSnapshot) {
 						// If duplicate, the first request is discarded, wait for the latest one
 						co_await duplicateSnapStatus;
+					}
+					if (checkFinishedDuplicateSnapshot) {
+						co_await snapCreate(cx, snapCmdRef, snapUID);
 					}
 					break;
 				} catch (Error& e) {
