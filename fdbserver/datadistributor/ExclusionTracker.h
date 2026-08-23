@@ -152,8 +152,6 @@ struct ExclusionTracker {
 	}
 
 private:
-	friend class DDTeamCollectionUnitTest;
-
 	static void appendAddressesMatchingLocalities(StorageServerInterface const& server,
 	                                              std::vector<std::pair<std::string, std::string>> const& localities,
 	                                              std::set<AddressExclusion>& exclusions) {
