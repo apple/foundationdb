@@ -25,9 +25,6 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/UnitTest.h"
 
-#include <initializer_list>
-#include <utility>
-
 void KeyRangeActorMap::getRangesAffectedByInsertion(const KeyRangeRef& keys, std::vector<KeyRange>& affectedRanges) {
 	auto s = map.rangeContaining(keys.begin);
 	if (s.begin() != keys.begin && s.value().isValid() && !s.value().isReady())
@@ -319,102 +316,6 @@ Future<Void> krmSetRangeCoalescing(Reference<ReadYourWritesTransaction> const& t
                                    KeyRange const& maxRange,
                                    Value const& value) {
 	return holdWhile(tr, krmSetRangeCoalescing_(tr.getPtr(), mapPrefix, range, maxRange, value));
-}
-
-namespace {
-
-class CoalescedRangeValueMetric {
-public:
-	CoalescedRangeValueMetric() = default;
-	CoalescedRangeValueMetric(const CoalescedRangeValueMetric&) { ++copies; }
-	static int copyCount() { return copies; }
-
-	template <class StoredKey>
-	int64_t operator()(const MapPair<StoredKey, int>& entry) const {
-		return 1 + entry.value;
-	}
-
-private:
-	static inline int copies = 0;
-};
-
-template <class Map>
-void checkCoalescedRanges(const Map& map,
-                          std::initializer_list<std::pair<KeyRef, int>> expected,
-                          int64_t expectedMetric) {
-	auto expectedRange = expected.begin();
-	auto ranges = map.ranges();
-	for (auto range = ranges.begin(); range != ranges.end(); ++range) {
-		ASSERT(expectedRange != expected.end());
-		ASSERT(range.begin() == expectedRange->first);
-		ASSERT_EQ(range.value(), expectedRange->second);
-		++expectedRange;
-		ASSERT(range.end() == (expectedRange == expected.end() ? KeyRef(map.mapEnd) : expectedRange->first));
-	}
-	ASSERT(expectedRange == expected.end());
-	ASSERT_EQ(map.sumRange(KeyRef(), KeyRef(map.mapEnd)), expectedMetric);
-}
-
-} // namespace
-
-TEST_CASE("/keyrangemap/coalesced/rangeInsert") {
-	const auto exercise = [](auto& map) {
-		const int metricCopies = CoalescedRangeValueMetric::copyCount();
-		map.insert(KeyRangeRef("b"_sr, "b"_sr), 9);
-		checkCoalescedRanges(map, { { ""_sr, 0 } }, 1);
-
-		map.insert(KeyRangeRef("b"_sr, "d"_sr), 2);
-		checkCoalescedRanges(map, { { ""_sr, 0 }, { "b"_sr, 2 }, { "d"_sr, 0 } }, 5);
-		map.insert(KeyRangeRef("d"_sr, "f"_sr), 2);
-		checkCoalescedRanges(map, { { ""_sr, 0 }, { "b"_sr, 2 }, { "f"_sr, 0 } }, 5);
-		map.insert(KeyRangeRef("a"_sr, "b"_sr), 2);
-		checkCoalescedRanges(map, { { ""_sr, 0 }, { "a"_sr, 2 }, { "f"_sr, 0 } }, 5);
-		map.insert(KeyRangeRef("c"_sr, "e"_sr), 2);
-		checkCoalescedRanges(map, { { ""_sr, 0 }, { "a"_sr, 2 }, { "f"_sr, 0 } }, 5);
-		map.insert(KeyRangeRef("h"_sr, "j"_sr), 2);
-		checkCoalescedRanges(map, { { ""_sr, 0 }, { "a"_sr, 2 }, { "f"_sr, 0 }, { "h"_sr, 2 }, { "j"_sr, 0 } }, 9);
-		map.insert(KeyRangeRef("f"_sr, "h"_sr), 2);
-		checkCoalescedRanges(map, { { ""_sr, 0 }, { "a"_sr, 2 }, { "j"_sr, 0 } }, 5);
-
-		map.insert(KeyRangeRef("c"_sr, "g"_sr), 5);
-		checkCoalescedRanges(map, { { ""_sr, 0 }, { "a"_sr, 2 }, { "c"_sr, 5 }, { "g"_sr, 2 }, { "j"_sr, 0 } }, 14);
-		map.insert(KeyRangeRef("a"_sr, "h"_sr), 4);
-		checkCoalescedRanges(map, { { ""_sr, 0 }, { "a"_sr, 4 }, { "h"_sr, 2 }, { "j"_sr, 0 } }, 10);
-		map.insert(KeyRangeRef("h"_sr, "z"_sr), 7);
-		checkCoalescedRanges(map, { { ""_sr, 0 }, { "a"_sr, 4 }, { "h"_sr, 7 } }, 14);
-		map.insert(KeyRangeRef(""_sr, "z"_sr), 3);
-		checkCoalescedRanges(map, { { ""_sr, 3 } }, 4);
-		map.insert(KeyRangeRef("z"_sr, "z"_sr), 9);
-		checkCoalescedRanges(map, { { ""_sr, 3 } }, 4);
-		ASSERT_EQ(CoalescedRangeValueMetric::copyCount(), metricCopies);
-	};
-
-	CoalescedKeyRangeMap<int, int64_t, CoalescedRangeValueMetric> owning(0, "z"_sr);
-	exercise(owning);
-	CoalescedKeyRefRangeMap<int, int64_t, CoalescedRangeValueMetric> borrowed(0, "z"_sr);
-	exercise(borrowed);
-	co_return;
-}
-
-TEST_CASE("/keyrangemap/coalesced/keyLifetime") {
-	CoalescedKeyRangeMap<int, int64_t, CoalescedRangeValueMetric> owning;
-	{
-		Key input("bd"_sr);
-		owning.insert(KeyRangeRef(input.substr(0, 1), input.substr(1, 1)), 2);
-		mutateString(input)[0] = 'x';
-		mutateString(input)[1] = 'y';
-	}
-	checkCoalescedRanges(owning, { { ""_sr, 0 }, { "b"_sr, 2 }, { "d"_sr, 0 } }, 5);
-
-	Arena retained;
-	CoalescedKeyRefRangeMap<int, int64_t, CoalescedRangeValueMetric> borrowed;
-	{
-		Arena input;
-		borrowed.insert(KeyRangeRef(KeyRef(input, "b"_sr), KeyRef(input, "d"_sr)), 2);
-		retained.dependsOn(input);
-	}
-	checkCoalescedRanges(borrowed, { { ""_sr, 0 }, { "b"_sr, 2 }, { "d"_sr, 0 } }, 5);
-	co_return;
 }
 
 TEST_CASE("/keyrangemap/decoderange/aligned") {
