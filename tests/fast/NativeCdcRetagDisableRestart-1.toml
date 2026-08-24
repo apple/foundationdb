@@ -28,6 +28,7 @@ waitForQuiescenceEnd = false
     rounds = 0
     prepareRestartDrain = true
     testRetaggedRestart = true
+    testRetagTransactionRetries = true
     operationTimeout = 120.0
 
     [[test.workload]]

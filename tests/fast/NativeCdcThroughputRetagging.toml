@@ -23,6 +23,10 @@ storage_metrics_average_interval_per_kseconds = 1000.0
 bytes_written_units_per_sample = 1
 cdc_proxy_failure_coalesce_delay = 0.1
 cdc_proxy_consume_poll_timeout = 0.25
+# Bound memory while retaining the deliberately unacknowledged history in this scenario.
+cdc_proxy_buffer_bytes = 33554432
+maximum_peek_bytes = 65536
+cdc_proxy_consume_reply_bytes = 65536
 
 [[test]]
 testTitle = 'NativeCdcThroughputRetagging'
@@ -42,6 +46,7 @@ timeout = 600
     writesPerRound = 1
     rounds = 0
     testThroughputRetagging = true
+    testRetagTransactionRetries = true
     memoryTestValueBytes = 512
     delayBetweenRounds = 0.05
     operationTimeout = 180.0
