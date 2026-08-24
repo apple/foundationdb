@@ -214,7 +214,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 	state std::string uploadID;
 	state std::vector<Future<PartState>> uploadFutures;
 	state std::vector<PartState> parts;
-	state std::vector<std::string> partDatas;
+	state std::vector<std::shared_ptr<std::string>> partDatas;
 	state int64_t size = fileSize(filepath);
 
 	try {
@@ -248,10 +248,10 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			state int64_t partSize = std::min(config.partSizeBytes, size - offset);
 
 			// Store part data in our vector to keep it alive
-			partDatas.emplace_back();
-			partDatas.back().resize(partSize);
+			partDatas.push_back(std::make_shared<std::string>(partSize, '\0'));
 
-			int bytesRead = wait(file->read(&partDatas.back()[0], partSize, offset));
+			int bytesRead =
+			    wait(uncancellable(holdWhile(partDatas.back(), file->read(&(*partDatas.back())[0], partSize, offset))));
 			if (bytesRead != partSize) {
 				TraceEvent(SevError, "S3ClientCopyUpFileReadError")
 				    .detail("Expected", partSize)
@@ -261,7 +261,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 				throw io_error();
 			}
 
-			std::string md5 = HTTP::computeMD5Sum(partDatas.back());
+			std::string md5 = HTTP::computeMD5Sum(*partDatas.back());
 			state PartState part;
 			part.partNumber = partNumber;
 			part.offset = offset;
@@ -270,7 +270,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			parts.push_back(part);
 
 			uploadFutures.push_back(
-			    uploadPart(endpoint, bucket, objectName, uploadID, part, partDatas.back(), config.retryDelayMs));
+			    uploadPart(endpoint, bucket, objectName, uploadID, part, *partDatas.back(), config.retryDelayMs));
 
 			offset += partSize;
 			partNumber++;
