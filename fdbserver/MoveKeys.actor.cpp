@@ -95,6 +95,11 @@ public:
 // finish_move_keys_too_many_retries once it is exhausted, resets the transaction.
 ACTOR static Future<Void> retryAfterPostWaitChange(FinishMoveRetryBudget* budget, Transaction* tr) {
 	if (budget->recordRetry(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES)) {
+		// Marked rare because all three call sites are rare: reaching them needs a concurrent
+		// reassignment to land inside the waitForShardReady window. Without this probe there is
+		// no way to tell whether the post-wait give-up path is exercised at all, which matters
+		// because FINISH_MOVE_KEYS_MAX_RETRIES is buggified down to 10 in simulation.
+		CODE_PROBE(true, "finishMove* giving up after a post-wait change", probe::decoration::rare);
 		throw finish_move_keys_too_many_retries();
 	}
 	wait(delay(finishMoveKeysBackoff(budget->attempts())));
