@@ -341,6 +341,11 @@ func (o NetworkOptions) SetClientTmpDir(param string) error {
 	return o.setOpt(91, []byte(param))
 }
 
+// After unlinking client library copies that are created for enabling multi-threading, replace with symlinks for debuggers/profilers.
+func (o NetworkOptions) SetSymlinkClientLibraryCopies() error {
+	return o.setOpt(92, nil)
+}
+
 // Set the size of the client location cache. Raising this value can boost performance in very large databases where clients access data in a near-random pattern. Defaults to 100000.
 //
 // Parameter: Max location cache entries
