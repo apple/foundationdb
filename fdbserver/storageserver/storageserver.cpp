@@ -5087,6 +5087,10 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 	Key beginKey = range.begin;
 	output->lastKey = KeyRef(output->arena, range.begin);
 	bool immediateError = true;
+	// Cause of a first-read failure, rethrown below. Collapsing it into retry() would hide the one
+	// distinction the caller acts on: it gives up immediately on wrong_shard_server (a stale range
+	// assignment, which no amount of retrying against this server can fix) and retries anything else.
+	Error firstReadError;
 	// Accumulate data read from local storage to output->kvs and make sampling until any error presents
 	while (true) {
 		// Read data and stop for any error
@@ -5110,6 +5114,15 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
+			}
+			TraceEvent(SevWarn, "SSBulkDumpRangeReadFailed", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("Range", range)
+			    .detail("BeginKey", beginKey)
+			    .detail("Version", version)
+			    .detail("FirstRead", immediateError);
+			if (immediateError) {
+				firstReadError = e;
 			}
 			break;
 		}
@@ -5149,7 +5162,7 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 	}
 
 	if (immediateError) {
-		throw retry();
+		throw firstReadError.isValid() ? firstReadError : retry();
 	}
 }
 
