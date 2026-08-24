@@ -1433,6 +1433,18 @@ static bool destUnchanged(const RangeResult& keyServers,
                           const RangeResult& uidToTagMap,
                           std::vector<UID> expectedDest,
                           Optional<UID> expectedDataMoveId) {
+	// Force the post-wait dest-changed branch in simulation. Buggifying
+	// FINISH_MOVE_KEYS_MAX_RETRIES cannot reach it: taking that branch requires a concurrent
+	// reassignment to land inside the waitForShardReady window, which no knob makes more likely
+	// (a 100k campaign with the cap buggified to 10 left all four post-wait branches at zero
+	// hits). Returning false here is a branch the callers already handle -- they retry the whole
+	// iteration -- so it is safe to inject. Deliberately low probability: every hit costs a
+	// re-read plus finishMoveKeysBackoff() before the iteration is retried.
+	if (BUGGIFY_WITH_PROB(0.01)) {
+		CODE_PROBE(true, "finishMove* injecting a post-wait dest change");
+		return false;
+	}
+
 	std::sort(expectedDest.begin(), expectedDest.end());
 	for (int i = 0; i + 1 < keyServers.size(); ++i) {
 		std::vector<UID> checkSrc, checkDest;
@@ -1842,9 +1854,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						// than silently expand the commit past the verified end.
 						ASSERT(rereadEnd <= currentKeys.end);
 						if (rereadEnd < currentKeys.end) {
-							CODE_PROBE(true,
-							           "finishMoveKeys reread keyServers boundary shorter than planning",
-							           probe::decoration::rare);
+							CODE_PROBE(true, "finishMoveKeys reread keyServers boundary shorter than planning");
 							currentKeys = KeyRangeRef(currentKeys.begin, rereadEnd);
 							endKey = rereadEnd;
 						}
@@ -2767,9 +2777,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					// end.
 					ASSERT(rereadEnd <= range.end);
 					if (rereadEnd < range.end) {
-						CODE_PROBE(true,
-						           "finishMoveShards reread keyServers boundary shorter than planning",
-						           probe::decoration::rare);
+						CODE_PROBE(true, "finishMoveShards reread keyServers boundary shorter than planning");
 						range = KeyRangeRef(range.begin, rereadEnd);
 					}
 
