@@ -2,7 +2,7 @@
 
 ![Build Status](https://codebuild.us-west-2.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoiVjVzb1RQNUZTaGxGNm9iUnk4OUZ1d09GdTMzZnVOT1YzaUU1RU1xR2o2TENRWFZjb3ZrTHJEcngrZVdnNE40bXJJVDErOGVwendIL3lFWFY3Y3oxQmdjPSIsIml2UGFyYW1ldGVyU3BlYyI6IlJUbWhnaUlJVXRORUNJTjQiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=main)
 
-FoundationDB is a distributed database designed to handle large volumes of structured data across clusters of commodity servers. It organizes data as an ordered key-value store and employs ACID transactions for all operations. It is especially well-suited for read/write workloads, but also has excellent performance for write-intensive workloads. Users interact with the database using API language binding.
+FoundationDB is a distributed database designed to handle large volumes of structured data across clusters of commodity servers. It organizes data as an ordered key-value store and employs ACID transactions for all operations. It is especially well-suited for read/write workloads, but also has excellent performance for write-intensive workloads. Users interact with the database using API language bindings.
 
 To learn more about FoundationDB, visit [foundationdb.org](https://www.foundationdb.org/)
 
@@ -12,17 +12,17 @@ Documentation can be found online at <https://apple.github.io/foundationdb/>. Th
 
 ## Forums
 
-[The FoundationDB Forums](https://forums.foundationdb.org/) are the home for most of the discussion and communication about the FoundationDB project. We welcome your participation!  We want FoundationDB to be a great project to be a part of, and as part of that, we have established a [Code of Conduct](CODE_OF_CONDUCT.md) to define what constitutes permissible modes of interaction.
+[The FoundationDB Forums](https://forums.foundationdb.org/) are the home for most of the discussion and communication about the FoundationDB project. We welcome your participation! We want FoundationDB to be a great project to be a part of, and as part of that, we have established a [Code of Conduct](CODE_OF_CONDUCT.md) to define what constitutes permissible modes of interaction.
 
 ## Contributing
 
-Contributing to FoundationDB can be in contributions to the codebase, sharing your experience and insights in the community on the Forums, or contributing to projects that make use of FoundationDB. Please see the [contributing guide](CONTRIBUTING.md) for more specifics.
+Contributions to FoundationDB can include contributions to the codebase, sharing your experience and insights with the community on the Forums, or contributing to projects that make use of FoundationDB. Please see the [contributing guide](CONTRIBUTING.md) for more specifics.
 
 ## Getting Started
 
 ### Latest Stable Releases
 
-The latest stable releases are (were) versions that are recommended for production use, which have been extensively validated via simulation and real cluster tests and used in our production environment.
+The latest stable releases are versions that are recommended for production use, which have been extensively validated via simulation and real cluster tests and used in our production environment.
 
 | Branch   |     Latest Production Release      |  Notes |
 |:--------:|:-------------:|------:|
@@ -84,7 +84,7 @@ defined in `/root/.bashrc` in the container image.
 
 To build outside of the official Docker image, you'll need at least these dependencies:
 
-1. [CMake](https://cmake.org/) version 3.24.2 or higher 
+1. [CMake](https://cmake.org/) version 3.24.2 or higher
 1. [Mono](https://www.mono-project.com/download/stable/)
 1. [ninja](https://ninja-build.org/)
 
@@ -140,7 +140,7 @@ Building FoundationDB requires at least 8GB of memory. More memory is needed whe
 
 ### macOS
 
-The build under macOS will work the same way as on Linux. [Homebrew](https://brew.sh/) can be used to install the `boost` library and the `ninja` build tool. Be careful, current main branch uses boost 1.86, do install this version or just let cmake download one. Also, if the Swift binding is not of interest, use -DBUILD_SWIFT_BINDING=OFF.
+The build under macOS will work the same way as on Linux. [Homebrew](https://brew.sh/) can be used to install the `boost` library and the `ninja` build tool. Be careful: the current main branch uses Boost 1.86; install this version or let CMake download it. Also, if the Swift binding is not of interest, use `-DBUILD_SWIFT_BINDING=OFF`.
 
 ```sh
 cmake -G Ninja <FDB_SOURCE_DIR> -B <BUILD_DIR>
@@ -156,10 +156,10 @@ To generate an installable package,
 
 ### Windows
 
-Under Windows, only Visual Studio with ClangCl is supported
+Under Windows, only Visual Studio with ClangCl is supported.
 
 1. Install Visual Studio 2019 (IDE or Build Tools), and enable LLVM support
-1. Install  [CMake 3.24.2](https://cmake.org/download/) or higher
+1. Install [CMake 3.24.2](https://cmake.org/download/) or higher
 1. Download [Boost 1.86.0](https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2)
 1. Unpack boost to C:\boost, or use `-DBOOST_ROOT=<PATH_TO_BOOST>` with `cmake` if unpacked elsewhere
 1. Install [Python](https://www.python.org/downloads/) if it is not already installed by Visual Studio
@@ -169,7 +169,7 @@ Under Windows, only Visual Studio with ClangCl is supported
 1. `mkdir build && cd build`
 1. `cmake -G "Visual Studio 16 2019" -A x64 -T ClangCl <FDB_SOURCE_DIR>`
 1. `msbuild /p:Configuration=Release foundationdb.sln`
-1. To increase build performance, use `/p:UseMultiToolTask=true` and `/p:CL_MPCount=<NUMBER_OF_PARALLEL_JOBS>` 
+1. To increase build performance, use `/p:UseMultiToolTask=true` and `/p:CL_MPCount=<NUMBER_OF_PARALLEL_JOBS>`
 
 ### Language Bindings
 
@@ -180,9 +180,9 @@ Generally, CMake will build all language bindings for which it can find all nece
 
 ### Generating `compile_commands.json`
 
-CMake can build a compilation database for you. However, the default generated one is not too useful as it operates on the generated files. When running `ninja`, the build system creates another `compile_commands.json` file in the source directory. This can then be used for tools such as  [CCLS](https://github.com/MaskRay/ccls) and [CQuery](https://github.com/cquery-project/cquery), among others. This way, you can get code completion and code navigation in flow. It is not yet perfect (it will show a few errors), but we are continually working to improve the development experience.
+CMake can build a compilation database for you. However, the default generated one is not too useful as it operates on the generated files. When running `ninja`, the build system creates another `compile_commands.json` file in the source directory. This can then be used for tools such as [CCLS](https://github.com/MaskRay/ccls) and [CQuery](https://github.com/cquery-project/cquery), among others. This way, you can get code completion and code navigation in flow. It is not yet perfect (it will show a few errors), but we are continually working to improve the development experience.
 
-CMake will not produce a `compile_commands.json` by default; you must pass `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`.  This also enables the target `processed_compile_commands`, which rewrites `compile_commands.json` to describe the actor compiler source file, not the post-processed output files, and places the output file in the source directory.  This file should then be picked up automatically by any tooling.
+CMake will not produce a `compile_commands.json` by default; you must pass `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`. This also enables the target `processed_compile_commands`, which rewrites `compile_commands.json` to describe the actor compiler source file, not the post-processed output files, and places the output file in the source directory. This file should then be picked up automatically by any tooling.
 
 Note that if the building is done inside the `foundationdb/build` Docker image, the resulting paths will still be incorrect and require manual fixing. One will wish to re-run `cmake` with `-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF` to prevent it from reverting the manual changes.
 
@@ -192,7 +192,7 @@ Note that if the building is done inside the `foundationdb/build` Docker image, 
 
 ### Using IDEs
 
-CMake provides built-in support for several popular IDEs. However, most FoundationDB files are written in the `flow` language, which is an extension of the C++ programming language,  for coroutine support (Note that when FoundationDB was being developed, C++20 was not available). The `flow` language will be transpiled into C++ code using `actorcompiler`, while preventing most IDEs from recognizing `flow`-specific syntax.
+CMake provides built-in support for several popular IDEs. However, most FoundationDB files are written in the `flow` language, which is an extension of the C++ programming language for coroutine support (note that when FoundationDB was being developed, C++20 was not available). The `flow` language will be transpiled into C++ code using `actorcompiler`, while preventing most IDEs from recognizing `flow`-specific syntax.
 
 It is possible to generate project files for editing `flow` with a supported IDE. There is a CMake option called `OPEN_FOR_IDE`, which creates a project that can be opened in an IDE for editing. This project cannot be built, but you will be able to edit the files and utilize most of the editing and navigation features that your IDE supports.
 
