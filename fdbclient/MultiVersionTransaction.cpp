@@ -709,8 +709,8 @@ void loadClientFunction(T* fp, void* lib, std::string libPath, const char* funct
 	}
 }
 
-DLApi::DLApi(std::string fdbCPath, std::string origPath, bool unlinkOnLoad)
-  : fdbCPath(fdbCPath), origPath(origPath), unlinkOnLoad(unlinkOnLoad), api(new FdbCApi()), networkSetup(false) {}
+DLApi::DLApi(std::string fdbCPath, std::string origPath, bool unlinkOnLoad, bool symlinkOnLoad)
+  : fdbCPath(fdbCPath), origPath(origPath), unlinkOnLoad(unlinkOnLoad), symlinkOnLoad(symlinkOnLoad), api(new FdbCApi()), networkSetup(false) {}
 
 // Loads client API functions (definitions are in FdbCApi struct)
 void DLApi::init() {
@@ -723,17 +723,19 @@ void DLApi::init() {
 		TraceEvent(SevError, "ErrorLoadingExternalClientLibrary").detail("LibraryPath", fdbCPath);
 		throw platform_error();
 	}
-	if (unlinkOnLoad) {
+	if (unlinkOnLoad || symlinkOnLoad) {
 		int err = unlink(fdbCPath.c_str());
 		if (err) {
 			TraceEvent(SevError, "ErrorUnlinkingTempClientLibraryFile").GetLastError().detail("LibraryPath", fdbCPath);
 			throw platform_error();
 		}
-		// Add symlink so debugger/profiler can find the lib file for symbols and build-id.
-		// Will not work on Windows, but Windows does not support unlinkOnLoad (nor multi-threaded fdb client).
-		err = symlink(origPath.c_str(), fdbCPath.c_str());
-		if (err) {
-			TraceEvent(SevWarn, "ErrorSymlinkingTempClientLibraryFile").GetLastError().detail("LibraryPath", fdbCPath);
+		if (symlinkOnLoad) {
+			// Add symlink so debugger/profiler can find the lib file for symbols and build-id.
+			// Will not work on Windows, but Windows does not support unlinkOnLoad nor multi-threaded client.
+			err = symlink(origPath.c_str(), fdbCPath.c_str());
+			if (err) {
+				TraceEvent(SevWarn, "ErrorSymlinkingTempClientLibraryFile").GetLastError().detail("LibraryPath", fdbCPath);
+			}
 		}
 	}
 
@@ -2445,6 +2447,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	} else if (option == FDBNetworkOptions::RETAIN_CLIENT_LIBRARY_COPIES) {
 		validateOption(value, CanBePresent::False, CanBeAbsent::True);
 		retainClientLibCopies = true;
+	} else if (option == FDBNetworkOptions::SYMLINK_CLIENT_LIBRARY_COPIES) {
+		validateOption(value, CanBePresent::False, CanBeAbsent::True);
+		symlinkClientLibCopies = true;
 	} else {
 		forwardOption = true;
 	}
@@ -2519,8 +2524,9 @@ void MultiVersionApi::setupNetwork() {
 					auto libCopies = copyExternalLibraryPerThread(path);
 					for (int idx = 0; idx < libCopies.size(); ++idx) {
 						bool unlinkOnLoad = libCopies[idx].second && !retainClientLibCopies;
+						bool symlinkOnLoad = libCopies[idx].second && symlinkClientLibCopies;
 						externalClients[filename].push_back(makeReference<ClientInfo>(
-						    new DLApi(libCopies[idx].first, path, unlinkOnLoad), path, useFutureVersion, idx));
+						    new DLApi(libCopies[idx].first, path, unlinkOnLoad, symlinkOnLoad), path, useFutureVersion, idx));
 					}
 				}
 			}
@@ -2918,8 +2924,8 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
     disableBypass(false), bypassMultiClientApi(false), externalClient(false), ignoreExternalClientFailures(false),
-    failIncompatibleClient(false), retainClientLibCopies(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
-    traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
+    failIncompatibleClient(false), retainClientLibCopies(false), symlinkClientLibCopies(false), apiVersion(0),
+    threadCount(0), tmpDir("/tmp"), traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
