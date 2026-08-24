@@ -1716,6 +1716,23 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					// SERVER_READY_QUORUM_TIMEOUT exceeds the ~5-second transaction lifetime,
 					// so waiting inside the transaction guarantees transaction_too_old on
 					// commit when destination servers are slow to respond.
+					//
+					// This also discards txn1's read conflict ranges. With V1 = this
+					// transaction's read version, V2 = txn2's, and C = txn2's commit version,
+					// the metadata is protected across the wait as follows:
+					//   keyServers (V1,V2]  txn2 re-reads at V2 and destUnchanged() compares.
+					//   keyServers (V2,C]   txn2's krmGetRanges is a non-snapshot read.
+					//   serverKeys (V2,C]   krmSetRangeCoalescing adds explicit read conflict
+					//                       ranges of its own (see KeyRangeMap.cpp); note this
+					//                       is where the pre-#13364 serverKeys coverage came
+					//                       from, not from the keyServers read, since
+					//                       finishMoveKeys never reads serverKeys.
+					//   serverKeys (V1,V2]  NOT covered by the resolver. Safe only because
+					//                       every writer that revokes a server's ownership in
+					//                       serverKeys also writes keyServers for the same
+					//                       range in the same transaction, which the V2 re-read
+					//                       therefore sees. See the INVARIANT note on
+					//                       serverKeysRange in SystemData.h.
 					tr.reset();
 
 					// Wait for new destination servers to fetch the keys (OUTSIDE any transaction)
@@ -2645,7 +2662,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				// SERVER_READY_QUORUM_TIMEOUT exceeds the ~5 s txn lifetime; waiting
 				// inside the transaction guarantees transaction_too_old on commit
 				// when destination servers are slow to respond. Same pattern as in
-				// finishMoveKeys above.
+				// finishMoveKeys above, including the read-conflict-range coverage
+				// table at that tr.reset(): serverKeys over (V1,V2] is not covered by
+				// the resolver and relies on the INVARIANT note on serverKeysRange in
+				// SystemData.h.
 				tr.reset();
 
 				// Wait OUTSIDE any transaction. A long timeout is safe — no
