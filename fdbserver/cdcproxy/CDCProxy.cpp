@@ -795,13 +795,9 @@ CDCStreamMetadataUpdate reconcileBufferedStreamMetadata(Reference<CDCBufferedStr
 		    !update.historyChanged ||
 		    std::any_of(stream->tagIntervals.begin(), stream->tagIntervals.end(), [&](const auto& interval) {
 			    return interval.begin <= version && version < interval.end &&
-			           std::any_of(
-			               previousIntervals.begin(),
-			               previousIntervals.end(),
-			               [&](const auto& previous) {
-				               return previous.tag == interval.tag && previous.begin <= version &&
-				                      version < previous.end;
-			               });
+			           std::any_of(previousIntervals.begin(), previousIntervals.end(), [&](const auto& previous) {
+				           return previous.tag == interval.tag && previous.begin <= version && version < previous.end;
+			           });
 		    });
 		if (version < stream->minVersion || !sameTag) {
 			update.releasedBytes += estimatedCDCConsumeVersionBytes(*buffered);
