@@ -88,13 +88,16 @@ static Future<Void> benchIONet2Coroutine(benchmark::State* benchState) {
 	uint32_t sum = 0;
 	uint64_t seed = 1;
 	std::unique_ptr<char[]> data(new char[4096]);
-	// Match the ACTOR state lifetimes. Releasing f between iterations evicts the
-	// cached file, so the next open would create another atomic-write file.
+	// Keep the final batch alive until KeepRunning() stops timing.
 	std::vector<Future<Void>> futures;
+	// Releasing f between iterations evicts the cached file, so the next open
+	// would create another atomic-write file.
 	Reference<IAsyncFile> f;
 	memset(data.get(), 0, 4096);
 	while (benchState->KeepRunning()) {
 		sum = 0;
+		// Match the ACTOR's declaration-point reset, including releasing capacity.
+		futures = std::vector<Future<Void>>();
 		futures.reserve(actorCount);
 		DeterministicRandom rand(seed);
 		for (int i = 0; i < actorCount; ++i) {
