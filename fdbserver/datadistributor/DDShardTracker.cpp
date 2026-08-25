@@ -1220,7 +1220,6 @@ void triggerStorageQueueRebalance(DataDistributionTracker* self, RebalanceStorag
 		e.detail("ShardSelected", shardToMove);
 		e.detail("ShardWriteBytesPerKSec", maxShardWriteTraffic);
 		RelocateShard rs(shardToMove, DataMovementReason::REBALANCE_STORAGE_QUEUE, RelocateReason::REBALANCE_WRITE);
-		rs.primaryRegion = req.primary;
 		self->output.send(rs);
 		TraceEvent("SendRelocateToDDQueue", self->distributorId)
 		    .detail("ServerPrimary", req.primary)

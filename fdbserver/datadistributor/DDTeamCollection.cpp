@@ -1348,7 +1348,6 @@ public:
 
 							RelocateShard rs(
 							    shards[i], maxPriority, RelocateReason::OTHER, deterministicRandom()->randomUniqueID());
-							rs.primaryRegion = self->primary;
 
 							self->output.send(rs);
 							TraceEvent("SendRelocateToDDQueue", self->distributorId)
@@ -3327,42 +3326,9 @@ public:
 		}
 	}
 
-	static SourceTeamInfo getSourceTeam(DDTeamCollection* self, const GetSourceTeamRequest& req) {
-		SourceTeamInfo result;
-		for (const UID& id : req.sources) {
-			const auto server = self->server_info.find(id);
-			if (server != self->server_info.end() && self->isCorrectDC(*server->second)) {
-				result.sources.push_back(id);
-			}
-		}
-		for (const UID& id : req.completeSources) {
-			const auto server = self->server_info.find(id);
-			if (server != self->server_info.end() && self->isCorrectDC(*server->second)) {
-				const auto& status = self->server_status.get(id);
-				// Undesired servers can still serve their existing shards until evacuation completes.
-				if (status.initialized && !status.isFailed) {
-					result.healthyCompleteSources.push_back(id);
-				}
-			}
-		}
-		result.healthyCompleteTeam = self->findTeamFromServers(req.completeSources, /*wantHealthy=*/true);
-		return result;
-	}
-
-	static Future<Void> serverGetSourceTeamRequests(DDTeamCollection* self, TeamCollectionInterface tci) {
-		while (true) {
-			GetSourceTeamRequest req = co_await tci.getSourceTeam.getFuture();
-			req.reply.send(getSourceTeam(self, req));
-		}
-	}
-
 	static Future<Void> serverGetTeamRequests(DDTeamCollection* self, TeamCollectionInterface tci) {
-		// Source revalidation can run synchronously inside a destination request's reply callback.
-		Future<Void> sourceRequests = serverGetSourceTeamRequests(self, tci);
 		while (true) {
-			auto request = co_await race(sourceRequests, tci.getTeam.getFuture());
-			ASSERT(request.index() == 1);
-			GetTeamRequest req = std::get<1>(std::move(request));
+			GetTeamRequest req = co_await tci.getTeam.getFuture();
 			if (req.findTeamByServers) {
 				getTeamByServers(self, req);
 			} else if (req.findTeamForBulkLoad) {
@@ -6676,111 +6642,6 @@ public:
 		ASSERT(result == 8);
 	}
 
-	static Future<Void> GetSourceTeam_ClassifiesSources() {
-		auto collection =
-		    testTeamCollection(3, makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>()), 4);
-		const UID healthy(1, 0), failed(2, 0), uninitialized(3, 0), undesired(4, 0), unknown(5, 0);
-		collection->server_status.set(failed,
-		                              ServerStatus(IsFailed::True,
-		                                           IsUndesired::False,
-		                                           IsWiggling::False,
-		                                           collection->server_info[failed]->getLastKnownInterface().locality));
-		collection->server_status.set(uninitialized, ServerStatus());
-		collection->server_status.set(
-		    undesired,
-		    ServerStatus(IsFailed::False,
-		                 IsUndesired::True,
-		                 IsWiggling::False,
-		                 collection->server_info[undesired]->getLastKnownInterface().locality));
-		TeamCollectionInterface tci;
-		Future<Void> service = collection->serverGetTeamRequests(tci);
-		GetSourceTeamRequest req;
-		req.sources = { healthy, failed, uninitialized, undesired, unknown };
-		req.completeSources = req.sources;
-		Future<SourceTeamInfo> reply = tci.getSourceTeam.getReply(req);
-		ASSERT(reply.isReady());
-		ASSERT(reply.get().sources == std::vector<UID>({ healthy, failed, uninitialized, undesired }));
-		ASSERT(reply.get().healthyCompleteSources == std::vector<UID>({ healthy, undesired }));
-		ASSERT(!reply.get().healthyCompleteTeam.present());
-
-		// The primary collection also tracks servers outside either active region for evacuation.
-		collection->includedDCs = { Optional<Key>(Key("other-dc"_sr)) };
-		GetSourceTeamRequest wrongDCReq;
-		wrongDCReq.sources = req.sources;
-		wrongDCReq.completeSources = req.completeSources;
-		Future<SourceTeamInfo> wrongDCReply = tci.getSourceTeam.getReply(wrongDCReq);
-		ASSERT(wrongDCReply.isReady());
-		ASSERT(wrongDCReply.get().sources.empty());
-		ASSERT(wrongDCReply.get().healthyCompleteSources.empty());
-		service.cancel();
-		co_return;
-	}
-
-	static Future<Void> GetSourceTeam_PropagatesServiceFailure() {
-		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 0);
-		TeamCollectionInterface tci;
-		Future<Void> service = collection->serverGetTeamRequests(tci);
-		ASSERT(!service.isReady());
-		tci.getSourceTeam.sendError(operation_failed());
-		ASSERT(service.isReady());
-		ASSERT(service.isError());
-		ASSERT_EQ(service.getError().code(), error_code_operation_failed);
-		co_return;
-	}
-
-	static Future<Void> GetSourceTeam_HealthyCompleteTeam() {
-		auto collection =
-		    testTeamCollection(3, makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>()), 4);
-		const std::vector<UID> team{ UID(1, 0), UID(2, 0), UID(3, 0) };
-		collection->addTeam(team, IsInitialTeam::True);
-		collection->disableBuildingTeams();
-		TeamCollectionInterface tci;
-		Future<Void> service = collection->serverGetTeamRequests(tci);
-		GetSourceTeamRequest req;
-		req.sources = { UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0), UID(5, 0) };
-		req.completeSources = team;
-		Future<SourceTeamInfo> reply = tci.getSourceTeam.getReply(req);
-		ASSERT(reply.isReady());
-		ASSERT(reply.get().healthyCompleteSources == team);
-		ASSERT(reply.get().healthyCompleteTeam.present());
-		ASSERT(reply.get().healthyCompleteTeam.get()->getServerIDs() == team);
-
-		GetTeamRequest destinationReq(team);
-		Future<Void> reentrantReply = map(destinationReq.reply.getFuture(), [tci, team](auto destination) mutable {
-			ASSERT(destination.first.present());
-			GetSourceTeamRequest sourceReq;
-			sourceReq.sources = team;
-			sourceReq.completeSources = team;
-			Future<SourceTeamInfo> sourceReply = tci.getSourceTeam.getReply(sourceReq);
-			ASSERT(sourceReply.isReady());
-			ASSERT(sourceReply.get().healthyCompleteTeam.present());
-			ASSERT(sourceReply.get().healthyCompleteTeam.get()->getServerIDs() == team);
-			return Void();
-		});
-		tci.getTeam.send(destinationReq);
-		ASSERT(reentrantReply.isReady());
-		reentrantReply.get();
-
-		GetSourceTeamRequest partialReq;
-		partialReq.sources = req.sources;
-		partialReq.completeSources = { UID(1, 0), UID(2, 0) };
-		Future<SourceTeamInfo> partialReply = tci.getSourceTeam.getReply(partialReq);
-		ASSERT(partialReply.isReady());
-		ASSERT(partialReply.get().healthyCompleteSources == partialReq.completeSources);
-		ASSERT(!partialReply.get().healthyCompleteTeam.present());
-
-		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
-		GetSourceTeamRequest unhealthyReq;
-		unhealthyReq.sources = req.sources;
-		unhealthyReq.completeSources = team;
-		Future<SourceTeamInfo> unhealthyReply = tci.getSourceTeam.getReply(unhealthyReq);
-		ASSERT(unhealthyReply.isReady());
-		ASSERT(unhealthyReply.get().healthyCompleteSources == team);
-		ASSERT(!unhealthyReply.get().healthyCompleteTeam.present());
-		service.cancel();
-		co_return;
-	}
-
 	static Future<Void> GetTeam_NewServersNotNeeded() {
 		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		int processSize = 5;
@@ -7697,18 +7558,6 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 
 TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	co_await DDTeamCollectionUnitTest::AddTeamsBestOf_NotEnoughServers();
-}
-
-TEST_CASE("/DataDistribution/GetSourceTeam/ClassifiesSources") {
-	co_await DDTeamCollectionUnitTest::GetSourceTeam_ClassifiesSources();
-}
-
-TEST_CASE("/DataDistribution/GetSourceTeam/PropagatesServiceFailure") {
-	co_await DDTeamCollectionUnitTest::GetSourceTeam_PropagatesServiceFailure();
-}
-
-TEST_CASE("/DataDistribution/GetSourceTeam/HealthyCompleteTeam") {
-	co_await DDTeamCollectionUnitTest::GetSourceTeam_HealthyCompleteTeam();
 }
 
 TEST_CASE("/DataDistribution/GetTeam/NewServersNotNeeded") {

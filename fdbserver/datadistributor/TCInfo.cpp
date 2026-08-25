@@ -400,20 +400,14 @@ std::string TCTeamInfo::getServerIDsStr() const {
 	return serversToString(this->serverIDs);
 }
 
-void TCTeamInfo::addDataInFlightToTeam(int64_t delta, const std::vector<UID>& excludedServers) {
-	for (const auto& server : servers) {
-		if (std::find(excludedServers.begin(), excludedServers.end(), server->getId()) == excludedServers.end()) {
-			server->incrementDataInFlightToServer(delta);
-		}
-	}
+void TCTeamInfo::addDataInFlightToTeam(int64_t delta) {
+	for (int i = 0; i < servers.size(); i++)
+		servers[i]->incrementDataInFlightToServer(delta);
 }
 
-void TCTeamInfo::addReadInFlightToTeam(int64_t delta, const std::vector<UID>& excludedServers) {
-	for (const auto& server : servers) {
-		if (std::find(excludedServers.begin(), excludedServers.end(), server->getId()) == excludedServers.end()) {
-			server->incrementReadInFlightToServer(delta);
-		}
-	}
+void TCTeamInfo::addReadInFlightToTeam(int64_t delta) {
+	for (int i = 0; i < servers.size(); i++)
+		servers[i]->incrementReadInFlightToServer(delta);
 }
 
 int64_t TCTeamInfo::getDataInFlightToTeam() const {
