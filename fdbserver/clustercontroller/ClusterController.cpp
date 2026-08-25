@@ -40,7 +40,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/BooleanParam.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/BackupInterface.h"
 #include "fdbserver/core/CoordinatedState.h"
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class

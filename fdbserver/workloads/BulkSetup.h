@@ -28,7 +28,7 @@
 #include <vector>
 
 #include "fdbclient/ClientBooleanParams.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/QuietDatabase.h"

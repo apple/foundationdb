@@ -31,7 +31,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
