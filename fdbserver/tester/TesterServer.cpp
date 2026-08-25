@@ -32,7 +32,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/FDBSimulatorProcessInfo.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WorkerInterface.h"
 #include "TesterServer.h"

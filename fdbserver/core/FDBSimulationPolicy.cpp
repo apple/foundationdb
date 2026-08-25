@@ -24,6 +24,7 @@
 #include <set>
 #include <vector>
 
+#include "fdbclient/SimulationCapabilities.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -55,7 +56,9 @@ FDBSimulationPolicyState& policyState() {
 	return *state;
 }
 
-class FDBSimulationPolicy final : public ISimulationPolicy {
+// Applies FDB replication and test configuration to availability, process-kill, and
+// storage capability decisions without exposing FDB-specific state to the generic simulator.
+class FDBSimulationPolicy final : public IFDBSimulationPolicy {
 public:
 	bool shouldIncludeInAvailabilityCheck(ProcessInfo const& processInfo) const override {
 		return isAvailableSimulatorProcessClass(processInfo);
@@ -112,17 +115,17 @@ public:
 		return false;
 	}
 
-	bool hasCapability(Capability capability) const override {
+	bool hasCapability(FDBSimulationCapability capability) const override {
 		switch (capability) {
-		case Capability::WarnOnStorageMismatch:
+		case FDBSimulationCapability::WarnOnStorageMismatch:
 			return fdbSimulationPolicyState().tssMode == FDBTSSMode::EnabledDropMutations;
-		case Capability::StorageReplicaFaultInjection:
+		case FDBSimulationCapability::StorageReplicaFaultInjection:
 			return fdbSimulationPolicyState().tssMode >= FDBTSSMode::EnabledAddDelay;
-		case Capability::StorageReplicaDelay:
+		case FDBSimulationCapability::StorageReplicaDelay:
 			return fdbSimulationPolicyState().tssMode == FDBTSSMode::EnabledAddDelay;
-		case Capability::StorageReplicaMutationDrop:
+		case FDBSimulationCapability::StorageReplicaMutationDrop:
 			return fdbSimulationPolicyState().tssMode == FDBTSSMode::EnabledDropMutations;
-		case Capability::LimitStorageServerReadBytes:
+		case FDBSimulationCapability::LimitStorageServerReadBytes:
 			return fdbSimulationPolicyState().tssMode == FDBTSSMode::Disabled;
 		}
 		UNREACHABLE();

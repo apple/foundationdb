@@ -80,56 +80,6 @@ TEST_CASE("/flow/genericactors/ActorHeaderDeclarations") {
 	co_await lowPriorityDelayAfterCleared(condition, 0.0);
 }
 
-template <class T, class Func, class ErrFunc, class CallbackType>
-class LambdaCallback final : public CallbackType, public FastAllocated<LambdaCallback<T, Func, ErrFunc, CallbackType>> {
-	Func func;
-	ErrFunc errFunc;
-
-	void fire(T const& t) override {
-		CallbackType::remove();
-		func(t);
-		delete this;
-	}
-	void fire(T&& t) override {
-		CallbackType::remove();
-		func(std::move(t));
-		delete this;
-	}
-	void error(Error e) override {
-		CallbackType::remove();
-		errFunc(e);
-		delete this;
-	}
-
-public:
-	LambdaCallback(Func&& f, ErrFunc&& e) : func(std::move(f)), errFunc(std::move(e)) {}
-};
-
-template <class T, class Func, class ErrFunc>
-void onReady(Future<T>&& f, Func&& func, ErrFunc&& errFunc) {
-	if (f.isReady()) {
-		if (f.isError())
-			errFunc(f.getError());
-		else
-			func(f.get());
-	} else {
-		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, Callback<T>>(std::move(func), std::move(errFunc)));
-	}
-}
-
-template <class T, class Func, class ErrFunc>
-void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
-	if (f.isReady()) {
-		if (f.isError())
-			errFunc(f.getError());
-		else
-			func(f.pop());
-	} else {
-		f.addCallbackAndClear(
-		    new LambdaCallback<T, Func, ErrFunc, SingleCallback<T>>(std::move(func), std::move(errFunc)));
-	}
-}
-
 namespace {
 void emptyVoidActor() {}
 

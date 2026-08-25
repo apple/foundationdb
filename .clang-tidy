@@ -5,6 +5,7 @@ Checks: >
   bugprone-implicit-widening-of-multiplication-result,
   bugprone-inaccurate-erase,
   bugprone-misplaced-widening-cast,
+  bugprone-move-forwarding-reference,
   bugprone-redundant-branch-condition,
   bugprone-return-const-ref-from-parameter,
   bugprone-shared-ptr-array-mismatch,
@@ -19,6 +20,7 @@ Checks: >
   bugprone-suspicious-string-compare,
   bugprone-suspicious-stringview-data-usage,
   bugprone-too-small-loop-variable,
+  bugprone-undefined-memory-manipulation,
   bugprone-unique-ptr-array-mismatch,
   bugprone-use-after-move,
   cppcoreguidelines-avoid-capturing-lambda-coroutines,
@@ -31,6 +33,7 @@ Checks: >
   performance-for-range-copy,
   performance-implicit-conversion-in-loop,
   performance-move-const-arg,
+  performance-move-constructor-init,
   readability-braces-around-statements,
   readability-container-contains,
   readability-const-return-type,
@@ -41,6 +44,8 @@ Checks: >
 CheckOptions:
   - key: bugprone-dangling-handle.HandleClasses
     value: 'std::basic_string_view;std::experimental::basic_string_view;std::span;StringRef'
+  - key: misc-coroutine-hostile-raii.RAIITypesList
+    value: 'std::lock_guard;std::scoped_lock;MutexHolder;ThreadSpinLockHolder'
   - key: modernize-use-auto.MinTypeNameLength
     value: '11'
   - key: readability-braces-around-statements.ShortStatementLines

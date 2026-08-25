@@ -1924,7 +1924,8 @@ struct ActiveCounter {
 		  : parent(parent), delta(delta), releaseCallback(releaseCallback) {
 			parent->counter += delta;
 		}
-		Releaser(Releaser&& r) noexcept : parent(r.parent), delta(r.delta), releaseCallback(r.releaseCallback) {
+		Releaser(Releaser&& r) noexcept
+		  : parent(r.parent), delta(r.delta), releaseCallback(std::move(r.releaseCallback)) {
 			r.parent = nullptr;
 		}
 		void operator=(Releaser&& r) {
