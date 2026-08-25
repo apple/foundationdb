@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 
 #include <algorithm>
 #include <cmath>
@@ -64,7 +64,9 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
+#include "fdbclient/ProxyLoadBalanceMetrics.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SimulationCapabilities.h"
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
@@ -89,6 +91,7 @@
 #include "flow/genericactors.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
+#include "flow/ScopeExit.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
@@ -297,7 +300,7 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			if (clientInfo->get().commitProxies.size())
 				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
 			if (clientInfo->get().grvProxies.size())
-				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
+				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies);
 			server_interf.clear();
 			locationCache.insert(allKeys, Reference<LocationInfo>());
 			break;
@@ -313,7 +316,7 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			if (clientInfo->get().commitProxies.size())
 				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
 			if (clientInfo->get().grvProxies.size())
-				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
+				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies);
 			server_interf.clear();
 			locationCache.insert(allKeys, Reference<LocationInfo>());
 			break;
@@ -938,13 +941,79 @@ void DatabaseContext::updateProxies() {
 		commitProxyProvisional = clientInfo->get().commitProxies[0].provisional;
 	}
 	if (clientInfo->get().grvProxies.size()) {
-		grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
+		grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies);
 		grvProxyProvisional = clientInfo->get().grvProxies[0].provisional;
 	}
 	if (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size()) {
 		ASSERT(commitProxyProvisional == grvProxyProvisional);
 		proxyProvisional = commitProxyProvisional;
 	}
+}
+
+TEST_CASE("/fdbclient/NativeAPI/proxyLoadBalanceMetrics") {
+	FlowKnobs knobs(Randomize::False, IsSimulated::False);
+	knobs.BASIC_LOAD_BALANCE_COMPUTE_PRECISION = 10000;
+	knobs.BASIC_LOAD_BALANCE_MIN_REQUESTS = 20;
+	knobs.BASIC_LOAD_BALANCE_MIN_CPU = 0.05;
+	knobs.BASIC_LOAD_BALANCE_MAX_CHANGE = 0.10;
+	knobs.BASIC_LOAD_BALANCE_MAX_PROB = 2.0;
+	const FlowKnobs* previousKnobs = FLOW_KNOBS;
+	ScopeExit restoreKnobs([previousKnobs]() { FLOW_KNOBS = previousKnobs; });
+	FLOW_KNOBS = &knobs;
+
+	// Keep this synchronous so the model updaters are cancelled before the global knobs are restored.
+	auto grv = makeReference<GrvProxyInfo>(std::vector<GrvProxyInterface>(2));
+	auto cpu = makeReference<CommitProxyInfo>(std::vector<CommitProxyInterface>(2));
+	auto update = [](const auto& model, int first, int second) {
+		model->updateRecent(0, first);
+		model->updateRecent(1, second);
+		model->updateProbabilities();
+	};
+	auto checkSelections = [](const auto& model, double firstProbability) {
+		for (int i = 0; i < 1024; ++i) {
+			// Match DeterministicRandom::random01 without reseeding or consuming an extra draw.
+			double next = deterministicRandom()->peek() / double(std::numeric_limits<uint64_t>::max());
+			int chosen = model->getBest();
+			// Ignore normalization roundoff at the expected selection boundary.
+			if (std::abs(next - firstProbability) > 1e-12) {
+				ASSERT_EQ(chosen, next <= firstProbability ? 0 : 1);
+			}
+		}
+	};
+
+	const int precision = knobs.BASIC_LOAD_BALANCE_COMPUTE_PRECISION;
+	ASSERT_EQ(ProxyGrvMetric::decode(-1), 0);
+	ASSERT_EQ(ProxyCpuMetric::decode(-1), -1);
+	ASSERT_EQ(ProxyGrvMetric::decode(precision - 1), 0);
+	ASSERT_EQ(ProxyCpuMetric::decode(precision - 1), precision - 1);
+	ASSERT_EQ(ProxyGrvMetric::decode(precision), 1);
+	ASSERT_EQ(ProxyCpuMetric::decode(precision), 0);
+
+	update(grv, 80 * precision + 1000, 20 * precision + 9000);
+	update(cpu, 80 * precision + 1000, 20 * precision + 9000);
+	checkSelections(grv, 0.47);
+	checkSelections(cpu, 0.54);
+
+	update(grv, 19 * precision + 9000, 20 * precision + 1000);
+	update(cpu, 80 * precision + 999, 20 * precision);
+	checkSelections(grv, 0.47);
+	checkSelections(cpu, 0.54);
+
+	update(grv, 40 * precision, 0);
+	update(cpu, 1000, 0);
+	checkSelections(grv, 0.47 - 0.05);
+	checkSelections(cpu, 0.54 - 0.05);
+
+	grv->updateRecent(0, 31000);
+	grv->updateRecent(1, 19000);
+	cpu->updateRecent(0, 31000);
+	cpu->updateRecent(1, 19000);
+	knobs.BASIC_LOAD_BALANCE_COMPUTE_PRECISION = 1000;
+	grv->updateProbabilities();
+	cpu->updateProbabilities();
+	checkSelections(grv, 0.42 + (0.5 - 31.0 / 50.0) * 0.10);
+	checkSelections(cpu, 0.54 - 0.05);
+	return Void();
 }
 
 Reference<CommitProxyInfo> DatabaseContext::getCommitProxies(UseProvisionalProxies useProvisionalProxies) {
@@ -1170,7 +1239,11 @@ Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 	}
 
 	if (debugID.present())
-		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.Before");
+		g_traceBatch.addEvent("TransactionDebug",
+		                      debugID.get().first(),
+		                      "NativeAPI.getKeyLocation.Before",
+		                      spanContext.traceID,
+		                      spanContext.spanID);
 
 	while (true) {
 		try {
@@ -1185,7 +1258,11 @@ Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 			    TaskPriority::DefaultPromiseEndpoint);
 			++cx->transactionKeyServerLocationRequestsCompleted;
 			if (debugID.present())
-				g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
+				g_traceBatch.addEvent("TransactionDebug",
+				                      debugID.get().first(),
+				                      "NativeAPI.getKeyLocation.After",
+				                      spanContext.traceID,
+				                      spanContext.spanID);
 			ASSERT(rep.results.size() == 1);
 
 			auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
@@ -1319,7 +1396,11 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database
                                                                         Version version) {
 	Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
 	if (debugID.present())
-		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.Before");
+		g_traceBatch.addEvent("TransactionDebug",
+		                      debugID.get().first(),
+		                      "NativeAPI.getKeyLocations.Before",
+		                      spanContext.traceID,
+		                      spanContext.spanID);
 
 	while (true) {
 		try {
@@ -1334,7 +1415,11 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database
 			    TaskPriority::DefaultPromiseEndpoint);
 			++cx->transactionKeyServerLocationRequestsCompleted;
 			if (debugID.present())
-				g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
+				g_traceBatch.addEvent("TransactionDebug",
+				                      debugID.get().first(),
+				                      "NativeAPI.getKeyLocations.After",
+				                      spanContext.traceID,
+				                      spanContext.spanID);
 			ASSERT(rep.results.size());
 
 			std::vector<KeyRangeLocationInfo> results;
@@ -1565,11 +1650,16 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 				getValueID = nondeterministicRandom()->randomUniqueID();
 				readOptions.get().debugID = getValueID;
 
-				g_traceBatch.addAttach(
-				    "GetValueAttachID", trState->readOptions.get().debugID.get().first(), getValueID.get().first());
+				g_traceBatch.addAttach("GetValueAttachID",
+				                       trState->readOptions.get().debugID.get().first(),
+				                       getValueID.get().first(),
+				                       trState->spanContext.traceID,
+				                       trState->spanContext.spanID);
 				g_traceBatch.addEvent("GetValueDebug",
 				                      getValueID.get().first(),
-				                      "NativeAPI.getValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
+				                      "NativeAPI.getValue.Before",
+				                      trState->spanContext.traceID,
+				                      trState->spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 				/*TraceEvent("TransactionDebugGetValueInfo", getValueID.get())
 				    .detail("Key", key)
 				    .detail("ReqVersion", ver)
@@ -1620,7 +1710,8 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			if (trState->trLogInfo && recordLogInfo) {
 				int valueSize = reply.value.present() ? reply.value.get().size() : 0;
 				trState->trLogInfo->addLog(FdbClientLogEvents::EventGet(
-				    startTimeD, trState->cx->clientLocality.dcId(), latency, valueSize, key));
+				                               startTimeD, trState->cx->clientLocality.dcId(), latency, valueSize, key),
+				                           trState->spanContext);
 			}
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
@@ -1630,7 +1721,9 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			if (getValueID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
 				                      getValueID.get().first(),
-				                      "NativeAPI.getValue.After"); //.detail("TaskID", g_network->getCurrentTask());
+				                      "NativeAPI.getValue.After",
+				                      trState->spanContext.traceID,
+				                      trState->spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 				/*TraceEvent("TransactionDebugGetValueDone", getValueID.get())
 				    .detail("Key", key)
 				    .detail("ReqVersion", ver)
@@ -1644,15 +1737,21 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
 			if (getValueID.present()) {
-				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Error");
+				g_traceBatch.addEvent("GetValueDebug",
+				                      getValueID.get().first(),
+				                      "NativeAPI.getValue.Error",
+				                      trState->spanContext.traceID,
+				                      trState->spanContext.spanID);
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				trState->cx->invalidateCache(key);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 			} else {
 				if (trState->trLogInfo && recordLogInfo)
-					trState->trLogInfo->addLog(FdbClientLogEvents::EventGetError(
-					    startTimeD, trState->cx->clientLocality.dcId(), static_cast<int>(e.code()), key));
+					trState->trLogInfo->addLog(
+					    FdbClientLogEvents::EventGetError(
+					        startTimeD, trState->cx->clientLocality.dcId(), static_cast<int>(e.code()), key),
+					    trState->spanContext);
 				throw e;
 			}
 		}
@@ -1670,13 +1769,18 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k) {
 		getKeyID = nondeterministicRandom()->randomUniqueID();
 		readOptions.get().debugID = getKeyID;
 
-		g_traceBatch.addAttach(
-		    "GetKeyAttachID", trState->readOptions.get().debugID.get().first(), getKeyID.get().first());
+		g_traceBatch.addAttach("GetKeyAttachID",
+		                       trState->readOptions.get().debugID.get().first(),
+		                       getKeyID.get().first(),
+		                       trState->spanContext.traceID,
+		                       trState->spanContext.spanID);
 		g_traceBatch.addEvent(
 		    "GetKeyDebug",
 		    getKeyID.get().first(),
-		    "NativeAPI.getKey.AfterVersion"); //.detail("StartKey",
-		                                      // k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
+		    "NativeAPI.getKey.AfterVersion",
+		    trState->spanContext.traceID,
+		    trState->spanContext.spanID); //.detail("StartKey",
+		                                  // k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 	}
 
 	loop {
@@ -1701,8 +1805,10 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k) {
 				g_traceBatch.addEvent(
 				    "GetKeyDebug",
 				    getKeyID.get().first(),
-				    "NativeAPI.getKey.Before"); //.detail("StartKey",
-				                                // k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
+				    "NativeAPI.getKey.Before",
+				    trState->spanContext.traceID,
+				    trState->spanContext.spanID); //.detail("StartKey",
+				                                  // k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 			++trState->cx->transactionPhysicalReads;
 
 			GetKeyRequest req(span.context,
@@ -1739,15 +1845,21 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k) {
 			if (getKeyID.present())
 				g_traceBatch.addEvent("GetKeyDebug",
 				                      getKeyID.get().first(),
-				                      "NativeAPI.getKey.After"); //.detail("NextKey",reply.sel.key).detail("Offset",
-				                                                 // reply.sel.offset).detail("OrEqual", k.orEqual);
+				                      "NativeAPI.getKey.After",
+				                      trState->spanContext.traceID,
+				                      trState->spanContext.spanID); //.detail("NextKey",reply.sel.key).detail("Offset",
+				                                                    // reply.sel.offset).detail("OrEqual", k.orEqual);
 			k = reply.sel;
 			if (!k.offset && k.orEqual) {
 				return k.getKey();
 			}
 		} catch (Error& e) {
 			if (getKeyID.present())
-				g_traceBatch.addEvent("GetKeyDebug", getKeyID.get().first(), "NativeAPI.getKey.Error");
+				g_traceBatch.addEvent("GetKeyDebug",
+				                      getKeyID.get().first(),
+				                      "NativeAPI.getKey.Error",
+				                      trState->spanContext.traceID,
+				                      trState->spanContext.spanID);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				trState->cx->invalidateCache(k.getKey(), Reverse{ k.isBackward() });
 
@@ -1760,46 +1872,58 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k) {
 	}
 }
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext) {
-	state Span span("NAPI:waitForCommittedVersion"_loc, spanContext);
-	loop {
+static Future<Version> waitForCommittedVersionImpl(Database cx, Version version, SpanContext spanContext) {
+	Span span("NAPI:waitForCommittedVersion"_loc, spanContext);
+	while (true) {
 		try {
-			choose {
-				when(wait(cx->onProxiesChanged())) {}
-				when(GetReadVersionReply v = wait(basicLoadBalance(
-				         cx->getGrvProxies(UseProvisionalProxies::False),
-				         &GrvProxyInterface::getConsistentReadVersion,
-				         GetReadVersionRequest(
-				             span.context, 0, TransactionPriority::IMMEDIATE, cx->ssVersionVectorCache.getMaxVersion()),
-				         cx->taskID))) {
-					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
-					if (v.midShardSize > 0)
-						cx->smoothMidShardSize.setTotal(v.midShardSize);
-					if (cx->versionVectorCacheActive(v.ssVersionVectorDelta)) {
-						if (cx->isCurrentGrvProxy(v.proxyId)) {
-							cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
-						} else {
-							cx->ssVersionVectorCache.clear();
-						}
-					}
-					if (v.version >= version)
-						return v.version;
-					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version
-					// (causal consistency is not needed for this purpose)
-					wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, cx->taskID));
+			// Reset proxy backoff before constructing a GRV request.
+			auto proxiesChanged = cx->onProxiesChanged();
+			if (proxiesChanged.isReady()) {
+				co_await proxiesChanged;
+				continue;
+			}
+			auto res = co_await race(std::move(proxiesChanged),
+			                         basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
+			                                          &GrvProxyInterface::getConsistentReadVersion,
+			                                          GetReadVersionRequest(span.context,
+			                                                                0,
+			                                                                TransactionPriority::IMMEDIATE,
+			                                                                cx->ssVersionVectorCache.getMaxVersion()),
+			                                          cx->taskID));
+			if (res.index() == 0) {
+				continue;
+			}
+			GetReadVersionReply v = std::get<1>(std::move(res));
+			cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
+			if (v.midShardSize > 0)
+				cx->smoothMidShardSize.setTotal(v.midShardSize);
+			if (cx->versionVectorCacheActive(v.ssVersionVectorDelta)) {
+				if (cx->isCurrentGrvProxy(v.proxyId)) {
+					cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+				} else {
+					cx->ssVersionVectorCache.clear();
 				}
 			}
+			if (v.version >= version)
+				co_return v.version;
+			// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version
+			// (causal consistency is not needed for this purpose)
+			co_await delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, cx->taskID);
+			continue;
 		} catch (Error& e) {
-			if (e.code() == error_code_batch_transaction_throttled ||
-			    e.code() == error_code_grv_proxy_memory_limit_exceeded) {
-				// GRV Proxy returns an error
-				wait(delayJittered(CLIENT_KNOBS->GRV_ERROR_RETRY_DELAY));
-			} else {
+			if (e.code() != error_code_batch_transaction_throttled &&
+			    e.code() != error_code_grv_proxy_memory_limit_exceeded) {
 				TraceEvent(SevError, "WaitForCommittedVersionError").error(e);
 				throw;
 			}
 		}
+		// GRV Proxy returns an error.
+		co_await delayJittered(CLIENT_KNOBS->GRV_ERROR_RETRY_DELAY);
 	}
+}
+
+Future<Version> waitForCommittedVersion(Database const& cx, Version const& version, SpanContext const& spanContext) {
+	return waitForCommittedVersionImpl(cx, version, spanContext);
 }
 
 ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
@@ -1853,11 +1977,16 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			if (parameters->debugID.present()) {
 				watchValueID = nondeterministicRandom()->randomUniqueID();
 
-				g_traceBatch.addAttach(
-				    "WatchValueAttachID", parameters->debugID.get().first(), watchValueID.get().first());
+				g_traceBatch.addAttach("WatchValueAttachID",
+				                       parameters->debugID.get().first(),
+				                       watchValueID.get().first(),
+				                       parameters->spanContext.traceID,
+				                       parameters->spanContext.spanID);
 				g_traceBatch.addEvent("WatchValueDebug",
 				                      watchValueID.get().first(),
-				                      "NativeAPI.watchValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
+				                      "NativeAPI.watchValue.Before",
+				                      parameters->spanContext.traceID,
+				                      parameters->spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 			}
 			state WatchValueReply resp;
 			choose {
@@ -1878,7 +2007,11 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				}
 			}
 			if (watchValueID.present()) {
-				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.After");
+				g_traceBatch.addEvent("WatchValueDebug",
+				                      watchValueID.get().first(),
+				                      "NativeAPI.watchValue.After",
+				                      parameters->spanContext.traceID,
+				                      parameters->spanContext.spanID);
 			}
 
 			// FIXME: wait for known committed version on the storage server before replying,
@@ -1900,7 +2033,11 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			ver = v;
 
 			if (watchValueID.present()) {
-				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.Retry");
+				g_traceBatch.addEvent("WatchValueDebug",
+				                      watchValueID.get().first(),
+				                      "NativeAPI.watchValue.Retry",
+				                      parameters->spanContext.traceID,
+				                      parameters->spanContext.spanID);
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
@@ -2196,7 +2333,9 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      trState->readOptions.get().debugID.get().first(),
-					                      "NativeAPI.getExactRange.Before");
+					                      "NativeAPI.getExactRange.Before",
+					                      trState->spanContext.traceID,
+					                      trState->spanContext.spanID);
 					/*TraceEvent("TransactionDebugGetExactRangeInfo", trState->readOptions.get().debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
@@ -2233,7 +2372,9 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 				if (trState->readOptions.present() && trState->readOptions.get().debugID.present())
 					g_traceBatch.addEvent("TransactionDebug",
 					                      trState->readOptions.get().debugID.get().first(),
-					                      "NativeAPI.getExactRange.After");
+					                      "NativeAPI.getExactRange.After",
+					                      trState->spanContext.traceID,
+					                      trState->spanContext.spanID);
 				output.arena().dependsOn(rep.arena);
 				output.append(output.arena(), rep.data.begin(), rep.data.size());
 
@@ -2436,8 +2577,10 @@ void getRangeFinished(Reference<TransactionState> trState,
 	trState->cx->transactionKeysRead += result.size();
 
 	if (trState->trLogInfo) {
-		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetRange(
-		    startTime, trState->cx->clientLocality.dcId(), now() - startTime, bytes, begin.getKey(), end.getKey()));
+		trState->trLogInfo->addLog(
+		    FdbClientLogEvents::EventGetRange(
+		        startTime, trState->cx->clientLocality.dcId(), now() - startTime, bytes, begin.getKey(), end.getKey()),
+		    trState->spanContext);
 	}
 
 	if (!snapshot) {
@@ -2565,12 +2708,19 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			req.spanContext = span.context;
 			if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
 				getRangeID = nondeterministicRandom()->randomUniqueID();
-				g_traceBatch.addAttach(
-				    "TransactionAttachID", trState->readOptions.get().debugID.get().first(), getRangeID.get().first());
+				g_traceBatch.addAttach("TransactionAttachID",
+				                       trState->readOptions.get().debugID.get().first(),
+				                       getRangeID.get().first(),
+				                       trState->spanContext.traceID,
+				                       trState->spanContext.spanID);
 			}
 			try {
 				if (getRangeID.present()) {
-					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Before");
+					g_traceBatch.addEvent("TransactionDebug",
+					                      getRangeID.get().first(),
+					                      "NativeAPI.getRange.Before",
+					                      trState->spanContext.traceID,
+					                      trState->spanContext.spanID);
 					/*
 					if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
 					    TraceEvent("TransactionDebugGetRangeInfo", trState->readOptions.get().debugID.get())
@@ -2617,7 +2767,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 				if (getRangeID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      getRangeID.get().first(),
-					                      "NativeAPI.getRange.After"); //.detail("SizeOf", rep.data.size());
+					                      "NativeAPI.getRange.After",
+					                      trState->spanContext.traceID,
+					                      trState->spanContext.spanID); //.detail("SizeOf", rep.data.size());
 					/*
 					if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
 					    TraceEvent("TransactionDebugGetRangeDone", trState->readOptions.get().debugID.get())
@@ -2733,7 +2885,11 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 
 			} catch (Error& e) {
 				if (getRangeID.present()) {
-					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Error");
+					g_traceBatch.addEvent("TransactionDebug",
+					                      getRangeID.get().first(),
+					                      "NativeAPI.getRange.Error",
+					                      trState->spanContext.traceID,
+					                      trState->spanContext.spanID);
 					TraceEvent("TransactionDebugError", getRangeID.get()).error(e);
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
@@ -2757,7 +2913,8 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						                                           trState->cx->clientLocality.dcId(),
 						                                           static_cast<int>(e.code()),
 						                                           begin.getKey(),
-						                                           end.getKey()));
+						                                           end.getKey()),
+						    trState->spanContext);
 					throw e;
 				}
 			}
@@ -2870,11 +3027,10 @@ static Future<Void> tssStreamComparison(Request request,
 			// skip tss comparison if both are end of stream
 			if ((!ssEndOfStream || !tssEndOfStream) && !TSS_doCompare(ssReply.get(), tssReply.get())) {
 				CODE_PROBE(true, "TSS mismatch in stream comparison", probe::decoration::rare);
-				TraceEvent mismatchEvent(
-				    (simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
-				        ? SevWarnAlways
-				        : SevError,
-				    LB_mismatchTraceName(request, TSS_COMPARISON));
+				TraceEvent mismatchEvent((fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch))
+				                             ? SevWarnAlways
+				                             : SevError,
+				                         LB_mismatchTraceName(request, TSS_COMPARISON));
 				mismatchEvent.setMaxEventLength(FLOW_KNOBS->TSS_LARGE_TRACE_SIZE);
 				mismatchEvent.detail("TSSID", tssData.tssId);
 
@@ -2896,7 +3052,7 @@ static Future<Void> tssStreamComparison(Request request,
 						// record a summarized trace event instead
 						TraceEvent summaryEvent(
 						    (g_network->isSimulated() &&
-						     simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
+						     fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch))
 						        ? SevWarnAlways
 						        : SevError,
 						    LB_mismatchTraceName(request, TSS_COMPARISON));
@@ -2921,8 +3077,10 @@ static Future<Void> tssStreamComparison(Request request,
 // Currently only used for GetKeyValuesStream but could easily be plugged for other stream types
 // User of the stream has to forward the SS's responses to the returned promise stream, if it is set
 template <class Request, bool P>
-Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>>
-maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<Request, P> const* ssStream) {
+Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>> maybeDuplicateTSSStreamFragment(
+    Request& req,
+    StorageServerQueueModel* model,
+    RequestStream<Request, P> const* ssStream) {
 	if (model) {
 		Optional<TSSEndpointData> tssData = model->getTssData(ssStream->getEndpoint().token.first());
 
@@ -2981,7 +3139,9 @@ ACTOR Future<Void> getRangeStreamImpl(Reference<TransactionState> trState,
 				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      trState->readOptions.get().debugID.get().first(),
-					                      "NativeAPI.RangeStream.Before");
+					                      "NativeAPI.RangeStream.Before",
+					                      trState->spanContext.traceID,
+					                      trState->spanContext.spanID);
 				}
 				++trState->cx->transactionPhysicalReads;
 				state GetKeyValuesStreamReply rep;
@@ -3080,7 +3240,9 @@ ACTOR Future<Void> getRangeStreamImpl(Reference<TransactionState> trState,
 					if (trState->readOptions.present() && trState->readOptions.get().debugID.present())
 						g_traceBatch.addEvent("TransactionDebug",
 						                      trState->readOptions.get().debugID.get().first(),
-						                      "NativeAPI.getExactRange.After");
+						                      "NativeAPI.getExactRange.After",
+						                      trState->spanContext.traceID,
+						                      trState->spanContext.spanID);
 					RangeResult output(RangeResultRef(rep.data, rep.more), rep.arena);
 
 					if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
@@ -3674,18 +3836,18 @@ Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
 
 	KeySelector b = begin;
 	if (b.orEqual) {
-		CODE_PROBE(true, "Native stream begin orEqual==true", probe::decoration::rare);
+		CODE_PROBE(true, "Native stream begin orEqual==true");
 		b.removeOrEqual(b.arena());
 	}
 
 	KeySelector e = end;
 	if (e.orEqual) {
-		CODE_PROBE(true, "Native stream end orEqual==true", probe::decoration::rare);
+		CODE_PROBE(true, "Native stream end orEqual==true");
 		e.removeOrEqual(e.arena());
 	}
 
 	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
-		CODE_PROBE(true, "Native stream range inverted", probe::decoration::rare);
+		CODE_PROBE(true, "Native stream range inverted");
 		results.sendError(end_of_stream());
 		return Void();
 	}
@@ -4332,8 +4494,16 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 
 		if (debugID.present()) {
 			commitID = nondeterministicRandom()->randomUniqueID();
-			g_traceBatch.addAttach("CommitAttachID", debugID.get().first(), commitID.get().first());
-			g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.Before");
+			g_traceBatch.addAttach("CommitAttachID",
+			                       debugID.get().first(),
+			                       commitID.get().first(),
+			                       trState->spanContext.traceID,
+			                       trState->spanContext.spanID);
+			g_traceBatch.addEvent("CommitDebug",
+			                      commitID.get().first(),
+			                      "NativeAPI.commit.Before",
+			                      trState->spanContext.traceID,
+			                      trState->spanContext.spanID);
 		}
 
 		req.debugID = commitID;
@@ -4395,7 +4565,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 					trState->cx->transactionCommittedMutationBytes += req.transaction.mutations.expectedSize();
 
 					if (commitID.present())
-						g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.After");
+						g_traceBatch.addEvent("CommitDebug",
+						                      commitID.get().first(),
+						                      "NativeAPI.commit.After",
+						                      trState->spanContext.traceID,
+						                      trState->spanContext.spanID);
 
 					double latency = now() - startTime;
 					trState->cx->commitLatencies.addSample(latency);
@@ -4408,7 +4582,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 						                                       req.transaction.mutations.size(),
 						                                       req.transaction.mutations.expectedSize(),
 						                                       ci.version,
-						                                       req));
+						                                       req),
+						    trState->spanContext);
 					if (trState->automaticIdempotency && alternativeChosen >= 0) {
 						// Automatic idempotency means we're responsible for best effort idempotency id clean up
 						proxiesUsed->getInterface(alternativeChosen)
@@ -4439,7 +4614,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 						TraceEvent(interval.end()).detail("Conflict", 1);
 
 					if (commitID.present())
-						g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.After");
+						g_traceBatch.addEvent("CommitDebug",
+						                      commitID.get().first(),
+						                      "NativeAPI.commit.After",
+						                      trState->spanContext.traceID,
+						                      trState->spanContext.spanID);
 
 					throw not_committed();
 				}
@@ -4501,8 +4680,10 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)
-				trState->trLogInfo->addLog(FdbClientLogEvents::EventCommitError(
-				    startTime, trState->cx->clientLocality.dcId(), static_cast<int>(e.code()), req));
+				trState->trLogInfo->addLog(
+				    FdbClientLogEvents::EventCommitError(
+				        startTime, trState->cx->clientLocality.dcId(), static_cast<int>(e.code()), req),
+				    trState->spanContext);
 			throw;
 		}
 	}
@@ -4663,6 +4844,23 @@ Future<Void> Transaction::commit() {
 	return committing;
 }
 
+static void traceTransactionBeingTraced(Reference<TransactionState> trState) {
+	if (!trState->trLogInfo || trState->trLogInfo->identifier.empty() || !trState->readOptions.present() ||
+	    !trState->readOptions.get().debugID.present()) {
+		return;
+	}
+
+	TraceEvent event(SevInfo, "TransactionBeingTraced");
+	event.detail("DebugTransactionID", trState->trLogInfo->identifier)
+	    .detail("ServerTraceID", trState->readOptions.get().debugID.get());
+	if (trState->spanContext.traceID.isValid()) {
+		event.detail("TraceID", trState->spanContext.traceID.toString());
+	}
+	if (trState->spanContext.spanID != 0) {
+		event.detail("SpanID", format("%016" PRIx64, trState->spanContext.spanID));
+	}
+}
+
 // Returns a thread-local mt19937_64 seeded once with 32 bytes of OS entropy.
 // Used for AUTOMATIC_IDEMPOTENCY ID generation in non-simulation runs.
 static std::mt19937_64& getIdempotencyRng() {
@@ -4746,11 +4944,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			    makeReference<TransactionLogInfo>(value.get().printable(), TransactionLogInfo::DONT_LOG);
 			trState->trLogInfo->maxFieldLength = trState->options.maxTransactionLoggingFieldLength;
 		}
-		if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
-			TraceEvent(SevInfo, "TransactionBeingTraced")
-			    .detail("DebugTransactionID", trState->trLogInfo->identifier)
-			    .detail("ServerTraceID", trState->readOptions.get().debugID.get());
-		}
+		traceTransactionBeingTraced(trState);
 		break;
 
 	case FDBTransactionOptions::LOG_TRANSACTION:
@@ -4781,12 +4975,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	case FDBTransactionOptions::SERVER_REQUEST_TRACING:
 		validateOptionValueNotPresent(value);
 		debugTransaction(deterministicRandom()->randomUniqueID());
-		if (trState->trLogInfo && !trState->trLogInfo->identifier.empty() && trState->readOptions.present() &&
-		    trState->readOptions.get().debugID.present()) {
-			TraceEvent(SevInfo, "TransactionBeingTraced")
-			    .detail("DebugTransactionID", trState->trLogInfo->identifier)
-			    .detail("ServerTraceID", trState->readOptions.get().debugID.get());
-		}
+		traceTransactionBeingTraced(trState);
 		break;
 
 	case FDBTransactionOptions::MAX_RETRY_DELAY:
@@ -4980,7 +5169,11 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 
 	++cx->transactionReadVersionBatches;
 	if (debugID.present())
-		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
+		g_traceBatch.addEvent("TransactionDebug",
+		                      debugID.get().first(),
+		                      "NativeAPI.getConsistentReadVersion.Before",
+		                      parentSpan.traceID,
+		                      parentSpan.spanID);
 	loop {
 		try {
 			state GetReadVersionRequest req(span.context,
@@ -5021,8 +5214,11 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 					}
 
 					if (debugID.present())
-						g_traceBatch.addEvent(
-						    "TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.After");
+						g_traceBatch.addEvent("TransactionDebug",
+						                      debugID.get().first(),
+						                      "NativeAPI.getConsistentReadVersion.After",
+						                      parentSpan.traceID,
+						                      parentSpan.spanID);
 					ASSERT(v.version > 0);
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					if (cx->versionVectorCacheActive(v.ssVersionVectorDelta)) {
@@ -5082,7 +5278,11 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 					if (!debugID.present()) {
 						debugID = nondeterministicRandom()->randomUniqueID();
 					}
-					g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
+					g_traceBatch.addAttach("TransactionAttachID",
+					                       req.debugID.get().first(),
+					                       debugID.get().first(),
+					                       req.spanContext.traceID,
+					                       req.spanContext.spanID);
 				}
 				span.addLink(req.spanContext);
 				requests.push_back(req.reply);
@@ -5161,8 +5361,12 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	}
 	trState->cx->GRVLatencies.addSample(latency);
 	if (trState->trLogInfo)
-		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(
-		    trState->startTime, trState->cx->clientLocality.dcId(), latency, trState->options.priority, rep.version));
+		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(trState->startTime,
+		                                                                  trState->cx->clientLocality.dcId(),
+		                                                                  latency,
+		                                                                  trState->options.priority,
+		                                                                  rep.version),
+		                           trState->spanContext);
 	if (rep.locked && !trState->options.lockAware)
 		throw database_locked();
 
@@ -6311,27 +6515,26 @@ Future<Void> DatabaseContext::splitStorageMetricsStream(const PromiseStream<Key>
 	    resultStream, Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated, minSplitBytes);
 }
 
-ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocations(
+static Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocationsImpl(
     std::vector<KeyRangeLocationInfo> locations,
     KeyRange keys,
     StorageMetrics limit,
     StorageMetrics estimated,
     Optional<int> minSplitBytes) {
-	state StorageMetrics used;
-	state Standalone<VectorRef<KeyRef>> results;
+	StorageMetrics used;
+	Standalone<VectorRef<KeyRef>> results;
 	results.push_back_deep(results.arena(), keys.begin);
 	//TraceEvent("SplitStorageMetrics").detail("Locations", locations.size());
 	try {
-		state int i = 0;
-		for (; i < locations.size(); i++) {
-			state Key beginKey = locations[i].range.begin;
-			loop {
+		for (int i = 0; i < locations.size(); ++i) {
+			Key beginKey = locations[i].range.begin;
+			while (true) {
 				KeyRangeRef range(beginKey, locations[i].range.end);
 				SplitMetricsRequest req(range, limit, used, estimated, i == locations.size() - 1, minSplitBytes);
-				SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
-				                                         &StorageServerInterface::splitMetrics,
-				                                         req,
-				                                         TaskPriority::DataDistribution));
+				SplitMetricsReply res = co_await loadBalance(locations[i].locations->locations(),
+				                                             &StorageServerInterface::splitMetrics,
+				                                             req,
+				                                             TaskPriority::DataDistribution);
 				if (res.splits.size() &&
 				    res.splits[0] <= results.back()) { // split points are out of order, possibly
 					                                   // because of moving data, throw error to retry
@@ -6363,14 +6566,23 @@ ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLoc
 		if (keys.end <= locations.back().range.end) {
 			results.push_back_deep(results.arena(), keys.end);
 		}
-		return results;
+		co_return results;
 	} catch (Error& e) {
 		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
 			TraceEvent(SevError, "SplitStorageMetricsError").error(e);
 			throw;
 		}
 	}
-	return Optional<Standalone<VectorRef<KeyRef>>>();
+	co_return Optional<Standalone<VectorRef<KeyRef>>>();
+}
+
+Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocations(
+    std::vector<KeyRangeLocationInfo> const& locations,
+    KeyRange const& keys,
+    StorageMetrics const& limit,
+    StorageMetrics const& estimated,
+    Optional<int> const& minSplitBytes) {
+	return splitStorageMetricsWithLocationsImpl(locations, keys, limit, estimated, minSplitBytes);
 }
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
@@ -6451,6 +6663,8 @@ void Transaction::setTransactionID(UID id) {
 void Transaction::setToken(uint64_t token) {
 	ASSERT(getSize() == 0);
 	trState->spanContext = SpanContext(trState->spanContext.traceID, token);
+	tr.spanContext = trState->spanContext;
+	span.context = trState->spanContext;
 }
 
 void enableClientInfoLogging() {

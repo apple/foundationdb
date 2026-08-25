@@ -18,11 +18,10 @@ if(NOT Sphinx_FOUND)
   execute_process(COMMAND "${Python3_EXECUTABLE}" -m venv ${SPHINX_VENV_DIR})
   find_program(
     VENV_Python3_EXECUTABLE
-    NAMES python3 python3.exe
-    PATHS ${SPHINX_VENV_DIR}/Scripts ${SPHINX_VENV_DIR}/bin REQUIRED
-    NO_DEFAULT_PATH NO_CACHE
+    NAMES python3 python3.exe python.exe
+    PATHS ${SPHINX_VENV_DIR}/Scripts ${SPHINX_VENV_DIR}/bin
+    REQUIRED NO_DEFAULT_PATH NO_CACHE
     DOC "Checking Python3 executable in virtual environment")
-  execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m ensurepip COMMAND_ERROR_IS_FATAL ANY)
   execute_process(COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install -r "${SPHINX_DOCUMENT_DIR}/requirements.txt" COMMAND_ERROR_IS_FATAL ANY)
   # find_package(Sphinx) only works with default search order, so use find_program()
   find_program(

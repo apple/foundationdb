@@ -41,7 +41,7 @@
 
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ClusterConnectionFile.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
@@ -316,7 +316,7 @@ public:
 	boost::interprocess::permissions permission;
 
 private:
-	explicit(false) WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
+	WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
 #ifdef _WIN32
 	SECURITY_ATTRIBUTES sa;
 #endif

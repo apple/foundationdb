@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 
 #include <functional>
 #include <iterator>
@@ -248,8 +248,11 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	latestCommitVersions.clear();
 
 	if (info->readOptions.present() && info->readOptions.get().debugID.present()) {
-		g_traceBatch.addEvent(
-		    "TransactionDebug", info->readOptions.get().debugID.get().first(), "NativeAPI.getLatestCommitVersions");
+		g_traceBatch.addEvent("TransactionDebug",
+		                      info->readOptions.get().debugID.get().first(),
+		                      "NativeAPI.getLatestCommitVersions",
+		                      info->spanContext.traceID,
+		                      info->spanContext.spanID);
 	}
 
 	if (!info->readVersionObtainedFromGrvProxy) {
@@ -855,8 +858,12 @@ Future<Void> assertFailure(GrvProxyInterface remote, Future<ErrorOr<GetReadVersi
 Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
                                       std::vector<GrvProxyInterface> newProxies) {
 	auto debugID = nondeterministicRandom()->randomUniqueID();
-	g_traceBatch.addEvent("AttemptGRVFromOldProxyDebug", debugID.first(), "NativeAPI.attemptGRVFromOldProxies.Start");
 	Span span("NAPI:VerifyCausalReadRisky"_loc);
+	g_traceBatch.addEvent("AttemptGRVFromOldProxyDebug",
+	                      debugID.first(),
+	                      "NativeAPI.attemptGRVFromOldProxies.Start",
+	                      span.context.traceID,
+	                      span.context.spanID);
 	std::vector<Future<Void>> replies;
 	replies.reserve(oldProxies.size());
 	GetReadVersionRequest req(

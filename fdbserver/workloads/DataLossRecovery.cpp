@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.h"

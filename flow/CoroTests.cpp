@@ -80,56 +80,6 @@ TEST_CASE("/flow/genericactors/ActorHeaderDeclarations") {
 	co_await lowPriorityDelayAfterCleared(condition, 0.0);
 }
 
-template <class T, class Func, class ErrFunc, class CallbackType>
-class LambdaCallback final : public CallbackType, public FastAllocated<LambdaCallback<T, Func, ErrFunc, CallbackType>> {
-	Func func;
-	ErrFunc errFunc;
-
-	void fire(T const& t) override {
-		CallbackType::remove();
-		func(t);
-		delete this;
-	}
-	void fire(T&& t) override {
-		CallbackType::remove();
-		func(std::move(t));
-		delete this;
-	}
-	void error(Error e) override {
-		CallbackType::remove();
-		errFunc(e);
-		delete this;
-	}
-
-public:
-	LambdaCallback(Func&& f, ErrFunc&& e) : func(std::move(f)), errFunc(std::move(e)) {}
-};
-
-template <class T, class Func, class ErrFunc>
-void onReady(Future<T>&& f, Func&& func, ErrFunc&& errFunc) {
-	if (f.isReady()) {
-		if (f.isError())
-			errFunc(f.getError());
-		else
-			func(f.get());
-	} else {
-		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, Callback<T>>(std::move(func), std::move(errFunc)));
-	}
-}
-
-template <class T, class Func, class ErrFunc>
-void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
-	if (f.isReady()) {
-		if (f.isError())
-			errFunc(f.getError());
-		else
-			func(f.pop());
-	} else {
-		f.addCallbackAndClear(
-		    new LambdaCallback<T, Func, ErrFunc, SingleCallback<T>>(std::move(func), std::move(errFunc)));
-	}
-}
-
 namespace {
 void emptyVoidActor() {}
 
@@ -1281,7 +1231,7 @@ struct Tracker {
 	int copied;
 	bool moved;
 	explicit Tracker(int copied = 0) : copied(copied), moved(false) {}
-	explicit(false) Tracker(Tracker&& other) : Tracker(other.copied) {
+	Tracker(Tracker&& other) : Tracker(other.copied) {
 		ASSERT(!other.moved);
 		other.moved = true;
 	}
@@ -1292,7 +1242,7 @@ struct Tracker {
 		this->copied = other.copied;
 		return *this;
 	}
-	explicit(false) Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
+	Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
 	Tracker& operator=(const Tracker& other) {
 		ASSERT(!other.moved);
 		this->moved = false;
@@ -1312,8 +1262,8 @@ struct LifetimeTracked {
 	inline static int liveCount = 0;
 
 	LifetimeTracked() { ++liveCount; }
-	explicit(false) LifetimeTracked(const LifetimeTracked&) { ++liveCount; }
-	explicit(false) LifetimeTracked(LifetimeTracked&&) noexcept { ++liveCount; }
+	LifetimeTracked(const LifetimeTracked&) { ++liveCount; }
+	LifetimeTracked(LifetimeTracked&&) noexcept { ++liveCount; }
 	LifetimeTracked& operator=(const LifetimeTracked&) = default;
 	LifetimeTracked& operator=(LifetimeTracked&&) noexcept = default;
 	~LifetimeTracked() { --liveCount; }
@@ -2079,6 +2029,18 @@ Future<Void> noThrowOnCancelTest(NoThrowOnCancelRecorder& recorder, Future<Void>
 	recorder.record(NoThrowOnCancelEvent::AfterWait);
 }
 
+Future<Void> noThrowOnCancelReentrantCancelTest(Future<Void>* result,
+                                                Future<Void> signal,
+                                                int* cleanupCount,
+                                                NoThrowOnCancel = {}) {
+	ScopeExit cleanup([result, cleanupCount]() {
+		++*cleanupCount;
+		result->cancel();
+	});
+
+	co_await signal;
+}
+
 Future<int> noThrowOnCancelValueTest(NoThrowOnCancelRecorder& recorder, Future<Void> signal, NoThrowOnCancel = {}) {
 	recorder.record(NoThrowOnCancelEvent::Start);
 
@@ -2766,6 +2728,23 @@ TEST_CASE("/flow/coro/noThrowOnCancel/awaitedFutureErrorRunsCatch") {
 	ASSERT(f.isReady() && !f.isError());
 	ASSERT(signal.getFutureReferenceCount() == 0);
 	assertNoThrowOnCancelCaughtError(recorder);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/noThrowOnCancel/reentrantCancelDuringCleanup") {
+	Promise<Void> signal;
+	Future<Void> result;
+	int cleanupCount = 0;
+	result = noThrowOnCancelReentrantCancelTest(&result, signal.getFuture(), &cleanupCount);
+	ASSERT(signal.getFutureReferenceCount() > 0);
+
+	result.cancel();
+	ASSERT(result.isReady() && result.isError() && result.getError().code() == error_code_actor_cancelled);
+	ASSERT_EQ(cleanupCount, 1);
+	ASSERT_EQ(signal.getFutureReferenceCount(), 0);
+
+	result.cancel();
+	ASSERT_EQ(cleanupCount, 1);
 	return Void();
 }
 
