@@ -245,7 +245,8 @@ private:
 // A range can only be locked by a registered owner.
 Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);
 
-// Remove an owner from the database metadata.
+// Remove an owner only if it holds no locks; otherwise throw range_lock_reject.
+// An already absent owner is a no-op.
 Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
 
 // Get all registered rangeLock owners.
