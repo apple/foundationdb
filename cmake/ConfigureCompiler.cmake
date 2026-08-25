@@ -29,6 +29,7 @@ env_set(TRACE_PC_GUARD_INSTRUMENTATION_LIB "" STRING "Path to a library containi
 env_set(PROFILE_INSTR_GENERATE OFF BOOL "If set, build FDB as an instrumentation build to generate profiles")
 env_set(PROFILE_INSTR_USE "" STRING "If set, build FDB with profile")
 env_set(FULL_DEBUG_SYMBOLS OFF BOOL "Generate full debug symbols")
+env_set(COMPRESS_DEBUG_SYMBOLS ON BOOL "Compress debug symbols")
 env_set(ENABLE_LONG_RUNNING_TESTS OFF BOOL "Add a long running tests package")
 
 set(is_swift_compile "$<COMPILE_LANGUAGE:Swift>")
@@ -224,9 +225,9 @@ else()
 
   # Also generate debug symbols in release builds,
   # CPack will strip them out and create a debuginfo rpm.
-  # (Just -g1 by default because they can be huge.)
+  # (Just -g1 by default because g2+ is huge, and rpm debuginfo split is very slow.)
   if(FULL_DEBUG_SYMBOLS)
-    # As much as possible, including macros and such.
+    # As much as possible, including macros etc.
     add_compile_options("$<${is_cxx_compile}:-g3>")
   elseif(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     # Reasonable for debugging, including function locals and c++ namespaces.
@@ -236,9 +237,11 @@ else()
     add_compile_options("$<${is_cxx_compile}:-g1>")
   endif()
 
-  # Enable compression of the debug sections. This reduces the size of the binaries several times.
-  add_compile_options("$<${is_cxx_compile}:-gz>")
-  add_link_options("$<${is_cxx_compile}:-gz>")
+  # Enable compression of the debug sections by default, for half the size, or better.
+  if(COMPRESS_DEBUG_SYMBOLS)
+    add_compile_options("$<${is_cxx_compile}:-gz>")
+    add_link_options("$<${is_cxx_link}:-gz>")
+  endif()
 
   if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)
       add_compile_options($<${is_cxx_compile}:-fsanitize-coverage=trace-pc-guard>)
