@@ -30,6 +30,7 @@
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/RangeLock.h"
 #include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
 
@@ -38,6 +39,27 @@
 // of these functions.
 
 namespace {
+
+Future<std::vector<RangeLockOwnerInfo>> listRangeLockOwnersClient(Database db) {
+	const auto owners = co_await getAllRangeLockOwners(db);
+	std::vector<RangeLockOwnerInfo> result;
+	result.reserve(owners.size());
+	for (const auto& owner : owners) {
+		result.push_back(
+		    RangeLockOwnerInfo{ Key(StringRef(owner.getOwnerUniqueId())), Value(StringRef(owner.getDescription())) });
+	}
+	co_return result;
+}
+
+Future<std::vector<RangeLockInfo>> listExclusiveReadLocksClient(Database db, KeyRange keys) {
+	const auto locks = co_await findExclusiveReadLockOnRange(db, keys);
+	std::vector<RangeLockInfo> result;
+	result.reserve(locks.size());
+	for (const auto& [range, lock] : locks) {
+		result.push_back(RangeLockInfo{ range, lock.getRange(), Key(StringRef(lock.getOwnerUniqueId())) });
+	}
+	co_return result;
+}
 
 struct NativeCdcCursorState {
 	explicit NativeCdcCursorState(NativeCdcCursor cursor) : cursor(cursor) {}
@@ -218,6 +240,71 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 	return onMainThread([db, snapUID, cmd]() -> Future<Void> {
 		db->checkDeferredError();
 		return db->createSnapshot(snapUID, cmd);
+	});
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::registerRangeLockOwner(const KeyRef& ownerId, const StringRef& description) {
+	DatabaseContext* db = this->db;
+	std::string ownerIdCopy = ownerId.toString();
+	std::string descriptionCopy = description.toString();
+	return onMainThread([db, ownerIdCopy, descriptionCopy]() -> Future<Void> {
+		db->checkDeferredError();
+		return ::registerRangeLockOwner(Database(Reference<DatabaseContext>::addRef(db)), ownerIdCopy, descriptionCopy);
+	});
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::removeRangeLockOwner(const KeyRef& ownerId) {
+	DatabaseContext* db = this->db;
+	std::string ownerIdCopy = ownerId.toString();
+	return onMainThread([db, ownerIdCopy]() -> Future<Void> {
+		db->checkDeferredError();
+		return ::removeRangeLockOwner(Database(Reference<DatabaseContext>::addRef(db)), ownerIdCopy);
+	});
+}
+
+ThreadFuture<std::vector<RangeLockOwnerInfo>> ThreadSafeDatabase::listRangeLockOwners() {
+	DatabaseContext* db = this->db;
+	return onMainThread([db]() -> Future<std::vector<RangeLockOwnerInfo>> {
+		db->checkDeferredError();
+		return listRangeLockOwnersClient(Database(Reference<DatabaseContext>::addRef(db)));
+	});
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::takeExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) {
+	DatabaseContext* db = this->db;
+	KeyRange keysCopy(keys);
+	std::string ownerIdCopy = ownerId.toString();
+	return onMainThread([db, keysCopy, ownerIdCopy]() -> Future<Void> {
+		db->checkDeferredError();
+		return takeExclusiveReadLockOnRange(Database(Reference<DatabaseContext>::addRef(db)), keysCopy, ownerIdCopy);
+	});
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::releaseExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) {
+	DatabaseContext* db = this->db;
+	KeyRange keysCopy(keys);
+	std::string ownerIdCopy = ownerId.toString();
+	return onMainThread([db, keysCopy, ownerIdCopy]() -> Future<Void> {
+		db->checkDeferredError();
+		return releaseExclusiveReadLockOnRange(Database(Reference<DatabaseContext>::addRef(db)), keysCopy, ownerIdCopy);
+	});
+}
+
+ThreadFuture<std::vector<RangeLockInfo>> ThreadSafeDatabase::listExclusiveReadLocks(const KeyRangeRef& keys) {
+	DatabaseContext* db = this->db;
+	KeyRange keysCopy(keys);
+	return onMainThread([db, keysCopy]() -> Future<std::vector<RangeLockInfo>> {
+		db->checkDeferredError();
+		return listExclusiveReadLocksClient(Database(Reference<DatabaseContext>::addRef(db)), keysCopy);
+	});
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::releaseAllExclusiveReadLocks(const KeyRef& ownerId) {
+	DatabaseContext* db = this->db;
+	std::string ownerIdCopy = ownerId.toString();
+	return onMainThread([db, ownerIdCopy]() -> Future<Void> {
+		db->checkDeferredError();
+		return releaseExclusiveReadLockByUser(Database(Reference<DatabaseContext>::addRef(db)), ownerIdCopy);
 	});
 }
 

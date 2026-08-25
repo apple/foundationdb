@@ -99,6 +99,16 @@ Range locks only take effect when commit proxies are started with ``knob_enable_
 The bulkload-specific commands (``bulkload addlockowner`` / ``bulkload clearlock`` / ``bulkload printlockowner``) remain available; they are a constrained subset of the above scoped to the bulkload workflow.
 
 
+Using the C bindings
+-------------------
+API version 800 exposes asynchronous database operations to register, remove,
+and list owners; take, release, and list exclusive read locks; and release all
+locks for an owner. See :ref:`c-range-locks` for the C interface, result memory
+ownership, exact-range release requirements, and retry and cancellation
+semantics. These bindings preserve the experimental management API behavior;
+a successful acquisition alone does not verify server enforcement.
+
+
 Example usage
 -------------
 When submitting a bulk load task on a range, we block user write traffic to the range.
