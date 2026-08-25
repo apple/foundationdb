@@ -22,7 +22,7 @@
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 
 struct CheckReply {
 	constexpr static FileIdentifier file_identifier = 11;
