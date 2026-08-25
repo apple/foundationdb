@@ -73,6 +73,18 @@ inline bool isDataMovementForValleyFiller(DataMovementReason reason) {
 	       reason == DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM;
 }
 
+SourceWork::SourceWork(std::vector<UID> sourceServers, std::vector<std::vector<UID>> regionalSources)
+  : regionalSources(std::move(regionalSources)), sourceServers(std::move(sourceServers)) {
+	uniquify(this->sourceServers);
+	for (auto& sources : this->regionalSources) {
+		uniquify(sources);
+		ASSERT(!sources.empty());
+		for (UID id : sources) {
+			ASSERT(std::binary_search(this->sourceServers.begin(), this->sourceServers.end(), id));
+		}
+	}
+}
+
 RelocateData::RelocateData()
   : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::OTHER), startTime(-1),
     dataMoveId(anonymousShardId), workFactor(0), wantsNewServers(false), cancellable(false),
@@ -93,9 +105,29 @@ RelocateData::RelocateData(RelocateShard const& rs)
                                                 rs.moveReason == DataMovementReason::SPLIT_SHARD ||
                                                 rs.moveReason == DataMovementReason::TEAM_REDUNDANT ||
                                                 rs.moveReason == DataMovementReason::REBALANCE_STORAGE_QUEUE)),
-    cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove) {
+    newServerRegion(rs.retryIntent.present() ? rs.retryIntent.get().primaryRegion : rs.primaryRegion),
+    forceAllSources(rs.forceAllSources), cancellable(true), interval("QueuedRelocation", randomId),
+    dataMove(rs.dataMove) {
 	if (dataMove != nullptr) {
 		this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
+	}
+}
+
+void RelocateData::mergeNewServerIntent(const RelocateData& other) {
+	const bool previousWantsNewServers = wantsNewServers;
+	const Optional<bool> previousRegion = newServerRegion;
+	if (other.wantsNewServers) {
+		if (!wantsNewServers) {
+			newServerRegion = other.newServerRegion;
+		} else if (newServerRegion != other.newServerRegion) {
+			newServerRegion.reset();
+		}
+		wantsNewServers = true;
+	}
+	forceAllSources |= other.forceAllSources;
+	if (forceAllSources || wantsNewServers != previousWantsNewServers || newServerRegion != previousRegion) {
+		// A source snapshot prepared for a narrower intent cannot admit the merged move.
+		sourceWork.reset();
 	}
 }
 
@@ -123,7 +155,9 @@ bool RelocateData::operator==(const RelocateData& rhs) const {
 	return priority == rhs.priority && boundaryPriority == rhs.boundaryPriority &&
 	       healthPriority == rhs.healthPriority && reason == rhs.reason && keys == rhs.keys &&
 	       startTime == rhs.startTime && workFactor == rhs.workFactor && src == rhs.src &&
-	       completeSources == rhs.completeSources && wantsNewServers == rhs.wantsNewServers && randomId == rhs.randomId;
+	       completeSources == rhs.completeSources && wantsNewServers == rhs.wantsNewServers &&
+	       newServerRegion == rhs.newServerRegion && forceAllSources == rhs.forceAllSources &&
+	       sourceWork == rhs.sourceWork && randomId == rhs.randomId;
 }
 bool RelocateData::operator!=(const RelocateData& rhs) const {
 	return !(*this == rhs);
@@ -135,8 +169,10 @@ Optional<KeyRange> RelocateData::getParentRange() const {
 static RelocateShard makeDestinationFailureRetry(RelocateData const& rd, UID retryTraceId) {
 	RelocateShard retry(rd.keys, rd.dmReason, rd.reason, retryTraceId);
 	retry.priority = rd.priority;
-	retry.retryIntent =
-	    RelocateShard::RetryRelocationIntent{ rd.boundaryPriority, rd.healthPriority, rd.wantsNewServers };
+	retry.retryIntent = RelocateShard::RetryRelocationIntent{
+		rd.boundaryPriority, rd.healthPriority, rd.wantsNewServers, rd.newServerRegion
+	};
+	retry.forceAllSources = rd.forceAllSources;
 	if (rd.getParentRange().present()) {
 		retry.setParentRange(rd.getParentRange().get());
 	}
@@ -155,6 +191,13 @@ static bool shouldYieldDestinationFailureRetry(RelocateData const& retry, Reloca
 class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
 	std::vector<Reference<IDataDistributionTeam>> teams;
 	std::vector<UID> tempServerIDs;
+	std::vector<UID> excludedServers;
+
+	std::vector<UID> exclusionsWith(const std::vector<UID>& additional) const {
+		std::vector<UID> result = excludedServers;
+		result.insert(result.end(), additional.begin(), additional.end());
+		return result;
+	}
 
 	template <typename NUM>
 	NUM sum(std::function<NUM(IDataDistributionTeam const&)> func) const {
@@ -187,7 +230,9 @@ class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDa
 
 public:
 	ParallelTCInfo() = default;
-	explicit ParallelTCInfo(ParallelTCInfo const& info) : teams(info.teams), tempServerIDs(info.tempServerIDs) {};
+	explicit ParallelTCInfo(std::vector<UID> excludedServers) : excludedServers(std::move(excludedServers)) {}
+	explicit ParallelTCInfo(ParallelTCInfo const& info)
+	  : teams(info.teams), tempServerIDs(info.tempServerIDs), excludedServers(info.excludedServers) {};
 
 	void addTeam(Reference<IDataDistributionTeam> team) { teams.push_back(team); }
 
@@ -220,15 +265,17 @@ public:
 		return tempServerIDs;
 	}
 
-	void addDataInFlightToTeam(int64_t delta) override {
+	void addDataInFlightToTeam(int64_t delta, const std::vector<UID>& additionalExclusions = {}) override {
+		const auto exclusions = exclusionsWith(additionalExclusions);
 		for (auto& team : teams) {
-			team->addDataInFlightToTeam(delta);
+			team->addDataInFlightToTeam(delta, exclusions);
 		}
 	}
 
-	void addReadInFlightToTeam(int64_t delta) override {
+	void addReadInFlightToTeam(int64_t delta, const std::vector<UID>& additionalExclusions = {}) override {
+		const auto exclusions = exclusionsWith(additionalExclusions);
 		for (auto& team : teams) {
-			team->addReadInFlightToTeam(delta);
+			team->addReadInFlightToTeam(delta, exclusions);
 		}
 	}
 
@@ -456,6 +503,103 @@ int getDestWorkFactor() {
 	return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
 }
 
+static bool useRegionalSourceAccounting() {
+	// These fetch modes can deliberately read replicas outside the destination's region.
+	return !SERVER_KNOBS->FETCH_USING_STREAMING && !SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT &&
+	       SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY == 0 &&
+	       !SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT;
+}
+
+static bool destinationNeedsFetch(const RelocateData& rd, UID id) {
+	return rd.bulkLoadTask.present() ||
+	       std::find(rd.completeSources.begin(), rd.completeSources.end(), id) == rd.completeSources.end();
+}
+
+// An absent result retains the legacy all-source estimate. A present empty result
+// means every selected region can keep a complete source team without fetching.
+static Optional<SourceWork> getSourceWork(
+    const RelocateData& rd,
+    const std::vector<SourceTeamInfo>& sourceTeams,
+    bool regionalAccounting,
+    const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& candidateTeams = {}) {
+	if (!regionalAccounting || rd.forceAllSources || rd.isRestore() || rd.bulkLoadTask.present() ||
+	    sourceTeams.size() != 2) {
+		return {};
+	}
+	if (rd.dataMoveId.isValid() && rd.dataMoveId != anonymousShardId &&
+	    getDataMoveTypeFromDataMoveId(rd.dataMoveId) != DataMoveType::LOGICAL) {
+		// The encoded fetch mode survives later knob changes.
+		return {};
+	}
+	const std::set<UID> allSources(rd.src.begin(), rd.src.end());
+	const std::set<UID> completeSources(rd.completeSources.begin(), rd.completeSources.end());
+	// A union of sources for multiple different teams does not prove regional coverage
+	// of the whole range. Keep its existing conservative admission rule.
+	if (allSources.empty() || allSources != completeSources) {
+		return {};
+	}
+	std::set<UID> classifiedSources;
+	for (const auto& team : sourceTeams) {
+		for (UID id : team.sources) {
+			if (!classifiedSources.insert(id).second) {
+				return {};
+			}
+		}
+	}
+	if (classifiedSources != allSources || (!candidateTeams.empty() && candidateTeams.size() != sourceTeams.size())) {
+		return {};
+	}
+	std::vector<UID> workSources;
+	std::vector<std::vector<UID>> admissionGroups;
+	for (int region = 0; region < sourceTeams.size(); ++region) {
+		const auto& sources = sourceTeams[region];
+		bool needsFetch;
+		if (candidateTeams.empty()) {
+			needsFetch = rd.wantsNewServersInRegion(region == 0) || !sources.healthyCompleteTeam.present() ||
+			             !sources.healthyCompleteTeam.get()->isHealthy();
+		} else {
+			const auto& dest = candidateTeams[region].first->getServerIDs();
+			needsFetch = std::any_of(dest.begin(), dest.end(), [&rd](UID id) { return destinationNeedsFetch(rd, id); });
+		}
+		if (!needsFetch) {
+			continue;
+		}
+		if (sources.healthyCompleteSources.empty()) {
+			// Region population or loss of all local suppliers requires cross-region reads.
+			return {};
+		}
+		workSources.insert(workSources.end(), sources.sources.begin(), sources.sources.end());
+		admissionGroups.push_back(sources.healthyCompleteSources);
+	}
+	return SourceWork(std::move(workSources), std::move(admissionGroups));
+}
+
+static bool sourceWorkCovers(const RelocateData& rd, const Optional<SourceWork>& required) {
+	if (!rd.sourceWork.present()) {
+		return true;
+	}
+	if (!required.present()) {
+		return false;
+	}
+	const auto& reserved = rd.sourceWork.get().servers();
+	const auto& needed = required.get().servers();
+	if (!std::includes(reserved.begin(), reserved.end(), needed.begin(), needed.end())) {
+		return false;
+	}
+	for (const auto& currentGroup : required.get().groups()) {
+		const auto& admittedGroups = rd.sourceWork.get().groups();
+		if (std::none_of(admittedGroups.begin(), admittedGroups.end(), [&](const auto& admittedGroup) {
+			    return std::includes(
+			        currentGroup.begin(), currentGroup.end(), admittedGroup.begin(), admittedGroup.end());
+		    })) {
+			// A previously eligible supplier failed. Its admission credit cannot be
+			// transferred to a surviving supplier that may already be fully occupied.
+			return false;
+		}
+	}
+	return true;
+}
+
 // Data movement's resource control: Do not overload servers used for the RelocateData
 // return true if servers are not too busy to launch the relocation
 // This ensure source servers will not be overloaded.
@@ -477,22 +621,33 @@ bool canLaunchSrc(RelocateData& relocation,
 
 	// find the "workFactor" for this, were it launched now
 	int workFactor = getSrcWorkFactor(relocation, singleRegionTeamSize);
+	auto canUseSource = [&](UID id) {
+		// For each source server for this relocation, copy and modify its busyness to reflect work that WOULD be
+		// cancelled
+		auto busyCopy = busymap[id];
+		for (int j = 0; j < cancellableRelocations.size(); j++) {
+			auto& servers = cancellableRelocations[j].workSources();
+			if (std::count(servers.begin(), servers.end(), id))
+				busyCopy.removeWork(cancellableRelocations[j].priority, cancellableRelocations[j].workFactor);
+		}
+		return busyCopy.canLaunch(relocation.priority, workFactor);
+	};
+	if (relocation.sourceWork.present()) {
+		// Every moving region needs an eligible local supplier; idle replicas in another
+		// region cannot stand in for it. All members of each group cover the full range.
+		for (const auto& sources : relocation.sourceWork.get().groups()) {
+			if (!std::any_of(sources.begin(), sources.end(), canUseSource)) {
+				return false;
+			}
+		}
+		return true;
+	}
 	int neededServers = std::min<int>(relocation.src.size(), teamSize - singleRegionTeamSize + 1);
 	if (SERVER_KNOBS->USE_OLD_NEEDED_SERVERS) {
 		neededServers = std::max(1, (int)relocation.src.size() - teamSize + 1);
 	}
-	// see if each of the SS can launch this task
-	for (int i = 0; i < relocation.src.size(); i++) {
-		// For each source server for this relocation, copy and modify its busyness to reflect work that WOULD be
-		// cancelled
-		auto busyCopy = busymap[relocation.src[i]];
-		for (int j = 0; j < cancellableRelocations.size(); j++) {
-			auto& servers = cancellableRelocations[j].src;
-			if (std::count(servers.begin(), servers.end(), relocation.src[i]))
-				busyCopy.removeWork(cancellableRelocations[j].priority, cancellableRelocations[j].workFactor);
-		}
-		// Use this modified busyness to check if this relocation could be launched
-		if (busyCopy.canLaunch(relocation.priority, workFactor)) {
+	for (UID id : relocation.src) {
+		if (canUseSource(id)) {
 			--neededServers;
 			if (neededServers == 0)
 				return true;
@@ -503,8 +658,8 @@ bool canLaunchSrc(RelocateData& relocation,
 }
 
 // candidateTeams is a vector containing one team per datacenter, the team(s) DD is planning on moving the shard to.
-bool canLaunchDest(const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& candidateTeams,
-                   int priority,
+bool canLaunchDest(const RelocateData& relocation,
+                   const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& candidateTeams,
                    std::map<UID, Busyness>& busymapDest) {
 	// fail switch if this is causing issues
 	if (SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER <= 0) {
@@ -513,7 +668,7 @@ bool canLaunchDest(const std::vector<std::pair<Reference<IDataDistributionTeam>,
 	int workFactor = getDestWorkFactor();
 	for (auto& [team, _] : candidateTeams) {
 		for (UID id : team->getServerIDs()) {
-			if (!busymapDest[id].canLaunch(priority, workFactor)) {
+			if (destinationNeedsFetch(relocation, id) && !busymapDest[id].canLaunch(relocation.priority, workFactor)) {
 				return false;
 			}
 		}
@@ -525,8 +680,8 @@ bool canLaunchDest(const std::vector<std::pair<Reference<IDataDistributionTeam>,
 void launch(RelocateData& relocation, std::map<UID, Busyness>& busymap, int singleRegionTeamSize) {
 	// if we are here this means that we can launch and should adjust all the work the servers can do
 	relocation.workFactor = getSrcWorkFactor(relocation, singleRegionTeamSize);
-	for (int i = 0; i < relocation.src.size(); i++)
-		busymap[relocation.src[i]].addWork(relocation.priority, relocation.workFactor);
+	for (UID id : relocation.workSources())
+		busymap[id].addWork(relocation.priority, relocation.workFactor);
 }
 
 void launchDest(RelocateData& relocation,
@@ -536,6 +691,9 @@ void launchDest(RelocateData& relocation,
 	int destWorkFactor = getDestWorkFactor();
 	for (auto& [team, _] : candidateTeams) {
 		for (UID id : team->getServerIDs()) {
+			if (!destinationNeedsFetch(relocation, id)) {
+				continue;
+			}
 			relocation.completeDests.push_back(id);
 			destBusymap[id].addWork(relocation.priority, destWorkFactor);
 		}
@@ -568,8 +726,8 @@ static void resetDestinationsForRetry(RelocateData& relocation,
 
 void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.bulkLoadTask.present() || relocation.workFactor > 0);
-	for (int i = 0; i < relocation.src.size(); i++)
-		busymap[relocation.src[i]].removeWork(relocation.priority, relocation.workFactor);
+	for (UID id : relocation.workSources())
+		busymap[id].removeWork(relocation.priority, relocation.workFactor);
 
 	completeDest(relocation, destBusymap);
 }
@@ -581,6 +739,17 @@ Future<Void> dataDistributionRelocator(class DDQueue* self,
                                        RelocateData rd,
                                        Future<Void> prevCleanup,
                                        const DDEnabledState* ddEnabledState);
+
+static Future<std::vector<SourceTeamInfo>> getSourceTeams(DDQueue* self, const RelocateData& rd) {
+	std::vector<Future<SourceTeamInfo>> replies;
+	for (auto& collection : self->teamCollections) {
+		GetSourceTeamRequest req;
+		req.sources = rd.src;
+		req.completeSources = rd.completeSources;
+		replies.push_back(brokenPromiseToNever(collection.getSourceTeam.getReply(req)));
+	}
+	return getAll(replies);
+}
 
 Future<Void> getSourceServersForRange(DDQueue* self,
                                       RelocateData input,
@@ -600,6 +769,11 @@ Future<Void> getSourceServersForRange(DDQueue* self,
 	IDDTxnProcessor::SourceServers res = co_await self->txnProcessor->getSourceServersForRange(input.keys);
 	input.src = std::move(res.srcServers);
 	input.completeSources = std::move(res.completeSources);
+	if (useRegionalSourceAccounting() && !input.forceAllSources && self->teamCollections.size() == 2) {
+		const auto sourceTeams = co_await getSourceTeams(self, input);
+		input.sourceWork = getSourceWork(input, sourceTeams, true);
+		CODE_PROBE(input.workSources().size() < input.src.size(), "Relocation leaves an unchanged region unreserved");
+	}
 	output.send(input);
 }
 
@@ -744,14 +918,14 @@ void DDQueue::validate() {
 
 		auto inFlightRanges = inFlight.ranges();
 		for (auto it = inFlightRanges.begin(); it != inFlightRanges.end(); ++it) {
-			for (int i = 0; i < it->value().src.size(); i++) {
+			for (UID id : it->value().workSources()) {
 				// each server in the inFlight map is in the busymap
-				if (!busymap.contains(it->value().src[i]))
+				if (!busymap.contains(id))
 					TraceEvent(SevError, "DDQueueValidateError8")
 					    .detail("Problem", "each server in the inFlight map is in the busymap");
 
 				// relocate data that is inFlight is not also in the queue
-				if (queue[it->value().src[i]].contains(it->value()))
+				if (queue[id].contains(it->value()))
 					TraceEvent(SevError, "DDQueueValidateError9")
 					    .detail("Problem", "relocate data that is inFlight is not also in the queue");
 			}
@@ -861,7 +1035,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 
 			bool active = fetchingSourcesQueue.contains(queued);
 			if (!active && !queued.src.empty()) {
-				auto sourceQueue = queue.find(queued.src.front());
+				auto sourceQueue = queue.find(queued.queueSources().front());
 				active = sourceQueue != queue.end() && sourceQueue->second.contains(queued);
 			}
 			if (active) {
@@ -888,7 +1062,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		bool foundActiveRelocation = false;
 
 		if (!foundActiveFetching && !rrs.src.empty()) {
-			firstQueue = &queue[rrs.src[0]];
+			firstQueue = &queue[rrs.queueSources().front()];
 			firstRelocationItr = firstQueue->find(rrs);
 			foundActiveRelocation = firstRelocationItr != firstQueue->end();
 		}
@@ -896,7 +1070,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		// If there is a queued job that wants data relocation which we are about to cancel/modify,
 		//  make sure that we keep the relocation intent for the job that we queue up
 		if (foundActiveFetching || foundActiveRelocation) {
-			rd.wantsNewServers |= rrs.wantsNewServers;
+			rd.mergeNewServerIntent(rrs);
 			rd.startTime = std::min(rd.startTime, rrs.startTime);
 			if (!hasHealthPriority) {
 				rd.healthPriority = std::max(rd.healthPriority, rrs.healthPriority);
@@ -912,13 +1086,13 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 				fetchingSourcesQueue.erase(fetchingSourcesItr);
 			else if (foundActiveRelocation) {
 				firstQueue->erase(firstRelocationItr);
-				for (int i = 1; i < rrs.src.size(); i++)
-					queue[rrs.src[i]].erase(rrs);
+				for (int i = 1; i < rrs.queueSources().size(); i++)
+					queue[rrs.queueSources()[i]].erase(rrs);
 			}
 		}
 
 		if (foundActiveFetching || foundActiveRelocation) {
-			serversToLaunchFrom.insert(rrs.src.begin(), rrs.src.end());
+			serversToLaunchFrom.insert(rrs.queueSources().begin(), rrs.queueSources().end());
 			/*TraceEvent(rrs.interval.end(), mi.id()).detail("Result","Cancelled")
 			    .detail("WasFetching", foundActiveFetching).detail("Contained", rd.keys.contains( rrs.keys ));*/
 			queuedRelocations--;
@@ -979,8 +1153,8 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 			ASSERT(!rrs.src.empty() || rrs.startTime == -1);
 
 			bool foundActiveRelocation = false;
-			for (int i = 0; i < rrs.src.size(); i++) {
-				auto& serverQueue = queue[rrs.src[i]];
+			for (UID id : rrs.queueSources()) {
+				auto& serverQueue = queue[id];
 
 				if (serverQueue.erase(rrs) > 0) {
 					if (!foundActiveRelocation) {
@@ -1030,16 +1204,16 @@ void DDQueue::completeSourceFetch(const RelocateData& results) {
 
 	fetchingSourcesQueue.erase(results);
 	queueMap.insert(results.keys, results);
-	for (int i = 0; i < results.src.size(); i++) {
-		queue[results.src[i]].insert(results);
+	for (UID id : results.queueSources()) {
+		queue[id].insert(results);
 	}
-	serverCounter.increaseForTeam(results.src, results.reason, ServerCounter::CountType::QueuedSource);
+	serverCounter.increaseForTeam(results.workSources(), results.reason, ServerCounter::CountType::QueuedSource);
 }
 
 void DDQueue::logRelocation(const RelocateData& rd, const char* title) {
 	std::string busyString;
-	for (int i = 0; i < rd.src.size() && i < teamSize * 2; i++)
-		busyString += describe(rd.src[i]) + " - (" + busymap[rd.src[i]].toString() + "); ";
+	for (int i = 0; i < rd.workSources().size() && i < teamSize * 2; i++)
+		busyString += describe(rd.workSources()[i]) + " - (" + busymap[rd.workSources()[i]].toString() + "); ";
 
 	TraceEvent(title, distributorId)
 	    .detail("KeyBegin", rd.keys.begin)
@@ -1048,6 +1222,7 @@ void DDQueue::logRelocation(const RelocateData& rd, const char* title) {
 	    .detail("WorkFactor", rd.workFactor)
 	    .detail("SourceServerCount", rd.src.size())
 	    .detail("SourceServers", describe(rd.src, teamSize * 2))
+	    .detail("WorkSources", describe(rd.workSources(), teamSize * 2))
 	    .detail("SourceBusyness", busyString);
 }
 
@@ -1056,7 +1231,7 @@ void DDQueue::launchQueuedWork(KeyRange keys, const DDEnabledState* ddEnabledSta
 	std::set<RelocateData, std::greater<RelocateData>> combined;
 	auto f = queueMap.intersectingRanges(keys);
 	for (auto it = f.begin(); it != f.end(); ++it) {
-		if (!it->value().src.empty() && queue[it->value().src[0]].contains(it->value()))
+		if (!it->value().src.empty() && queue[it->value().queueSources().front()].contains(it->value()))
 			combined.insert(it->value());
 	}
 	launchQueuedWork(combined, ddEnabledState);
@@ -1189,6 +1364,25 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			continue;
 		}
 
+		// Preserve overlapping movement intent before testing its source footprint. In
+		// particular, replacing a primary rebalance with a remote repair still needs
+		// primary source capacity. Reindex an expanded request so that either region's
+		// completion can wake it even if admission fails this time.
+		for (auto range = intersectingInFlight.begin(); range != intersectingInFlight.end(); ++range) {
+			if (inFlightActors.liveActorAt(range->range().begin)) {
+				rd.mergeNewServerIntent(range->value());
+			}
+		}
+		if (!rd.isRestore() && rd != *it) {
+			for (UID id : it->queueSources()) {
+				ASSERT(queue[id].erase(*it));
+			}
+			for (UID id : rd.queueSources()) {
+				queue[id].insert(rd);
+			}
+			queueMap.insert(rd.keys, rd);
+		}
+
 		// Because the busyness of a server is decreased when a superseding relocation is issued, we
 		//  need to consider what the busyness of a server WOULD be if
 		auto containedRanges = inFlight.containedRanges(rd.keys);
@@ -1229,20 +1423,12 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			finishRelocation(rd.priority, rd.healthPriority);
 
 			// now we are launching: remove this entry from the queue of all the src servers
-			for (size_t i = 0; i < rd.src.size(); i++) {
-				const auto result = queue[rd.src[i]].erase(rd);
+			for (UID id : rd.queueSources()) {
+				const auto result = queue[id].erase(rd);
 				ASSERT(result);
 			}
 		}
 
-		// If there is a job in flight that wants data relocation which we are about to cancel/modify,
-		//     make sure that we keep the relocation intent for the job that we launch
-		auto f = inFlight.intersectingRanges(rd.keys);
-		for (auto it = f.begin(); it != f.end(); ++it) {
-			if (inFlightActors.liveActorAt(it->range().begin)) {
-				rd.wantsNewServers |= it->value().wantsNewServers;
-			}
-		}
 		startedHere++;
 
 		// update both inFlightActors and inFlight key range maps, cancelling deleted RelocateShards
@@ -1569,8 +1755,11 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 	// Source transfer completion is shared across retries, while each attempt registers new destination work.
 	bool ownsDestBusyness = false;
 	bool retryAfterDestinationTeamFailure = false;
+	bool retryWithAllSources = false;
+	bool retryAfterCompletedTransfer = false;
+	bool retryAfterSourceChange = false;
 	UID distributorId = self->distributorId;
-	ParallelTCInfo healthyDestinations;
+	ParallelTCInfo healthyDestinations(rd.bulkLoadTask.present() ? std::vector<UID>() : rd.completeSources);
 
 	bool anyHealthy = false;
 	bool allHealthy = true;
@@ -1728,6 +1917,18 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 
 		ASSERT(!rd.src.empty());
 		while (true) {
+			if (!rd.isRestore() && !rd.bulkLoadTask.present() && !rd.completeSources.empty()) {
+				// Source discovery ran while this move was queued. An overlapping move
+				// or an earlier attempt may have finished since then; only the post-cleanup
+				// ownership snapshot can justify excluding already-present destinations.
+				const auto current = co_await self->txnProcessor->getSourceServersForRange(rd.keys);
+				if (current.srcServers != rd.src ||
+				    std::set<UID>(current.completeSources.begin(), current.completeSources.end()) !=
+				        std::set<UID>(rd.completeSources.begin(), rd.completeSources.end())) {
+					retryAfterSourceChange = true;
+					throw data_move_cancelled();
+				}
+			}
 			destOverloadedCount = 0;
 			stuckCount = 0;
 			uint64_t physicalShardIDCandidate = UID().first();
@@ -1796,7 +1997,7 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
 						TeamSelect destTeamSelect;
-						if (!rd.wantsNewServers) {
+						if (!rd.wantsNewServersInRegion(tciIndex == 0)) {
 							destTeamSelect = TeamSelect::WANT_COMPLETE_SRCS;
 						} else if (wantTrueBest) {
 							destTeamSelect = TeamSelect::WANT_TRUE_BEST;
@@ -1973,9 +2174,28 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 					tciIndex++;
 				}
 
+				if (foundTeams && anyHealthy && rd.sourceWork.present()) {
+					Future<std::vector<SourceTeamInfo>> sourceTeamsFuture = getSourceTeams(self, rd);
+					const bool sourceTeamsReady = sourceTeamsFuture.isReady();
+					const auto sourceTeams = co_await sourceTeamsFuture;
+					if (!sourceTeamsReady) {
+						// Destination failure tracking is edge-triggered. Any yield after team
+						// selection requires selecting the teams again before moveShard.
+						self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::SourceInfoNotReady]++;
+						foundTeams = false;
+					} else if (!sourceWorkCovers(
+					               rd, getSourceWork(rd, sourceTeams, useRegionalSourceAccounting(), bestTeams))) {
+						// Team health or selection changed since queue admission. Release the
+						// original reservation and re-enter admission with the conservative
+						// footprint; never wait while holding only the narrower reservation.
+						retryWithAllSources = true;
+						throw data_move_cancelled();
+					}
+				}
+
 				// once we've found healthy candidate teams, make sure they're not overloaded with outstanding moves
 				// already
-				anyDestOverloaded = !canLaunchDest(bestTeams, rd.priority, self->destBusymap);
+				anyDestOverloaded = !canLaunchDest(rd, bestTeams, self->destBusymap);
 				if (doBulkLoading) {
 					anyDestOverloaded = false;
 				}
@@ -2158,6 +2378,8 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			    .detail("Priority", rd.priority)
 			    .detail("DataMoveId", rd.dataMoveId)
 			    .detail("SrcIds", describe(rd.src))
+			    .detail("WorkSources", describe(rd.workSources()))
+			    .detail("RegionalSourceAccounting", rd.sourceWork.present())
 			    .detail("DestId", describe(destIds))
 			    .detail("BulkLoadTaskID", doBulkLoading ? rd.bulkLoadTask.get().coreState.getTaskId().toString() : "");
 
@@ -2177,7 +2399,8 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 				self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
 			}
 
-			// FIXME: do not add data in flight to servers that were already in the src.
+			// The destination view retains every team for health tracking, but its
+			// in-flight accounting excludes replicas that already hold the full range.
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
 			healthyDestinations.addReadInFlightToTeam(+metrics.readLoadKSecond());
 
@@ -2198,9 +2421,8 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 			RelocateDecision decision{ rd, destIds, extraIds, metrics, parentMetrics };
 			traceRelocateDecision(ev, relocateShardInterval.pairID, decision);
 
-			self->serverCounter.increaseForTeam(rd.src, rd.reason, DDQueue::ServerCounter::LaunchedSource);
-			self->serverCounter.increaseForTeam(destIds, rd.reason, DDQueue::ServerCounter::LaunchedDest);
-			self->serverCounter.increaseForTeam(extraIds, rd.reason, DDQueue::ServerCounter::LaunchedDest);
+			self->serverCounter.increaseForTeam(rd.workSources(), rd.reason, DDQueue::ServerCounter::LaunchedSource);
+			self->serverCounter.increaseForTeam(rd.completeDests, rd.reason, DDQueue::ServerCounter::LaunchedDest);
 
 			Error error = success();
 			Promise<Void> dataMovementComplete;
@@ -2507,11 +2729,25 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 				}
 
+				if (signalledTransferComplete && !doBulkLoading) {
+					// The queued completion owns the old source reservation. A new fetch
+					// attempt must go through admission again, even if that completion
+					// has not yet been drained by DDQueue.
+					retryAfterCompletedTransfer = true;
+					throw data_move_cancelled();
+				}
 				co_await delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch);
 			}
 		}
 	} catch (Error& e) {
 		err = e;
+	}
+
+	if (retryWithAllSources || retryAfterCompletedTransfer || retryAfterSourceChange) {
+		auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
+		ASSERT(inFlightRange.range() == rd.keys && inFlightRange.value().randomId == rd.randomId);
+		inFlightRange.value().cancellable = false;
+		rd.cancellable = false;
 	}
 
 	TraceEvent(relocateShardInterval.end(), distributorId).errorUnsuppressed(err).detail("Duration", now() - startTime);
@@ -2547,15 +2783,23 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 		    .detail("RestoredRanges", restoredRanges.size());
 	}
 
-	if (err.code() == error_code_data_move_dest_team_not_found && retryAfterDestinationTeamFailure) {
+	if ((err.code() == error_code_data_move_dest_team_not_found && retryAfterDestinationTeamFailure) ||
+	    retryWithAllSources || retryAfterCompletedTransfer || retryAfterSourceChange) {
 		// randomId participates in RelocateData's queue ordering, so a new attempt needs a new identity.
 		RelocateShard retry = makeDestinationFailureRetry(rd, deterministicRandom()->randomUniqueID());
+		retry.forceAllSources |= retryWithAllSources;
 		self->output.send(retry);
-		TraceEvent(SevWarnAlways, "RelocateShardRetryDestinationTeamFailure", self->distributorId)
+		TraceEvent(retryAfterDestinationTeamFailure ? SevWarnAlways : SevInfo,
+		           retryAfterDestinationTeamFailure ? "RelocateShardRetryDestinationTeamFailure"
+		                                            : "RelocateShardRetrySourceAdmission",
+		           self->distributorId)
 		    .detail("Range", rd.keys)
 		    .detail("DataMoveID", rd.dataMoveId)
 		    .detail("Priority", rd.priority)
 		    .detail("Reason", rd.reason.toString())
+		    .detail("ForceAllSources", retry.forceAllSources)
+		    .detail("TransferAlreadyCompleted", retryAfterCompletedTransfer)
+		    .detail("SourceSnapshotChanged", retryAfterSourceChange)
 		    .detail("TraceID", retry.traceId)
 		    .detail("PreviousTraceID", rd.randomId);
 	}
@@ -2673,7 +2917,9 @@ Future<bool> rebalanceReadLoad(DDQueue* self,
 	for (int i = 0; i < shards.size(); i++) {
 		if (shard == shards[i]) {
 			UID traceId = deterministicRandom()->randomUniqueID();
-			self->output.send(RelocateShard(shard, moveReason, RelocateReason::REBALANCE_READ, traceId));
+			RelocateShard relocation(shard, moveReason, RelocateReason::REBALANCE_READ, traceId);
+			relocation.primaryRegion = primary;
+			self->output.send(relocation);
 			traceEvent->detail("TraceId", traceId);
 
 			auto serverIds = sourceTeam->getServerIDs();
@@ -2752,7 +2998,9 @@ static Future<bool> rebalanceTeams(DDQueue* self,
 	for (int i = 0; i < shards.size(); i++) {
 		if (moveShard == shards[i]) {
 			UID traceId = deterministicRandom()->randomUniqueID();
-			self->output.send(RelocateShard(moveShard, moveReason, RelocateReason::REBALANCE_DISK, traceId));
+			RelocateShard relocation(moveShard, moveReason, RelocateReason::REBALANCE_DISK, traceId);
+			relocation.primaryRegion = primary;
+			self->output.send(relocation);
 			traceEvent->detail("TraceId", traceId);
 
 			self->serverCounter.increaseForTeam(
@@ -3056,7 +3304,7 @@ struct DDQueueImpl {
 			FlowLock::Releaser lockGuard(state->queueMutationLock);
 			complete(done, state->self->busymap, state->self->destBusymap);
 			bool wasEmpty = state->serversToLaunchFrom.empty();
-			state->serversToLaunchFrom.insert(done.src.begin(), done.src.end());
+			state->serversToLaunchFrom.insert(done.workSources().begin(), done.workSources().end());
 			if (wasEmpty && !state->serversToLaunchFrom.empty()) {
 				scheduleQueuedServerWork(state);
 			}
@@ -3158,6 +3406,8 @@ struct DDQueueImpl {
 			    .detail("MoveReusePhysicalShard", self->moveReusePhysicalShard)
 			    .detail("RemoteBestTeamNotReady",
 			            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteBestTeamNotReady])
+			    .detail("SourceInfoNotReady",
+			            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::SourceInfoNotReady])
 			    .detail("PrimaryNoHealthyTeam",
 			            self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::PrimaryNoHealthyTeam])
 			    .detail("RemoteNoHealthyTeam",
@@ -3612,5 +3862,437 @@ TEST_CASE("/DataDistribution/DDQueue/SerializeRelocatorError") {
 	ASSERT(immediate.isReady());
 	ASSERT(immediate.isError());
 	ASSERT(immediate.getError().code() == error_code_movekeys_conflict);
+	co_return;
+}
+
+namespace {
+
+class DDQueueRegionalTestFixture {
+	Reference<LocalitySet> locality = makeReference<LocalityMap<UID>>();
+	std::map<UID, Reference<TCServerInfo>> servers;
+
+public:
+	Reference<IDataDistributionTeam> team(const std::vector<UID>& ids) {
+		std::vector<Reference<TCServerInfo>> members;
+		for (UID id : ids) {
+			auto it = servers.find(id);
+			if (it == servers.end()) {
+				StorageServerInterface ssi(id);
+				ssi.locality.set("machineid"_sr, Standalone<StringRef>(id.toString()));
+				ssi.locality.set("zoneid"_sr, Standalone<StringRef>(id.toString()));
+				it = servers.emplace(id, makeReference<TCServerInfo>(ssi, nullptr, ProcessClass(), true, locality))
+				         .first;
+			}
+			members.push_back(it->second);
+		}
+		auto result = makeReference<TCTeamInfo>(members);
+		result->setHealthy(true);
+		return result;
+	}
+
+	std::vector<SourceTeamInfo> sourceTeams() {
+		std::vector<SourceTeamInfo> result(2);
+		result[0].sources = { UID(1, 0), UID(2, 0), UID(3, 0) };
+		result[0].healthyCompleteSources = result[0].sources;
+		result[0].healthyCompleteTeam = team(result[0].sources);
+		result[1].sources = { UID(4, 0), UID(5, 0), UID(6, 0) };
+		result[1].healthyCompleteSources = { UID(4, 0), UID(5, 0) };
+		return result;
+	}
+
+	RelocateData relocation() const {
+		RelocateData rd(RelocateShard(
+		    KeyRangeRef("a"_sr, "b"_sr), SERVER_KNOBS->PRIORITY_TEAM_2_LEFT, RelocateReason::OTHER, UID(10, 0)));
+		rd.src = { UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0), UID(5, 0), UID(6, 0) };
+		rd.completeSources = rd.src;
+		return rd;
+	}
+};
+
+bool ddQueueTestBusynessEmpty(const std::map<UID, Busyness>& busymap) {
+	return std::all_of(busymap.begin(), busymap.end(), [](const auto& entry) {
+		return std::all_of(entry.second.ledger.begin(), entry.second.ledger.end(), [](int work) { return work == 0; });
+	});
+}
+
+} // namespace
+
+TEST_CASE("/DataDistribution/DDQueue/RegionalSourceWorkSelection") {
+	DDQueueRegionalTestFixture fixture;
+	const auto sources = fixture.sourceTeams();
+	RelocateData rd = fixture.relocation();
+	rd.sourceWork = getSourceWork(rd, sources, true);
+	ASSERT(rd.sourceWork.present());
+	ASSERT(rd.workSources() == sources[1].sources);
+	ASSERT(rd.sourceWork.get().groups() == std::vector<std::vector<UID>>{ sources[1].healthyCompleteSources });
+	ASSERT(sourceWorkCovers(rd, rd.sourceWork));
+	ASSERT(!sourceWorkCovers(rd, Optional<SourceWork>()));
+	auto fewerSuppliers = sources;
+	fewerSuppliers[1].healthyCompleteSources.pop_back();
+	ASSERT(!sourceWorkCovers(rd, getSourceWork(rd, fewerSuppliers, true)));
+	auto recoveredSupplier = sources;
+	recoveredSupplier[1].healthyCompleteSources = recoveredSupplier[1].sources;
+	ASSERT(sourceWorkCovers(rd, getSourceWork(rd, recoveredSupplier, true)));
+
+	ASSERT(!getSourceWork(rd, sources, false).present());
+	RelocateData fallback = rd;
+	for (const auto type : { DataMoveType::PHYSICAL, DataMoveType::PHYSICAL_EXP }) {
+		fallback.dataMoveId = newDataMoveId(99, AssignEmptyRange::False, type, rd.dmReason);
+		ASSERT(!getSourceWork(fallback, sources, true).present());
+	}
+	fallback = rd;
+	fallback.completeSources.pop_back();
+	ASSERT(!getSourceWork(fallback, sources, true).present());
+	fallback = rd;
+	fallback.forceAllSources = true;
+	ASSERT(!getSourceWork(fallback, sources, true).present());
+	fallback = rd;
+	fallback.dataMove = std::make_shared<DataMove>();
+	ASSERT(!getSourceWork(fallback, sources, true).present());
+	fallback = rd;
+	fallback.src.push_back(UID(9, 0));
+	fallback.completeSources = fallback.src;
+	ASSERT(!getSourceWork(fallback, sources, true).present());
+	auto unavailable = sources;
+	unavailable[1].healthyCompleteSources.clear();
+	ASSERT(!getSourceWork(rd, unavailable, true).present());
+	auto ambiguous = sources;
+	ambiguous[1].sources.push_back(sources[0].sources.front());
+	ASSERT(!getSourceWork(rd, ambiguous, true).present());
+
+	// Both regions can retain full teams, so this is a known no-fetch move, not unknown ownership.
+	auto retained = sources;
+	retained[1].healthyCompleteSources = retained[1].sources;
+	retained[1].healthyCompleteTeam = fixture.team(retained[1].sources);
+	RelocateData noFetch = rd;
+	noFetch.sourceWork = getSourceWork(noFetch, retained, true);
+	ASSERT(noFetch.sourceWork.present());
+	ASSERT(noFetch.workSources().empty());
+	ASSERT(noFetch.queueSources() == std::vector<UID>{ UID() });
+	DDQueue noFetchQueue;
+	noFetchQueue.fetchingSourcesQueue.insert(noFetch);
+	noFetchQueue.completeSourceFetch(noFetch);
+	ASSERT_EQ(noFetchQueue.queue.size(), 1);
+	ASSERT(noFetchQueue.queue.at(UID()).contains(noFetch));
+	std::map<UID, Busyness> fullyBusy;
+	for (UID id : rd.src) {
+		fullyBusy[id].addWork(rd.priority, WORK_FULL_UTILIZATION);
+	}
+	ASSERT(canLaunchSrc(noFetch, 6, 3, fullyBusy, {}));
+
+	rd.wantsNewServers = true;
+	rd.newServerRegion = false;
+	rd.sourceWork = getSourceWork(rd, retained, true);
+	RelocateData primaryIntent = rd;
+	primaryIntent.newServerRegion = true;
+	const auto primaryWork = getSourceWork(primaryIntent, retained, true);
+	ASSERT(primaryWork.present());
+	ASSERT(primaryWork.get().servers() == retained[0].sources);
+	ASSERT(!sourceWorkCovers(rd, primaryWork));
+	rd.mergeNewServerIntent(primaryIntent);
+	ASSERT(rd.wantsNewServersInRegion(true));
+	ASSERT(rd.wantsNewServersInRegion(false));
+	ASSERT(!rd.sourceWork.present());
+	ASSERT(sourceWorkCovers(rd, primaryWork));
+	rd.forceAllSources = true;
+	RelocateData retry(makeDestinationFailureRetry(rd, UID(11, 0)));
+	ASSERT(retry.forceAllSources);
+	ASSERT(retry.wantsNewServersInRegion(true));
+	ASSERT(retry.wantsNewServersInRegion(false));
+	ASSERT(!retry.sourceWork.present());
+	ASSERT(retry.src.empty());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/DDQueue/RegionalSourceAdmissionAndCompletion") {
+	DDQueueRegionalTestFixture fixture;
+	const auto sources = fixture.sourceTeams();
+	RelocateData remoteRepair = fixture.relocation();
+	remoteRepair.sourceWork = getSourceWork(remoteRepair, sources, true);
+	ASSERT(remoteRepair.sourceWork.present());
+	DDQueue queue;
+	queue.fetchingSourcesQueue.insert(remoteRepair);
+	queue.completeSourceFetch(remoteRepair);
+	for (UID id : sources[0].sources) {
+		ASSERT(!queue.queue.contains(id));
+	}
+	for (UID id : sources[1].sources) {
+		ASSERT(queue.queue.at(id).contains(remoteRepair));
+	}
+
+	// Another shard has already replaced the failed remote replica and needs a primary-region move.
+	RelocateData primaryMove = remoteRepair;
+	primaryMove.keys = KeyRangeRef("c"_sr, "d"_sr);
+	primaryMove.priority = SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
+	primaryMove.healthPriority = -1;
+	primaryMove.reason = RelocateReason::REBALANCE_READ;
+	primaryMove.dmReason = DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM;
+	primaryMove.src.back() = UID(7, 0);
+	primaryMove.completeSources = primaryMove.src;
+	primaryMove.wantsNewServers = true;
+	primaryMove.newServerRegion = true;
+	auto primarySources = sources;
+	primarySources[1].sources.back() = UID(7, 0);
+	primarySources[1].healthyCompleteSources = primarySources[1].sources;
+	primarySources[1].healthyCompleteTeam = fixture.team(primarySources[1].sources);
+	primaryMove.sourceWork = getSourceWork(primaryMove, primarySources, true);
+	ASSERT(primaryMove.sourceWork.present());
+	ASSERT(primaryMove.workSources() == sources[0].sources);
+
+	for (bool regional : { false, true }) {
+		RelocateData repair = remoteRepair;
+		RelocateData primary = primaryMove;
+		if (!regional) {
+			repair.sourceWork.reset();
+			primary.sourceWork.reset();
+		}
+		std::map<UID, Busyness> sourceBusymap, destBusymap;
+		std::vector<RelocateData> launched;
+		const int work = getSrcWorkFactor(repair, 3);
+		for (int i = 0; i < WORK_FULL_UTILIZATION / work; ++i) {
+			ASSERT(canLaunchSrc(repair, 6, 3, sourceBusymap, {}));
+			RelocateData move = repair;
+			launch(move, sourceBusymap, 3);
+			launched.push_back(move);
+		}
+		ASSERT(!canLaunchSrc(repair, 6, 3, sourceBusymap, {}));
+		// Removing the snapshot reproduces the old cross-region admission failure with the same workload.
+		ASSERT(canLaunchSrc(primary, 6, 3, sourceBusymap, {}) == regional);
+		if (regional) {
+			for (UID id : sources[0].sources) {
+				ASSERT_EQ(sourceBusymap[id].ledger[repair.priority / 100], 0);
+			}
+			RelocateData both = remoteRepair;
+			both.wantsNewServers = true;
+			both.newServerRegion.reset();
+			both.sourceWork = getSourceWork(both, sources, true);
+			ASSERT(!canLaunchSrc(both, 6, 3, sourceBusymap, {}));
+			auto oneRemoteFree = sourceBusymap;
+			oneRemoteFree[sources[1].healthyCompleteSources.front()].removeWork(repair.priority, work);
+			ASSERT(canLaunchSrc(both, 6, 3, oneRemoteFree, {}));
+
+			// Cancelling remote work cannot credit primary servers merely because they own the same shard.
+			auto primaryBusy = sourceBusymap;
+			for (UID id : sources[0].sources) {
+				primaryBusy[id].addWork(primary.priority, WORK_FULL_UTILIZATION);
+			}
+			ASSERT(!canLaunchSrc(primary, 6, 3, primaryBusy, { launched.front() }));
+		}
+		for (const auto& move : launched) {
+			complete(move, sourceBusymap, destBusymap);
+		}
+		ASSERT(ddQueueTestBusynessEmpty(sourceBusymap));
+	}
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/DDQueue/RegionalReservationDelayedCleanup") {
+	DDQueueRegionalTestFixture fixture;
+	const auto sources = fixture.sourceTeams();
+	RelocateData rd = fixture.relocation();
+	const auto ownership = rd.src;
+	rd.sourceWork = getSourceWork(rd, sources, true);
+	ASSERT(rd.sourceWork.present());
+	const auto retainedPrimary = fixture.team(sources[0].sources);
+	const auto remoteDest = fixture.team({ UID(4, 0), UID(5, 0), UID(7, 0) });
+	const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> firstTeams{ { retainedPrimary, true },
+		                                                                             { remoteDest, true } };
+	ASSERT(sourceWorkCovers(rd, getSourceWork(rd, sources, true, firstTeams)));
+	std::map<UID, Busyness> sourceBusymap, destBusymap;
+	for (UID id : ownership) {
+		destBusymap[id].addWork(rd.priority, WORK_FULL_UTILIZATION);
+	}
+	ASSERT(canLaunchDest(rd, firstTeams, destBusymap));
+	RelocateData partialRange = rd;
+	partialRange.completeSources.erase(partialRange.completeSources.begin());
+	ASSERT(!canLaunchDest(partialRange, firstTeams, destBusymap));
+	launch(rd, sourceBusymap, 3);
+	launchDest(rd, firstTeams, destBusymap);
+	ASSERT(rd.completeDests == std::vector<UID>{ UID(7, 0) });
+
+	const int64_t bytes = 100, readLoad = 10;
+	ParallelTCInfo destinations(rd.completeSources);
+	destinations.addTeam(retainedPrimary);
+	destinations.addTeam(remoteDest);
+	destinations.addDataInFlightToTeam(bytes);
+	destinations.addReadInFlightToTeam(readLoad);
+	ASSERT_EQ(retainedPrimary->getDataInFlightToTeam(), 0);
+	ASSERT_EQ(retainedPrimary->getReadInFlightToTeam(), 0);
+	ASSERT_EQ(remoteDest->getDataInFlightToTeam(), bytes);
+	ASSERT_EQ(remoteDest->getReadInFlightToTeam(), readLoad);
+
+	PromiseStream<RelocateData> completions;
+	FutureStream<RelocateData> completed = completions.getFuture();
+	completions.send(rd);
+	ParallelTCInfo firstReadCleanup(destinations);
+	destinations.addDataInFlightToTeam(-bytes);
+	destinations.clear();
+
+	const auto primaryDest = fixture.team({ UID(1, 0), UID(2, 0), UID(8, 0) });
+	const auto retainedRemote = fixture.team(sources[1].sources);
+	const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> retryTeams{ { primaryDest, true },
+		                                                                             { retainedRemote, true } };
+	const auto retryWork = getSourceWork(rd, sources, true, retryTeams);
+	ASSERT(retryWork.present());
+	ASSERT(!sourceWorkCovers(rd, retryWork));
+	// A later independently admitted move must not change the first completion's reservations.
+	rd.keys = KeyRangeRef("c"_sr, "d"_sr);
+	rd.randomId = UID(12, 0);
+	rd.sourceWork = retryWork;
+	rd.workFactor = 0;
+	rd.completeDests.clear();
+	launch(rd, sourceBusymap, 3);
+	launchDest(rd, retryTeams, destBusymap);
+	ASSERT(rd.completeDests == std::vector<UID>{ UID(8, 0) });
+	destinations.addTeam(primaryDest);
+	destinations.addTeam(retainedRemote);
+	destinations.addDataInFlightToTeam(bytes);
+	destinations.addReadInFlightToTeam(readLoad);
+	ASSERT_EQ(primaryDest->getDataInFlightToTeam(), bytes);
+	ASSERT_EQ(retainedRemote->getDataInFlightToTeam(), 0);
+	ASSERT_EQ(retainedRemote->getReadInFlightToTeam(), 0);
+
+	complete(completed.pop(), sourceBusymap, destBusymap);
+	firstReadCleanup.addReadInFlightToTeam(-readLoad);
+	ASSERT_EQ(remoteDest->getReadInFlightToTeam(), 0);
+	ASSERT_EQ(primaryDest->getReadInFlightToTeam(), readLoad);
+	for (UID id : sources[1].sources) {
+		ASSERT_EQ(sourceBusymap[id].ledger[rd.priority / 100], 0);
+	}
+	for (UID id : sources[0].sources) {
+		ASSERT_EQ(sourceBusymap[id].ledger[rd.priority / 100], rd.workFactor);
+	}
+	complete(rd, sourceBusymap, destBusymap);
+	destinations.addDataInFlightToTeam(-bytes);
+	destinations.addReadInFlightToTeam(-readLoad);
+	ASSERT_EQ(primaryDest->getDataInFlightToTeam(), 0);
+	ASSERT_EQ(primaryDest->getReadInFlightToTeam(), 0);
+	ASSERT(ddQueueTestBusynessEmpty(sourceBusymap));
+	for (UID id : ownership) {
+		ASSERT_EQ(destBusymap[id].ledger[rd.priority / 100], WORK_FULL_UTILIZATION);
+		destBusymap[id].removeWork(rd.priority, WORK_FULL_UTILIZATION);
+	}
+	ASSERT(ddQueueTestBusynessEmpty(destBusymap));
+	ASSERT(rd.src == ownership);
+	ASSERT(rd.completeSources == ownership);
+	return Void();
+}
+
+namespace {
+
+class DDQueueLegacyMetadataGuard {
+	const bool previousValue = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+
+public:
+	DDQueueLegacyMetadataGuard() {
+		ASSERT(trySetServerKnob("shard_encode_location_metadata", KnobValueRef::create(false)));
+	}
+	~DDQueueLegacyMetadataGuard() {
+		ASSERT_ABORT(trySetServerKnob("shard_encode_location_metadata", KnobValueRef::create(previousValue)));
+	}
+	DDQueueLegacyMetadataGuard(const DDQueueLegacyMetadataGuard&) = delete;
+	DDQueueLegacyMetadataGuard& operator=(const DDQueueLegacyMetadataGuard&) = delete;
+};
+
+class DDQueueSourceSnapshotTestProcessor final : public DDTxnProcessor {
+	SourceServers currentSources;
+	int sourceCalls = 0;
+	int moveCalls = 0;
+
+public:
+	explicit DDQueueSourceSnapshotTestProcessor(SourceServers currentSources)
+	  : currentSources(std::move(currentSources)) {}
+	Future<SourceServers> getSourceServersForRange(KeyRangeRef) override {
+		++sourceCalls;
+		return currentSources;
+	}
+	Future<Void> moveKeys(const MoveKeysParams&) override {
+		++moveCalls;
+		return Never();
+	}
+	int getSourceCalls() const { return sourceCalls; }
+	int getMoveCalls() const { return moveCalls; }
+};
+
+Future<RelocateData> observeNoncancellableTransfer(DDQueue* self, FutureStream<RelocateData> transfers) {
+	RelocateData done = co_await transfers;
+	auto inFlight = self->inFlight.rangeContaining(done.keys.begin);
+	ASSERT(!inFlight.value().cancellable);
+	co_return done;
+}
+
+} // namespace
+
+TEST_CASE("/DataDistribution/DDQueue/SourceSnapshotChangeRequeuesBeforeTeamSelection") {
+	DDQueueLegacyMetadataGuard legacyMetadata;
+	for (bool forceAll : { false, true }) {
+		DDQueueRegionalTestFixture fixture;
+		RelocateData rd = fixture.relocation();
+		rd.wantsNewServers = true;
+		rd.newServerRegion = false;
+		rd.forceAllSources = forceAll;
+		rd.sourceWork = getSourceWork(rd, fixture.sourceTeams(), true);
+		IDDTxnProcessor::SourceServers changed{ rd.src, rd.completeSources };
+		if (forceAll) {
+			changed.completeSources.pop_back();
+		} else {
+			changed.srcServers.back() = UID(9, 0);
+			changed.completeSources = changed.srcServers;
+		}
+		auto processor = makeReference<DDQueueSourceSnapshotTestProcessor>(changed);
+		DDQueue self;
+		self.distributorId = UID(20, 0);
+		self.lastInterval = now();
+		self.suppressIntervals = 0;
+		self.txnProcessor = processor;
+		self.teamCollections.resize(2);
+		launch(rd, self.busymap, 3);
+		self.inFlight.insert(rd.keys, rd);
+		const UID unrelatedDestination(21, 0);
+		self.destBusymap[unrelatedDestination].addWork(rd.priority, 123);
+		FutureStream<RelocateData> transfers = self.dataTransferComplete.getFuture();
+		Future<RelocateData> transfer = observeNoncancellableTransfer(&self, transfers);
+		FutureStream<RelocateData> finished = self.relocationComplete.getFuture();
+		FutureStream<RelocateShard> retries = self.output.getFuture();
+		Future<Void> queueError = self.error.getFuture();
+		DDEnabledState enabled;
+		Future<Void> relocator = dataDistributionRelocator(&self, rd, Void(), &enabled);
+		GetMetricsRequest request = co_await self.getShardMetrics.getFuture();
+		ASSERT(request.keys == rd.keys);
+		ASSERT(self.inFlight.rangeContaining(rd.keys.begin).value().cancellable);
+		request.reply.send(StorageMetrics());
+		ASSERT(relocator.isReady() && relocator.isError());
+		ASSERT_EQ(relocator.getError().code(), error_code_data_move_cancelled);
+		ASSERT_EQ(processor->getSourceCalls(), 1);
+		ASSERT_EQ(processor->getMoveCalls(), 0);
+		ASSERT(!queueError.isReady());
+		for (auto& collection : self.teamCollections) {
+			ASSERT(!collection.getTeam.getFuture().isReady());
+			ASSERT(!collection.getSourceTeam.getFuture().isReady());
+		}
+
+		ASSERT(transfer.isReady() && !transfer.isError());
+		const RelocateData done = transfer.get();
+		ASSERT(!done.cancellable);
+		ASSERT(done.src == rd.src && done.completeSources == rd.completeSources);
+		ASSERT(done.sourceWork == rd.sourceWork && done.workFactor == rd.workFactor);
+		ASSERT(done.completeDests.empty());
+		ASSERT(finished.isReady());
+		ASSERT(finished.pop() == done);
+		ASSERT(retries.isReady());
+		RelocateData retry(retries.pop());
+		ASSERT(retry.keys == rd.keys && retry.priority == rd.priority);
+		ASSERT(retry.randomId != rd.randomId);
+		ASSERT(retry.wantsNewServers && retry.newServerRegion.present() && !retry.newServerRegion.get());
+		ASSERT(retry.forceAllSources == forceAll);
+		ASSERT(retry.src.empty() && !retry.sourceWork.present() && retry.workFactor == 0);
+		ASSERT(!transfers.isReady() && !finished.isReady() && !retries.isReady());
+		for (UID id : rd.workSources()) {
+			ASSERT_EQ(self.busymap[id].ledger[rd.priority / 100], rd.workFactor);
+		}
+		complete(done, self.busymap, self.destBusymap);
+		ASSERT(ddQueueTestBusynessEmpty(self.busymap));
+		ASSERT_EQ(self.destBusymap[unrelatedDestination].ledger[rd.priority / 100], 123);
+	}
 	co_return;
 }

@@ -120,6 +120,9 @@ struct RelocateShard {
 	UID dataMoveId;
 	RelocateReason reason;
 	DataMovementReason moveReason;
+	// Absent means new-server selection may change either region.
+	Optional<bool> primaryRegion;
+	bool forceAllSources = false;
 
 	UID traceId; // track the lifetime of this relocate shard
 
@@ -127,6 +130,7 @@ struct RelocateShard {
 		int boundaryPriority;
 		int healthPriority;
 		bool wantsNewServers;
+		Optional<bool> primaryRegion;
 	};
 
 	// Retry-only overrides used when an in-flight relocation must be recreated without carrying
@@ -491,8 +495,21 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 };
 
+struct SourceTeamInfo {
+	std::vector<UID> sources;
+	std::vector<UID> healthyCompleteSources;
+	Optional<Reference<IDataDistributionTeam>> healthyCompleteTeam;
+};
+
+struct GetSourceTeamRequest {
+	std::vector<UID> sources;
+	std::vector<UID> completeSources;
+	Promise<SourceTeamInfo> reply;
+};
+
 struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
+	PromiseStream<GetSourceTeamRequest> getSourceTeam;
 };
 
 // Used to track the number of ongoing bulkload tasks for each storage server

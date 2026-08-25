@@ -34,6 +34,20 @@ public:
 	;
 };
 
+// An immutable snapshot of the regions expected to serve a relocation's local fetches.
+// Keep this separate from keyServers ownership: retained replicas in another region
+// must remain available for recovery even when they need no relocation reservation.
+class SourceWork {
+	std::vector<std::vector<UID>> regionalSources;
+	std::vector<UID> sourceServers;
+
+public:
+	SourceWork(std::vector<UID> sourceServers, std::vector<std::vector<UID>> regionalSources);
+	const std::vector<std::vector<UID>>& groups() const { return regionalSources; }
+	const std::vector<UID>& servers() const { return sourceServers; }
+	bool operator==(const SourceWork&) const = default;
+};
+
 // DDQueue use RelocateData to track proposed movements
 class RelocateData {
 	// If this rs comes from a splitting, parent range is the original range.
@@ -55,6 +69,10 @@ public:
 	std::vector<UID> completeSources;
 	std::vector<UID> completeDests;
 	bool wantsNewServers;
+	Optional<bool> newServerRegion; // Empty means new servers may be selected in either region.
+	bool forceAllSources = false;
+	// An absent snapshot uses the legacy conservative all-source accounting.
+	Optional<SourceWork> sourceWork;
 	bool cancellable;
 	TraceInterval interval;
 	std::shared_ptr<DataMove> dataMove;
@@ -63,6 +81,17 @@ public:
 
 	RelocateData();
 	explicit RelocateData(RelocateShard const& rs);
+	void mergeNewServerIntent(const RelocateData& other);
+	bool wantsNewServersInRegion(bool primary) const {
+		return wantsNewServers && (!newServerRegion.present() || newServerRegion.get() == primary);
+	}
+	const std::vector<UID>& workSources() const { return sourceWork.present() ? sourceWork.get().servers() : src; }
+	const std::vector<UID>& queueSources() const {
+		// Known no-fetch work still needs an entry for overlap retries, but must not
+		// occupy any storage server's bounded queue lookahead. UID() is not a server.
+		static const std::vector<UID> noFetchQueue{ UID() };
+		return sourceWork.present() && sourceWork.get().servers().empty() ? noFetchQueue : workSources();
+	}
 
 	static bool isHealthPriority(int priority) {
 		return priority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
@@ -273,7 +302,7 @@ public:
 	std::set<RelocateData, std::greater<RelocateData>> fetchKeysComplete;
 	KeyRangeActorMap getSourceActors;
 	std::map<UID, std::set<RelocateData, std::greater<RelocateData>>>
-	    queue; // Key UID is serverID, value is the serverID's set of RelocateData to relocate
+	    queue; // ServerID -> queued source work; UID() holds known no-fetch work.
 	// Last read-rebalance proposal for each selected source server. Pace proposals while the selected team's
 	// sampled read load catches up; discovering other replicas of the range must not refresh this cooldown.
 	std::map<UID, double> lastAsSource;
@@ -312,6 +341,7 @@ public:
 	enum RetryFindDstReason {
 		None = 0,
 		RemoteBestTeamNotReady,
+		SourceInfoNotReady,
 		PrimaryNoHealthyTeam,
 		RemoteNoHealthyTeam,
 		RemoteTeamIsFull,

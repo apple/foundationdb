@@ -214,9 +214,9 @@ public:
 
 	std::string getServerIDsStr() const;
 
-	void addDataInFlightToTeam(int64_t delta) override;
+	void addDataInFlightToTeam(int64_t delta, const std::vector<UID>& excludedServers = {}) override;
 
-	void addReadInFlightToTeam(int64_t delta) override;
+	void addReadInFlightToTeam(int64_t delta, const std::vector<UID>& excludedServers = {}) override;
 
 	int64_t getDataInFlightToTeam() const override;
 

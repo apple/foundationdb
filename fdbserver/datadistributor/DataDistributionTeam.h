@@ -58,8 +58,8 @@ struct IDataDistributionTeam {
 	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
 	virtual int size() const = 0;
 	virtual std::vector<UID> const& getServerIDs() const = 0;
-	virtual void addDataInFlightToTeam(int64_t delta) = 0;
-	virtual void addReadInFlightToTeam(int64_t delta) = 0;
+	virtual void addDataInFlightToTeam(int64_t delta, const std::vector<UID>& excludedServers = {}) = 0;
+	virtual void addReadInFlightToTeam(int64_t delta, const std::vector<UID>& excludedServers = {}) = 0;
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual Optional<int64_t> getLongestStorageQueueSize() const = 0;
 	virtual Optional<int> getMaxOngoingBulkLoadTaskCount() const = 0;

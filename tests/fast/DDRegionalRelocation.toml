@@ -1,0 +1,61 @@
+# Exercise regional source admission with ordinary logical fetches. Simulation's
+# extra replica reads would otherwise select conservative all-source accounting.
+[configuration]
+minimumRegions = 2
+minimumReplication = 3
+generateFearless = true
+machineCount = 24
+extraMachineCountDC = 2
+processesPerMachine = 1
+storageEngineExcludeTypes = [5]
+buggify = false
+faultInjection = false
+
+[[knobs]]
+fetch_using_streaming = false
+enable_replica_consistency_check_on_data_movement = false
+dd_physical_shard_move_probability = 0.0
+enable_physical_shard_move_experiment = false
+shard_encode_location_metadata = true
+data_distribution_failure_reaction_time = 1.0
+initial_failure_reaction_delay = 0.0
+min_shard_bytes = 100000
+shard_bytes_per_sqrt_bytes = 0
+
+[[test]]
+testTitle = 'DDRegionalRelocationLoad'
+clearAfterTest = false
+runFailureWorkloads = false
+runConsistencyCheck = true
+waitForQuiescenceEnd = true
+connectionFailuresDisableDuration = 10000.0
+timeout = 600
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30000
+    transactionsPerSecond = 2500.0
+    testDuration = 1.0
+
+[[test]]
+testTitle = 'DDRegionalRelocation'
+runFailureWorkloads = false
+runConsistencyCheck = true
+waitForQuiescenceEnd = true
+# Keep this failure confined to one storage server after the initial load has
+# quiesced. Random connection failures can make both source regions unhealthy.
+connectionFailuresDisableDuration = 10000.0
+timeout = 600
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30000
+    skipSetup = true
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'TargetedKill'
+    machineToKill = 'storage'
+    numKillStorages = 1
+    killAt = 10.0
