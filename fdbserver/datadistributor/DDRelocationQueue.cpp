@@ -1033,7 +1033,6 @@ void DDQueue::completeSourceFetch(const RelocateData& results) {
 	for (int i = 0; i < results.src.size(); i++) {
 		queue[results.src[i]].insert(results);
 	}
-	updateLastAsSource(results.src);
 	serverCounter.increaseForTeam(results.src, results.reason, ServerCounter::CountType::QueuedSource);
 }
 
@@ -3319,6 +3318,59 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 		}
 	}
 	std::cout << "Finished.";
+}
+
+TEST_CASE("/DataDistribution/DDQueue/SourceDiscoveryPreservesReadRebalanceCooldown") {
+	DDQueue self;
+	const std::vector<UID> primary{ UID(1, 0), UID(2, 0), UID(3, 0) };
+	const std::vector<UID> remote{ UID(4, 0), UID(5, 0), UID(6, 0) };
+	RelocateData repair(RelocateShard(
+	    KeyRangeRef("a"_sr, "b"_sr), SERVER_KNOBS->PRIORITY_TEAM_2_LEFT, RelocateReason::OTHER, UID(7, 0)));
+	RelocateData read(RelocateShard(KeyRangeRef("b"_sr, "c"_sr),
+	                                DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM,
+	                                RelocateReason::REBALANCE_READ,
+	                                UID(8, 0)));
+	for (RelocateData* results : { &repair, &read }) {
+		results->src = primary;
+		results->src.insert(results->src.end(), remote.begin(), remote.end());
+		results->completeSources = results->src;
+	}
+	auto finishSourceDiscovery = [&self](RelocateData const& results) {
+		self.fetchingSourcesQueue.insert(results);
+		self.completeSourceFetch(results);
+	};
+
+	// Source discovery includes both regions even when only the remote team needs repair.
+	finishSourceDiscovery(repair);
+	ASSERT(self.lastAsSource.empty());
+	ASSERT(!self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+
+	const double cooldown =
+	    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL / SERVER_KNOBS->READ_REBALANCE_SRC_PARALLELISM;
+	const double proposedAt = now() - cooldown / 2;
+	self.updateLastAsSource(primary, proposedAt);
+	ASSERT(self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+	const auto proposalTimestamps = self.lastAsSource;
+
+	// Delayed or repeated source discovery must not extend the proposal's cooldown to either region.
+	for (RelocateData const* results : { &repair, &read }) {
+		finishSourceDiscovery(*results);
+		ASSERT(self.lastAsSource == proposalTimestamps);
+	}
+	ASSERT(self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+
+	self.updateLastAsSource(primary, now() - 2 * cooldown);
+	const auto expiredTimestamps = self.lastAsSource;
+	for (RelocateData const* results : { &repair, &read }) {
+		finishSourceDiscovery(*results);
+		ASSERT(self.lastAsSource == expiredTimestamps);
+	}
+	ASSERT(!self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+	return Void();
 }
 
 TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {
