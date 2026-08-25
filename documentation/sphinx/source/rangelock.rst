@@ -100,7 +100,7 @@ The bulkload-specific commands (``bulkload addlockowner`` / ``bulkload clearlock
 
 
 Using the C bindings
--------------------
+--------------------
 API version 800 exposes asynchronous database operations to register, remove,
 and list owners; take, release, and list exclusive read locks; and release all
 locks for an owner. See :ref:`c-range-locks` for the C interface, result memory
