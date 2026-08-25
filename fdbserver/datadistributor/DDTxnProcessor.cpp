@@ -19,7 +19,7 @@
  */
 
 #include "DDTxnProcessor.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ManagementAPI.h"
 #include "DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"

@@ -83,8 +83,9 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/Notified.h"
+#include "fdbclient/SimulationCapabilities.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/StorageServerShard.h"
 #include "fdbclient/SystemData.h"
@@ -1109,7 +1110,7 @@ public:
 		// With fault injection enabled, the tss will start acting normal for a bit, then after the specified delay
 		// start behaving incorrectly.
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
-		    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaFaultInjection)) {
+		    fdbSimulationHasCapability(FDBSimulationCapability::StorageReplicaFaultInjection)) {
 			tssFaultInjectTime = now() + deterministicRandom()->randomInt(60, 300);
 			TraceEvent(SevWarnAlways, "TSSInjectFaultEnabled", thisServerID)
 			    .detail("Mode", static_cast<int>(fdbSimulationPolicyState().tssMode))
@@ -3419,11 +3420,10 @@ Future<Key> findKey(StorageServer* data,
 	if (sel.offset <= 1 && sel.offset >= 0)
 		maxBytes = std::numeric_limits<int>::max();
 	else {
-		maxBytes =
-		    (g_network->isSimulated() &&
-		     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) && buggify())
-		        ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
-		        : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
+		maxBytes = (g_network->isSimulated() &&
+		            fdbSimulationHasCapability(FDBSimulationCapability::LimitStorageServerReadBytes) && buggify())
+		               ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
+		               : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 	}
 
 	GetKeyValuesReply rep = co_await readRange(data,
@@ -6091,12 +6091,11 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 
 				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
 				// had it enabled.
-				int byteLimit =
-				    (buggify() && g_network->isSimulated() &&
-				     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) &&
-				     !data->isTss() && !data->isSSWithTSSPair())
-				        ? 1
-				        : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+				int byteLimit = (buggify() && g_network->isSimulated() &&
+				                 fdbSimulationHasCapability(FDBSimulationCapability::LimitStorageServerReadBytes) &&
+				                 !data->isTss() && !data->isSSWithTSSPair())
+				                    ? 1
+				                    : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 				TraceEvent(SevDebug, "SSGetKeyValueStreamLimits")
 				    .detail("ByteLimit", byteLimit)
 				    .detail("ReqLimit", req.limit)
@@ -9874,7 +9873,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 
 			if (g_network->isSimulated() && data->isTss() &&
-			    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaDelay) &&
+			    fdbSimulationHasCapability(FDBSimulationCapability::StorageReplicaDelay) &&
 			    !g_simulator->speedUpSimulation && data->tssFaultInjectTime.present() &&
 			    data->tssFaultInjectTime.get() < now()) {
 				if (deterministicRandom()->random01() < 0.01) {
@@ -10125,7 +10124,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS
 					// in quarantine.
 					if (g_network->isSimulated() && data->isTss() && !g_simulator->speedUpSimulation &&
-					    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaMutationDrop) &&
+					    fdbSimulationHasCapability(FDBSimulationCapability::StorageReplicaMutationDrop) &&
 					    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
 					    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
 					    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&

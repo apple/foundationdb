@@ -3683,12 +3683,25 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				                                                       CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT,
 				                                                       5.0); // Poll every 5 seconds
 
+				// A bulkdump that did not finish leaves no keyspace snapshot, and therefore no bulkDumpJobId
+				// for a bulkload restore to locate its data. Reporting the backup as successful in that
+				// state claims delivery of something that was asked for and not produced: the caller finds
+				// out only much later, when a restore aborts with BulkLoadRestoreNoBulkDumpJobId and
+				// appears to blame the restore for a backup-side omission hours earlier.
+				//
+				// This also restores symmetry the path had lost. The dataset-completeness check below fails
+				// the backup for the same class of problem, but it sits inside the `completed` branch and so
+				// never ran on this route -- a timeout was the one way to skip every check and still report
+				// success. Mode restoration needs no handling here; the catch below already does it on the
+				// error path.
 				if (!completed) {
-					TraceEvent(SevWarn, "BulkDumpTaskTimeout")
+					TraceEvent(SevError, "BulkDumpTaskTimeout")
 					    .detail("BackupUID", config.getUid())
 					    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
-					    .detail("TimeoutDuration", 300.0);
+					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT)
+					    .detail("Reason", "BulkDump did not complete; backup would not be bulkload-restorable");
 					Params.timeoutOccurred().set(task, true);
+					throw backup_error();
 				}
 
 				TraceEvent("BulkDumpTaskComplete")

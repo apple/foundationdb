@@ -16,11 +16,11 @@ The client library provides a layered transaction API. From outside in: C API / 
 
 ## Transaction Layers
 
-### Layer 1: NativeAPI / Transaction -- `NativeAPI.actor.h:311-525`
+### Layer 1: NativeAPI / Transaction -- `NativeAPI.h:311-525`
 
 The raw transaction. Directly communicates with proxies and storage servers.
 
-**TransactionState** (`NativeAPI.actor.h:255-309`):
+**TransactionState** (`NativeAPI.h:255-309`):
 ```
 - Database cx                    // DatabaseContext reference
 - Future<Version> readVersionFuture
@@ -278,7 +278,7 @@ Management API exposed as key-value operations:
 | File | Purpose |
 |------|---------|
 | [`fdbclient/NativeAPI.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/NativeAPI.actor.cpp) | Core transaction implementation, tryCommit, getValue, getRange |
-| `fdbclient/include/fdbclient/NativeAPI.actor.h` | Transaction class, TransactionState |
+| `fdbclient/include/fdbclient/NativeAPI.h` | Transaction class, TransactionState |
 | [`fdbclient/ReadYourWrites.cpp`](https://github.com/apple/foundationdb/blob/main/fdbclient/ReadYourWrites.cpp) | RYW layer, write map, snapshot cache merging |
 | `fdbclient/include/fdbclient/DatabaseContext.h` | DatabaseContext: location cache, proxy tracking, watches |
 | [`fdbclient/include/fdbclient/CommitTransaction.h`](https://github.com/apple/foundationdb/blob/main/fdbclient/include/fdbclient/CommitTransaction.h) | MutationRef, CommitTransactionRef |
