@@ -129,9 +129,11 @@ Future<Optional<UID>> getNativeCdcProxyAssignmentForTag(Transaction* tr, Tag tar
 		const CDCStreamId streamId = decodeCDCTagOwnerValue(indexedStream.get());
 		Future<Optional<Value>> activeStream = tr->get(cdcStreamKeyFor(streamId));
 		RangeResult history = co_await tr->getRange(cdcTagHistoryRangeFor(streamId), 1, Snapshot::False, Reverse::True);
+		// Keep the await separate so GCC 13 does not evaluate history.front() before the short-circuit guards.
+		const Optional<Value> activeStreamValue = co_await activeStream;
 		// The index is derived: removal or retagging can invalidate its representative, and the per-stream
 		// assignment remains authoritative across proxy replacement, including by older metadata writers.
-		if ((co_await activeStream).present() && !history.empty() &&
+		if (activeStreamValue.present() && !history.empty() &&
 		    decodeCDCTagHistoryKey(history.front().key).tag == targetTag) {
 			Optional<UID> proxyId = co_await getNativeCdcProxyAssignment(tr, streamId);
 			if (proxyId.present()) {
