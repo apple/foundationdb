@@ -7240,6 +7240,28 @@ public:
 		co_await delay(0);
 	}
 
+	struct TimedRelocation {
+		double receivedAt;
+		RelocateShard request;
+	};
+
+	static Future<std::vector<TimedRelocation>> observePeriodicRelocations(
+	    FutureStream<RelocateShard> relocations,
+	    Reference<AsyncVar<bool>> processingUnhealthy) {
+		std::vector<TimedRelocation> observed;
+		observed.reserve(4);
+		for (int i = 0; i < 4; ++i) {
+			RelocateShard request = co_await relocations;
+			observed.push_back({ now(), std::move(request) });
+		}
+
+		// Close the observation window, then unwind the synchronous output.send() callback before
+		// the caller can destroy the collection.
+		processingUnhealthy->set(true);
+		co_await delay(0);
+		co_return observed;
+	}
+
 	static Future<Void> StorageServerFailureTracker_ReadyRecoverySkipsRemovalCheck() {
 		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 1);
 		auto txnProcessor = makeReference<DDTeamCollectionTestTxnProcessor>(collection->dbContext());
@@ -7497,11 +7519,19 @@ public:
 		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
 		ASSERT(!relocations.isReady());
 
-		co_await delay(checkTeamDelay + 0.01);
-		ASSERT(relocations.isReady());
-		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
-		ASSERT(relocations.isReady());
-		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		// A buggified observation delay can span multiple valid retry intervals. Observe the next
+		// four retries continuously and check that two trackers cannot send three requests within
+		// one polling interval.
+		const auto periodicRetries =
+		    co_await timeoutError(observePeriodicRelocations(relocations, collection->processingUnhealthy), 5.0);
+		for (const auto& retry : periodicRetries) {
+			ASSERT_EQ(retry.request.keys, mergedRange);
+			ASSERT_EQ(retry.request.priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		}
+		for (size_t i = 2; i < periodicRetries.size(); ++i) {
+			ASSERT_GE(periodicRetries[i].receivedAt + INetwork::TIME_EPS,
+			          periodicRetries[i - 2].receivedAt + checkTeamDelay);
+		}
 		ASSERT(!relocations.isReady());
 		ASSERT_NE(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
 		          initialTeamCollectionInfoTime);
