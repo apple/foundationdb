@@ -512,6 +512,60 @@ Future<bool> finishNativeCdcRetag(Transaction* tr, NativeCdcTagState expected) {
 	co_return true;
 }
 
+Future<NativeCdcRegistrationResult> prepareNativeCdcStreamRegistration(Transaction* tr,
+                                                                       Key name,
+                                                                       KeyRange keys,
+                                                                       UID proxyId) {
+	validateNativeCdcStream(name, keys);
+
+	const Key nameKey = cdcStreamNameKeyFor(name);
+	Optional<Value> currentId = co_await tr->get(nameKey);
+	if (currentId.present()) {
+		const CDCStreamId streamId = decodeCDCStreamNameValue(currentId.get());
+		Optional<Value> currentKeys = co_await tr->get(cdcStreamKeyFor(streamId));
+		if (!currentKeys.present() || decodeCDCStreamKeysValue(currentKeys.get()) != keys) {
+			throw client_invalid_operation();
+		}
+		if (!(co_await getNativeCdcProxyAssignment(tr, streamId)).present()) {
+			CODE_PROBE(true, "Native CDC registration restores missing stream owner", probe::decoration::rare);
+			const Tag tag = co_await getNativeCdcCurrentTag(tr, streamId);
+			Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(tr, tag);
+			CODE_PROBE(
+			    sharedTagProxy.present(), "Native CDC shared-tag streams use one owner", probe::decoration::rare);
+			const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
+			tr->set(cdcProxyKeyFor(streamId, selectedProxy), Value());
+			signalNativeCdcProxyAssignmentChange(tr);
+			co_return NativeCdcRegistrationResult{ streamId, true };
+		}
+		co_return NativeCdcRegistrationResult{ streamId, false };
+	}
+
+	// Disabling CDC stops new admission, but existing registrations and
+	// owner repair must remain available so durable streams can drain.
+	const bool nativeCdcEnabled = tr->getDatabase()->clientInfo->get().nativeCdcEnabled;
+	const int nativeCdcTagCount = tr->getDatabase()->clientInfo->get().nativeCdcTagCount;
+	validateNativeCdcEnabled(nativeCdcEnabled);
+	NativeCdcIdentifierAllocator allocator;
+	co_await observeNativeCdcMetadata(tr, &allocator);
+	const auto [streamId, tag] = allocator.allocate(nativeCdcTagCount);
+	// The read version is a conservative lower bound for tag routing.
+	// The versionstamped minimum below is the commit version, and stream
+	// initialization takes their maximum before exposing mutations.
+	const Version registrationVersion = co_await tr->getReadVersion();
+
+	tr->set(nameKey, cdcStreamNameValue(streamId));
+	tr->set(cdcMaxStreamIdKey, cdcMaxStreamIdValue(streamId));
+	tr->set(cdcStreamKeyFor(streamId), cdcStreamKeysValue(keys));
+	tr->set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
+	tr->atomicOp(
+	    cdcMinVersionKeyFor(streamId), cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
+	Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(tr, tag);
+	const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
+	tr->set(cdcProxyKeyFor(streamId, selectedProxy), Value());
+	signalNativeCdcProxyAssignmentChange(tr);
+	co_return NativeCdcRegistrationResult{ streamId, true };
+}
+
 Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, UID proxyId) {
 	validateNativeCdcStream(name, keys);
 
@@ -522,54 +576,12 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			const Key nameKey = cdcStreamNameKeyFor(name);
-			Optional<Value> currentId = co_await tr.get(nameKey);
-			if (currentId.present()) {
-				const CDCStreamId streamId = decodeCDCStreamNameValue(currentId.get());
-				Optional<Value> currentKeys = co_await tr.get(cdcStreamKeyFor(streamId));
-				if (!currentKeys.present() || decodeCDCStreamKeysValue(currentKeys.get()) != keys) {
-					throw client_invalid_operation();
-				}
-				if (!(co_await getNativeCdcProxyAssignment(&tr, streamId)).present()) {
-					CODE_PROBE(true, "Native CDC registration restores missing stream owner", probe::decoration::rare);
-					const Tag tag = co_await getNativeCdcCurrentTag(&tr, streamId);
-					Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
-					CODE_PROBE(sharedTagProxy.present(),
-					           "Native CDC shared-tag streams use one owner",
-					           probe::decoration::rare);
-					const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
-					tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
-					signalNativeCdcProxyAssignmentChange(&tr);
-					co_await tr.commit();
-				}
-				co_return streamId;
+			const NativeCdcRegistrationResult result =
+			    co_await prepareNativeCdcStreamRegistration(&tr, name, keys, proxyId);
+			if (result.requiresCommit) {
+				co_await tr.commit();
 			}
-
-			// Disabling CDC stops new admission, but existing registrations and
-			// owner repair must remain available so durable streams can drain.
-			const bool nativeCdcEnabled = cx->clientInfo->get().nativeCdcEnabled;
-			const int nativeCdcTagCount = cx->clientInfo->get().nativeCdcTagCount;
-			validateNativeCdcEnabled(nativeCdcEnabled);
-			NativeCdcIdentifierAllocator allocator;
-			co_await observeNativeCdcMetadata(&tr, &allocator);
-			const auto [streamId, tag] = allocator.allocate(nativeCdcTagCount);
-			// The read version is a conservative lower bound for tag routing.
-			// The versionstamped minimum below is the commit version, and stream
-			// initialization takes their maximum before exposing mutations.
-			const Version registrationVersion = co_await tr.getReadVersion();
-
-			tr.set(nameKey, cdcStreamNameValue(streamId));
-			tr.set(cdcMaxStreamIdKey, cdcMaxStreamIdValue(streamId));
-			tr.set(cdcStreamKeyFor(streamId), cdcStreamKeysValue(keys));
-			tr.set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
-			tr.atomicOp(
-			    cdcMinVersionKeyFor(streamId), cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
-			Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
-			const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
-			tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
-			signalNativeCdcProxyAssignmentChange(&tr);
-			co_await tr.commit();
-			co_return streamId;
+			co_return result.streamId;
 		} catch (Error& e) {
 			err = e;
 		}

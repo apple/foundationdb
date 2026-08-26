@@ -45,6 +45,20 @@ Future<Optional<std::vector<NativeCdcTagState>>> readNativeCdcTagStates(Transact
 Future<bool> retagNativeCdcStream(Transaction* tr, NativeCdcTagState expected, Tag destination);
 Future<bool> finishNativeCdcRetag(Transaction* tr, NativeCdcTagState expected);
 
+struct NativeCdcRegistrationResult {
+	CDCStreamId streamId;
+	// Describes only mutations prepared by this helper, not unrelated caller mutations.
+	bool requiresCommit;
+};
+
+// Prepares one registration without committing or retrying. The caller sets LOCK_AWARE and ACCESS_SYSTEM_KEYS
+// and owns commit and retry handling. Transaction does not read its own writes: prepare at most one registration
+// per transaction, without earlier mutations to the CDC metadata this operation reads.
+Future<NativeCdcRegistrationResult> prepareNativeCdcStreamRegistration(Transaction* tr,
+                                                                       Key name,
+                                                                       KeyRange keys,
+                                                                       UID proxyId);
+
 // Durable metadata operations used by CDC server roles. Registration is
 // feature gated; drain and cleanup operations remain available for streams
 // persisted before native CDC is disabled.

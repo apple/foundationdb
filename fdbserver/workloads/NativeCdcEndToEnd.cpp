@@ -482,6 +482,32 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 	}
 
+	Future<bool> retagLoadReady(Transaction* tr, Tag coldTag, Optional<Tag> hotTag = Optional<Tag>()) {
+		const Optional<Value> generation = co_await tr->get(cdcProxyAssignmentChangeKey);
+		const Version readVersion = co_await tr->getReadVersion();
+		const auto current = [&](CDCTagLoadSample const& sample) {
+			return generation.present() && sample.assignmentChange == generation.get() && sample.sampleVersion >= 0 &&
+			       sample.sampleVersion <= readVersion && sample.validThrough >= readVersion;
+		};
+		const Optional<Value> coldValue = co_await tr->get(cdcTagLoadKeyFor(coldTag));
+		if (!coldValue.present()) {
+			co_return false;
+		}
+		const CDCTagLoadSample cold = decodeCDCTagLoadValue(coldValue.get());
+		if (!current(cold) || cold.bytesWrittenPerKSecond != 0) {
+			co_return false;
+		}
+		if (hotTag.present()) {
+			const Optional<Value> hotValue = co_await tr->get(cdcTagLoadKeyFor(hotTag.get()));
+			if (!hotValue.present()) {
+				co_return false;
+			}
+			const CDCTagLoadSample hot = decodeCDCTagLoadValue(hotValue.get());
+			co_return current(hot) && hot.bytesWrittenPerKSecond > 0;
+		}
+		co_return true;
+	}
+
 	Future<Void> waitForRetagLoad(Database cx, Tag coldTag, Optional<Tag> hotTag = Optional<Tag>()) {
 		const double deadline = now() + operationTimeout;
 		Transaction tr(cx);
@@ -490,27 +516,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				const Optional<Value> generation = co_await tr.get(cdcProxyAssignmentChangeKey);
-				const Version readVersion = co_await tr.getReadVersion();
-				const auto current = [&](CDCTagLoadSample const& sample) {
-					return generation.present() && sample.assignmentChange == generation.get() &&
-					       sample.sampleVersion <= readVersion && sample.validThrough >= readVersion;
-				};
-				const Optional<Value> coldValue = co_await tr.get(cdcTagLoadKeyFor(coldTag));
-				bool ready = false;
-				if (coldValue.present()) {
-					const CDCTagLoadSample cold = decodeCDCTagLoadValue(coldValue.get());
-					ready = current(cold) && cold.bytesWrittenPerKSecond == 0;
-				}
-				if (ready && hotTag.present()) {
-					const Optional<Value> hotValue = co_await tr.get(cdcTagLoadKeyFor(hotTag.get()));
-					ready = false;
-					if (hotValue.present()) {
-						const CDCTagLoadSample hot = decodeCDCTagLoadValue(hotValue.get());
-						ready = current(hot) && hot.bytesWrittenPerKSecond > 0;
-					}
-				}
-				if (ready) {
+				if (co_await retagLoadReady(&tr, coldTag, hotTag)) {
 					co_return;
 				}
 				ASSERT_LT(now(), deadline);
@@ -522,6 +528,88 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
+	}
+
+	Future<Void> addStreamWithRetagLoad(Database cx, KeyRange keys, Tag coldTag, Tag hotTag) {
+		StreamState stream;
+		stream.name = Key(StringRef(format("native-cdc-e2e/stream/%04d", nextStreamNumber++)));
+		stream.keys = std::move(keys);
+		const double deadline = now() + operationTimeout;
+		const CDCProxyInterface proxy = co_await timeoutError(
+		    waitForAssignedProxy(cx, streams.front().consumer->position().streamId), operationTimeout);
+		std::unordered_map<Key, Version> attempts;
+		bool uncommittedRetryInjected = false;
+		bool commitRetryInjected = false;
+		bool ambiguousCommit = false;
+		bool confirmedCommit = false;
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				ASSERT_LT(now(), deadline);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				const Optional<Value> currentId = co_await tr.get(cdcStreamNameKeyFor(stream.name));
+				if (currentId.present()) {
+					// Our successful registration changes the sample generation. Recognize an ambiguous commit
+					// before waiting for another load sample, and prove it belongs to one of our guarded attempts.
+					ASSERT(ambiguousCommit);
+					const CDCStreamId streamId = decodeCDCStreamNameValue(currentId.get());
+					const Optional<NativeCdcTagState> state = co_await readNativeCdcTagState(&tr, streamId);
+					ASSERT(state.present() && !state.get().pending);
+					ASSERT_EQ(state.get().keys, stream.keys);
+					ASSERT_EQ(state.get().assignment.tag, coldTag);
+					const auto attempt = attempts.find(state.get().historyKey);
+					ASSERT(attempt != attempts.end());
+					ASSERT_GT(state.get().minVersion, state.get().assignment.version);
+					if (attempt->second != invalidVersion) {
+						ASSERT_EQ(state.get().minVersion, attempt->second);
+					}
+				} else {
+					// A recovery can expire a sample between separate transactions. Guard the actual allocation
+					// snapshot with ordinary reads, and recheck the guard after every transaction retry.
+					if (!(co_await retagLoadReady(&tr, coldTag, hotTag))) {
+						tr.reset();
+						co_await delay(0.05);
+						continue;
+					}
+				}
+				const NativeCdcRegistrationResult registration =
+				    co_await prepareNativeCdcStreamRegistration(&tr, stream.name, stream.keys, proxy.id());
+				if (currentId.present()) {
+					ASSERT_EQ(registration.streamId, decodeCDCStreamNameValue(currentId.get()));
+					if (registration.requiresCommit) {
+						co_await tr.commit();
+					}
+					confirmedCommit = true;
+					break;
+				}
+				ASSERT(registration.requiresCommit);
+				const Version readVersion = co_await tr.getReadVersion();
+				const Key historyKey = cdcTagHistoryKeyFor(registration.streamId, readVersion, coldTag);
+				auto attempt = attempts.try_emplace(historyKey, invalidVersion).first;
+				if (testRetagTransactionRetries && !uncommittedRetryInjected) {
+					uncommittedRetryInjected = true;
+					throw commit_unknown_result();
+				}
+				co_await tr.commit();
+				attempt->second = tr.getCommittedVersion();
+				if (testRetagTransactionRetries && !commitRetryInjected) {
+					commitRetryInjected = true;
+					throw commit_unknown_result();
+				}
+				break;
+			} catch (Error& e) {
+				ambiguousCommit |= e.code() == error_code_commit_unknown_result;
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+		ASSERT(!testRetagTransactionRetries || (uncommittedRetryInjected && confirmedCommit));
+		CODE_PROBE(uncommittedRetryInjected && confirmedCommit,
+		           "Native CDC throughput registration rechecks load after retries and recognizes its own commit");
+		stream.consumer = co_await timeoutError(createNativeCdcConsumer(cx, stream.name), operationTimeout);
+		streams.push_back(std::move(stream));
 	}
 
 	Future<RetagSnapshot> commitRetagFixture(Database cx,
@@ -723,9 +811,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		// so registration must use measured producer load rather than the otherwise preferable stream count.
 		Promise<Void> siblingWriterStop;
 		Future<Void> siblingWriter = writeRetagTraffic(cx, { sibling }, ledgers, siblingWriterStop.getFuture());
-		co_await waitForRetagLoad(cx, otherTag, originalTag);
 		const Key extraKey = keyForIndex(4);
-		co_await addStream(cx, KeyRange(KeyRangeRef(extraKey, keyAfter(extraKey))));
+		co_await timeoutError(
+		    addStreamWithRetagLoad(cx, KeyRange(KeyRangeRef(extraKey, keyAfter(extraKey))), otherTag, originalTag),
+		    operationTimeout);
 		const int extra = static_cast<int>(streams.size()) - 1;
 		ledgers.push_back(makeReference<RetagMarkerLedger>(extraKey));
 		const RetagSnapshot extraState = co_await readRetagSnapshot(cx, extra);
