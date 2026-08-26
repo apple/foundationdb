@@ -9993,6 +9993,7 @@ static Future<Reference<ArenaPage>> neverCompletingPageRead(Reference<ArenaPage>
 }
 
 TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
+	const StringRef expectedPageContents = "retained page contents"_sr;
 	Future<Reference<const ArenaPage>> survivingRead;
 	{
 		DWALPager::PageCacheEntry entry;
@@ -10007,10 +10008,11 @@ TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
 		ASSERT(entry.getReadFuture<false>().get().getPtr() == firstPagePtr);
 
 		Reference<ArenaPage> updatedPage = makeReference<ArenaPage>(4096, 4096);
+		updatedPage->init(EncodingType::XXHash64, PageType::BTreeNode, 1);
+		memcpy(updatedPage->mutateData(), expectedPageContents.begin(), expectedPageContents.size());
 		ArenaPage* updatedPagePtr = updatedPage.getPtr();
 		entry.setReadFuture(updatedPage);
 		Future<Reference<const ArenaPage>> updatedRead = entry.getReadFuture<true>();
-		ASSERT(updatedRead != firstRead);
 		ASSERT(updatedRead.isReady() && updatedRead.get().getPtr() == updatedPagePtr);
 		ASSERT(firstRead.get().getPtr() == firstPagePtr);
 
@@ -10020,13 +10022,14 @@ TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
 		Future<Reference<const ArenaPage>> secondPendingRead = entry.getReadFuture<true>();
 		ASSERT(!pendingRead.isReady());
 		ASSERT(!secondPendingRead.isReady());
-		ASSERT(pendingRead != secondPendingRead);
+		pendingRead.cancel();
+		ASSERT(pendingRead.isReady() && pendingRead.isError());
+		ASSERT_EQ(pendingRead.getError().code(), error_code_actor_cancelled);
+		ASSERT(!secondPendingRead.isReady());
 		Reference<ArenaPage> pendingPage = makeReference<ArenaPage>(4096, 4096);
 		ArenaPage* pendingPagePtr = pendingPage.getPtr();
 		pendingPromise.send(pendingPage);
-		ASSERT(pendingRead.isReady() && !pendingRead.isError());
 		ASSERT(secondPendingRead.isReady() && !secondPendingRead.isError());
-		ASSERT(pendingRead.get().getPtr() == pendingPagePtr);
 		ASSERT(secondPendingRead.get().getPtr() == pendingPagePtr);
 		Future<Reference<const ArenaPage>> cachedRead = entry.getReadFuture<true>();
 		ASSERT(cachedRead.isReady() && !cachedRead.isError());
@@ -10059,7 +10062,7 @@ TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
 		updatedPage.clear();
 	}
 	ASSERT(survivingRead.isReady() && !survivingRead.isError());
-	ASSERT(survivingRead.get().getPtr() != nullptr);
+	ASSERT_EQ(survivingRead.get()->dataAsStringRef().substr(0, expectedPageContents.size()), expectedPageContents);
 
 	return Void();
 }

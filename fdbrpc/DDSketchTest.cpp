@@ -66,8 +66,12 @@ TEST_CASE("/fdbrpc/ddsketch/samplePair") {
 	DDSketch<double> actualFirst;
 	DDSketch<double> actualSecond;
 
-	for (int i = 0; i < 4000; ++i) {
-		double sample = i % 17 == 0 ? 0.0 : deterministicRandom()->random01() * 2.0;
+	// Different histories must remain independent when adding shared samples.
+	expectedFirst.addSample(16.0);
+	actualFirst.addSample(16.0);
+
+	constexpr double eps = DDSketch<double>::EPS;
+	for (double sample : { 2.0, 1.0, 0.0, eps / 2, eps, eps * 2, 4.0, 2.0 }) {
 		expectedFirst.addSample(sample);
 		expectedSecond.addSample(sample);
 		actualFirst.addSamplePair(sample, actualSecond);
@@ -83,5 +87,10 @@ TEST_CASE("/fdbrpc/ddsketch/samplePair") {
 	ASSERT_EQ(expectedSecond.min(), actualSecond.min());
 	ASSERT_EQ(expectedFirst.max(), actualFirst.max());
 	ASSERT_EQ(expectedSecond.max(), actualSecond.max());
+	// getSamples() omits the separate zero population.
+	for (double percentile : { 0.0, 0.5 }) {
+		ASSERT_EQ(expectedFirst.percentile(percentile), actualFirst.percentile(percentile));
+		ASSERT_EQ(expectedSecond.percentile(percentile), actualSecond.percentile(percentile));
+	}
 	return Void();
 }

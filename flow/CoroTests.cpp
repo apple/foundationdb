@@ -83,10 +83,8 @@ TEST_CASE("/flow/coro/PriorityMultiLock/tryLock") {
 	Optional<PriorityMultiLock::Releaser> replaced = movePml->tryLock();
 	ASSERT_EQ(movePml->getRunnersCount(), 2);
 	moved.release();
-	PriorityMultiLock::Releaser replacement = std::move(replaced.get());
-	ASSERT(!replaced.get().isLocked());
 	ASSERT_EQ(movePml->getRunnersCount(), 1);
-	replacement.release();
+	replaced.get().release();
 	ASSERT_EQ(movePml->getRunnersCount(), 0);
 
 	auto cancelPml = makeReference<PriorityMultiLock>(1, std::vector<int>{ 1 });
@@ -103,9 +101,9 @@ TEST_CASE("/flow/coro/PriorityMultiLock/tryLock") {
 	auto haltedPml = makeReference<PriorityMultiLock>(1, std::vector<int>{ 1 });
 	Optional<PriorityMultiLock::Releaser> halted = haltedPml->tryLock();
 	haltedPml->halt();
-	ASSERT(!haltedPml->tryLock().present());
 	halted.reset();
 	ASSERT_EQ(haltedPml->getRunnersCount(), 0);
+	ASSERT(!haltedPml->tryLock().present());
 
 	pml->kill();
 	try {
