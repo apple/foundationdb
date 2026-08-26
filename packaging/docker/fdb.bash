@@ -30,7 +30,6 @@ function create_cluster_file() {
         elif [[ "$FDB_IP_VERSION" == '6' ]]; then
             coordinator_ip="[$(getent ahostsv6 $FDB_COORDINATOR | awk 'END{ print $1 }')]"
         fi
-        
         if [[ -z "$coordinator_ip" ]]; then
             echo "Failed to look up coordinator address for $FDB_COORDINATOR" 1>&2
             exit 1
@@ -72,53 +71,48 @@ function first_hostname_with_str() {
 function create_server_environment() {
     FDB_IP_VERSION=${FDB_IP_VERSION:-4}
 
+    if [[ "$FDB_IP_VERSION" == '4' ]]; then
+        FDB_LISTEN_IP=${FDB_LISTEN_IP:-'0.0.0.0'}
+    elif [[ "$FDB_IP_VERSION" == '6' ]]; then
+        FDB_LISTEN_IP=${FDB_LISTEN_IP:-'[::]'}
+    else
+        echo "Unknown FDB_IP_VERSION \"$FDB_IP_VERSION\"" 1>&2
+        exit 1
+    fi
     if [[ "$FDB_NETWORKING_MODE" == "host" ]]; then
         if [[ "$FDB_IP_VERSION" == '4' ]]; then
-            export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'0.0.0.0'}
             public_ip=127.0.0.1
         elif [[ "$FDB_IP_VERSION" == '6' ]]; then
-            export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'[::]'}
             public_ip='[::1]'
-        else
-            echo "Unknown FDB IP version \"$FDB_IP_VERSION\"" 1>&2
-            exit 1
         fi
     elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
         if [[ "$FDB_IP_VERSION" == '4' ]]; then
-            export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'0.0.0.0'}
             public_ip=${FDB_PUBLIC_IP:-"$(first_hostname_with_str '.')"}
         elif [[ "$FDB_IP_VERSION" == '6' ]]; then
-            export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'[::]'}
             public_ip=${FDB_PUBLIC_IP:-"[$(first_hostname_with_str ':')]"}
-        else
-            echo "Unknown FDB IP version \"$FDB_IP_VERSION\"" 1>&2
+        fi
+        if [[ $? != 0 ]]; then
+            echo "No valid IPv${FDB_IP_VERSION} address" 1>&2
             exit 1
         fi
     else
-        echo "Unknown networking mode \"$FDB_NETWORKING_MODE\"" 1>&2
+        echo "Unknown FDB Networking mode \"$FDB_NETWORKING_MODE\"" 1>&2
         exit 1
     fi
-    
-    if (( $? > 0 )); then
-        echo "No valid IP for IP version \"$FDB_IP_VERSION\"" 1>&2
-        exit 1
-    fi
-    
-    export FDB_PUBLIC_IP="$public_ip"
-    
+    export PUBLIC_IP="$public_ip"
 
     # Set default cluster file contents only if no other configuration is specified.
     if [[ (! -s "$FDB_CLUSTER_FILE") && -z "$FDB_CLUSTER_FILE_CONTENTS" && -z "$FDB_COORDINATOR" ]]; then
         echo "Warning: No configuration available, falling back to self-coordinated." 1>&2
-        FDB_CLUSTER_FILE_CONTENTS="docker:docker@$FDB_PUBLIC_IP:$FDB_PORT"
+        FDB_CLUSTER_FILE_CONTENTS="docker:docker@$public_ip:$FDB_PORT"
     fi
 
     create_cluster_file
 }
 
 create_server_environment
-echo "Starting FDB server on $FDB_PUBLIC_IP:$FDB_PORT, listening on $FDB_LISTEN_IP:$FDB_PORT"
-fdbserver --listen-address "$FDB_LISTEN_IP:$FDB_PORT" --public-address "$FDB_PUBLIC_IP:$FDB_PORT" \
+echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT, listening on $FDB_LISTEN_IP:$FDB_PORT"
+fdbserver --listen-address "$FDB_LISTEN_IP:$FDB_PORT" --public-address "$PUBLIC_IP:$FDB_PORT" \
     --datadir /var/fdb/data --logdir /var/fdb/logs \
     --locality-zoneid="$(hostname)" --locality-machineid="$(hostname)" --class "$FDB_PROCESS_CLASS" --knob_disable_posix_kernel_aio=1 \
     "$@"
