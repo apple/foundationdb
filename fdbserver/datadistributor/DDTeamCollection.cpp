@@ -3049,7 +3049,7 @@ public:
 		PromiseStream<Future<Void>> addTSSInProgress;
 		Future<Void> inProgressTSS =
 		    actorCollection(addTSSInProgress.getFuture(), &inProgressTSSCount, nullptr, nullptr, nullptr);
-		Reference<TSSPairState> tssState = makeReference<TSSPairState>();
+		auto tssState = makeReference<TSSPairState>();
 		Future<Void> checkTss = self->initialFailureReactionDelay;
 		bool pendingTSSCheck = false;
 
@@ -3487,7 +3487,7 @@ public:
 			TxnCounters* counters = updateStorageMetadataCounters();
 			KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 			    serverMetadataKeys.begin, IncludeVersion());
-			Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
+			auto tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
 
 			bool isTss = server->getLastKnownInterface().isTss();
 			// Update server's storeType, especially when it was created
@@ -7623,7 +7623,7 @@ TEST_CASE("/DataDistribution/GetTeam/DeprioritizeWigglePausedTeam") {
 }
 
 TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
-	Reference<StorageWiggler> wiggler = makeReference<StorageWiggler>(nullptr);
+	auto wiggler = makeReference<StorageWiggler>(nullptr);
 	double startTime = now();
 	wiggler->addServer(UID(1, 0),
 	                   StorageMetadataType(startTime - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 5.0,
@@ -7675,7 +7675,7 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
 TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithTSS") {
 	std::unique_ptr<DDTeamCollection> collection =
 	    DDTeamCollectionUnitTest::testMachineTeamCollection(1, makeReference<PolicyOne>(), 5);
-	Reference<StorageWiggler> wiggler = makeReference<StorageWiggler>(collection.get());
+	auto wiggler = makeReference<StorageWiggler>(collection.get());
 
 	std::cout << "Test when need TSS ... \n";
 	collection->configuration.usableRegions = 1;
