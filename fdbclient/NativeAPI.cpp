@@ -71,6 +71,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TransactionLineage.h"
+#include "fdbclient/VersionVector.h"
 #include "fdbclient/versions.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbrpc/LoadBalance.h"
@@ -1914,28 +1915,32 @@ Future<Key> getKey(Reference<TransactionState> trStateInput, KeySelector kInput)
 	}
 }
 
+namespace {
+
+// Each proxy retry must sample the live cache version and tracing context.
+class RawReadVersionRequestBuilder {
+	const VersionVector& versionVector;
+	const SpanContext& spanContext;
+
+public:
+	RawReadVersionRequestBuilder(const VersionVector& versionVector, const SpanContext& spanContext)
+	  : versionVector(versionVector), spanContext(spanContext) {}
+
+	GetReadVersionRequest build() const {
+		return GetReadVersionRequest(spanContext, 0, TransactionPriority::IMMEDIATE, versionVector.getMaxVersion());
+	}
+};
+
+} // namespace
+
 static Future<Version> waitForCommittedVersionImpl(Database cx, Version version, SpanContext spanContext) {
 	Span span("NAPI:waitForCommittedVersion"_loc, spanContext);
 	while (true) {
 		try {
-			// Reset proxy backoff before constructing a GRV request.
-			auto proxiesChanged = cx->onProxiesChanged();
-			if (proxiesChanged.isReady()) {
-				co_await proxiesChanged;
-				continue;
-			}
-			auto res = co_await race(std::move(proxiesChanged),
-			                         basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
-			                                          &GrvProxyInterface::getConsistentReadVersion,
-			                                          GetReadVersionRequest(span.context,
-			                                                                0,
-			                                                                TransactionPriority::IMMEDIATE,
-			                                                                cx->ssVersionVectorCache.getMaxVersion()),
-			                                          cx->taskID));
-			if (res.index() == 0) {
-				continue;
-			}
-			GetReadVersionReply v = std::get<1>(std::move(res));
+			GetReadVersionReply v = co_await grvProxyLoadBalance<ProxyChangePriority::ChangeFirst>(
+			    cx,
+			    RawReadVersionRequestBuilder(cx->ssVersionVectorCache, span.context),
+			    &GrvProxyInterface::getConsistentReadVersion);
 			cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 			if (v.midShardSize > 0)
 				cx->smoothMidShardSize.setTotal(v.midShardSize);
@@ -1971,34 +1976,256 @@ Future<Version> waitForCommittedVersion(Database const& cx, Version const& versi
 Future<Version> getRawVersion(Reference<TransactionState> trStateInput) {
 	Reference<TransactionState> trState(std::move(trStateInput));
 	Span span("NAPI:getRawVersion"_loc, trState->spanContext);
-	while (true) {
-		auto proxiesChanged = trState->cx->onProxiesChanged();
-		if (proxiesChanged.isReady()) {
-			co_await proxiesChanged;
-			continue;
+	GetReadVersionReply v = co_await grvProxyLoadBalance<ProxyChangePriority::ChangeFirst>(
+	    trState->cx,
+	    RawReadVersionRequestBuilder(trState->cx->ssVersionVectorCache, trState->spanContext),
+	    &GrvProxyInterface::getConsistentReadVersion);
+	if (trState->cx->versionVectorCacheActive(v.ssVersionVectorDelta)) {
+		if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
+			trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+		} else {
+			trState->cx->ssVersionVectorCache.clear();
 		}
-		auto res =
-		    co_await race(std::move(proxiesChanged),
-		                  basicLoadBalance(trState->cx->getGrvProxies(UseProvisionalProxies::False),
-		                                   &GrvProxyInterface::getConsistentReadVersion,
-		                                   GetReadVersionRequest(trState->spanContext,
-		                                                         0,
-		                                                         TransactionPriority::IMMEDIATE,
-		                                                         trState->cx->ssVersionVectorCache.getMaxVersion()),
-		                                   trState->cx->taskID));
-		if (res.index() == 0) {
-			continue;
-		}
-		GetReadVersionReply v = std::get<1>(std::move(res));
-		if (trState->cx->versionVectorCacheActive(v.ssVersionVectorDelta)) {
-			if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
-				trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
-			} else {
-				trState->cx->ssVersionVectorCache.clear();
-			}
-		}
-		co_return v.version;
 	}
+	co_return v.version;
+}
+
+TEST_CASE("/fdbclient/NativeAPI/grvProxyLoadBalance/liveRequestContext") {
+	VersionVector versionVector(101);
+	SpanContext spanContext(UID(1, 2), 3);
+	RawReadVersionRequestBuilder builder(versionVector, spanContext);
+	auto first = builder.build();
+
+	versionVector.setMaxVersion(202);
+	spanContext = SpanContext(UID(4, 5), 6);
+	auto second = builder.build();
+	ASSERT_EQ(first.maxVersion, 101);
+	ASSERT_EQ(first.spanContext.traceID, UID(1, 2));
+	ASSERT_EQ(first.spanContext.spanID, 3);
+	ASSERT_EQ(second.maxVersion, 202);
+	ASSERT_EQ(second.spanContext.traceID, UID(4, 5));
+	ASSERT_EQ(second.spanContext.spanID, 6);
+	ASSERT_EQ(second.transactionCount, 0);
+	ASSERT(second.priority == TransactionPriority::IMMEDIATE);
+	return Void();
+}
+
+namespace {
+
+class LocalGrvProxyTestContext : NonCopyable {
+	GrvProxyInterface proxy{};
+	IFailureMonitor& failureMonitor;
+	NetworkAddress address;
+	FailureStatus previousStatus;
+	Database cx;
+
+public:
+	LocalGrvProxyTestContext()
+	  : failureMonitor(IFailureMonitor::failureMonitor()),
+	    address(proxy.getConsistentReadVersion.getEndpoint().getPrimaryAddress()),
+	    previousStatus(failureMonitor.getState(address)), cx(new DatabaseContext(operation_failed())) {
+		// The error constructor starts no database monitors. Initialize the fields
+		// used by onProxiesChanged(), updateProxies(), and the GRV request builder.
+		proxy.provisional = false;
+		ClientDBInfo info;
+		info.id = UID(1, 1);
+		info.grvProxies.push_back(proxy);
+		cx->clientInfo = makeReference<AsyncVar<ClientDBInfo>>(info);
+		cx->proxiesLastChange = UID();
+		cx->proxyProvisional = false;
+		cx->commitProxies.clear();
+		cx->grvProxies.clear();
+		cx->taskID = TaskPriority::DefaultPromiseEndpoint;
+		cx->ssVersionVectorCache.setMaxVersion(101);
+		cx->updateProxies();
+		failureMonitor.setStatus(address, FailureStatus(false));
+	}
+
+	~LocalGrvProxyTestContext() {
+		// Tests declare their RPC and responder results after this fixture, so
+		// they are released before its model updater and endpoint-health guard.
+		cx = Database();
+		failureMonitor.setStatus(address, previousStatus);
+	}
+
+	const Database& database() const { return cx; }
+	FutureStream<GetReadVersionRequest> requests() const { return proxy.getConsistentReadVersion.getFuture(); }
+};
+
+template <class Build>
+class GrvProxyTestRequestBuilder {
+	Build buildRequest;
+
+public:
+	explicit GrvProxyTestRequestBuilder(const Build& buildRequest) : buildRequest(buildRequest) {}
+	GetReadVersionRequest build() const { return buildRequest(); }
+};
+
+template <class Respond>
+Future<Void> serveLocalGrvTestRequests(FutureStream<GetReadVersionRequest> requests, int count, Respond respond) {
+	for (int i = 0; i < count; ++i) {
+		GetReadVersionRequest request = co_await requests;
+		respond(request, i);
+	}
+	co_return;
+}
+
+} // namespace
+
+TEST_CASE("/fdbclient/NativeAPI/grvProxyLoadBalance/readyPriority") {
+	for (bool changeFirst : { false, true }) {
+		for (bool firstReplyFails : { false, true }) {
+			LocalGrvProxyTestContext fixture;
+			SpanContext spanContext;
+			RawReadVersionRequestBuilder raw(fixture.database()->ssVersionVectorCache, spanContext);
+			int builds = 0;
+			GrvProxyTestRequestBuilder builder([&]() {
+				if (++builds == 1) {
+					fixture.database()->proxiesChangeTrigger.trigger();
+				}
+				return raw.build();
+			});
+			const int expectedRequests = changeFirst ? 2 : 1;
+			auto responder = serveLocalGrvTestRequests(
+			    fixture.requests(), expectedRequests, [firstReplyFails](const GetReadVersionRequest& request, int i) {
+				    if (i == 0 && firstReplyFails) {
+					    request.reply.sendError(transaction_too_old());
+				    } else {
+					    GetReadVersionReply reply;
+					    reply.version = i == 0 ? 111 : 222;
+					    request.reply.send(reply);
+				    }
+			    });
+			// The local responder runs inside request dispatch. On the first
+			// ChangeFirst attempt, both the change and RPC are ready at race().
+			auto result =
+			    changeFirst
+			        ? grvProxyLoadBalance<ProxyChangePriority::ChangeFirst>(
+			              fixture.database(), builder, &GrvProxyInterface::getConsistentReadVersion)
+			        : grvProxyLoadBalance(fixture.database(), builder, &GrvProxyInterface::getConsistentReadVersion);
+			ASSERT(result.isReady());
+			ASSERT_EQ(result.isError(), !changeFirst && firstReplyFails);
+			if (result.isError()) {
+				ASSERT_EQ(result.getError().code(), error_code_transaction_too_old);
+			} else {
+				ASSERT_EQ(result.get().version, changeFirst ? 222 : 111);
+			}
+			ASSERT_EQ(builds, expectedRequests);
+			ASSERT(responder.isReady() && !responder.isError());
+		}
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/grvProxyLoadBalance/releasesRequestBeforeRetry") {
+	for (bool changeWhileBuilding : { false, true }) {
+		LocalGrvProxyTestContext fixture;
+		SpanContext spanContext;
+		RawReadVersionRequestBuilder raw(fixture.database()->ssVersionVectorCache, spanContext);
+		Optional<GetReadVersionRequest> firstRequest;
+		std::vector<Version> requestedVersions;
+		int builds = 0;
+		GrvProxyTestRequestBuilder builder([&]() {
+			if (++builds == 2) {
+				ASSERT(firstRequest.present());
+				ASSERT_EQ(firstRequest.get().reply.getFutureReferenceCount(), 0);
+			}
+			auto request = raw.build();
+			if (builds == 1 && changeWhileBuilding) {
+				fixture.database()->ssVersionVectorCache.setMaxVersion(202);
+				fixture.database()->proxiesChangeTrigger.trigger();
+			}
+			return request;
+		});
+		auto responder =
+		    serveLocalGrvTestRequests(fixture.requests(), 2, [&](const GetReadVersionRequest& request, int i) {
+			    requestedVersions.push_back(request.maxVersion);
+			    if (i == 0) {
+				    firstRequest = request;
+			    } else {
+				    GetReadVersionReply reply;
+				    reply.version = 222;
+				    request.reply.send(reply);
+			    }
+		    });
+		auto result = grvProxyLoadBalance<ProxyChangePriority::ChangeFirst>(
+		    fixture.database(), builder, &GrvProxyInterface::getConsistentReadVersion);
+		if (!changeWhileBuilding) {
+			ASSERT(!result.isReady());
+			ASSERT(firstRequest.present());
+			ASSERT(firstRequest.get().reply.getFutureReferenceCount() > 0);
+			fixture.database()->ssVersionVectorCache.setMaxVersion(202);
+			fixture.database()->proxiesChangeTrigger.trigger();
+		}
+		ASSERT(result.isReady() && !result.isError());
+		ASSERT_EQ(result.get().version, 222);
+		ASSERT_EQ(builds, 2);
+		ASSERT_EQ(requestedVersions.size(), 2);
+		ASSERT_EQ(requestedVersions[0], 101);
+		ASSERT_EQ(requestedVersions[1], 202);
+		ASSERT_EQ(firstRequest.get().reply.getFutureReferenceCount(), 0);
+		ASSERT(responder.isReady() && !responder.isError());
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/grvProxyLoadBalance/propagatesRpcErrors") {
+	for (const Error& error :
+	     { transaction_too_old(), batch_transaction_throttled(), grv_proxy_memory_limit_exceeded() }) {
+		LocalGrvProxyTestContext fixture;
+		SpanContext spanContext;
+		RawReadVersionRequestBuilder raw(fixture.database()->ssVersionVectorCache, spanContext);
+		int builds = 0;
+		GrvProxyTestRequestBuilder builder([&]() {
+			++builds;
+			return raw.build();
+		});
+		auto responder = serveLocalGrvTestRequests(
+		    fixture.requests(), 1, [&](const GetReadVersionRequest& request, int) { request.reply.sendError(error); });
+		auto result = grvProxyLoadBalance<ProxyChangePriority::ChangeFirst>(
+		    fixture.database(), builder, &GrvProxyInterface::getConsistentReadVersion);
+		ASSERT(result.isReady() && result.isError());
+		ASSERT_EQ(result.getError().code(), error.code());
+		ASSERT_EQ(builds, 1);
+		ASSERT(responder.isReady() && !responder.isError());
+		ASSERT_EQ(fixture.database()->proxiesChangeTrigger.onTrigger().getFutureReferenceCount(), 1);
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbclient/NativeAPI/grvProxyLoadBalance/cancelAndNotificationError") {
+	for (bool abandonNotification : { false, true }) {
+		LocalGrvProxyTestContext fixture;
+		SpanContext spanContext;
+		RawReadVersionRequestBuilder raw(fixture.database()->ssVersionVectorCache, spanContext);
+		Optional<GetReadVersionRequest> pendingRequest;
+		int builds = 0;
+		GrvProxyTestRequestBuilder builder([&]() {
+			++builds;
+			return raw.build();
+		});
+		auto responder = serveLocalGrvTestRequests(
+		    fixture.requests(), 1, [&](const GetReadVersionRequest& request, int) { pendingRequest = request; });
+		auto result = grvProxyLoadBalance<ProxyChangePriority::ChangeFirst>(
+		    fixture.database(), builder, &GrvProxyInterface::getConsistentReadVersion);
+		ASSERT(!result.isReady());
+		ASSERT(pendingRequest.present());
+		if (abandonNotification) {
+			fixture.database()->proxiesChangeTrigger = AsyncTrigger();
+		} else {
+			result.cancel();
+		}
+		ASSERT(result.isReady() && result.isError());
+		ASSERT_EQ(result.getError().code(),
+		          abandonNotification ? error_code_broken_promise : error_code_actor_cancelled);
+		ASSERT_EQ(builds, 1);
+		// Keep the completed result alive while checking that neither pending
+		// operation is retained by its coroutine frame.
+		ASSERT_EQ(pendingRequest.get().reply.getFutureReferenceCount(), 0);
+		ASSERT_EQ(fixture.database()->proxiesChangeTrigger.onTrigger().getFutureReferenceCount(), 1);
+		ASSERT(responder.isReady() && !responder.isError());
+	}
+	return Void();
 }
 
 Future<Version> watchValue(Database cxInput, Reference<const WatchParameters> parametersInput) {

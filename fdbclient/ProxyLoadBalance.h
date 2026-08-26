@@ -78,19 +78,39 @@ AsyncResult<REPLY_TYPE(Req)> commitProxyLoadBalance(Database cx,
 	return commitProxyLoadBalance(cx, reqBuilder, channel, UseProvisionalProxies::False, cx->taskID, atMostOnce);
 }
 
+enum class ProxyChangePriority { ReplyFirst, ChangeFirst };
+
 // Retries a GRV-proxy request whenever the proxy set changes before a reply arrives.
-template <class Req, class Builder, bool IsPublicStream>
+template <ProxyChangePriority priority = ProxyChangePriority::ReplyFirst, class Req, class Builder, bool IsPublicStream>
 AsyncResult<REPLY_TYPE(Req)> grvProxyLoadBalance(Database cx,
                                                  Builder reqBuilder,
                                                  RequestStream<Req, IsPublicStream> GrvProxyInterface::* channel,
                                                  AtMostOnce atMostOnce = AtMostOnce::False,
                                                  ExplicitVoid = {}) {
 	while (true) {
-		Future<REPLY_TYPE(Req)> replyFuture = basicLoadBalance(
-		    cx->getGrvProxies(UseProvisionalProxies::False), channel, reqBuilder.build(), cx->taskID, atMostOnce);
-		auto res = co_await race(replyFuture, cx->onProxiesChanged());
-		if (res.index() == 0) {
-			co_return std::get<0>(std::move(res));
+		if constexpr (priority == ProxyChangePriority::ChangeFirst) {
+			// Reset proxy backoff before constructing a request, and do not dispatch against an already-changed set.
+			auto proxiesChanged = cx->onProxiesChanged();
+			if (proxiesChanged.isReady()) {
+				co_await proxiesChanged;
+				continue;
+			}
+			auto res = co_await race(std::move(proxiesChanged),
+			                         basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
+			                                          channel,
+			                                          reqBuilder.build(),
+			                                          cx->taskID,
+			                                          atMostOnce));
+			if (res.index() == 1) {
+				co_return std::get<1>(std::move(res));
+			}
+		} else {
+			Future<REPLY_TYPE(Req)> replyFuture = basicLoadBalance(
+			    cx->getGrvProxies(UseProvisionalProxies::False), channel, reqBuilder.build(), cx->taskID, atMostOnce);
+			auto res = co_await race(replyFuture, cx->onProxiesChanged());
+			if (res.index() == 0) {
+				co_return std::get<0>(std::move(res));
+			}
 		}
 	}
 }
