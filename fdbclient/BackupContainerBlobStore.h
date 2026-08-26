@@ -64,8 +64,55 @@ public:
 	// Normalize and validate the value of the "prefix" URL parameter.  Strips leading and trailing
 	// slashes; an empty result selects the default bucket-root layout.  Throws backup_invalid_url
 	// if a path segment contains characters outside [A-Za-z0-9._-], a segment is empty, "." or "..",
-	// or the first segment is the reserved data or backups folder.
-	static std::string normalizePrefix(std::string prefix);
+	// or the first segment is the reserved data or backups folder.  If error is non-null, it is
+	// populated before throwing.
+	static std::string normalizePrefix(std::string prefix, std::string* error = nullptr) {
+		// Strip leading and trailing slashes; an empty result selects the default bucket-root layout.
+		size_t begin = prefix.find_first_not_of('/');
+		if (begin == std::string::npos) {
+			return "";
+		}
+		size_t end = prefix.find_last_not_of('/');
+		prefix = prefix.substr(begin, end - begin + 1);
+
+		auto invalidPrefix = [&]() {
+			if (error != nullptr) {
+				*error = "Invalid 'prefix' parameter value: '" + prefix + "'";
+			}
+			throw backup_invalid_url();
+		};
+		auto validSegment = [](const std::string& segment) {
+			return !segment.empty() && segment != "." && segment != "..";
+		};
+		auto isAsciiAlphanumeric = [](char c) {
+			return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+		};
+
+		// Validate character set and path segments.  Reject empty ("//"), "." and ".." segments so the
+		// prefix always denotes a well-formed key path that cannot traverse upward.
+		std::string segment;
+		for (auto c : prefix) {
+			if (c == '/') {
+				if (!validSegment(segment)) {
+					invalidPrefix();
+				}
+				segment.clear();
+				continue;
+			}
+			if (!isAsciiAlphanumeric(c) && c != '_' && c != '-' && c != '.') {
+				invalidPrefix();
+			}
+			segment += c;
+		}
+		if (!validSegment(segment)) {
+			invalidPrefix();
+		}
+		std::string firstSegment = prefix.substr(0, prefix.find('/'));
+		if (firstSegment == "data" || firstSegment == "backups") {
+			invalidPrefix();
+		}
+		return prefix;
+	}
 
 	Future<Reference<IAsyncFile>> readFile(const std::string& path) final;
 

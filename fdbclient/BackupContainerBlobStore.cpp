@@ -185,57 +185,13 @@ BackupContainerBlobStore::BackupContainerBlobStore(Reference<IBlobStoreEndpoint>
 			continue;
 		}
 		if (name == "prefix") {
-			m_prefix = normalizePrefix(value);
+			m_prefix = normalizePrefix(value, &IBackupContainer::lastOpenError);
 			continue;
 		}
 		TraceEvent(SevWarn, "BackupContainerBlobStoreInvalidParameter").detail("Name", name).detail("Value", value);
 		IBackupContainer::lastOpenError = format("Unknown URL parameter: '%s'", name.c_str());
 		throw backup_invalid_url();
 	}
-}
-
-std::string BackupContainerBlobStore::normalizePrefix(std::string prefix) {
-	// Strip leading and trailing slashes; an empty result selects the default bucket-root layout.
-	size_t begin = prefix.find_first_not_of('/');
-	if (begin == std::string::npos) {
-		return "";
-	}
-	size_t end = prefix.find_last_not_of('/');
-	prefix = prefix.substr(begin, end - begin + 1);
-
-	// Validate character set and path segments.  Reject empty ("//"), "." and ".." segments so the
-	// prefix always denotes a well-formed key path that cannot traverse upward.
-	std::string segment;
-	auto validSegment = [](const std::string& s) { return !s.empty() && s != "." && s != ".."; };
-	auto isAsciiAlphanumeric = [](char c) {
-		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
-	};
-	for (auto c : prefix) {
-		if (c == '/') {
-			if (!validSegment(segment)) {
-				IBackupContainer::lastOpenError = format("Invalid 'prefix' parameter value: '%s'", prefix.c_str());
-				throw backup_invalid_url();
-			}
-			segment.clear();
-			continue;
-		}
-		if (!isAsciiAlphanumeric(c) && c != '_' && c != '-' && c != '.') {
-			IBackupContainer::lastOpenError = format("Invalid 'prefix' parameter value: '%s'", prefix.c_str());
-			throw backup_invalid_url();
-		}
-		segment += c;
-	}
-	if (!validSegment(segment)) {
-		IBackupContainer::lastOpenError = format("Invalid 'prefix' parameter value: '%s'", prefix.c_str());
-		throw backup_invalid_url();
-	}
-	std::string firstSegment = prefix.substr(0, prefix.find('/'));
-	if (firstSegment == BackupContainerBlobStoreImpl::DATAFOLDER ||
-	    firstSegment == BackupContainerBlobStoreImpl::INDEXFOLDER) {
-		IBackupContainer::lastOpenError = format("Invalid 'prefix' parameter value: '%s'", prefix.c_str());
-		throw backup_invalid_url();
-	}
-	return prefix;
 }
 
 void BackupContainerBlobStore::addref() {
@@ -361,17 +317,30 @@ TEST_CASE("/backup/containers/blobstore/prefix") {
 	std::string resource;
 	std::string error;
 	IBlobStoreEndpoint::ParametersT backupParams;
-	Reference<IBlobStoreEndpoint> bstore =
-	    IBlobStoreEndpoint::fromString("blobstore://ak:sk@localhost:9999/some/container?bucket=bkt&prefix=/p1/p2/",
-	                                   {},
-	                                   &resource,
-	                                   &error,
-	                                   &backupParams);
+	Reference<IBlobStoreEndpoint> bstore = IBlobStoreEndpoint::fromString(
+	    "blobstore://ak:sk@localhost:9999/some/container?bucket=bkt&prefix=old&prefix=/p1/p2/",
+	    {},
+	    &resource,
+	    &error,
+	    &backupParams);
 	ASSERT(bstore.isValid());
 	ASSERT(resource == "some/container");
 	auto c = makeReference<BackupContainerBlobStore>(bstore, resource, backupParams, Optional<std::string>(), 0, true);
 	ASSERT(c->getBucket() == "bkt");
 	ASSERT(c->getPrefix() == "p1/p2");
+
+	// HTML entity decoding belongs to the component which reads a URL from HTML, not the URL parser.
+	std::string htmlResource;
+	IBlobStoreEndpoint::ParametersT htmlParams;
+	Reference<IBlobStoreEndpoint> htmlStore = IBlobStoreEndpoint::fromString(
+	    "blobstore://localhost:9999/some/container?bucket=bkt&amp;prefix=p", {}, &htmlResource, &error, &htmlParams);
+	ASSERT(htmlStore.isValid());
+	try {
+		makeReference<BackupContainerBlobStore>(htmlStore, htmlResource, htmlParams, Optional<std::string>(), 0, true);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
+	}
 
 	IBlobStoreEndpoint::ParametersT badParams = backupParams;
 	badParams["prefix"] = "has space";
