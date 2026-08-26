@@ -2504,8 +2504,8 @@ void getRangeFinished(Reference<TransactionState> trState,
 					const auto& reqAndResult = mappedKeyValue.reqAndResult;
 					if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
 						auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
-						extraConflictRanges->push_back(Future<std::pair<Key, Key>>(
-						    std::make_pair(getValue.key, keyAfter(getValue.key))));
+						extraConflictRanges->push_back(
+						    Future<std::pair<Key, Key>>(std::make_pair(getValue.key, keyAfter(getValue.key))));
 					} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResult)) {
 						auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
 						Key crBegin = getRange.begin.getKey();
@@ -2516,8 +2516,7 @@ void getRangeFinished(Reference<TransactionState> trState,
 								crEnd = keyAfter(getRange.result.end()[-1].key);
 							}
 						}
-						extraConflictRanges->push_back(
-						    Future<std::pair<Key, Key>>(std::make_pair(crBegin, crEnd)));
+						extraConflictRanges->push_back(Future<std::pair<Key, Key>>(std::make_pair(crBegin, crEnd)));
 					}
 				}
 			}
@@ -2564,8 +2563,15 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 
 		loop {
 			if (end.getKey() == allKeys.begin && (end.offset < 1 || end.isFirstGreaterOrEqual())) {
-				getRangeFinished(
-				    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, output);
+				getRangeFinished(trState,
+				                 startTime,
+				                 originalBegin,
+				                 originalEnd,
+				                 snapshot,
+				                 conflictRange,
+				                 extraConflictRanges,
+				                 reverse,
+				                 output);
 				return output;
 			}
 
@@ -2721,8 +2727,15 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						output = copy;
 						output.more = true;
 
-						getRangeFinished(
-						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, output);
+						getRangeFinished(trState,
+						                 startTime,
+						                 originalBegin,
+						                 originalEnd,
+						                 snapshot,
+						                 conflictRange,
+						                 extraConflictRanges,
+						                 reverse,
+						                 output);
 						return output;
 					}
 
@@ -2734,8 +2747,15 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						output.setReadThrough(reverse ? shard.begin : shard.end);
 					}
 
-					getRangeFinished(
-					    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, output);
+					getRangeFinished(trState,
+					                 startTime,
+					                 originalBegin,
+					                 originalEnd,
+					                 snapshot,
+					                 conflictRange,
+					                 extraConflictRanges,
+					                 reverse,
+					                 output);
 					if (!output.more) {
 						ASSERT(!output.readThrough.present());
 					}
@@ -2752,8 +2772,15 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						output.setReadThrough(reverse ? shard.begin : shard.end);
 					}
 
-					getRangeFinished(
-					    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, output);
+					getRangeFinished(trState,
+					                 startTime,
+					                 originalBegin,
+					                 originalEnd,
+					                 snapshot,
+					                 conflictRange,
+					                 extraConflictRanges,
+					                 reverse,
+					                 output);
 					if (!output.more) {
 						ASSERT(!output.readThrough.present());
 					}
@@ -2768,8 +2795,15 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						RangeResultFamily result = wait(
 						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
 						        trState, originalBegin, originalEnd, mapper, originalLimits, reverse));
-						getRangeFinished(
-						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, result);
+						getRangeFinished(trState,
+						                 startTime,
+						                 originalBegin,
+						                 originalEnd,
+						                 snapshot,
+						                 conflictRange,
+						                 extraConflictRanges,
+						                 reverse,
+						                 result);
 						return result;
 					}
 
@@ -2798,8 +2832,15 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						RangeResultFamily result = wait(
 						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
 						        trState, originalBegin, originalEnd, mapper, originalLimits, reverse));
-						getRangeFinished(
-						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, result);
+						getRangeFinished(trState,
+						                 startTime,
+						                 originalBegin,
+						                 originalEnd,
+						                 snapshot,
+						                 conflictRange,
+						                 extraConflictRanges,
+						                 reverse,
+						                 result);
 						return result;
 					}
 
