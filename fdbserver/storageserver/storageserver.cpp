@@ -5087,10 +5087,6 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 	Key beginKey = range.begin;
 	output->lastKey = KeyRef(output->arena, range.begin);
 	bool immediateError = true;
-	// Cause of a first-read failure, rethrown below. Collapsing it into retry() would hide the one
-	// distinction the caller acts on: it gives up immediately on wrong_shard_server (a stale range
-	// assignment, which no amount of retrying against this server can fix) and retries anything else.
-	Error firstReadError;
 	// Accumulate data read from local storage to output->kvs and make sampling until any error presents
 	while (true) {
 		// Read data and stop for any error
@@ -5122,7 +5118,10 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 			    .detail("Version", version)
 			    .detail("FirstRead", immediateError);
 			if (immediateError) {
-				firstReadError = e;
+				// Rethrow rather than collapsing into retry(): the caller gives up immediately on
+				// wrong_shard_server -- a stale range assignment, which no amount of retrying against
+				// this server can fix -- and retries anything else.
+				throw e;
 			}
 			break;
 		}
@@ -5161,9 +5160,9 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 		beginKey = keyAfter(output->lastKey);
 	}
 
-	if (immediateError) {
-		throw firstReadError.isValid() ? firstReadError : retry();
-	}
+	// A first-read failure throws from the catch above, so reaching here means at least one read
+	// succeeded. immediateError is cleared immediately after the try/catch, before any other break.
+	ASSERT(!immediateError);
 }
 
 // The SS actor handling bulk dump task sent from DD.
