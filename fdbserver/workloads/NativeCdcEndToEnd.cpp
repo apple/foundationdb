@@ -613,12 +613,22 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	                                         CDCProxyInterface proxy,
 	                                         Key name,
 	                                         KeyRange keys,
-	                                         UID expectedOwner) {
+	                                         Optional<CDCStreamId> sharedTagStream = Optional<CDCStreamId>()) {
 		const CDCRegisterStreamReply reply = co_await timeoutError(
 		    proxy.registerStream.getReply(CDCRegisterStreamRequest(name, keys)), operationTimeout);
-		const CDCProxyInterface owner =
-		    co_await timeoutError(waitForAssignedProxy(cx, reply.streamId), operationTimeout);
-		ASSERT_EQ(owner.id(), expectedOwner);
+		co_await timeoutError(waitForAssignedProxy(cx, reply.streamId), operationTimeout);
+		// Recovery can replace the owner while registration or consumption is in flight. Compare live streams
+		// in the same published snapshot instead of retaining a proxy ID across those waits.
+		const auto& assignments = cx->clientInfo->get().streamToCDCProxyId;
+		const auto owner = assignments.find(reply.streamId);
+		ASSERT(owner != assignments.end());
+		UID expectedOwner = proxy.id();
+		if (sharedTagStream.present()) {
+			const auto sharedOwner = assignments.find(sharedTagStream.get());
+			ASSERT(sharedOwner != assignments.end());
+			expectedOwner = sharedOwner->second;
+		}
+		ASSERT_EQ(owner->second, expectedOwner);
 		co_return reply.streamId;
 	}
 
@@ -640,7 +650,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await checkTagOwner(cx, tag, firstId);
 
 		// The public client usually chooses the first proxy, which cannot distinguish an index hit from caller choice.
-		const CDCStreamId removedId = co_await registerThroughProxy(cx, other, secondName, keys, owner.id());
+		const CDCStreamId removedId = co_await registerThroughProxy(cx, other, secondName, keys, firstId);
 		co_await checkTagOwner(cx, tag, firstId);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, secondName), operationTimeout);
 		co_await checkTagOwner(cx, tag, firstId);
@@ -648,7 +658,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		for (const Optional<CDCStreamId> invalidAnchor :
 		     { Optional<CDCStreamId>(), Optional<CDCStreamId>(removedId) }) {
 			co_await overwriteTagOwnerForTesting(cx, tag, invalidAnchor);
-			co_await registerThroughProxy(cx, other, secondName, keys, owner.id());
+			co_await registerThroughProxy(cx, other, secondName, keys, firstId);
 			co_await checkTagOwner(cx, tag, firstId);
 			co_await timeoutError(removeNativeCdcStreamClient(cx, secondName), operationTimeout);
 		}
@@ -662,20 +672,20 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		proxies = cx->clientInfo->get().cdcProxies;
 		ASSERT_EQ(proxies.size(), 2);
 		other = proxies[proxies.front().id() == owner.id() ? 1 : 0];
-		const CDCStreamId secondId = co_await registerThroughProxy(cx, other, secondName, keys, owner.id());
+		const CDCStreamId secondId = co_await registerThroughProxy(cx, other, secondName, keys, firstId);
 		co_await checkTagOwner(cx, tag, firstId);
 		co_await consumeThroughValue(consumer, committed, key, value);
 
 		co_await timeoutError(removeNativeCdcStreamClient(cx, firstName), operationTimeout);
 		co_await checkTagOwner(cx, tag, Optional<CDCStreamId>());
-		co_await registerThroughProxy(cx, other, thirdName, keys, owner.id());
+		co_await registerThroughProxy(cx, other, thirdName, keys, secondId);
 		co_await checkTagOwner(cx, tag, secondId);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, thirdName), operationTimeout);
 		co_await checkTagOwner(cx, tag, secondId);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, secondName), operationTimeout);
 		co_await checkTagOwner(cx, tag, Optional<CDCStreamId>());
 
-		const CDCStreamId reusedId = co_await registerThroughProxy(cx, other, firstName, keys, other.id());
+		const CDCStreamId reusedId = co_await registerThroughProxy(cx, other, firstName, keys);
 		co_await checkTagOwner(cx, tag, reusedId);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, firstName), operationTimeout);
 		co_await checkTagOwner(cx, tag, Optional<CDCStreamId>());
