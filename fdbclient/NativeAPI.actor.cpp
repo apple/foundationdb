@@ -2444,7 +2444,6 @@ int64_t inline getRangeResultFamilyBytes(MappedRangeResultRef result) {
 	return bytes;
 }
 
-// TODO: Client should add mapped keys to conflict ranges.
 template <class RangeResultFamily> // RangeResult or MappedRangeResult
 void getRangeFinished(Reference<TransactionState> trState,
                       double startTime,
@@ -2452,6 +2451,7 @@ void getRangeFinished(Reference<TransactionState> trState,
                       KeySelector end,
                       Snapshot snapshot,
                       Promise<std::pair<Key, Key>> conflictRange,
+                      std::vector<Future<std::pair<Key, Key>>>* extraConflictRanges,
                       Reverse reverse,
                       RangeResultFamily result) {
 	int64_t bytes = getRangeResultFamilyBytes(result);
@@ -2494,6 +2494,34 @@ void getRangeFinished(Reference<TransactionState> trState,
 		}
 
 		conflictRange.send(std::make_pair(rangeBegin, rangeEnd));
+
+		// For MappedRangeResult, add conflict ranges covering the secondary lookups
+		// (the keys/ranges the storage server fetched via the mapper). Without these,
+		// concurrent writes to mapped keys would not cause conflicts.
+		if constexpr (std::is_same_v<RangeResultFamily, MappedRangeResult>) {
+			if (extraConflictRanges) {
+				for (const auto& mappedKeyValue : result) {
+					const auto& reqAndResult = mappedKeyValue.reqAndResult;
+					if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
+						auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
+						extraConflictRanges->push_back(Future<std::pair<Key, Key>>(
+						    std::make_pair(getValue.key, keyAfter(getValue.key))));
+					} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResult)) {
+						auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
+						Key crBegin = getRange.begin.getKey();
+						Key crEnd = getRange.end.getKey();
+						if (getRange.result.size() > 0) {
+							crBegin = std::min(crBegin, getRange.result[0].key);
+							if (crEnd <= getRange.result.end()[-1].key) {
+								crEnd = keyAfter(getRange.result.end()[-1].key);
+							}
+						}
+						extraConflictRanges->push_back(
+						    Future<std::pair<Key, Key>>(std::make_pair(crBegin, crEnd)));
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -2509,6 +2537,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
                                    Key mapper,
                                    GetRangeLimits limits,
                                    Promise<std::pair<Key, Key>> conflictRange,
+                                   std::vector<Future<std::pair<Key, Key>>>* extraConflictRanges,
                                    Snapshot snapshot,
                                    Reverse reverse) {
 	//	state using RangeResultRefFamily = typename RangeResultFamily::RefType;
@@ -2536,7 +2565,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 		loop {
 			if (end.getKey() == allKeys.begin && (end.offset < 1 || end.isFirstGreaterOrEqual())) {
 				getRangeFinished(
-				    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+				    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, output);
 				return output;
 			}
 
@@ -2693,7 +2722,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						output.more = true;
 
 						getRangeFinished(
-						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, output);
 						return output;
 					}
 
@@ -2706,7 +2735,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					}
 
 					getRangeFinished(
-					    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+					    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, output);
 					if (!output.more) {
 						ASSERT(!output.readThrough.present());
 					}
@@ -2724,7 +2753,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					}
 
 					getRangeFinished(
-					    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+					    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, output);
 					if (!output.more) {
 						ASSERT(!output.readThrough.present());
 					}
@@ -2740,7 +2769,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
 						        trState, originalBegin, originalEnd, mapper, originalLimits, reverse));
 						getRangeFinished(
-						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
+						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, result);
 						return result;
 					}
 
@@ -2770,7 +2799,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
 						        trState, originalBegin, originalEnd, mapper, originalLimits, reverse));
 						getRangeFinished(
-						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
+						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, extraConflictRanges, reverse, result);
 						return result;
 					}
 
@@ -3653,7 +3682,7 @@ Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin
 	}
 
 	return ::getRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
-	    trState, b, e, mapper, limits, conflictRange, snapshot, reverse);
+	    trState, b, e, mapper, limits, conflictRange, &extraConflictRanges, snapshot, reverse);
 }
 
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
