@@ -261,10 +261,6 @@ Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 								initWithNewMetrics = false;
 							}
 						}
-						if (keys.begin >= systemKeys.begin) {
-							self()->systemSizeEstimate +=
-							    metrics.first.get().bytes - shardMetrics->get().get().metrics.bytes;
-						}
 					}
 
 					shardMetrics->set(ShardMetrics(metrics.first.get(), lastLowBandwidthStartTime, shardCount));
@@ -328,13 +324,8 @@ Future<Void> changeSizes(DataDistributionTracker* self,
                          int64_t oldShardsEndingSize,
                          std::string context) {
 	std::vector<Future<int64_t>> sizes;
-	std::vector<Future<int64_t>> systemSizes;
 	for (auto it : self->shards->intersectingRanges(keys)) {
-		Future<int64_t> thisSize = getFirstSize(it->value().stats);
-		sizes.push_back(thisSize);
-		if (it->range().begin >= systemKeys.begin) {
-			systemSizes.push_back(thisSize);
-		}
+		sizes.push_back(getFirstSize(it->value().stats));
 	}
 
 	co_await waitForAll(sizes);
@@ -345,11 +336,6 @@ Future<Void> changeSizes(DataDistributionTracker* self,
 		newShardsStartingSize += size.get();
 	}
 
-	int64_t newSystemShardsStartingSize = 0;
-	for (const auto& systemSize : systemSizes) {
-		newSystemShardsStartingSize += systemSize.get();
-	}
-
 	int64_t totalSizeEstimate = self->dbSizeEstimate->get();
 	DisabledTraceEvent("TrackerChangeSizes")
 	    .detail("Context", "changeSizes when " + context)
@@ -358,10 +344,6 @@ Future<Void> changeSizes(DataDistributionTracker* self,
 	    .detail("EndSizeOfOldShards", oldShardsEndingSize)
 	    .detail("StartingSizeOfNewShards", newShardsStartingSize);
 	self->dbSizeEstimate->set(totalSizeEstimate + newShardsStartingSize - oldShardsEndingSize);
-	self->systemSizeEstimate += newSystemShardsStartingSize;
-	if (keys.begin >= systemKeys.begin) {
-		self->systemSizeEstimate -= oldShardsEndingSize;
-	}
 }
 
 struct HasBeenTrueFor : ReferenceCounted<HasBeenTrueFor> {
@@ -676,8 +658,6 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 		    .detail("LastLowBandwidthStartTime", lastLowBandwidthStartTime);
 	}
 
-	int64_t systemBytes = keys.begin >= systemKeys.begin ? shardSize->get().get().metrics.bytes : 0;
-
 	while (true) {
 		Optional<ShardMetrics> newMetrics;
 		if (!forwardComplete) {
@@ -751,9 +731,6 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 		endingStats += newMetrics.get().metrics;
 		shardCount += newMetrics.get().shardCount;
 		lastLowBandwidthStartTime = newMetrics.get().lastLowBandwidthStartTime;
-		if ((forwardComplete ? prevIter->range().begin : nextIter->range().begin) >= systemKeys.begin) {
-			systemBytes += newMetrics.get().metrics.bytes;
-		}
 		shardsMerged++;
 
 		auto shardBounds = getShardSizeBounds(merged, maxShardSize);
@@ -784,9 +761,6 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			// If going forward, remove most recently added range
 			endingStats -= newMetrics.get().metrics;
 			shardCount -= newMetrics.get().shardCount;
-			if (nextIter->range().begin >= systemKeys.begin) {
-				systemBytes -= newMetrics.get().metrics.bytes;
-			}
 			--nextIter;
 			merged = KeyRangeRef(prevIter->range().begin, nextIter->range().end);
 			forwardComplete = true;
@@ -818,9 +792,6 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	    .detail("LastLowBandwidthStartTime", lastLowBandwidthStartTime)
 	    .detail("ShardCount", shardCount);
 
-	if (mergeRange.begin < systemKeys.begin) {
-		self->systemSizeEstimate -= systemBytes;
-	}
 	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
 	self->output.send(RelocateShard(mergeRange, DataMovementReason::MERGE_SHARD, RelocateReason::MERGE_SHARD));
@@ -1233,7 +1204,7 @@ void triggerStorageQueueRebalance(DataDistributionTracker* self, RebalanceStorag
 
 DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitParams const& params)
   : IDDShardTracker(), db(params.db), distributorId(params.distributorId), shards(params.shards), actors(false),
-    systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
+    dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
     output(params.output), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     physicalShardCollection(params.physicalShardCollection), bulkLoadTaskCollection(params.bulkLoadTaskCollection),
     readyToStart(params.readyToStart), anyZeroHealthyTeams(params.anyZeroHealthyTeams),
@@ -1256,13 +1227,65 @@ struct DataDistributionTrackerImpl {
 		}
 	}
 
+	// Computes the size of the system keyspace, and the whole database, directly from the shard map.
+	//
+	// Why: the incrementally maintained systemSizeEstimate was observed drifting in BOTH directions on a
+	// 998-process cluster -- +10.98 TB against a true ~26 GB over ~2 days while shard merges were starved
+	// by an exclude (PriorityMergeShard 340 < PriorityTeamUnhealthy 700), and -5.8 GB over 2 h while
+	// merges dominated. Neither tracked reality. Note the counter is per-DD-instance and resets to 0 on
+	// DD restart, which masks the drift and makes it easy to miss.
+	//
+	// The root cause is NOT established. The incremental arithmetic it replaced looks correct on review:
+	// the asymmetry in changeSizes() (unconditional add, guarded subtract) is right, because a shard whose
+	// range began below \xff was never counted as system and so has nothing to subtract; and the
+	// shardMerger() guard `mergeRange.begin < systemKeys.begin` is deliberate -- added by 8f0348d5e0
+	// ("fix: merges which cross over systemKeys.begin did not properly decrement the systemSizeEstimate")
+	// to remove system bytes that got folded into a merged shard which is itself not a system shard.
+	//
+	// Remaining suspects, neither confirmed:
+	//   * changeSizes() captures oldShardsEndingSize at call time but reads the new sizes after
+	//     `co_await waitForAll(sizes)` and `co_await yield()`, so add and subtract can describe different
+	//     shard populations under concurrent churn.
+	//   * merges preset the new tracker via restartShardTrackers(..., ShardMetrics(endingStats, ...)),
+	//     where endingStats is a sum of stale per-shard estimates, folding that error into the counter.
+	//
+	// Since these values are reporting-only (status' system_kv_size_bytes / sum of key-value sizes), an
+	// exact sum is preferable to incremental arithmetic across async boundaries: it cannot drift for any
+	// of the above reasons. intersectingRanges(systemKeys) visits only the system portion of the map.
+	//
+	// dbSizeEstimate is deliberately left in place and reported alongside a ground-truth total, so that
+	// any drift in IT becomes measurable -- it shares both remaining suspects, and unlike the system
+	// counter it feeds getMaxShardSize() and therefore real shard-sizing decisions.
+	static int64_t computeSystemSizeBytes(DataDistributionTracker* self) {
+		int64_t systemSizeBytes = 0;
+		for (auto it : self->shards->intersectingRanges(systemKeys)) {
+			if (it->value().stats->get().present()) {
+				systemSizeBytes += it->value().stats->get().get().metrics.bytes;
+			}
+		}
+		return systemSizeBytes;
+	}
+
+	static int64_t computeTotalSizeBytes(DataDistributionTracker* self) {
+		int64_t totalSizeBytes = 0;
+		for (auto it : self->shards->intersectingRanges(allKeys)) {
+			if (it->value().stats->get().present()) {
+				totalSizeBytes += it->value().stats->get().get().metrics.bytes;
+			}
+		}
+		return totalSizeBytes;
+	}
+
 	static Future<Void> logDDTrackerStats(DataDistributionTracker* self) {
 		auto ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
 		while (true) {
+			int64_t totalGroundTruth = computeTotalSizeBytes(self);
 			TraceEvent("DDTrackerStats", self->distributorId)
 			    .detail("Shards", self->shards->size())
 			    .detail("TotalSizeBytes", self->dbSizeEstimate->get())
-			    .detail("SystemSizeBytes", self->systemSizeEstimate)
+			    .detail("SystemSizeBytes", computeSystemSizeBytes(self))
+			    .detail("TotalSizeGroundTruth", totalGroundTruth)
+			    .detail("TotalSizeDrift", self->dbSizeEstimate->get() - totalGroundTruth)
 			    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
 			co_await delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 		}

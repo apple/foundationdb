@@ -63,7 +63,6 @@ public:
 	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	ActorCollection actors;
 
-	int64_t systemSizeEstimate = 0;
 	Reference<AsyncVar<int64_t>> dbSizeEstimate;
 	Reference<AsyncVar<Optional<int64_t>>> maxShardSize;
 	Future<Void> maxShardSizeUpdater;
