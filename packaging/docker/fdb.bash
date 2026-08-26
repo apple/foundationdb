@@ -72,22 +72,38 @@ function first_hostname_with_str() {
 function create_server_environment() {
     FDB_IP_VERSION=${FDB_IP_VERSION:-4}
 
-    if [[ "$FDB_IP_VERSION" == '4' ]]; then
-        export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'0.0.0.0'}
-        public_ip=${FDB_PUBLIC_IP:-"$(first_hostname_with_str '.')"}
-    elif [[ "$FDB_IP_VERSION" == '6' ]]; then
-        export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'[::]'}
-        public_ip=${FDB_PUBLIC_IP:-"[$(first_hostname_with_str ':')]"}
+    if [[ "$FDB_NETWORKING_MODE" == "host" ]]; then
+        if [[ "$FDB_IP_VERSION" == '4' ]]; then
+            export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'0.0.0.0'}
+            public_ip=127.0.0.1
+        elif [[ "$FDB_IP_VERSION" == '6' ]]; then
+            export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'[::]'}
+            public_ip='[::1]'
+        else
+            echo "Unknown FDB IP version \"$FDB_IP_VERSION\"" 1>&2
+            exit 1
+        fi
+    elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
+        if [[ "$FDB_IP_VERSION" == '4' ]]; then
+            export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'0.0.0.0'}
+            public_ip=${FDB_PUBLIC_IP:-"$(first_hostname_with_str '.')"}
+        elif [[ "$FDB_IP_VERSION" == '6' ]]; then
+            export FDB_LISTEN_IP=${FDB_LISTEN_IP:-'[::]'}
+            public_ip=${FDB_PUBLIC_IP:-"[$(first_hostname_with_str ':')]"}
+        else
+            echo "Unknown FDB IP version \"$FDB_IP_VERSION\"" 1>&2
+            exit 1
+        fi
     else
-        echo "Unknown FDB IP version \"$FDB_IP_VERSION\"" 1>&2
+        echo "Unknown networking mode \"$FDB_NETWORKING_MODE\"" 1>&2
         exit 1
     fi
-
+    
     if (( $? > 0 )); then
         echo "No valid IP for IP version \"$FDB_IP_VERSION\"" 1>&2
         exit 1
     fi
-
+    
     export FDB_PUBLIC_IP="$public_ip"
     
 
