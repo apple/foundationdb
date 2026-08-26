@@ -1,12 +1,41 @@
 # Exclude sharded RocksDB (type 5) — it requires SHARD_ENCODE=true and
 # cannot operate after the knob flips to false.
+#
+# NOTE: shard_metadata_migration is NOT set in the initial config below.
+# Enabling migration at cluster-init time caused joshua to time out during
+# `configure new` under fault injection (Unable to set starting configuration).
+# Instead, a ChangeConfig workload enables migration at the start of the
+# ShardEncodeRollbackVerify phase (below), right when the knob flip to
+# false takes effect and we want DD to run the rewrite.
+#
+# `datacenters = 1` + `generateFearless = false` pin the sim to a single
+# datacenter, single-region setup. Without them, setRandomConfig() picks
+# randInt(1,4) DCs plus multi-region layouts on top of our config, and
+# joshua's fault injection struggles to bring those up (setup times out
+# at 2000s with "Unable to set starting configuration"). PR2's rewrite
+# logic doesn't care about regions; the extra sim variation is pure
+# flakiness for this test.
 [configuration]
 storageEngineExcludeTypes=[3,4,5]
+config = "triple ssd-2"
+datacenters = 1
+generateFearless = false
 
 # Top-level: SHARD_ENCODE=false is the "final" state.
 # Block 1 overrides to true temporarily.
+#
+# Force fine-grained sharding so the rollback rewrite has many keyServers
+# entries to convert (exercises Phase 2 pagination and, with the buggified
+# SHARD_ENCODE_REWRITE_KS_BATCH_SIZE / KRM_GET_RANGE_LIMIT, multi-page /
+# multi-scan draining). Small min_shard_bytes + shard_bytes_per_sqrt_bytes=0
+# keeps DD from coalescing shards back together. These values mirror
+# DDPipelineSaturation.toml ("forces many small shards"): min_shard_bytes
+# =10000 with a high-TPS Cycle at nodeCount=60000. Verify the resulting
+# shard count via CheckMetadataEncodingResult.KeyServersOld/New in the trace.
 [[knobs]]
 shard_encode_location_metadata = false
+min_shard_bytes = 10000
+shard_bytes_per_sqrt_bytes = 0
 
 [[test]]
 testTitle = 'ShardEncodeRollbackSetup'
@@ -17,13 +46,20 @@ testTitle = 'ShardEncodeRollbackSetup'
 
     [[test.workload]]
     testName = 'Cycle'
-    transactionsPerSecond = 2500.0
-    nodeCount = 2500
-    testDuration = 10.0
+    transactionsPerSecond = 5000.0
+    nodeCount = 60000
+    testDuration = 30.0
 
+    # RandomMoveKeys here (knob=true) builds the new-format keyServers/
+    # serverKeys state that the Verify phase rolls back. It is deliberately
+    # confined to this phase — see the note in ShardEncodeRollbackVerify
+    # for why it must not run concurrently with the rollback rewrite. This
+    # phase is all knob=true (no rollback, no lock-contention race), so we
+    # run it long enough to build a large multi-page new-format state that
+    # stresses Phase 2/Phase 3 pagination during the rollback below.
     [[test.workload]]
     testName = 'RandomMoveKeys'
-    testDuration = 10.0
+    testDuration = 30.0
 
 [[test]]
 testTitle = 'ShardEncodeRollbackVerify'
@@ -31,15 +67,38 @@ testTitle = 'ShardEncodeRollbackVerify'
     # Phase 2: No per-test override — inherits top-level false.
     # DD detects knob change, restarts, exercises rollback path.
 
+    # Enable the DD-init active rewrite via ChangeConfig at the start of
+    # this phase (rather than at cluster-init time, which caused
+    # setup-timeout failures under joshua's fault injection). Small delay
+    # so this fires after DD has settled into the knob=false state.
     [[test.workload]]
-    testName = 'Cycle'
-    transactionsPerSecond = 2500.0
-    nodeCount = 2500
-    testDuration = 30.0
+    testName = 'ChangeConfig'
+    configMode = 'shard_metadata_migration=enabled'
+    minDelayBeforeChange = 1.0
+    maxDelayBeforeChange = 3.0
 
     [[test.workload]]
-    testName = 'RandomMoveKeys'
+    testName = 'Cycle'
+    transactionsPerSecond = 5000.0
+    nodeCount = 60000
     testDuration = 30.0
+
+    # NOTE: RandomMoveKeys is intentionally NOT run in this rollback phase.
+    # It takes the moveKeysLock itself and issues moveKeys() directly,
+    # contending with DD for the lock. During the knob flip, one of those
+    # direct moves can sample shard_encode_location_metadata=true and
+    # commit a new-format keyServers entry in the window between DD's
+    # Phase 2 sweep and its seal (DD does not hold the lock across that
+    # gap) — DD then seals sentinel=old and the fast-path skip never
+    # reconverts it, so the audit never reaches ROLLBACK COMPLETE. This is
+    # NOT a production scenario: in production DD is the sole moveKeysLock
+    # holder during its init (its queue is off), prior-gen moves are
+    # lock-fenced, and under knob=false every dispatch path writes
+    # old-format, so the seal is safe. RandomMoveKeys runs in the Setup
+    # phase (knob=true) above to build the new-format state we roll back;
+    # Cycle + Attrition + Rollback below still stress the rewrite with
+    # traffic, DD restarts, and TLog recovery (all correctly old-format
+    # under knob=false).
 
     [[test.workload]]
     testName = 'Attrition'
@@ -58,3 +117,19 @@ testTitle = 'ShardEncodeRollbackVerify'
     testName = 'CheckMetadataEncoding'
     requireKnobFalse = true
     allowMixedFormats = true
+
+# Phase 3: after the churn workloads have completed, assert the audit
+# tool's ROLLBACK COMPLETE terminal condition — zero new-format entries
+# in keyServers/serverKeys and no in-flight dataMoves. Without PR2's
+# proactive serverKeys rewrite (Phase 3 of rewriteShardEncodedMetadata),
+# this would fail: new-format serverKeys entries would persist
+# indefinitely on quiescent SSes and ROLLBACK COMPLETE would never be
+# reached. This phase runs in its own test block so it starts after all
+# concurrent churn workloads in ShardEncodeRollbackVerify have exited.
+[[test]]
+testTitle = 'ShardEncodeRollbackFinal'
+
+    [[test.workload]]
+    testName = 'CheckMetadataEncoding'
+    requireKnobFalse = true
+    requireRollbackComplete = true
