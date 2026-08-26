@@ -28,7 +28,7 @@
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/WorkerEvents.h"
@@ -515,6 +515,11 @@ struct RolesInfo {
 			obj["low_priority_queries"] = StatusCounter(storageMetrics.getValue("LowPriorityQueries")).getStatus();
 			obj["bytes_queried"] = StatusCounter(storageMetrics.getValue("BytesQueried")).getStatus();
 			obj["keys_queried"] = StatusCounter(storageMetrics.getValue("RowsQueried")).getStatus();
+			obj.setKeyRawNumber("active_watches", storageMetrics.getValue("ActiveWatches"));
+			obj["total_watches"] = StatusCounter(storageMetrics.getValue("WatchQueries")).getStatus();
+			obj["triggered_watches"] = StatusCounter(storageMetrics.getValue("TriggeredWatches")).getStatus();
+			obj["timed_out_watches"] = StatusCounter(storageMetrics.getValue("TimedOutWatches")).getStatus();
+			obj["errored_watches"] = StatusCounter(storageMetrics.getValue("ErroredWatches")).getStatus();
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
 			obj["mutations"] = StatusCounter(storageMetrics.getValue("Mutations")).getStatus();
 			obj.setKeyRawNumber("local_rate", storageMetrics.getValue("LocalRate"));

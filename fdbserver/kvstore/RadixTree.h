@@ -235,7 +235,7 @@ public:
 		node* m_pointee;
 
 		iterator() : m_pointee(nullptr) {}
-		explicit(false) iterator(const iterator& r) : m_pointee(r.m_pointee) {}
+		iterator(const iterator& r) : m_pointee(r.m_pointee) {}
 		explicit(false) iterator(node* p) : m_pointee(p) {}
 		iterator& operator=(const iterator& r) {
 			m_pointee = r.m_pointee;

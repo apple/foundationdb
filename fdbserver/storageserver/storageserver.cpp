@@ -51,6 +51,7 @@
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
+#include "MappedKeyPlan.h"
 #include "ReadLatencySamples.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.h"
@@ -80,8 +81,9 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/Notified.h"
+#include "fdbclient/SimulationCapabilities.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/StorageServerShard.h"
 #include "fdbclient/SystemData.h"
@@ -812,9 +814,15 @@ public:
 	int watchReplyCount{ 0 };
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
+	SpanContext spanContext;
 
-	ServerWatchMetadata(Key key, Optional<Value> value, Version version, Optional<TagSet> tags, Optional<UID> debugID)
-	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
+	ServerWatchMetadata(Key key,
+	                    Optional<Value> value,
+	                    Version version,
+	                    Optional<TagSet> tags,
+	                    Optional<UID> debugID,
+	                    SpanContext spanContext)
+	  : key(key), value(value), version(version), tags(tags), debugID(debugID), spanContext(spanContext) {}
 };
 
 struct BusiestWriteTagContext {
@@ -1100,7 +1108,7 @@ public:
 		// With fault injection enabled, the tss will start acting normal for a bit, then after the specified delay
 		// start behaving incorrectly.
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
-		    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaFaultInjection)) {
+		    fdbSimulationHasCapability(FDBSimulationCapability::StorageReplicaFaultInjection)) {
 			tssFaultInjectTime = now() + deterministicRandom()->randomInt(60, 300);
 			TraceEvent(SevWarnAlways, "TSSInjectFaultEnabled", thisServerID)
 			    .detail("Mode", static_cast<int>(fdbSimulationPolicyState().tssMode))
@@ -1182,88 +1190,15 @@ public:
 	Key sk;
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	Database cx;
-	ActorCollection actors;
-
-	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
-	AsyncVar<bool> byteSampleClearsTooLarge;
-	Future<Void> byteSampleRecovery;
-	Future<Void> durableInProgress;
-
-	AsyncMap<Key, bool> watches;
-	int64_t watchBytes;
-	int64_t numWatches;
-	AsyncVar<bool> noRecentUpdates;
-	double lastUpdate;
-
-	std::string folder;
-	std::string checkpointFolder;
-	std::string fetchedCheckpointFolder;
-	std::string bulkDumpFolder;
-	std::string bulkLoadFolder;
-
-	// defined only during splitMutations()/addMutation()
-	UpdateEagerReadInfo* updateEagerReads;
-
-	FlowLock durableVersionLock;
-	FlowLock fetchKeysParallelismLock;
-	int64_t fetchKeysBytesBudget;
-	AsyncVar<bool> fetchKeysBudgetUsed;
-	int64_t fetchKeysTotalCommitBytes;
-	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
-
-	ThroughputLimiter fetchKeysLimiter;
-
-	FlowLock serveFetchCheckpointParallelismLock;
-
-	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
-
-	Reference<PriorityMultiLock> ssLock;
-	std::vector<int> readPriorityRanks;
-
-	Future<PriorityMultiLock::Lock> getReadLock(const Optional<ReadOptions>& options) {
-		int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
-		readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
-		return ssLock->lock(readPriorityRanks[readType]);
-	}
-
-	FlowLock serveAuditStorageParallelismLock;
-
-	FlowLock serveBulkDumpParallelismLock;
-
-	int64_t instanceID;
-
-	Promise<Void> otherError;
-	Promise<Void> coreStarted;
-	bool shuttingDown;
-
-	Promise<Void> registerInterfaceAcceptingRequests;
-	Future<Void> interfaceRegistered;
-
-	bool behind;
-	bool versionBehind;
-
-	bool debug_inApplyUpdate;
-	double debug_lastValidateTime;
-
-	int64_t lastBytesInputEBrake;
-	Version lastDurableVersionEBrake;
-
-	int maxQueryQueue;
-	int getAndResetMaxQueryQueueSize() {
-		int val = maxQueryQueue;
-		maxQueryQueue = 0;
-		return val;
-	}
-
-	TransactionTagCounter transactionTagCounter;
-	BusiestWriteTagContext busiestWriteTagContext;
-
-	Optional<LatencyBandConfig> latencyBandConfig;
 
 	struct Counters : CommonStorageCounters {
 
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
 		    getRangeStreamQueries, lowPriorityQueries, rowsQueried, watchQueries, emptyQueries;
+
+		// How the watches counted by watchQueries ended. Exactly one is incremented per watch, so
+		// watchQueries == triggeredWatches + timedOutWatches + erroredWatches + numWatches.
+		Counter triggeredWatches, timedOutWatches, erroredWatches;
 
 		// counters related to getMappedRange queries
 		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
@@ -1342,8 +1277,10 @@ public:
 		    getRangeSystemKeyQueries("GetRangeSystemKeyQueries", cc),
 		    getMappedRangeQueries("GetMappedRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
 		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
-		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
-		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
+		    watchQueries("WatchQueries", cc), triggeredWatches("TriggeredWatches", cc),
+		    timedOutWatches("TimedOutWatches", cc), erroredWatches("ErroredWatches", cc),
+		    emptyQueries("EmptyQueries", cc), logicalBytesInput("LogicalBytesInput", cc),
+		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
 		    bytesDurable("BytesDurable", cc), sampledBytesCleared("SampledBytesCleared", cc),
@@ -1408,6 +1345,84 @@ public:
 			specialCounter(cc, "KvstoreInlineKey", [self]() { return std::get<2>(self->storage.getSize()); });
 		}
 	} counters;
+
+	ActorCollection actors;
+
+	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
+	AsyncVar<bool> byteSampleClearsTooLarge;
+	Future<Void> byteSampleRecovery;
+	Future<Void> durableInProgress;
+
+	AsyncMap<Key, bool> watches;
+	int64_t watchBytes;
+	int64_t numWatches;
+	AsyncVar<bool> noRecentUpdates;
+	double lastUpdate;
+
+	std::string folder;
+	std::string checkpointFolder;
+	std::string fetchedCheckpointFolder;
+	std::string bulkDumpFolder;
+	std::string bulkLoadFolder;
+
+	// defined only during splitMutations()/addMutation()
+	UpdateEagerReadInfo* updateEagerReads;
+
+	FlowLock durableVersionLock;
+	FlowLock fetchKeysParallelismLock;
+	int64_t fetchKeysBytesBudget;
+	AsyncVar<bool> fetchKeysBudgetUsed;
+	int64_t fetchKeysTotalCommitBytes;
+	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
+
+	ThroughputLimiter fetchKeysLimiter;
+
+	FlowLock serveFetchCheckpointParallelismLock;
+
+	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
+
+	Reference<PriorityMultiLock> ssLock;
+	std::vector<int> readPriorityRanks;
+
+	Future<PriorityMultiLock::Lock> getReadLock(const Optional<ReadOptions>& options) {
+		int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
+		readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
+		return ssLock->lock(readPriorityRanks[readType]);
+	}
+
+	FlowLock serveAuditStorageParallelismLock;
+
+	FlowLock serveBulkDumpParallelismLock;
+
+	int64_t instanceID;
+
+	Promise<Void> otherError;
+	Promise<Void> coreStarted;
+	bool shuttingDown;
+
+	Promise<Void> registerInterfaceAcceptingRequests;
+	Future<Void> interfaceRegistered;
+
+	bool behind;
+	bool versionBehind;
+
+	bool debug_inApplyUpdate;
+	double debug_lastValidateTime;
+
+	int64_t lastBytesInputEBrake;
+	Version lastDurableVersionEBrake;
+
+	int maxQueryQueue;
+	int getAndResetMaxQueryQueueSize() {
+		int val = maxQueryQueue;
+		maxQueryQueue = 0;
+		return val;
+	}
+
+	TransactionTagCounter transactionTagCounter;
+	BusiestWriteTagContext busiestWriteTagContext;
+
+	Optional<LatencyBandConfig> latencyBandConfig;
 
 	// Bytes read from storage engine when a storage server starts.
 	int64_t bytesRestored = 0;
@@ -2121,12 +2136,12 @@ std::shared_ptr<MoveInShard> StorageServer::getMoveInShard(const UID& dataMoveId
 Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, req.spanContext);
+	CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	try {
 		++data->counters.getValueQueries;
-		++data->counters.allQueries;
 		if (req.key.startsWith(systemKeys.begin)) {
 			++data->counters.systemKeyQueries;
 		}
@@ -2146,7 +2161,9 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
+			                      "getValueQ.DoRead",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 		}
 
 		Optional<Value> v;
@@ -2158,7 +2175,9 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
+			                      "getValueQ.AfterVersion",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 		}
 
 		uint64_t changeCounter = data->shardChangeCounter;
@@ -2225,7 +2244,9 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
+			                      "getValueQ.AfterRead",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 		}
 
 		GetValueReply reply(v, /*cached=*/false);
@@ -2240,8 +2261,6 @@ Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	// Key size is not included in "BytesQueried", but still contributes to cost,
 	// so it must be accounted for here.
 	data->transactionTagCounter.addRequest(req.tags, req.key.size() + resultSize);
-
-	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySamples.sample(duration, ReadLatencySamples::READ, trackedReadType(req));
@@ -2266,7 +2285,9 @@ Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* 
 	if (metadata->debugID.present()) {
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
-		                      "watchValueSendReply.Before"); //.detail("TaskID", g_network->getCurrentTask());
+		                      "watchValueSendReply.Before",
+		                      metadata->spanContext.traceID,
+		                      metadata->spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 	}
 
 	Version originalMetadataVersion = metadata->version;
@@ -2274,7 +2295,9 @@ Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* 
 	if (metadata->debugID.present()) {
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
-		                      "watchValueSendReply.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
+		                      "watchValueSendReply.AfterVersion",
+		                      metadata->spanContext.traceID,
+		                      metadata->spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 	}
 
 	Version minVersion = data->data().latestVersion;
@@ -2311,10 +2334,11 @@ Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* 
 			               data->thisServerID);
 
 			if (metadata->debugID.present()) {
-				g_traceBatch.addEvent(
-				    "WatchValueDebug",
-				    metadata->debugID.get().first(),
-				    "watchValueSendReply.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
+				g_traceBatch.addEvent("WatchValueDebug",
+				                      metadata->debugID.get().first(),
+				                      "watchValueSendReply.AfterRead",
+				                      metadata->spanContext.traceID,
+				                      metadata->spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 			}
 
 			// If the version we read is less than minVersion, then we may fail to be notified of any changes that occur
@@ -2354,9 +2378,13 @@ Future<Version> watchWaitForValueChange(coro::FrameSizeRecorder, StorageServer* 
 					watchFuture = watchFuture || delay(deterministicRandom()->random01());
 				}
 
-				if (metadata->debugID.present())
-					g_traceBatch.addEvent(
-					    "WatchValueDebug", metadata->debugID.get().first(), "watchValueSendReply.WaitChange");
+				if (metadata->debugID.present()) {
+					g_traceBatch.addEvent("WatchValueDebug",
+					                      metadata->debugID.get().first(),
+					                      "watchValueSendReply.WaitChange",
+					                      metadata->spanContext.traceID,
+					                      metadata->spanContext.spanID);
+				}
 				co_await watchFuture;
 				data->watchBytes -= watchBytes;
 			} catch (Error& e) {
@@ -2427,6 +2455,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 
 					// fire watch
 					req.reply.send(WatchValueReply{ ver });
+					++data->counters.triggeredWatches;
 					finishWatchValueReply(data, metadata);
 					--data->numWatches;
 					data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
@@ -2444,9 +2473,11 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 				if (response.present()) {
 					// fire watch
 					req.reply.send(WatchValueReply{ response.get() });
+					++data->counters.triggeredWatches;
 				} else {
 					// watch timed out
 					data->sendErrorWithPenalty(req.reply, timed_out(), data->getPenalty());
+					++data->counters.timedOutWatches;
 				}
 				finishWatchValueReply(data, metadata);
 				--data->numWatches;
@@ -2460,6 +2491,7 @@ Future<Void> watchValueSendReply(coro::FrameSizeRecorder,
 			data->watchBytes -= WATCH_OVERHEAD_WATCHQ;
 			finishWatchValueReply(data, metadata);
 			--data->numWatches;
+			++data->counters.erroredWatches;
 
 			if (!canReplyWith(e))
 				throw e;
@@ -3150,11 +3182,10 @@ Future<Key> findKey(StorageServer* data,
 	if (sel.offset <= 1 && sel.offset >= 0)
 		maxBytes = std::numeric_limits<int>::max();
 	else {
-		maxBytes =
-		    (g_network->isSimulated() &&
-		     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) && buggify())
-		        ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
-		        : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
+		maxBytes = (g_network->isSimulated() &&
+		            fdbSimulationHasCapability(FDBSimulationCapability::LimitStorageServerReadBytes) && buggify())
+		               ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
+		               : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 	}
 
 	GetKeyValuesReply rep = co_await readRange(data,
@@ -3332,8 +3363,8 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
+	CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	++data->counters.getRangeQueries;
-	++data->counters.allQueries;
 	if (req.begin.getKey().startsWith(systemKeys.begin)) {
 		++data->counters.systemKeyQueries;
 		++data->counters.getRangeSystemKeyQueries;
@@ -3352,9 +3383,13 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	    queueWaitEnd - req.requestTime(), ReadLatencySamples::READ_QUEUE_WAIT, trackedReadType(req));
 
 	try {
-		if (req.options.present() && req.options.get().debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.Before");
+		if (req.options.present() && req.options.get().debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getKeyValues.Before",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
+		}
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);
@@ -3373,9 +3408,13 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		//		try {
 		KeyRange shard = getShardKeyRange(data, req.begin);
 
-		if (req.options.present() && req.options.get().debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
+		if (req.options.present() && req.options.get().debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getKeyValues.AfterVersion",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
+		}
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
 		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
@@ -3403,9 +3442,13 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		Key begin = co_await fBegin;
 		Key end = co_await fEnd;
 
-		if (req.options.present() && req.options.get().debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.AfterKeys");
+		if (req.options.present() && req.options.get().debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getKeyValues.AfterKeys",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
+		}
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
@@ -3433,9 +3476,13 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		}
 
 		if (begin >= end) {
-			if (req.options.present() && req.options.get().debugID.present())
-				g_traceBatch.addEvent(
-				    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.Send");
+			if (req.options.present() && req.options.get().debugID.present()) {
+				g_traceBatch.addEvent("TransactionDebug",
+				                      req.options.get().debugID.get().first(),
+				                      "storageserver.getKeyValues.Send",
+				                      req.spanContext.traceID,
+				                      req.spanContext.spanID);
+			}
 			//.detail("Begin",begin).detail("End",end);
 
 			GetKeyValuesReply none;
@@ -3464,7 +3511,9 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
-				                      "storageserver.getKeyValues.AfterReadRange");
+				                      "storageserver.getKeyValues.AfterReadRange",
+				                      req.spanContext.traceID,
+				                      req.spanContext.spanID);
 			}
 			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 			data->checkChangeCounter(
@@ -3516,7 +3565,6 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySamples.sample(duration, ReadLatencySamples::READ, trackedReadType(req));
@@ -3547,7 +3595,9 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
-		                      "storageserver.quickGetKeyValues.Before");
+		                      "storageserver.quickGetKeyValues.Before",
+		                      pOriginalReq->spanContext.traceID,
+		                      pOriginalReq->spanContext.spanID);
 	}
 	try {
 		// TODO: Use a lower level API may be better?
@@ -3583,7 +3633,9 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 			if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      pOriginalReq->options.get().debugID.get().first(),
-				                      "storageserver.quickGetKeyValues.AfterLocalFetch");
+				                      "storageserver.quickGetKeyValues.AfterLocalFetch",
+				                      pOriginalReq->spanContext.traceID,
+				                      pOriginalReq->spanContext.spanID);
 			}
 			co_return getRange;
 		}
@@ -3613,146 +3665,14 @@ Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      pOriginalReq->options.get().debugID.get().first(),
-			                      "storageserver.quickGetKeyValues.AfterRemoteFetch");
+			                      "storageserver.quickGetKeyValues.AfterRemoteFetch",
+			                      pOriginalReq->spanContext.traceID,
+			                      pOriginalReq->spanContext.spanID);
 		}
 		co_return getRange;
 	} else {
 		throw quick_get_key_values_miss();
 	}
-}
-
-void unpackKeyTuple(Tuple** referenceTuple, Optional<Tuple>& keyTuple, KeyValueRef* keyValue) {
-	if (!keyTuple.present()) {
-		// May throw exception if the key is not parsable as a tuple.
-		try {
-			keyTuple = Tuple::unpack(keyValue->key);
-		} catch (Error& e) {
-			TraceEvent("KeyNotTuple").error(e).detail("Key", keyValue->key.printable());
-			throw key_not_tuple();
-		}
-	}
-	*referenceTuple = &keyTuple.get();
-}
-
-void unpackValueTuple(Tuple** referenceTuple, Optional<Tuple>& valueTuple, KeyValueRef* keyValue) {
-	if (!valueTuple.present()) {
-		// May throw exception if the value is not parsable as a tuple.
-		try {
-			valueTuple = Tuple::unpack(keyValue->value);
-		} catch (Error& e) {
-			TraceEvent("ValueNotTuple").error(e).detail("Value", keyValue->value.printable());
-			throw value_not_tuple();
-		}
-	}
-	*referenceTuple = &valueTuple.get();
-}
-
-bool unescapeLiterals(std::string& s, std::string before, std::string after) {
-	bool escaped = false;
-	size_t p = 0;
-	while (true) {
-		size_t found = s.find(before, p);
-		if (found == std::string::npos) {
-			break;
-		}
-		s.replace(found, before.length(), after);
-		p = found + after.length();
-		escaped = true;
-	}
-	return escaped;
-}
-
-bool singleKeyOrValue(const std::string& s, size_t sz) {
-	// format would be {K[??]} or {V[??]}
-	return sz > 5 && s[0] == '{' && (s[1] == 'K' || s[1] == 'V') && s[2] == '[' && s[sz - 2] == ']' && s[sz - 1] == '}';
-}
-
-bool rangeQuery(const std::string& s) {
-	return s == "{...}";
-}
-
-// create a vector of Optional<Tuple>
-// in case of a singleKeyOrValue, insert an empty Tuple to vector as placeholder
-// in case of a rangeQuery, insert Optional.empty as placeholder
-// in other cases, insert the correct Tuple to be used.
-void preprocessMappedKey(Tuple& mappedKeyFormatTuple, std::vector<Optional<Tuple>>& vt, bool& isRangeQuery) {
-	vt.reserve(mappedKeyFormatTuple.size());
-
-	for (int i = 0; i < mappedKeyFormatTuple.size(); i++) {
-		Tuple::ElementType type = mappedKeyFormatTuple.getType(i);
-		if (type == Tuple::BYTES || type == Tuple::UTF8) {
-			std::string s = mappedKeyFormatTuple.getString(i).toString();
-			auto sz = s.size();
-			bool escaped = unescapeLiterals(s, "{{", "{");
-			escaped = unescapeLiterals(s, "}}", "}") || escaped;
-			if (escaped) {
-				vt.emplace_back(Tuple::makeTuple(s));
-			} else if (singleKeyOrValue(s, sz)) {
-				// when it is SingleKeyOrValue, insert an empty Tuple to vector as placeholder
-				vt.emplace_back(Tuple());
-			} else if (rangeQuery(s)) {
-				if (i != mappedKeyFormatTuple.size() - 1) {
-					// It must be the last element of the mapper tuple
-					throw mapper_bad_range_decriptor();
-				}
-				// when it is rangeQuery, insert Optional.empty as placeholder
-				vt.emplace_back(Optional<Tuple>());
-				isRangeQuery = true;
-			} else {
-				Tuple t;
-				t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
-				vt.emplace_back(t);
-			}
-		} else {
-			Tuple t;
-			t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
-			vt.emplace_back(t);
-		}
-	}
-}
-
-Key constructMappedKey(KeyValueRef* keyValue, std::vector<Optional<Tuple>>& vec, Tuple& mappedKeyFormatTuple) {
-	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
-	Optional<Tuple> keyTuple;
-	Optional<Tuple> valueTuple;
-	Tuple mappedKeyTuple;
-
-	mappedKeyTuple.reserve(vec.size());
-
-	for (int i = 0; i < vec.size(); i++) {
-		if (!vec[i].present()) {
-			// rangeQuery
-			continue;
-		}
-		if (vec[i].get().size()) {
-			mappedKeyTuple.append(vec[i].get());
-		} else {
-			// singleKeyOrValue is true
-			std::string s = mappedKeyFormatTuple.getString(i).toString();
-			auto sz = s.size();
-			int idx;
-			Tuple* referenceTuple;
-			try {
-				idx = std::stoi(s.substr(3, sz - 5));
-			} catch (std::exception& e) {
-				throw mapper_bad_index();
-			}
-			if (s[1] == 'K') {
-				unpackKeyTuple(&referenceTuple, keyTuple, keyValue);
-			} else if (s[1] == 'V') {
-				unpackValueTuple(&referenceTuple, valueTuple, keyValue);
-			} else {
-				ASSERT(false);
-				throw internal_error();
-			}
-			if (idx < 0 || idx >= referenceTuple->size()) {
-				throw mapper_bad_index();
-			}
-			mappedKeyTuple.appendRaw(referenceTuple->subTupleRawString(idx));
-		}
-	}
-
-	return mappedKeyTuple.pack();
 }
 
 struct AuditGetShardInfoRes {
@@ -5191,6 +5111,18 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
+			TraceEvent(SevWarn, "SSBulkDumpRangeReadFailed", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("Range", range)
+			    .detail("BeginKey", beginKey)
+			    .detail("Version", version)
+			    .detail("FirstRead", immediateError);
+			if (immediateError) {
+				// Rethrow rather than collapsing into retry(): the caller gives up immediately on
+				// wrong_shard_server -- a stale range assignment, which no amount of retrying against
+				// this server can fix -- and retries anything else.
+				throw e;
+			}
 			break;
 		}
 
@@ -5228,9 +5160,9 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 		beginKey = keyAfter(output->lastKey);
 	}
 
-	if (immediateError) {
-		throw retry();
-	}
+	// A first-read failure throws from the catch above, so reaching here means at least one read
+	// succeeded. immediateError is cleared immediately after the try/catch, before any other break.
+	ASSERT(!immediateError);
 }
 
 // The SS actor handling bulk dump task sent from DD.
@@ -5407,55 +5339,42 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	{
 		Tuple mappedKeyFormatTuple =
 		    Tuple::makeTuple("normal"_sr, "{{escaped}}"_sr, "{K[2]}"_sr, "{V[0]}"_sr, "{...}"_sr);
-
-		std::vector<Optional<Tuple>> vt;
-		bool isRangeQuery = false;
-		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+		MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+		Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 
 		Key expectedMappedKey =
 		    Tuple::makeTuple("normal"_sr, "{escaped}"_sr, "key-2"_sr, "value-0"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
-		ASSERT(isRangeQuery == true);
+		ASSERT(mappedKeyPlan.isRangeQuery() == true);
 	}
 
 	{
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{{{{}}"_sr, "}}"_sr);
-
-		std::vector<Optional<Tuple>> vt;
-		bool isRangeQuery = false;
-		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+		MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+		Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 
 		Key expectedMappedKey = Tuple::makeTuple("{{}"_sr, "}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
-		ASSERT(isRangeQuery == false);
+		ASSERT(mappedKeyPlan.isRangeQuery() == false);
 	}
 	{
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{{{{}}"_sr, "}}"_sr);
-
-		std::vector<Optional<Tuple>> vt;
-		bool isRangeQuery = false;
-		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+		MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+		Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 
 		Key expectedMappedKey = Tuple::makeTuple("{{}"_sr, "}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
-		ASSERT(isRangeQuery == false);
+		ASSERT(mappedKeyPlan.isRangeQuery() == false);
 	}
 	{
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{K[100]}"_sr);
 		bool throwException = false;
 		try {
-			std::vector<Optional<Tuple>> vt;
-			bool isRangeQuery = false;
-			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+			MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+			Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException = true;
@@ -5466,11 +5385,8 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{...}"_sr, "last-element"_sr);
 		bool throwException2 = false;
 		try {
-			std::vector<Optional<Tuple>> vt;
-			bool isRangeQuery = false;
-			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+			MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+			Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
 			throwException2 = true;
@@ -5481,16 +5397,27 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{K[not-a-number]}"_sr);
 		bool throwException3 = false;
 		try {
-			std::vector<Optional<Tuple>> vt;
-			bool isRangeQuery = false;
-			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
+			MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
+			Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException3 = true;
 		}
 		ASSERT(throwException3);
+	}
+	{
+		KeyValueRef invalidKeyAndValue("\xff"_sr, "\xff"_sr);
+		MappedKeyPlan literalPlan(Tuple::makeTuple("literal"_sr).pack());
+		ASSERT(literalPlan.constructMappedKey(invalidKeyAndValue) ==
+		       Tuple::makeTuple("literal"_sr).getDataAsStandalone());
+
+		KeyValueRef invalidValue(key, "\xff"_sr);
+		MappedKeyPlan keyPlan(Tuple::makeTuple("{K[1]}"_sr).pack());
+		ASSERT(keyPlan.constructMappedKey(invalidValue) == Tuple::makeTuple("key-1"_sr).getDataAsStandalone());
+
+		KeyValueRef invalidKey("\xff"_sr, value);
+		MappedKeyPlan valuePlan(Tuple::makeTuple("{V[1]}"_sr).pack());
+		ASSERT(valuePlan.constructMappedKey(invalidKey) == Tuple::makeTuple("value-1"_sr).getDataAsStandalone());
 	}
 	return Void();
 }
@@ -5543,20 +5470,14 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	result.arena.dependsOn(input.arena);
 
 	result.data.reserve(result.arena, input.data.size());
-	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
-		g_traceBatch.addEvent(
-		    "TransactionDebug", pOriginalReq->options.get().debugID.get().first(), "storageserver.mapKeyValues.Start");
-	Tuple mappedKeyFormatTuple;
-
-	try {
-		mappedKeyFormatTuple = Tuple::unpack(mapper);
-	} catch (Error& e) {
-		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper);
-		throw mapper_not_tuple();
+	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
+		g_traceBatch.addEvent("TransactionDebug",
+		                      pOriginalReq->options.get().debugID.get().first(),
+		                      "storageserver.mapKeyValues.Start",
+		                      pOriginalReq->spanContext.traceID,
+		                      pOriginalReq->spanContext.spanID);
 	}
-	std::vector<Optional<Tuple>> vt;
-	bool isRangeQuery = false;
-	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
+	MappedKeyPlan mappedKeyPlan(mapper);
 
 	int sz = input.data.size();
 	const int k = std::min(sz, SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE);
@@ -5566,7 +5487,9 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
-		                      "storageserver.mapKeyValues.BeforeLoop");
+		                      "storageserver.mapKeyValues.BeforeLoop",
+		                      pOriginalReq->spanContext.traceID,
+		                      pOriginalReq->spanContext.spanID);
 	}
 
 	for (; (offset < sz) && (*remainingLimitBytes > 0); offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
@@ -5577,21 +5500,23 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// Clear key value to the default.
 			kvm->key = ""_sr;
 			kvm->value = ""_sr;
-			Key mappedKey = constructMappedKey(it, vt, mappedKeyFormatTuple);
+			Key mappedKey = mappedKeyPlan.constructMappedKey(*it);
 			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 			result.arena.dependsOn(mappedKey.arena());
 
 			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
 			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
 
-			subqueries.push_back(
-			    mapSubquery(data, input.version, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey));
+			subqueries.push_back(mapSubquery(
+			    data, input.version, pOriginalReq, &result.arena, mappedKeyPlan.isRangeQuery(), it, kvm, mappedKey));
 		}
 		co_await waitForAll(subqueries);
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      pOriginalReq->options.get().debugID.get().first(),
-			                      "storageserver.mapKeyValues.AfterBatch");
+			                      "storageserver.mapKeyValues.AfterBatch",
+			                      pOriginalReq->spanContext.traceID,
+			                      pOriginalReq->spanContext.spanID);
 		}
 		subqueries.clear();
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
@@ -5619,7 +5544,9 @@ Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
 		                      pOriginalReq->options.get().debugID.get().first(),
-		                      "storageserver.mapKeyValues.AfterAll");
+		                      "storageserver.mapKeyValues.AfterAll",
+		                      pOriginalReq->spanContext.traceID,
+		                      pOriginalReq->spanContext.spanID);
 	}
 	co_return result;
 }
@@ -5635,8 +5562,8 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
-	++data->counters.getMappedRangeQueries;
-	++data->counters.allQueries;
+	CountedSection csAll(data->counters.allQueries, data->counters.finishedQueries);
+	CountedSection csRangeMapped(data->counters.getMappedRangeQueries, data->counters.finishedGetMappedRangeQueries);
 	if (req.begin.getKey().startsWith(systemKeys.begin)) {
 		++data->counters.systemKeyQueries;
 	}
@@ -5654,9 +5581,13 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 	    queueWaitEnd - req.requestTime(), ReadLatencySamples::READ_QUEUE_WAIT, trackedReadType(req));
 
 	try {
-		if (req.options.present() && req.options.get().debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getMappedKeyValues.Before");
+		if (req.options.present() && req.options.get().debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getMappedKeyValues.Before",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
+		}
 		// VERSION_VECTOR change
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);
@@ -5670,7 +5601,9 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "storageserver.getMappedKeyValues.AfterVersion");
+			                      "storageserver.getMappedKeyValues.AfterVersion",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 		}
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
@@ -5698,7 +5631,9 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "storageserver.getMappedKeyValues.AfterKeys");
+			                      "storageserver.getMappedKeyValues.AfterKeys",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 		}
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
@@ -5720,7 +5655,9 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
-				                      "storageserver.getMappedKeyValues.Send");
+				                      "storageserver.getMappedKeyValues.Send",
+				                      req.spanContext.traceID,
+				                      req.spanContext.spanID);
 			}
 			//.detail("Begin",begin).detail("End",end);
 
@@ -5762,7 +5699,9 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
-				                      "storageserver.getMappedKeyValues.AfterReadRange");
+				                      "storageserver.getMappedKeyValues.AfterReadRange",
+				                      req.spanContext.traceID,
+				                      req.spanContext.spanID);
 			}
 			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 			data->checkChangeCounter(
@@ -5791,8 +5730,6 @@ Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest 
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-	++data->counters.finishedQueries;
-	++data->counters.finishedGetMappedRangeQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySamples.sample(duration, ReadLatencySamples::READ, trackedReadType(req));
@@ -5818,8 +5755,8 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 	int64_t resultSize = 0;
 
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
+	CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	++data->counters.getRangeStreamQueries;
-	++data->counters.allQueries;
 	if (req.begin.getKey().startsWith(systemKeys.begin)) {
 		++data->counters.systemKeyQueries;
 	}
@@ -5831,9 +5768,13 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 	co_await delay(0, TaskPriority::DefaultEndpoint);
 
 	try {
-		if (req.options.present() && req.options.get().debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValuesStream.Before");
+		if (req.options.present() && req.options.get().debugID.present()) {
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getKeyValuesStream.Before",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
+		}
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		Version version = co_await waitForVersion(data, commitVersion, req.version, span.context);
@@ -5845,7 +5786,9 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "storageserver.getKeyValuesStream.AfterVersion");
+			                      "storageserver.getKeyValuesStream.AfterVersion",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 		}
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
@@ -5872,7 +5815,9 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "storageserver.getKeyValuesStream.AfterKeys");
+			                      "storageserver.getKeyValuesStream.AfterKeys",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID);
 		}
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
@@ -5894,7 +5839,9 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.options.get().debugID.get().first(),
-				                      "storageserver.getKeyValuesStream.Send");
+				                      "storageserver.getKeyValuesStream.Send",
+				                      req.spanContext.traceID,
+				                      req.spanContext.spanID);
 			}
 			//.detail("Begin",begin).detail("End",end);
 
@@ -5918,12 +5865,11 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 
 				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
 				// had it enabled.
-				int byteLimit =
-				    (buggify() && g_network->isSimulated() &&
-				     simulationPolicyHasCapability(ISimulationPolicy::Capability::LimitStorageServerReadBytes) &&
-				     !data->isTss() && !data->isSSWithTSSPair())
-				        ? 1
-				        : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+				int byteLimit = (buggify() && g_network->isSimulated() &&
+				                 fdbSimulationHasCapability(FDBSimulationCapability::LimitStorageServerReadBytes) &&
+				                 !data->isTss() && !data->isSSWithTSSPair())
+				                    ? 1
+				                    : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 				TraceEvent(SevDebug, "SSGetKeyValueStreamLimits")
 				    .detail("ByteLimit", byteLimit)
 				    .detail("ReqLimit", req.limit)
@@ -5938,7 +5884,9 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 				if (req.options.present() && req.options.get().debugID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      req.options.get().debugID.get().first(),
-					                      "storageserver.getKeyValuesStream.AfterReadRange");
+					                      "storageserver.getKeyValuesStream.AfterReadRange",
+					                      req.spanContext.traceID,
+					                      req.spanContext.spanID);
 				}
 				//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 				data->checkChangeCounter(
@@ -6001,7 +5949,6 @@ Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest 
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-	++data->counters.finishedQueries;
 }
 
 Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
@@ -6010,8 +5957,8 @@ Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
+	CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	++data->counters.getKeyQueries;
-	++data->counters.allQueries;
 	data->maxQueryQueue = std::max<int>(
 	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
@@ -6074,8 +6021,6 @@ Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// key It would be more accurate to count all the read bytes, but it's not critical because this function is only
 	// used if read-your-writes is disabled
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-
-	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySamples.sample(duration, ReadLatencySamples::READ, trackedReadType(req));
@@ -6838,6 +6783,107 @@ static Future<Void> processSampleFiles(StorageServer* data,
 	} // end file iteration loop
 }
 
+// Filter the whole task's file set down to what this fetchKeys owns. The set spans the task, while `keys` is a
+// single destination shard piece, so files outside `keys` are routine rather than a fault. A straddling file is
+// still returned -- it holds keys this fetch owns and only the KV-replay path can clip it to `keys` -- but it
+// clears *allOwnedContained, disqualifying the fetch from whole-file ingest.
+static BulkLoadFileSetKeyMap selectOwnedBulkLoadFileSets(const BulkLoadFileSetKeyMap& taskFileSets,
+                                                         KeyRangeRef keys,
+                                                         bool* allOwnedContained,
+                                                         KeyRange* firstUncontained) {
+	ASSERT(allOwnedContained != nullptr);
+	BulkLoadFileSetKeyMap owned;
+	*allOwnedContained = true;
+	for (const auto& fileSetPair : taskFileSets) {
+		if (!keys.intersects(fileSetPair.first)) {
+			continue;
+		}
+		if (!keys.contains(fileSetPair.first)) {
+			if (*allOwnedContained && firstUncontained != nullptr) {
+				*firstUncontained = fileSetPair.first;
+			}
+			*allOwnedContained = false;
+		}
+		owned.push_back(fileSetPair);
+	}
+	return owned;
+}
+
+TEST_CASE("/fdbserver/storageserver/selectOwnedBulkLoadFileSets") {
+	auto entry = [](StringRef begin, StringRef end) {
+		return std::make_pair(KeyRange(KeyRangeRef(begin, end)), BulkLoadFileSet());
+	};
+	bool allContained = false;
+	KeyRange uncontained;
+
+	// Fetch owns the whole task.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "c"_sr), entry("c"_sr, "e"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "e"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 2);
+		ASSERT(allContained);
+	}
+
+	// Disjoint ("e"-"g") and adjacent ("c"-"e") files are dropped without disqualifying the fetch.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "c"_sr), entry("c"_sr, "e"_sr), entry("e"_sr, "g"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "c"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 1);
+		ASSERT(owned[0].first == KeyRangeRef("a"_sr, "c"_sr));
+		ASSERT(allContained);
+	}
+
+	// A straddling file is retained, but disqualifies the fetch.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "d"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "c"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 1);
+		ASSERT(!allContained);
+		ASSERT(uncontained == KeyRangeRef("a"_sr, "d"_sr));
+	}
+
+	// As does one spanning it.
+	{
+		BulkLoadFileSetKeyMap task{ entry("a"_sr, "z"_sr) };
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("c"_sr, "e"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 1);
+		ASSERT(!allContained);
+	}
+
+	// Empty task file set is vacuously contained.
+	{
+		BulkLoadFileSetKeyMap task;
+		auto owned = selectOwnedBulkLoadFileSets(task, KeyRangeRef("a"_sr, "z"_sr), &allContained, &uncontained);
+		ASSERT_EQ(owned.size(), 0);
+		ASSERT(allContained);
+	}
+
+	// Across pieces partitioning the task range, every file must be claimed exactly once: zero loses it, twice
+	// ingests the same keys under two shards.
+	{
+		BulkLoadFileSetKeyMap task{
+			entry("a"_sr, "c"_sr), entry("c"_sr, "e"_sr), entry("e"_sr, "g"_sr), entry("g"_sr, "i"_sr)
+		};
+		const std::vector<KeyRangeRef> pieces{ KeyRangeRef("a"_sr, "c"_sr),
+			                                   KeyRangeRef("c"_sr, "g"_sr),
+			                                   KeyRangeRef("g"_sr, "i"_sr) };
+		std::map<std::string, int> owners;
+		for (const auto& piece : pieces) {
+			bool contained = false;
+			for (const auto& ownedPair : selectOwnedBulkLoadFileSets(task, piece, &contained, nullptr)) {
+				owners[ownedPair.first.begin.toString()]++;
+			}
+			ASSERT(contained); // the partition is manifest-aligned, so nothing straddles
+		}
+		ASSERT_EQ(owners.size(), task.size());
+		for (const auto& ownerPair : owners) {
+			ASSERT_EQ(ownerPair.second, 1);
+		}
+	}
+
+	return Void();
+}
+
 Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	TraceInterval interval("FetchKeys");
@@ -7122,19 +7168,21 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("Phase", "File download")
 				    .detail("FKID", fetchKeysID);
 				// Do SST ingestion if (1) the knob is enabled, (2) the storage engine supports SST ingestion, and
-				// (3) the task range is aligned with manifests' range, and (4) all file ranges fit within shard.
-				// Check (4) is needed because shard boundaries may differ between backup and restore time.
+				// (3) the task range is aligned with manifests' range, and (4) every file this fetch owns fits
+				// within the shard. Check (4) is needed because shard boundaries may differ between backup and
+				// restore time.
 				bool allFilesContained = true;
-				for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
-					if (!keys.contains(range)) {
-						allFilesContained = false;
-						TraceEvent(SevInfo, "SSBulkLoadFileRangeMismatch", data->thisServerID)
-						    .detail("ShardRange", keys)
-						    .detail("FileRange", range)
-						    .detail("DataMoveId", dataMoveId.toString())
-						    .detail("FKID", fetchKeysID);
-						break;
-					}
+				KeyRange firstUncontainedFileRange;
+				auto ownedBulkLoadFileSets = std::make_shared<BulkLoadFileSetKeyMap>(selectOwnedBulkLoadFileSets(
+				    *localBulkLoadFileSets, keys, &allFilesContained, &firstUncontainedFileRange));
+				if (!allFilesContained) {
+					TraceEvent(SevInfo, "SSBulkLoadFileRangeMismatch", data->thisServerID)
+					    .detail("ShardRange", keys)
+					    .detail("FileRange", firstUncontainedFileRange)
+					    .detail("OwnedFileCount", ownedBulkLoadFileSets->size())
+					    .detail("TaskFileCount", localBulkLoadFileSets->size())
+					    .detail("DataMoveId", dataMoveId.toString())
+					    .detail("FKID", fetchKeysID);
 				}
 				if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
 				    data->storage.getKeyValueStore()->supportsSstIngestion() && bulkloadCanIngestSSTFile &&
@@ -7157,7 +7205,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// Ingest the SST files.
 					// Measure duration at this level so we capture the inter-thread handoff time.
 					double ingestStartTime = g_network->timer(); // Record start time
-					co_await data->storage.getKeyValueStore()->ingestSSTFiles(localBulkLoadFileSets);
+					co_await data->storage.getKeyValueStore()->ingestSSTFiles(ownedBulkLoadFileSets);
 					const double ingestDuration = g_network->timer() - ingestStartTime;
 					data->counters.ingestDurationLatencySample->addMeasurement(ingestDuration);
 
@@ -7165,7 +7213,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					co_await data->storage.getKeyValueStore()->compactRange(keys);
 
 					// Process sample files after SST ingestion
-					co_await processSampleFiles(data, keys, bulkLoadLocalDir, localBulkLoadFileSets);
+					co_await processSampleFiles(data, keys, bulkLoadLocalDir, ownedBulkLoadFileSets);
 
 					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
 					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
@@ -7184,7 +7232,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						    .detail("AllFilesContained", allFilesContained)
 						    .detail("FKID", fetchKeysID);
 					}
-					hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
+					hold = tryGetRangeForBulkLoad(results, keys, ownedBulkLoadFileSets);
 					rangeEnd = keys.end;
 				}
 			} else {
@@ -9599,7 +9647,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 
 			if (g_network->isSimulated() && data->isTss() &&
-			    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaDelay) &&
+			    fdbSimulationHasCapability(FDBSimulationCapability::StorageReplicaDelay) &&
 			    !g_simulator->speedUpSimulation && data->tssFaultInjectTime.present() &&
 			    data->tssFaultInjectTime.get() < now()) {
 				if (deterministicRandom()->random01() < 0.01) {
@@ -9850,7 +9898,7 @@ Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS
 					// in quarantine.
 					if (g_network->isSimulated() && data->isTss() && !g_simulator->speedUpSimulation &&
-					    simulationPolicyHasCapability(ISimulationPolicy::Capability::StorageReplicaMutationDrop) &&
+					    fdbSimulationHasCapability(FDBSimulationCapability::StorageReplicaMutationDrop) &&
 					    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
 					    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
 					    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
@@ -11579,7 +11627,9 @@ Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueReq
 		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.options.get().debugID.get().first(),
-			                      "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
+			                      "storageServer.received",
+			                      req.spanContext.traceID,
+			                      req.spanContext.spanID); //.detail("TaskID", g_network->getCurrentTask());
 		}
 
 		if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
@@ -11657,7 +11707,8 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 
 		// case 1: no watch set for the current key
 		if (!metadata.isValid()) {
-			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+			metadata = makeReference<ServerWatchMetadata>(
+			    req.key, req.value, req.version, req.tags, req.debugID, req.spanContext);
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
 			addWatchValueReply(self, req, metadata, span.context);
@@ -11666,11 +11717,17 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 		else if (metadata->value == req.value) {
 			if (req.debugID.present()) {
 				if (metadata->debugID.present()) {
-					g_traceBatch.addAttach(
-					    "WatchRequestCase2", req.debugID.get().first(), metadata->debugID.get().first());
+					g_traceBatch.addAttach("WatchRequestCase2",
+					                       req.debugID.get().first(),
+					                       metadata->debugID.get().first(),
+					                       req.spanContext.traceID,
+					                       req.spanContext.spanID);
 				} else {
-					g_traceBatch.addEvent(
-					    "WatchValueDebug", metadata->debugID.get().first(), "watchValueSendReply.Case2");
+					g_traceBatch.addEvent("WatchValueDebug",
+					                      req.debugID.get().first(),
+					                      "watchValueSendReply.Case2",
+					                      req.spanContext.traceID,
+					                      req.spanContext.spanID);
 				}
 			}
 
@@ -11680,6 +11737,7 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 				if (req.debugID.present()) {
 					metadata->debugID = req.debugID;
 				}
+				metadata->spanContext = req.spanContext;
 			}
 
 			addWatchValueReply(self, req, metadata, span.context);
@@ -11690,7 +11748,8 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 			metadata->versionPromise.send(req.version);
 			metadata->watch_impl.cancel();
 
-			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+			metadata = makeReference<ServerWatchMetadata>(
+			    req.key, req.value, req.version, req.tags, req.debugID, req.spanContext);
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
 
@@ -11722,8 +11781,8 @@ Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<Watch
 					}
 
 					if (reply.value == req.value) { // valSS == valreq
-						metadata =
-						    makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+						metadata = makeReference<ServerWatchMetadata>(
+						    req.key, req.value, req.version, req.tags, req.debugID, req.spanContext);
 						KeyRef key = self->setWatchMetadata(metadata);
 						metadata->watch_impl =
 						    forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);

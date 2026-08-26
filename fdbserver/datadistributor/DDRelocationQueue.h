@@ -274,8 +274,8 @@ public:
 	KeyRangeActorMap getSourceActors;
 	std::map<UID, std::set<RelocateData, std::greater<RelocateData>>>
 	    queue; // Key UID is serverID, value is the serverID's set of RelocateData to relocate
-	// The last time one server was selected as source team for read rebalance reason. We want to throttle read
-	// rebalance on time bases because the read workload sample update has delay after the previous moving
+	// Last read-rebalance proposal for each selected source server. Pace proposals while the selected team's
+	// sampled read load catches up; discovering other replicas of the range must not refresh this cooldown.
 	std::map<UID, double> lastAsSource;
 	ServerCounter serverCounter;
 

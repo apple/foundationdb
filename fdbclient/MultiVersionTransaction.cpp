@@ -48,7 +48,7 @@
 #include <fcntl.h>
 #endif // __unixish__
 
-#ifdef FDBCLIENT_NATIVEAPI_ACTOR_H
+#ifdef FDBCLIENT_NATIVEAPI_H
 #error "MVC should not depend on the Native API"
 #endif
 

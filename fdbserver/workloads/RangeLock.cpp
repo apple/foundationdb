@@ -148,6 +148,88 @@ struct RangeLocking : TestWorkload {
 		}
 	}
 
+	Future<Void> expectOperationRejected(Future<Void> operation, int expectedError) {
+		bool rejected = false;
+		try {
+			co_await operation;
+		} catch (Error& e) {
+			if (e.code() != expectedError) {
+				throw;
+			}
+			rejected = true;
+		}
+		ASSERT(rejected);
+	}
+
+	Future<Void> expectClearRejected(Database cx, KeyRange range) {
+		return expectOperationRejected(clearRange(cx, range), error_code_transaction_rejected_range_locked);
+	}
+
+	Future<Void> testNormalKeyspaceBoundary(Database cx) {
+		const Key lockedKey = "rangeLockBoundary/c"_sr;
+		const Key outsideKey = "rangeLockBoundary/z"_sr;
+		const Value value = "preserved"_sr;
+		const KeyRange middleRange = KeyRangeRef("rangeLockBoundary/b"_sr, "rangeLockBoundary/d"_sr);
+		const KeyRange suffixRange = KeyRangeRef(middleRange.begin, normalKeys.end);
+		co_await setKey(cx, lockedKey, value);
+		co_await setKey(cx, outsideKey, value);
+		co_await takeExclusiveReadLockOnRange(cx, middleRange, rangeLockOwnerName);
+		co_await expectClearRejected(cx, suffixRange);
+		co_await expectClearRejected(cx, normalKeys);
+		co_await clearRange(cx, KeyRangeRef(middleRange.end, normalKeys.end));
+		Optional<Value> lockedValue = co_await getKey(cx, lockedKey);
+		Optional<Value> outsideValue = co_await getKey(cx, outsideKey);
+		ASSERT(lockedValue.present() && lockedValue.get() == value);
+		ASSERT(!outsideValue.present());
+		co_await releaseExclusiveReadLockOnRange(cx, middleRange, rangeLockOwnerName);
+
+		co_await takeExclusiveReadLockOnRange(cx, suffixRange, rangeLockOwnerName);
+		co_await expectClearRejected(cx, suffixRange);
+		co_await releaseExclusiveReadLockOnRange(cx, suffixRange, rangeLockOwnerName);
+		co_await takeExclusiveReadLockOnRange(cx, normalKeys, rangeLockOwnerName);
+		co_await expectClearRejected(cx, normalKeys);
+		co_await releaseExclusiveReadLockOnRange(cx, normalKeys, rangeLockOwnerName);
+		co_await clearRange(cx, normalKeys);
+		lockedValue = co_await getKey(cx, lockedKey);
+		ASSERT(!lockedValue.present());
+		TraceEvent("RangeLockNormalKeyspaceBoundaryPassed");
+	}
+
+	Future<Void> testLogicalIdentity(Database cx) {
+		const RangeLockOwnerName owner = "RangeLockIdentityA";
+		const RangeLockOwnerName collidingOwner = owner + "ExclusiveReadLock{ begin=X";
+		const KeyRange range = KeyRangeRef("XExclusiveReadLock{ begin=a"_sr, "z"_sr);
+		const KeyRange collidingRange = KeyRangeRef("a"_sr, "z"_sr);
+		const RangeLockState original(RangeLockType::ExclusiveReadLock, owner, range);
+		const RangeLockState colliding(RangeLockType::ExclusiveReadLock, collidingOwner, collidingRange);
+		const Key protectedKey = "m"_sr;
+		const Value value = "preserved"_sr;
+		ASSERT(original != colliding);
+		ASSERT(original.getLockUniqueString() == colliding.getLockUniqueString());
+		co_await registerRangeLockOwner(cx, owner, owner);
+		co_await registerRangeLockOwner(cx, collidingOwner, collidingOwner);
+		co_await setKey(cx, protectedKey, value);
+		co_await takeExclusiveReadLockOnRange(cx, range, owner);
+
+		co_await expectOperationRejected(takeExclusiveReadLockOnRange(cx, collidingRange, collidingOwner),
+		                                 error_code_range_lock_reject);
+		auto locks = co_await findExclusiveReadLockOnRange(cx, normalKeys);
+		ASSERT(locks.size() == 1 && locks[0].first == range && locks[0].second == original);
+		co_await expectOperationRejected(releaseExclusiveReadLockOnRange(cx, collidingRange, collidingOwner),
+		                                 error_code_range_unlock_reject);
+		locks = co_await findExclusiveReadLockOnRange(cx, normalKeys);
+		ASSERT(locks.size() == 1 && locks[0].first == range && locks[0].second == original);
+		co_await expectClearRejected(cx, collidingRange);
+		const Optional<Value> protectedValue = co_await getKey(cx, protectedKey);
+		ASSERT(protectedValue.present() && protectedValue.get() == value);
+
+		co_await releaseExclusiveReadLockOnRange(cx, range, owner);
+		co_await clearKey(cx, protectedKey);
+		co_await removeRangeLockOwner(cx, owner);
+		co_await removeRangeLockOwner(cx, collidingOwner);
+		TraceEvent("RangeLockLogicalIdentityPassed");
+	}
+
 	std::string getLockRangesString(const std::vector<std::pair<KeyRange, RangeLockState>>& locks) {
 		std::string res = "";
 		int count = 0;
@@ -603,12 +685,21 @@ struct RangeLocking : TestWorkload {
 				                           candidates[i]));
 			}
 		}
+		// The isolation assertions intentionally leave other owners locked.
+		// Release those locks before the harness clears the normal keyspace.
+		for (const auto& candidate : candidates) {
+			co_await releaseExclusiveReadLockByUser(cx, candidate);
+		}
+		const auto remainingLocks = co_await findExclusiveReadLockOnRange(cx, normalKeys);
+		ASSERT(remainingLocks.empty());
 	}
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			co_return;
 		}
+		co_await testNormalKeyspaceBoundary(cx);
+		co_await testLogicalIdentity(cx);
 		co_await complexTest(this, cx);
 		co_await testUnlockByUser(this, cx);
 	}

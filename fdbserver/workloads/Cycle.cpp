@@ -26,7 +26,7 @@
 #include "flow/serialize.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "BulkSetup.h"

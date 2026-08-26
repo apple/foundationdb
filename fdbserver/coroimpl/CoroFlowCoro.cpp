@@ -1,5 +1,5 @@
 /*
- * CoroFlowCoro.actor.cpp
+ * CoroFlowCoro.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,11 +20,11 @@
 
 #include "fdbserver/CoroFlow.h"
 #include "flow/ActorCollection.h"
+#include "flow/CoroUtils.h"
 #include "Coro.h"
 #include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 // Old libcoroutine based implementation. Used on Windows until CI has
 // boost context installed
@@ -112,11 +112,10 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 				delete workers[c];
 		}
 
-		ACTOR Future<Void> holdRefUntilStopped(Pool* p) {
+		Future<Void> holdRefUntilStopped(Pool* p) {
 			p->addref();
-			wait(p->allStopped.getResult());
+			co_await p->allStopped.getResult();
 			p->delref();
-			return Void();
 		}
 	};
 
@@ -172,17 +171,22 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 	};
 
 	Reference<Pool> pool;
-	Future<Void> m_stopOnError; // must be last, because its cancellation calls stop()!
 	Error error;
+	bool destroying{ false };
+	Promise<Void> stopRequested;
+	Future<Void> m_stopOnError; // Destroy before the shutdown signal and pool.
 
-	ACTOR Future<Void> stopOnError(WorkPool* w) {
+	Future<Void> stopOnError(WorkPool* w) {
 		try {
-			wait(w->getError());
-			ASSERT(false);
+			auto result = co_await race(w->getError(), w->stopRequested.getFuture());
+			ASSERT(result.index() == 1);
 		} catch (Error& e) {
 			w->stop(e);
+			co_return;
 		}
-		return Void();
+		if (w->destroying) {
+			w->stop(actor_cancelled());
+		}
 	}
 
 	void checkError() {
@@ -194,6 +198,13 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 
 public:
 	WorkPool() : pool(new Pool) { m_stopOnError = stopOnError(this); }
+	~WorkPool() override {
+		destroying = true;
+		// Run implicit stop inside the watcher's exception boundary, not this noexcept destructor.
+		if (stopRequested.canBeSet()) {
+			stopRequested.send(Void());
+		}
+	}
 
 	Future<Void> getError() const override { return pool->anyError.getResult(); }
 	void addThread(IThreadPoolReceiver* userData, const char*) override {
@@ -207,10 +218,10 @@ public:
 		pool->allStopped.add(w->stopped.getFuture());
 		startWorker(w);
 	}
-	ACTOR static void startWorker(Worker* w) {
+	static coro::DetachedCoroutine startWorker(Worker* w) {
 		// We want to make sure that coroutines are always started after Net2::run() is called, so the main coroutine is
 		// initialized.
-		wait(delay(0, g_network->getCurrentTask()));
+		co_await delay(0, g_network->getCurrentTask());
 		w->start();
 	}
 	void post(PThreadAction action) override {
@@ -223,10 +234,16 @@ public:
 			pool->idle.pop_back();
 			pool->queueLock.leave();
 			c->unblock();
-		} else
+		} else {
 			pool->queueLock.leave();
+		}
 	}
 	Future<Void> stop(Error const& e) override {
+		// User cancellation callbacks can release the last owner, except during implicit destruction itself.
+		Reference<WorkPool> keepAlive;
+		if (!destroying) {
+			keepAlive = Reference<WorkPool>::addRef(this);
+		}
 		if (error.code() == invalid_error_code) {
 			error = e;
 		}
@@ -251,6 +268,10 @@ public:
 		for (int i = 0; i < idle.size(); i++)
 			idle[i]->unblock();
 
+		// Keep implicit shutdown pending if synchronous cleanup throws; finish before stop waiters can release us.
+		if (stopRequested.canBeSet()) {
+			stopRequested.send(Void());
+		}
 		pool->allStopped.add(Void());
 
 		return pool->allStopped.getResult();
@@ -262,15 +283,15 @@ public:
 
 using CoroPool = WorkPool<Coroutine, ThreadUnsafeSpinLock, true>;
 
-ACTOR void coroSwitcher(Future<Void> what, TaskPriority taskID, Coro* coro) {
+coro::DetachedCoroutine coroSwitcher(Future<Void> what, TaskPriority taskID, Coro* coro) {
 	try {
 		// state double t = now();
-		wait(what);
+		co_await what;
 		// if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting && now()!=t)
 		//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", taskID).detail("Elapsed", now()-t).backtrace("Flow");
 	} catch (Error&) {
 	}
-	wait(delay(0, taskID));
+	co_await delay(0, taskID);
 	Coro_switchTo_(swapCoro(coro), coro);
 }
 

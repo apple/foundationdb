@@ -107,7 +107,7 @@ public:
 		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::operator=(std::move(r));
 	}
 
-	explicit(false) CoalescedKeyRangeMap(CoalescedKeyRangeMap&& source) = default;
+	CoalescedKeyRangeMap(CoalescedKeyRangeMap&& source) = default;
 
 	void insert(const KeyRangeRef& keys, const Val& value);
 	void insert(const KeyRef& key, const Val& value);
@@ -199,15 +199,21 @@ std::vector<KeyRangeWith<Val>> KeyRangeMap<Val, Metric, MetricFunc>::getAffected
 	return affectedRanges;
 }
 
-template <class Val, class Metric, class MetricFunc>
-void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(const KeyRangeRef& keys, const Val& value) {
+namespace KeyRangeMapImpl {
+
+template <class StoredKey, class Val, class Metric, class MetricFunc>
+void insertCoalescedRange(Map<StoredKey, Val, MapPair<StoredKey, Val>, Metric>& map,
+                          const MetricFunc& mf,
+                          const Key& mapEnd,
+                          const KeyRangeRef& keys,
+                          const Val& value) {
 	ASSERT(keys.end <= mapEnd);
 
 	if (keys.empty())
 		return;
 
-	auto begin = RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.lower_bound(keys.begin);
-	auto end = RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.lower_bound(keys.end);
+	auto begin = map.lower_bound(keys.begin);
+	auto end = map.lower_bound(keys.end);
 	bool insertEnd = false;
 	bool insertBegin = false;
 	Val endVal;
@@ -236,17 +242,22 @@ void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(const KeyRangeRef& ke
 			insertBegin = true;
 	}
 
-	RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.erase(begin, end);
+	map.erase(begin, end);
 	if (insertEnd) {
-		MapPair<Key, Val> p(keys.end, endVal);
-		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.insert(
-		    p, true, RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::mf(p));
+		MapPair<StoredKey, Val> p(keys.end, endVal);
+		map.insert(p, true, mf(p));
 	}
 	if (insertBegin) {
-		MapPair<Key, Val> p(keys.begin, value);
-		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.insert(
-		    p, true, RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::mf(p));
+		MapPair<StoredKey, Val> p(keys.begin, value);
+		map.insert(p, true, mf(p));
 	}
+}
+
+} // namespace KeyRangeMapImpl
+
+template <class Val, class Metric, class MetricFunc>
+void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(const KeyRangeRef& keys, const Val& value) {
+	KeyRangeMapImpl::insertCoalescedRange(this->map, this->mf, mapEnd, keys, value);
 }
 
 template <class Val, class Metric, class MetricFunc>
@@ -299,52 +310,7 @@ void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(const KeyRef& key, co
 
 template <class Val, class Metric, class MetricFunc>
 void CoalescedKeyRefRangeMap<Val, Metric, MetricFunc>::insert(const KeyRangeRef& keys, const Val& value) {
-	ASSERT(keys.end <= mapEnd);
-
-	if (keys.empty())
-		return;
-
-	auto begin = RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::map.lower_bound(keys.begin);
-	auto end = RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::map.lower_bound(keys.end);
-	bool insertEnd = false;
-	bool insertBegin = false;
-	Val endVal;
-
-	if (keys.end != mapEnd) {
-		if (end->key != keys.end) {
-			auto before_end = end;
-			before_end.decrementNonEnd();
-			if (value != before_end->value) {
-				insertEnd = true;
-				endVal = before_end->value;
-			}
-		}
-
-		if (!insertEnd && end->value == value && end->key != mapEnd) {
-			++end;
-		}
-	}
-
-	if (keys.begin == allKeys.begin) {
-		insertBegin = true;
-	} else {
-		auto before_begin = begin;
-		before_begin.decrementNonEnd();
-		if (before_begin->value != value)
-			insertBegin = true;
-	}
-
-	RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::map.erase(begin, end);
-	if (insertEnd) {
-		MapPair<KeyRef, Val> p(keys.end, endVal);
-		RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::map.insert(
-		    p, true, RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::mf(p));
-	}
-	if (insertBegin) {
-		MapPair<KeyRef, Val> p(keys.begin, value);
-		RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::map.insert(
-		    p, true, RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::mf(p));
-	}
+	KeyRangeMapImpl::insertCoalescedRange(this->map, this->mf, mapEnd, keys, value);
 }
 
 template <class Val, class Metric, class MetricFunc>
