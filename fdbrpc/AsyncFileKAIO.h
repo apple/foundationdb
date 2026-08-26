@@ -534,15 +534,21 @@ private:
 
 		template <class T>
 		static coro::DetachedCoroutine deliver(Promise<T> result, bool failed, int r, TaskPriority task) {
-			co_await delay(0, task);
-			if (failed)
-				result.sendError(io_timeout());
-			else if (r < 0)
-				result.sendError(io_error());
-			else if constexpr (std::is_same_v<T, Void>)
-				result.send(Void());
-			else
-				result.send(r);
+			try {
+				co_await delay(0, task);
+				if (failed)
+					result.sendError(io_timeout());
+				else if (r < 0)
+					result.sendError(io_error());
+				else if constexpr (std::is_same_v<T, Void>)
+					result.send(Void());
+				else
+					result.send(r);
+			} catch (const Error&) {
+				// Typed completion errors have no result consumer.
+			} catch (...) {
+				(void)unknown_error();
+			}
 		}
 
 		void setResult(int r) {
