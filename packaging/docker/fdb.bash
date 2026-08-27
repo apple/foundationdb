@@ -26,11 +26,11 @@ function create_cluster_file() {
 
     if [[ -n $FDB_COORDINATOR ]]; then
         if [[ "$FDB_IP_VERSION" == '4' ]]; then
-            coordinator_ip="$(getent ahostsv4 $FDB_COORDINATOR | awk 'END{ print $1 }')"
+            coordinator_ip="$(getent ahostsv4 "$FDB_COORDINATOR" | awk '{ print $1; exit }')"
         elif [[ "$FDB_IP_VERSION" == '6' ]]; then
-            coordinator_ip="[$(getent ahostsv6 $FDB_COORDINATOR | awk 'END{ print $1 }')]"
+            coordinator_ip="[$(getent ahostsv6 "$FDB_COORDINATOR" | awk '{ print $1; exit }')]"
         fi
-        if [[ -z "$coordinator_ip" ]]; then
+        if [[ -z "$coordinator_ip" ]] || [[ "$coordinator_ip" == "[]" ]]; then
             echo "Failed to look up coordinator address for $FDB_COORDINATOR" 1>&2
             exit 1
         fi
@@ -43,6 +43,10 @@ function create_cluster_file() {
             echo "Overwriting existing clusterfile." 1>&2
         fi
         echo "$FDB_CLUSTER_FILE_CONTENTS" > "$FDB_CLUSTER_FILE"
+        if [[ $? != 0 ]]; then
+            echo "Unable to write to FDB_CLUSTER_FILE." 1>&2
+            exit 1
+        fi
     elif [[ ! -w "$FDB_CLUSTER_FILE" ]]; then
         # fdbserver requires write permissions to clusterfile, or it may *eventually* fail due to cluster migrations.
         # https://apple.github.io/foundationdb/administration.html#required-permissions
@@ -50,11 +54,6 @@ function create_cluster_file() {
         exit 1
     else
         echo "Using existing clusterfile at \"$FDB_CLUSTER_FILE\"." 1>&2
-    fi
-
-    if (( $? != 0 )); then
-        echo "Unable to write to FDB_CLUSTER_FILE." 1>&2
-        exit 1
     fi
 }
 
@@ -72,24 +71,24 @@ function create_server_environment() {
     FDB_IP_VERSION=${FDB_IP_VERSION:-4}
 
     if [[ "$FDB_IP_VERSION" == '4' ]]; then
-        FDB_LISTEN_IP=${FDB_LISTEN_IP:-'0.0.0.0'}
+        FDB_LISTEN_IP="${FDB_LISTEN_IP:-0.0.0.0}"
     elif [[ "$FDB_IP_VERSION" == '6' ]]; then
-        FDB_LISTEN_IP=${FDB_LISTEN_IP:-'[::]'}
+        FDB_LISTEN_IP="[${FDB_LISTEN_IP:-::}]"
     else
         echo "Unknown FDB_IP_VERSION \"$FDB_IP_VERSION\"" 1>&2
         exit 1
     fi
     if [[ "$FDB_NETWORKING_MODE" == "host" ]]; then
         if [[ "$FDB_IP_VERSION" == '4' ]]; then
-            public_ip=127.0.0.1
+            public_ip='127.0.0.1'
         elif [[ "$FDB_IP_VERSION" == '6' ]]; then
             public_ip='[::1]'
         fi
     elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
         if [[ "$FDB_IP_VERSION" == '4' ]]; then
-            public_ip=${FDB_PUBLIC_IP:-"$(first_hostname_with_str '.')"}
+            public_ip="${FDB_PUBLIC_IP:-$(first_hostname_with_str '.')}"
         elif [[ "$FDB_IP_VERSION" == '6' ]]; then
-            public_ip=${FDB_PUBLIC_IP:-"[$(first_hostname_with_str ':')]"}
+            public_ip="[${FDB_PUBLIC_IP:-$(first_hostname_with_str ':')}]"
         fi
         if [[ $? != 0 ]]; then
             echo "No valid IPv${FDB_IP_VERSION} address" 1>&2
