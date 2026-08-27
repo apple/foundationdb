@@ -5,154 +5,121 @@ Flow
 Engineering challenges
 ======================
 
-FoundationDB began with ambitious goals for both :doc:`high performance <performance>` per node and :doc:`scalability <scalability>`. We knew that to achieve these goals we would face serious engineering challenges while developing the FoundationDB core. We'd need to implement efficient asynchronous communicating processes of the sort supported by `Erlang <http://en.wikipedia.org/wiki/Erlang_(programming_language)>`_ or the `Async library in .NET <http://msdn.microsoft.com/en-us/library/vstudio/hh191443.aspx>`_, but we'd also need the raw speed and I/O efficiency of C++. Finally, we'd need to perform extensive simulation to engineer for reliability and fault tolerance on large clusters.
+FoundationDB began with ambitious goals for both :doc:`high performance <performance>` per node and :doc:`scalability <scalability>`. We knew that to achieve these goals we would face serious engineering challenges while developing the FoundationDB core. We'd need efficient asynchronous communicating processes, the speed and I/O efficiency of C++, and extensive simulation to engineer for reliability and fault tolerance on large clusters.
 
-To meet these challenges, we developed several new tools, the first of which is Flow, a new programming language that brings `actor-based concurrency <http://en.wikipedia.org/wiki/Actor_model>`_ to C++11. To add this capability, Flow introduces a number of new keywords and control-flow primitives for managing concurrency. Flow is implemented as a compiler which analyzes an asynchronous function (actor) and rewrites it as an object with many different sub-functions that use callbacks to avoid blocking (see `streamlinejs <https://github.com/Sage/streamlinejs>`_ for a similar concept using JavaScript). The Flow compiler's output is normal C++11 code, which is then compiled to a binary using traditional tools. Flow also provides input to our simulation tool, which conducts deterministic simulations of the entire system, including its physical interfaces and failure modes. In short, Flow allows efficient concurrency within C++ in a maintainable and extensible manner, achieving all three major engineering goals:
+Flow provides the asynchronous runtime for these processes. FoundationDB uses standard C++ coroutines with Flow futures, streams, and cooperative scheduling. The C++ compiler preserves each coroutine's execution state across suspension points, and Flow connects awaited operations to the event loop. The same runtime supports deterministic simulation of the system, including its physical interfaces and failure modes.
 
-* high performance (by compiling to native code),
-* actor-based concurrency (for high productivity development),
-* simulation support (for testing).
+Flow supports three major engineering goals:
+
+* high performance through native code,
+* asynchronous concurrency through coroutines and message passing,
+* simulation support for testing.
 
 A first look
 ============
 
-Actors in Flow receive asynchronous messages from each other using a data type called a *future*. When an actor requires a data value to continue computation, it waits for it without blocking other actors. The following simple actor performs asynchronous addition. It takes a future integer and a normal integer as an offset, waits on the future integer, and returns the sum of the value and the offset:
+Coroutines receive asynchronous results through futures. When a coroutine needs a result, it can suspend without blocking other work on the event loop. This function waits for an integer, adds an offset, and returns the sum:
 
-.. code-block:: c
+.. code-block:: cpp
 
-    ACTOR Future<int> asyncAdd(Future<int> f, int offset) {
-      int value = wait( f );
-      return value + offset;
+    #include "flow/flow.h"
+
+    Future<int> asyncAdd(Future<int> f, int offset) {
+        int value = co_await f;
+        co_return value + offset;
     }
+
+A coroutine returning ``Future<T>`` starts immediately when called and runs until it completes or awaits an operation that is not ready. Its returned future represents the eventual result. Coroutine code lives in ordinary ``.cpp`` and ``.h`` files.
 
 Flow features
 =============
 
-Flow's new keywords and control-flow primitives support the capability to pass messages asynchronously between components. Here's a brief overview.
-
 Promise<T> and Future<T>
 ------------------------
 
-The data types that connect asynchronous senders and receivers are ``Promise<T>`` and ``Future<T>`` for some C++ type ``T``. When a sender holds a ``Promise<T>``, it represents a promise to deliver a value of type ``T`` at some point in the future to the holder of the ``Future<T>``. Conversely, a receiver holding a ``Future<T>`` can asynchronously continue computation until the point at which it actually needs the ``T.``
+``Promise<T>`` and ``Future<T>`` connect an asynchronous sender and receiver. A promise can deliver one value of type ``T`` or an error. The future lets its holder observe that result. A future may have multiple holders.
 
-Promises and futures can be used within a single process, but their real strength in a distributed system is that they can traverse the network. For example, one computer could create a promise/future pair, then send the promise to another computer over the network. The promise and future will still be connected, and when the promise is fulfilled by the remote computer, the original holder of the future will see the value appear.
+These are local process handles. FoundationDB's RPC layer uses ``RequestStream<T>`` and ``ReplyPromise<T>`` for network requests and replies. A request can carry a reply promise to another process; sending the reply there makes the caller's future ready.
 
-wait()
-------
+co_await and co_return
+----------------------
 
-At the point when a receiver holding a ``Future<T>`` needs the ``T`` to continue computation, it invokes the ``wait()`` statement with the ``Future<T>`` as its parameter. The ``wait()`` statement allows the calling actor to pause execution until the value of the future is set, returning a value of type ``T``. During the wait, other actors can continue execution, providing asynchronous concurrency within a single process.
+``co_await`` waits for a future without blocking the event loop. Awaiting a ready future continues immediately; otherwise the coroutine suspends until it becomes ready. If the future contains an error, awaiting it throws that ``Error``.
 
-ACTOR
------
+A coroutine returning ``Future<T>`` completes with ``co_return value;``. For ``Future<Void>``, use ``co_return;`` to signal completion without a payload. Awaiting a ``Future<Void>`` does not produce a value to assign.
 
-Only functions labeled with the ``ACTOR`` tag can call ``wait()``. Actors are the essential unit of asynchronous work and can be composed to create complex message-passing systems. By composing actors, futures can be chained together so that the result of one depends on the output of another.
+Local variables and ownership
+-----------------------------
 
-An actor is declared as returning a ``Future<T>`` where ``T`` may be ``Void`` if the actor's return value is used only for signaling. Each actor is preprocessed into a C++11 class with internal callbacks and supporting functions.
+Local variables obey normal C++ scope rules and remain alive across suspension while their scope is active. Value parameters are stored in the coroutine frame. References, pointers, and views such as ``StringRef`` do not extend the lifetime of their referents or backing storage. Use owning types such as ``Reference<T>`` and ``Standalone<T>`` when the coroutine needs to retain an object or its bytes.
 
-State
------
+PromiseStream<T> and FutureStream<T>
+------------------------------------
 
-The ``state`` keyword is used to scope a variable so that it is visible across multiple ``wait()`` statements within an actor. The use of a ``state`` variable is illustrated in the example actor below.
+``PromiseStream<T>`` and ``FutureStream<T>`` represent a series of asynchronous messages. Awaiting a ``FutureStream<T>`` consumes its next value. If an item is already queued, execution continues without suspension:
 
-PromiseStream<T>, FutureStream<T>
----------------------------------
+.. code-block:: cpp
 
-When a component wants to work with a *stream* of asynchronous messages rather than a single message, it can use ``PromiseStream<T>`` and ``FutureStream<T>``. These constructs allow for two important features: multiplexing and reliable delivery of messages. They also play an important role in Flow design patterns. For example, many of the servers in FoundationDB expose their interfaces as a ``struct`` of promise streams—one for each request type.
+    Future<Void> forwardWithOffset(FutureStream<int> input,
+                                   PromiseStream<int> output,
+                                   int offset) {
+        while (true) {
+            int value = co_await input;
+            output.send(value + offset);
+        }
+    }
 
-waitNext()
-----------
-
-``waitNext()`` is the counterpart of ``wait()`` for streams. It pauses program execution and waits for the next value in a ``FutureStream``. If there is a value ready in the stream, execution continues without delay.
-
-choose . . . when
------------------
-
-The ``choose`` and ``when`` constructs allow an actor to wait for multiple futures at once in a ordered and predictable way.
-
-Example: A Server Interface
+Waiting for multiple inputs
 ---------------------------
 
-Below is a actor that runs on single server communicating over the network. Its functionality is to maintain a count in response to asynchronous messages from other actors. It supports an interface implemented with a loop containing a ``choose`` statement with a ``when`` for each request type. Each ``when`` uses ``waitNext()`` to asynchronously wait for the next request in the stream. The add and subtract interfaces modify the count itself, stored with a state variable. The get interface takes a ``Promise<int>`` instead of just an ``int`` to facilitate sending back the return message.
+``race()`` from ``flow/CoroUtils.h`` waits for the first ready input. It returns a ``std::variant`` whose index matches the winning argument. Inputs can be futures or streams; a winning stream consumes one item. If several inputs are already ready, the lowest argument index wins. Errors propagate from the winning input.
 
-To write the equivalent code directly in C++, a developer would have to implement a complex set of callbacks with exception-handling, requiring far more engineering effort. Flow makes it much easier to implement this sort of asynchronous coordination, with no loss of performance:
+Losing inputs are detached from the race, not explicitly cancelled. They may still be cancelled if releasing the race drops their last future reference. Retain a future separately when its operation must continue after losing. A completed non-stream future stays ready, so replace it or remove it from a repeated race after handling it.
 
-.. code-block:: c
+Example: A server interface
+---------------------------
 
-    ACTOR void serveCountingServerInterface(
-               CountingServerInterface csi) {
-        state int count = 0;
-        while (1) {
-            choose {
-                when (int x = waitNext(csi.addCount.getFuture())){
-                    count += x;
-                }
-                when (int x = waitNext(csi.subtractCount.getFuture())){
-                    count -= x;
-                }
-                when (Promise<int> r = waitNext(csi.getCount.getFuture())){
-                    r.send( count ); // goes to client
-                }
+This local server maintains a count in response to asynchronous messages. It has one promise stream per request type and races those streams in a loop. A request for the current count carries a ``Promise<int>`` through which the server replies. A network interface uses the RPC types described above and also needs serialization.
+
+.. code-block:: cpp
+
+    #include "flow/CoroUtils.h"
+
+    struct CountingServerInterface {
+        PromiseStream<int> addCount;
+        PromiseStream<int> subtractCount;
+        PromiseStream<Promise<int>> getCount;
+    };
+
+    Future<Void> serveCountingServerInterface(CountingServerInterface csi) {
+        int count = 0;
+        while (true) {
+            auto request = co_await race(csi.addCount.getFuture(),
+                                         csi.subtractCount.getFuture(),
+                                         csi.getCount.getFuture());
+            switch (request.index()) {
+            case 0:
+                count += std::get<0>(request);
+                break;
+            case 1:
+                count -= std::get<1>(request);
+                break;
+            case 2:
+                std::get<2>(request).send(count);
+                break;
             }
         }
     }
 
-Caveats
-=======
+The caller must keep the returned ``Future<Void>`` alive while the server is needed. The local ``count`` remains alive across each suspension.
 
-Even though Flow code looks a lot like C++, it is not. It has different rules and the files are preprocessed. It is always important to keep this in mind when programming flow.
+Cancellation and lifetime pitfalls
+==================================
 
-We still want to be able to use IDEs and modern editors (with language servers like cquery or clang-based completion engines like ycm). Because of this there is a header-file ``actorcompiler.h`` in flow which defines preprocessor definitions to make flow compile as normal C++ code. CMake even supports a special mode so that it doesn't preprocess flow files. This mode can be used by passing ``-DOPEN_FOR_IDE=ON`` to cmake. Additionally we generate a special ``compile_commands.json`` into the source-directory which will support opening the project in IDEs and editors that look for a compilation database.
+By default, dropping the last reference to a pending coroutine's returned future cancels it. An explicit ``Future::cancel()`` also requests cancellation. A suspended coroutine resumes by throwing ``actor_cancelled`` from its await. Local objects are destroyed as their scopes unwind. Keep the future alive, or await it directly, when the work must continue.
 
-Some preprocessor definitions will not fix all issues though. When programming Flow the following things have to be taken care of by the programmer:
+Error and retry handlers must propagate ``actor_cancelled`` after any required synchronous cleanup. Do not silently swallow ``broken_promise`` or other errors unless the caller's contract explicitly handles them. C++ does not allow ``co_await`` inside a ``catch`` handler; save the error and await asynchronous recovery after leaving the handler.
 
-- Local variables don't survive a call to ``wait``. So this would be legal Flow code, but NOT legal C++ code:
+Captures in a coroutine lambda belong to the lambda's closure, which may be destroyed while the coroutine is suspended. Prefer a named coroutine with explicit value parameters when the work can outlive the call that starts it.
 
-  .. code-block:: c
-
-                ACTOR void foo {
-                    int i = 0;
-                    wait(someFuture);
-                    int i = 2;
-                    wait(someOtherFuture)
-                }
-
-
-  In order to make this not break IDE-support one can either rename the second occurrence of this variable or, if this is not desired as it might make the code unreadable, one can use scoping:
-
-
-  .. code-block:: c
-
-                ACTOR void foo {
-                    {
-                        int i = 0;
-                        wait(someFuture);
-                    }
-                    {
-                        int i = 2;
-                        wait(someOtherFuture)
-                    }
-                }
-
-- An ``ACTOR`` is compiled into a class internally. Which means that within an actor-function, ``this`` is a valid pointer to this class. But using them explicitly (or as described later implicitly) will break IDE support. One can use ``THIS`` and ``THIS_ADDR`` instead. But be careful as ``THIS`` will be of type ``nullptr_t`` in IDE-mode and of the actor-type in normal compilation mode.
-- Lambdas and state variables are weird in a sense. After actor compilation, a state variable is a member of the compiled actor class. In IDE mode it is considered a normal local variable. This can result in some surprising side-effects. So the following code will only compile if the method ``Foo::bar`` is defined as ``const``:
-
-  .. code-block:: c
-
-                ACTOR foo() {
-                    state Foo f;
-                    foo([=]() { f.bar(); })
-                }
-
-
-  If it is not, one has to pass the member explicitly as a reference:
-
-  .. code-block:: c
-
-                ACTOR foo() {
-                    state Foo f;
-                    auto x = &f;
-                    foo([x]() { x->bar(); })
-                }
-
-- state variables in Flow don't follow the normal scoping rules. So in Flow a state variable can be defined in an inner scope and later it can be used in the outer scope. In order to not break compilation in IDE-mode, always define state variables in the outermost scope they will be used.
-
+See the `Flow tutorial <https://github.com/apple/foundationdb/blob/main/flow/README.md>`_, the `coroutine design guide <https://github.com/apple/foundationdb/blob/main/design/coroutines.md>`_, and the `runnable coroutine tutorial <https://github.com/apple/foundationdb/blob/main/documentation/coro_tutorial/tutorial.cpp>`_ for further examples.

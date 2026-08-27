@@ -13,26 +13,28 @@ Probes
 ======
 
 
-Actors
-------
+Legacy actor probes
+-------------------
+
+These probes are emitted by the legacy source translator. The C++ coroutine runtime does
+not emit them.
 
 .. code-block:: c
 
-   FDB_TRACE_PROBE(actor_create, "actorname")
-   FDB_TRACE_PROBE(actor_destroy, "actorname")
+   FDB_TRACE_PROBE(actor_create, "actorname", id)
+   FDB_TRACE_PROBE(actor_destroy, "actorname", id)
 
-Gets called whenever an actor is created or gets destroyed. It provides one argument which is a
-string and it is the name of the actor.
+These record creation and destruction of a generated actor. Their arguments are the actor's
+name and an ``unsigned long`` instance identifier.
 
 .. code-block:: c
 
-   FDB_TRACE_PROBE(actor_enter, "name", index)
-   FDB_TRACE_PROBE(actor_exit, "name", index)
+   FDB_TRACE_PROBE(actor_enter, "name", id, index)
+   FDB_TRACE_PROBE(actor_exit, "name", id, index)
 
-Whenever we call into an actor (either directly through a function call or indirectly through a callback)
-we call ``actor_enter``. Whenever we leave an actor (either because it returns or because it calls into
-wait) we call ``actor_exit``. The first argument is a string of the name of the actor and the second is an
-index. ``-1`` means that we entered/exited through in a main function call, otherwise it is a generated index.
+These record entry to and exit from generated actor code. The arguments are the actor's name,
+instance identifier, and an integer index. ``-1`` identifies the initial function invocation;
+other indices identify generated callbacks.
 
 Main-Loop
 ---------

@@ -84,7 +84,7 @@ The format of `location` is, in general, `<source_file_name>.<function/actor nam
 NativeAPI.getConsistentReadVersion.Before
 ```
 
-means the `location` is at `NativeAPI.actor.cpp`, `ACTOR` `getConsistentReadVersion`, `Before` requesting the read version from GRV Proxy.
+means the `location` is in the `getConsistentReadVersion` function in NativeAPI, `Before` requesting the read version from GRV Proxy. The source links below refer to the historical revision used for these traces.
 
 Some example queries are:
 

@@ -176,9 +176,9 @@ A typical consumer loop is:
 
 ```cpp
 co_await registerNativeCdcStreamClient(db, "orders"_sr, KeyRangeRef("order/"_sr, "order0"_sr));
-state Reference<NativeCdcConsumer> consumer = co_await createNativeCdcConsumer(db, "orders"_sr);
+Reference<NativeCdcConsumer> consumer = co_await createNativeCdcConsumer(db, "orders"_sr);
 
-loop {
+while (true) {
 	CDCConsumeReply reply = co_await consumer->consume();
 	for (auto const& versionedMutations : reply.mutations) {
 		// Apply all mutations for versionedMutations.version.
