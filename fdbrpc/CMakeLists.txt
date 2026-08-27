@@ -17,7 +17,6 @@ endif()
 
 set(FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS
   ActorFuzz.actor.cpp
-  FlowTests.actor.cpp
   dsltest.actor.cpp)
 
 add_flow_target(STATIC_LIBRARY NAME fdbrpc

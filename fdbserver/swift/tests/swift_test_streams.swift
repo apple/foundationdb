@@ -23,7 +23,7 @@ import flow_swift
 
 struct StreamTests: SimpleSwiftTestSuite {
     var tests: [TestCase] {
-        /// Corresponds to FlowTests.actor.cpp "/flow/flow/trivial promisestreams"
+        /// Corresponds to FlowTests.cpp "/flow/flow/trivial promisestreams"
         TestCase("PromiseStream: await stream.waitNext") {
             var ps = PromiseStreamCInt()
             var fs: FutureStreamCInt = ps.getFuture()
