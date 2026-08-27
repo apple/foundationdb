@@ -505,6 +505,14 @@ public:
 						}
 					}
 
+					// Tracked-latest events first logged before the trace file was opened (e.g. an early
+					// ProgramStart in backup_agent) were cached without the universal annotation fields
+					// (LogGroup, Machine, Roles). Now that the log is open, annotate the rolled copy so it
+					// carries them. Already-annotated cached copies already have those fields (copied
+					// above), so skip them to avoid duplicating fields.
+					if (!events[idx].isAnnotated())
+						annotateEvent(rolledFields);
+
 					eventBuffer.push_back(rolledFields);
 				}
 			}
