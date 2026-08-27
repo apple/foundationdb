@@ -32,7 +32,7 @@
 #endif // WITH_ROCKSDB
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbserver/CoroFlow.h"

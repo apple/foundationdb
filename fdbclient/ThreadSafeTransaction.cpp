@@ -29,7 +29,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/NativeCdc.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
 

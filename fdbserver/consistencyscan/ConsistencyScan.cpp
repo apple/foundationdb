@@ -22,6 +22,7 @@
 #include <limits>
 
 #include "fdbclient/JSONDoc.h"
+#include "fdbclient/SimulationCapabilities.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "fdbclient/json_spirit/json_spirit_writer_options.h"
@@ -396,7 +397,7 @@ Future<int> consistencyCheckReadData(UID myId,
 					             (*storageServerInterfaces)[firstValidServer->get()].isTss();
 					bool isExpectedTSSMismatch =
 					    g_network->isSimulated() &&
-					    simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch) && isTss;
+					    fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch) && isTss;
 					// It's possible that the storage servers are inconsistent in KillRegion
 					// workload where a forced recovery is performed. The killed storage server
 					// in the killed region returned first with a higher version, and a later
@@ -2144,8 +2145,7 @@ Future<Void> checkDataConsistency(Database cx,
 						break;
 					} else if (estimatedBytes[j] < 0 &&
 					           ((g_network->isSimulated() &&
-					             !simulationPolicyHasCapability(
-					                 ISimulationPolicy::Capability::StorageReplicaFaultInjection)) ||
+					             !fdbSimulationHasCapability(FDBSimulationCapability::StorageReplicaFaultInjection)) ||
 					            !storageServerInterfaces[j].isTss())) {
 						// Ignore a non-responding TSS outside of simulation, or if tss fault injection is enabled
 						break;

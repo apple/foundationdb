@@ -71,9 +71,21 @@ std::atomic<int> g_bulkDumpTaskCompleteCount(0);
 std::atomic<int> g_bulkLoadRestoreTaskCompleteCount(0);
 
 // Helper function to monitor BulkDump job completion
-// Returns true if job completed successfully, false if timed out
+// Returns true if the job completed, false if it stopped making progress for timeoutDuration.
+//
+// The budget is a no-progress window, not a total duration. A dump advances one bounded slice per
+// scheduling round (the SS returns after SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST batches and the
+// remainder is re-dispatched on a later round), so total time scales with the size of the range and
+// with how finely it is sharded -- not with the health of the job. A wall-clock budget therefore fails
+// dumps that are advancing perfectly well, while still not catching a job that is truly wedged sooner
+// than the budget. Measuring absence of progress separates the two.
 Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeoutDuration, double pollInterval) {
-	double timeoutStart = now();
+	double lastProgressTime = now();
+	size_t lastCompleteCount = 0;
+	// Counting completed ranges walks the job's bulkdump metadata, so it must be sampled far more
+	// coarsely than the liveness poll.
+	double progressCheckInterval = std::max(pollInterval, timeoutDuration / 10);
+	double lastProgressCheck = now();
 	Transaction tr(cx);
 
 	while (true) {
@@ -86,8 +98,26 @@ Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeout
 				co_return true; // Job completed successfully
 			}
 
-			if (now() - timeoutStart > timeoutDuration) {
-				co_return false; // Timed out
+			if (now() - lastProgressCheck >= progressCheckInterval) {
+				lastProgressCheck = now();
+				// A sample that fails carries no information: leave the window running rather than
+				// letting a transient read error either fail the backup or extend its deadline.
+				try {
+					size_t completeCount = co_await getBulkDumpCompleteTaskCount(cx, currentJob.get().getJobRange());
+					if (completeCount > lastCompleteCount) {
+						lastCompleteCount = completeCount;
+						lastProgressTime = now();
+					}
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw;
+					}
+					TraceEvent(SevWarn, "BulkDumpProgressCheckFailed").error(e).detail("BulkDumpJobId", jobId);
+				}
+			}
+
+			if (now() - lastProgressTime > timeoutDuration) {
+				co_return false; // No progress within the window
 			}
 
 			co_await delay(pollInterval);
@@ -632,6 +662,13 @@ Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulk
 
 // Monitor BulkLoad job completion and update restore progress counters
 // restoreUid is used to update the RestoreConfig progress
+//
+// Returns false when the job stops making progress for timeoutDuration, not when it has simply been
+// running that long. A restore's duration is a function of how much data it moves, so a wall-clock budget
+// aborts large restores that are advancing normally -- BULKLOAD_JOB_TIMEOUT's own comment concedes as much
+// ("large DBs may take days" against a 24 hour default). The task counters this loop already maintains for
+// the status display are exactly the progress signal needed, so measuring absence of progress costs
+// nothing extra here.
 Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
                                                       UID jobId,
                                                       UID restoreUid,
@@ -639,7 +676,9 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
                                                       double timeoutDuration,
                                                       double pollInterval,
                                                       bool lockAware) {
-	double timeoutStart = now();
+	double lastProgressTime = now();
+	int64_t lastCompletedTasks = -1;
+	int64_t lastCompletedBytes = -1;
 	RestoreConfig restore(restoreUid);
 
 	while (true) {
@@ -653,6 +692,11 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 		// Update progress based on completed bulkload tasks
 		try {
 			auto [completed, submitted, triggered, running, total, bytes] = co_await getBulkLoadTaskProgress(cx, jobId);
+			if (completed > lastCompletedTasks || bytes > lastCompletedBytes) {
+				lastCompletedTasks = completed;
+				lastCompletedBytes = bytes;
+				lastProgressTime = now();
+			}
 			if (total > 0) {
 				// For bulkload restores, fileBlockCount is 0, so use task count as "blocks"
 				// This provides meaningful progress tracking for the restore status display
@@ -700,8 +744,8 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 			TraceEvent(SevWarn, "BulkLoadRestoreProgressError").error(e).detail("JobId", jobId);
 		}
 
-		if (now() - timeoutStart > timeoutDuration) {
-			co_return false; // Timed out
+		if (now() - lastProgressTime > timeoutDuration) {
+			co_return false; // No progress within the window
 		}
 
 		co_await delay(pollInterval);
@@ -3683,12 +3727,27 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				                                                       CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT,
 				                                                       5.0); // Poll every 5 seconds
 
+				// A bulkdump that did not finish leaves no keyspace snapshot, and therefore no bulkDumpJobId
+				// for a bulkload restore to locate its data. Reporting the backup as successful in that
+				// state claims delivery of something that was asked for and not produced: the caller finds
+				// out only much later, when a restore aborts with BulkLoadRestoreNoBulkDumpJobId and
+				// appears to blame the restore for a backup-side omission hours earlier.
+				//
+				// This also restores symmetry the path had lost. The dataset-completeness check below fails
+				// the backup for the same class of problem, but it sits inside the `completed` branch and so
+				// never ran on this route -- a timeout was the one way to skip every check and still report
+				// success. Mode restoration needs no handling here; the catch below already does it on the
+				// error path.
 				if (!completed) {
-					TraceEvent(SevWarn, "BulkDumpTaskTimeout")
+					TraceEvent(SevError, "BulkDumpTaskTimeout")
 					    .detail("BackupUID", config.getUid())
 					    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
-					    .detail("TimeoutDuration", 300.0);
+					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT)
+					    .detail("Reason",
+					            "BulkDump made no progress within the timeout; backup would not be "
+					            "bulkload-restorable");
 					Params.timeoutOccurred().set(task, true);
+					throw backup_error();
 				}
 
 				TraceEvent("BulkDumpTaskComplete")
@@ -4298,7 +4357,8 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					TraceEvent(SevWarn, "BulkLoadRestoreTimeout")
 					    .detail("RestoreUID", restore.getUid())
 					    .detail("BulkLoadJobId", bulkLoadJob.getJobId())
-					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKLOAD_JOB_TIMEOUT);
+					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKLOAD_JOB_TIMEOUT)
+					    .detail("Reason", "BulkLoad restore made no progress within the timeout");
 					// Restore original BulkLoad mode before throwing
 					if (originalBulkLoadMode != 1) {
 						co_await setBulkLoadMode(cx, originalBulkLoadMode);

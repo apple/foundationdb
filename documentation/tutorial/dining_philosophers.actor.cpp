@@ -22,7 +22,7 @@
 #include "flow/flow.h"
 #include "flow/Platform.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TLSConfig.h"
 #include <functional>

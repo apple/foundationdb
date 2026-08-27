@@ -25,7 +25,7 @@
 #include "flow/flow.h"
 #include "flow/IAsyncFile.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include <vector>
 

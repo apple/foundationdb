@@ -562,6 +562,33 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
+	Future<Void> checkUnsupportedMappedRange(Database cx,
+	                                         Key begin,
+	                                         Key end,
+	                                         Key mapper,
+	                                         Snapshot snapshot,
+	                                         bool readYourWritesDisabled) {
+		bool rejected = false;
+		try {
+			ReadYourWritesTransaction tr(cx);
+			if (readYourWritesDisabled) {
+				tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+			}
+			co_await tr.getMappedRange(KeySelector(firstGreaterOrEqual(begin), begin.arena()),
+			                           KeySelector(firstGreaterOrEqual(end), end.arena()),
+			                           mapper,
+			                           GetRangeLimits(/*rowLimit=*/100, /*byteLimit=*/100000),
+			                           snapshot,
+			                           Reverse::False);
+		} catch (Error& e) {
+			if (e.code() != error_code_unsupported_operation) {
+				throw;
+			}
+			rejected = true;
+		}
+		ASSERT(rejected);
+	}
+
 	Future<Void> checkMappedSelectorBoundaries(Database cx, Key mapper, GetMappedRangeWorkload* self) {
 		Key begin = indexEntryKey(10);
 		Key end = indexEntryKey(20);
@@ -590,6 +617,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		                                              KeySelector(firstGreaterOrEqual(begin), begin.arena()),
 		                                              mapper,
 		                                              GetRangeLimits(/*rowLimit=*/100, /*byteLimit=*/100000));
+
+		co_await checkUnsupportedMappedRange(cx, begin, end, mapper, Snapshot::True, /*readYourWritesDisabled=*/false);
+		co_await checkUnsupportedMappedRange(cx, begin, end, mapper, Snapshot::False, /*readYourWritesDisabled=*/true);
 
 		bool specialKeyRejected = false;
 		try {
