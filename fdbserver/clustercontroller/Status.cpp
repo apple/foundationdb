@@ -3628,10 +3628,15 @@ StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
 		json_spirit::mValue mv = readJSONStrictly(statusStr);
 		JSONDoc jsonDoc(mv);
 
-		std::string faultToleranceRelatedFields[] = {
-			"fault_tolerance", "data",    "logs", "maintenance_zone", "maintenance_seconds_remaining", "qos",
-			"recovery_state",  "messages", "degraded_multi_region"
-		};
+		std::string faultToleranceRelatedFields[] = { "fault_tolerance",
+			                                          "data",
+			                                          "logs",
+			                                          "maintenance_zone",
+			                                          "maintenance_seconds_remaining",
+			                                          "qos",
+			                                          "recovery_state",
+			                                          "messages",
+			                                          "degraded_multi_region" };
 
 		JsonBuilderObject statusObj;
 		for (std::string& field : faultToleranceRelatedFields) {
