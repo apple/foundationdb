@@ -1105,12 +1105,52 @@ std::map<Optional<Standalone<StringRef>>, int> getColocCounts(
 	return counts;
 }
 
+static bool singletonRecruitmentReady(const ClusterControllerData* self) {
+	const auto& dbInfo = self->db.serverInfo->get();
+	return self->masterProcessId.present() && self->masterProcessId == dbInfo.master.locality.processId() &&
+	       dbInfo.recoveryState >= RecoveryState::ACCEPTING_COMMITS;
+}
+
+void processRegisteredSingletons(ClusterControllerData* self,
+                                 WorkerInterface const& worker,
+                                 Optional<DataDistributorInterface> const& distributorInterf,
+                                 Optional<RatekeeperInterface> const& ratekeeperInterf,
+                                 Optional<ConsistencyScanInterface> const& consistencyScanInterf);
+
 // Checks if there exists a better process for each singleton (e.g. DD) compared
 // to the process it is currently on.
 // When adding new singletons, just follow the ratekeeper/data distributor examples.
 void checkBetterSingletons(ClusterControllerData* self) {
-	if (!self->masterProcessId.present() ||
-	    self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+	if (!singletonRecruitmentReady(self)) {
+		return;
+	}
+
+	// Reconsider deferred cross-DC registrations before recruitment can fail for lack of a candidate.
+	// Replaying same-DC registrations could instead replace the current singleton with an older one.
+	std::vector<WorkerInterface> deferredWorkers;
+	for (const auto& [processId, workerInfo] : self->id_worker) {
+		if (workerInfo.verified && workerInfo.details.interf.locality.dcId() != self->clusterControllerDcId &&
+		    (workerInfo.distributorInterf.present() || workerInfo.ratekeeperInterf.present() ||
+		     workerInfo.consistencyScanInterf.present())) {
+			deferredWorkers.push_back(workerInfo.details.interf);
+		}
+	}
+	for (const auto& worker : deferredWorkers) {
+		if (!singletonRecruitmentReady(self)) {
+			return;
+		}
+		auto workerInfo = self->id_worker.find(worker.locality.processId());
+		if (workerInfo == self->id_worker.end() || !workerInfo->second.verified ||
+		    workerInfo->second.details.interf.id() != worker.id()) {
+			continue;
+		}
+		// Halts may run callbacks, so do not retain references to worker state across reconciliation.
+		auto distributor = workerInfo->second.distributorInterf;
+		auto ratekeeper = workerInfo->second.ratekeeperInterf;
+		auto consistencyScan = workerInfo->second.consistencyScanInterf;
+		processRegisteredSingletons(self, worker, distributor, ratekeeper, consistencyScan);
+	}
+	if (!singletonRecruitmentReady(self)) {
 		return;
 	}
 
@@ -1303,12 +1343,6 @@ void removeFailedWorker(WorkerInterface const& worker, ClusterControllerData* cl
 	cluster->updateClusterHealthMonitorInputs();
 	cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
 }
-
-void processRegisteredSingletons(ClusterControllerData* self,
-                                 WorkerInterface const& worker,
-                                 Optional<DataDistributorInterface> const& distributorInterf,
-                                 Optional<RatekeeperInterface> const& ratekeeperInterf,
-                                 Optional<ConsistencyScanInterface> const& consistencyScanInterf);
 
 Future<Void> workerAvailabilityWatch(WorkerInterface worker,
                                      ProcessClass startingClass,
@@ -1559,9 +1593,21 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 	const std::string roleName = currSingleton.getRole().roleName;
 	const std::string roleAbbr = currSingleton.getRole().abbreviation;
 
+	const bool recruitmentConflict = recruitingID.present() && recruitingID.get() != registeringID;
+	const bool wrongDatacenter = self->clusterControllerDcId != worker.locality.dcId();
+	if (wrongDatacenter && !recruitmentConflict && !singletonRecruitmentReady(self)) {
+		// An elected controller may briefly be outside the primary DC. Keep existing services alive until
+		// its current master is accepting commits; retain this registration without publishing it.
+		TraceEvent(("CCDeferRegistering" + roleName).c_str(), self->id)
+		    .detail(roleAbbr + "ID", registeringID)
+		    .detail("DcID", printable(self->clusterControllerDcId))
+		    .detail("ReqDcID", printable(worker.locality.dcId()))
+		    .detail("RecoveryState", (int)self->db.serverInfo->get().recoveryState);
+		return;
+	}
+
 	// halt the requesting singleton if it isn't the one currently being recruited
-	if ((recruitingID.present() && recruitingID.get() != registeringID) ||
-	    self->clusterControllerDcId != worker.locality.dcId()) {
+	if (recruitmentConflict || wrongDatacenter) {
 		TraceEvent(("CCHaltRegistering" + roleName).c_str(), self->id)
 		    .detail(roleAbbr + "ID", registeringID)
 		    .detail("DcID", printable(self->clusterControllerDcId))
@@ -3763,6 +3809,184 @@ TEST_CASE("/fdbserver/clustercontroller/unverifiedRegistrationCannotPublishSingl
 	ASSERT(data.id_worker[processId].verified);
 	ASSERT(data.db.serverInfo->get().distributor.present());
 	ASSERT(data.db.serverInfo->get().distributor.get().id() == distributor.id());
+}
+
+WorkerInterface addSingletonTestWorker(ClusterControllerData& data, StringRef processId, StringRef dcId) {
+	LocalityData locality;
+	locality.set(LocalityData::keyProcessId, Standalone<StringRef>(processId));
+	locality.set(LocalityData::keyDcId, Standalone<StringRef>(dcId));
+	WorkerInterface worker(locality);
+	worker.initEndpoints();
+	worker.storage.getEndpoint(TaskPriority::Worker);
+	auto& info = data.id_worker[locality.processId()];
+	info.details =
+	    WorkerDetails(worker, ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource), false, true);
+	info.verified = true;
+	return worker;
+}
+
+TEST_CASE("/fdbserver/clustercontroller/deferCrossDatacenterSingletonHaltsUntilRecovery") {
+	LocalityData controllerLocality;
+	controllerLocality.set(LocalityData::keyDcId, "new-primary"_sr);
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           controllerLocality,
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	WorkerInterface remoteWorker = addSingletonTestWorker(data, "remote-singletons"_sr, "old-primary"_sr);
+	LocalityData remoteLocality = remoteWorker.locality;
+	auto& remote = data.id_worker[remoteLocality.processId()];
+	remote.distributorInterf = DataDistributorInterface(remoteLocality, UID(1, 1));
+	remote.ratekeeperInterf = RatekeeperInterface(remoteLocality, UID(1, 2));
+	remote.consistencyScanInterf = ConsistencyScanInterface(remoteLocality, UID(1, 3));
+	FutureStream<HaltDataDistributorRequest> ddHalts = remote.distributorInterf.get().haltDataDistributor.getFuture();
+	FutureStream<HaltRatekeeperRequest> rkHalts = remote.ratekeeperInterf.get().haltRatekeeper.getFuture();
+	FutureStream<HaltConsistencyScanRequest> csHalts =
+	    remote.consistencyScanInterf.get().haltConsistencyScan.getFuture();
+	auto registerSingletons = [&]() {
+		processRegisteredSingletons(
+		    &data, remoteWorker, remote.distributorInterf, remote.ratekeeperInterf, remote.consistencyScanInterf);
+	};
+	auto assertNoHalts = [&]() {
+		ASSERT(!ddHalts.isReady());
+		ASSERT(!rkHalts.isReady());
+		ASSERT(!csHalts.isReady());
+	};
+
+	registerSingletons();
+	assertNoHalts();
+	ASSERT(!data.db.serverInfo->get().distributor.present());
+	ASSERT(!data.db.serverInfo->get().ratekeeper.present());
+	ASSERT(!data.db.serverInfo->get().consistencyScan.present());
+
+	data.recruitingDistributorID = remote.distributorInterf.get().id();
+	registerSingletons();
+	assertNoHalts();
+
+	// A recruitment conflict remains actionable even before placement can be enforced.
+	data.recruitingDistributorID = UID(2, 1);
+	registerSingletons();
+	ASSERT(ddHalts.isReady());
+	HaltDataDistributorRequest conflictingHalt = ddHalts.pop();
+	ASSERT(conflictingHalt.requesterID == data.id);
+	conflictingHalt.reply.send(Void());
+	assertNoHalts();
+	data.recruitingDistributorID = Optional<UID>();
+
+	WorkerInterface master = addSingletonTestWorker(data, "master"_sr, "new-primary"_sr);
+	LocalityData masterLocality = master.locality;
+	data.masterProcessId = masterLocality.processId();
+	auto dbInfo = data.db.serverInfo->get();
+	dbInfo.master.locality = masterLocality;
+	dbInfo.recoveryState = RecoveryState::RECOVERY_TRANSACTION;
+	dbInfo.id = UID(3, 1);
+	data.db.serverInfo->set(dbInfo);
+	registerSingletons();
+	checkBetterSingletons(&data);
+	assertNoHalts();
+
+	dbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	dbInfo.id = UID(3, 2);
+	data.db.serverInfo->set(dbInfo);
+	data.masterProcessId = Optional<Standalone<StringRef>>();
+	registerSingletons();
+	checkBetterSingletons(&data);
+	assertNoHalts();
+
+	data.masterProcessId = Standalone<StringRef>("replacement-master"_sr);
+	registerSingletons();
+	checkBetterSingletons(&data);
+	assertNoHalts();
+
+	// Recovery alone must not make an unverified worker's cached registration actionable.
+	data.masterProcessId = masterLocality.processId();
+	remote.verified = false;
+	checkBetterSingletons(&data);
+	assertNoHalts();
+
+	// The existing outstanding-request path must reconsider the cached interfaces without re-registration.
+	remote.verified = true;
+	checkBetterSingletons(&data);
+	ASSERT(ddHalts.isReady());
+	ASSERT(rkHalts.isReady());
+	ASSERT(csHalts.isReady());
+	HaltDataDistributorRequest ddHalt = ddHalts.pop();
+	HaltRatekeeperRequest rkHalt = rkHalts.pop();
+	HaltConsistencyScanRequest csHalt = csHalts.pop();
+	ASSERT(ddHalt.requesterID == data.id);
+	ASSERT(rkHalt.requesterID == data.id);
+	ASSERT(csHalt.requesterID == data.id);
+	ddHalt.reply.send(Void());
+	rkHalt.reply.send(Void());
+	csHalt.reply.send(Void());
+	ASSERT(!data.db.serverInfo->get().distributor.present());
+	ASSERT(!data.db.serverInfo->get().ratekeeper.present());
+	ASSERT(!data.db.serverInfo->get().consistencyScan.present());
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/recheckDeferredSingletonWorkerIdentity") {
+	LocalityData controllerLocality;
+	controllerLocality.set(LocalityData::keyDcId, "primary"_sr);
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           controllerLocality,
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	WorkerInterface master = addSingletonTestWorker(data, "master"_sr, "primary"_sr);
+	data.masterProcessId = master.locality.processId();
+	auto dbInfo = data.db.serverInfo->get();
+	dbInfo.master.locality = master.locality;
+	dbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	dbInfo.id = UID(4, 1);
+	data.db.serverInfo->set(dbInfo);
+
+	WorkerInterface first = addSingletonTestWorker(data, "remote-a"_sr, "remote"_sr);
+	WorkerInterface second = addSingletonTestWorker(data, "remote-b"_sr, "remote"_sr);
+	DataDistributorInterface firstDD(first.locality, UID(5, 1));
+	DataDistributorInterface oldDD(second.locality, UID(5, 2));
+	data.id_worker[first.locality.processId()].distributorInterf = firstDD;
+	data.id_worker[second.locality.processId()].distributorInterf = oldDD;
+	FutureStream<HaltDataDistributorRequest> oldHalts = oldDD.haltDataDistributor.getFuture();
+
+	WorkerInterface replacement(second.locality);
+	replacement.initEndpoints();
+	replacement.storage.getEndpoint(TaskPriority::Worker);
+	ASSERT(replacement.id() != second.id());
+	DataDistributorInterface newDD(replacement.locality, UID(5, 3));
+	FutureStream<HaltDataDistributorRequest> newHalts = newDD.haltDataDistributor.getFuture();
+	auto replaceOnHalt = [](ClusterControllerData* data,
+	                        FutureStream<HaltDataDistributorRequest> halts,
+	                        WorkerInterface replacement,
+	                        DataDistributorInterface replacementDD) -> Future<Void> {
+		HaltDataDistributorRequest halt = co_await halts;
+		ASSERT(halt.requesterID == data->id);
+		auto& entry = data->id_worker.at(replacement.locality.processId());
+		ASSERT(entry.details.interf.id() != replacement.id());
+		entry.details.interf = replacement;
+		entry.distributorInterf = replacementDD;
+		entry.verified = true;
+		halt.reply.send(Void());
+		co_return;
+	};
+	Future<Void> replacementDone = replaceOnHalt(&data, firstDD.haltDataDistributor.getFuture(), replacement, newDD);
+	ASSERT(!replacementDone.isReady());
+
+	// Local halt delivery replaces the second worker during the scan, after its old interface was snapshotted.
+	checkBetterSingletons(&data);
+	ASSERT(replacementDone.isReady());
+	replacementDone.get();
+	ASSERT(!oldHalts.isReady());
+	ASSERT(!newHalts.isReady());
+
+	data.id_worker[first.locality.processId()].distributorInterf = Optional<DataDistributorInterface>();
+	checkBetterSingletons(&data);
+	ASSERT(!oldHalts.isReady());
+	ASSERT(newHalts.isReady());
+	HaltDataDistributorRequest halt = newHalts.pop();
+	ASSERT(halt.requesterID == data.id);
+	halt.reply.send(Void());
+	return Void();
 }
 
 TEST_CASE("/fdbserver/clustercontroller/staleWatcherCannotRemoveReplacement") {
