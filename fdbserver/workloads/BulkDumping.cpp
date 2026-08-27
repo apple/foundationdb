@@ -22,7 +22,7 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.h"

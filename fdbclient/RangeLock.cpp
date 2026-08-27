@@ -23,7 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -87,6 +87,29 @@ Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID)
 			}
 			RangeLockOwner owner = decodeRangeLockOwner(res.get());
 			ASSERT(owner.isValid());
+			// Every page must share the deletion's read version and conflict ranges.
+			// Restart the scan on retry so a concurrent acquisition cannot leave an orphan.
+			Key beginKey = normalKeys.begin;
+			while (beginKey < normalKeys.end) {
+				RangeResult result = co_await krmGetRanges(&tr, rangeLockPrefix, KeyRangeRef(beginKey, normalKeys.end));
+				ASSERT(result.size() > 1 && result.back().key > beginKey);
+				for (int i = 0; i < result.size() - 1; ++i) {
+					if (result[i].value.empty()) {
+						continue;
+					}
+					RangeLockStateSet locks = decodeRangeLockStateSet(result[i].value);
+					ASSERT(locks.isValid());
+					for (const auto& [name, lock] : locks.getLocks()) {
+						if (lock.getOwnerUniqueId() == ownerUniqueID) {
+							TraceEvent(SevDebug, "RemoveRangeLockOwnerRejected")
+							    .detail("Owner", ownerUniqueID)
+							    .detail("Range", KeyRangeRef(result[i].key, result[i + 1].key));
+							throw range_lock_reject();
+						}
+					}
+				}
+				beginKey = result.back().key;
+			}
 			tr.clear(rangeLockOwnerKeyFor(ownerUniqueID));
 			co_await tr.commit();
 			co_return;

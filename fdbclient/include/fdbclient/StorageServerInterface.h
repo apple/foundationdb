@@ -31,7 +31,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/LoadBalance.actor.h"
+#include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 #include "fdbclient/TSSComparison.h"
@@ -1269,6 +1269,6 @@ inline int mvccStorageBytes(int mutationBytes) {
 	       (mutationBytes + MutationRef::OVERHEAD_BYTES) * 2;
 }
 
-#include "fdbclient/StorageServerLoadBalance.actor.h"
+#include "fdbclient/StorageServerLoadBalance.h"
 
 #endif

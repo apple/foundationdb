@@ -1015,6 +1015,9 @@ public:
 		bool lastZeroHealthy = self->zeroHealthyTeams->get();
 		bool firstCheck = true;
 		bool firstHealthChangeTrace = true;
+		bool lastProcessingUnhealthy = self->processingUnhealthy->get();
+		bool retryDue = false;
+		Future<Void> retryTimer;
 		std::unordered_set<KeyRange> submittedShards;
 
 		Future<Void> zeroServerLeftLogger;
@@ -1083,14 +1086,23 @@ public:
 				    !healthy && self->shardsAffectedByTeamFailure->hasShards(
 				                    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 				if (retryUnhealthyShards) {
+					if (!retryTimer.isValid()) {
+						retryTimer = delay(checkTeamDelay, TaskPriority::DataDistributionLow);
+					} else if (retryTimer.isReady()) {
+						retryDue = true;
+						retryTimer = delay(checkTeamDelay, TaskPriority::DataDistributionLow);
+					}
 					change.push_back(self->processingUnhealthy->onChange());
 					change.push_back(self->pipelineFull->onChange());
-					// Partial moves can leave a merged shard associated with this team without another health change.
-					change.push_back(delay(checkTeamDelay, TaskPriority::DataDistributionLow));
+				} else {
+					retryTimer = Future<Void>();
+					retryDue = false;
 				}
 				const bool healthyTeamBecameAvailable = lastZeroHealthy && !self->zeroHealthyTeams->get();
 				const bool processingUnhealthy = self->processingUnhealthy->get();
 				const bool pipelineFull = self->pipelineFull->get();
+				const bool unhealthyDrained = lastProcessingUnhealthy && !processingUnhealthy;
+				lastProcessingUnhealthy = processingUnhealthy;
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            healthyTeamBecameAvailable || containsFailed || retryUnhealthyShards);
 				bool teamStateChanged = serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired ||
@@ -1257,10 +1269,15 @@ public:
 						std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 						    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 						if (teamStateChanged || !retryUnhealthyShards || healthyTeamBecameAvailable ||
-						    (!processingUnhealthy && !pipelineFull)) {
+						    unhealthyDrained || (retryDue && !processingUnhealthy && !pipelineFull)) {
 							// Undesired and explicitly failed relocations do not set processingUnhealthy. Keep
-							// retrying stranded ranges when the queue is idle and its pipeline can accept them.
+							// retrying stranded ranges at the polling interval when the queue can accept them.
+							// A transient pipeline-full edge must not clear the dedupe set and resubmit all ranges.
 							submittedShards.clear();
+							retryDue = false;
+							if (retryUnhealthyShards) {
+								retryTimer = delay(checkTeamDelay, TaskPriority::DataDistributionLow);
+							}
 						} else {
 							// An unchanged range may still be waiting behind the relocation pipeline gate. Only retry
 							// newly mapped ranges while unhealthy relocations remain in the queue, and forget ranges
@@ -1370,6 +1387,10 @@ public:
 					}
 				}
 
+				if (retryUnhealthyShards) {
+					// Partial moves can leave a merged shard associated with this team without another health change.
+					change.push_back(retryTimer);
+				}
 				// Wait for any of the machines to change status
 				co_await quorum(change, 1);
 				co_await yield();
@@ -3049,7 +3070,7 @@ public:
 		PromiseStream<Future<Void>> addTSSInProgress;
 		Future<Void> inProgressTSS =
 		    actorCollection(addTSSInProgress.getFuture(), &inProgressTSSCount, nullptr, nullptr, nullptr);
-		Reference<TSSPairState> tssState = makeReference<TSSPairState>();
+		auto tssState = makeReference<TSSPairState>();
 		Future<Void> checkTss = self->initialFailureReactionDelay;
 		bool pendingTSSCheck = false;
 
@@ -3487,7 +3508,7 @@ public:
 			TxnCounters* counters = updateStorageMetadataCounters();
 			KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 			    serverMetadataKeys.begin, IncludeVersion());
-			Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
+			auto tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
 
 			bool isTss = server->getLastKnownInterface().isTss();
 			// Update server's storeType, especially when it was created
@@ -7240,6 +7261,28 @@ public:
 		co_await delay(0);
 	}
 
+	struct TimedRelocation {
+		double receivedAt;
+		RelocateShard request;
+	};
+
+	static Future<std::vector<TimedRelocation>> observePeriodicRelocations(
+	    FutureStream<RelocateShard> relocations,
+	    Reference<AsyncVar<bool>> processingUnhealthy) {
+		std::vector<TimedRelocation> observed;
+		observed.reserve(4);
+		for (int i = 0; i < 4; ++i) {
+			RelocateShard request = co_await relocations;
+			observed.push_back({ now(), std::move(request) });
+		}
+
+		// Close the observation window, then unwind the synchronous output.send() callback before
+		// the caller can destroy the collection.
+		processingUnhealthy->set(true);
+		co_await delay(0);
+		co_return observed;
+	}
+
 	static Future<Void> StorageServerFailureTracker_ReadyRecoverySkipsRemovalCheck() {
 		auto collection = testTeamCollection(1, makeReference<PolicyOne>(), 1);
 		auto txnProcessor = makeReference<DDTeamCollectionTestTxnProcessor>(collection->dbContext());
@@ -7441,6 +7484,22 @@ public:
 		ASSERT_EQ(relocations.pop().keys, mergedRange);
 		ASSERT(!relocations.isReady());
 
+		// A brief full/clear flap can be caused by a duplicate crossing the pipeline gate. It must not
+		// immediately clear submitted ranges and feed another duplicate back into the gate.
+		for (int i = 0; i < 3; ++i) {
+			collection->pipelineFull->set(true);
+			co_await delay(0.002);
+			collection->pipelineFull->set(false);
+			co_await delay(0.002);
+			ASSERT(!relocations.isReady());
+		}
+		co_await delay(checkTeamDelay + 0.01);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(relocations.isReady());
+		ASSERT_EQ(relocations.pop().keys, mergedRange);
+		ASSERT(!relocations.isReady());
+
 		collection->processingUnhealthy->set(true);
 		co_await delay(checkTeamDelay + 0.01);
 		ASSERT(!relocations.isReady());
@@ -7497,11 +7556,19 @@ public:
 		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
 		ASSERT(!relocations.isReady());
 
-		co_await delay(checkTeamDelay + 0.01);
-		ASSERT(relocations.isReady());
-		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
-		ASSERT(relocations.isReady());
-		ASSERT_EQ(relocations.pop().priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		// A buggified observation delay can span multiple valid retry intervals. Observe the next
+		// four retries continuously and check that two trackers cannot send three requests within
+		// one polling interval.
+		const auto periodicRetries =
+		    co_await timeoutError(observePeriodicRelocations(relocations, collection->processingUnhealthy), 5.0);
+		for (const auto& retry : periodicRetries) {
+			ASSERT_EQ(retry.request.keys, mergedRange);
+			ASSERT_EQ(retry.request.priority, SERVER_KNOBS->PRIORITY_TEAM_FAILED);
+		}
+		for (size_t i = 2; i < periodicRetries.size(); ++i) {
+			ASSERT_GE(periodicRetries[i].receivedAt + INetwork::TIME_EPS,
+			          periodicRetries[i - 2].receivedAt + checkTeamDelay);
+		}
 		ASSERT(!relocations.isReady());
 		ASSERT_NE(latestEventCache.get(collection->teamCollectionInfoEventHolder->trackingKey).getValue("Time"),
 		          initialTeamCollectionInfoTime);
@@ -7593,7 +7660,7 @@ TEST_CASE("/DataDistribution/GetTeam/DeprioritizeWigglePausedTeam") {
 }
 
 TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
-	Reference<StorageWiggler> wiggler = makeReference<StorageWiggler>(nullptr);
+	auto wiggler = makeReference<StorageWiggler>(nullptr);
 	double startTime = now();
 	wiggler->addServer(UID(1, 0),
 	                   StorageMetadataType(startTime - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 5.0,
@@ -7645,7 +7712,7 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
 TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithTSS") {
 	std::unique_ptr<DDTeamCollection> collection =
 	    DDTeamCollectionUnitTest::testMachineTeamCollection(1, makeReference<PolicyOne>(), 5);
-	Reference<StorageWiggler> wiggler = makeReference<StorageWiggler>(collection.get());
+	auto wiggler = makeReference<StorageWiggler>(collection.get());
 
 	std::cout << "Test when need TSS ... \n";
 	collection->configuration.usableRegions = 1;

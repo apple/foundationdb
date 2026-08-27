@@ -20,7 +20,7 @@
 
 #include <boost/lexical_cast.hpp>
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/SimpleIni.h"

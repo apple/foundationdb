@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/MoveKeys.h"
 
 // The DD epoch fences mutations. Disabling balancing leaves acknowledged
