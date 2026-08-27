@@ -116,7 +116,8 @@ FDB_BOOLEAN_PARAM(AtMostOnce);
 FDB_BOOLEAN_PARAM(TriedAllOptions);
 
 inline const Future<Void>& neverSecondRequest() {
-	static const Future<Void> result = Never();
+	// Constructing the Future initializes allocator TLS first, so this Future is destroyed before allocator teardown.
+	static thread_local const Future<Void> result = Never();
 	return result;
 }
 
