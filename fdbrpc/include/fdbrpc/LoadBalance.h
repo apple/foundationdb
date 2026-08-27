@@ -662,8 +662,8 @@ Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const void*);
 // If |alternativeChosen| is not null, then atMostOnce must be True, and if the returned future completes successfully
 // then *alternativeChosen will be the alternative to which the message was sent. *alternativeChosen must outlive the
 // returned future.
-template <class Interface, class Request, class Multi, bool P>
-Future<REPLY_TYPE(Request)> basicLoadBalanceImpl(Reference<ModelInterface<Multi>> alternativesInput,
+template <class Interface, class Request, class Multi, bool P, class Metric>
+Future<REPLY_TYPE(Request)> basicLoadBalanceImpl(Reference<ModelInterface<Multi, Metric>> alternativesInput,
                                                  RequestStream<Request, P> Interface::* channel,
                                                  Request requestInput,
                                                  TaskPriority taskID,
@@ -671,7 +671,7 @@ Future<REPLY_TYPE(Request)> basicLoadBalanceImpl(Reference<ModelInterface<Multi>
                                                  int* alternativeChosen,
                                                  ExplicitVoid = {}) {
 	// Release owned request resources and server references before publishing completion.
-	Reference<ModelInterface<Multi>> alternatives(std::move(alternativesInput));
+	Reference<ModelInterface<Multi, Metric>> alternatives(std::move(alternativesInput));
 	Request request(std::move(requestInput));
 	ASSERT(alternatives->size() && alternatives->alwaysFresh());
 
@@ -754,8 +754,8 @@ Future<REPLY_TYPE(Request)> basicLoadBalanceImpl(Reference<ModelInterface<Multi>
 	}
 }
 
-template <class Interface, class Request, class Multi, bool P>
-Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> alternatives,
+template <class Interface, class Request, class Multi, bool P, class Metric>
+Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi, Metric>> alternatives,
                                              RequestStream<Request, P> Interface::* channel,
                                              Request request = Request(),
                                              TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
@@ -766,6 +766,6 @@ Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> al
 	if (!alternatives) {
 		return Never();
 	}
-	return basicLoadBalanceImpl<Interface, Request, Multi, P>(
+	return basicLoadBalanceImpl<Interface, Request, Multi, P, Metric>(
 	    std::move(alternatives), channel, std::move(request), taskID, atMostOnce, alternativeChosen);
 }

@@ -23,7 +23,7 @@
 
 #include "flow/IRandom.h"
 #include "flow/ProcessEvents.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"

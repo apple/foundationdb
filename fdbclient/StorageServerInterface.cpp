@@ -22,6 +22,7 @@
 // FIXME: actually it should be renamed "ReplyComparison" because TSS vs SS
 // is just one use case.  This code is agnostic to the specific use cases.
 // Fundamentally it is just about comparing replies. Where they came from is incidental.
+#include "fdbclient/ProxyLoadBalanceMetrics.h"
 #include "fdbclient/StorageServerInterface.h"
 
 #include "crc32/crc32c.h" // for crc32c_append, to checksum values in tss trace events
@@ -569,8 +570,8 @@ TEST_CASE("/fdbclient/BasicLoadBalance/releasesCompletedRequest") {
 	FutureStream<WaitMetricsRequest> requests = server.waitMetrics.getFuture();
 	IFailureMonitor::failureMonitor().setStatus(server.waitMetrics.getEndpoint().getPrimaryAddress(),
 	                                            FailureStatus(false));
-	auto alternatives =
-	    makeReference<ModelInterface<LoadBalanceTestInterface>>(std::vector<LoadBalanceTestInterface>{ server });
+	auto alternatives = makeReference<ModelInterface<LoadBalanceTestInterface, ProxyCpuMetric>>(
+	    std::vector<LoadBalanceTestInterface>{ server });
 
 	WaitMetricsRequest request(
 	    0, KeyRangeRef("load-balance-begin"_sr, "load-balance-end"_sr), StorageMetrics(), StorageMetrics());
