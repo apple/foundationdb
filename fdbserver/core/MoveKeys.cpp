@@ -100,6 +100,11 @@ public:
 // finish_move_keys_too_many_retries once it is exhausted, resets the transaction.
 static Future<Void> retryAfterPostWaitChange(FinishMoveRetryBudget* budget, Transaction* tr) {
 	if (budget->recordRetry(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES)) {
+		// Marked rare because all three call sites are rare: reaching them needs a concurrent
+		// reassignment to land inside the waitForShardReady window. Without this probe there is
+		// no way to tell whether the post-wait give-up path is exercised at all, which matters
+		// because FINISH_MOVE_KEYS_MAX_RETRIES is buggified down to 10 in simulation.
+		CODE_PROBE(true, "finishMove* giving up after a post-wait change", probe::decoration::rare);
 		throw finish_move_keys_too_many_retries();
 	}
 	co_await delay(finishMoveKeysBackoff(budget->attempts()));
@@ -1420,6 +1425,18 @@ static bool destUnchanged(const RangeResult& keyServers,
                           const RangeResult& uidToTagMap,
                           std::vector<UID> expectedDest,
                           Optional<UID> expectedDataMoveId) {
+	// Force the post-wait dest-changed branch in simulation. Buggifying
+	// FINISH_MOVE_KEYS_MAX_RETRIES cannot reach it: taking that branch requires a concurrent
+	// reassignment to land inside the waitForShardReady window, which no knob makes more likely
+	// (a 100k campaign with the cap buggified to 10 left all four post-wait branches at zero
+	// hits). Returning false here is a branch the callers already handle -- they retry the whole
+	// iteration -- so it is safe to inject. Deliberately low probability: every hit costs a
+	// re-read plus finishMoveKeysBackoff() before the iteration is retried.
+	if (buggify(0.01)) {
+		CODE_PROBE(true, "finishMove* injecting a post-wait dest change");
+		return false;
+	}
+
 	std::sort(expectedDest.begin(), expectedDest.end());
 	for (int i = 0; i + 1 < keyServers.size(); ++i) {
 		std::vector<UID> checkSrc, checkDest;
