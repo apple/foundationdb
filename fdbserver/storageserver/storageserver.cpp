@@ -12055,8 +12055,7 @@ Future<Void> serveAuditStorageRequests(StorageServer* self, FutureStream<AuditSt
 			    .detail("AuditRange", req.range)
 			    .detail("DDId", req.ddId)
 			    .detail("AuditId", req.id)
-			    .detail("AuditType", req.getType())
-			    .detail("AuditRange", req.range);
+			    .detail("AuditType", req.getType());
 			req.reply.sendError(audit_storage_cancelled());
 			continue;
 		}
