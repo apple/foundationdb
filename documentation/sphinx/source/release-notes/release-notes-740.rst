@@ -7,6 +7,8 @@ Release Notes
 7.4.7
 =====
 
+AVX enabled release.
+
 * Avoided restarting transaction-system recovery when an old-epoch backup worker fails. `(PR #13939) <https://github.com/apple/foundationdb/pull/13939>`_
 * Moved `waitForShardReady` outside the transaction used to finish data moves, preventing slow destination servers from exhausting the transaction lifetime and stalling data distribution. `(PR #13642) <https://github.com/apple/foundationdb/pull/13642>`_
 * Fixed a use-after-free when cancelling S3 backup file copies. `(PR #13916) <https://github.com/apple/foundationdb/pull/13916>`_
