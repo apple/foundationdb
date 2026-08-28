@@ -55,10 +55,8 @@ Future<Void> simpleTimer() {
 	}
 }
 
-// A actor that demonstrates how choose-when
-// blocks work.
+// A coroutine that demonstrates choosing between futures.
 Future<Void> someFuture(Future<int> ready) {
-	// loop choose {} works as well here - the braces are optional
 	while (true) {
 		co_await Choose()
 		    .When(delay(0.5), [](Void const&) { std::cout << "Still waiting...\n"; })

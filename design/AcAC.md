@@ -1,5 +1,7 @@
 # AcAC -- Actor Active Context
 
+This document records the actor-context tooling and traces from the implementation before the C++ coroutine migration. The captured output and `.actor.cpp` paths below are historical; they do not describe current coroutine source files.
+
 ## Introduction
 
 FoundationDB developers often face multiple difficulties debugging the code, and one of the significant challenges is that the call stack is usually hard to interpret. Because of the underlying "chain reaction" mechanism, when a single-assigned value (SAV) is fired,  actors waiting for the `Promise`s will be called recursively, creating a huge stack and overwhelming the reader. Providing an actor-wise call stack for the current running actor would be beneficial. For this purpose, AcAC is developed.

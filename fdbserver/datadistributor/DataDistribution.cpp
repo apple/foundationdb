@@ -1249,12 +1249,44 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 			// re-dispatch on the next scan.
 			throw timed_out();
 		}
-		if (ack.unretryableError) {
-			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
-			    .detail("Phase", "See unretryable error")
+		// restartCount advances on every re-trigger from any cause -- DD reinit, the backstop above, a
+		// supplanting trigger -- and is never reset, so this bounds a task's total thrash rather than its
+		// destination team failures alone. A task that has already burned the budget on unrelated churn
+		// therefore gets no retry for its first genuine team failure. That is deliberate for now: giving
+		// up is safe because a job ending in Error fails its restore instead of reporting completion, so
+		// the outcome is a loud restore failure rather than the silent range loss this replaced.
+		int const maxRetryableRedispatch = SERVER_KNOBS->DD_BULKLOAD_MAX_RETRYABLE_REDISPATCH;
+		bool retriesExhausted = ack.retryableError && triggeredBulkLoadTask.restartCount >= maxRetryableRedispatch;
+		if (ack.retryableError && !retriesExhausted) {
+			CODE_PROBE(true, "Bulkload task re-dispatched after a recoverable data move failure");
+			// Drop this task from the collection before exiting. publishTask refuses a task whose taskId
+			// is already published, deliberately, to stop a task being triggered twice -- so leaving the
+			// entry behind makes every later re-dispatch fail as bulkload_task_outdated and the task
+			// spins between scheduleBulkLoadTasks and publishTask without ever moving data. Persisted
+			// task state is untouched; only the in-memory publication goes, which is what lets the next
+			// scan trigger this task again.
+			self->bulkLoadTaskCollection->eraseTask(triggeredBulkLoadTask);
+			TraceEvent(SevWarn, "DDBulkLoadTaskDoTask", self->ddId)
+			    .detail("Phase", "See retryable error")
 			    .detail("CancelledDataMovePriority", ack.dataMovePriority)
 			    .detail("Range", range)
 			    .detail("TaskID", taskId)
+			    .detail("RestartCount", triggeredBulkLoadTask.restartCount)
+			    .detail("MaxRetryableRedispatch", maxRetryableRedispatch)
+			    .detail("Duration", now() - beginTime);
+			throw data_move_dest_team_not_found();
+		}
+
+		if (ack.unretryableError || retriesExhausted) {
+			if (retriesExhausted) {
+				CODE_PROBE(true, "Bulkload task marked Error after exhausting recoverable retries");
+			}
+			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
+			    .detail("Phase", retriesExhausted ? "Retryable error budget exhausted" : "See unretryable error")
+			    .detail("CancelledDataMovePriority", ack.dataMovePriority)
+			    .detail("Range", range)
+			    .detail("TaskID", taskId)
+			    .detail("RestartCount", triggeredBulkLoadTask.restartCount)
 			    .detail("Duration", now() - beginTime);
 			try {
 				// Mark this task failed in system metadata

@@ -10,7 +10,7 @@ Rigorous testing is central to our engineering process. The :doc:`features of ou
 Simulation
 ==========
 
-Simulation is a powerful tool for testing system correctness. Our simulation technology, called Simulation, is enabled by and tightly integrated with :doc:`flow`, our programming language for actor-based concurrency. In addition to generating efficient production code, Flow works with Simulation for simulated execution.
+Simulation is a powerful tool for testing system correctness. Our simulation technology, called Simulation, is enabled by and tightly integrated with :doc:`flow`, our asynchronous runtime for C++ coroutines. Flow supports both production execution and deterministic simulated execution.
 
 The major goal of Simulation is to make sure that we find and diagnose issues in simulation rather than the real world. Simulation runs tens of thousands of simulations every night, each one simulating large numbers of component failures. Based on the volume of tests that we run and the increased intensity of the failures in our scenarios, we estimate that we have run the equivalent of roughly one trillion CPU-hours of simulation on FoundationDB.
 

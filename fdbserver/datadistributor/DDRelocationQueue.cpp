@@ -147,6 +147,27 @@ static bool shouldRetryDestinationTeamFailure(bool doBulkLoading, RelocateData c
 	return !doBulkLoading;
 }
 
+// Simulation-only test hook, off by default: a team rarely goes unhealthy inside the window a
+// bulkload move is in flight, so the retry and give-up paths need the failure injected. The budget is
+// a count spent on one task, because the give-up path bounds a single task's restartCount and a
+// budget spread across tasks never reaches it.
+static bool injectBulkLoadDestinationTeamFailure(bool doBulkLoading, RelocateData const& rd) {
+	static int injected = 0;
+	static UID targetTaskId;
+	if (!doBulkLoading || !g_network->isSimulated() ||
+	    injected >= SERVER_KNOBS->BULKLOAD_SIM_INJECT_DEST_TEAM_FAILURES) {
+		return false;
+	}
+	UID const taskId = rd.bulkLoadTask.get().coreState.getTaskId();
+	if (!targetTaskId.isValid()) {
+		targetTaskId = taskId;
+	} else if (targetTaskId != taskId) {
+		return false;
+	}
+	++injected;
+	return true;
+}
+
 static bool shouldYieldDestinationFailureRetry(RelocateData const& retry, RelocateData const& queued) {
 	bool isSplit = retry.reason == RelocateReason::SIZE_SPLIT || retry.reason == RelocateReason::WRITE_SPLIT;
 	return isSplit && retry.keys != queued.keys && retry.keys.contains(queued.keys);
@@ -1033,7 +1054,6 @@ void DDQueue::completeSourceFetch(const RelocateData& results) {
 	for (int i = 0; i < results.src.size(); i++) {
 		queue[results.src[i]].insert(results);
 	}
-	updateLastAsSource(results.src);
 	serverCounter.increaseForTeam(results.src, results.reason, ServerCounter::CountType::QueuedSource);
 }
 
@@ -2303,7 +2323,8 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 							break;
 						}
 					} else if (res.index() == 1) {
-						if (!healthyDestinations.isHealthy()) {
+						if (!healthyDestinations.isHealthy() ||
+						    injectBulkLoadDestinationTeamFailure(doBulkLoading, rd)) {
 							if (!signalledTransferComplete) {
 								signalledTransferComplete = true;
 								self->dataTransferComplete.send(rd);
@@ -2317,8 +2338,13 @@ Future<Void> dataDistributionRelocator(DDQueue* self,
 								    .detail("Range", rd.keys)
 								    .detail("Dest", describe(destIds));
 								if (doBulkLoading && rd.bulkLoadTask.get().completeAck.canBeSet()) {
-									rd.bulkLoadTask.get().completeAck.send(
-									    BulkLoadAck(/*unretryableError=*/true, rd.priority));
+									CODE_PROBE(true, "Bulkload data move lost its destination team");
+									// Recoverable: the same task can succeed against a team chosen
+									// later. Terminal here would abandon the task, and its key-values
+									// exist only in the dump until an attempt ingests them, so the
+									// range would simply be missing from the restored database.
+									rd.bulkLoadTask.get().completeAck.send(BulkLoadAck(
+									    /*unretryableError=*/false, /*retryableError=*/true, rd.priority));
 								}
 								retryAfterDestinationTeamFailure = shouldRetryDestinationTeamFailure(doBulkLoading, rd);
 								throw data_move_dest_team_not_found();
@@ -3319,6 +3345,59 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 		}
 	}
 	std::cout << "Finished.";
+}
+
+TEST_CASE("/DataDistribution/DDQueue/SourceDiscoveryPreservesReadRebalanceCooldown") {
+	DDQueue self;
+	const std::vector<UID> primary{ UID(1, 0), UID(2, 0), UID(3, 0) };
+	const std::vector<UID> remote{ UID(4, 0), UID(5, 0), UID(6, 0) };
+	RelocateData repair(RelocateShard(
+	    KeyRangeRef("a"_sr, "b"_sr), SERVER_KNOBS->PRIORITY_TEAM_2_LEFT, RelocateReason::OTHER, UID(7, 0)));
+	RelocateData read(RelocateShard(KeyRangeRef("b"_sr, "c"_sr),
+	                                DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM,
+	                                RelocateReason::REBALANCE_READ,
+	                                UID(8, 0)));
+	for (RelocateData* results : { &repair, &read }) {
+		results->src = primary;
+		results->src.insert(results->src.end(), remote.begin(), remote.end());
+		results->completeSources = results->src;
+	}
+	auto finishSourceDiscovery = [&self](RelocateData const& results) {
+		self.fetchingSourcesQueue.insert(results);
+		self.completeSourceFetch(results);
+	};
+
+	// Source discovery includes both regions even when only the remote team needs repair.
+	finishSourceDiscovery(repair);
+	ASSERT(self.lastAsSource.empty());
+	ASSERT(!self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+
+	const double cooldown =
+	    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL / SERVER_KNOBS->READ_REBALANCE_SRC_PARALLELISM;
+	const double proposedAt = now() - cooldown / 2;
+	self.updateLastAsSource(primary, proposedAt);
+	ASSERT(self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+	const auto proposalTimestamps = self.lastAsSource;
+
+	// Delayed or repeated source discovery must not extend the proposal's cooldown to either region.
+	for (RelocateData const* results : { &repair, &read }) {
+		finishSourceDiscovery(*results);
+		ASSERT(self.lastAsSource == proposalTimestamps);
+	}
+	ASSERT(self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+
+	self.updateLastAsSource(primary, now() - 2 * cooldown);
+	const auto expiredTimestamps = self.lastAsSource;
+	for (RelocateData const* results : { &repair, &read }) {
+		finishSourceDiscovery(*results);
+		ASSERT(self.lastAsSource == expiredTimestamps);
+	}
+	ASSERT(!self.timeThrottle(primary));
+	ASSERT(!self.timeThrottle(remote));
+	return Void();
 }
 
 TEST_CASE("/DataDistribution/DDQueue/DestinationRetryHelperAccounting") {

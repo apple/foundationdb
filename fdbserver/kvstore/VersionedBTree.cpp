@@ -10857,7 +10857,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	if (reload) {
 		pager = new DWALPager(
 		    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
-		co_await success(pager->init());
+		co_await pager->init();
 
 		LogicalPageID extID = pager->newLastExtentID();
 		m_extentQueue.create(pager, extID, "ExtentQueue", pager->newLastQueueID(), true);
@@ -10907,7 +10907,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	printf("Reopening pager file from disk.\n");
 	pager = new DWALPager(
 	    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
-	co_await success(pager->init());
+	co_await pager->init();
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
 

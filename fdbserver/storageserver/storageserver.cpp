@@ -5349,6 +5349,18 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
+			TraceEvent(SevWarn, "SSBulkDumpRangeReadFailed", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("Range", range)
+			    .detail("BeginKey", beginKey)
+			    .detail("Version", version)
+			    .detail("FirstRead", immediateError);
+			if (immediateError) {
+				// Rethrow rather than collapsing into retry(): the caller gives up immediately on
+				// wrong_shard_server -- a stale range assignment, which no amount of retrying against
+				// this server can fix -- and retries anything else.
+				throw e;
+			}
 			break;
 		}
 
@@ -5386,9 +5398,9 @@ Future<Void> getRangeDataToDump(StorageServer* data,
 		beginKey = keyAfter(output->lastKey);
 	}
 
-	if (immediateError) {
-		throw retry();
-	}
+	// A first-read failure throws from the catch above, so reaching here means at least one read
+	// succeeded. immediateError is cleared immediately after the try/catch, before any other break.
+	ASSERT(!immediateError);
 }
 
 // The SS actor handling bulk dump task sent from DD.
@@ -12341,8 +12353,7 @@ Future<Void> serveAuditStorageRequests(StorageServer* self, FutureStream<AuditSt
 			    .detail("AuditRange", req.range)
 			    .detail("DDId", req.ddId)
 			    .detail("AuditId", req.id)
-			    .detail("AuditType", req.getType())
-			    .detail("AuditRange", req.range);
+			    .detail("AuditType", req.getType());
 			req.reply.sendError(audit_storage_cancelled());
 			continue;
 		}
