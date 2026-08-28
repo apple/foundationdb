@@ -22,9 +22,6 @@
 #include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
 #include "flow/BooleanParam.h"
-#ifdef BUILD_AZURE_BACKUP
-#include "fdbclient/BackupContainerAzureBlobStore.h"
-#endif
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "BackupContainerLocalDirectory.h"
 #include "BackupContainerBlobStore.h"

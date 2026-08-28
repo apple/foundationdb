@@ -53,37 +53,8 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/BuildFlags.h.in ${CMAKE_CURRENT_BINAR
 
 set(BUILD_AZURE_BACKUP OFF CACHE BOOL "Build Azure backup client")
 if(BUILD_AZURE_BACKUP)
-  add_compile_definitions(BUILD_AZURE_BACKUP)
-  set(FDBCLIENT_SRCS
-    ${FDBCLIENT_SRCS}
-    azure_backup/BackupContainerAzureBlobStore.actor.cpp)
-
-  configure_file(azurestorage.cmake azurestorage-download/CMakeLists.txt)
-
-  execute_process(
-    COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
-    RESULT_VARIABLE results
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-download
-  )
-
-  if(results)
-    message(FATAL_ERROR "Configuration step for AzureStorage has Failed. ${results}")
-  endif()
-
-  execute_process(
-    COMMAND ${CMAKE_COMMAND} --build . --config Release
-    RESULT_VARIABLE results
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-download
-  )
-
-  if(results)
-    message(FATAL_ERROR "Build step for AzureStorage has Failed. ${results}")
-  endif()
-
-  add_subdirectory(
-    ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-src
-    ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-build
-  )
+  message(FATAL_ERROR
+    "BUILD_AZURE_BACKUP is unsupported: this source tree does not contain the Azure backup implementation.")
 endif()
 
 
@@ -208,11 +179,6 @@ target_link_libraries(fdbclient_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbcl
 if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
                                      # x-compiling.
   add_subdirectory(bench EXCLUDE_FROM_ALL)
-endif()
-
-if(BUILD_AZURE_BACKUP)
-  target_link_libraries(fdbclient PRIVATE curl azure-storage-lite)
-  target_link_libraries(fdbclient_sampling PRIVATE curl azure-storage-lite)
 endif()
 
 if(WITH_AWS_BACKUP)
