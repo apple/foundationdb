@@ -91,7 +91,7 @@ Then symlink it to your source root:
 
 .. note::
 
-   A full build is recommended so that generated files (e.g., ``.actor.g.cpp`` headers) exist and include paths resolve correctly. Without a build, ``clang-tidy`` may report false errors on files that depend on generated code. If your ``compile_commands.json`` was generated on a different machine (e.g., Okteto), fix the paths with:
+   A full build is recommended so that generated headers exist and include paths resolve correctly. Without a build, ``clang-tidy`` may report false errors on files that depend on generated code. If your ``compile_commands.json`` was generated on a different machine (e.g., Okteto), fix the paths with:
 
    .. code-block:: shell
 
@@ -127,10 +127,10 @@ Check all changes between your branch and ``main``:
 
 .. code-block:: shell
 
-   git diff -U0 origin/main...HEAD | grep -v -E '\.actor\.cpp' | python3 "$TIDY_DIFF" -p 1 -path .
+   git diff -U0 origin/main...HEAD | python3 "$TIDY_DIFF" -p 1 -path .
 
    # Or with the alias:
-   git diff -U0 origin/main...HEAD | grep -v -E '\.actor\.cpp' | fdb-tidy
+   git diff -U0 origin/main...HEAD | fdb-tidy
 
 Check a specific commit:
 
@@ -176,9 +176,7 @@ Optional CMake variables:
 Known limitations
 -----------------
 
-**``.actor.cpp`` files cannot be analyzed.** These files use FoundationDB's custom actor compiler syntax (``ACTOR``, ``wait()``, ``state``) that ``clang-tidy`` cannot parse. With CMake 3.27 or newer, build-integrated clang-tidy skips generated ``.actor.g.cpp`` outputs using CMake's ``SKIP_LINTING`` property. This automatic suppression is unavailable with the minimum supported CMake version, 3.24.2. Exclude actor inputs from your diff when running locally.
-
-Build-integrated clang-tidy also skips bundled external-library targets, including ``crc32``, ``libb64``, ``md5``, ``libeio``, and ``libcoroutine``.
+Build-integrated clang-tidy skips bundled external-library targets, including ``crc32``, ``libb64``, ``md5``, ``libeio``, and ``libcoroutine``.
 
 ``readability-simplify-boolean-expr`` is not enabled because it diagnoses ordinary
 uses of FoundationDB's ``ASSERT`` macro after macro expansion.
@@ -188,7 +186,7 @@ Quick reference
 
 .. code-block:: shell
 
-   git diff -U0 origin/main...HEAD | grep -v -E '\.actor\.cpp' | python3 "$TIDY_DIFF" -p 1 -path .
+   git diff -U0 origin/main...HEAD | python3 "$TIDY_DIFF" -p 1 -path .
 
 **GCC-built compile_commands.json with clang-tidy.** If your ``compile_commands.json`` was generated with GCC, it may contain GCC-specific flags that ``clang-tidy`` (which uses the clang frontend) does not recognize. Add ``-extra-arg=-Wno-unknown-warning-option`` to suppress these errors:
 

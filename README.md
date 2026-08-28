@@ -180,11 +180,11 @@ Generally, CMake will build all language bindings for which it can find all nece
 
 ### Generating `compile_commands.json`
 
-CMake can build a compilation database for you. However, the default generated one is not too useful as it operates on the generated files. When running `ninja`, the build system creates another `compile_commands.json` file in the source directory. This can then be used for tools such as [CCLS](https://github.com/MaskRay/ccls) and [CQuery](https://github.com/cquery-project/cquery), among others. This way, you can get code completion and code navigation in flow. It is not yet perfect (it will show a few errors), but we are continually working to improve the development experience.
+CMake can generate a compilation database for code completion, navigation, and static analysis of the C++20 coroutine sources. Pass `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` when configuring a Ninja or Makefile build, then point your tooling at `compile_commands.json` in the build directory.
 
-CMake will not produce a `compile_commands.json` by default; you must pass `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`. This also enables the target `processed_compile_commands`, which rewrites `compile_commands.json` to describe the actor compiler source file, not the post-processed output files, and places the output file in the source directory. This file should then be picked up automatically by any tooling.
+When Python support is enabled, this option also enables the `processed_compile_commands` target, which writes a database to the source directory. With Ninja, it includes Swift compilation commands as well.
 
-Note that if the building is done inside the `foundationdb/build` Docker image, the resulting paths will still be incorrect and require manual fixing. One will wish to re-run `cmake` with `-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF` to prevent it from reverting the manual changes.
+If the build runs inside a container, the database contains container paths. Run the tooling in the same environment or map those paths to the host checkout.
 
 ### Code Formatting and Static Analysis
 
@@ -192,9 +192,9 @@ Note that if the building is done inside the `foundationdb/build` Docker image, 
 
 ### Using IDEs
 
-CMake provides built-in support for several popular IDEs. However, most FoundationDB files are written in the `flow` language, which is an extension of the C++ programming language for coroutine support (note that when FoundationDB was being developed, C++20 was not available). The `flow` language will be transpiled into C++ code using `actorcompiler`, while preventing most IDEs from recognizing `flow`-specific syntax.
+CMake provides built-in support for several popular IDEs. FoundationDB's asynchronous code uses standard C++20 coroutines with the Flow runtime, so use an IDE or language server with C++20 support. See the [coroutine guide](design/coroutines.md) for the programming model.
 
-It is possible to generate project files for editing `flow` with a supported IDE. There is a CMake option called `OPEN_FOR_IDE`, which creates a project that can be opened in an IDE for editing. This project cannot be built, but you will be able to edit the files and utilize most of the editing and navigation features that your IDE supports.
+The CMake option `OPEN_FOR_IDE` creates an editing-only project for a supported IDE. This project cannot be built, but supports editing and navigation.
 
 For example, if you want to use Xcode to make changes to FoundationDB, you can create an Xcode project with the following command:
 
