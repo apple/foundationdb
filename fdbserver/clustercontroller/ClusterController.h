@@ -340,12 +340,13 @@ public:
 				}
 			};
 
-			for (unsigned r = 0; r < recruitment::NoRole; r++)
+			for (unsigned r = 0; r < recruitment::NoRole; r++) {
 				if (roles.test((recruitment::ClusterRole)r)) {
 					if (!roleCodes.empty())
 						roleCodes.append(",");
 					appendRoleCode((recruitment::ClusterRole)r);
 				}
+			}
 			return roleCodes;
 		}
 	};
