@@ -790,19 +790,36 @@ int64_t TransientStorageMetricSample::addAndExpire(const Key& key, int64_t metri
 	return x;
 }
 
-// FIXME: both versions of erase are broken, because they do not remove items in the queue with will subtract a
-// metric from the value sometime in the future
 int64_t TransientStorageMetricSample::erase(KeyRef key) {
 	auto it = sample.find(key);
 	if (it == sample.end())
 		return 0;
 	int64_t x = sample.getMetric(it);
 	sample.erase(it);
+
+	auto n = queue.size();
+	for (decltype(n) i = 0; i < n; i++) {
+		auto entry = std::move(queue.front());
+		queue.pop_front();
+		if (entry.second.first != key) {
+			queue.push_back(std::move(entry));
+		}
+	}
+
 	return x;
 }
 
 void TransientStorageMetricSample::erase(KeyRangeRef keys) {
 	sample.erase(keys.begin, keys.end);
+
+	auto n = queue.size();
+	for (decltype(n) i = 0; i < n; i++) {
+		auto entry = std::move(queue.front());
+		queue.pop_front();
+		if (!keys.contains(entry.second.first)) {
+			queue.push_back(std::move(entry));
+		}
+	}
 }
 
 bool TransientStorageMetricSample::roll(int64_t metric) const {
@@ -969,6 +986,47 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/exclusiveEnd") {
 	ssm.getSplitPoints(req, {});
 	ASSERT(reply.isReady());
 	ASSERT(reply.get().splitPoints.empty());
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/TransientStorageMetricSample/eraseKey/removesQueuedItems") {
+	TransientStorageMetricSample ts(1);
+
+	// addAndExpire bypasses sampling when metric >= metricUnitsPerSample, so
+	// every call here deterministically inserts into both sample and queue.
+	ts.addAndExpire("A"_sr, 10, 1e9);
+	ts.addAndExpire("B"_sr, 20, 1e9);
+	ts.addAndExpire("C"_sr, 30, 1e9);
+
+	ASSERT(ts.sample.sumRange("A"_sr, "D"_sr) == 60);
+
+	// Erase "B" — should remove from sample AND from queue.
+	int64_t erased = ts.erase("B"_sr);
+	ASSERT(erased == 20);
+	ASSERT(ts.sample.sumRange("A"_sr, "D"_sr) == 40);
+
+	// The queue should only contain entries for "A" and "C".
+	ASSERT(ts.queue.size() == 2);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/TransientStorageMetricSample/eraseRange/removesQueuedItems") {
+	TransientStorageMetricSample ts(1);
+
+	ts.addAndExpire("A"_sr, 10, 1e9);
+	ts.addAndExpire("B"_sr, 20, 1e9);
+	ts.addAndExpire("C"_sr, 30, 1e9);
+	ts.addAndExpire("D"_sr, 40, 1e9);
+
+	ASSERT(ts.sample.sumRange("A"_sr, "E"_sr) == 100);
+
+	// Erase range ["B", "D") — should remove "B" and "C" from both sample
+	// and queue, leaving "A" and "D".
+	ts.erase(KeyRangeRef("B"_sr, "D"_sr));
+	ASSERT(ts.sample.sumRange("A"_sr, "E"_sr) == 50);
+	ASSERT(ts.queue.size() == 2);
 
 	return Void();
 }
