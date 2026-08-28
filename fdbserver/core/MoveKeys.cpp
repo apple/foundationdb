@@ -62,15 +62,47 @@ static bool updateFinishMoveKeysTransactionTooOldRetries(int errorCode, int maxR
 	return ++(*consecutiveRetries) > maxRetries;
 }
 
+// Per-chunk retry budget shared by the finishMove* loops.
+//
+// Both finishMoveKeys and finishMoveShards process one data move in KRM-sized
+// chunks, committing each chunk in its own transaction.
+// FINISH_MOVE_KEYS_MAX_RETRIES is meant to bound "this chunk is stuck", not
+// "this move is large", so finishing a chunk has to restore the full budget.
+// Without that reset the chunk count pollutes the counter: a move split into N
+// chunks that each hit a few benign conflicts drains a budget no individual
+// chunk was straining, and a late chunk then aborts the whole move on the first
+// concurrent reassignment it sees.
+class FinishMoveRetryBudget {
+	int attemptsSpent = 0;
+
+public:
+	// Failed attempts spent on the current chunk. Read-only on purpose: tracing
+	// and backoff consume this without being able to perturb the budget.
+	int attempts() const { return attemptsSpent; }
+
+	// Record a failed attempt at the current chunk. Returns true once this chunk
+	// has spent more attempts than `maxRetries` allows.
+	[[nodiscard]] bool recordRetry(int maxRetries) { return ++attemptsSpent > maxRetries; }
+
+	// Record a failed attempt at the current chunk without enforcing any cap.
+	// Used by the paths that deliberately retry indefinitely (see the comments
+	// there) but still want the count for backoff and tracing.
+	void recordRetryUncapped() { ++attemptsSpent; }
+
+	// The current chunk is finished — it committed, or it turned out to need no
+	// work. The next chunk starts with a full budget.
+	void chunkCompleted() { attemptsSpent = 0; }
+};
+
 // Shared retry tail used by the finishMove* post-wait branches that detect a
 // concurrent change (dest reassigned, data move deleted, phase changed):
-// bumps `retries`, throws finish_move_keys_too_many_retries once the cap is
-// exceeded, resets the transaction.
-static Future<Void> retryAfterPostWaitChange(int* retries, Transaction* tr) {
-	if (++(*retries) > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
+// spends one attempt from the current chunk's budget, throws
+// finish_move_keys_too_many_retries once it is exhausted, resets the transaction.
+static Future<Void> retryAfterPostWaitChange(FinishMoveRetryBudget* budget, Transaction* tr) {
+	if (budget->recordRetry(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES)) {
 		throw finish_move_keys_too_many_retries();
 	}
-	co_await delay(finishMoveKeysBackoff(*retries));
+	co_await delay(finishMoveKeysBackoff(budget->attempts()));
 	tr->reset();
 	co_return;
 }
@@ -1706,7 +1738,7 @@ static Future<bool> reverifyKeysDestAndCommit(Transaction* tr,
                                               std::set<UID> const& allServers,
                                               KeyRange const& keys,
                                               UID relocationIntervalId,
-                                              int* retries,
+                                              FinishMoveRetryBudget* retryBudget,
                                               TxnCounters* counters) {
 	tr->trState->taskID = TaskPriority::MoveKeys;
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1754,7 +1786,7 @@ static Future<bool> reverifyKeysDestAndCommit(Transaction* tr,
 		    .detail("KeyBegin", keys.begin)
 		    .detail("KeyEnd", keys.end)
 		    .detail("OrigDest", describe(dest));
-		co_await retryAfterPostWaitChange(retries, tr);
+		co_await retryAfterPostWaitChange(retryBudget, tr);
 		co_return false;
 	}
 
@@ -1803,7 +1835,7 @@ static Future<Void> finishMoveKeys(Database occ,
 	static auto* counters = makeCounters("/movekeys/finishMoveKeys");
 	Key begin = keys.begin;
 	Key endKey;
-	int retries = 0;
+	FinishMoveRetryBudget retryBudget;
 	// Transaction 2 can hit benign not_committed conflicts while adjacent
 	// finishers update KRM ranges. Only consecutive transaction_too_old
 	// failures should exhaust the bailout intended for a stuck TTO loop.
@@ -1864,6 +1896,9 @@ static Future<Void> finishMoveKeys(Database occ,
 					                                                                 endKey);
 					if (!decoded.present()) {
 						begin = endKey;
+						// This chunk needed no work, so it is finished: the next one
+						// starts with a full budget.
+						retryBudget.chunkCompleted();
 						consecutiveTransactionTooOldRetries = 0;
 						break;
 					}
@@ -1905,7 +1940,7 @@ static Future<Void> finishMoveKeys(Database occ,
 						                                                    decoded->allServers,
 						                                                    keys,
 						                                                    relocationIntervalId,
-						                                                    &retries,
+						                                                    &retryBudget,
 						                                                    counters);
 						if (!committed) {
 							// dest changed during wait — retry the inner loop
@@ -1913,25 +1948,24 @@ static Future<Void> finishMoveKeys(Database occ,
 							continue;
 						}
 						begin = endKey;
-						retries = 0;
+						retryBudget.chunkCompleted();
 						consecutiveTransactionTooOldRetries = 0;
 						break;
 					}
 					// This leads to a count of transactions starting that exceeds the sum of
 					// committed or aborted, but this is intentional here.
 					consecutiveTransactionTooOldRetries = 0;
-					retries++;
-					if (retries > SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES) {
+					if (retryBudget.recordRetry(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES)) {
 						CODE_PROBE(true, "finishMoveKeys giving up due to timeout on dest servers");
 						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveKeysDestNotReady", relocationIntervalId)
 						    .detail("KeyBegin", keys.begin)
 						    .detail("KeyEnd", keys.end)
-						    .detail("Retries", retries)
+						    .detail("Retries", retryBudget.attempts())
 						    .detail("ReadyCount", count)
 						    .detail("DestCount", decoded->dest.size());
 						throw finish_move_keys_too_many_retries();
 					}
-					co_await delay(finishMoveKeysBackoff(retries));
+					co_await delay(finishMoveKeysBackoff(retryBudget.attempts()));
 					tr.reset();
 					continue;
 				} catch (Error& error) {
@@ -1941,18 +1975,22 @@ static Future<Void> finishMoveKeys(Database occ,
 				if (err.code() == error_code_actor_cancelled)
 					throw err;
 				co_await tr.onError(err);
-				retries++;
+				// Uncapped: the give-up in this handler is driven by
+				// consecutiveTransactionTooOldRetries, not by the chunk budget. The
+				// budget is still spent so that backoff and tracing see the true
+				// attempt count for this chunk.
+				retryBudget.recordRetryUncapped();
 				bool tooManyConsecutiveTransactionTooOldRetries = updateFinishMoveKeysTransactionTooOldRetries(
 				    err.code(), SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES, &consecutiveTransactionTooOldRetries);
 				// tr.onError delays are short for transaction_too_old. With 15
 				// FlowLock slots all retrying, this creates a retry storm. Add
 				// additional exponential backoff capped at 5s.
 				if (err.code() == error_code_transaction_too_old) {
-					double backoff = finishMoveKeysBackoff(retries);
+					double backoff = finishMoveKeysBackoff(retryBudget.attempts());
 					CODE_PROBE(true, "finishMoveKeys transaction_too_old backoff");
 					TraceEvent("FinishMoveKeysBackoff", relocationIntervalId)
 					    .suppressFor(1.0)
-					    .detail("Retries", retries)
+					    .detail("Retries", retryBudget.attempts())
 					    .detail("TransactionTooOldRetries", consecutiveTransactionTooOldRetries)
 					    .detail("BackoffSeconds", backoff);
 					if (tooManyConsecutiveTransactionTooOldRetries) {
@@ -1961,14 +1999,14 @@ static Future<Void> finishMoveKeys(Database occ,
 						    .error(err)
 						    .detail("KeyBegin", keys.begin)
 						    .detail("KeyEnd", keys.end)
-						    .detail("Retries", retries)
+						    .detail("Retries", retryBudget.attempts())
 						    .detail("TransactionTooOldRetries", consecutiveTransactionTooOldRetries);
 						throw finish_move_keys_too_many_retries();
 					}
 					co_await delay(backoff);
 				}
-				if (retries % 10 == 0) {
-					TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
+				if (retryBudget.attempts() % 10 == 0) {
+					TraceEvent(retryBudget.attempts() == 20 ? SevWarnAlways : SevWarn,
 					           "RelocateShard_FinishMoveKeysRetrying",
 					           relocationIntervalId)
 					    .error(err)
@@ -2670,7 +2708,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
                                                             DataMoveMetaData* postWaitDataMove_out,
                                                             UID relocationIntervalId,
                                                             Severity sevDm,
-                                                            int* retries,
+                                                            FinishMoveRetryBudget* retryBudget,
                                                             bool* runPreCheck,
                                                             bool* cancelDataMove,
                                                             TxnCounters* counters) {
@@ -2691,7 +2729,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 		TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeletedAfterWait", relocationIntervalId)
 		    .detail("DataMoveID", dataMoveId);
 		*runPreCheck = false;
-		co_await retryAfterPostWaitChange(retries, tr);
+		co_await retryAfterPostWaitChange(retryBudget, tr);
 		co_return ReverifyShardsResult::RetryLoop;
 	}
 	if (reread.dataMove.get().getPhase() != DataMoveMetaData::Running) {
@@ -2700,7 +2738,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Phase", static_cast<int>(reread.dataMove.get().getPhase()));
 		*runPreCheck = false;
-		co_await retryAfterPostWaitChange(retries, tr);
+		co_await retryAfterPostWaitChange(retryBudget, tr);
 		co_return ReverifyShardsResult::RetryLoop;
 	}
 	ASSERT(!reread.keyServers.empty());
@@ -2732,7 +2770,7 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Range", *range);
 		*runPreCheck = false;
-		co_await retryAfterPostWaitChange(retries, tr);
+		co_await retryAfterPostWaitChange(retryBudget, tr);
 		co_return ReverifyShardsResult::RetryLoop;
 	}
 
@@ -2842,7 +2880,7 @@ static Future<Void> finishMoveShards(Database occ,
 	KeyRange keys = targetRanges[0];
 	Future<Void> warningLogger = logWarningAfter("FinishMoveShardsTooLong", 600, destinationTeam);
 	static auto* counters = makeCounters("/movekeys/finishMoveShards");
-	int retries = 0;
+	FinishMoveRetryBudget retryBudget;
 	DataMoveMetaData dataMove;
 	bool cancelDataMove = false;
 	Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
@@ -3020,13 +3058,21 @@ static Future<Void> finishMoveShards(Database occ,
 					                                                            &postWaitDataMove,
 					                                                            relocationIntervalId,
 					                                                            sevDm,
-					                                                            &retries,
+					                                                            &retryBudget,
 					                                                            &runPreCheck,
 					                                                            &cancelDataMove,
 					                                                            counters);
 					if (res == ReverifyShardsResult::RetryLoop) {
 						continue;
 					}
+					// This chunk committed, so it is finished and the next one starts
+					// with a full budget (mirroring finishMoveKeys, which resets on the
+					// same event). Without this the chunk count of a large move drains
+					// a budget no individual chunk was straining; since the budget is
+					// only consulted by the post-wait-change branches, the symptom
+					// would be a late chunk aborting the whole move on the first
+					// concurrent reassignment it sees.
+					retryBudget.chunkCompleted();
 					if (res == ReverifyShardsResult::FullyCommitted) {
 						// Post validate consistency of update of keyServers and serverKeys
 						if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
@@ -3053,17 +3099,17 @@ static Future<Void> finishMoveShards(Database occ,
 					// DataMoveDeletedAfterWait / PhaseChangedAfterWait)
 					// still use retryAfterPostWaitChange because they detect
 					// real concurrent reassignments, not slowness.
-					++retries;
-					if (retries % 10 == 0) {
+					retryBudget.recordRetryUncapped();
+					if (retryBudget.attempts() % 10 == 0) {
 						TraceEvent(SevWarnAlways, "RelocateShard_FinishMoveShardsDestNotReady", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Range", range)
-						    .detail("Retries", retries)
+						    .detail("Retries", retryBudget.attempts())
 						    .detail("ReadyCount", readyCount)
 						    .detail("DestCount", newDestinationsCount);
 					}
 					runPreCheck = false;
-					co_await delay(finishMoveKeysBackoff(retries));
+					co_await delay(finishMoveKeysBackoff(retryBudget.attempts()));
 					tr.reset();
 					continue;
 				}
@@ -3078,16 +3124,16 @@ static Future<Void> finishMoveShards(Database occ,
 				throw location_metadata_corruption();
 			} else if (err.code() == error_code_retry) {
 				runPreCheck = false;
-				++retries;
+				retryBudget.recordRetryUncapped();
 				co_await delay(1);
 			} else if (err.code() == error_code_actor_cancelled) {
 				throw err;
 			} else {
 				runPreCheck = false;
 				co_await tr.onError(err);
-				retries++;
-				if (retries % 10 == 0) {
-					TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
+				retryBudget.recordRetryUncapped();
+				if (retryBudget.attempts() % 10 == 0) {
+					TraceEvent(retryBudget.attempts() == 20 ? SevWarnAlways : SevWarn,
 					           "RelocateShard_FinishMoveShardsRetrying",
 					           relocationIntervalId)
 					    .error(err)
@@ -4119,6 +4165,43 @@ TEST_CASE("/fdbserver/MoveKeys/finishMoveKeysBackoff") {
 
 	// Verify the retry limit knob exists and is positive
 	ASSERT(SERVER_KNOBS->FINISH_MOVE_KEYS_MAX_RETRIES > 0);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MoveKeys/finishMoveRetryBudgetIsPerChunk") {
+	constexpr int maxRetries = 5;
+
+	// A chunk may spend maxRetries attempts before the budget is exhausted; the
+	// next attempt is the one that reports exhaustion.
+	FinishMoveRetryBudget budget;
+	for (int i = 0; i < maxRetries; ++i) {
+		ASSERT(!budget.recordRetry(maxRetries));
+		ASSERT(budget.attempts() == i + 1);
+	}
+	ASSERT(budget.recordRetry(maxRetries));
+
+	// The budget bounds "this chunk is stuck", not "this move is large": a move
+	// split into many chunks that each need a few retries must never exhaust it,
+	// even though the total attempt count far exceeds maxRetries.
+	budget = FinishMoveRetryBudget();
+	for (int chunk = 0; chunk < 10; ++chunk) {
+		for (int i = 0; i < maxRetries; ++i) {
+			ASSERT(!budget.recordRetry(maxRetries));
+		}
+		budget.chunkCompleted();
+		ASSERT(budget.attempts() == 0);
+	}
+
+	// The uncapped variant still advances the count (callers use it for backoff
+	// and tracing) and is still cleared by finishing a chunk.
+	budget = FinishMoveRetryBudget();
+	for (int i = 0; i < maxRetries * 3; ++i) {
+		budget.recordRetryUncapped();
+	}
+	ASSERT(budget.attempts() == maxRetries * 3);
+	budget.chunkCompleted();
+	ASSERT(budget.attempts() == 0);
 
 	return Void();
 }
