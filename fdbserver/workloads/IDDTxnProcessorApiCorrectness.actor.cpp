@@ -402,6 +402,10 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		state MoveKeysParams mockParams = realParams;
 		mockParams.dataMovementComplete = Promise<Void>();
+		// The real moveKeys() can fail with errors that mean "this move did not happen, issue it
+		// again"; see retryableDataMoveError(). Bound the reissues so a cluster that genuinely
+		// cannot move a shard still fails the test.
+		state int moveReissues = 0;
 
 		loop {
 			realParams.dataMovementComplete.reset();
@@ -413,10 +417,21 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 				self->testAll++;
 				break;
 			} catch (Error& e) {
-				if (e.code() != error_code_movekeys_conflict)
-					throw;
+				if (e.code() != error_code_movekeys_conflict) {
+					if (!retryableDataMoveError(e) || moveReissues >= MOVE_MAX_REISSUES) {
+						throw;
+					}
+					// The real move did not happen, so reissue it. Re-running the mock move with the
+					// same params is idempotent and the real move converges on the same final state,
+					// so the verifyInitDataEqual() below still compares like with like.
+					++moveReissues;
+					TraceEvent(SevWarn, "IDDTxnProcessorApiMoveKeysReissuing", relocateShardInterval.pairID)
+					    .error(e)
+					    .detail("Reissue", moveReissues)
+					    .detail("Limit", MOVE_MAX_REISSUES);
+				}
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-				// Keep trying to get the moveKeysLock
+				// Keep trying: either to get the moveKeysLock, or to reissue the move.
 			}
 		}
 
