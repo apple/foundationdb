@@ -284,79 +284,37 @@ class DDTxnProcessorImpl {
 		}
 	}
 
-	// When SHARD_ENCODE_LOCATION_METADATA is false on DD init, do a bounded
-	// rewrite to start the rollback. Two phases, both bounded:
+	// When SHARD_ENCODE_LOCATION_METADATA is false on DD init, clear any
+	// DataMoveMetaData left behind by a shard-encoding DD.
 	//
-	// Phase 1: Clear all DataMoveMetaData (single transaction; the dataMoves
-	// keyspace is small, this is always one commit).
+	// These records describe in-flight physical shard moves that this DD has no
+	// machinery to complete, so nothing would ever retire them: getInitialDataDistribution
+	// decodes every record into dataMoveMap on every init, and the old path rejects
+	// anonymous shard-encoded moves. Clearing the range is a single commit and is
+	// complete regardless of how many records exist.
 	//
-	// Phase 2: Rewrite up to 1000 keyServers entries at the head of the
-	// prefix from new (UID-based) to old (tag-based) format. Returns true
-	// if either phase committed; the caller restarts the outer init loop
-	// and calls back in. The Phase-2 cap means clusters with more than
-	// 1000 shard-encoded keyServers entries are NOT fully rewritten by
-	// this function — by design. Bulk rewrite happens through normal
-	// shard movement / storage wiggle once the knob is false (see the
-	// "Migration for downgrade" section of
-	// design/shard-encode-location-metadata.md); this function just
-	// clears dataMoves and rewrites the small remnant at the head so DD
-	// init has a tidy starting point.
+	// keyServers entries are deliberately NOT rewritten here. Every write on the old
+	// path emits old-format values, so both keyServers and serverKeys converge through
+	// normal shard movement. That convergence is unbounded in time -- a cold range may
+	// never be rewritten -- so it is not sufficient to declare a binary downgrade safe;
+	// see the "Migration for downgrade" section of
+	// design/shard-encode-location-metadata.md.
 	//
-	// Calling this when nothing needs rewriting (knob has been false the
-	// whole time, or rollback already complete) is safe and
-	// write-cost-free: the reads find no shard-encoded entries, no
-	// commits happen, returns false. Cost is three system-key reads on
-	// every DD init when knob is false.
-	//
-	// serverKeys entries are left in place — they drain naturally as DD
-	// moves shards using the old path.
-	static Future<bool> rewriteShardEncodedMetadata(Transaction& tr, UID distributorId) {
+	// Returns true if a clear was committed, so the caller restarts the outer init loop
+	// and re-reads. When there is nothing to clear this costs one system-key read per DD
+	// init and commits nothing.
+	static Future<bool> clearShardEncodedDataMoves(Transaction& tr, UID distributorId) {
 		TraceEvent(SevInfo, "DDInitShardEncodeOff", distributorId)
 		    .detail("KnobValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-		// Phase 1: Clear all DataMoveMetaData
 		RangeResult dmsCheck = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!dmsCheck.more && dmsCheck.size() < CLIENT_KNOBS->TOO_MANY);
 		if (!dmsCheck.empty()) {
 			TraceEvent(SevWarnAlways, "DDInitCancellingShardEncodedMoves", distributorId)
 			    .detail("Count", dmsCheck.size());
 			tr.clear(dataMoveKeys);
-			co_await tr.commit();
-			tr.reset();
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			co_return true;
-		}
-
-		// Phase 2: Rewrite shard-encoded keyServers entries to old format.
-		// Reads 1000 entries per iteration. Caller loops (co_return true triggers
-		// re-entry) until no shard-encoded entries remain. Previously-rewritten
-		// entries won't match hasShardEncodeLocationMetaData() on re-read.
-		RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-
-		bool rewroteAny = false;
-		RangeResult ksEntries = co_await tr.getRange(KeyRangeRef(keyServersPrefix, keyServersEnd), 1000);
-		for (const auto& kv : ksEntries) {
-			if (kv.value.empty())
-				continue;
-			BinaryReader rd(kv.value, IncludeVersion());
-			if (rd.protocolVersion().hasShardEncodeLocationMetaData()) {
-				std::vector<UID> src, dest;
-				UID srcId, destId;
-				decodeKeyServersValue(UIDtoTagMap, kv.value, src, dest, srcId, destId);
-				Value oldValue = keyServersValue(UIDtoTagMap, src, dest);
-				tr.set(kv.key, oldValue);
-				rewroteAny = true;
-			}
-		}
-
-		if (rewroteAny) {
-			TraceEvent(SevInfo, "DDInitRewritingShardEncodedMetadata", distributorId)
-			    .detail("KeyServersEntries", ksEntries.size());
 			co_await tr.commit();
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -471,11 +429,11 @@ class DDTxnProcessorImpl {
 					}
 				}
 
-				// If SHARD_ENCODE is off, rewrite any shard-encoded metadata to old format.
+				// If SHARD_ENCODE is off, drop DataMoveMetaData this DD cannot complete.
 				if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-					bool rewrote = wait(rewriteShardEncodedMetadata(tr, distributorId));
-					if (rewrote) {
-						continue; // Committed a rewrite — re-read from the top
+					bool cleared = wait(clearShardEncodedDataMoves(tr, distributorId));
+					if (cleared) {
+						continue; // Committed a clear — re-read from the top
 					}
 				}
 
