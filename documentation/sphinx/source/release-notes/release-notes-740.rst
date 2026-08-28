@@ -4,6 +4,32 @@
 Release Notes
 #############
 
+7.4.7
+=====
+
+* Fixed a use-after-free when cancelling S3 backup file copies. `(PR #13916) <https://github.com/apple/foundationdb/pull/13916>`_
+* Fixed server knob overrides being silently skipped when a knob name is shared with client knobs. `(PR #13932) <https://github.com/apple/foundationdb/pull/13932>`_
+* Added opt-in eviction of stale client connections to failed storage servers and proxies. `(PR #13912) <https://github.com/apple/foundationdb/pull/13912>`_
+* Disabled data distribution global admission control by default. `(PR #13917) <https://github.com/apple/foundationdb/pull/13917>`_
+* Fixed crashes and incorrect behavior in snapshot options, cancelled file reads, data distribution shutdown, and TLog minimum popped-version tracking. `(PR #13871) <https://github.com/apple/foundationdb/pull/13871>`_
+* Fixed an incorrect shard assignment after an excluded server failed. `(PR #13869) <https://github.com/apple/foundationdb/pull/13869>`_
+* Added a retry limit for repeated `startMoveKeys` failures to prevent infinite retries. `(PR #13782) <https://github.com/apple/foundationdb/pull/13782>`_
+* Fixed exclusion tracking for data distribution. `(PR #13766) <https://github.com/apple/foundationdb/pull/13766>`_
+* Fixed read and write overflow handling for snapshot manifests larger than 2 GB. `(PR #13820) <https://github.com/apple/foundationdb/pull/13820>`_
+* Added GCM authentication tags to encrypted backup files and fixed encrypted restore block-size initialization. `(PR #13777) <https://github.com/apple/foundationdb/pull/13777>`_
+* Dropped stale backup workers during recovery. `(PR #13655) <https://github.com/apple/foundationdb/pull/13655>`_
+* Fixed successful automatic-idempotency replays not populating the committed version. `(PR #13294) <https://github.com/apple/foundationdb/pull/13294>`_
+* Fixed read-ahead cache reads extending past the end of small or final blocks. `(PR #13292) <https://github.com/apple/foundationdb/pull/13292>`_
+* Improved RocksDB memory accounting by charging write buffers and selected memory usage to the block cache. `(PR #13371) <https://github.com/apple/foundationdb/pull/13371>`_, `(PR #13346) <https://github.com/apple/foundationdb/pull/13346>`_
+* Improved data distribution relocation backoff and admission control to reduce retry contention and pipeline pressure. `(PR #13145) <https://github.com/apple/foundationdb/pull/13145>`_, `(PR #13280) <https://github.com/apple/foundationdb/pull/13280>`_
+* Added mutation-log-type configuration for backups. `(PR #13127) <https://github.com/apple/foundationdb/pull/13127>`_
+* Fixed encrypted restore failures, including a `platform_error` crash. `(PR #13118) <https://github.com/apple/foundationdb/pull/13118>`_
+* Made cluster status requests asynchronous so status retrieval can return before the timeout. `(PR #13099) <https://github.com/apple/foundationdb/pull/13099>`_
+* Hardened S3 error handling for non-XML and HTTP 4xx responses. `(PR #12996) <https://github.com/apple/foundationdb/pull/12996>`_, `(PR #13021) <https://github.com/apple/foundationdb/pull/13021>`_
+* Fixed `minRestorableVersion` and `maxRestorableVersion` updates when mutation logs are missing. `(PR #12710) <https://github.com/apple/foundationdb/pull/12710>`_
+* Restricted `backup_worker_enabled` configuration through `fdbcli`. `(PR #12711) <https://github.com/apple/foundationdb/pull/12711>`_
+* Enabled TLS hostname validation against certificate CN and SAN values. `(PR #12730) <https://github.com/apple/foundationdb/pull/12730>`_
+
 7.4.6
 =====
 
