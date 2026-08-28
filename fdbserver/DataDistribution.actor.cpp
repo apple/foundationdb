@@ -522,7 +522,8 @@ public:
 		                 lock,
 		                 configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
 		                 context->ddEnabledState.get(),
-		                 SkipDDModeCheck::False));
+		                 SkipDDModeCheck::False,
+		                 configuration));
 	}
 
 	void initDcInfo() {
@@ -675,9 +676,25 @@ public:
 			    .setMaxFieldLength(-1)
 			    .detail("Conf", self->configuration.toString());
 
+			// Resolve the effective shard-location-metadata encoding target for
+			// this DD incarnation: DatabaseConfiguration is authoritative, with
+			// the legacy SHARD_ENCODE_LOCATION_METADATA knob as the fallback
+			// only when shard_metadata_format is UNSET. Publish it on
+			// ddEnabledState so every downstream write/move path reads one
+			// resolved value instead of the raw knob.
+			bool shardEncodeLocationMetadata = self->configuration.shardMetadataFormatIsEncoded().orDefault(
+			    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+			self->context->ddEnabledState->setShardEncodeLocationMetadata(shardEncodeLocationMetadata);
+			TraceEvent("DDInitShardEncodeTarget", self->ddId)
+			    .detail("ShardEncodeLocationMetadata", shardEncodeLocationMetadata)
+			    .detail("ConfigFormatUnset",
+			            self->configuration.shardMetadataFormat == DatabaseConfiguration::ShardMetadataFormat::UNSET)
+			    .detail("Knob", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+
 			if (self->configuration.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
-			    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			    !shardEncodeLocationMetadata) {
 				TraceEvent(SevError, "PhysicalShardNotEnabledForShardedRocks", self->ddId)
+				    .detail("Reason", "sharded-rocksdb requires new-format shard-location metadata")
 				    .detail("EnableServerKnob", "SHARD_ENCODE_LOCATION_METADATA");
 				throw internal_error();
 			}
@@ -810,7 +827,8 @@ public:
 		}
 
 		state std::vector<Key> customBoundaries;
-		if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+		if (bulkLoadIsEnabled(self->initData->bulkLoadMode,
+		                      self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 			// Bulk load does not allow boundary change
 			TraceEvent(SevInfo, "DDInitCustomRangeConfigDisabledByBulkLoadMode", self->ddId);
 		} else {
@@ -944,7 +962,7 @@ public:
 				    .detail("DataMoveType", dataMoveType)
 				    .detail("DataMove", meta.toString());
 			} else if (it.value()->isCancelled() ||
-			           (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
+			           (it.value()->valid && !self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 				RelocateShard rs(meta.ranges.front(), DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
@@ -2723,19 +2741,20 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(self->pollMoveKeysLock());
 
-			self->context->tracker = makeReference<DataDistributionTracker>(
-			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
-			                                       .distributorId = self->ddId,
-			                                       .readyToStart = self->initialized,
-			                                       .output = self->relocationProducer,
-			                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
-			                                       .physicalShardCollection = self->physicalShardCollection,
-			                                       .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
-			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
-			                                       .shards = &shards,
-			                                       .trackerCancelled = &self->context->trackerCancelled,
-			                                       .ddTenantCache = self->ddTenantCache,
-			                                       .usableRegions = self->configuration.usableRegions });
+			self->context->tracker = makeReference<DataDistributionTracker>(DataDistributionTrackerInitParams{
+			    .db = self->txnProcessor,
+			    .distributorId = self->ddId,
+			    .readyToStart = self->initialized,
+			    .output = self->relocationProducer,
+			    .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			    .physicalShardCollection = self->physicalShardCollection,
+			    .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
+			    .anyZeroHealthyTeams = anyZeroHealthyTeams,
+			    .shards = &shards,
+			    .trackerCancelled = &self->context->trackerCancelled,
+			    .ddTenantCache = self->ddTenantCache,
+			    .usableRegions = self->configuration.usableRegions,
+			    .shardEncodeLocationMetadata = self->context->ddEnabledState->shardEncodeLocationMetadata() });
 			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
 			                                                                 self->initData,
 			                                                                 getShardMetrics.getFuture(),
@@ -2867,7 +2886,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(serveBlobMigratorRequests(self, self->context->tracker, self->context->ddQueue));
-			if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+			if (bulkLoadIsEnabled(self->initData->bulkLoadMode,
+			                      self->context->ddEnabledState->shardEncodeLocationMetadata())) {
 				TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
 				    .detail("UsableRegions", self->configuration.usableRegions);
 				self->bulkLoadEnabled = true;
