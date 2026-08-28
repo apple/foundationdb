@@ -1820,7 +1820,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					if (dataMove.ranges.empty() || dataMove.ranges.front().begin != keys.begin) {
 						// DataMoveMetaData unexpectedly empty or mismatched. During knob
 						// rollback, a concurrent DD instance may have cleared it via
-						// rewriteShardEncodedMetadata(). We can't assert here because the
+						// clearShardEncodedDataMoves(). We can't assert here because the
 						// old DD still has knob=true (shared process in simulation) — the
 						// knob guard doesn't help. Throwing dd_config_changed restarts this
 						// DD instance, which then picks up the new knob value. In production

@@ -354,7 +354,6 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self,
                               AuditType auditType,
                               KeyValueStoreType auditStorageEngineType);
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
-ACTOR Future<Void> monitorShardEncodeKnob(UID ddId);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
@@ -2899,8 +2898,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				}
 			}
 
-			actors.push_back(monitorShardEncodeKnob(self->ddId));
-
 			wait(waitForAll(actors));
 			ASSERT_WE_THINK(false);
 			return Void();
@@ -2973,22 +2970,6 @@ static std::set<int> const& normalDataDistributorErrors() {
 		s.insert(error_code_audit_storage_failed);
 	}
 	return s;
-}
-
-// Monitor SHARD_ENCODE_LOCATION_METADATA knob for changes. If flipped mid-run,
-// throw dd_config_changed to restart DD cleanly (preventing in-flight move actors
-// from hitting asserts due to knob/path mismatch).
-ACTOR Future<Void> monitorShardEncodeKnob(UID ddId) {
-	state bool initial = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
-	loop {
-		wait(delay(5.0));
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA != initial) {
-			TraceEvent(SevInfo, "DDShardEncodeKnobChanged", ddId)
-			    .detail("OldValue", initial)
-			    .detail("NewValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-			throw dd_config_changed();
-		}
-	}
 }
 
 ACTOR template <class Req>

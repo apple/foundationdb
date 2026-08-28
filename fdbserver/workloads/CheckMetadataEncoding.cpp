@@ -36,11 +36,18 @@ struct CheckMetadataEncodingWorkload : TestWorkload {
 	bool shardEncodeExpected;
 	bool allowMixedFormats; // True in rollback scenarios where old entries remain
 	bool requireKnobFalse; // If true, assert that SHARD_ENCODE is actually false
+	// If true, require dataMoveKeys to be empty by the end of the test. This is the
+	// assertion for the rollback path: DD init clears DataMoveMetaData left behind by a
+	// shard-encoding DD, and the old move path never writes dataMoveKeys, so once
+	// rollback has taken effect the range must stay empty. Checked in check() rather
+	// than start() so DD has had the whole test phase to re-init and clear.
+	bool requireNoDataMoves;
 
 	explicit CheckMetadataEncodingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		shardEncodeExpected = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
 		allowMixedFormats = getOption(options, "allowMixedFormats"_sr, false);
 		requireKnobFalse = getOption(options, "requireKnobFalse"_sr, false);
+		requireNoDataMoves = getOption(options, "requireNoDataMoves"_sr, false);
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -60,8 +67,51 @@ struct CheckMetadataEncodingWorkload : TestWorkload {
 		return _start(this, cx);
 	}
 
-	Future<bool> check(Database const& cx) override { return true; }
+	Future<bool> check(Database const& cx) override {
+		if (clientId != 0 || !requireNoDataMoves)
+			return true;
+		return _check(this, cx);
+	}
 	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	// Poll until dataMoveKeys is empty. A DD restarted late in the phase (Attrition,
+	// or a recovery) clears the range on its next init, so allow a bounded settling
+	// window rather than sampling once and racing that restart.
+	Future<bool> _check(CheckMetadataEncodingWorkload* self, Database cx) {
+		int64_t remaining = 0;
+		double deadline = now() + 60.0;
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				RangeResult dms = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
+				remaining = dms.size();
+				if (remaining == 0) {
+					co_return true;
+				}
+				if (now() >= deadline) {
+					break;
+				}
+				tr.reset();
+				co_await delay(1.0);
+				continue;
+			} catch (Error& e) {
+				err = e;
+			}
+			// co_await is not allowed in a catch handler, so retry out here.
+			co_await tr.onError(err);
+		}
+		TraceEvent(SevError, "CheckMetadataEncodingFailed")
+		    .detail("Reason", "DataMoveMetaData still present after rollback")
+		    .detail("DataMoveCount", remaining)
+		    .detail("Hint",
+		            "DD init should clear dataMoveKeys when SHARD_ENCODE_LOCATION_METADATA is false, "
+		            "and the old move path never writes them.");
+		co_return false;
+	}
 
 	Future<Void> _start(CheckMetadataEncodingWorkload* self, Database cx) {
 		int64_t keyServersOld = 0, keyServersNew = 0;

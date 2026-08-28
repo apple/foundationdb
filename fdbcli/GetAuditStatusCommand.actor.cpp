@@ -188,8 +188,6 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		type = AuditType::ValidateStorageServerShard;
 	} else if (tokencmp(tokens[1], "validate_restore")) {
 		type = AuditType::ValidateRestore;
-	} else if (tokencmp(tokens[1], "metadata_encoding")) {
-		type = AuditType::ValidateMetadataEncoding;
 	} else {
 		printUsage(tokens[0]);
 		return false;
