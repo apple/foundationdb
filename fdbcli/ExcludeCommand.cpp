@@ -269,9 +269,11 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 		bool markFailed = false;
 		std::vector<ProcessData> workers;
 		std::map<std::string, StorageServerInterface> server_interfaces;
+		std::set<NetworkAddress> activeLogAddresses;
 		Future<bool> future_workers = fdb_cli::getWorkers(db, &workers);
 		Future<Void> future_server_interfaces = fdb_cli::getStorageServerInterfaces(db, &server_interfaces);
-		co_await (success(future_workers) && success(future_server_interfaces));
+		Future<Void> future_active_logs = fdb_cli::getActiveLogAddresses(db, &activeLogAddresses);
+		co_await (success(future_workers) && success(future_server_interfaces) && success(future_active_logs));
 
 		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
 			if (*t == "FORCE"_sr) {
@@ -317,6 +319,45 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 		if (exclusionAddresses.empty() && exclusionLocalities.empty()) {
 			fprintf(stderr, "ERROR: At least one valid network endpoint address or a locality must be provided\n");
 			co_return false;
+		}
+
+		// Locality is resolved to addresses using the worker list and the persisted storage server list, but log
+		// servers have no equivalent persisted, locality-tagged record: a log that isn't currently registered as a
+		// worker (down or partitioned) cannot be matched to any locality and is silently left out of the exclusion
+		// set. Warn about any such log so the operator doesn't mistake a completed locality exclude for a guarantee
+		// that these logs' data has been moved.
+		if (!exclusionLocalities.empty()) {
+			std::set<NetworkAddress> knownAddresses;
+			for (const auto& w : workers) {
+				knownAddresses.insert(w.address);
+			}
+			for (const auto& [_addr, ssi] : server_interfaces) {
+				knownAddresses.insert(ssi.address());
+				if (ssi.secondaryAddress().present()) {
+					knownAddresses.insert(ssi.secondaryAddress().get());
+				}
+			}
+
+			std::vector<NetworkAddress> unresolvedLogs;
+			for (const auto& addr : activeLogAddresses) {
+				if (knownAddresses.find(addr) == knownAddresses.end()) {
+					unresolvedLogs.push_back(addr);
+				}
+			}
+
+			if (!unresolvedLogs.empty()) {
+				fprintf(stderr,
+				        "WARNING: %zu log server(s) are not currently reporting to the cluster, so it could not be "
+				        "determined whether they match the locality being excluded:\n",
+				        unresolvedLogs.size());
+				for (const auto& addr : unresolvedLogs) {
+					fprintf(stderr, "  %s\n", addr.toString().c_str());
+				}
+				fprintf(stderr,
+				        "  If any of the above belong to the excluded locality, `exclude` cannot wait for their "
+				        "data to be safely moved and will not report them as excluded. Verify their locality once "
+				        "they reconnect, or exclude their addresses explicitly, before removing any hardware.\n");
+			}
 		}
 
 		bool res = co_await excludeServersAndLocalities(db, exclusionAddresses, exclusionLocalities, markFailed, force);
