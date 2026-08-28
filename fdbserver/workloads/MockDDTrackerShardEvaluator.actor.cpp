@@ -93,7 +93,8 @@ public:
 
 		// start tracker
 		Reference<InitialDataDistribution> initData =
-		    mock->getInitialDataDistribution(ddcx.id(), ddcx.lock, {}, ddcx.ddEnabledState.get(), SkipDDModeCheck::True)
+		    mock->getInitialDataDistribution(
+		            ddcx.id(), ddcx.lock, {}, ddcx.ddEnabledState.get(), SkipDDModeCheck::True, ddcx.configuration)
 		        .get();
 		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
 		Reference<BulkLoadTaskCollection> bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(ddcx.id());

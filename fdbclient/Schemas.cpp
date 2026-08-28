@@ -906,6 +906,16 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "optional_experimental",
              "required_experimental"
          ]},
+         "shard_metadata_format": {
+             "$enum":[
+             "original",
+             "encoded"
+         ]},
+         "shard_metadata_migration": {
+             "$enum":[
+             "enabled",
+             "disabled"
+         ]},
          "encryption_at_rest_mode": {
              "$enum":[
              "disabled",
