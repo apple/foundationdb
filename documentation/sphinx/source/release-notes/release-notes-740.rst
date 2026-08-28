@@ -7,6 +7,8 @@ Release Notes
 7.4.7
 =====
 
+* Avoided restarting transaction-system recovery when an old-epoch backup worker fails. `(PR #13939) <https://github.com/apple/foundationdb/pull/13939>`_
+* Moved `waitForShardReady` outside the transaction used to finish data moves, preventing slow destination servers from exhausting the transaction lifetime and stalling data distribution. `(PR #13642) <https://github.com/apple/foundationdb/pull/13642>`_
 * Fixed a use-after-free when cancelling S3 backup file copies. `(PR #13916) <https://github.com/apple/foundationdb/pull/13916>`_
 * Fixed server knob overrides being silently skipped when a knob name is shared with client knobs. `(PR #13932) <https://github.com/apple/foundationdb/pull/13932>`_
 * Added opt-in eviction of stale client connections to failed storage servers and proxies. `(PR #13912) <https://github.com/apple/foundationdb/pull/13912>`_
