@@ -527,20 +527,24 @@ private:
 // system trigger a new data move when terminate the error task.
 struct BulkLoadAck {
 	// How the data move ended, from the bulkload engine's point of view. Exactly one outcome applies, so
-	// the engine cannot mistake one for another: Unplaceable used to be a second flag set alongside the
-	// terminal one, and checking terminal first would silently have skipped the narrowing this outcome
-	// exists to request.
+	// the engine cannot mistake one for another.
 	enum class Outcome {
 		// The move completed, or the task was superseded with nothing to report.
 		Completed = 0,
 		// Failed on a condition a later attempt can clear -- e.g. the destination team was momentarily
 		// unhealthy. The task must stay eligible for re-dispatch rather than be marked Error.
 		Retryable,
-		// No destination team could be found. Neither transient nor a property of this attempt: a
-		// destination team must be disjoint from src, src is the union of the owners of every shard the
-		// range spans, and so a range spanning enough of the fleet has no legal destination however often
-		// it is attempted. Narrowing the range is what clears it, so the task is split while it still
-		// holds more than one manifest, and is marked Error only once too narrow to split.
+		// No destination team could be found for long enough that re-attempting the same range is not
+		// worth it (see the BestTeamStuck path in dataDistributionRelocator). The engine's response is to
+		// narrow the range, and to mark Error only once the task is too narrow to split.
+		//
+		// Narrowing is a remedy for one of the reasons a team cannot be found: a destination team must be
+		// disjoint from src, src is the union of the owners of every shard the range spans, and so a range
+		// spanning enough of the fleet has no legal destination however often it is attempted. The
+		// relocator cannot distinguish that from the other reasons getTeamForBulkLoad returns nothing --
+		// every team unhealthy, or none with disk headroom -- which narrowing does not address. Splitting
+		// on those is wasted work rather than harmful: the children tile the parent and carry the same
+		// manifests, so nothing is lost, and the split count is bounded by the manifest count.
 		Unplaceable,
 		// Failed in a way neither a later attempt nor a narrower range can clear, so the task is marked
 		// Error and its data is never ingested. Reserve this for genuinely terminal conditions: a bulkload

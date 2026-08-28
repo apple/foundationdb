@@ -1116,8 +1116,9 @@ Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<Data
 // if nothing does. Because the job's manifests tile the key space, splitting the manifest list at the same
 // key that splits the range gives each child exactly the manifests covering its own range.
 //
-// Returns false if the task holds a single manifest, which is as narrow as a task can get; the caller
-// then has a genuinely unplaceable range. Halving also bounds recursion without a counter.
+// Returns false without writing anything if the task cannot be narrowed -- it holds a single manifest, or no
+// manifest boundary falls inside its range -- and also if the parent turns out to be no longer ours, which is
+// not a statement about the range. Halving bounds recursion without a counter.
 Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskState parent) {
 	std::vector<BulkLoadManifest> manifests = parent.getManifests();
 	if (manifests.size() < 2) {
@@ -1142,9 +1143,8 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	// is its manifests' span intersected with the job range (see generateBulkLoadTaskRange), so a parent
 	// whose range was clipped is narrower than the data its manifests describe. Splitting on manifest
 	// min/max then yields children reaching outside the parent, handing them key space this task was never
-	// given -- observed as this function's own tiling assertion firing on BulkDumpingS3WithChaos. Splitting
-	// the parent's range makes the children tile it by construction. A task range narrower than its
-	// manifests is expected and handled: the storage server filters file content to the task range.
+	// given. Splitting the parent's range makes the children tile it by construction. A task range narrower
+	// than its manifests is expected and handled: the storage server filters file content to the task range.
 	//
 	// For the same reason the cut must be chosen from the boundaries that fall strictly inside the parent's
 	// range. A task at a job-range edge can hold many manifests whose midpoint lies outside its clipped
@@ -1192,6 +1192,15 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	ASSERT(children[0].getRange().begin == parent.getRange().begin);
 	ASSERT(children[0].getRange().end == children[1].getRange().begin);
 	ASSERT(children[1].getRange().end == parent.getRange().end);
+	// The writes below must be issued in ascending key order, so keep the guard next to the reason.
+	// krmSetRange reads oldValue at Snapshot::True on a plain Transaction, which has no read-your-writes,
+	// so each call is blind to the previous one's mutations and only their order makes the result correct.
+	// Each call emits clear(range); set(begin, value); set(end, oldValue). Ascending, the second call's
+	// clear() erases the boundary value the first call parked there before rewriting it, leaving
+	// begin->child0, boundary->child1. Descending, the second call's trailing set(boundary, oldValue)
+	// lands last and republishes the parent over the second child's range -- precisely the state the
+	// tiling comment above says cannot exist.
+	ASSERT(children[0].getRange().begin < children[1].getRange().begin);
 
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
@@ -1434,8 +1443,9 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 			co_return;
 		}
 
-		// An Unplaceable task that could not be narrowed is terminal, which is what the flag it replaced
-		// encoded by also setting the unretryable one.
+		// An Unplaceable task that could not be narrowed is terminal. Note splitBulkLoadTask also declines
+		// when the parent is no longer ours, which is not a terminal range: failBulkLoadTask below re-reads
+		// the task, hits bulkload_task_outdated again, and exits without marking anything Error.
 		if (ack.outcome == BulkLoadAck::Outcome::Terminal || ack.outcome == BulkLoadAck::Outcome::Unplaceable ||
 		    retriesExhausted) {
 			if (retriesExhausted) {
