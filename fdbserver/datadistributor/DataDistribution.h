@@ -522,25 +522,56 @@ private:
 	std::unordered_map<UID, int> busyMap; // <Storage Server ID, Task Count>
 };
 
-// Used to piggyback the data move priority when an unretryable error happens to the task datamove.
+// Used to piggyback the data move priority when a bulkload task's data move ends.
 // If the priority indicates the data move is a team unhealthy related data move, the bulkload engine
 // system trigger a new data move when terminate the error task.
 struct BulkLoadAck {
-	// The data move failed in a way no later attempt can clear, so the task is marked Error and its
-	// data is never ingested. Reserve this for genuinely terminal conditions: a bulkload task's data
-	// lives only in the dump until some attempt succeeds, so calling a recoverable failure terminal
-	// drops that data with no other copy in the cluster.
-	bool unretryableError = false;
-	// The data move failed on a condition a later attempt can clear -- e.g. the destination team was
-	// momentarily unhealthy. The task must stay eligible for re-dispatch rather than be marked Error.
-	bool retryableError = false;
+	// How the data move ended, from the bulkload engine's point of view. Exactly one outcome applies, so
+	// the engine cannot mistake one for another.
+	enum class Outcome {
+		// The move completed, or the task was superseded with nothing to report.
+		Completed = 0,
+		// Failed on a condition a later attempt can clear -- e.g. the destination team was momentarily
+		// unhealthy. The task must stay eligible for re-dispatch rather than be marked Error.
+		Retryable,
+		// No destination team could be found for long enough that re-attempting the same range is not
+		// worth it (see the BestTeamStuck path in dataDistributionRelocator). The engine's response is to
+		// narrow the range, and to mark Error only once the task is too narrow to split.
+		//
+		// Narrowing is a remedy for one of the reasons a team cannot be found: a destination team must be
+		// disjoint from src, src is the union of the owners of every shard the range spans, and so a range
+		// spanning enough of the fleet has no legal destination however often it is attempted. The
+		// relocator cannot distinguish that from the other reasons getTeamForBulkLoad returns nothing --
+		// every team unhealthy, or none with disk headroom -- which narrowing does not address. Splitting
+		// on those is wasted work rather than harmful: the children tile the parent and carry the same
+		// manifests, so nothing is lost, and the split count is bounded by the manifest count.
+		Unplaceable,
+		// Failed in a way neither a later attempt nor a narrower range can clear, so the task is marked
+		// Error and its data is never ingested. Reserve this for genuinely terminal conditions: a bulkload
+		// task's data lives only in the dump until some attempt succeeds, so calling a recoverable failure
+		// terminal drops that data with no other copy in the cluster.
+		Terminal,
+	};
+
+	Outcome outcome = Outcome::Completed;
 	int dataMovePriority = -1;
 
 	BulkLoadAck() = default;
-	BulkLoadAck(bool unretryableError, int dataMovePriority)
-	  : unretryableError(unretryableError), dataMovePriority(dataMovePriority) {}
-	BulkLoadAck(bool unretryableError, bool retryableError, int dataMovePriority)
-	  : unretryableError(unretryableError), retryableError(retryableError), dataMovePriority(dataMovePriority) {}
+	BulkLoadAck(Outcome outcome, int dataMovePriority) : outcome(outcome), dataMovePriority(dataMovePriority) {}
+
+	static std::string toString(Outcome outcome) {
+		switch (outcome) {
+		case Outcome::Completed:
+			return "Completed";
+		case Outcome::Retryable:
+			return "Retryable";
+		case Outcome::Unplaceable:
+			return "Unplaceable";
+		case Outcome::Terminal:
+			return "Terminal";
+		}
+		UNREACHABLE();
+	}
 };
 
 struct DDBulkLoadEngineTask {
