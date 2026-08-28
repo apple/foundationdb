@@ -107,6 +107,14 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 		resAuditId = cancelledAuditId;
 
 	} else {
+		// Not a distributed audit: metadata_encoding is a client-side scan, so handle it
+		// before selecting an AuditType and never send it to the data distributor.
+		if (tokencmp(tokens[1], "metadata_encoding")) {
+			state Database db = Database::createDatabase(clusterFile, ApiVersion::LATEST_VERSION);
+			wait(success(checkMetadataEncodingCommandActor(db, tokens)));
+			return deterministicRandom()->randomUniqueID();
+		}
+
 		type = AuditType::Invalid;
 		if (tokencmp(tokens[1], "ha")) {
 			type = AuditType::ValidateHA;
@@ -118,18 +126,9 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 			type = AuditType::ValidateStorageServerShard;
 		} else if (tokencmp(tokens[1], "validate_restore")) {
 			type = AuditType::ValidateRestore;
-		} else if (tokencmp(tokens[1], "metadata_encoding")) {
-			type = AuditType::ValidateMetadataEncoding;
 		} else {
 			printUsage(tokens[0]);
 			return UID();
-		}
-
-		if (type == AuditType::ValidateMetadataEncoding) {
-			// This audit runs client-side (simple scan, not distributed)
-			state Database db = Database::createDatabase(clusterFile, ApiVersion::LATEST_VERSION);
-			wait(success(checkMetadataEncodingCommandActor(db, tokens)));
-			return deterministicRandom()->randomUniqueID();
 		}
 
 		Key begin = allKeys.begin, end = allKeys.end;

@@ -332,20 +332,22 @@ Safe — tested and verified in simulation (`ShardEncodeRollback.toml`):
 
 2. **DD restarts on knob change.** In production, changing the knob requires a
    process restart. On restart, DD initializes with the new value and runs the
-   startup rewrite. In-flight actors from the old DD are cancelled.
+   startup clear. In-flight actors from the old DD are cancelled.
 
-3. **DD rewrites keyServers on startup.** When DD restarts with knob=false, it
-   scans keyServers entries and rewrites shard-encoded ones to old tag-based format.
-   DataMoveMetaData entries are cleared.
+3. **DD clears stale data moves on startup.** When DD restarts with knob=false, it
+   clears DataMoveMetaData left behind by the shard-encoding DD. Those records
+   describe in-flight physical shard moves the old path cannot complete, and nothing
+   else would ever retire them.
 
-4. **serverKeys drains naturally.** Shard-encoded serverKeys entries are NOT
-   rewritten on startup (doing so causes KRM fragmentation and SS pair-processing
-   issues). They remain readable in both formats and drain to old format as DD
-   moves shards using the old path.
+4. **keyServers and serverKeys drain naturally.** Neither is rewritten on startup.
+   Every write on the old path emits old-format values, so both converge as DD moves
+   shards, and they remain readable in both formats meanwhile. This convergence is
+   **unbounded in time** — a cold range may never be touched — so it is not by itself
+   sufficient to declare a binary downgrade safe.
 
 5. **Safety net for rolling restarts.** During a rolling restart, an old DD
    instance (not yet killed) may find its DataMoveMetaData cleared by a new DD
-   instance that already ran the startup rewrite. In this case, MoveKeys functions
+   instance that already ran the startup clear. In this case, MoveKeys functions
    throw `dd_config_changed` instead of asserting — causing the old DD to restart
    once more and pick up the new knob value. This is at most one extra restart
    per DD instance during the transition, not per-shard.
@@ -353,11 +355,14 @@ Safe — tested and verified in simulation (`ShardEncodeRollback.toml`):
 The rollback procedure:
 1. Set `SHARD_ENCODE_LOCATION_METADATA=false`
 2. Restart the `fdbserver` processes (knob change requires restart)
-3. On DD init, keyServers entries are rewritten to old format and DataMoveMetaData is cleared
+3. On DD init, DataMoveMetaData is cleared
 4. DD proceeds with old path for all new moves
-5. serverKeys entries drain to old format as DD touches shards over time
+5. keyServers and serverKeys entries drain to old format as DD touches shards over time
 
-No need to stop writes or trigger wiggle.
+No need to stop writes. Note that step 5 is unbounded: reaching a state where every
+entry is old format — the precondition for downgrading to a binary that predates the
+format — still requires a storage wiggle. Use `audit_storage metadata_encoding` to
+confirm no new-format entries remain before downgrading.
 
 ### Rollback to old binary (downgrade)
 
@@ -425,9 +430,9 @@ progressing?). Use `audit_storage metadata_encoding` for the final gate decision
                       +--------> Old binary <--------------------------+
 ```
 
-## Verifying Migration State: ValidateMetadataEncoding Audit
+## Verifying Migration State: the `metadata_encoding` scan
 
-Extends the existing `audit_storage` fdbcli command with a new AuditType that
+Extends the existing `audit_storage` fdbcli command with a client-side scan that
 reports encoding format state across keyServers and serverKeys. Used to confirm
 both forward migration completion and rollback readiness. Runs client-side
 (immediate scan, not a distributed audit).

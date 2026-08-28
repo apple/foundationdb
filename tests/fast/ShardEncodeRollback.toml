@@ -57,4 +57,10 @@ testTitle = 'ShardEncodeRollbackVerify'
     [[test.workload]]
     testName = 'CheckMetadataEncoding'
     requireKnobFalse = true
+    # Mixed formats are the expected steady state after rollback: keyServers and
+    # serverKeys converge only as DD moves shards, which is unbounded in time.
     allowMixedFormats = true
+    # DataMoveMetaData is the one thing rollback clears outright, so it must be empty
+    # by the end of the phase. This is the assertion that fails if DD never re-inits
+    # with the flipped knob, or if the old move path starts writing dataMoveKeys.
+    requireNoDataMoves = true
