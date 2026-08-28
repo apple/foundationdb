@@ -26,7 +26,6 @@
 #include <cstdio>
 #include <thread>
 
-#undef loop
 #include "fdbrpc/test/echo.grpc.pb.h"
 
 #include "flow/Error.h"

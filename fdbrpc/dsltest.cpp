@@ -1,5 +1,5 @@
 /*
- * dsltest.actor.cpp
+ * dsltest.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -25,16 +25,14 @@
 #include "fdbrpc/simulator.h"
 #include "ActorFuzz.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-//
-// TODO: IS THIS FILE NEEDED?  IS IT RUN ON A RECURRING BASIS?  IF NOT, DELETE IT.
-//
+#include "flow/CoroUtils.h"
+#include "flow/UnitTest.h"
 
 void* allocateLargePages(int total);
 
-bool testFuzzActor(Future<int> (*actor)(FutureStream<int> const&, PromiseStream<int> const&, Future<Void> const&),
+bool testFuzzActor(Future<int> (*actor)(FutureStream<int>, PromiseStream<int>, Future<Void>),
                    const char* desc,
                    std::vector<int> const& expectedOutput) {
 	// Run the test 5 times with different "timing"
@@ -252,27 +250,31 @@ void memoryTest() {
 }
 #endif
 
-ACTOR template <int N, class X>
-[[flow_allow_discard]] Future<X> addN(Future<X> in) {
-	X i = wait(in);
-	return i + N;
+template <int N, class X>
+Future<X> addN(Future<X> in) {
+	Future<X> input(std::move(in));
+	X i = co_await input;
+	co_return i + N;
 }
 
-ACTOR template <class A, class B>
-[[flow_allow_discard]] Future<Void> switchTest(FutureStream<A> as, Future<B> oneb) {
-	loop choose {
-		when(A a = waitNext(as)) {
+template <class A, class B>
+Future<Void> switchTest(FutureStream<A> as, Future<B> oneb) {
+	FutureStream<A> inputs(std::move(as));
+	Future<B> done(std::move(oneb));
+	while (true) {
+		auto res = co_await race(inputs, done);
+		if (res.index() == 0) {
+			A a = std::get<0>(std::move(res));
 			std::cout << "A " << a << std::endl;
-		}
-		when(B b = wait(oneb)) {
+		} else if (res.index() == 1) {
+			B b = std::get<1>(std::move(res));
 			std::cout << "B " << b << std::endl;
 			break;
+		} else {
+			UNREACHABLE();
 		}
 	}
-	loop {
-		std::cout << "Done!" << std::endl;
-		return Void();
-	}
+	std::cout << "Done!" << std::endl;
 }
 
 class TestBuffer : public ReferenceCounted<TestBuffer> {
@@ -484,13 +486,13 @@ Future<Void> threadSafetySender(std::vector<PromiseT>& v, Event& start, Event& r
 	return Void();
 }
 
-ACTOR [[flow_allow_discard]] void threadSafetyWaiter(Future<Void> f, int32_t* count) {
-	wait(f);
+Future<Void> threadSafetyWaiter(Future<Void> f, int32_t* count, Uncancellable = Uncancellable()) {
+	co_await f;
 	interlockedIncrement(count);
 }
-ACTOR [[flow_allow_discard]] void threadSafetyWaiter(FutureStream<Void> f, int n, int32_t* count) {
+Future<Void> threadSafetyWaiter(FutureStream<Void> f, int n, int32_t* count, Uncancellable = Uncancellable()) {
 	while (n--) {
-		waitNext(f);
+		co_await f;
 		interlockedIncrement(count);
 	}
 }
@@ -566,15 +568,15 @@ void threadSafetyTest2() {
 
 volatile int32_t cancelled = 0, returned = 0;
 
-ACTOR [[flow_allow_discard]] Future<Void> returnCancelRacer( Future<Void> f ) {
+Future<Void> returnCancelRacer( Future<Void> f ) {
+	Future<Void> input(std::move(f));
 	try {
-		wait(f);
+		co_await input;
 	} catch ( Error& ) {
 		interlockedIncrement( &cancelled );
 		throw;
 	}
 	interlockedIncrement( &returned );
-	return Void();
 }
 
 void returnCancelRaceTest() {
@@ -618,15 +620,17 @@ void returnCancelRaceTest() {
 }
 #endif
 
-ACTOR [[flow_allow_discard]] Future<int> chooseTest(Future<int> a, Future<int> b) {
-	choose {
-		when(int A = wait(a)) {
-			return A;
-		}
-		when(int B = wait(b)) {
-			return B;
-		}
+Future<int> chooseTest(Future<int> a, Future<int> b) {
+	// Release both inputs before completion, even when callers retain the result future.
+	Future<int> first(std::move(a));
+	Future<int> second(std::move(b));
+	auto res = co_await race(first, second);
+	if (res.index() == 0) {
+		co_return std::get<0>(res);
+	} else if (res.index() == 1) {
+		co_return std::get<1>(res);
 	}
+	UNREACHABLE();
 }
 
 void showArena(ArenaBlock* a, ArenaBlock* parent) {
@@ -649,7 +653,9 @@ void showArena(ArenaBlock* a, ArenaBlock* parent) {
 }
 
 void arenaTest() {
-	BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+	// The standalone DSL test runs before network initialization.
+	const ProtocolVersion protocolVersion = currentProtocolVersion();
+	BinaryWriter wr(AssumeVersion(protocolVersion));
 	{
 		Arena arena;
 		VectorRef<StringRef> test;
@@ -667,7 +673,7 @@ void arenaTest() {
 	{
 		Arena arena2;
 		VectorRef<StringRef> test2;
-		BinaryReader reader(wr.getData(), wr.getLength(), AssumeVersion(g_network->protocolVersion()));
+		BinaryReader reader(wr.getData(), wr.getLength(), AssumeVersion(protocolVersion));
 		reader >> test2 >> arena2;
 
 		for (auto i = test2.begin(); i != test2.end(); ++i)
@@ -688,68 +694,70 @@ void arenaTest() {
 	// showArena( ar.impl.getPtr(), 0 );
 };
 
-ACTOR [[flow_allow_discard]] void testStream(FutureStream<int> xs) {
-	loop {
-		int x = waitNext(xs);
+Future<Void> testStream(FutureStream<int> xs, Uncancellable = Uncancellable()) {
+	while (true) {
+		int x = co_await xs;
 		std::cout << x << std::endl;
 	}
 }
 
-ACTOR [[flow_allow_discard]] Future<Void> actorTest1(bool b) {
+Future<Void> actorTest1(bool b) {
 	printf("1");
 	if (b)
 		throw future_version();
-	return Void();
+	co_return;
 }
 
-ACTOR [[flow_allow_discard]] void actorTest2(bool b) {
+Future<Void> actorTest2(bool b, Uncancellable = Uncancellable()) {
 	printf("2");
 	if (b)
 		throw future_version();
+	co_return;
 }
 
-ACTOR [[flow_allow_discard]] Future<Void> actorTest3(bool b) {
+Future<Void> actorTest3(bool b) {
 	try {
 		if (b)
 			throw future_version();
 	} catch (Error&) {
 		printf("3");
-		return Void();
+		co_return;
 	}
 	printf("\nactorTest3 failed\n");
-	return Void();
 }
 
-ACTOR [[flow_allow_discard]] Future<Void> actorTest4(bool b) {
-	state double tstart = now();
+Future<Void> actorTest4(bool b) {
+	double tstart = now();
+	bool caught = false;
 	try {
 		if (b)
 			throw operation_failed();
 	} catch (...) {
-		wait(delay(1));
+		caught = true;
 	}
+	if (caught)
+		co_await delay(1);
 	if (now() < tstart + 1)
 		printf("actorTest4 failed");
 	else
 		printf("4");
-	return Void();
 }
 
-ACTOR [[flow_allow_discard]] Future<bool> actorTest5() {
-	state bool caught = false;
+Future<bool> actorTest5() {
+	bool caught = false;
 
-	loop {
-		loop {
-			state bool inloop = false;
+	while (true) {
+		while (true) {
+			bool inloop = false;
 			if (caught) {
 				printf("5");
-				return true;
+				co_return true;
 			}
 			try {
-				loop {
+				while (true) {
 					if (inloop) {
 						printf("\nactorTest5 failed\n");
-						return false;
+						co_return false;
 					}
 					inloop = true;
 					if (1)
@@ -762,12 +770,12 @@ ACTOR [[flow_allow_discard]] Future<bool> actorTest5() {
 	}
 }
 
-ACTOR [[flow_allow_discard]] Future<bool> actorTest6() {
-	state bool caught = false;
-	loop {
+Future<bool> actorTest6() {
+	bool caught = false;
+	while (true) {
 		if (caught) {
 			printf("6");
-			return true;
+			co_return true;
 		}
 		try {
 			if (1)
@@ -778,47 +786,47 @@ ACTOR [[flow_allow_discard]] Future<bool> actorTest6() {
 	}
 }
 
-ACTOR [[flow_allow_discard]] Future<bool> actorTest7() {
+Future<bool> actorTest7() {
 	try {
-		loop {
-			loop {
+		while (true) {
+			while (true) {
 				if (1)
 					throw operation_failed();
 				if (1) {
 					printf("actorTest7 failed (1)\n");
-					return false;
+					co_return false;
 				}
 				if (0)
 					break;
 			}
 			if (1) {
 				printf("actorTest7 failed (2)\n");
-				return false;
+				co_return false;
 			}
 		}
 	} catch (Error&) {
 		printf("7");
-		return true;
+		co_return true;
 	}
 }
 
-ACTOR [[flow_allow_discard]] Future<bool> actorTest8() {
-	state bool caught = false;
-	state Future<bool> set = true;
+Future<bool> actorTest8() {
+	bool caught = false;
+	Future<bool> set = true;
 
-	loop {
-		state bool inloop = false;
+	while (true) {
+		bool inloop = false;
 		if (caught) {
 			printf("8");
-			return true;
+			co_return true;
 		}
 		try {
-			loop {
+			while (true) {
 				if (inloop) {
 					printf("\nactorTest8 failed\n");
-					return false;
+					co_return false;
 				}
-				wait(success(set));
+				co_await success(set);
 				inloop = true;
 				if (1)
 					throw operation_failed();
@@ -829,26 +837,27 @@ ACTOR [[flow_allow_discard]] Future<bool> actorTest8() {
 	}
 }
 
-ACTOR [[flow_allow_discard]] Future<bool> actorTest9A(Future<Void> setAfterCalling) {
-	state int count = 0;
-	loop {
+Future<bool> actorTest9A(Future<Void> setAfterCalling) {
+	Future<Void> start(std::move(setAfterCalling));
+	int count = 0;
+	while (true) {
 		if (count == 4) {
 			printf("9");
-			return true;
+			co_return true;
 		}
 		if (count && count != 4) {
 			printf("\nactorTest9 failed\n");
-			return false;
+			co_return false;
 		}
-		loop {
-			loop {
-				wait(setAfterCalling);
-				loop {
-					loop {
+		while (true) {
+			while (true) {
+				co_await start;
+				while (true) {
+					while (true) {
 						count++;
 						break;
 					}
-					wait(Future<Void>(Void()));
+					co_await Future<Void>(Void());
 					count++;
 					break;
 				}
@@ -858,7 +867,6 @@ ACTOR [[flow_allow_discard]] Future<bool> actorTest9A(Future<Void> setAfterCalli
 			count++;
 			break;
 		}
-		// loopDepth < 0 ???
 	}
 }
 
@@ -869,14 +877,14 @@ Future<bool> actorTest9() {
 	return f;
 }
 
-ACTOR [[flow_allow_discard]] Future<Void> actorTest10A(FutureStream<int> inputStream, Future<Void> go) {
-	state int i;
-	for (i = 0; i < 5; i++) {
-		wait(go);
-		int input = waitNext(inputStream);
+Future<Void> actorTest10A(FutureStream<int> inputStream, Future<Void> go) {
+	FutureStream<int> inputs(std::move(inputStream));
+	Future<Void> start(std::move(go));
+	for (int i = 0; i < 5; i++) {
+		co_await start;
+		int input = co_await inputs;
 		(void)input;
 	}
-	return Void();
 }
 
 void actorTest10() {
@@ -894,32 +902,32 @@ void actorTest10() {
 		printf("10");
 }
 
-ACTOR [[flow_allow_discard]] Future<Void> cancellable() {
-	wait(Never());
-	return Void();
+Future<Void> cancellable() {
+	co_await Future<Void>(Never());
 }
 
-ACTOR [[flow_allow_discard]] Future<Void> simple() {
-	return Void();
+Future<Void> simple() {
+	co_return;
 }
 
-ACTOR [[flow_allow_discard]] Future<Void> simpleWait() {
-	wait(Future<Void>(Void()));
-	return Void();
+Future<Void> simpleWait() {
+	co_await Future<Void>(Void());
 }
 
-ACTOR [[flow_allow_discard]] Future<int> simpleRet(Future<int> x) {
-	int i = wait(x);
-	return i;
+Future<int> simpleRet(Future<int> x) {
+	Future<int> input(std::move(x));
+	int i = co_await input;
+	co_return i;
 }
 
 template <int i>
 Future<int> chain(Future<int> const& x);
 
-ACTOR template <int i>
-[[flow_allow_discard]] Future<int> achain(Future<int> x) {
-	int k = wait(chain<i>(x));
-	return k + 1;
+template <int i>
+Future<int> achain(Future<int> x) {
+	Future<int> input(std::move(x));
+	int k = co_await chain<i>(input);
+	co_return k + 1;
 }
 
 template <int i>
@@ -932,52 +940,56 @@ Future<int> chain<0>(Future<int> const& x) {
 	return x;
 }
 
-ACTOR [[flow_allow_discard]] Future<int> chain2(Future<int> x, int i);
+Future<int> chain2(Future<int> x, int i);
 
-ACTOR [[flow_allow_discard]] Future<int> chain2(Future<int> x, int i) {
+Future<int> chain2(Future<int> x, int i) {
+	Future<int> input(std::move(x));
 	if (i > 1) {
-		int k = wait(chain2(x, i - 1));
-		return k + 1;
+		int k = co_await chain2(input, i - 1);
+		co_return k + 1;
 	} else {
-		int k = wait(x);
-		return k + i;
+		int k = co_await input;
+		co_return k + i;
 	}
 }
 
-ACTOR [[flow_allow_discard]] Future<Void> cancellable2() {
+Future<Void> cancellable2() {
 	try {
-		wait(Never());
-		return Void();
+		co_await Future<Void>(Never());
 	} catch (Error& e) {
 		throw;
 	}
 }
 
-ACTOR [[flow_allow_discard]] Future<int> introLoadValueFromDisk(Future<std::string> filename) {
-	std::string file = wait(filename);
+Future<int> introLoadValueFromDisk(Future<std::string> filename) {
+	Future<std::string> input(std::move(filename));
+	std::string file = co_await input;
 
 	if (file == "/dev/threes")
-		return 3;
+		co_return 3;
 	else
 		ASSERT(false);
-	return 0; // does not happen
+	co_return 0; // does not happen
 }
 
-ACTOR [[flow_allow_discard]] Future<int> introAdd(Future<int> a, Future<int> b) {
-	state int x = wait(a);
-	int y = wait(b);
-	return x + y; // x would be undefined here if it was not "state"
+Future<int> introAdd(Future<int> a, Future<int> b) {
+	Future<int> first(std::move(a));
+	Future<int> second(std::move(b));
+	int x = co_await first;
+	int y = co_await second;
+	co_return x + y;
 }
 
-ACTOR [[flow_allow_discard]] Future<int> introFirst(Future<int> a, Future<int> b) {
-	choose {
-		when(int x = wait(a)) {
-			return x;
-		}
-		when(int x = wait(b)) {
-			return x;
-		}
+Future<int> introFirst(Future<int> a, Future<int> b) {
+	Future<int> first(std::move(a));
+	Future<int> second(std::move(b));
+	auto res = co_await race(first, second);
+	if (res.index() == 0) {
+		co_return std::get<0>(res);
+	} else if (res.index() == 1) {
+		co_return std::get<1>(res);
 	}
+	UNREACHABLE();
 }
 
 struct AddReply {
@@ -1004,11 +1016,15 @@ struct AddRequest {
 	}
 };
 
-ACTOR [[flow_allow_discard]] void introAddServer(PromiseStream<AddRequest> add) {
-	loop choose {
-		when(AddRequest req = waitNext(add.getFuture())) {
+Future<Void> introAddServer(PromiseStream<AddRequest> add, Uncancellable = Uncancellable()) {
+	while (true) {
+		auto res = co_await race(add.getFuture());
+		if (res.index() == 0) {
+			AddRequest req = std::get<0>(std::move(res));
 			printf("%d + %d = %d\n", req.a, req.b, req.a + req.b);
 			req.reply.send(req.a + req.b);
+		} else {
+			UNREACHABLE();
 		}
 	}
 }
@@ -1074,32 +1090,174 @@ void chainTest() {
 	printf("chain2<%d>: %0.3f M/sec\n", N, 0.1 / (endt - startt));
 }
 
-ACTOR [[flow_allow_discard]] void cycle(FutureStream<Void> in, PromiseStream<Void> out, int* ptotal) {
-	loop {
-		waitNext(in);
+Future<Void> cycle(FutureStream<Void> in, PromiseStream<Void> out, int* ptotal, Uncancellable = Uncancellable()) {
+	while (true) {
+		co_await in;
 		(*ptotal)++;
 		out.send(Void());
 	}
 }
 
-ACTOR [[flow_allow_discard]] Future<Void> cycleTime(int nodes, int times) {
-	state std::vector<PromiseStream<Void>> n(nodes);
-	state int total = 0;
+Future<Void> cycleTime(int nodes, int times) {
+	std::vector<PromiseStream<Void>> n(nodes);
+	int total = 0;
 
 	// 1->2, 2->3, ..., n-1->0
 	for (int i = 1; i < nodes; i++)
 		cycle(n[i].getFuture(), n[(i + 1) % nodes], &total);
 
-	state double startT = timer();
+	double startT = timer();
 	n[1].send(Void());
-	loop {
-		waitNext(n[0].getFuture());
+	while (true) {
+		co_await n[0].getFuture();
 		if (!--times)
 			break;
 		n[1].send(Void());
 	}
 
 	printf("Ring test: %d nodes, %d total ops, %.3f seconds\n", nodes, total, timer() - startT);
+}
+
+namespace {
+
+Future<int> cancellationTrackedProducer(Promise<Void> cancelled) {
+	Promise<Void> notification(std::move(cancelled));
+	try {
+		co_await Future<Void>(Never());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			notification.send(Void());
+		throw;
+	}
+	UNREACHABLE();
+}
+
+} // namespace
+
+TEST_CASE("/fdbrpc/Coroutines/ControlFlow") {
+	Future<Void> failed = actorTest1(true);
+	ASSERT(failed.isReady() && failed.isError());
+	ASSERT(failed.getError().code() == error_code_future_version);
+	co_await actorTest1(false);
+	co_await actorTest3(true);
+	ASSERT(actorTest5().get());
+	ASSERT(actorTest6().get());
+	ASSERT(actorTest7().get());
+	ASSERT(actorTest8().get());
+
+	Promise<Void> nestedLoopStart;
+	Future<bool> nestedLoops = actorTest9A(nestedLoopStart.getFuture());
+	ASSERT(!nestedLoops.isReady());
+	nestedLoopStart.send(Void());
+	ASSERT(nestedLoops.isReady() && nestedLoops.get());
+	ASSERT(nestedLoopStart.getFutureReferenceCount() == 0);
+
+	PromiseStream<int> inputs;
+	Promise<Void> go;
+	inputs.send(1);
+	inputs.send(2);
+	Future<Void> reader = actorTest10A(inputs.getFuture(), go.getFuture());
+	ASSERT(!reader.isReady());
+	go.send(Void());
+	ASSERT(!reader.isReady());
+	inputs.send(3);
+	inputs.send(4);
+	ASSERT(!reader.isReady());
+	inputs.send(5);
+	ASSERT(reader.isReady() && !reader.isError());
+	ASSERT(inputs.getFutureReferenceCount() == 0);
+	ASSERT(go.getFutureReferenceCount() == 0);
+
+	Future<Void> caught = actorTest4(true);
+	ASSERT(!caught.isReady());
+	co_await caught;
+}
+
+TEST_CASE("/fdbrpc/Coroutines/FireAndForget") {
+	int32_t count = 0;
+	Promise<Void> ready;
+	threadSafetyWaiter(ready.getFuture(), &count);
+	ASSERT(count == 0);
+	ready.send(Void());
+	ASSERT(count == 1);
+
+	PromiseStream<Void> stream;
+	threadSafetyWaiter(stream.getFuture(), 2, &count);
+	stream.send(Void());
+	ASSERT(count == 2);
+	stream.send(Void());
+	ASSERT(count == 3);
+	stream.send(Void());
+	ASSERT(count == 3);
+
+	Future<Void> ring = cycleTime(4, 5);
+	ASSERT(ring.isReady() && !ring.isError());
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/Coroutines/Race") {
+	for (auto firstReady : { &chooseTest, &introFirst }) {
+		ASSERT(firstReady(1, 2).get() == 1);
+		ASSERT(firstReady(1, operation_failed()).get() == 1);
+		Future<int> failed = firstReady(operation_failed(), 2);
+		ASSERT(failed.isError() && failed.getError().code() == error_code_operation_failed);
+
+		Promise<Void> readyLoserCancelled;
+		Future<int> readyWinner = firstReady(1, cancellationTrackedProducer(readyLoserCancelled));
+		ASSERT(readyWinner.isReady() && readyWinner.get() == 1);
+		ASSERT(readyLoserCancelled.getFuture().isReady() && !readyLoserCancelled.getFuture().isError());
+
+		Promise<int> winner;
+		Promise<Void> pendingLoserCancelled;
+		Future<int> pendingWinner = firstReady(winner.getFuture(), cancellationTrackedProducer(pendingLoserCancelled));
+		ASSERT(!pendingWinner.isReady() && !pendingLoserCancelled.getFuture().isReady());
+		winner.send(3);
+		ASSERT(pendingWinner.isReady() && pendingWinner.get() == 3);
+		ASSERT(pendingLoserCancelled.getFuture().isReady() && !pendingLoserCancelled.getFuture().isError());
+
+		Promise<int> first, second;
+		Future<int> selected = firstReady(first.getFuture(), second.getFuture());
+		ASSERT(!selected.isReady());
+		second.send(2);
+		ASSERT(selected.isReady() && selected.get() == 2);
+		first.sendError(operation_failed());
+		ASSERT(selected.get() == 2);
+
+		Promise<int> cancelledFirst, cancelledSecond;
+		Future<int> cancelled = firstReady(cancelledFirst.getFuture(), cancelledSecond.getFuture());
+		cancelled.cancel();
+		ASSERT(cancelled.isError() && cancelled.getError().code() == error_code_actor_cancelled);
+		cancelledFirst.send(1);
+		cancelledSecond.send(2);
+		ASSERT(cancelled.isError() && cancelled.getError().code() == error_code_actor_cancelled);
+	}
+	PromiseStream<int> inputs;
+	Future<Void> switched = switchTest(inputs.getFuture(), Future<int>(0));
+	ASSERT(switched.isReady() && !switched.isError());
+	ASSERT(inputs.getFutureReferenceCount() == 0);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/Coroutines/Cancellation") {
+	for (auto pending : { &cancellable, &cancellable2 }) {
+		Future<Void> result = pending();
+		ASSERT(!result.isReady());
+		result.cancel();
+		ASSERT(result.isReady() && result.isError());
+		ASSERT(result.getError().code() == error_code_actor_cancelled);
+	}
+	for (auto forward : { &simpleRet, &addN<1, int>, &achain<2> }) {
+		Promise<Void> producerCancelled;
+		Future<int> result = forward(cancellationTrackedProducer(producerCancelled));
+		ASSERT(!result.isReady());
+		result.cancel();
+		ASSERT(result.isReady() && result.isError() && result.getError().code() == error_code_actor_cancelled);
+		ASSERT(producerCancelled.getFuture().isReady() && !producerCancelled.getFuture().isError());
+	}
+	Promise<Void> producerCancelled;
+	Future<int> failedSum = introAdd(operation_failed(), cancellationTrackedProducer(producerCancelled));
+	ASSERT(failedSum.isError() && failedSum.getError().code() == error_code_operation_failed);
+	ASSERT(producerCancelled.getFuture().isReady() && !producerCancelled.getFuture().isError());
 	return Void();
 }
 
@@ -1365,17 +1523,6 @@ void dsltest() {
 			std::cout << "Error not transmitted!" << std::endl;
 	}
 
-	/*{
-	    int na = Actor::allActors.size();
-	    PromiseStream<int> t;
-	    testStream(t.getFuture());
-	    if (Actor::allActors.size() != na+1)
-	        std::cout << "Actor not created!" << std::endl;
-	    t = PromiseStream<int>();
-	    if (Actor::allActors.size() != na)
-	        std::cout << "Actor not cleaned up!" << std::endl;
-	}*/
-
 	PromiseStream<int> as;
 	Promise<double> bs;
 	as.send(4);
@@ -1396,35 +1543,6 @@ void dsltest() {
 	printf("Thread safety disabled.\n");
 #endif
 }
-
-/*ACTOR Future<Void> pingServer( FutureStream<Promise<bool>> requests, int rate ) {
-    state int count = 0;
-    loop {
-        Promise<bool> req = waitNext( requests );
-        req.send( (++count)%rate != 0 );
-    }
-}
-
-ACTOR Future<int> ping( PromiseStream<Promise<bool>> server ) {
-    state int count = 0;
-    loop {
-        bool result = wait( server.getReply<bool>() );
-
-        count++;
-        if (!result)
-            break;
-    }
-    return count;
-}
-
-void pingtest() {
-    double start = timer();
-    PromiseStream<Promise<bool>> serverInterface;
-    Future<Void> pS = pingServer( serverInterface.getFuture(), 5000000 );
-    Future<int> count = ping( serverInterface );
-    double end = timer();
-    std::cout << count.get() << " pings completed in " << (end-start) << " sec" << std::endl;
-}*/
 
 void copyTest() {
 	double start, elapsed;
@@ -1473,28 +1591,3 @@ void copyTest() {
 		printf("move(Standalone)->Standalone: %fs/GB\n", elapsed);
 	}
 }
-
-/*ACTOR void badTest( FutureStream<int> is ) {
-    state PromiseStream<int> js;
-
-    loop choose {
-        when( int j = waitNext( js.getFuture() ) ) {
-            std::cout << "J" << j << std::endl;
-        }
-        when( int i = waitNext( is ) ) {
-            std::cout << "I" << i << std::endl;
-            js.send( i );
-            std::cout << "-I" << i << std::endl;
-        }
-    }
-}
-
-void dsltest() {
-    PromiseStream<int> is;
-    badTest( is.getFuture() );
-    is.send(1);
-    is.send(2);
-    is.send(3);
-    throw not_implemented();
-}
-void pingtest() {}*/

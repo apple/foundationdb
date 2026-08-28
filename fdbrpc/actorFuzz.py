@@ -129,13 +129,16 @@ class loopF(F):
     def __str__(self):
         if self.forever:
             return (
-                indent(self.cx) + "loop {\n" + str(self.body) + indent(self.cx) + "}\n"
+                indent(self.cx)
+                + "while (true) {\n"
+                + str(self.body)
+                + indent(self.cx)
+                + "}\n"
             )
         else:
             return (
                 indent(self.cx)
-                + "state int i%d; for(i%d = 0; i%d < 5; i%d++) {\n"
-                % ((self.uniqueID,) * 4)
+                + "for(int i%d = 0; i%d < 5; i%d++) {\n" % ((self.uniqueID,) * 3)
                 + str(self.body)
                 + indent(self.cx)
                 + "}\n"
@@ -179,7 +182,7 @@ class rangeForF(F):
             + ("\n" + indent(self.cx))
             .join(
                 [
-                    "state std::vector<int> V;",
+                    "std::vector<int> V;",
                     "V.push_back(1);",
                     "V.push_back(2);",
                     "V.push_back(3);",
@@ -267,13 +270,28 @@ class tryF(F):
         self.catch = compoundF(ccx, [hashF(ccx)] + [fuzzCode(ccx)(ccx)] + [hashF(ccx)])
 
     def __str__(self):
+        # A handler may suspend, so run its body outside the C++ catch clause.
+        body = "".join("\t" + line for line in str(self.body).splitlines(True))
+        handler = "".join("\t" + line for line in str(self.catch).splitlines(True))
         return (
             indent(self.cx)
-            + "try {\n"
-            + str(self.body)
+            + "{\n"
             + indent(self.cx)
-            + "} catch (...) {\n"
-            + str(self.catch)
+            + "\tbool caught = false;\n"
+            + indent(self.cx)
+            + "\ttry {\n"
+            + body
+            + indent(self.cx)
+            + "\t} catch (...) {\n"
+            + indent(self.cx)
+            + "\t\tcaught = true;\n"
+            + indent(self.cx)
+            + "\t}\n"
+            + indent(self.cx)
+            + "\tif (caught) {\n"
+            + handler
+            + indent(self.cx)
+            + "\t}\n"
             + indent(self.cx)
             + "}\n"
         )
@@ -337,9 +355,13 @@ class waitF(F):
     def __str__(self):
         return (
             indent(self.cx)
-            + "int input = waitNext( inputStream );\n"
+            + "{\n"
             + indent(self.cx)
-            + "outputStream.send( input + %d );\n" % self.uniqueID
+            + "\tint input = co_await inputStream;\n"
+            + indent(self.cx)
+            + "\toutputStream.send( input + %d );\n" % self.uniqueID
+            + indent(self.cx)
+            + "}\n"
         )
 
     def eval(self, ecx):
@@ -369,15 +391,15 @@ class throwF2(throwF):
         return indent(self.cx) + "throw_operation_failed();\n"
 
     def unreachable(self):
-        return False  # The actor compiler doesn't know the function never returns
+        return False  # Retain code after calls whose bodies always throw.
 
 
 class throwF3(throwF):
     def __str__(self):
-        return indent(self.cx) + "wait( error ); // throw operation_failed()\n"
+        return indent(self.cx) + "co_await error; // throw operation_failed()\n"
 
     def unreachable(self):
-        return False  # The actor compiler doesn't know that 'error' always contains an error
+        return False  # Retain code after awaiting a future that fails at runtime.
 
 
 class returnF(F):
@@ -386,7 +408,7 @@ class returnF(F):
         self.uniqueID = cx.uniqueID()
 
     def __str__(self):
-        return indent(self.cx) + "return %d;\n" % self.uniqueID
+        return indent(self.cx) + "co_return %d;\n" % self.uniqueID
 
     def unreachable(self):
         return True
@@ -417,11 +439,15 @@ def randomActor(index):
             cx, [actor, returnF(cx)]
         )  # Add a return at the end if the end is reachable
         name = "actorFuzz%d" % index
+        body = str(actor)
+        if not isinstance(actor.children[-1], returnF):
+            # Keep throw-only cases as coroutines and make every path return a value.
+            body += indent(cx) + "co_return 0;\n"
         text = (
-            "ACTOR Future<int> %s( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {\n"
+            "Future<int> %s( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {\n"
             % name
-            + "\tstate int ifstate = 0;\n"
-            + str(actor)
+            + ("\tint ifstate = 0;\n" if "++ifstate" in body else "")
+            + body
             + "}"
         )
         ecx = actor.ecx = ExecContext((i + 1) * 1000 for i in range(1000000))
@@ -443,9 +469,8 @@ def randomActor(index):
         return actor
 
 
-header = """
-/*
- * ActorFuzz.actor.cpp
+header = """/*
+ * ActorFuzz.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -467,28 +492,34 @@ header = """
 """
 
 
-testCaseCount = 30
-outputFile = open("ActorFuzz.actor.cpp", "wt")
-print(header, file=outputFile)
-print(
-    "// THIS FILE WAS GENERATED BY actorFuzz.py; DO NOT MODIFY IT DIRECTLY\n",
-    file=outputFile,
-)
-print('#include "ActorFuzz.h"\n', file=outputFile)
-print("#ifndef WIN32\n", file=outputFile)
+def main():
+    testCaseCount = 30
+    with open("ActorFuzz.cpp", "wt") as outputFile:
+        print(header, file=outputFile)
+        print(
+            "// THIS FILE WAS GENERATED BY actorFuzz.py; DO NOT MODIFY IT DIRECTLY\n",
+            file=outputFile,
+        )
+        print('#include "ActorFuzz.h"\n', file=outputFile)
+        print("#ifndef WIN32\n", file=outputFile)
 
-actors = [randomActor(i) for i in range(testCaseCount)]
+        actors = [randomActor(i) for i in range(testCaseCount)]
 
-for actor in actors:
-    print(actor.text + "\n", file=outputFile)
+        for actor in actors:
+            print(actor.text + "\n", file=outputFile)
 
-print("std::pair<int,int> actorFuzzTests() {\n\tint testsOK = 0;", file=outputFile)
-for actor in actors:
-    print(
-        '\ttestsOK += testFuzzActor( &%s, "%s", {%s} );'
-        % (actor.name, actor.name, ",".join(str(e) for e in actor.ecx.output)),
-        file=outputFile,
-    )
-print("\treturn std::make_pair(testsOK, %d);\n}" % len(actors), file=outputFile)
-print("#endif // WIN32\n", file=outputFile)
-outputFile.close()
+        print(
+            "std::pair<int,int> actorFuzzTests() {\n\tint testsOK = 0;", file=outputFile
+        )
+        for actor in actors:
+            print(
+                '\ttestsOK += testFuzzActor( &%s, "%s", {%s} );'
+                % (actor.name, actor.name, ",".join(str(e) for e in actor.ecx.output)),
+                file=outputFile,
+            )
+        print("\treturn std::make_pair(testsOK, %d);\n}" % len(actors), file=outputFile)
+        print("#endif // WIN32\n", file=outputFile)
+
+
+if __name__ == "__main__":
+    main()
