@@ -506,10 +506,58 @@ Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 	}
 }
 
+// Snapshot of the remote-region stall state shared between trackTlogRecovery (which updates it on
+// every core-state change) and remoteRegionStallEventRefresher (which re-emits the trackLatest event
+// on a fixed cadence while the stall persists).
+struct RemoteRegionStallState : ReferenceCounted<RemoteRegionStallState> {
+	bool remoteRegionLogsMissing = false;
+	bool allLogs = false;
+	int oldTLogDataSize = 0;
+	int usableRegions = 1;
+	double missingSince = 0; // now() at stall start; valid when remoteRegionLogsMissing
+	std::string eventName; // stall event name, resolved once by trackTlogRecovery
+};
+
+// Emits the remote-region stall trackLatest event from the given snapshot. Called on core-state
+// changes (where the signal can also be cleared) and on the refresher's cadence.
+static void traceRemoteRegionStall(Reference<ClusterRecoveryData> self,
+                                   const RemoteRegionStallState* state,
+                                   bool remoteRegionLogsMissing,
+                                   double stallSeconds) {
+	TraceEvent(state->eventName.c_str(), self->dbgid)
+	    .detail("RemoteRegionLogsMissing", remoteRegionLogsMissing)
+	    .detail("AllLogs", state->allLogs)
+	    .detail("OldTLogDataSize", state->oldTLogDataSize)
+	    .detail("UsableRegions", state->usableRegions)
+	    .detail("StallSeconds", stallSeconds)
+	    .trackLatest(self->clusterRecoveryRemoteRegionStallEventHolder->trackingKey);
+}
+
+// Re-emits the remote-region stall trackLatest event on a fixed cadence while the stall persists,
+// keeping StallSeconds advancing on an otherwise idle cluster. Started lazily by trackTlogRecovery
+// on the first observed stall; returns once the shared state says the stall is over.
+Future<Void> remoteRegionStallEventRefresher(Reference<ClusterRecoveryData> self,
+                                             Reference<RemoteRegionStallState> state) {
+	while (state->remoteRegionLogsMissing) {
+		co_await delay(SERVER_KNOBS->DEGRADED_MULTI_REGION_REFRESH_SECONDS);
+		// trackTlogRecovery may have cleared the stall while the delay was pending.
+		if (!state->remoteRegionLogsMissing) {
+			co_return;
+		}
+		traceRemoteRegionStall(self, state.getPtr(), true, std::max(0.0, now() - state->missingSince));
+	}
+}
+
 // Keeps the coordinated state (cstate) updated as the set of recruited tlogs change through recovery.
 Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
                                Reference<AsyncVar<Reference<LogSystem>>> oldLogSystems,
                                Future<Void> minRecoveryDuration) {
+	// Shared with the refresher, which runs as a local future while a stall is active: when this
+	// function returns (final update), the refresher is cancelled automatically.
+	Reference<RemoteRegionStallState> stallState = makeReference<RemoteRegionStallState>();
+	stallState->eventName =
+	    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME);
+	Future<Void> refresher;
 	Future<Void> rejoinRequests = Never();
 	DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
 	DatabaseConfiguration configuration =
@@ -585,29 +633,36 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 		}
 
-		// Surface "degraded multi-region" as a first-class signal: with usableRegions > 1, the remote region's
-		// log set has not been recruited (allLogs == false). Committed data is still safe in the surviving
-		// region, so this is distinct from data loss. Note that oldTLogData is deliberately not a
-		// discriminator: when the remote region is down, old log generations cannot be purged (finalUpdate
-		// requires allLogs), so oldTLogData stays non-empty precisely in this stalled state. The value is also
-		// (re)set when all logs are recruited or the cluster fully recovers, so the trackLatest event always
-		// reflects the current state.
+		// "Degraded multi-region": with usableRegions > 1 the remote region's log set has not been
+		// recruited (allLogs == false). oldTLogData is deliberately not a discriminator: when the
+		// remote region is down, old generations cannot be purged (finalUpdate requires allLogs),
+		// so oldTLogData stays non-empty precisely in this stalled state.
 		//
-		// The remote log set is legitimately absent before recovery reaches accepting_commits even during a
-		// normal (non-region-loss) recovery, because remote tlog recruitment is part of the normal recovery
-		// path. Only begin tracking the stall once the cluster is accepting commits: at that point a missing
-		// remote log set is no longer a transient recruiting artifact but a genuine degraded multi-region
-		// condition. Without this gate, StallSeconds accumulates across the pre-accepting_commits recruiting
-		// window and a slow-but-healthy recovery trips degraded_multi_region once the stall exceeds
-		// DEGRADED_MULTI_REGION_MIN_STALL_SECONDS.
+		// Gate on ACCEPTING_COMMITS: a missing remote log set is a transient recruiting artifact
+		// during normal recovery, so StallSeconds must not start accumulating before the cluster
+		// accepts commits, or a slow-but-healthy recovery trips degraded_multi_region.
 		bool remoteRegionLogsMissing =
 		    configuration.usableRegions > 1 && !allLogs && self->recoveryState >= RecoveryState::ACCEPTING_COMMITS;
-		if (remoteRegionLogsMissing) {
-			if (!remoteLogsMissingSince.present()) {
-				remoteLogsMissingSince = now();
-			}
-		} else {
+		if (remoteRegionLogsMissing && !remoteLogsMissingSince.present()) {
+			remoteLogsMissingSince = now();
+		} else if (!remoteRegionLogsMissing) {
 			remoteLogsMissingSince = Optional<double>();
+		}
+		// Publish the current snapshot for the refresher actor before starting it: the refresher reads
+		// remoteRegionLogsMissing synchronously on creation (before its first co_await), so publishing
+		// first lets it enter its loop immediately instead of deferring the first re-emission by a full
+		// loop iteration.
+		stallState->remoteRegionLogsMissing = remoteRegionLogsMissing;
+		stallState->allLogs = allLogs;
+		stallState->oldTLogDataSize = newState.oldTLogData.size();
+		stallState->usableRegions = configuration.usableRegions;
+		if (remoteLogsMissingSince.present()) {
+			stallState->missingSince = remoteLogsMissingSince.get();
+		}
+		if (remoteRegionLogsMissing) {
+			if (!refresher.isValid() || refresher.isReady()) {
+				refresher = remoteRegionStallEventRefresher(self, stallState);
+			}
 		}
 		// StallSeconds is carried in the event itself rather than derived from the event's
 		// emission Time by status: the event is re-emitted on every core-state change, and
@@ -615,15 +670,7 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		// the stall is still ongoing.
 		double remoteRegionStallSeconds =
 		    remoteLogsMissingSince.present() ? std::max(0.0, now() - remoteLogsMissingSince.get()) : 0.0;
-		TraceEvent(
-		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME).c_str(),
-		    self->dbgid)
-		    .detail("RemoteRegionLogsMissing", remoteRegionLogsMissing)
-		    .detail("AllLogs", allLogs)
-		    .detail("OldTLogDataSize", newState.oldTLogData.size())
-		    .detail("UsableRegions", configuration.usableRegions)
-		    .detail("StallSeconds", remoteRegionStallSeconds)
-		    .trackLatest(self->clusterRecoveryRemoteRegionStallEventHolder->trackingKey);
+		traceRemoteRegionStall(self, stallState.getPtr(), remoteRegionLogsMissing, remoteRegionStallSeconds);
 
 		self->registrationTrigger.trigger();
 
@@ -633,15 +680,7 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			co_return;
 		}
 
-		// While the remote log set is missing, keep re-emitting the stall event on a fixed cadence so
-		// StallSeconds keeps advancing even when no core-state change would otherwise wake this loop.
-		// Without this, an idle (commits-stalled) cluster would block forever in co_await changed and
-		// the sustained-stall threshold could never be crossed.
-		if (remoteRegionLogsMissing) {
-			co_await (changed || delay(SERVER_KNOBS->DEGRADED_MULTI_REGION_REFRESH_SECONDS));
-		} else {
-			co_await changed;
-		}
+		co_await changed;
 	}
 }
 

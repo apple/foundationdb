@@ -19,6 +19,7 @@ datacenters = 4
 simHTTPServerEnabled = false
 satelliteRedundancyMode = "one_satellite_single"
 config = "single"
+desiredTLogCount = 2
 
 [[test]]
 testTitle = 'DegradedMultiRegionStatus'
