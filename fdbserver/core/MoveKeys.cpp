@@ -4088,6 +4088,18 @@ Future<Void> rawFinishMovement(Database occ,
 	                      params.ddEnabledState);
 }
 
+bool retryableDataMoveError(const Error& e) {
+	switch (e.code()) {
+	case error_code_finish_move_keys_too_many_retries:
+	case error_code_start_move_keys_too_many_retries:
+	case error_code_data_move_cancelled:
+	case error_code_data_move_dest_team_not_found:
+		return true;
+	default:
+		return false;
+	}
+}
+
 Future<Void> moveKeys(Database occ, MoveKeysParams params) {
 	ASSERT(!params.destinationTeam.empty());
 	std::sort(params.destinationTeam.begin(), params.destinationTeam.end());

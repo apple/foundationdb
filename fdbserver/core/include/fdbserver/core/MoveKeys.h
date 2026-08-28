@@ -158,6 +158,27 @@ Future<Void> rawFinishMovement(Database occ,
 // When dataMoveId.isValid(), the keyrange will be moved to a shard designated as dataMoveId.
 Future<Void> moveKeys(Database occ, MoveKeysParams params);
 
+// True for errors from moveKeys() that mean "this move did not happen, issue it again" rather than
+// "the cluster is broken". The data distributor already treats exactly these as normal and simply
+// reissues the relocation -- see normalDDQueueErrors() in DataDistribution.cpp and the matching
+// suppression in DDRelocationQueue.cpp.
+//
+// Callers that drive moveKeys() directly (the workloads) must handle these explicitly: none of them
+// are retryable transaction errors, so Transaction::onError() rethrows and kills the caller. Bound
+// any reissue loop by a count rather than a deadline -- one moveKeys() call can spend minutes inside
+// finishMoveKeys()/finishMoveShards() exhausting FINISH_MOVE_KEYS_MAX_RETRIES.
+//
+// movekeys_conflict is deliberately NOT included: it means another DD holds the lock, which callers
+// retry without consuming a reissue budget. broken_promise is likewise excluded so a genuinely dead
+// process still surfaces.
+bool retryableDataMoveError(const Error& e);
+
+// How many times a direct moveKeys() caller should reissue after a retryableDataMoveError() before
+// letting the error propagate. A count, not a wall-clock budget: one moveKeys() call can spend
+// minutes inside finishMoveKeys()/finishMoveShards() exhausting FINISH_MOVE_KEYS_MAX_RETRIES, which
+// blows any sane deadline before the first reissue.
+constexpr int MOVE_MAX_REISSUES = 3;
+
 // Cancels a data move designated by dataMoveId.
 Future<Void> cleanUpDataMove(
     Database occ,
