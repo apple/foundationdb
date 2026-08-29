@@ -24,9 +24,9 @@
 #define FDBRPC_FLOW_GRPC_TESTS_H
 
 #include <cstdio>
+#include <grpcpp/channel.h>
 #include <thread>
 
-#undef loop
 #include "fdbrpc/test/echo.grpc.pb.h"
 
 #include "flow/Error.h"

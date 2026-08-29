@@ -33,9 +33,7 @@
 #include "flow/IConnection.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
-#undef state
 #include "fdbclient/SimpleIni.h"
-#define state
 #undef max
 #undef min
 
