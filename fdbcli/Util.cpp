@@ -196,12 +196,16 @@ Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 }
 
 // Returns the addresses of all tlogs (current and previous generation still recovering) known from the
-// persisted DBCoreState. Unlike the worker list, this reflects every log the cluster currently depends on for
-// durability, whether or not that process is currently reachable/registered.
-Future<Void> getActiveLogAddresses(Reference<IDatabase> db, std::set<NetworkAddress>* logAddresses) {
+// persisted DBCoreState, as of the cluster's last recovery. A log whose interface wasn't known at that recovery
+// (down or still being recruited) is recorded with an empty NetworkAddress instead of a real one; those are
+// counted in unknownInterfaceLogCount rather than returned as addresses, since there's no address to report.
+Future<Void> getActiveLogAddresses(Reference<IDatabase> db,
+                                   std::set<NetworkAddress>* logAddresses,
+                                   int* unknownInterfaceLogCount) {
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		logAddresses->clear();
+		*unknownInterfaceLogCount = 0;
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -212,12 +216,16 @@ Future<Void> getActiveLogAddresses(Reference<IDatabase> db, std::set<NetworkAddr
 			if (logsValue.present()) {
 				auto logs = decodeLogsValue(logsValue.get());
 				for (const auto& [_id, addr] : logs.first) {
-					if (addr != NetworkAddress()) {
+					if (addr == NetworkAddress()) {
+						++(*unknownInterfaceLogCount);
+					} else {
 						logAddresses->insert(addr);
 					}
 				}
 				for (const auto& [_id, addr] : logs.second) {
-					if (addr != NetworkAddress()) {
+					if (addr == NetworkAddress()) {
+						++(*unknownInterfaceLogCount);
+					} else {
 						logAddresses->insert(addr);
 					}
 				}
