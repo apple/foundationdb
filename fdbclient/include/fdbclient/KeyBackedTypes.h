@@ -40,7 +40,7 @@
 #include "flow/ThreadHelper.h"
 
 #define KEYBACKEDTYPES_DEBUG 0
-#if KEYBACKEDTYPES_DEBUG || !defined(NO_INTELLISENSE)
+#if KEYBACKEDTYPES_DEBUG
 #define kbt_debug fmt::print
 #else
 #define kbt_debug(...)

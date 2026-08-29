@@ -26,7 +26,7 @@
 
 #define PRIORITYMULTILOCK_DEBUG 0
 
-#if PRIORITYMULTILOCK_DEBUG || !defined(NO_INTELLISENSE)
+#if PRIORITYMULTILOCK_DEBUG
 #define pml_debug_printf(...)                                                                                          \
 	if (now() > 0) {                                                                                                   \
 		printf("pml line=%04d ", __LINE__);                                                                            \

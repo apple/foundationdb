@@ -84,8 +84,6 @@ struct Criteria {
 enum class TLSEndpointType { UNSET = 0, CLIENT, SERVER };
 
 class TLSConfig;
-template <typename T>
-class LoadAsyncActorState;
 
 class LoadedTLSConfig {
 public:
@@ -124,8 +122,6 @@ private:
 	TLSEndpointType endpointType = TLSEndpointType::UNSET;
 
 	friend class TLSConfig;
-	template <typename T>
-	friend class LoadAsyncActorState;
 };
 
 class TLSConfig {
@@ -212,8 +208,6 @@ public:
 private:
 #endif
 	static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self); // FIXME
-	template <typename T>
-	friend class LoadAsyncActorState;
 
 	std::string tlsCertPath, tlsKeyPath, tlsCAPath;
 	std::string tlsCertBytes, tlsKeyBytes, tlsCABytes;

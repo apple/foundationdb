@@ -2778,13 +2778,14 @@ AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx
 	while (true) {
 		Error err;
 		try {
-			// LOCK_AWARE is the load-bearing one: a caller may read this while the database is locked --
-			// a restore holds the lock while deciding whether its bulkload job succeeded -- and
-			// database_locked is retryable, so without it the loop below spins forever instead of
-			// failing. READ_SYSTEM_KEYS is belt-and-braces for a system-keyspace range.
+			// READ_LOCK_AWARE is the load-bearing one: a caller may read this while the database is
+			// locked -- a restore holds the lock while deciding whether its bulkload job succeeded --
+			// and database_locked is retryable, so without it the loop below spins forever instead of
+			// failing. The read-only variant suffices here and enforces that this stays a read.
+			// READ_SYSTEM_KEYS is belt-and-braces for a system-keyspace range.
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			if (lockAware) {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			}
 			jobHistoryResult.clear();
 			jobHistoryResult =
