@@ -1765,7 +1765,7 @@ Future<Optional<Value>> getValue(Reference<TransactionState> trStateInput,
 
 			trState->cx->transactionBytesRead += reply.value.present() ? reply.value.get().size() : 0;
 			++trState->cx->transactionKeysRead;
-			co_return reply.value;
+			co_return std::move(reply.value);
 		} catch (Error& e) {
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();

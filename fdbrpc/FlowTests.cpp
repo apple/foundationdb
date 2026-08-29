@@ -21,11 +21,14 @@
 // Unit tests for the Flow runtime and libraries
 
 #include <chrono>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include "flow/Arena.h"
 #include "flow/Error.h"
+#include "flow/ProcessEvents.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
@@ -38,6 +41,8 @@
 #include "flow/CoroUtils.h"
 
 void forceLinkFlowTests() {}
+
+extern bool g_crashOnError;
 
 TEST_CASE("/flow/buggifiedDelay") {
 	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
@@ -357,6 +362,112 @@ struct Int {
 		serializer(ar, value);
 	}
 };
+
+template <class T>
+SAV<T>* replyPromiseState(ReplyPromise<T>& promise) {
+	auto* rawState = promise.extractRawPointer();
+	promise = ReplyPromise<T>(rawState);
+	return rawState;
+}
+
+struct ReplyPromiseReuseRequest {
+	constexpr static FileIdentifier file_identifier = 1449982;
+	ReplyPromise<Int> reply;
+	SAV<Int>* defaultState;
+
+	ReplyPromiseReuseRequest() : defaultState(replyPromiseState(reply)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+class RpcExceptionObserver : NonCopyable {
+	const bool previousTraceProcessEvents;
+	const char* expectedException;
+	int observed = 0;
+	int unexpected = 0;
+	ProcessEvents::Event event;
+
+	void observe(const std::any& data) {
+		auto tracePtr = std::any_cast<BaseTraceEvent*>(&data);
+		if (!tracePtr || !*tracePtr) {
+			++unexpected;
+			return;
+		}
+		auto* trace = *tracePtr;
+		int errorCode = 0;
+		std::string exception;
+		if (!expectedException || observed != 0 || trace->getSeverity() != SevError ||
+		    !trace->getFields().tryGetInt("ErrorCode", errorCode) || errorCode != error_code_unknown_error ||
+		    !trace->getFields().tryGetValue("StdException", exception) || exception != expectedException) {
+			++unexpected;
+			return;
+		}
+		++observed;
+		// Preserve the real severity check, but identify only this deliberately injected exception to trace scanners.
+		trace->detail("ErrorIsInjectedFault", 1);
+	}
+
+public:
+	explicit RpcExceptionObserver(const char* expectedException = nullptr)
+	  : previousTraceProcessEvents(g_traceProcessEvents), expectedException(expectedException),
+	    event("TraceEvent::SystemError"_sr, [this](StringRef, const std::any& data, const Error&) { observe(data); }) {
+		g_traceProcessEvents = true;
+	}
+	~RpcExceptionObserver() { g_traceProcessEvents = previousTraceProcessEvents; }
+
+	void check(int expectedCount) const {
+		ASSERT_EQ(observed, expectedCount);
+		ASSERT_EQ(unexpected, 0);
+	}
+};
+
+template <bool ErrorReply>
+struct ThrowingRpcReply {
+	constexpr static FileIdentifier file_identifier = 1449983 + ErrorReply;
+	uint32_t value = 0;
+
+	static const char* exceptionMessage() {
+		return ErrorReply ? "RpcUnexpectedException/networkSenderErrorReply"
+		                  : "RpcUnexpectedException/networkSenderValue";
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+		if constexpr (is_fb_function<Ar>) {
+			// Vtable collection visits the reply alternative even when ErrorOr contains an error.
+			throw std::runtime_error(exceptionMessage());
+		}
+	}
+};
+
+Future<Void> checkNetworkSenderKnownErrors() {
+	RpcExceptionObserver observer;
+	ReplyPromise<Int> recipient;
+	Future<Int> received = recipient.getFuture();
+	Endpoint endpoint(FlowTransport::transport().getLocalAddresses(), recipient.getEndpoint().token);
+	ReplyPromise<Int> sender;
+	sender.loadRemoteEndpoint(endpoint);
+	sender.sendError(operation_failed());
+	ErrorOr<Int> result = co_await errorOr(timeoutError(received, 1.0));
+	ASSERT(result.isError() && result.getError().code() == error_code_operation_failed);
+	ASSERT_EQ(sender.getFutureReferenceCount(), 0);
+
+	ReplyPromise<Int> noReplyRecipient;
+	Future<Int> noReplyReceived = noReplyRecipient.getFuture();
+	Endpoint noReplyEndpoint(FlowTransport::transport().getLocalAddresses(), noReplyRecipient.getEndpoint().token);
+	ReplyPromise<Int> noReplySender;
+	noReplySender.loadRemoteEndpoint(noReplyEndpoint);
+	noReplySender.send(Never());
+	co_await orderedDelay(0, TaskPriority::DefaultPromiseEndpoint);
+	ASSERT(!noReplyReceived.isReady());
+	ASSERT_EQ(noReplySender.getFutureReferenceCount(), 0);
+	observer.check(0);
+}
+
 } // namespace flow_tests_details
 
 TEST_CASE("/flow/flow/nonserializable futures") {
@@ -426,6 +537,133 @@ TEST_CASE("/flow/flow/networked futures") {
 	}
 
 	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state on deserialize") {
+	using flow_tests_details::Int;
+	const Endpoint remote({ NetworkAddress(IPAddress(0x01010101), 1) }, UID(1, 2));
+
+	{
+		ReplyPromise<Int> promise;
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) == original);
+		ASSERT(promise.getEndpoint() == remote);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(17));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 17);
+	}
+
+	{
+		ReplyPromise<Int> promise;
+		Future<Int> oldReply = promise.getFuture();
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		ASSERT(oldReply.isReady() && oldReply.isError() && oldReply.getError().code() == error_code_broken_promise);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(23));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 23);
+	}
+
+	{
+		ReplyPromise<Int> promise;
+		Endpoint local = promise.getEndpoint();
+		ASSERT(local.isValid());
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		ASSERT(promise.getEndpoint() == remote);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(31));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 31);
+	}
+
+	{
+		ReplyPromise<Int> promise(
+		    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(41));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 41);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state binary deserialize") {
+	using flow_tests_details::ReplyPromiseReuseRequest;
+	ReplyPromiseReuseRequest request;
+	ProtocolVersion version = currentProtocolVersion();
+	version.removeObjectSerializerFlag();
+	BinaryWriter writer(IncludeVersion(version));
+	writer << request;
+
+	BinaryReader reader(writer.toValue(), IncludeVersion(version));
+	ReplyPromiseReuseRequest received;
+	reader >> received;
+	ASSERT(flow_tests_details::replyPromiseState(received.reply) == received.defaultState);
+	ASSERT(received.reply.getEndpoint().token == request.reply.getEndpoint().token);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state exact reply") {
+	RequestStream<flow_tests_details::ReplyPromiseReuseRequest> local;
+	FutureStream<flow_tests_details::ReplyPromiseReuseRequest> incoming = local.getFuture();
+	flow_tests_details::ReplyPromiseReuseRequest request;
+	Future<flow_tests_details::Int> reply = request.reply.getFuture();
+	{
+		RequestStream<flow_tests_details::ReplyPromiseReuseRequest> remote(local.getEndpoint());
+		remote.send(request);
+	}
+
+	flow_tests_details::ReplyPromiseReuseRequest received = co_await incoming;
+	ASSERT(flow_tests_details::replyPromiseState(received.reply) == received.defaultState);
+	received.reply.send(flow_tests_details::Int(59));
+	flow_tests_details::Int value = co_await reply;
+	ASSERT(value.value == 59);
+}
+
+TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/networkSenderValue") {
+	// Simulation counts SevError before the observer can mark an expected injection; crash-on-error must stay intact.
+	if (g_network->isSimulated() || g_crashOnError) {
+		return Void();
+	}
+	using Reply = flow_tests_details::ThrowingRpcReply<false>;
+	flow_tests_details::RpcExceptionObserver observer(Reply::exceptionMessage());
+	Endpoint endpoint(FlowTransport::transport().getLocalAddresses(), UID(1, 2));
+	ReplyPromise<Reply> reply;
+	reply.loadRemoteEndpoint(endpoint);
+	ASSERT_GT(reply.getFutureReferenceCount(), 0);
+	reply.send(Reply());
+	observer.check(1);
+	ASSERT_EQ(reply.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/networkSenderErrorReply") {
+	if (g_network->isSimulated() || g_crashOnError) {
+		return Void();
+	}
+	using Reply = flow_tests_details::ThrowingRpcReply<true>;
+	flow_tests_details::RpcExceptionObserver observer(Reply::exceptionMessage());
+	Endpoint endpoint(FlowTransport::transport().getLocalAddresses(), UID(1, 2));
+	ReplyPromise<Reply> reply;
+	reply.loadRemoteEndpoint(endpoint);
+	ASSERT_GT(reply.getFutureReferenceCount(), 0);
+	reply.sendError(operation_failed());
+	observer.check(1);
+	ASSERT_EQ(reply.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/networkSenderKnownErrors") {
+	if (g_network->isSimulated() || g_crashOnError) {
+		co_return;
+	}
+	co_await flow_tests_details::checkNetworkSenderKnownErrors();
 }
 
 TEST_CASE("/flow/flow/quorum") {

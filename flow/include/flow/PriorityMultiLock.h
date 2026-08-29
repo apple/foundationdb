@@ -22,6 +22,7 @@
 
 #include "flow/flow.h"
 #include <boost/intrusive/list.hpp>
+#include <utility>
 
 #define PRIORITYMULTILOCK_DEBUG 0
 
@@ -75,6 +76,35 @@ public:
 		Promise<Void> promise;
 	};
 
+	// Move-only holder for an immediately granted lock. It avoids the Promise and release callback needed by Lock.
+	class Releaser : NonCopyable {
+		Reference<PriorityMultiLock> owner;
+		int priority = -1;
+
+		friend class PriorityMultiLock;
+		Releaser(Reference<PriorityMultiLock> owner, int priority) : owner(std::move(owner)), priority(priority) {}
+
+	public:
+		Releaser() = default;
+		Releaser(Releaser&& rhs) noexcept : owner(std::move(rhs.owner)), priority(std::exchange(rhs.priority, -1)) {}
+		Releaser& operator=(Releaser&&) = delete;
+
+		void release() {
+			if (!owner) {
+				return;
+			}
+
+			// Waking the runner can synchronously resume waiters, so clear this holder first.
+			auto self = std::move(owner);
+			int index = std::exchange(priority, -1);
+			auto* p = &self->priorities[index];
+			releaseRunner(std::move(self), p);
+		}
+
+		bool isLocked() const { return owner.isValid(); }
+		~Releaser() { release(); }
+	};
+
 	PriorityMultiLock(int concurrency, std::string weights)
 	  : PriorityMultiLock(concurrency, parseStringToVector<int>(weights, ',')) {}
 
@@ -91,6 +121,32 @@ public:
 	}
 
 	~PriorityMultiLock() { kill(); }
+
+	// Grants an immediately available lock synchronously without creating a Future<Lock>; never enqueues a waiter.
+	Optional<Releaser> tryLock(int priority = 0) {
+		if (killed)
+			throw broken_promise();
+
+		Priority& p = priorities[priority];
+		if (!p.queue.empty() || available <= 0) {
+			return {};
+		}
+
+		// With no waiters, available already proves this priority has capacity; skip the weight division.
+		if (totalPendingWeights != 0) {
+			totalPendingWeights += p.weight;
+			bool hasCapacity = p.runners < currentCapacity(p.weight);
+			totalPendingWeights -= p.weight;
+			if (!hasCapacity) {
+				return {};
+			}
+		}
+
+		++p.runners;
+		--available;
+		pml_debug_printf("lock nowait priority %d  %s\n", priority, toString().c_str());
+		return Releaser(Reference<PriorityMultiLock>::addRef(this), priority);
+	}
 
 	Future<Lock> lock(int priority = 0) {
 		if (killed)
