@@ -1072,10 +1072,7 @@ Future<bool> checkExclusion(Database db,
 			}
 		}
 
-	}
-	// NOTE: ActorCompiler only accepts Error& or ... (for std::exception), it is not possible to capture
-	// std::exception&
-	catch (...) {
+	} catch (...) {
 		*msg = ManagementAPIError::toJsonString(
 		    false, markFailed ? "exclude failed" : "exclude", errorString + "General exception raised.\n");
 		co_return false;

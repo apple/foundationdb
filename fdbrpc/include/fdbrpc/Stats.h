@@ -257,6 +257,7 @@ public:
 	              double accuracy,
 	              bool skipTraceOnSilentInterval = false);
 	void addMeasurement(double measurement);
+	void addMeasurementPair(double measurement, LatencySample& other);
 
 private:
 	std::string name;

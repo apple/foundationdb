@@ -1,5 +1,5 @@
 /*
- * FlowTests.actor.cpp
+ * FlowTests.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,17 @@
  * limitations under the License.
  */
 
-// Unit tests for the flow language and libraries
+// Unit tests for the Flow runtime and libraries
 
 #include <chrono>
+#include <stdexcept>
 #include <thread>
+#include <utility>
 #include "flow/Arena.h"
 #include "flow/Error.h"
+#include "flow/ProcessEvents.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
@@ -34,48 +38,31 @@
 #include "flow/IAsyncFile.h"
 #include "flow/TLSConfig.h"
 #include "fdbrpc/grpc/AsyncTaskExecutor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 void forceLinkFlowTests() {}
 
-constexpr int firstLine = __LINE__;
-TEST_CASE("/flow/actorcompiler/lineNumbers") {
-	loop {
-		try {
-			ASSERT(__LINE__ == firstLine + 4);
-			wait(Future<Void>(Void()));
-			ASSERT(__LINE__ == firstLine + 6);
-			throw success();
-		} catch (Error& e) {
-			ASSERT(__LINE__ == firstLine + 9);
-			wait(Future<Void>(Void()));
-			ASSERT(__LINE__ == firstLine + 11);
-		}
-		break;
-	}
-	ASSERT(__FILE__sr.endsWith("FlowTests.actor.cpp"_sr));
-	return Void();
-}
+extern bool g_crashOnError;
 
 TEST_CASE("/flow/buggifiedDelay") {
 	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
-		return Void();
+		co_return;
 	}
-	loop {
-		state double x = deterministicRandom()->random01();
-		state int last = 0;
-		state Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
+	while (true) {
+		double x = deterministicRandom()->random01();
+		int last = 0;
+		Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
 			*last = 1;
 			return Void();
 		});
-		state Future<Void> f2 = map(delay(x), [last = &last](const Void&) {
+		Future<Void> f2 = map(delay(x), [last = &last](const Void&) {
 			*last = 2;
 			return Void();
 		});
-		wait(f1 && f2);
+		co_await (f1 && f2);
 		if (last == 1) {
 			CODE_PROBE(true, "Delays can become ready out of order", probe::decoration::rare);
-			return Void();
+			co_return;
 		}
 	}
 }
@@ -112,8 +99,10 @@ void onReady(Future<T>&& f, Func&& func, ErrFunc&& errFunc) {
 			errFunc(f.getError());
 		else
 			func(f.get());
-	} else
-		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, Callback<T>>(std::move(func), std::move(errFunc)));
+	} else {
+		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, Callback<T>>(std::forward<Func>(func),
+		                                                                        std::forward<ErrFunc>(errFunc)));
+	}
 }
 
 template <class T, class Func, class ErrFunc>
@@ -123,101 +112,80 @@ void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
 			errFunc(f.getError());
 		else
 			func(f.pop());
-	} else
-		f.addCallbackAndClear(
-		    new LambdaCallback<T, Func, ErrFunc, SingleCallback<T>>(std::move(func), std::move(errFunc)));
+	} else {
+		f.addCallbackAndClear(new LambdaCallback<T, Func, ErrFunc, SingleCallback<T>>(std::forward<Func>(func),
+		                                                                              std::forward<ErrFunc>(errFunc)));
+	}
 }
 
-ACTOR static void emptyVoidActor() {}
+static Future<Void> emptyVoidActor(Uncancellable = Uncancellable()) {
+	co_return;
+}
 
-ACTOR [[flow_allow_discard]] static Future<Void> emptyActor() {
+static Future<Void> emptyActor() {
 	return Void();
 }
 
-ACTOR static void oneWaitVoidActor(Future<Void> f) {
-	wait(f);
+static Future<Void> oneWaitVoidActor(Future<Void> f, Uncancellable = Uncancellable()) {
+	co_await f;
 }
 
-ACTOR static Future<Void> oneWaitActor(Future<Void> f) {
-	wait(f);
-	return Void();
+static Future<Void> oneWaitActor(Future<Void> f) {
+	co_await f;
 }
 
 Future<Void> g_cheese;
-ACTOR static Future<Void> cheeseWaitActor() {
-	wait(g_cheese);
-	return Void();
+static Future<Void> cheeseWaitActor() {
+	// The global can change while this coroutine is suspended.
+	Future<Void> f = g_cheese;
+	co_await f;
 }
 
-size_t cheeseWaitActorSize() {
-#ifndef OPEN_FOR_IDE
-	return sizeof(CheeseWaitActorActor);
-#else
-	return 0ul;
-#endif
-}
-
-ACTOR static void trivialVoidActor(int* result) {
+static Future<Void> trivialVoidActor(int* result, Uncancellable = Uncancellable()) {
 	*result = 1;
+	co_return;
 }
 
-ACTOR static Future<int> return42Actor() {
+static Future<int> return42Actor() {
 	return 42;
 }
 
-ACTOR static void voidWaitActor(Future<int> in, int* result) {
-	int i = wait(in);
+static Future<Void> voidWaitActor(Future<int> in, int* result, Uncancellable = Uncancellable()) {
+	int i = co_await in;
 	*result = i;
 }
 
-ACTOR static Future<int> addOneActor(Future<int> in) {
-	int i = wait(in);
-	return i + 1;
+static Future<int> addOneActor(Future<int> in) {
+	int i = co_await in;
+	co_return i + 1;
 }
 
-ACTOR static Future<Void> chooseTwoActor(Future<Void> f, Future<Void> g) {
-	choose {
-		when(wait(f)) {}
-		when(wait(g)) {}
-	}
-	return Void();
+static Future<Void> chooseTwoActor(Future<Void> f, Future<Void> g) {
+	co_await race(f, g);
 }
 
-ACTOR static Future<int> consumeOneActor(FutureStream<int> in) {
-	int i = waitNext(in);
-	return i;
+static Future<int> consumeOneActor(FutureStream<int> in) {
+	int i = co_await in;
+	co_return i;
 }
 
-ACTOR static Future<int> sumActor(FutureStream<int> in) {
-	state int total = 0;
+static Future<int> sumActor(FutureStream<int> in) {
+	int total = 0;
 	try {
-		loop {
-			int i = waitNext(in);
+		while (true) {
+			int i = co_await in;
 			total += i;
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream)
 			throw;
 	}
-	return total;
+	co_return total;
 }
 
-ACTOR template <class T>
+template <class T>
 static Future<T> templateActor(T t) {
 	return t;
-}
-
-static int destroy() {
-	return 666;
-}
-ACTOR static Future<Void> testHygeine() {
-	ASSERT(destroy() == 666); // Should fail to compile if SAV<Void>::destroy() is visible
-	return Void();
-}
-
-// bool expectActorCount(int x) { return actorCount == x; }
-bool expectActorCount(int) {
-	return true;
 }
 
 struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
@@ -307,24 +275,24 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 };
 
 struct NonserializableThing {};
-ACTOR static Future<NonserializableThing> testNonserializableThing() {
+static Future<NonserializableThing> testNonserializableThing() {
 	return NonserializableThing();
 }
 
-ACTOR Future<Void> testCancelled(bool* exits, Future<Void> f) {
+Future<Void> testCancelled(bool* exits, Future<Void> f) {
+	Error err;
 	try {
-		wait(Future<Void>(Never()));
+		co_await Future<Void>(Never());
 	} catch (Error& e) {
-		state Error err = e;
-		try {
-			wait(Future<Void>(Never()));
-		} catch (Error& e) {
-			*exits = true;
-			throw;
-		}
-		throw err;
+		err = e;
 	}
-	return Void();
+	try {
+		co_await Future<Void>(Never());
+	} catch (Error& e) {
+		*exits = true;
+		throw;
+	}
+	throw err;
 }
 
 TEST_CASE("/flow/flow/cancel1") {
@@ -336,6 +304,9 @@ TEST_CASE("/flow/flow/cancel1") {
 	ASSERT(exits);
 	ASSERT(test.getPromiseReferenceCount() == 0 && test.getFutureReferenceCount() == 1 && test.isReady() &&
 	       test.isError() && test.getError().code() == error_code_actor_cancelled);
+	// Coroutine parameters remain alive until the last future releases the frame.
+	ASSERT(p.getPromiseReferenceCount() == 1 && p.getFutureReferenceCount() == 1);
+	test = Future<Void>();
 	ASSERT(p.getPromiseReferenceCount() == 1 && p.getFutureReferenceCount() == 0);
 
 	return Void();
@@ -352,10 +323,10 @@ TEST_CASE("/fdbrpc/asyncFileNonDurable/sendErrorOnShutdownCancellation") {
 	return Void();
 }
 
-ACTOR static Future<Void> noteCancel(int* cancelled) {
+static Future<Void> noteCancel(int* cancelled) {
 	*cancelled = 0;
 	try {
-		wait(Future<Void>(Never()));
+		co_await Future<Void>(Never());
 		throw internal_error();
 	} catch (...) {
 		printf("Cancelled!\n");
@@ -391,6 +362,112 @@ struct Int {
 		serializer(ar, value);
 	}
 };
+
+template <class T>
+SAV<T>* replyPromiseState(ReplyPromise<T>& promise) {
+	auto* rawState = promise.extractRawPointer();
+	promise = ReplyPromise<T>(rawState);
+	return rawState;
+}
+
+struct ReplyPromiseReuseRequest {
+	constexpr static FileIdentifier file_identifier = 1449982;
+	ReplyPromise<Int> reply;
+	SAV<Int>* defaultState;
+
+	ReplyPromiseReuseRequest() : defaultState(replyPromiseState(reply)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+class RpcExceptionObserver : NonCopyable {
+	const bool previousTraceProcessEvents;
+	const char* expectedException;
+	int observed = 0;
+	int unexpected = 0;
+	ProcessEvents::Event event;
+
+	void observe(const std::any& data) {
+		auto tracePtr = std::any_cast<BaseTraceEvent*>(&data);
+		if (!tracePtr || !*tracePtr) {
+			++unexpected;
+			return;
+		}
+		auto* trace = *tracePtr;
+		int errorCode = 0;
+		std::string exception;
+		if (!expectedException || observed != 0 || trace->getSeverity() != SevError ||
+		    !trace->getFields().tryGetInt("ErrorCode", errorCode) || errorCode != error_code_unknown_error ||
+		    !trace->getFields().tryGetValue("StdException", exception) || exception != expectedException) {
+			++unexpected;
+			return;
+		}
+		++observed;
+		// Preserve the real severity check, but identify only this deliberately injected exception to trace scanners.
+		trace->detail("ErrorIsInjectedFault", 1);
+	}
+
+public:
+	explicit RpcExceptionObserver(const char* expectedException = nullptr)
+	  : previousTraceProcessEvents(g_traceProcessEvents), expectedException(expectedException),
+	    event("TraceEvent::SystemError"_sr, [this](StringRef, const std::any& data, const Error&) { observe(data); }) {
+		g_traceProcessEvents = true;
+	}
+	~RpcExceptionObserver() { g_traceProcessEvents = previousTraceProcessEvents; }
+
+	void check(int expectedCount) const {
+		ASSERT_EQ(observed, expectedCount);
+		ASSERT_EQ(unexpected, 0);
+	}
+};
+
+template <bool ErrorReply>
+struct ThrowingRpcReply {
+	constexpr static FileIdentifier file_identifier = 1449983 + ErrorReply;
+	uint32_t value = 0;
+
+	static const char* exceptionMessage() {
+		return ErrorReply ? "RpcUnexpectedException/networkSenderErrorReply"
+		                  : "RpcUnexpectedException/networkSenderValue";
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+		if constexpr (is_fb_function<Ar>) {
+			// Vtable collection visits the reply alternative even when ErrorOr contains an error.
+			throw std::runtime_error(exceptionMessage());
+		}
+	}
+};
+
+Future<Void> checkNetworkSenderKnownErrors() {
+	RpcExceptionObserver observer;
+	ReplyPromise<Int> recipient;
+	Future<Int> received = recipient.getFuture();
+	Endpoint endpoint(FlowTransport::transport().getLocalAddresses(), recipient.getEndpoint().token);
+	ReplyPromise<Int> sender;
+	sender.loadRemoteEndpoint(endpoint);
+	sender.sendError(operation_failed());
+	ErrorOr<Int> result = co_await errorOr(timeoutError(received, 1.0));
+	ASSERT(result.isError() && result.getError().code() == error_code_operation_failed);
+	ASSERT_EQ(sender.getFutureReferenceCount(), 0);
+
+	ReplyPromise<Int> noReplyRecipient;
+	Future<Int> noReplyReceived = noReplyRecipient.getFuture();
+	Endpoint noReplyEndpoint(FlowTransport::transport().getLocalAddresses(), noReplyRecipient.getEndpoint().token);
+	ReplyPromise<Int> noReplySender;
+	noReplySender.loadRemoteEndpoint(noReplyEndpoint);
+	noReplySender.send(Never());
+	co_await orderedDelay(0, TaskPriority::DefaultPromiseEndpoint);
+	ASSERT(!noReplyReceived.isReady());
+	ASSERT_EQ(noReplySender.getFutureReferenceCount(), 0);
+	observer.check(0);
+}
+
 } // namespace flow_tests_details
 
 TEST_CASE("/flow/flow/nonserializable futures") {
@@ -460,6 +537,133 @@ TEST_CASE("/flow/flow/networked futures") {
 	}
 
 	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state on deserialize") {
+	using flow_tests_details::Int;
+	const Endpoint remote({ NetworkAddress(IPAddress(0x01010101), 1) }, UID(1, 2));
+
+	{
+		ReplyPromise<Int> promise;
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) == original);
+		ASSERT(promise.getEndpoint() == remote);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(17));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 17);
+	}
+
+	{
+		ReplyPromise<Int> promise;
+		Future<Int> oldReply = promise.getFuture();
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		ASSERT(oldReply.isReady() && oldReply.isError() && oldReply.getError().code() == error_code_broken_promise);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(23));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 23);
+	}
+
+	{
+		ReplyPromise<Int> promise;
+		Endpoint local = promise.getEndpoint();
+		ASSERT(local.isValid());
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		ASSERT(promise.getEndpoint() == remote);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(31));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 31);
+	}
+
+	{
+		ReplyPromise<Int> promise(
+		    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
+		auto* original = flow_tests_details::replyPromiseState(promise);
+		promise.loadRemoteEndpoint(remote);
+		ASSERT(flow_tests_details::replyPromiseState(promise) != original);
+		Future<Int> reply = promise.getFuture();
+		promise.send(Int(41));
+		ASSERT(reply.isReady() && !reply.isError() && reply.get().value == 41);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state binary deserialize") {
+	using flow_tests_details::ReplyPromiseReuseRequest;
+	ReplyPromiseReuseRequest request;
+	ProtocolVersion version = currentProtocolVersion();
+	version.removeObjectSerializerFlag();
+	BinaryWriter writer(IncludeVersion(version));
+	writer << request;
+
+	BinaryReader reader(writer.toValue(), IncludeVersion(version));
+	ReplyPromiseReuseRequest received;
+	reader >> received;
+	ASSERT(flow_tests_details::replyPromiseState(received.reply) == received.defaultState);
+	ASSERT(received.reply.getEndpoint().token == request.reply.getEndpoint().token);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/ReplyPromise/reuse state exact reply") {
+	RequestStream<flow_tests_details::ReplyPromiseReuseRequest> local;
+	FutureStream<flow_tests_details::ReplyPromiseReuseRequest> incoming = local.getFuture();
+	flow_tests_details::ReplyPromiseReuseRequest request;
+	Future<flow_tests_details::Int> reply = request.reply.getFuture();
+	{
+		RequestStream<flow_tests_details::ReplyPromiseReuseRequest> remote(local.getEndpoint());
+		remote.send(request);
+	}
+
+	flow_tests_details::ReplyPromiseReuseRequest received = co_await incoming;
+	ASSERT(flow_tests_details::replyPromiseState(received.reply) == received.defaultState);
+	received.reply.send(flow_tests_details::Int(59));
+	flow_tests_details::Int value = co_await reply;
+	ASSERT(value.value == 59);
+}
+
+TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/networkSenderValue") {
+	// Simulation counts SevError before the observer can mark an expected injection; crash-on-error must stay intact.
+	if (g_network->isSimulated() || g_crashOnError) {
+		return Void();
+	}
+	using Reply = flow_tests_details::ThrowingRpcReply<false>;
+	flow_tests_details::RpcExceptionObserver observer(Reply::exceptionMessage());
+	Endpoint endpoint(FlowTransport::transport().getLocalAddresses(), UID(1, 2));
+	ReplyPromise<Reply> reply;
+	reply.loadRemoteEndpoint(endpoint);
+	ASSERT_GT(reply.getFutureReferenceCount(), 0);
+	reply.send(Reply());
+	observer.check(1);
+	ASSERT_EQ(reply.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/networkSenderErrorReply") {
+	if (g_network->isSimulated() || g_crashOnError) {
+		return Void();
+	}
+	using Reply = flow_tests_details::ThrowingRpcReply<true>;
+	flow_tests_details::RpcExceptionObserver observer(Reply::exceptionMessage());
+	Endpoint endpoint(FlowTransport::transport().getLocalAddresses(), UID(1, 2));
+	ReplyPromise<Reply> reply;
+	reply.loadRemoteEndpoint(endpoint);
+	ASSERT_GT(reply.getFutureReferenceCount(), 0);
+	reply.sendError(operation_failed());
+	observer.check(1);
+	ASSERT_EQ(reply.getFutureReferenceCount(), 0);
+	return Void();
+}
+
+TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/networkSenderKnownErrors") {
+	if (g_network->isSimulated() || g_crashOnError) {
+		co_return;
+	}
+	co_await flow_tests_details::checkNetworkSenderKnownErrors();
 }
 
 TEST_CASE("/flow/flow/quorum") {
@@ -631,8 +835,8 @@ TEST_CASE("/flow/flow/promisestream callbacks") {
 /*
 TEST_CASE("/flow/flow/promisestream multiple wait error")
 {
-    state int result = 0;
-    state PromiseStream<int> p;
+    int result = 0;
+    PromiseStream<int> p;
     try {
         onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e){ result = -1; });
         result = 100;
@@ -650,43 +854,34 @@ TEST_CASE("/flow/flow/promisestream multiple wait error")
 */
 
 TEST_CASE("/flow/flow/trivial actors") {
-	ASSERT(expectActorCount(0));
-
 	int result = 0;
 	trivialVoidActor(&result);
 	ASSERT(result == 1);
-	ASSERT(expectActorCount(0));
 
 	Future<int> f = return42Actor();
 	ASSERT(f.isReady() && !f.isError() && f.get() == 42 && f.getFutureReferenceCount() == 1 &&
 	       f.getPromiseReferenceCount() == 0);
-	ASSERT(expectActorCount(1));
 	f = Future<int>();
-	ASSERT(expectActorCount(0));
 
 	f = templateActor(24);
 	ASSERT(f.isReady() && !f.isError() && f.get() == 24 && f.getFutureReferenceCount() == 1 &&
 	       f.getPromiseReferenceCount() == 0);
-	ASSERT(expectActorCount(1));
 	f = Future<int>();
-	ASSERT(expectActorCount(0));
 
 	result = 0;
 	voidWaitActor(2, &result);
-	ASSERT(result == 2 && expectActorCount(0));
+	ASSERT(result == 2);
 
 	Promise<int> p;
 	f = addOneActor(p.getFuture());
-	ASSERT(!f.isReady() && expectActorCount(1));
+	ASSERT(!f.isReady());
 	p.send(100);
 	ASSERT(f.isReady() && f.get() == 101);
-	ASSERT(expectActorCount(1)); //< hmm
 	f = Future<int>();
-	ASSERT(expectActorCount(0));
 
 	PromiseStream<int> ps;
 	f = consumeOneActor(ps.getFuture());
-	ASSERT(!f.isReady() && expectActorCount(1));
+	ASSERT(!f.isReady());
 	ps.send(101);
 	ASSERT(f.get() == 101 && ps.isEmpty());
 	ps.send(102);
@@ -701,7 +896,6 @@ TEST_CASE("/flow/flow/trivial actors") {
 	ps.sendError(end_of_stream());
 	ASSERT(f.get() == 111);
 
-	ASSERT(testHygeine().isReady());
 	return Void();
 }
 
@@ -818,16 +1012,14 @@ TEST_CASE("/flow/perf/yieldedFuture") {
 }
 
 TEST_CASE("/flow/flow/chooseTwoActor") {
-	ASSERT(expectActorCount(0));
-
 	Promise<Void> a, b;
 	Future<Void> c = chooseTwoActor(a.getFuture(), b.getFuture());
-	ASSERT(a.getFutureReferenceCount() == 2 && b.getFutureReferenceCount() == 2 && !c.isReady());
+	// Parameters, race inputs, and callbacks each retain a reference while suspended.
+	ASSERT(a.getFutureReferenceCount() == 3 && b.getFutureReferenceCount() == 3 && !c.isReady());
 	b.send(Void());
-	ASSERT(a.getFutureReferenceCount() == 0 && b.getFutureReferenceCount() == 0 && c.isReady() && !c.isError() &&
-	       expectActorCount(1));
+	ASSERT(a.getFutureReferenceCount() == 1 && b.getFutureReferenceCount() == 1 && c.isReady() && !c.isError());
 	c = Future<Void>();
-	ASSERT(a.getFutureReferenceCount() == 0 && b.getFutureReferenceCount() == 0 && expectActorCount(0));
+	ASSERT(a.getFutureReferenceCount() == 0 && b.getFutureReferenceCount() == 0);
 	return Void();
 }
 
@@ -835,22 +1027,16 @@ TEST_CASE("#flow/flow/perf/actor patterns") {
 	double start;
 	int N = 1000000;
 
-	ASSERT(expectActorCount(0));
-
 	start = timer();
 	for (int i = 0; i < N; i++)
 		emptyVoidActor();
 	printf("emptyVoidActor(): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-
-	ASSERT(expectActorCount(0));
 
 	start = timer();
 	for (int i = 0; i < N; i++) {
 		emptyActor();
 	}
 	printf("emptyActor(): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-
-	ASSERT(expectActorCount(0));
 
 	Promise<Void> neverSet;
 	Future<Void> never = neverSet.getFuture();
@@ -860,8 +1046,6 @@ TEST_CASE("#flow/flow/perf/actor patterns") {
 	for (int i = 0; i < N; i++)
 		oneWaitVoidActor(already);
 	printf("oneWaitVoidActor(already): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-
-	ASSERT(expectActorCount(0));
 
 	/*start = timer();
 	for (int i = 0; i < N; i++)
@@ -884,7 +1068,6 @@ TEST_CASE("#flow/flow/perf/actor patterns") {
 			ASSERT(!f.isReady());
 		}
 		printf("(cancelled) oneWaitActor(never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
-		ASSERT(expectActorCount(0));
 	}
 
 	{
@@ -959,7 +1142,6 @@ TEST_CASE("#flow/flow/perf/actor patterns") {
 			Future<Void> f = chooseTwoActor(never, never);
 			ASSERT(!f.isReady());
 		}
-		// ASSERT(expectActorCount(0));
 		printf("(cancelled) chooseTwoActor(never, never): %0.1f M/sec\n", N / 1e6 / (timer() - start));
 	}
 
@@ -1105,7 +1287,6 @@ TEST_CASE("#flow/flow/perf/actor patterns") {
 			ASSERT(out2[i].isReady());
 		}
 		printf("2xcheeseActor(chooseTwoActor(cheeseActor(fifo), never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-		printf("sizeof(CheeseWaitActorActor) == %zu\n", cheeseWaitActorSize());
 	}
 
 	{
@@ -1161,7 +1342,7 @@ struct YAMRandom {
 		} else if (op == 1) {
 			onchanges.push_back(trigger([this]() { this->randomOp(); }, yam.onChange(k)));
 		} else if (op == 2) {
-			if (onchanges.size()) {
+			if (!onchanges.empty()) {
 				int i = deterministicRandom()->randomInt(0, onchanges.size());
 				onchanges[i] = onchanges.back();
 				onchanges.pop_back();
@@ -1182,57 +1363,51 @@ struct YAMRandom {
 };
 
 TEST_CASE("/flow/flow/YieldedAsyncMap/randomized") {
-	state YAMRandom<YieldedAsyncMap<int, int>> yamr;
-	state int it;
-	for (it = 0; it < 100000; it++) {
+	YAMRandom<YieldedAsyncMap<int, int>> yamr;
+	for (int it = 0; it < 100000; it++) {
 		yamr.randomOp();
-		wait(yield());
+		co_await yield();
 	}
-	return Void();
 }
 
 TEST_CASE("/flow/flow/AsyncMap/randomized") {
-	state YAMRandom<AsyncMap<int, int>> yamr;
-	state int it;
-	for (it = 0; it < 100000; it++) {
+	YAMRandom<AsyncMap<int, int>> yamr;
+	for (int it = 0; it < 100000; it++) {
 		yamr.randomOp();
-		wait(yield());
+		co_await yield();
 	}
-	return Void();
 }
 
 TEST_CASE("/flow/flow/YieldedAsyncMap/basic") {
-	state YieldedAsyncMap<int, int> yam;
-	state Future<Void> y0 = yam.onChange(1);
+	YieldedAsyncMap<int, int> yam;
+	Future<Void> y0 = yam.onChange(1);
 	yam.setUnconditional(1, 0);
-	state Future<Void> y1 = yam.onChange(1);
-	state Future<Void> y1a = yam.onChange(1);
-	state Future<Void> y1b = yam.onChange(1);
+	Future<Void> y1 = yam.onChange(1);
+	Future<Void> y1a = yam.onChange(1);
+	Future<Void> y1b = yam.onChange(1);
 	yam.set(1, 1);
 	// while (!check_yield()) {}
 	// yam.triggerRange(0, 4);
 
-	state Future<Void> y2 = yam.onChange(1);
-	wait(reportErrors(y0, "Y0"));
-	wait(reportErrors(y1, "Y1"));
-	wait(reportErrors(y1a, "Y1a"));
-	wait(reportErrors(y1b, "Y1b"));
-	wait(reportErrors(timeout(y2, 5, Void()), "Y2"));
-
-	return Void();
+	Future<Void> y2 = yam.onChange(1);
+	co_await reportErrors(y0, "Y0");
+	co_await reportErrors(y1, "Y1");
+	co_await reportErrors(y1a, "Y1a");
+	co_await reportErrors(y1b, "Y1b");
+	co_await reportErrors(timeout(y2, 5, Void()), "Y2");
 }
 
 TEST_CASE("/flow/flow/YieldedAsyncMap/cancel") {
-	state YieldedAsyncMap<int, int> yam;
+	YieldedAsyncMap<int, int> yam;
 	// ASSERT(yam.count(1) == 0);
-	// state Future<Void> y0 = yam.onChange(1);
+	// Future<Void> y0 = yam.onChange(1);
 	// ASSERT(yam.count(1) == 1);
 	// yam.setUnconditional(1, 0);
 
 	ASSERT(yam.count(1) == 0);
-	state Future<Void> y1 = yam.onChange(1);
-	state Future<Void> y1a = yam.onChange(1);
-	state Future<Void> y1b = yam.onChange(1);
+	Future<Void> y1 = yam.onChange(1);
+	Future<Void> y1a = yam.onChange(1);
+	Future<Void> y1b = yam.onChange(1);
 	ASSERT(yam.count(1) == 1);
 	y1.cancel();
 	ASSERT(!y1a.isReady());
@@ -1247,10 +1422,10 @@ TEST_CASE("/flow/flow/YieldedAsyncMap/cancel") {
 }
 
 TEST_CASE("/flow/flow/YieldedAsyncMap/cancel2") {
-	state YieldedAsyncMap<int, int> yam;
+	YieldedAsyncMap<int, int> yam;
 
-	state Future<Void> y1 = yam.onChange(1);
-	state Future<Void> y2 = yam.onChange(2);
+	Future<Void> y1 = yam.onChange(1);
+	Future<Void> y2 = yam.onChange(2);
 
 	auto* pyam = &yam;
 	uncancellable(trigger(
@@ -1260,11 +1435,9 @@ TEST_CASE("/flow/flow/YieldedAsyncMap/cancel2") {
 	    },
 	    delay(1)));
 
-	wait(y1);
+	co_await y1;
 	printf("Got y1\n");
 	y2.cancel();
-
-	return Void();
 }
 
 TEST_CASE("/flow/flow/AsyncVar/basic") {
@@ -1284,15 +1457,18 @@ TEST_CASE("/flow/flow/AsyncVar/basic") {
 	return Void();
 }
 
-ACTOR static Future<Void> waitAfterCancel(int* output) {
+static Future<Void> waitAfterCancel(int* output) {
 	*output = 0;
+	bool cancelled = false;
 	try {
-		wait(Never());
+		co_await Future<Void>(Never());
 	} catch (...) {
-		wait((*output = 1, Future<Void>(Void())));
+		cancelled = true;
+	}
+	if (cancelled) {
+		co_await (*output = 1, Future<Void>(Void()));
 	}
 	ASSERT(false);
-	return Void();
 }
 
 TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel_flow") {
@@ -1301,86 +1477,8 @@ TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel_flow") {
 	ASSERT(a == 0);
 	f.cancel();
 	ASSERT(a == 1);
+	ASSERT(f.isReady() && f.isError() && f.getError().code() == error_code_actor_cancelled);
 	return Void();
-}
-
-// Tests for https://github.com/apple/foundationdb/issues/1226
-
-template <class>
-struct ShouldNotGoIntoClassContextStack;
-
-class Foo1 {
-public:
-	explicit Foo1(int x) : x(x) {}
-	Future<int> foo() { return fooActor(this); }
-	ACTOR static Future<int> fooActor(Foo1* self);
-
-private:
-	int x;
-};
-ACTOR Future<int> Foo1::fooActor(Foo1* self) {
-	wait(Future<Void>());
-	return self->x;
-}
-
-class [[nodiscard]] Foo2 {
-public:
-	explicit Foo2(int x) : x(x) {}
-	Future<int> foo() { return fooActor(this); }
-	ACTOR static Future<int> fooActor(Foo2* self);
-
-private:
-	int x;
-};
-ACTOR Future<int> Foo2::fooActor(Foo2* self) {
-	wait(Future<Void>());
-	return self->x;
-}
-
-class alignas(4) Foo3 {
-public:
-	explicit Foo3(int x) : x(x) {}
-	Future<int> foo() { return fooActor(this); }
-	ACTOR static Future<int> fooActor(Foo3* self);
-
-private:
-	int x;
-};
-ACTOR Future<int> Foo3::fooActor(Foo3* self) {
-	wait(Future<Void>());
-	return self->x;
-}
-
-struct Super {};
-
-class Foo4 : Super {
-public:
-	explicit Foo4(int x) : x(x) {}
-	Future<int> foo() { return fooActor(this); }
-	ACTOR static Future<int> fooActor(Foo4* self);
-
-private:
-	int x;
-};
-ACTOR Future<int> Foo4::fooActor(Foo4* self) {
-	wait(Future<Void>());
-	return self->x;
-}
-
-struct Outer {
-	class Foo5 : Super {
-	public:
-		explicit Foo5(int x) : x(x) {}
-		Future<int> foo() { return fooActor(this); }
-		ACTOR static Future<int> fooActor(Foo5* self);
-
-	private:
-		int x;
-	};
-};
-ACTOR Future<int> Outer::Foo5::fooActor(Outer::Foo5* self) {
-	wait(Future<Void>());
-	return self->x;
 }
 
 // Meant to be run with -fsanitize=undefined
@@ -1429,32 +1527,31 @@ struct Tracker {
 	}
 	~Tracker() = default;
 
-	ACTOR static Future<Void> listen(FutureStream<Tracker> stream) {
-		Tracker movedTracker = waitNext(stream);
+	static Future<Void> listen(FutureStream<Tracker> stream, int expectedCopies) {
+		Tracker movedTracker = co_await stream;
 		ASSERT(!movedTracker.moved);
-		ASSERT(movedTracker.copied == 0);
-		return Void();
+		ASSERT(movedTracker.copied == expectedCopies);
 	}
 };
 
 TEST_CASE("/flow/flow/PromiseStream/move") {
-	state PromiseStream<Tracker> stream;
-	state Future<Void> listener;
+	PromiseStream<Tracker> stream;
+	Future<Void> listener;
 	{
 		// This tests the case when a callback is added before
 		// a movable value is sent
-		listener = Tracker::listen(stream.getFuture());
+		listener = Tracker::listen(stream.getFuture(), 0);
 		stream.send(Tracker{});
-		wait(listener);
+		co_await listener;
 	}
 
 	{
 		// This tests the case when a callback is added before
-		// a unmovable value is sent
-		listener = Tracker::listen(stream.getFuture());
+		// an lvalue is copied into the coroutine's awaiter storage.
+		listener = Tracker::listen(stream.getFuture(), 1);
 		Tracker namedTracker;
 		stream.send(namedTracker);
-		wait(listener);
+		co_await listener;
 	}
 	{
 		// This tests the case when no callback is added until
@@ -1462,12 +1559,12 @@ TEST_CASE("/flow/flow/PromiseStream/move") {
 		stream.send(Tracker{});
 		stream.send(Tracker{});
 		{
-			state Tracker movedTracker = waitNext(stream.getFuture());
+			Tracker movedTracker = co_await stream.getFuture();
 			ASSERT(!movedTracker.moved);
 			ASSERT(movedTracker.copied == 0);
 		}
 		{
-			Tracker movedTracker = waitNext(stream.getFuture());
+			Tracker movedTracker = co_await stream.getFuture();
 			ASSERT(!movedTracker.moved);
 			ASSERT(movedTracker.copied == 0);
 		}
@@ -1480,48 +1577,46 @@ TEST_CASE("/flow/flow/PromiseStream/move") {
 		stream.send(namedTracker1);
 		stream.send(namedTracker2);
 		{
-			state Tracker copiedTracker = waitNext(stream.getFuture());
+			Tracker copiedTracker = co_await stream.getFuture();
 			ASSERT(!copiedTracker.moved);
 			// must copy onto queue
 			ASSERT(copiedTracker.copied == 1);
 		}
 		{
-			Tracker copiedTracker = waitNext(stream.getFuture());
+			Tracker copiedTracker = co_await stream.getFuture();
 			ASSERT(!copiedTracker.moved);
 			// must copy onto queue
 			ASSERT(copiedTracker.copied == 1);
 		}
 	}
-
-	return Void();
 }
 
 TEST_CASE("/flow/flow/PromiseStream/move2") {
 	PromiseStream<Tracker> stream;
 	stream.send(Tracker{});
-	Tracker tracker = waitNext(stream.getFuture());
+	Tracker tracker = co_await stream.getFuture();
 	Tracker movedTracker = std::move(tracker);
 	ASSERT(
 	    tracker.moved); // NOLINT(bugprone-use-after-move): this test intentionally checks the moved-from Tracker state.
 	ASSERT(!movedTracker.moved);
 	ASSERT(movedTracker.copied == 0);
-	return Void();
 }
 
 constexpr double mutexTestDelay = 0.00001;
 
-ACTOR Future<Void> mutexTest(int id, FlowMutex* mutex, int n, bool allowError, bool* verbose) {
+Future<Void> mutexTest(int id, FlowMutex* mutex, int n, bool allowError, bool* verbose) {
+	FlowMutex::Lock lock;
 	while (n-- > 0) {
-		state double d = deterministicRandom()->random01() * mutexTestDelay;
+		double d = deterministicRandom()->random01() * mutexTestDelay;
 		if (*verbose) {
 			printf("%d:%d wait %f while unlocked\n", id, n, d);
 		}
-		wait(delay(d));
+		co_await delay(d);
 
 		if (*verbose) {
 			printf("%d:%d locking\n", id, n);
 		}
-		state FlowMutex::Lock lock = wait(mutex->take());
+		lock = co_await mutex->take();
 		if (*verbose) {
 			printf("%d:%d locked\n", id, n);
 		}
@@ -1530,7 +1625,7 @@ ACTOR Future<Void> mutexTest(int id, FlowMutex* mutex, int n, bool allowError, b
 		if (*verbose) {
 			printf("%d:%d wait %f while locked\n", id, n, d);
 		}
-		wait(delay(d));
+		co_await delay(d);
 
 		// On the last iteration, send an error or drop the lock if allowError is true
 		if (n == 0 && allowError) {
@@ -1557,61 +1652,60 @@ ACTOR Future<Void> mutexTest(int id, FlowMutex* mutex, int n, bool allowError, b
 	if (*verbose) {
 		printf("%d Returning\n", id);
 	}
-	return Void();
 }
 
 TEST_CASE("/flow/flow/FlowMutex") {
-	state int count = 100000;
+	int count = 100000;
 
 	// Default verboseness
-	state bool verboseSetting = false;
+	bool verboseSetting = false;
 	// Useful for debugging, enable verbose mode for this iteration number
-	state int verboseTestIteration = -1;
+	int verboseTestIteration = -1;
 
 	try {
-		state bool verbose = verboseSetting || count == verboseTestIteration;
+		bool verbose = verboseSetting || count == verboseTestIteration;
 
 		while (--count > 0) {
 			if (count % 1000 == 0) {
 				printf("%d tests left\n", count);
 			}
 
-			state FlowMutex mutex;
-			state std::vector<Future<Void>> tests;
+			FlowMutex mutex;
+			std::vector<Future<Void>> tests;
 
-			state bool allowErrors = deterministicRandom()->coinflip();
+			bool allowErrors = deterministicRandom()->coinflip();
 			if (verbose) {
 				printf("\nTesting allowErrors=%d\n", allowErrors);
 			}
 
-			state Optional<Error> error;
+			Optional<Error> error;
 
 			try {
 				for (int i = 0; i < 10; ++i) {
 					tests.push_back(mutexTest(i, &mutex, 10, allowErrors, &verbose));
 				}
-				wait(waitForAll(tests));
+				co_await waitForAll(tests);
 
 				if (allowErrors) {
 					if (verbose) {
 						printf("Final wait in case error was injected by the last actor to finish\n");
 					}
-					wait(success(mutex.take()));
+					co_await success(mutex.take());
 				}
 			} catch (Error& e) {
 				if (verbose) {
 					printf("Caught error %s\n", e.what());
 				}
 				error = e;
-
+			}
+			if (error.present()) {
 				// Some actors can still be running, waiting while locked or unlocked,
 				// but all should become ready, some with errors.
-				state int i;
 				if (verbose) {
 					printf("Waiting for completions.  Future end states:\n");
 				}
-				for (i = 0; i < tests.size(); ++i) {
-					ErrorOr<Void> f = wait(errorOr(tests[i]));
+				for (int i = 0; i < tests.size(); ++i) {
+					ErrorOr<Void> f = co_await errorOr(tests[i]);
 					if (verbose) {
 						printf("  %d: %s\n", i, f.isError() ? f.getError().what() : "done");
 					}
@@ -1626,18 +1720,16 @@ TEST_CASE("/flow/flow/FlowMutex") {
 		printf("Error at count=%d\n", count + 1);
 		ASSERT(false);
 	}
-
-	return Void();
 }
 
 using namespace std::chrono_literals;
 
 TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Simple") {
-	state AsyncTaskExecutor exc(1);
+	AsyncTaskExecutor exc(1);
 	noUnseed = true;
 	ThreadReturnPromiseStream<int> stream;
-	state ThreadFutureStream<int> f = stream.getFuture();
-	state Future<Void> t = exc.post([stream = std::move(stream)]() mutable {
+	ThreadFutureStream<int> f = stream.getFuture();
+	Future<Void> t = exc.post([stream = std::move(stream)]() mutable {
 		for (int i = 0; i < 10; ++i) {
 			stream.send(i);
 			std::cout << "Sent: " << i << std::endl;
@@ -1647,12 +1739,12 @@ TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Simple") {
 		return Void();
 	});
 
-	state int n = 0;
+	int n = 0;
 	while (true) {
 		try {
-			state int i = waitNext(f);
+			int i = co_await f;
 			std::cout << "Got: " << i << std::endl;
-			wait(delay(0.1));
+			co_await delay(0.1);
 			ASSERT(i == n);
 			++n;
 		} catch (Error& e) {
@@ -1662,16 +1754,15 @@ TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Simple") {
 		}
 	}
 
-	wait(t);
-	return Void();
+	co_await t;
 }
 
 TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Seq") {
-	state AsyncTaskExecutor exc(1);
+	AsyncTaskExecutor exc(1);
 	noUnseed = true;
 	ThreadReturnPromiseStream<int> stream;
-	state ThreadFutureStream<int> f = stream.getFuture();
-	state Future<Void> t = exc.post([stream = std::move(stream)]() mutable {
+	ThreadFutureStream<int> f = stream.getFuture();
+	Future<Void> t = exc.post([stream = std::move(stream)]() mutable {
 		for (int i = 0; i <= 3; ++i) {
 			stream.send(i);
 			std::this_thread::sleep_for(100ms);
@@ -1680,61 +1771,58 @@ TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Seq") {
 		return Void();
 	});
 
-	int r0 = waitNext(f);
+	int r0 = co_await f;
 	ASSERT(r0 == 0);
-	int r1 = waitNext(f);
+	int r1 = co_await f;
 	ASSERT(r1 == 1);
-	int r2 = waitNext(f);
+	int r2 = co_await f;
 	ASSERT(r2 == 2);
-	wait(delay(1.0));
-	int r3 = waitNext(f);
+	co_await delay(1.0);
+	int r3 = co_await f;
 	ASSERT(r3 == 3);
-	wait(t);
-	return Void();
+	co_await t;
 }
 
 TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Error") {
-	state AsyncTaskExecutor exc(1);
+	AsyncTaskExecutor exc(1);
 	noUnseed = true;
 
 	{
 		ThreadReturnPromiseStream<int> s1;
-		state ThreadFutureStream<int> f1 = s1.getFuture();
-		state Future<Void> t1 = exc.post([s1 = std::move(s1)]() mutable {
+		ThreadFutureStream<int> f1 = s1.getFuture();
+		Future<Void> t1 = exc.post([s1 = std::move(s1)]() mutable {
 			std::this_thread::sleep_for(2s);
 			return Void();
 		});
 
 		try {
-			int _ = waitNext(f1);
+			co_await f1;
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_broken_promise);
 		}
 
-		wait(t1);
+		co_await t1;
 	}
 
 	{
 		ThreadReturnPromiseStream<int> s2;
-		state ThreadFutureStream<int> f2 = s2.getFuture();
-		state Future<Void> t2 = exc.post([s2 = std::move(s2)]() mutable {
+		ThreadFutureStream<int> f2 = s2.getFuture();
+		Future<Void> t2 = exc.post([s2 = std::move(s2)]() mutable {
 			std::this_thread::sleep_for(2s);
 			s2.sendError(transaction_too_old());
 			return Void();
 		});
 
 		try {
-			int _ = waitNext(f2);
+			co_await f2;
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_transaction_too_old);
 		}
 
-		wait(t2);
+		co_await t2;
 	}
-
-	return Void();
 }
 
 TEST_CASE("/fdbrpc/waitValueOrSignal/peerDisconnect") {
@@ -1746,17 +1834,16 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/peerDisconnect") {
 	// peer->disconnect, and PeerHolder only touches outstandingReplies. Note that Peer construction
 	// also updates the global failure monitor status for fakeAddr.
 	NetworkAddress fakeAddr = NetworkAddress::parse("1.2.3.4:1234");
-	state Reference<Peer> peer = makeReference<Peer>(nullptr, fakeAddr);
+	Reference<Peer> peer = makeReference<Peer>(nullptr, fakeAddr);
 
 	// Create a value future that never resolves (simulating a stuck RPC to unreachable storage server)
-	state Promise<Void> neverReply;
+	Promise<Void> neverReply;
 
 	// No failure signal either (simulating failure monitor not yet detecting the failure)
-	state Endpoint ep;
+	Endpoint ep;
 
 	// Call waitValueOrSignal with the peer
-	state Future<ErrorOr<Void>> result =
-	    waitValueOrSignal(neverReply.getFuture(), Never(), ep, ReplyPromise<Void>(), peer);
+	Future<ErrorOr<Void>> result = waitValueOrSignal(neverReply.getFuture(), Never(), ep, ReplyPromise<Void>(), peer);
 
 	// Result should not be ready yet - the reply hasn't come and disconnect hasn't fired
 	ASSERT(!result.isReady());
@@ -1780,7 +1867,7 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream_DestroyPromise") {
 		std::cout << "ThreadReturnPromiseStream with future > 0, promise == 0, end_of_stream sent\n";
 		// After all references to PromiseStream are gone, FutureStream should still be able to get
 		// all the values if PromiseStream had reached end_of_stream.
-		state ThreadFutureStream<int> fs1 = ([]() {
+		ThreadFutureStream<int> fs1 = ([]() {
 			ThreadReturnPromiseStream<int> p;
 			auto ret = p.getFuture();
 			for (int i = 0; i < 10; i++) {
@@ -1791,12 +1878,12 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream_DestroyPromise") {
 			return ret;
 		})();
 
-		wait(delay(1));
+		co_await delay(1);
 
-		state int recvd = 0;
+		int recvd = 0;
 		try {
 			while (true) {
-				int _ = waitNext(fs1);
+				co_await fs1;
 				recvd += 1;
 			}
 		} catch (Error& err) {
@@ -1812,7 +1899,7 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream_DestroyPromise") {
 	{
 		// After all references to PromiseStream are gone, but the stream was not ended cleanly
 		// by sending end_of_stream, we should instead get broken_promise.
-		state ThreadFutureStream<int> fs2 = ([]() {
+		ThreadFutureStream<int> fs2 = ([]() {
 			ThreadReturnPromiseStream<int> p;
 			auto ret = p.getFuture();
 			for (int i = 0; i < 10; i++) {
@@ -1822,13 +1909,15 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream_DestroyPromise") {
 			return ret;
 		})();
 
-		wait(delay(1));
+		co_await delay(1);
 
 		try {
 			while (true) {
-				choose {
-					when(int _ = waitNext(fs2)) {}
-					when(wait(delay(1))) {
+				if (fs2.isReady()) {
+					co_await fs2;
+				} else {
+					auto res = co_await race(fs2, delay(1));
+					if (res.index() == 1) {
 						ASSERT(false); // shouldn't hangup if end_of_stream is not sent.
 						break;
 					}
@@ -1838,8 +1927,6 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream_DestroyPromise") {
 			ASSERT(err.code() == error_code_broken_promise);
 		}
 	}
-
-	return Void();
 }
 
 TEST_CASE("/fdbrpc/waitValueOrSignal/noPeerFallback") {
@@ -1847,10 +1934,10 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/noPeerFallback") {
 	// The broken_promise path should still be handled: when the reply promise breaks,
 	// the endpoint should be marked as not found and value set to Never().
 
-	state Promise<Void> reply;
+	Promise<Void> reply;
 
 	// Call waitValueOrSignal without a peer (default behavior)
-	state Future<ErrorOr<Void>> result = waitValueOrSignal(reply.getFuture(), Never(), Endpoint());
+	Future<ErrorOr<Void>> result = waitValueOrSignal(reply.getFuture(), Never(), Endpoint());
 
 	ASSERT(!result.isReady());
 
@@ -1860,10 +1947,8 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/noPeerFallback") {
 	// waitValueOrSignal should handle broken_promise by setting value = Never() and looping.
 	// Since signal is Never() and there's no peer disconnect, it should now wait forever.
 	// We verify it doesn't crash and the result is NOT ready (it's stuck in the loop).
-	wait(delay(0.1));
+	co_await delay(0.1);
 	ASSERT(!result.isReady());
-
-	return Void();
 }
 
 TEST_CASE("/fdbrpc/waitValueOrSignal/retryOnDisconnect") {
@@ -1878,17 +1963,17 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/retryOnDisconnect") {
 
 	NetworkAddress addr1 = NetworkAddress::parse("1.2.3.4:1234");
 	NetworkAddress addr2 = NetworkAddress::parse("1.2.3.5:1234");
-	state Reference<Peer> peer1 = makeReference<Peer>(nullptr, addr1);
-	state Reference<Peer> peer2 = makeReference<Peer>(nullptr, addr2);
+	Reference<Peer> peer1 = makeReference<Peer>(nullptr, addr1);
+	Reference<Peer> peer2 = makeReference<Peer>(nullptr, addr2);
 
-	state int numAttempts = 0;
+	int numAttempts = 0;
 
 	// --- Attempt 1: peer1 disconnects mid-request (simulating K8s NAT timeout) ---
 	{
-		state Promise<Void> reply1;
-		state Endpoint ep1;
+		Promise<Void> reply1;
+		Endpoint ep1;
 
-		state Future<ErrorOr<Void>> result1 =
+		Future<ErrorOr<Void>> result1 =
 		    waitValueOrSignal(reply1.getFuture(), Never(), ep1, ReplyPromise<Void>(), peer1);
 
 		numAttempts++;
@@ -1907,10 +1992,10 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/retryOnDisconnect") {
 	// --- Attempt 2: retry to peer2, which responds successfully ---
 	// This is what loadBalance does: on request_maybe_delivered, pick next alternative and retry
 	{
-		state Promise<Void> reply2;
-		state Endpoint ep2;
+		Promise<Void> reply2;
+		Endpoint ep2;
 
-		state Future<ErrorOr<Void>> result2 =
+		Future<ErrorOr<Void>> result2 =
 		    waitValueOrSignal(reply2.getFuture(), Never(), ep2, ReplyPromise<Void>(), peer2);
 
 		numAttempts++;

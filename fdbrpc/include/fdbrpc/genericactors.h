@@ -312,9 +312,9 @@ Future<Void> incrementalBroadcastWithError(Future<T> input,
 
 struct PeerHolder {
 	Reference<Peer> peer;
-	explicit PeerHolder(Reference<Peer> peer) : peer(peer) {
-		if (peer) {
-			peer->outstandingReplies++;
+	explicit PeerHolder(Reference<Peer> peer) : peer(std::move(peer)) {
+		if (this->peer) {
+			this->peer->outstandingReplies++;
 		}
 	}
 	~PeerHolder() {
@@ -336,12 +336,13 @@ Future<Void> endStreamOnDisconnect(Uncancellable,
                                    ReplyPromiseStream<X> stream,
                                    Endpoint endpoint,
                                    Reference<Peer> peer = Reference<Peer>()) {
-	PeerHolder holder = PeerHolder(peer);
+	PeerHolder holder(std::move(peer));
 	stream.setRequestStreamEndpoint(endpoint);
 	Error err;
 	try {
-		auto res = co_await race(
-		    signal, peer.isValid() ? peer->disconnect.getFuture() : Never(), stream.getErrorFutureAndDelPromiseRef());
+		auto res = co_await race(signal,
+		                         holder.peer.isValid() ? holder.peer->disconnect.getFuture() : Never(),
+		                         stream.getErrorFutureAndDelPromiseRef());
 		if (res.index() == 0) {
 			stream.sendError(connection_failed());
 		} else if (res.index() == 1) {
@@ -368,10 +369,11 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
                                      Endpoint endpoint,
                                      ReplyPromise<X> holdme = ReplyPromise<X>(),
                                      Reference<Peer> peer = Reference<Peer>()) {
-	PeerHolder holder = PeerHolder(peer);
+	PeerHolder holder(std::move(peer));
 	while (true) {
 		try {
-			auto res = co_await race(value, signal, peer.isValid() ? peer->disconnect.getFuture() : Never());
+			auto res =
+			    co_await race(value, signal, holder.peer.isValid() ? holder.peer->disconnect.getFuture() : Never());
 			if (res.index() == 0) {
 				X x = std::get<0>(std::move(res));
 

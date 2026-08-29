@@ -45,7 +45,6 @@ void forceLinkDDSketchTests();
 void forceLinkCommitProxyTests();
 void forceLinkWipedStringTests();
 void forceLinkRandomKeyValueUtilsTests();
-void forceLinkActorFuzzUnitTests();
 void forceLinkGrpcTests();
 void forceLinkGrpcTests2();
 void forceLinkSimpleCounterTests();
@@ -128,7 +127,6 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkDDSketchTests();
 		forceLinkWipedStringTests();
 		forceLinkRandomKeyValueUtilsTests();
-		forceLinkActorFuzzUnitTests();
 		forceLinkSimpleCounterTests();
 		forceLinkLogSystemRecoveryTests();
 		forceLinkIPagerTests();

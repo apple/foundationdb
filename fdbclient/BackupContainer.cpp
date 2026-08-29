@@ -25,9 +25,6 @@
 #include "flow/Arena.h"
 #include "flow/Trace.h"
 #include "flow/Platform.h"
-#ifdef BUILD_AZURE_BACKUP
-#include "fdbclient/BackupContainerAzureBlobStore.h"
-#endif
 #include "BackupContainerLocalDirectory.h"
 #include "BackupContainerBlobStore.h"
 #include "fdbclient/SystemData.h"
@@ -259,9 +256,6 @@ std::string IBackupContainer::lastOpenError;
 
 std::vector<std::string> IBackupContainer::getURLFormats() {
 	return {
-#ifdef BUILD_AZURE_BACKUP
-		BackupContainerAzureBlobStore::getURLFormat(),
-#endif
 		BackupContainerLocalDirectory::getURLFormat(),
 		BackupContainerBlobStore::getURLFormat(),
 	};
@@ -321,53 +315,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			BackupContainerBlobStore::validateBackupUrl(resource);
 			r = makeReference<BackupContainerBlobStore>(
 			    bstore, resource, backupParams, encryptionKeyFileName, encryptionBlockSize, /*isBackup=*/true);
-		}
-#ifdef BUILD_AZURE_BACKUP
-		else if (u.startsWith("azure://"_sr)) {
-			u.eat("azure://"_sr);
-			auto address = u.eat("/"_sr);
-			if (address.endsWith(std::string(azure::storage_lite::constants::default_endpoint_suffix))) {
-				CODE_PROBE(true, "Azure backup url with standard azure storage account endpoint");
-				// <account>.<service>.core.windows.net/<resource_path>
-				auto endPoint = address.toString();
-				auto accountName = address.eat("."_sr).toString();
-				auto containerName = u.eat("/"_sr).toString();
-				r = makeReference<BackupContainerAzureBlobStore>(
-				    endPoint, accountName, containerName, encryptionKeyFileName);
-			} else {
-				// resolve the network address if necessary
-				std::string endpoint(address.toString());
-				Optional<NetworkAddress> parsedAddress = NetworkAddress::parseOptional(endpoint);
-				if (!parsedAddress.present()) {
-					try {
-						auto hostname = Hostname::parse(endpoint);
-						auto resolvedAddress = hostname.resolveBlocking();
-						if (resolvedAddress.present()) {
-							CODE_PROBE(true, "Azure backup url with hostname in the endpoint");
-							parsedAddress = resolvedAddress.get();
-						}
-					} catch (Error& e) {
-						TraceEvent(SevError, "InvalidAzureBackupUrl").error(e).detail("Endpoint", endpoint);
-						throw backup_invalid_url();
-					}
-				}
-				if (!parsedAddress.present()) {
-					TraceEvent(SevError, "InvalidAzureBackupUrl").detail("Endpoint", endpoint);
-					throw backup_invalid_url();
-				}
-				auto accountName = u.eat("/"_sr).toString();
-				// Avoid including ":tls" and "(fromHostname)"
-				// note: the endpoint needs to contain the account name
-				// so either "<account_name>.blob.core.windows.net" or "<ip>:<port>/<account_name>"
-				endpoint =
-				    fmt::format("{}/{}", formatIpPort(parsedAddress.get().ip, parsedAddress.get().port), accountName);
-				auto containerName = u.eat("/"_sr).toString();
-				r = makeReference<BackupContainerAzureBlobStore>(
-				    endpoint, accountName, containerName, encryptionKeyFileName);
-			}
-		}
-#endif
-		else {
+		} else {
 			lastOpenError = "invalid URL prefix";
 			throw backup_invalid_url();
 		}
@@ -422,15 +370,7 @@ Future<std::vector<std::string>> listContainers_impl(std::string baseURL, Option
 
 			std::vector<std::string> results = co_await BackupContainerBlobStore::listURLs(bstore, dummy.getBucket());
 			co_return results;
-		}
-		// TODO: Enable this when Azure backups are ready
-		/*
-		else if (u.startsWith("azure://"_sr)) {
-		    std::vector<std::string> results = wait(BackupContainerAzureBlobStore::listURLs(baseURL));
-		    return results;
-		}
-		*/
-		else {
+		} else {
 			IBackupContainer::lastOpenError = "invalid URL prefix";
 			throw backup_invalid_url();
 		}

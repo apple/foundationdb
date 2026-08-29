@@ -175,9 +175,9 @@ A typical consumer loop is:
 
 ```cpp
 co_await registerNativeCdcStreamClient(db, "orders"_sr, KeyRangeRef("order/"_sr, "order0"_sr));
-state Reference<NativeCdcConsumer> consumer = co_await createNativeCdcConsumer(db, "orders"_sr);
+Reference<NativeCdcConsumer> consumer = co_await createNativeCdcConsumer(db, "orders"_sr);
 
-loop {
+while (true) {
 	CDCConsumeReply reply = co_await consumer->consume();
 	for (auto const& versionedMutations : reply.mutations) {
 		// Apply all mutations for versionedMutations.version.
@@ -364,6 +364,7 @@ than transaction state:
 | `\xff\x02/cdc/minVersion/<streamId>` | `Version` | Earliest version that an active stream may still require. |
 | `\xff\x02/cdc/retiredTagPopVersion/<tag>` | `Version` | Final pop watermark required after a stream using a tag is removed. |
 | `\xff\x02/cdc/tagLoad/<tag>` | assignment generation, sample version, expiry version, sampled write rate | Advisory producer-load estimate used for placement. |
+| `\xff\x02/cdc/tagOwner/<tag>` | `CDCStreamId` | Derived representative stream used to look up a current tag's proxy owner. |
 
 The initial `minVersion` is written with a versionstamp at stream
 registration. When a consumer acknowledges processing through version `V`, the
@@ -402,6 +403,22 @@ properties rather than exceptional cases.
 
 The current proxy assignment at registration uses an available CDC proxy; it
 does not yet balance by stream traffic, memory use, or consumer lag.
+
+Registration reuses a tag's owner through a persisted representative stream.
+The lookup validates, in the registration transaction, that the representative
+is active and still uses that current tag, then reads its authoritative
+per-stream proxy assignment. Proxy replacement therefore does not require a
+second ownership update. A missing or stale entry is reconstructed from active
+stream metadata; registration on an unused tag establishes its first
+representative. Removing the representative clears the entry without disturbing
+other streams or their retained history.
+
+This index avoids repeated global ownership discovery for stable shared tags.
+It is derived storage-backed system data, not routing or retention authority,
+and can be discarded and rebuilt. Existing streams need no eager migration;
+validation also rejects stale representatives left by older metadata writers.
+The allocator's stream-count scan remains necessary, and ownership discovery
+still scans global metadata when the representative is absent or invalid.
 
 ### Throughput-aware placement and live retagging
 

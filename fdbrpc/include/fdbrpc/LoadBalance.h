@@ -107,6 +107,12 @@ struct LoadBalanceRequestHooks {
 FDB_BOOLEAN_PARAM(AtMostOnce);
 FDB_BOOLEAN_PARAM(TriedAllOptions);
 
+inline const Future<Void>& neverSecondRequest() {
+	// Constructing the Future initializes allocator TLS first, so this Future is destroyed before allocator teardown.
+	static thread_local const Future<Void> result = Never();
+	return result;
+}
+
 // Stores state for a request made by the load balancer
 template <class Request, class Interface, class Multi, class Model, bool P>
 struct RequestData : NonCopyable {
@@ -314,7 +320,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alt
 	RequestData<Request, Interface, Multi, Model, P> secondRequestData(compareReplicas);
 
 	Optional<uint64_t> firstRequestEndpoint;
-	Future<Void> secondDelay = Never();
+	Future<Void> secondDelay = neverSecondRequest();
 
 	double startTime = now();
 
@@ -416,7 +422,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alt
 				secondDelay = delay(model->secondMultiplier * nextTime + FLOW_KNOBS->BASE_SECOND_REQUEST_TIME);
 			}
 		} else {
-			secondDelay = Never();
+			secondDelay = neverSecondRequest();
 		}
 	}
 
@@ -599,7 +605,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alt
 					firstRequestEndpoint = Optional<uint64_t>();
 					break;
 				} else {
-					secondDelay = Never();
+					secondDelay = neverSecondRequest();
 					if (model && model->secondBudget >= 1.0) {
 						model->secondMultiplier += FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_GROWTH;
 						model->secondBudget -= 1.0;
@@ -619,7 +625,7 @@ Future<REPLY_TYPE(Request)> loadBalanceImpl(Reference<MultiInterface<Multi>> alt
 		if (nextAlt == startAlt)
 			triedAllOptions = TriedAllOptions::True;
 		resetReply(request, taskID);
-		secondDelay = Never();
+		secondDelay = neverSecondRequest();
 	}
 }
 
