@@ -53,10 +53,12 @@ public:
 // registration and the remaining operations stay available so existing durable
 // streams can be drained after the feature is disabled. Requests retry when
 // stream ownership changes.
-Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys);
+// Ranges form an immutable union. Registration normalizes overlap and adjacency
+// so equivalent range sets have the same identity regardless of input order.
+Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, std::vector<KeyRange> ranges);
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);
-// Uses the range registered for this name; consumers do not respecify it. A
+// Uses the ranges registered for this name; consumers do not respecify them. A
 // CDCCursor remains a serializable position token and does not hold Database.
 Future<Reference<NativeCdcConsumer>> createNativeCdcConsumer(Database cx, Key name);
 Reference<NativeCdcConsumer> resumeNativeCdcConsumer(Database cx, CDCCursor position);

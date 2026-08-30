@@ -95,8 +95,35 @@ public:
 	}
 };
 
-void validateNativeCdcStream(KeyRef const& name, KeyRangeRef const& keys) {
-	if (name.empty() || keys.empty() || !normalKeys.contains(keys)) {
+void normalizeNativeCdcStreamRanges(KeyRef const& name, std::vector<KeyRange>& ranges) {
+	if (name.empty() || ranges.empty() || ranges.size() > NATIVE_CDC_MAX_RANGES) {
+		throw client_invalid_operation();
+	}
+	for (const auto& range : ranges) {
+		if (range.begin >= range.end || !normalKeys.contains(range)) {
+			throw client_invalid_operation();
+		}
+	}
+	std::sort(
+	    ranges.begin(), ranges.end(), [](const KeyRange& lhs, const KeyRange& rhs) { return lhs.begin < rhs.begin; });
+	size_t count = 0;
+	for (const auto& range : ranges) {
+		if (count > 0 && range.begin <= ranges[count - 1].end) {
+			if (range.end > ranges[count - 1].end) {
+				ranges[count - 1] = KeyRange(KeyRangeRef(ranges[count - 1].begin, range.end));
+			}
+		} else {
+			ranges[count++] = range;
+		}
+	}
+	ranges.resize(count);
+
+	int64_t keyBytes = 0;
+	for (const auto& range : ranges) {
+		keyBytes += static_cast<int64_t>(range.begin.size()) + range.end.size();
+	}
+	if (keyBytes > CLIENT_KNOBS->VALUE_SIZE_LIMIT ||
+	    cdcStreamKeysValue(ranges).size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
 		throw client_invalid_operation();
 	}
 }
@@ -386,8 +413,8 @@ Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database c
 
 } // namespace
 
-Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, UID proxyId) {
-	validateNativeCdcStream(name, keys);
+Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, std::vector<KeyRange> ranges, UID proxyId) {
+	normalizeNativeCdcStreamRanges(name, ranges);
 
 	Transaction tr(cx);
 	while (true) {
@@ -401,7 +428,7 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 			if (currentId.present()) {
 				const CDCStreamId streamId = decodeCDCStreamNameValue(currentId.get());
 				Optional<Value> currentKeys = co_await tr.get(cdcStreamKeyFor(streamId));
-				if (!currentKeys.present() || decodeCDCStreamKeysValue(currentKeys.get()) != keys) {
+				if (!currentKeys.present() || decodeCDCStreamKeysValue(currentKeys.get()) != ranges) {
 					throw client_invalid_operation();
 				}
 				if (!(co_await getNativeCdcProxyAssignment(&tr, streamId)).present()) {
@@ -437,7 +464,7 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 
 			tr.set(nameKey, cdcStreamNameValue(streamId));
 			tr.set(cdcMaxStreamIdKey, cdcMaxStreamIdValue(streamId));
-			tr.set(cdcStreamKeyFor(streamId), cdcStreamKeysValue(keys));
+			tr.set(cdcStreamKeyFor(streamId), cdcStreamKeysValue(ranges));
 			tr.set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
 			tr.atomicOp(
 			    cdcMinVersionKeyFor(streamId), cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
@@ -559,12 +586,12 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx) {
 				begin = keyAfter(page.back().key);
 			}
 
-			std::unordered_map<CDCStreamId, KeyRange> streamKeys;
+			std::unordered_map<CDCStreamId, std::vector<KeyRange>> streamRanges;
 			begin = cdcStreamKeys.begin;
 			while (begin < cdcStreamKeys.end) {
 				RangeResult page = co_await tr.getRange(KeyRangeRef(begin, cdcStreamKeys.end), CLIENT_KNOBS->TOO_MANY);
 				for (const auto& kv : page) {
-					streamKeys.emplace(decodeCDCStreamKey(kv.key), decodeCDCStreamKeysValue(kv.value));
+					streamRanges.emplace(decodeCDCStreamKey(kv.key), decodeCDCStreamKeysValue(kv.value));
 				}
 				if (!page.more) {
 					break;
@@ -589,11 +616,11 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx) {
 			std::vector<NativeCdcStreamInfo> result;
 			result.reserve(names.size());
 			for (auto& [name, streamId] : names) {
-				auto keys = streamKeys.find(streamId);
+				auto ranges = streamRanges.find(streamId);
 				auto minVersion = minVersions.find(streamId);
-				if (keys != streamKeys.end() && minVersion != minVersions.end()) {
-					result.push_back(
-					    NativeCdcStreamInfo{ std::move(name), streamId, keys->second, minVersion->second });
+				if (ranges != streamRanges.end() && minVersion != minVersions.end()) {
+					result.push_back(NativeCdcStreamInfo{
+					    std::move(name), streamId, std::move(ranges->second), minVersion->second });
 				}
 			}
 			co_return result;
@@ -693,8 +720,8 @@ Future<Version> acknowledgeNativeCdcStream(Database cx,
 	}
 }
 
-Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys) {
-	validateNativeCdcStream(name, keys);
+Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, std::vector<KeyRange> ranges) {
+	normalizeNativeCdcStreamRanges(name, ranges);
 	Optional<UID> previousProxy;
 	while (true) {
 		Future<Void> proxyChanged = cx->clientInfo->onChange();
@@ -724,7 +751,7 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRang
 		CDCProxyInterface proxy = selectedProxy.get();
 		try {
 			Future<ErrorOr<CDCRegisterStreamReply>> request =
-			    proxy.registerStream.tryGetReply(CDCRegisterStreamRequest(name, keys));
+			    proxy.registerStream.tryGetReply(CDCRegisterStreamRequest(name, ranges));
 			// Assignment publications for other streams also change ClientDBInfo. Keep this request alive while its
 			// proxy remains published; abandoning it can let a server-side retry recreate the stream after removal.
 			while (true) {
@@ -884,6 +911,60 @@ Future<Void> NativeCdcConsumer::acknowledge() {
 	}
 	operationOutstanding = true;
 	return acknowledgeImpl(Reference<NativeCdcConsumer>::addRef(this));
+}
+
+TEST_CASE("/NativeCDC/RangeNormalization") {
+	std::vector<KeyRange> ranges{
+		KeyRangeRef("x"_sr, "z"_sr), KeyRangeRef("b"_sr, "d"_sr), KeyRangeRef("a"_sr, "b"_sr),
+		KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("b"_sr, "c"_sr), KeyRangeRef("x"_sr, "z"_sr)
+	};
+	const std::vector<KeyRange> expected{ KeyRangeRef("a"_sr, "d"_sr), KeyRangeRef("x"_sr, "z"_sr) };
+	normalizeNativeCdcStreamRanges("orders"_sr, ranges);
+	ASSERT(ranges == expected);
+	normalizeNativeCdcStreamRanges("orders"_sr, ranges);
+	ASSERT(ranges == expected);
+
+	std::vector<KeyRange> entireKeyspace{ normalKeys };
+	normalizeNativeCdcStreamRanges("all"_sr, entireKeyspace);
+	ASSERT(entireKeyspace == std::vector<KeyRange>{ normalKeys });
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/InvalidRanges") {
+	auto expectInvalid = [](KeyRef name, std::vector<KeyRange> ranges) {
+		try {
+			normalizeNativeCdcStreamRanges(name, ranges);
+		} catch (Error& error) {
+			ASSERT_EQ(error.code(), error_code_client_invalid_operation);
+			return;
+		}
+		ASSERT(false);
+	};
+	expectInvalid(KeyRef(), { normalKeys });
+	expectInvalid("orders"_sr, {});
+	expectInvalid("orders"_sr, { KeyRangeRef("a"_sr, "a"_sr) });
+	expectInvalid("orders"_sr, { normalKeys, systemKeys });
+	expectInvalid("orders"_sr, std::vector<KeyRange>(NATIVE_CDC_MAX_RANGES + 1, normalKeys));
+
+	std::vector<KeyRange> maximumCount;
+	std::vector<KeyRange> oversizedMetadata;
+	const int endpointLength = CLIENT_KNOBS->VALUE_SIZE_LIMIT / (2 * NATIVE_CDC_MAX_RANGES);
+	for (int i = 0; i < NATIVE_CDC_MAX_RANGES; ++i) {
+		const std::string prefix = format("%04d/", i);
+		maximumCount.emplace_back(KeyRangeRef(prefix + "a", prefix + "z"));
+		ASSERT_GT(endpointLength, prefix.size());
+		oversizedMetadata.emplace_back(KeyRangeRef(prefix + std::string(endpointLength - prefix.size(), 'a'),
+		                                           prefix + std::string(endpointLength - prefix.size(), 'z')));
+	}
+	normalizeNativeCdcStreamRanges("orders"_sr, maximumCount);
+	ASSERT_EQ(maximumCount.size(), NATIVE_CDC_MAX_RANGES);
+	ASSERT_LE(2 * NATIVE_CDC_MAX_RANGES * endpointLength, CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+	ASSERT_GT(cdcStreamKeysValue(oversizedMetadata).size(), CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+	expectInvalid("orders"_sr, oversizedMetadata);
+	const std::string oversizedBegin(CLIENT_KNOBS->VALUE_SIZE_LIMIT, 'a');
+	const std::string oversizedEnd(CLIENT_KNOBS->VALUE_SIZE_LIMIT, 'b');
+	expectInvalid("orders"_sr, { KeyRangeRef(oversizedBegin, oversizedEnd) });
+	return Void();
 }
 
 TEST_CASE("/NativeCDC/LifecycleAllocation") {

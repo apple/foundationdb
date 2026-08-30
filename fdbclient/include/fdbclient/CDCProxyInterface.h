@@ -72,17 +72,17 @@ struct CDCRegisterStreamReply {
 struct CDCRegisterStreamRequest {
 	constexpr static FileIdentifier file_identifier = 1269096;
 	Key name;
-	KeyRange keys;
+	std::vector<KeyRange> ranges;
 	ReplyPromise<CDCRegisterStreamReply> reply;
 
 	CDCRegisterStreamRequest() = default;
-	CDCRegisterStreamRequest(Key name, KeyRange keys) : name(name), keys(keys) {}
+	CDCRegisterStreamRequest(Key name, std::vector<KeyRange> ranges) : name(name), ranges(std::move(ranges)) {}
 
 	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, name, keys, reply);
+		serializer(ar, name, ranges, reply);
 	}
 };
 

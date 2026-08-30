@@ -586,7 +586,10 @@ select API version 800 or later before calling these functions.
 .. type:: FDBCdcStreamInfo
 
    A listed CDC stream, including its name, stable stream ID, registered
-   key range, and durable minimum required version.
+   key ranges, and durable minimum required version. ``ranges`` points to
+   ``range_count`` sorted, non-empty, disjoint ranges; overlapping and adjacent
+   registered ranges are merged. The array and its key bytes have the same
+   lifetime as the stream-info result.
 
 .. type:: FDBCdcMutation
 
@@ -605,11 +608,21 @@ select API version 800 or later before calling these functions.
    remains valid after the originating future is destroyed. Destroy it exactly
    once with :func:`fdb_cdc_consumer_destroy()`.
 
-.. function:: FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* database, uint8_t const* name, int name_length, uint8_t const* begin_key, int begin_key_length, uint8_t const* end_key, int end_key_length)
+.. function:: FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* database, uint8_t const* name, int name_length, FDBKeyRange const* ranges, int range_count)
 
-   Registers ``name`` for the non-empty half-open range ``[begin_key,
-   end_key)`` in normal user key space. Repeating the same name and range is
-   idempotent; reusing a name with a different range fails. The future returns
+   Registers ``name`` for the union of ``range_count`` non-empty half-open
+   ranges in normal user key space. The input must contain between 1 and 1024
+   ranges. Ranges may arrive in any order; overlapping, duplicate, and adjacent
+   ranges are merged. The encoded canonical range set must fit within the
+   database value-size limit. Mutations in gaps between the resulting ranges are
+   excluded, and clear-range mutations are clipped to each intersecting range.
+
+   A stream's range set is immutable. Repeating the same name and equivalent
+   range union is idempotent; reusing a name with a different union fails.
+   All ranges share one consumer cursor and acknowledgement position.
+   The range array, key bytes, and name bytes are copied before this function
+   returns. Invalid counts, negative lengths, null required pointers, or invalid
+   ranges return a future with ``client_invalid_operation``. The future returns
    the ``uint64_t`` stream ID, extracted with :func:`fdb_future_get_uint64()`.
 
 .. function:: FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* database, uint8_t const* name, int name_length)

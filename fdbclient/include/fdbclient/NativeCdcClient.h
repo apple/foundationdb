@@ -31,10 +31,12 @@
 // Native CDC value types shared by thread-safe client surfaces and language
 // bindings. Keep this header independent from NativeAPI so multi-version
 // client plumbing does not depend on the native client implementation.
+constexpr int NATIVE_CDC_MAX_RANGES = 1024;
+
 struct NativeCdcStreamInfo {
 	Key name;
 	CDCStreamId streamId = 0;
-	KeyRange keys;
+	std::vector<KeyRange> ranges;
 	Version minVersion = invalidVersion;
 };
 

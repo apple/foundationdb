@@ -52,7 +52,7 @@ namespace {
 
 // Snapshot from one durable metadata read, used while initializing or validating one stream.
 struct CDCStreamReadState {
-	Optional<KeyRange> keys;
+	Optional<std::vector<KeyRange>> ranges;
 	Version minVersion = invalidVersion;
 	Version readVersion = invalidVersion;
 	// Each Version is the inclusive lower bound for log versions routed to its paired tag; the next entry's
@@ -74,7 +74,7 @@ struct CDCTagInterval {
 // Proxy-owned state for one assigned stream. In-flight actors may retain it after active becomes false.
 struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	CDCStreamId streamId;
-	Optional<KeyRange> keys;
+	Optional<std::vector<KeyRange>> ranges;
 	bool active = true;
 	bool initialized = false;
 	bool initializationPausedForTesting = false;
@@ -416,26 +416,32 @@ public:
 	Future<Void> run(CDCProxyInterface proxy, uint64_t recoveryCount);
 };
 
-Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef const& keys) {
+template <class Visitor>
+void visitClippedCDCMutations(MutationRef const& mutation, std::vector<KeyRange> const& ranges, Visitor&& visitor) {
+	// Canonical stream ranges are ordered and disjoint, so their ends are strictly increasing.
+	auto range = std::upper_bound(ranges.begin(), ranges.end(), mutation.param1, [](KeyRef key, KeyRange const& range) {
+		return key < range.end;
+	});
 	if (isSingleKeyMutation((MutationRef::Type)mutation.type)) {
-		if (keys.contains(mutation.param1)) {
-			return mutation;
+		if (range != ranges.end() && range->contains(mutation.param1)) {
+			visitor(mutation);
 		}
 	} else if (mutation.type == MutationRef::ClearRange) {
-		KeyRangeRef intersection = keys & KeyRangeRef(mutation.param1, mutation.param2);
-		if (!intersection.empty()) {
-			return MutationRef(MutationRef::ClearRange, intersection.begin, intersection.end);
+		for (; range != ranges.end() && range->begin < mutation.param2; ++range) {
+			const KeyRangeRef intersection = *range & KeyRangeRef(mutation.param1, mutation.param2);
+			if (!intersection.empty()) {
+				visitor(MutationRef(MutationRef::ClearRange, intersection.begin, intersection.end));
+			}
 		}
 	} else {
 		ASSERT(false);
 	}
-	return Optional<MutationRef>();
 }
 
 Future<CDCStreamReadState> readCDCStreamState(Database cx,
                                               CDCStreamId streamId,
                                               UID expectedProxyId,
-                                              bool requireKeys) {
+                                              bool requireRanges) {
 	if (streamId == 0) {
 		throw client_invalid_operation();
 	}
@@ -447,17 +453,17 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
-			Future<Optional<Value>> keysFuture = tr.get(cdcStreamKeyFor(streamId));
+			Future<Optional<Value>> rangesFuture = tr.get(cdcStreamKeyFor(streamId));
 			Future<Optional<Value>> minVersionFuture = tr.get(cdcMinVersionKeyFor(streamId));
 			Future<RangeResult> assignedProxiesFuture = tr.getRange(cdcProxyRangeFor(streamId), 2);
 			KeyRange tagHistoryRange = cdcTagHistoryRangeFor(streamId);
 			Future<RangeResult> historyFuture = tr.getRange(tagHistoryRange, CLIENT_KNOBS->TOO_MANY);
 
 			CDCStreamReadState result;
-			Optional<Value> keysValue = co_await keysFuture;
-			if (keysValue.present()) {
-				result.keys = decodeCDCStreamKeysValue(keysValue.get());
-			} else if (requireKeys) {
+			Optional<Value> rangesValue = co_await rangesFuture;
+			if (rangesValue.present()) {
+				result.ranges = decodeCDCStreamKeysValue(rangesValue.get());
+			} else if (requireRanges) {
 				throw client_invalid_operation();
 			}
 
@@ -842,7 +848,7 @@ void CDCProxy::visitBufferedMutations(Reference<CDCBufferedTag> tag,
 				}
 				auto stream = streams.find(streamId);
 				if (stream == streams.end() || !stream->second->active || stream->second->readDemand == 0 ||
-				    !stream->second->keys.present()) {
+				    !stream->second->ranges.present()) {
 					continue;
 				}
 				const bool coversVersion =
@@ -855,10 +861,9 @@ void CDCProxy::visitBufferedMutations(Reference<CDCBufferedTag> tag,
 				if (!coversVersion) {
 					continue;
 				}
-				Optional<MutationRef> clipped = clipCDCMutation(mutation, stream->second->keys.get());
-				if (clipped.present()) {
-					visitor(stream->second, messageVersion, clipped.get());
-				}
+				visitClippedCDCMutations(mutation, stream->second->ranges.get(), [&](MutationRef const& clipped) {
+					visitor(stream->second, messageVersion, clipped);
+				});
 			}
 		}
 		cursor->nextMessage();
@@ -1172,7 +1177,7 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 			CODE_PROBE(true, "CDC proxy discards stale stream initialization");
 			co_return;
 		}
-		stream->keys = metadata.keys;
+		stream->ranges = metadata.ranges;
 		stream->minVersion = metadata.minVersion;
 		stream->bufferedThrough = metadata.minVersion - 1;
 		for (size_t i = 0; i < metadata.tagAssignments.size(); ++i) {
@@ -1629,7 +1634,7 @@ Future<Void> CDCProxy::acknowledge(CDCAckRequest request) {
 
 Future<Void> CDCProxy::registerStream(CDCRegisterStreamRequest request) {
 	try {
-		const CDCStreamId streamId = co_await registerNativeCdcStream(cx, request.name, request.keys, id);
+		const CDCStreamId streamId = co_await registerNativeCdcStream(cx, request.name, request.ranges, id);
 		request.reply.send(CDCRegisterStreamReply(streamId));
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -1887,23 +1892,83 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 }
 
 TEST_CASE("/NativeCDC/ProxyMutationFiltering") {
-	const KeyRangeRef keys("c"_sr, "m"_sr);
+	const std::vector<KeyRange> ranges{ KeyRangeRef("c"_sr, "m"_sr), KeyRangeRef("q"_sr, "t"_sr) };
+	std::vector<MutationRef> filtered;
+	auto collect = [&filtered](MutationRef const& mutation) { filtered.push_back(mutation); };
 
-	Optional<MutationRef> inRange = clipCDCMutation(MutationRef(MutationRef::SetValue, "d"_sr, "value"_sr), keys);
-	ASSERT(inRange.present());
-	ASSERT_EQ(inRange.get().param1, "d"_sr);
+	for (const KeyRef key : { "c"_sr, "d"_sr, "q"_sr, "s"_sr }) {
+		filtered.clear();
+		visitClippedCDCMutations(MutationRef(MutationRef::SetValue, key, "value"_sr), ranges, collect);
+		ASSERT_EQ(filtered.size(), 1);
+		ASSERT_EQ(filtered.front().param1, key);
+	}
+	for (const KeyRef key : { "a"_sr, "m"_sr, "n"_sr, "t"_sr, "z"_sr }) {
+		filtered.clear();
+		visitClippedCDCMutations(MutationRef(MutationRef::SetValue, key, "value"_sr), ranges, collect);
+		ASSERT(filtered.empty());
+	}
 
-	Optional<MutationRef> outOfRange = clipCDCMutation(MutationRef(MutationRef::SetValue, "z"_sr, "value"_sr), keys);
-	ASSERT(!outOfRange.present());
+	visitClippedCDCMutations(MutationRef(MutationRef::ClearRange, "a"_sr, "r"_sr), ranges, collect);
+	ASSERT_EQ(filtered.size(), 2);
+	ASSERT_EQ(filtered[0].param1, "c"_sr);
+	ASSERT_EQ(filtered[0].param2, "m"_sr);
+	ASSERT_EQ(filtered[1].param1, "q"_sr);
+	ASSERT_EQ(filtered[1].param2, "r"_sr);
 
-	Optional<MutationRef> clippedClear = clipCDCMutation(MutationRef(MutationRef::ClearRange, "a"_sr, "f"_sr), keys);
-	ASSERT(clippedClear.present());
-	ASSERT_EQ(clippedClear.get().param1, "c"_sr);
-	ASSERT_EQ(clippedClear.get().param2, "f"_sr);
+	filtered.clear();
+	visitClippedCDCMutations(MutationRef(MutationRef::ClearRange, "l"_sr, "z"_sr), ranges, collect);
+	ASSERT_EQ(filtered.size(), 2);
+	ASSERT_EQ(filtered[0].param1, "l"_sr);
+	ASSERT_EQ(filtered[0].param2, "m"_sr);
+	ASSERT_EQ(filtered[1].param1, "q"_sr);
+	ASSERT_EQ(filtered[1].param2, "t"_sr);
 
-	Optional<MutationRef> excludedClear = clipCDCMutation(MutationRef(MutationRef::ClearRange, "n"_sr, "z"_sr), keys);
-	ASSERT(!excludedClear.present());
+	filtered.clear();
+	visitClippedCDCMutations(MutationRef(MutationRef::ClearRange, "m"_sr, "q"_sr), ranges, collect);
+	visitClippedCDCMutations(MutationRef(MutationRef::ClearRange, "d"_sr, "d"_sr), ranges, collect);
+	visitClippedCDCMutations(MutationRef(MutationRef::ClearRange, "t"_sr, "z"_sr), ranges, collect);
+	ASSERT(filtered.empty());
 
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ProxyMutationFiltering/MultiRangeBatch") {
+	const std::vector<KeyRange> ranges{ KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("x"_sr, "z"_sr) };
+	auto stream = makeReference<CDCBufferedStream>(1);
+	CDCBufferedBatch batch;
+	const std::vector<MutationRef> input{ MutationRef(MutationRef::SetValue, "b"_sr, "before"_sr),
+		                                  MutationRef(MutationRef::ClearRange, "b"_sr, "y"_sr),
+		                                  MutationRef(MutationRef::SetValue, "x"_sr, "after"_sr),
+		                                  MutationRef(MutationRef::SetValue, "m"_sr, "gap"_sr) };
+	for (const auto& mutation : input) {
+		visitClippedCDCMutations(
+		    mutation, ranges, [&](MutationRef const& clipped) { addMutationToBatch(stream, &batch, 100, clipped); });
+	}
+	ASSERT_EQ(batch.mutations.size(), 1);
+	const auto& versioned = batch.mutations.front();
+	ASSERT_EQ(versioned.version, 100);
+	ASSERT_EQ(versioned.mutations.size(), 4);
+	const std::vector<MutationRef> expected{ input[0],
+		                                     MutationRef(MutationRef::ClearRange, "b"_sr, "c"_sr),
+		                                     MutationRef(MutationRef::ClearRange, "x"_sr, "y"_sr),
+		                                     input[2] };
+	int64_t expectedBytes = sizeof(VersionedMutationsRef);
+	for (int i = 0; i < versioned.mutations.size(); ++i) {
+		ASSERT_EQ(versioned.mutations[i].type, expected[i].type);
+		ASSERT_EQ(versioned.mutations[i].param1, expected[i].param1);
+		ASSERT_EQ(versioned.mutations[i].param2, expected[i].param2);
+		expectedBytes += expected[i].expectedSize() + sizeof(MutationRef);
+	}
+	ASSERT_EQ(batch.bufferedBytes, expectedBytes);
+
+	const int64_t versionBytes = estimatedCDCConsumeVersionBytes(versioned);
+	CDCConsumeReplySelection tooSmall;
+	ASSERT(!selectCDCConsumeReplyVersion(&tooSmall, 100, 100, versionBytes, versionBytes - 1));
+	ASSERT(tooSmall.firstVersionTooLarge);
+	ASSERT_EQ(selectedCDCConsumeReplyThrough(tooSmall, 100), 99);
+	CDCConsumeReplySelection exactFit;
+	ASSERT(selectCDCConsumeReplyVersion(&exactFit, 100, 100, versionBytes, versionBytes));
+	ASSERT_EQ(selectedCDCConsumeReplyThrough(exactFit, 100), 100);
 	return Void();
 }
 
