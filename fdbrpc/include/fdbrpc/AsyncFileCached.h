@@ -164,7 +164,7 @@ public:
 			length = int(this->length - offset);
 			ASSERT(length >= 0);
 		}
-		auto f = read_write_impl<false>(this, static_cast<uint8_t*>(data), length, offset);
+		auto f = read_write_impl<false>(static_cast<uint8_t*>(data), length, offset);
 		if (f.isReady() && !f.isError())
 			return length;
 		++countFileCacheReadsBlocked;
@@ -172,48 +172,41 @@ public:
 		return tag(f, length);
 	}
 
-	static Future<Void> write_impl(AsyncFileCached* self, void const* data, int length, int64_t offset) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		// If there is a truncate in progress before the the write position then we must
 		// wait for it to complete.
-		if (length + offset > self->currentTruncateSize) {
-			Future<Void> currentTruncate = self->currentTruncate;
+		if (length + offset > currentTruncateSize) {
+			Future<Void> currentTruncate = this->currentTruncate;
 			co_await currentTruncate;
 		}
-		++self->countFileCacheWrites;
-		++self->countCacheWrites;
-		Future<Void> f = read_write_impl<true>(self, static_cast<const uint8_t*>(data), length, offset);
+		++countFileCacheWrites;
+		++countCacheWrites;
+		Future<Void> f = read_write_impl<true>(static_cast<const uint8_t*>(data), length, offset);
 		if (!f.isReady()) {
-			++self->countFileCacheWritesBlocked;
-			++self->countCacheWritesBlocked;
+			++countFileCacheWritesBlocked;
+			++countCacheWritesBlocked;
 		}
 		co_await f;
-	}
-
-	Future<Void> write(void const* data, int length, int64_t offset) override {
-		return write_impl(this, data, length, offset);
 	}
 
 	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override;
 	void releaseZeroCopy(void* data, int length, int64_t offset) override;
 
-	// This waits for previously started truncates to finish and then truncates
-	Future<Void> truncate(int64_t size) override { return truncate_impl(this, size); }
+	// This wrapper for the actual truncation operation enforces ordering of truncates.
+	// It maintains currentTruncate and currentTruncateSize so writers can wait behind truncates that would affect them.
+	Future<Void> truncate(int64_t size) override {
+		Future<Void> previousTruncate = currentTruncate;
+		co_await previousTruncate;
+		currentTruncateSize = size;
+		currentTruncate = changeFileSize(size);
+		Future<Void> currentTruncate = this->currentTruncate;
+		co_await currentTruncate;
+	}
 
 	// This is the 'real' truncate that does the actual removal of cache blocks and then shortens the file
 	Future<Void> changeFileSize(int64_t size);
 
-	// This wrapper for the actual truncation operation enforces ordering of truncates.
-	// It maintains currentTruncate and currentTruncateSize so writers can wait behind truncates that would affect them.
-	static Future<Void> truncate_impl(AsyncFileCached* self, int64_t size) {
-		Future<Void> previousTruncate = self->currentTruncate;
-		co_await previousTruncate;
-		self->currentTruncateSize = size;
-		self->currentTruncate = self->changeFileSize(size);
-		Future<Void> currentTruncate = self->currentTruncate;
-		co_await currentTruncate;
-	}
-
-	Future<Void> sync() override { return waitAndSync(this, flush()); }
+	Future<Void> sync() override { return waitAndSync(flush()); }
 
 	Future<int64_t> size() const override { return length; }
 
@@ -353,16 +346,15 @@ private:
 
 	Future<Void> quiesce();
 
-	static Future<Void> waitAndSync(AsyncFileCached* self, Future<Void> flush) {
+	Future<Void> waitAndSync(Future<Void> flush) {
 		co_await flush;
-		co_await self->uncached->sync();
+		co_await uncached->sync();
 	}
 
 	template <bool writing>
-	static Future<Void> read_write_impl(AsyncFileCached* self,
-	                                    typename std::conditional_t<writing, const uint8_t*, uint8_t*> data,
-	                                    int length,
-	                                    int64_t offset);
+	Future<Void> read_write_impl(typename std::conditional_t<writing, const uint8_t*, uint8_t*> data,
+	                             int length,
+	                             int64_t offset);
 
 	void remove_page(AFCPage* page);
 };
