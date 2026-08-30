@@ -827,12 +827,12 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveEnd", dataMoveId).detail("Range", keys);
 }
 
-Future<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
-                                                  std::vector<StorageServerInterface> srcInterfs,
-                                                  std::vector<StorageServerInterface> destInterfs,
-                                                  Version version,
-                                                  int desiredHealthy,
-                                                  int maxServers) {
+AsyncResult<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
+                                                       std::vector<StorageServerInterface> srcInterfs,
+                                                       std::vector<StorageServerInterface> destInterfs,
+                                                       Version version,
+                                                       int desiredHealthy,
+                                                       int maxServers) {
 	if (srcInterfs.size() >= maxServers) {
 		co_return std::vector<UID>();
 	}
@@ -920,10 +920,10 @@ Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector<UID> 
 	co_return result;
 }
 
-Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards,
-                                                        Reference<ReadYourWritesTransaction> tr,
-                                                        int desiredHealthy,
-                                                        int maxServers) {
+AsyncResult<std::vector<std::vector<UID>>> additionalSources(RangeResult shards,
+                                                             Reference<ReadYourWritesTransaction> tr,
+                                                             int desiredHealthy,
+                                                             int maxServers) {
 	RangeResult UIDtoTagMap = co_await tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 	std::vector<Future<Optional<Value>>> serverListEntries;
@@ -957,7 +957,7 @@ Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards,
 		ssiMap[ssi.id()] = ssi;
 	}
 
-	std::vector<Future<std::vector<UID>>> allChecks;
+	std::vector<AsyncResult<std::vector<UID>>> allChecks;
 	for (int i = 0; i < shards.size() - 1; ++i) {
 		KeyRangeRef rangeIntersectKeys(shards[i].key, shards[i + 1].key);
 		std::vector<UID> src;
@@ -982,7 +982,7 @@ Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards,
 		    rangeIntersectKeys, srcInterfs, destInterfs, tr->getReadVersion().get(), desiredHealthy, maxServers));
 	}
 
-	std::vector<std::vector<UID>> result = co_await getAll(allChecks);
+	std::vector<std::vector<UID>> result = co_await getAllAsync(std::move(allChecks));
 	co_return result;
 }
 

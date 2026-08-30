@@ -559,7 +559,7 @@ Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
 // Gets checkpoint metadata for `ranges` at the specific version, with the particular format.
 // Returns a list of [range, checkpoint], where the `checkpoint` has data over `range`.
 // checkpoint_not_found() error will be returned if the specific checkpoint cannot be found.
-Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
+AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
     Database cx,
     std::vector<KeyRange> ranges,
     Version version,
