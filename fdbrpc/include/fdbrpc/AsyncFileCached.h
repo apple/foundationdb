@@ -410,18 +410,18 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 		// If data is not valid but no read is in progress, start reading
 		if (notReading.isReady()) {
-			notReading = readThrough(this);
+			notReading = readThrough();
 		}
 
-		notReading = waitAndWrite(this, data, length, offset);
+		notReading = waitAndWrite(data, length, offset);
 
 		return notReading;
 	}
 
-	static Future<Void> waitAndWrite(AFCPage* self, void const* data, int length, int offset) {
-		Future<Void> notReading = self->notReading;
+	Future<Void> waitAndWrite(void const* data, int length, int offset) {
+		Future<Void> notReading = this->notReading;
 		co_await notReading;
-		memcpy(static_cast<uint8_t*>(self->data) + offset, data, length);
+		memcpy(static_cast<uint8_t*>(this->data) + offset, data, length);
 	}
 
 	Future<Void> readZeroCopy() {
@@ -436,7 +436,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		++owner->countCachePageReadsMissed;
 
 		if (notReading.isReady()) {
-			notReading = readThrough(this);
+			notReading = readThrough();
 		} else {
 			++owner->countFileCachePageReadsMerged;
 			++owner->countCachePageReadsMerged;
@@ -463,94 +463,94 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		++owner->countCachePageReadsMissed;
 
 		if (notReading.isReady()) {
-			notReading = readThrough(this);
+			notReading = readThrough();
 		} else {
 			++owner->countFileCachePageReadsMerged;
 			++owner->countCachePageReadsMerged;
 		}
 
-		notReading = waitAndRead(this, data, length, offset);
+		notReading = waitAndRead(data, length, offset);
 
 		return notReading;
 	}
 
-	static Future<Void> waitAndRead(AFCPage* self, void* data, int length, int offset) {
-		Future<Void> notReading = self->notReading;
+	Future<Void> waitAndRead(void* data, int length, int offset) {
+		Future<Void> notReading = this->notReading;
 		co_await notReading;
-		memcpy(data, static_cast<uint8_t const*>(self->data) + offset, length);
+		memcpy(data, static_cast<uint8_t const*>(this->data) + offset, length);
 	}
 
-	static Future<Void> readThrough(AFCPage* self) {
-		ASSERT(!self->valid);
-		void* dst = self->data;
-		if (self->pageOffset < self->owner->prevLength) {
+	Future<Void> readThrough() {
+		ASSERT(!valid);
+		void* dst = data;
+		if (pageOffset < owner->prevLength) {
 			try {
-				int _ = co_await self->owner->uncached->read(dst, self->pageCache->pageSize, self->pageOffset);
-				if (_ != self->pageCache->pageSize) {
+				int _ = co_await owner->uncached->read(dst, pageCache->pageSize, pageOffset);
+				if (_ != pageCache->pageSize) {
 					TraceEvent("ReadThroughShortRead")
 					    .detail("ReadAmount", _)
-					    .detail("PageSize", self->pageCache->pageSize)
-					    .detail("PageOffset", self->pageOffset);
+					    .detail("PageSize", pageCache->pageSize)
+					    .detail("PageOffset", pageOffset);
 				}
 			} catch (Error& e) {
-				self->zeroCopyRefCount = 0;
+				zeroCopyRefCount = 0;
 				TraceEvent("ReadThroughFailed").error(e);
 				throw;
 			}
 		}
 		// If the memory we read into wasn't orphaned while we were waiting on the read then set valid to true
-		if (dst == self->data)
-			self->valid = true;
+		if (dst == data)
+			valid = true;
 	}
 
-	static Future<Void> writeThrough(AFCPage* self, Promise<Void> writing) {
+	Future<Void> writeThrough(Promise<Void> writing) {
 		// writeThrough can be called on a page that is not dirty, just to wait for a previous writeThrough to finish.
 		// In that case we don't want to do any disk I/O
 		try {
-			bool dirty = self->dirty;
-			++self->writeThroughCount;
-			self->updateFlushableIndex();
+			bool dirty = this->dirty;
+			++writeThroughCount;
+			updateFlushableIndex();
 
-			Future<Void> readyToWrite = self->notReading && self->notFlushing;
+			Future<Void> readyToWrite = notReading && notFlushing;
 			co_await readyToWrite;
 
 			if (dirty) {
 				// Wait for rate control if it is set
-				if (self->owner->getRateControl()) {
+				if (owner->getRateControl()) {
 					int allowance = 1;
 					// If I/O size is defined, wait for the calculated I/O quota
 					if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE > 0) {
-						allowance = (self->pageCache->pageSize + FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE - 1) /
+						allowance = (pageCache->pageSize + FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE - 1) /
 						            FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE; // round up
 						ASSERT(allowance > 0);
 					}
-					co_await self->owner->getRateControl()->getAllowance(allowance);
+					co_await owner->getRateControl()->getAllowance(allowance);
 				}
 
-				if (self->pageOffset + self->pageCache->pageSize > self->owner->length) {
-					ASSERT(self->pageOffset < self->owner->length);
-					memset(static_cast<uint8_t*>(self->data) + self->owner->length - self->pageOffset,
+				if (pageOffset + pageCache->pageSize > owner->length) {
+					ASSERT(pageOffset < owner->length);
+					memset(static_cast<uint8_t*>(data) + owner->length - pageOffset,
 					       0,
-					       self->pageCache->pageSize - (self->owner->length - self->pageOffset));
+					       pageCache->pageSize - (owner->length - pageOffset));
 				}
 
-				auto f = self->owner->uncached->write(self->data, self->pageCache->pageSize, self->pageOffset);
+				auto f = owner->uncached->write(data, pageCache->pageSize, pageOffset);
 
 				co_await f;
 			}
 		} catch (Error& e) {
-			--self->writeThroughCount;
-			self->setDirty();
+			--writeThroughCount;
+			setDirty();
 			writing.sendError(e);
 			throw;
 		}
-		--self->writeThroughCount;
-		self->updateFlushableIndex();
+		--writeThroughCount;
+		updateFlushableIndex();
 
 		writing.send(Void()); // FIXME: This could happen before the wait if AsyncFileKAIO dealt properly with
 		                      // overlapping write and sync operations
 
-		self->pageCache->try_evict();
+		pageCache->try_evict();
 	}
 
 	Future<Void> flush() {
@@ -561,7 +561,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 		Promise<Void> writing;
 
-		notFlushing = writeThrough(this, writing);
+		notFlushing = writeThrough(writing);
 
 		clearDirty(); // Do this last so that if writeThrough immediately calls try_evict, we can't be evicted before
 		              // assigning notFlushing
@@ -590,13 +590,13 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		if (zeroCopyRefCount != 0)
 			orphan();
 		truncated = true;
-		return truncate_impl(this);
+		return truncate_impl();
 	}
 
-	static Future<Void> truncate_impl(AFCPage* self) {
-		Future<Void> readyToTruncate = self->notReading && self->notFlushing && yield();
+	Future<Void> truncate_impl() {
+		Future<Void> readyToTruncate = notReading && notFlushing && yield();
 		co_await readyToTruncate;
-		delete self;
+		delete this;
 	}
 
 	AFCPage(AsyncFileCached* owner, int64_t offset)
