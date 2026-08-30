@@ -10303,7 +10303,9 @@ TEST_CASE("Lredwood/correctness/seekExactKey") {
 	          Optional<Value>(StringRef(format("value-%04d-%s", 150, std::string(512, 'v').c_str()))));
 	ASSERT_EQ(emptyValue, Optional<Value>(""_sr));
 
-	kvStore = keyValueStoreRedwoodV1(kvFile, UID(), {}, 65536);
+	// Keep the large leaf, its ancestors, and pager metadata cached even with buggified page sizes.
+	// The earlier reads exercise eviction with a small cache; this phase requires a cache hit.
+	kvStore = keyValueStoreRedwoodV1(kvFile, UID(), {}, FLOW_KNOBS->PAGE_CACHE_4K);
 	co_await kvStore->init();
 	unsigned int cacheHitsBefore = g_redwoodMetrics.metric.pagerCacheHit;
 	co_await checkExactKVStoreKey(kvStore, largeKey.toString(), largeValue.toString());
