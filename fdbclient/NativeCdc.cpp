@@ -120,7 +120,8 @@ void normalizeNativeCdcStreamRanges(KeyRef const& name, std::vector<KeyRange>& r
 
 	int64_t keyBytes = 0;
 	for (const auto& range : ranges) {
-		keyBytes += static_cast<int64_t>(range.begin.size()) + range.end.size();
+		// Single-key ranges serialize only the end key, so count the encoded payload before allocating metadata.
+		keyBytes += static_cast<int64_t>(range.end.size()) + (range.singleKeyRange() ? 0 : range.begin.size());
 	}
 	if (keyBytes > CLIENT_KNOBS->VALUE_SIZE_LIMIT ||
 	    cdcStreamKeysValue(ranges).size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
@@ -927,6 +928,24 @@ TEST_CASE("/NativeCDC/RangeNormalization") {
 	std::vector<KeyRange> entireKeyspace{ normalKeys };
 	normalizeNativeCdcStreamRanges("all"_sr, entireKeyspace);
 	ASSERT(entireKeyspace == std::vector<KeyRange>{ normalKeys });
+
+	constexpr int singletonCount = 10;
+	const int keyLength = CLIENT_KNOBS->VALUE_SIZE_LIMIT / (2 * singletonCount) + 1;
+	ASSERT_LT(keyLength, CLIENT_KNOBS->KEY_SIZE_LIMIT);
+	std::vector<KeyRange> singletonRanges;
+	int64_t endpointBytes = 0;
+	for (int i = 0; i < singletonCount; ++i) {
+		const std::string prefix = format("%04d/", i);
+		ASSERT_GT(keyLength, prefix.size());
+		const Key key(StringRef(prefix + std::string(keyLength - prefix.size(), 'x')));
+		singletonRanges.push_back(singleKeyRange(key));
+		endpointBytes += static_cast<int64_t>(key.size()) + key.size() + 1;
+	}
+	ASSERT_GT(endpointBytes, CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+	ASSERT_LE(cdcStreamKeysValue(singletonRanges).size(), CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+	const auto expectedSingletons = singletonRanges;
+	normalizeNativeCdcStreamRanges("singletons"_sr, singletonRanges);
+	ASSERT(singletonRanges == expectedSingletons);
 	return Void();
 }
 
