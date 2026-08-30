@@ -618,44 +618,40 @@ public:
 	}
 
 	// Open and loads file into memory
-	Future<Void> openFile(Reference<IBackupContainer> container) { return openFileImpl(this, container); }
+	Future<Void> openFile(Reference<IBackupContainer> container) {
+		TraceEvent("ReadFile").detail("Name", file.fileName).detail("Len", file.fileSize);
 
-	static Future<Void> openFileImpl(DecodeRangeProgress* self, Reference<IBackupContainer> container) {
-		TraceEvent("ReadFile").detail("Name", self->file.fileName).detail("Len", self->file.fileSize);
-
-		self->fd = co_await container->readFile(self->file.fileName);
-		Standalone<StringRef> buf = makeString(self->file.fileSize);
-		int rLen = co_await self->fd->read(mutateString(buf), self->file.fileSize, 0);
-		if (rLen != self->file.fileSize) {
+		fd = co_await container->readFile(file.fileName);
+		Standalone<StringRef> buf = makeString(file.fileSize);
+		int rLen = co_await fd->read(mutateString(buf), file.fileSize, 0);
+		if (rLen != file.fileSize) {
 			throw restore_bad_read();
 		}
 
-		if (self->save) {
-			std::string dir = self->file.fileName;
-			std::size_t found = self->file.fileName.find_last_of('/');
+		if (save) {
+			std::string dir = file.fileName;
+			std::size_t found = file.fileName.find_last_of('/');
 			if (found != std::string::npos) {
-				std::string path = self->file.fileName.substr(0, found);
+				std::string path = file.fileName.substr(0, found);
 				if (!directoryExists(path)) {
 					platform::createDirectory(path);
 				}
 			}
 
-			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-			if (self->lfd == -1) {
-				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
+			lfd = open(file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+			if (lfd == -1) {
+				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", file.fileName);
 				throw platform_error();
 			}
-			int wlen = write(self->lfd, buf.begin(), self->file.fileSize);
-			if (wlen != self->file.fileSize) {
-				TraceEvent(SevError, "WriteLocalFileFailed")
-				    .detail("File", self->file.fileName)
-				    .detail("Len", self->file.fileSize);
+			int wlen = write(lfd, buf.begin(), file.fileSize);
+			if (wlen != file.fileSize) {
+				TraceEvent(SevError, "WriteLocalFileFailed").detail("File", file.fileName).detail("Len", file.fileSize);
 				throw platform_error();
 			}
-			TraceEvent("WriteLocalFile").detail("Name", self->file.fileName).detail("Len", self->file.fileSize);
+			TraceEvent("WriteLocalFile").detail("Name", file.fileName).detail("Len", file.fileSize);
 		}
 
-		self->decodeFile(buf);
+		decodeFile(buf);
 	}
 
 	// Reads a file content in the buffer, decodes it into key/value pairs, and stores these pairs.
