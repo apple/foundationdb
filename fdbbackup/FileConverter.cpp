@@ -274,28 +274,26 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 	// Requires hasMutations() return true before calling this function.
 	// The caller must hold on the the arena associated with the mutation.
-	Future<VersionedData> getNextMutation() { return getMutationImpl(this); }
+	Future<VersionedData> getNextMutation() {
+		ASSERT(!fileProgress.empty() && !fileProgress[0]->mutations.empty());
 
-	static Future<VersionedData> getMutationImpl(MutationFilesReadProgress* self) {
-		ASSERT(!self->fileProgress.empty() && !self->fileProgress[0]->mutations.empty());
-
-		Reference<FileProgress> fp = self->fileProgress[0];
+		Reference<FileProgress> fp = fileProgress[0];
 		VersionedData data = fp->mutations[0];
 		fp->mutations.erase(fp->mutations.begin());
 		if (fp->mutations.empty()) {
 			// decode one more block
-			co_await decodeToVersion(fp, /*version=*/0, self->endVersion, self->getLogFile(fp->idx));
+			co_await decodeToVersion(fp, /*version=*/0, endVersion, getLogFile(fp->idx));
 		}
 
 		if (fp->empty()) {
-			self->fileProgress.erase(self->fileProgress.begin());
+			fileProgress.erase(fileProgress.begin());
 		} else {
 			// Keep fileProgress sorted
-			for (int i = 1; i < self->fileProgress.size(); i++) {
-				if (*self->fileProgress[i - 1] <= *self->fileProgress[i]) {
+			for (int i = 1; i < fileProgress.size(); i++) {
+				if (*fileProgress[i - 1] <= *fileProgress[i]) {
 					break;
 				}
-				std::swap(self->fileProgress[i - 1], self->fileProgress[i]);
+				std::swap(fileProgress[i - 1], fileProgress[i]);
 			}
 		}
 		co_return data;
@@ -303,12 +301,10 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 	LogFile& getLogFile(int index) { return files[index]; }
 
-	Future<Void> openLogFiles(Reference<IBackupContainer> container) { return openLogFilesImpl(this, container); }
-
 	// Opens log files in the progress and starts decoding until the beginVersion is seen.
-	static Future<Void> openLogFilesImpl(MutationFilesReadProgress* progress, Reference<IBackupContainer> container) {
+	Future<Void> openLogFiles(Reference<IBackupContainer> container) {
 		std::vector<Future<Reference<IAsyncFile>>> asyncFiles;
-		for (const auto& file : progress->files) {
+		for (const auto& file : files) {
 			asyncFiles.push_back(container->readFile(file.fileName));
 		}
 		co_await waitForAll(asyncFiles); // open all files
@@ -317,14 +313,13 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		std::vector<Future<Void>> fileDecodes;
 		for (int i = 0; i < asyncFiles.size(); i++) {
 			auto fp = makeReference<FileProgress>(asyncFiles[i].get(), i);
-			progress->fileProgress.push_back(fp);
-			fileDecodes.push_back(
-			    decodeToVersion(fp, progress->beginVersion, progress->endVersion, progress->getLogFile(i)));
+			fileProgress.push_back(fp);
+			fileDecodes.push_back(decodeToVersion(fp, beginVersion, endVersion, getLogFile(i)));
 		}
 
 		co_await waitForAll(fileDecodes);
 
-		progress->sortAndRemoveEmpty();
+		sortAndRemoveEmpty();
 	}
 
 	// Decodes the file until EOF or an mutation >= minVersion and saves these mutations.
