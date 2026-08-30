@@ -277,7 +277,7 @@ std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 }
 
 std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err) {
-	std::string line = readFileBytes(filename, 64 * 1024 * 1024);
+	std::string line = readFileBytes(filename, size_t{ 64 } * 1024 * 1024);
 	return parsePrefixesLine(line, err);
 }
 
@@ -688,7 +688,7 @@ public:
 // convert a StringRef to Hex string
 std::string hexStringRef(const StringRef& s) {
 	std::string result;
-	result.reserve(s.size() * 2);
+	result.reserve(static_cast<size_t>(s.size()) * 2);
 	for (int i = 0; i < s.size(); i++) {
 		result.append(format("%02x", s[i]));
 	}
