@@ -255,9 +255,9 @@ struct MovableCoordinatedStateImpl {
 
 	explicit MovableCoordinatedStateImpl(ServerCoordinators const& c) : coordinators(c), cs(c) {}
 
-	static Future<Value> read(MovableCoordinatedStateImpl* self) {
+	Future<Value> read() {
 		MovableValue moveState;
-		Value rawValue = co_await self->cs.read();
+		Value rawValue = co_await cs.read();
 		if (!rawValue.empty()) {
 			BinaryReader r(rawValue, IncludeVersion());
 			if (!r.protocolVersion().hasMovableCoordinatedState()) {
@@ -272,8 +272,7 @@ struct MovableCoordinatedStateImpl {
 		if (moveState.mode == MovableValue::MaybeTo) {
 			CODE_PROBE(true, "Maybe moveto state");
 			ASSERT(moveState.other.present());
-			co_await moveTo(
-			    self, &self->cs, ClusterConnectionString(moveState.other.get().toString()), moveState.value);
+			co_await moveTo(&cs, ClusterConnectionString(moveState.other.get().toString()), moveState.value);
 		}
 		co_return moveState.value;
 	}
@@ -287,15 +286,15 @@ struct MovableCoordinatedStateImpl {
 		return cs.setExclusive(lastCSValue.get());
 	}
 
-	static Future<Void> move(MovableCoordinatedStateImpl* self, ClusterConnectionString nc) {
+	Future<Void> move(ClusterConnectionString nc) {
 		// Call only after setExclusive returns.  Attempts to move the coordinated state
 		// permanently to the new ServerCoordinators, which must be uninitialized.  Returns when the process has
 		// reached the point where a leader elected by the new coordinators should be doing the rest of the work
 		// (and therefore the caller should die).
-		CoordinatedState cs(self->coordinators);
+		CoordinatedState cs(coordinators);
 		CoordinatedState nccs(ServerCoordinators(makeReference<ClusterConnectionMemoryRecord>(nc)));
 		Future<Void> creationTimeout = delay(30);
-		ASSERT(self->lastValue.present() && self->lastCSValue.present());
+		ASSERT(lastValue.present() && lastCSValue.present());
 		TraceEvent("StartMove").detail("ConnectionString", nc.toString());
 		{
 			auto res = co_await race(creationTimeout, nccs.read());
@@ -309,12 +308,12 @@ struct MovableCoordinatedStateImpl {
 		TraceEvent("FinishedRead").detail("ConnectionString", nc.toString());
 
 		{
-			auto res = co_await race(creationTimeout,
-			                         nccs.setExclusive(BinaryWriter::toValue(
-			                             MovableValue(self->lastValue.get(),
-			                                          MovableValue::MovingFrom,
-			                                          self->coordinators.ccr->getConnectionString().toString()),
-			                             IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()))));
+			auto res = co_await race(
+			    creationTimeout,
+			    nccs.setExclusive(BinaryWriter::toValue(
+			        MovableValue(
+			            lastValue.get(), MovableValue::MovingFrom, coordinators.ccr->getConnectionString().toString()),
+			        IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()))));
 			if (res.index() == 0) {
 				throw new_coordinators_timed_out();
 			}
@@ -325,22 +324,19 @@ struct MovableCoordinatedStateImpl {
 			co_await delay(5);
 
 		Value oldQuorumState = co_await cs.read();
-		if (oldQuorumState != self->lastCSValue.get()) {
+		if (oldQuorumState != lastCSValue.get()) {
 			CODE_PROBE(
 			    true, "Quorum change aborted by concurrent write to old coordination state", probe::decoration::rare);
 			TraceEvent("QuorumChangeAbortedByConcurrency").log();
 			throw coordinated_state_conflict();
 		}
 
-		co_await moveTo(self, &cs, nc, self->lastValue.get());
+		co_await moveTo(&cs, nc, lastValue.get());
 
 		throw coordinators_changed();
 	}
 
-	static Future<Void> moveTo(MovableCoordinatedStateImpl* self,
-	                           CoordinatedState* coordinatedState,
-	                           ClusterConnectionString nc,
-	                           Value value) {
+	Future<Void> moveTo(CoordinatedState* coordinatedState, ClusterConnectionString nc, Value value) {
 		co_await coordinatedState->setExclusive(
 		    BinaryWriter::toValue(MovableValue(value, MovableValue::MaybeTo, nc.toString()),
 		                          IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2())));
@@ -351,7 +347,7 @@ struct MovableCoordinatedStateImpl {
 		// SOMEDAY: If we are worried about someone magically getting the new cluster ID and interfering, do a second
 		// cs.setExclusive( encode( ReallyTo, ... ) )
 		TraceEvent("ChangingQuorum").detail("ConnectionString", nc.toString());
-		co_await changeLeaderCoordinators(self->coordinators, StringRef(nc.toString()));
+		co_await changeLeaderCoordinators(coordinators, StringRef(nc.toString()));
 		TraceEvent("ChangedQuorum").detail("ConnectionString", nc.toString());
 		throw coordinators_changed();
 	}
@@ -362,7 +358,7 @@ MovableCoordinatedState::MovableCoordinatedState(class ServerCoordinators const&
   : impl(PImpl<MovableCoordinatedStateImpl>::create(coord)) {}
 MovableCoordinatedState::~MovableCoordinatedState() = default;
 Future<Value> MovableCoordinatedState::read() {
-	return MovableCoordinatedStateImpl::read(impl.get());
+	return impl->read();
 }
 Future<Void> MovableCoordinatedState::onConflict() {
 	return impl->onConflict();
@@ -371,7 +367,7 @@ Future<Void> MovableCoordinatedState::setExclusive(Value v) {
 	return impl->setExclusive(v);
 }
 Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
-	return MovableCoordinatedStateImpl::move(impl.get(), nc);
+	return impl->move(nc);
 }
 
 Optional<Value> updateCCSInMovableValue(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey) {
