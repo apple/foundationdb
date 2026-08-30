@@ -948,7 +948,7 @@ TEST_CASE("/NativeCDC/InvalidRanges") {
 
 	std::vector<KeyRange> maximumCount;
 	std::vector<KeyRange> oversizedMetadata;
-	const int endpointLength = CLIENT_KNOBS->VALUE_SIZE_LIMIT / (2 * NATIVE_CDC_MAX_RANGES);
+	const int endpointLength = CLIENT_KNOBS->VALUE_SIZE_LIMIT / (int64_t{ 2 } * NATIVE_CDC_MAX_RANGES);
 	for (int i = 0; i < NATIVE_CDC_MAX_RANGES; ++i) {
 		const std::string prefix = format("%04d/", i);
 		maximumCount.emplace_back(KeyRangeRef(prefix + "a", prefix + "z"));
