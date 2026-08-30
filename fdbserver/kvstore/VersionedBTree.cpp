@@ -1869,25 +1869,23 @@ public:
 	}
 
 	// Clears the cache, saving the entries to second cache, then waits for each item to be evictable and evicts it.
-	static Future<Void> clear_impl(ObjectCache* self, bool waitForSafeEviction) {
+	Future<Void> clear(bool waitForSafeEviction = false) {
 		// Claim ownership of all of our cached items, removing them from the evictor's control and quota.
-		for (auto& ie : self->cache) {
-			self->pEvictor->reclaim(ie.second);
+		for (auto& ie : this->cache) {
+			this->pEvictor->reclaim(ie.second);
 		}
 
 		// All items are in the cache so we don't need the prioritized eviction order anymore, and the cache is about
 		// to be destroyed so the prioritizedEvictions head/tail will become invalid.
-		self->prioritizedEvictions.clear();
+		this->prioritizedEvictions.clear();
 
-		auto i = self->cache.begin();
-		while (i != self->cache.end()) {
+		auto i = this->cache.begin();
+		while (i != this->cache.end()) {
 			co_await (waitForSafeEviction ? i->second.item.onEvictable() : i->second.item.cancel());
 			++i;
 		}
-		self->cache.clear();
+		this->cache.clear();
 	}
-
-	Future<Void> clear(bool waitForSafeEviction = false) { return clear_impl(this, waitForSafeEviction); }
 
 	// Move the prioritized evictions queued to the front of the eviction order
 	void flushPrioritizedEvictions() { pEvictor->moveIn(prioritizedEvictions); }
