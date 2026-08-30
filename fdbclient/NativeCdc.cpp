@@ -930,7 +930,7 @@ TEST_CASE("/NativeCDC/RangeNormalization") {
 	ASSERT(entireKeyspace == std::vector<KeyRange>{ normalKeys });
 
 	constexpr int singletonCount = 10;
-	const int keyLength = CLIENT_KNOBS->VALUE_SIZE_LIMIT / (2 * singletonCount) + 1;
+	const int keyLength = CLIENT_KNOBS->VALUE_SIZE_LIMIT / (2LL * singletonCount) + 1;
 	ASSERT_LT(keyLength, CLIENT_KNOBS->KEY_SIZE_LIMIT);
 	std::vector<KeyRange> singletonRanges;
 	int64_t endpointBytes = 0;
