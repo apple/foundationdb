@@ -1817,9 +1817,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		Optional<Error> registrationError;
 		try {
 			const std::vector<KeyRange> ranges{ normalKeys };
-			co_await timeoutError(
-			    registerNativeCdcStreamClient(cx, "native-cdc-e2e/disabled-registration"_sr, ranges),
-			    operationTimeout);
+			co_await timeoutError(registerNativeCdcStreamClient(cx, "native-cdc-e2e/disabled-registration"_sr, ranges),
+			                      operationTimeout);
 		} catch (Error& e) {
 			registrationError = e;
 		}
