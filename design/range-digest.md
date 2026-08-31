@@ -221,13 +221,16 @@ root — it makes the combine visibly incomplete rather than plausibly wrong.
   writes a known key-value set, then (a) cross-checks the audit's combined root against an
   **independent client-side computation** of the same additive digest — scanning every key-value and
   applying the canonical leaf encoding, which validates the storage-server fold *and* the combine —
-  and (b) runs a **second** audit and asserts the root is identical. Data distribution may have
-  moved shards in between, but nothing forces it to, so treat this as a determinism check that is
-  additionally partition-independent on the seeds where movement did occur. The workload waits for
-  the data to split into shards, but it does **not** wait for `moving_data -> 0`, so the precondition
-  is not established in simulation — a root mismatch caused by movement would surface as a hard
-  failure. The full backup → clear → restore → recompute cycle is exercised by the Kubernetes test
-  below, not in simulation.
+  and (b) runs a **second** audit and asserts the root is identical. Before each digest the workload
+  establishes the quiescence precondition, polling `getDataInFlight` and the data distribution queue
+  until both reach zero; on timeout it records `RangeDigestValidationInconclusive` and declines to
+  assert rather than digesting a moving cluster. Between the two digests it *forces* a repartition by
+  excluding a storage server that owns part of the range (`forceMovementBetweenDigests`, on by
+  default), so the second comparison tests partition-independence and not merely that a
+  deterministic fold is deterministic. On a cluster too small to spare a server the repartition is
+  skipped and `PartitionChanged=0` records that the run degraded to a determinism check. The full
+  backup → clear → restore → recompute cycle is exercised by the Kubernetes test below, not in
+  simulation.
 - **Skips are failures.** `runOneDigest` retries the transient audit errors itself; if the digest
   still never reaches `Complete` the workload records `RangeDigestValidationDidNotComplete` and
   `check()` fails, so a permanently broken digest cannot pass as a skip. `RangeDigest` is excluded

@@ -25,9 +25,15 @@
 //      against an INDEPENDENT client-side computation of the same additive digest (scanning
 //      every key-value and applying the canonical leaf encoding). This validates the SS fold
 //      and the DD combine.
-//   4. It triggers a SECOND RangeDigest audit and asserts the root is identical. DD may have
-//      moved shards in between, but nothing here forces it to, so this is a determinism check
-//      that additionally covers partition-independence on the seeds where movement occurred.
+//   4. It forces a repartition (excluding a storage server that owns part of the range), then
+//      triggers a SECOND RangeDigest audit and asserts the root is identical. Because the layout
+//      really changed, this asserts partition-independence and not merely that a deterministic fold
+//      is deterministic. On a cluster too small to spare a server the repartition is skipped and the
+//      run degrades to a determinism check, recorded as PartitionChanged=0.
+//
+// Every digest is preceded by a wait for quiescence (data in flight and the DD queue both drained),
+// which is the precondition the digest requires; a timeout there is reported as inconclusive rather
+// than asserted on.
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"

@@ -5078,17 +5078,39 @@ Future<Void> auditRangeDigestQ(StorageServer* data, AuditStorageRequest req) {
 	KeyRange rangeToRead = req.range;
 	Key rangeToReadBegin = req.range.begin;
 	int limit = SERVER_KNOBS->AUDIT_RESTORE_BATCH_KEY_LIMIT;
-	int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+	// Ceiling of an adaptive budget, not a fixed batch size. Deliberately not
+	// CLIENT_KNOBS->REPLY_BYTE_LIMIT, a per-RPC-reply cap reached long before the key limit above at any
+	// realistic record size, which would make that key limit unreachable; see nextAuditBatchBytes().
+	const int limitBytesCeiling = SERVER_KNOBS->AUDIT_RESTORE_BATCH_BYTE_LIMIT;
+	const int limitBytesFloor = std::min<int>(limitBytesCeiling, SERVER_KNOBS->AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN);
+	// Seeded through nextAuditBatchBytes() so a nonsensical knob pair cannot put the FIRST batch outside
+	// the window. Returns the ceiling unchanged for any sane configuration.
+	int limitBytes = nextAuditBatchBytes(limitBytesCeiling, true, limitBytesFloor, limitBytesCeiling);
 	int64_t readBytes = 0;
+	int consecutiveRetries = 0;
+	int64_t totalRetryableErrors = 0;
+	// Jittered geometric backoff on the house knobs, reset on success so an audit that hits an occasional
+	// retry does not ratchet to the maximum and stay there.
+	Backoff retryBackoff;
 	bool complete = false;
 	double startTime = now();
+	// Time blocked on the audit rate limiter, reported so a throttled digest is distinguishable from a
+	// slow one.
+	double rateLimiterTotalWaitTime = 0;
 	Error nonRetryableError;
-	Reference<IRateControl> rateLimiter = makeReference<SpeedLimit>(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1);
+	// Server-wide, not per-task: see StorageServer::auditStorageRateLimiter.
+	Reference<IRateControl> rateLimiter = data->auditStorageRateLimiter;
 
 	{
 		Optional<Error> err;
 		try {
 			while (true) {
+				// Snapshot the accumulator: a retryable failure re-reads this same batch from the same
+				// start key, and the additive digest has no inverse, so the only way to undo a partial fold
+				// is to restore the pre-batch state.
+				const RangeDigest batchStartDigest = digest;
+				const int64_t batchStartKvCount = kvCount;
+				const int64_t batchStartByteCount = byteCount;
 				try {
 					readBytes = 0;
 					rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
@@ -5118,13 +5140,19 @@ Future<Void> auditRangeDigestQ(StorageServer* data, AuditStorageRequest req) {
 					}
 					readBytes = reply.data.expectedSize();
 
+					const double rateLimiterBeforeWaitTime = now();
 					co_await rateLimiter->getAllowance(readBytes);
+					rateLimiterTotalWaitTime += now() - rateLimiterBeforeWaitTime;
 
 					if (!reply.more || reply.data.empty()) {
 						complete = true;
 						break;
 					}
 					rangeToReadBegin = keyAfter(reply.data.back().key);
+					// The batch succeeded, so let the byte budget grow back toward its ceiling.
+					consecutiveRetries = 0;
+					retryBackoff = Backoff();
+					limitBytes = nextAuditBatchBytes(limitBytes, true, limitBytesFloor, limitBytesCeiling);
 					if (rangeToReadBegin >= req.range.end) {
 						complete = true;
 						break;
@@ -5140,13 +5168,28 @@ Future<Void> auditRangeDigestQ(StorageServer* data, AuditStorageRequest req) {
 					if (nonRetryableError.code() == error_code_future_version ||
 					    nonRetryableError.code() == error_code_transaction_too_old ||
 					    nonRetryableError.code() == error_code_server_overloaded) {
+						// This batch is retried from the same start key, so undo its partial fold.
+						digest = batchStartDigest;
+						kvCount = batchStartKvCount;
+						byteCount = batchStartByteCount;
+						const int retriedBytes = limitBytes;
+						limitBytes = nextAuditBatchBytes(limitBytes, false, limitBytesFloor, limitBytesCeiling);
+						++consecutiveRetries;
+						++totalRetryableErrors;
+						// Suppressed, with the running total reported in SSAuditRangeDigestComplete: retrying
+						// is an expected path, and the budget halving above is the actual remedy.
 						TraceEvent(SevWarn, "SSAuditRangeDigestRetryableError", data->thisServerID)
+						    .suppressFor(10.0)
 						    .detail("AuditID", req.id)
 						    .detail("Error", nonRetryableError.what())
 						    .detail("Version", version)
-						    .detail("Range", rangeToRead);
+						    .detail("Range", rangeToRead)
+						    .detail("BatchBytes", retriedBytes)
+						    .detail("NextBatchBytes", limitBytes)
+						    .detail("ConsecutiveRetries", consecutiveRetries)
+						    .detail("TotalRetryableErrors", totalRetryableErrors);
 						nonRetryableError = Error();
-						co_await delay(1.0);
+						co_await retryBackoff.onError();
 						continue;
 					}
 					throw nonRetryableError;
@@ -5167,7 +5210,9 @@ Future<Void> auditRangeDigestQ(StorageServer* data, AuditStorageRequest req) {
 			    .detail("KVCount", kvCount)
 			    .detail("Bytes", byteCount)
 			    .detail("Digest", digest.toHex())
-			    .detail("Duration", now() - startTime);
+			    .detail("Duration", now() - startTime)
+			    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime)
+			    .detail("TotalRetryableErrors", totalRetryableErrors);
 			co_await persistAuditStateByRange(data->cx, res);
 
 		} catch (Error& e) {

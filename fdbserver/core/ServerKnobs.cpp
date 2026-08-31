@@ -1180,7 +1180,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// An audit divides its range into TASKS; each task is handled by one storage server, which walks it in
 	// BATCHES of reads. The knobs below bound those two units independently:
 	//   AUDIT_TASK_MAX_BYTES     -- how much keyspace one task covers
-	//   AUDIT_RESTORE_BATCH_*    -- how much one read inside a task fetches (validate_restore only)
+	//   AUDIT_RESTORE_BATCH_*    -- how much one read inside a task fetches (validate_restore, RangeDigest)
 
 	// Max bytes one comparison batch fetches from each side. This is an upper bound, not the size used:
 	// the actual budget moves between AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN and this value, halving whenever a
