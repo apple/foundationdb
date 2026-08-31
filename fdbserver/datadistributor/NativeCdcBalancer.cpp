@@ -268,6 +268,7 @@ Future<Void> sampleNativeCdcLoads(Database cx, NativeCdcLoadModel* model) {
 	std::vector<Future<Void>> workers;
 	const size_t workerCount =
 	    std::min(model->segmentCount(), static_cast<size_t>(SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_CONCURRENCY));
+	workers.reserve(workerCount);
 	for (size_t i = 0; i < workerCount; ++i) {
 		workers.push_back(sampleNativeCdcRanges(cx, model, &nextSegment));
 	}

@@ -407,6 +407,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	                                  std::vector<int> indices,
 	                                  std::vector<Reference<RetagMarkerLedger>> ledgers) {
 		std::vector<std::pair<Key, Value>> values;
+		values.reserve(indices.size());
 		for (const int index : indices) {
 			values.emplace_back(ledgers[index]->key(), ledgers[index]->expectWrite(memoryTestValueBytes));
 		}
@@ -750,6 +751,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		Promise<Void> firstConsumerStop;
 		Future<Void> firstWriter = writeRetagTraffic(cx, hotStreams, ledgers, firstWriterStop.getFuture());
 		std::vector<Future<Void>> firstConsumers;
+		firstConsumers.reserve(hotStreams.size());
 		for (const int index : hotStreams) {
 			firstConsumers.push_back(
 			    consumeRetagTraffic(streams[index].consumer, ledgers[index], firstConsumerStop.getFuture()));
