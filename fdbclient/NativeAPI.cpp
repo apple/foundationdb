@@ -7051,6 +7051,7 @@ AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointM
                                                                                         Optional<UID> actionId,
                                                                                         double timeout) {
 	std::vector<AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>>> futures;
+	futures.reserve(ranges.size());
 
 	// TODO(heliu): Avoid send requests to the same shard.
 	for (const auto& range : ranges) {

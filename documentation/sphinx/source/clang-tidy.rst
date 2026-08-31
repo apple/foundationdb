@@ -10,15 +10,15 @@ This guide explains how to run ``clang-tidy`` locally so you can fix issues befo
 What clang-tidy checks
 ======================
 
-FoundationDB configures 40 named checks in the ``.clang-tidy`` file at the repository root. The
+FoundationDB configures 43 named checks in the ``.clang-tidy`` file at the repository root. The
 active set depends on the clang-tidy version and can be inspected with ``clang-tidy --list-checks``.
 The intent is to enable more as we go forward. Here are some example rules:
 
-* **22 Bugprone rules** -- catch potential runtime errors, including dangling returned references, incorrect forwarding, bytewise operations on non-trivially-copyable objects, incorrect erase/remove calls, and arithmetic widened after the calculation
+* **24 Bugprone rules** -- catch potential runtime errors, including assignments in conditions, truncated string literals with embedded NUL bytes, dangling returned references, incorrect forwarding, bytewise operations on non-trivially-copyable objects, incorrect erase/remove calls, and arithmetic widened after the calculation
 * **1 C++ Core Guidelines rule** -- catch unsafe captures in coroutine lambdas (``cppcoreguidelines-avoid-capturing-lambda-coroutines``)
 * **2 Misc rules** -- catch redundant expressions and RAII objects held across coroutine suspension points
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
-* **4 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, pointless moves, and move constructors that copy movable members (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-move-const-arg``, ``performance-move-constructor-init``)
+* **5 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, repeated vector growth in simple loops, pointless moves, and move constructors that copy movable members (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-inefficient-vector-operation``, ``performance-move-const-arg``, ``performance-move-constructor-init``)
 * **7 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
 
 ``misc-coroutine-hostile-raii`` checks Flow's blocking ``MutexHolder`` and

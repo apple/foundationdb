@@ -1167,7 +1167,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FETCH_KEYS_PARALLELISM,                                  2 );
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
-	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         1 );
+	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         4 ); if ( isSimulated ) SERVE_AUDIT_STORAGE_PARALLELISM = deterministicRandom()->randomInt(1, SERVE_AUDIT_STORAGE_PARALLELISM+1);
 	init( PERSIST_FINISH_AUDIT_COUNT,                             10 ); if ( isSimulated ) PERSIST_FINISH_AUDIT_COUNT = deterministicRandom()->randomInt(1, PERSIST_FINISH_AUDIT_COUNT+1);
 	init( AUDIT_RETRY_COUNT_MAX,                               10000 ); if ( isSimulated ) AUDIT_RETRY_COUNT_MAX = 10;
 	init( CONCURRENT_AUDIT_TASK_COUNT_MAX,                        20 ); if ( isSimulated ) CONCURRENT_AUDIT_TASK_COUNT_MAX = deterministicRandom()->randomInt(1, CONCURRENT_AUDIT_TASK_COUNT_MAX+1);
@@ -1177,6 +1177,36 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX,              50 );
 	init( AUDIT_STORAGE_RATE_PER_SERVER_MAX,                    50e6 ); // per second
 	init( AUDIT_RESTORE_BATCH_KEY_LIMIT,                      100000 ); // 100K keys per batch (was hardcoded 10K)
+	// An audit divides its range into TASKS; each task is handled by one storage server, which walks it in
+	// BATCHES of reads. The knobs below bound those two units independently:
+	//   AUDIT_TASK_MAX_BYTES     -- how much keyspace one task covers
+	//   AUDIT_RESTORE_BATCH_*    -- how much one read inside a task fetches (validate_restore only)
+
+	// Max bytes one comparison batch fetches from each side. This is an upper bound, not the size used:
+	// the actual budget moves between AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN and this value, halving whenever a
+	// read fails and growing back on success (see nextAuditBatchBytes).
+	//
+	// It adapts because the real constraint is a deadline, not a size: a batch reads at a pinned version
+	// that expires after MAX_READ_TRANSACTION_LIFE_VERSIONS, so what a server can fetch in one go depends
+	// on current load, and overshooting fails with transaction_too_old and is re-read from the start.
+	//
+	// Raise for fewer, larger round trips. Lower if audits provoke transaction_too_old, or to cut memory:
+	// a server holds ~4 x this x SERVE_AUDIT_STORAGE_PARALLELISM in flight.
+	init( AUDIT_RESTORE_BATCH_BYTE_LIMIT,                        4e6 ); if( randomize && buggify() ) AUDIT_RESTORE_BATCH_BYTE_LIMIT = 80000;
+	// Smallest the adaptive batch above may shrink to, so a run of failed reads cannot leave the audit
+	// crawling through tiny batches.
+	init( AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN,                  256e3 ); if( randomize && buggify() ) AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN = 1000;
+	// Max bytes of keyspace one audit task covers, for every audit type (ValidateHA, ValidateReplica,
+	// ValidateRestore). Tasks default to one keyServers shard, and a shard bigger than this is subdivided
+	// so that no single task dominates.
+	//
+	// This bounds the audit phase's wall-clock: a task is scanned start to finish by one storage server,
+	// so the phase cannot end before its largest task does, and making individual tasks faster cannot help.
+	//
+	// Lower for a shorter tail at the cost of more tasks. 0 disables subdivision. A target, not a hard
+	// bound -- splitStorageMetrics jitters piece sizes and the client merges a trailing piece under
+	// STORAGE_METRICS_UNFAIR_SPLIT_LIMIT back into its predecessor, so a task can reach ~1.4x this.
+	init( AUDIT_TASK_MAX_BYTES,                                128e6 ); if( randomize && buggify() ) AUDIT_TASK_MAX_BYTES = deterministicRandom()->coinflip() ? 0 : 1e6;
 	init( AUDIT_PROGRESS_PERSIST_BYTES_INTERVAL,           100000000 ); // 100MB - only persist progress after this many bytes
 	init( ENABLE_AUDIT_VERBOSE_TRACE,                          false );
 	// Disabled in simulation: audit_storage locationmetadata already runs at controlled times in sim,

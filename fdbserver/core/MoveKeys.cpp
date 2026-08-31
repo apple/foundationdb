@@ -207,6 +207,7 @@ Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID
 	}
 	TraceEvent(SevDebug, "DataMoveDeleteCheckpoints", dataMoveId).detail("Checkpoints", describe(checkpointIds));
 	std::vector<Future<Optional<Value>>> checkpointEntries;
+	checkpointEntries.reserve(checkpointIds.size());
 	for (const UID& id : checkpointIds) {
 		checkpointEntries.push_back(tr->get(checkpointKeyFor(id)));
 	}
@@ -884,6 +885,7 @@ AsyncResult<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
 // Returns storage servers selected from 'candidates', who is serving a read-write copy of 'range'.
 Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector<UID> candidates, KeyRangeRef range) {
 	std::vector<Future<Optional<Value>>> serverListEntries;
+	serverListEntries.reserve(candidates.size());
 
 	for (const UID id : candidates) {
 		serverListEntries.push_back(tr->get(serverListKeyFor(id)));
@@ -892,6 +894,7 @@ Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector<UID> 
 	std::vector<Optional<Value>> serverListValues = co_await getAll(serverListEntries);
 
 	std::vector<StorageServerInterface> ssis;
+	ssis.reserve(serverListValues.size());
 	for (auto& v : serverListValues) {
 		ssis.push_back(decodeServerListValue(v.get()));
 	}
@@ -3155,6 +3158,7 @@ Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInter
 
 			std::vector<Future<Optional<Value>>> localityExclusions;
 			std::map<std::string, std::string> localityData = server.locality.getAllData();
+			localityExclusions.reserve(localityData.size());
 			for (const auto& l : localityData) {
 				localityExclusions.push_back(tr->get(StringRef(encodeExcludedLocalityKey(
 				    LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second))));
@@ -3575,6 +3579,7 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 						}
 
 						std::vector<Future<Void>> actors;
+						actors.reserve(dest.size());
 
 						// Unassign the shard from the dest servers.
 						for (const UID& id : dest) {
@@ -3864,6 +3869,7 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 				}
 
 				std::vector<Future<Void>> actors;
+				actors.reserve(oldDests.size());
 				for (const auto& uid : oldDests) {
 					actors.push_back(unassignServerKeys(&tr, uid, range, physicalShardMap[uid], dataMoveId));
 				}
