@@ -1,0 +1,140 @@
+# BulkLoad restore that cannot complete must fail, and must leave the database usable
+#
+# Variant of BackupS3BlobBulkLoadRestore.toml that drives one bulkload task past its re-dispatch budget, so
+# the task is marked Error and the job therefore ends in a non-Complete phase. The restore must then fail
+# rather than report success -- a restore reporting success while part of the key space was never ingested is
+# the silent data loss this guard exists to catch, measured once at 935,560 key-values.
+#
+# The half that had no coverage until now is the recovery, not the detection: failing is terminal, so the
+# restore is aborted, and ABORTED puts it outside isRunnable() -- the operator's abortRestore() would return
+# before its own unlockDatabase(), leaving a failed restore with the database locked and no route out through
+# the restore API. The abort path releases the lock itself, and this test asserts it: the workload requires
+# restore_error, a final state of ABORTED, and databaseLockedKey absent afterwards.
+#
+# Note the client cannot see restore_bulkload_failed: FileBackupAgentImpl::restore converts any non-COMPLETED
+# final state into restore_error, so 2391 appears only in the restore's own lastErrorPerType.
+#
+# The rest of this file is inherited from BackupS3BlobBulkLoadRestore.toml.
+#
+testClass = "Backup"
+
+[configuration]
+storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] # FIXME: remove after allowing bulkloading with fetchKey and shardedrocksdb
+disableTss = true # TODO(BulkLoad): support TSS
+
+# HA (multi-region) configuration - randomly enabled for test coverage
+generateFearless = false
+simpleConfig = false
+minimumRegions = 1
+# singleRegion not set - allows random HA configuration
+
+# Ensure enough storage servers for non-overlapping BulkLoad teams
+extraMachineCountDC = 3
+# Dedicated storage-class machines so bulk-load team selection can find a team disjoint from the
+# source: it rejects any team sharing a server with the source (DDTeamCollection). Without these,
+# runs fail with DDBulkLoadEngineTaskGetTeamFailedToFindValidTeam reporting ValidTeamSize 0 with
+# every candidate team duplicated, the task is marked Error, and the restore is incomplete.
+# extraMachineCountDC above adds ordinary machines, which do not supply that capacity. Per DC, so
+# this holds for the multi-region variants too. See tests/fast/BulkLoading.toml for the same guard.
+extraStorageMachineCountPerDC = 5
+
+# Explicit simple config - single replication, single region, explicit process counts
+config = "triple usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
+
+# Disable buggify and fault injection to avoid interference with MockS3/BulkLoad
+buggify = false
+faultInjection = false
+
+# Required knobs for BulkLoad functionality (from BulkDumpingS3.toml)
+[[knobs]]
+bulkload_sim_failure_injection = false
+
+# Exhaust one task's re-dispatch budget so it is marked Error and the job ends non-Complete.
+bulkload_sim_inject_dest_team_failures = 40
+
+# Pin the budget: as a buggify draw it would be a fresh random 1-3 per dispatch, so the give-up path would be
+# reached or not depending on the draw rather than on the injection count.
+dd_bulkload_max_retryable_redispatch = 20
+shard_encode_location_metadata = true
+enable_read_lock_on_range = true
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
+min_byte_sampling_probability = 0.5
+cc_enforce_use_unfit_dd_in_sim = true
+disable_audit_storage_final_replica_check_in_sim = true
+max_trace_lines = 5000000
+# Allow more time for BulkDump job to complete (Linux runs 4x slower than macOS)
+bulkdump_job_timeout = 1200
+bulkload_job_timeout = 1200
+
+# Disable buggified delays
+[[flow_knobs]]
+MAX_BUGGIFIED_DELAY = 0.0
+
+# S3/Blobstore settings for stability/determinism
+blobstore_max_connection_life = 300
+blobstore_request_timeout_min = 300
+blobstore_request_tries = 5
+blobstore_connect_tries = 5
+blobstore_connect_timeout = 30
+http_send_size = 1024
+http_read_size = 1024
+connection_monitor_loop_time = 0.1
+connection_monitor_timeout = 1.0
+connection_monitor_idle_timeout = 60.0
+dd_team_zero_server_left_log_delay = 0
+dd_rebalance_parallelism = 1
+
+[[test]]
+# Phase 1: write the dataset and let Cycle verify it, before the restore destroys it. In the sibling tests
+# Cycle runs alongside the backup workload and its check passes because the restore puts the data back. Here
+# the restore is meant to fail, so normalKeys is cleared and never refilled -- Cycle's own check would report
+# "Node count changed, Before 100 After 0". Running it as its own phase keeps the data generation without
+# asserting survival across a restore that is designed not to survive.
+testTitle = 'BackupS3BlobBulkLoadRestoreJobIncompleteSetup'
+useDB = true
+clearAfterTest = false
+waitForQuiescence = false
+timeout = 3600
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 100
+    transactionsPerSecond = 100.0
+    testDuration = 30.0
+
+[[test]]
+testTitle = 'BackupS3BlobBulkLoadRestoreJobIncomplete'
+useDB = true
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+waitForQuiescence = false
+waitForQuiescenceEnd = false
+# The restore is deliberately incomplete: the ranges of the tasks driven to Error were never ingested, so the
+# database is inconsistent by construction and the end-of-test check would report it as 8 x
+# ConsistencyCheckFailure. This test asserts the failure is reported and the database is left usable, not
+# that the data is whole -- those two cannot both hold here.
+runConsistencyCheck = false
+connectionFailuresDisableDuration = 1000000
+runFailureWorkloads = false
+timeout = 3600
+
+    [[test.workload]]
+    testName = 'BackupS3BlobCorrectness'
+    backupAfter = 10.0
+    restoreAfter = 600.0
+    abortAndRestartAfter = 0.0
+    stopDifferentialAfter = 0.0
+    performRestore = true
+    backupRangesCount = -1
+    skipDirtyRestore = false
+    backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
+    # BulkDump/BulkLoad integration options
+    snapshotMode = 2           # 2 = BOTH (creates range files AND SST files for comparison)
+    useRangeFileRestore = false # false = use BulkLoad for restore
+    # No validation: there is no complete restore to compare against, and performValidation's audit compares
+    # contents that by definition are missing here. Assert the failure is reported and the database is left
+    # unlocked instead.
+    performValidation = false
+    expectRestoreFailure = true
