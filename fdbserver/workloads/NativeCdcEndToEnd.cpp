@@ -2499,6 +2499,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				chosenKeys.insert(deterministicRandom()->randomInt(0, keyCount));
 			}
 			std::vector<std::pair<Key, Value>> values;
+			values.reserve(chosenKeys.size());
 			for (int index : chosenKeys) {
 				values.emplace_back(keyForIndex(index), Value(StringRef(format("round/%04d/key/%04d", round, index))));
 			}

@@ -1254,6 +1254,7 @@ Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ryw, Key
 	std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
 	// Decode the excluded localities to check if any server is excluded by locality.
 	std::vector<std::pair<std::string, std::string>> decodedExcludedLocalities;
+	decodedExcludedLocalities.reserve(excludedLocalities.size());
 	for (auto& excludedLocality : excludedLocalities) {
 		decodedExcludedLocalities.push_back(decodeLocality(excludedLocality));
 	}

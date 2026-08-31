@@ -1432,6 +1432,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::ColumnFamilyOptions cfOptions = sharedState->getCfOptions();
 			std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+			descriptors.reserve(columnFamilies.size());
 			for (const std::string& name : columnFamilies) {
 				descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
 			}
@@ -1648,6 +1649,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				std::set<std::string> columnFamilies{ "default" };
 				columnFamilies.insert(SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY);
 				std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+				descriptors.reserve(columnFamilies.size());
 				for (const std::string name : columnFamilies) {
 					descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, sharedState->getCfOptions() });
 				}
