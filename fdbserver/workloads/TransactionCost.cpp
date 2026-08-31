@@ -207,6 +207,7 @@ class TransactionCostWorkload : public TestWorkload {
 
 		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
 			std::vector<Future<Void>> futures;
+			futures.reserve(10);
 			for (int i = 0; i < 10; ++i) {
 				futures.push_back(success(tr->get(workload.getKey(testNumber, i))));
 			}

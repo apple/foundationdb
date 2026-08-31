@@ -557,6 +557,7 @@ struct RangeLocking : TestWorkload {
 		std::vector<std::pair<KeyRange, RangeLockState>> res;
 		res = co_await findExclusiveReadLockOnRange(cx, normalKeys);
 		std::vector<KeyRange> ranges;
+		ranges.reserve(res.size());
 		for (const auto& [lockedRange, _lockState] : res) {
 			ranges.push_back(lockedRange);
 		}

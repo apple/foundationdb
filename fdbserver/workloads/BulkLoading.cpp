@@ -442,6 +442,7 @@ struct BulkLoading : TestWorkload {
 
 	std::vector<Key> getAllKeys(const std::vector<KeyValue>& kvs) {
 		std::vector<Key> res;
+		res.reserve(kvs.size());
 		for (const auto& kv : kvs) {
 			res.push_back(kv.key);
 		}
@@ -556,6 +557,7 @@ struct BulkLoading : TestWorkload {
 		oldBulkLoadMode = co_await setBulkLoadMode(cx, 1);
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		std::vector<BulkLoadTaskState> errorTasks = co_await self->waitUntilAllTaskCompleteOrError(self, cx);
+		errorRanges.reserve(errorTasks.size());
 		for (const auto& errorTask : errorTasks) {
 			errorRanges.push_back(errorTask.getRange());
 		}
@@ -667,6 +669,7 @@ struct BulkLoading : TestWorkload {
 		}
 		// Wait until all tasks have completed
 		std::vector<BulkLoadTaskState> errorTasks = co_await self->waitUntilAllTaskCompleteOrError(self, cx);
+		errorRanges.reserve(errorTasks.size());
 		for (const auto& errorTask : errorTasks) {
 			errorRanges.push_back(errorTask.getRange()); // for any error range, do not check data
 		}
@@ -759,6 +762,7 @@ struct BulkLoading : TestWorkload {
 		if (backgroundTrafficEnabled) {
 			std::vector<Future<Void>> trafficActors;
 			int actorCount = deterministicRandom()->randomInt(1, 10);
+			trafficActors.reserve(actorCount);
 			for (int i = 0; i < actorCount; i++) {
 				trafficActors.push_back(backgroundWriteTraffic(this, cx));
 			}

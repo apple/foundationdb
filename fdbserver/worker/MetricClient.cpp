@@ -119,6 +119,7 @@ void UDPMetricClient::send(MetricCollection* metrics) {
 
 		metrics->histMap.clear();
 
+		gauges.reserve(metrics->gaugeMap.size());
 		for (auto& [_, g] : metrics->gaugeMap) {
 			gauges.push_back(std::move(g));
 		}

@@ -2740,6 +2740,7 @@ AsyncResult<JsonBuilderObject> layerStatusFetcher(Database cx,
 				// TODO:  Also fetch other linked subtrees of meta keys
 
 				std::vector<Future<RangeResult>> docFutures;
+				docFutures.reserve(jsonLayers.size());
 				for (int i = 0; i < jsonLayers.size(); ++i) {
 					docFutures.push_back(
 					    tr.getRange(KeyRangeRef(jsonLayers[i].value, strinc(jsonLayers[i].value)), 1000));

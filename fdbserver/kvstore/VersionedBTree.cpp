@@ -2989,6 +2989,7 @@ public:
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
 		int blockSize = self->physicalPageSize;
 		std::vector<Future<int>> reads;
+		reads.reserve(pageIDs.size());
 		for (int i = 0; i < pageIDs.size(); ++i) {
 			reads.push_back(
 			    readPhysicalBlock(self, page, i * blockSize, blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
