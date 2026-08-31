@@ -2263,9 +2263,9 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 			char tempName[MAX_TMP_NAME_LENGTH];
 			snprintf(tempName, MAX_TMP_NAME_LENGTH, "%s/%s-XXXXXX", tmpDir.c_str(), filename.c_str());
 			int tempFd = mkstemp(tempName);
-			int fd;
+			int fd = open(path.c_str(), O_RDONLY);
 
-			if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
+			if (fd == -1) {
 				TraceEvent("ExternalClientNotFound").detail("LibraryPath", path);
 				throw file_not_found();
 			}

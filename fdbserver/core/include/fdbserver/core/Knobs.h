@@ -1115,6 +1115,12 @@ public:
 	int AUDIT_STORAGE_RATE_PER_SERVER_MAX;
 	bool ENABLE_AUDIT_VERBOSE_TRACE;
 	int AUDIT_RESTORE_BATCH_KEY_LIMIT;
+	// int, not int64_t: these feed GetRangeLimits::bytes, which is an int. Declaring them wider only
+	// moves the narrowing to the use site, where an out-of-range value can land on -1, which
+	// GetRangeLimits reads as BYTE_LIMIT_UNLIMITED and so silently removes the bound entirely.
+	int AUDIT_RESTORE_BATCH_BYTE_LIMIT;
+	int AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN; // floor the adaptive batch budget backs off to
+	int64_t AUDIT_TASK_MAX_BYTES; // cap on one audit task's range; 0 disables subdivision
 	int64_t AUDIT_PROGRESS_PERSIST_BYTES_INTERVAL;
 	double AUDIT_LOCATION_METADATA_INTERVAL;
 	bool LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT;

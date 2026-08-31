@@ -304,6 +304,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 	// Opens log files in the progress and starts decoding until the beginVersion is seen.
 	Future<Void> openLogFiles(Reference<IBackupContainer> container) {
 		std::vector<Future<Reference<IAsyncFile>>> asyncFiles;
+		asyncFiles.reserve(files.size());
 		for (const auto& file : files) {
 			asyncFiles.push_back(container->readFile(file.fileName));
 		}

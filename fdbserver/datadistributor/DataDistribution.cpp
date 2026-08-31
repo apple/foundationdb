@@ -19,6 +19,8 @@
  */
 
 #include <algorithm>
+#include <limits>
+#include <unordered_set>
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
@@ -444,6 +446,12 @@ public:
 	std::string bulkLoadFolder;
 
 	Optional<DDBulkLoadJobManager> bulkLoadJobManager;
+
+	// Bulkload tasks that have reached the terminal Error phase and have already been reported.
+	// scheduleBulkLoadTasks() rescans the task metadata every DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC and an
+	// Error-phase task is never erased, so without this the same failure is re-logged for the life of the
+	// cluster. Reset per DD generation, which is intended: a new DD should report the current state once.
+	std::unordered_set<UID> reportedErrorBulkLoadTasks;
 
 	bool bulkDumpEnabled = false;
 	ParallelismLimitor bulkDumpParallelismLimitor;
@@ -1615,9 +1623,15 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 					// We do one metadata erase at a time to aviod unnecessary transaction conflicts
 					co_await eraseBulkLoadTask(self, bulkLoadTaskState.getRange(), bulkLoadTaskState.getTaskId());
 				} else if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
-					TraceEvent(SevWarnAlways, "DDBulkLoadTaskUnretriableError", self->ddId)
-					    .detail("Range", bulkLoadTaskState.getRange())
-					    .detail("TaskID", bulkLoadTaskState.getTaskId());
+					// Error is terminal and the metadata is deliberately left in place for the operator, so
+					// report each failed task once rather than on every rescan: the scan interval is seconds
+					// and nothing ever clears the entry, so re-logging continues for the cluster's life.
+					if (self->reportedErrorBulkLoadTasks.insert(bulkLoadTaskState.getTaskId()).second) {
+						TraceEvent(SevWarnAlways, "DDBulkLoadTaskUnretriableError", self->ddId)
+						    .detail("Range", bulkLoadTaskState.getRange())
+						    .detail("TaskID", bulkLoadTaskState.getTaskId())
+						    .detail("TotalErrorTasksReported", self->reportedErrorBulkLoadTasks.size());
+					}
 				} else {
 					ASSERT(bulkLoadTaskState.phase == BulkLoadPhase::Complete);
 				}
@@ -4776,6 +4790,71 @@ Future<std::unordered_map<UID, KeyValueStoreType>> getStorageType(std::vector<St
 	co_return res;
 }
 
+// Subdivide one shard-sized audit task range so a single fat shard cannot become an unbounded
+// straggler; see AUDIT_TASK_MAX_BYTES. Takes the txnProcessor and ddId rather than the DataDistributor
+// so a mock can drive it: the failure mode that matters -- a metrics read error must degrade to the
+// unsplit shard, never fail the audit -- is otherwise only reachable on a real cluster.
+static Future<std::vector<KeyRange>> boundAuditTaskRange(Reference<IDDTxnProcessor> txnProcessor,
+                                                         UID ddId,
+                                                         KeyRange shardRange) {
+	if (SERVER_KNOBS->AUDIT_TASK_MAX_BYTES <= 0 || shardRange.empty()) {
+		co_return std::vector<KeyRange>{ shardRange };
+	}
+
+	Optional<Error> splitError;
+	try {
+		StorageMetrics splitMetrics;
+		splitMetrics.bytes = SERVER_KNOBS->AUDIT_TASK_MAX_BYTES;
+		// Split on size only. Setting the other dimensions to infinity is REQUIRED, not merely tidy:
+		// getSplitKey() does ASSERT(limits > 0), so leaving them at 0 would assert-fail in the storage
+		// server. Infinity makes getSplitKey's `limits < infinity / 2` test false, which is how a
+		// dimension is opted out of. Auditing is read-only, so size is the only dimension of interest.
+		splitMetrics.bytesWrittenPerKSecond = splitMetrics.infinity;
+		splitMetrics.iosPerKSecond = splitMetrics.infinity;
+		splitMetrics.bytesReadPerKSecond = splitMetrics.infinity;
+
+		// minSplitBytes must not exceed half the target. The storage server stops splitting once
+		// `remaining.bytes < 2 * minSplitBytes`, so passing the target itself leaves every shard below
+		// TWICE the target whole.
+		//
+		// Anything below target/2 behaves the same, since getSplitKey() only splits while
+		// remaining > target/2 and that binds first; half the target just avoids generating split points
+		// the client will discard.
+		const int minSplitBytes =
+		    std::max<int>(1,
+		                  static_cast<int>(std::min<int64_t>(std::numeric_limits<int>::max(),
+		                                                     SERVER_KNOBS->AUDIT_TASK_MAX_BYTES / 2)));
+		Standalone<VectorRef<KeyRef>> splitPoints =
+		    co_await txnProcessor->splitStorageMetrics(shardRange, splitMetrics, StorageMetrics(), minSplitBytes);
+		// splitStorageMetrics() returns shardRange.begin and shardRange.end as its first and last points,
+		// in order, so consecutive pairs tile the range. Same idiom as DDShardTracker's executeShardSplit().
+		std::vector<KeyRange> taskRanges;
+		for (int i = 0; i + 1 < splitPoints.size(); ++i) {
+			taskRanges.push_back(KeyRangeRef(splitPoints[i], splitPoints[i + 1]));
+		}
+		ASSERT(!taskRanges.empty());
+		if (taskRanges.size() > 1) {
+			TraceEvent(SevInfo, "DDAuditTaskRangeSubdivided", ddId)
+			    .suppressFor(30.0)
+			    .detail("ShardRange", shardRange)
+			    .detail("NumTaskRanges", taskRanges.size())
+			    .detail("MaxBytesPerTask", SERVER_KNOBS->AUDIT_TASK_MAX_BYTES);
+		}
+		co_return taskRanges;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		splitError = e;
+	}
+	// A metrics read must never fail an audit: fall back to the unsplit shard, which is exactly the
+	// behaviour before this cap existed. Worst case we keep the straggler we were trying to avoid.
+	TraceEvent(SevWarn, "DDAuditTaskRangeSplitFailed", ddId)
+	    .errorUnsuppressed(splitError.get())
+	    .detail("ShardRange", shardRange);
+	co_return std::vector<KeyRange>{ shardRange };
+}
+
 // Partition the input range into multiple subranges according to the range ownership, and
 // schedule ha/replica/restore audit tasks of each subrange on the server which owns the subrange
 // Automatically retry until complete or timed out
@@ -4795,6 +4874,9 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 	Key currentRangeToScheduleBegin = rangeToSchedule.begin;
 	KeyRange currentRangeToSchedule;
 	int64_t issueDoAuditCount = 0;
+	// Counts skipped task ranges, not distinct shards: the engine-type skip has always been per audit
+	// state range, and a shard subdivided by AUDIT_TASK_MAX_BYTES contributes one count per piece. Kept
+	// under its existing name so the SkippedShardsCountInThisSchedule trace field stays greppable.
 	int64_t numSkippedShards = 0;
 
 	try {
@@ -4812,12 +4894,32 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 				    .detail("RangeLocationsBackKey", rangeLocations.back().range.end);
 			}
 
-			// Divide the audit job in to tasks according to KeyServers system mapping
+			// Divide the audit job in to tasks according to KeyServers system mapping, then subdivide
+			// any shard larger than AUDIT_TASK_MAX_BYTES. A task is scanned sequentially by one storage
+			// server and the audit phase ends only when its slowest task does, so an uncapped fat shard
+			// bounds the whole phase from below.
 			int assignedRangeTasks = 0;
-			int rangeLocationIndex = 0;
-			for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
+			// Split lazily, one shard at a time, so the first task dispatches immediately: splitting
+			// every shard up front would put thousands of sequential metrics reads ahead of any audit
+			// work. Entries are (task range, index of the shard it came from) -- the shard index is
+			// needed because the servers to audit come from that rangeLocations entry.
+			std::vector<std::pair<KeyRange, int>> taskRangesToSchedule;
+			int nextShardToSplit = 0;
+			for (int taskIndex = 0;; ++taskIndex) {
+				while (taskIndex >= taskRangesToSchedule.size() && nextShardToSplit < rangeLocations.size()) {
+					std::vector<KeyRange> boundedRanges = co_await boundAuditTaskRange(
+					    self->txnProcessor, self->ddId, rangeLocations[nextShardToSplit].range);
+					for (KeyRange const& boundedRange : boundedRanges) {
+						taskRangesToSchedule.emplace_back(boundedRange, nextShardToSplit);
+					}
+					++nextShardToSplit;
+				}
+				if (taskIndex >= taskRangesToSchedule.size()) {
+					break; // every shard split and every resulting task scheduled
+				}
 				// For each task, check the progress, and create task request for the unfinished range
-				KeyRange taskRange = rangeLocations[rangeLocationIndex].range;
+				KeyRange taskRange = taskRangesToSchedule[taskIndex].first;
+				const int rangeLocationIndex = taskRangesToSchedule[taskIndex].second;
 				if (SERVER_KNOBS->ENABLE_AUDIT_VERBOSE_TRACE) {
 					TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRangeTask", self->ddId)
 					    .detail("AuditID", audit->coreState.id)
@@ -5042,7 +5144,15 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 					TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRangeTaskAssigned", self->ddId);
 				}
 				++assignedRangeTasks;
-				co_await delay(0.1);
+				// Throttle once per keyServers shard, NOT once per subdivided piece: per piece this
+				// multiplies by the split factor, adding a term linear in the piece count to the very
+				// wall-clock the cap exists to shorten. Pieces are appended a whole shard at a time, so
+				// the last present entry is always its shard's last piece.
+				const bool lastPieceOfShard = taskIndex + 1 >= taskRangesToSchedule.size() ||
+				                              taskRangesToSchedule[taskIndex + 1].second != rangeLocationIndex;
+				if (lastPieceOfShard) {
+					co_await delay(0.1);
+				}
 			}
 			// Proceed to the next range if getSourceServerInterfacesForRange is partially read
 			currentRangeToScheduleBegin = rangeLocations.back().range.end;
@@ -5594,6 +5704,123 @@ inline int getRandomShardCount() {
 }
 
 } // namespace data_distribution_test
+
+namespace {
+
+// Drives boundAuditTaskRange() without a cluster: returns the configured split points, or fails the
+// metrics read when asked to.
+class AuditSplitTestTxnProcessor final : public DDTxnProcessor {
+public:
+	explicit AuditSplitTestTxnProcessor(std::vector<std::string> points, Optional<Error> failWith = {})
+	  : points(std::move(points)), failWith(failWith) {}
+
+	int getSplitCalls() const { return splitCalls; }
+	int64_t getLastMinSplitBytes() const { return lastMinSplitBytes; }
+
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
+	                                                          StorageMetrics const&,
+	                                                          StorageMetrics const&,
+	                                                          Optional<int> const& minSplitBytes) const override {
+		++splitCalls;
+		lastMinSplitBytes = minSplitBytes.present() ? minSplitBytes.get() : -1;
+		if (failWith.present()) {
+			return failWith.get();
+		}
+		Standalone<VectorRef<KeyRef>> splitKeys;
+		for (std::string const& p : points) {
+			splitKeys.push_back_deep(splitKeys.arena(), StringRef(p));
+		}
+		return splitKeys;
+	}
+
+private:
+	std::vector<std::string> points;
+	Optional<Error> failWith;
+	mutable int splitCalls = 0;
+	mutable int64_t lastMinSplitBytes = 0;
+};
+
+// Restores AUDIT_TASK_MAX_BYTES on any exit path. Unit tests share a process, so a knob left at a
+// test value by a failed ASSERT silently reconfigures every test that runs afterwards, turning one
+// failure into a cascade that no longer points at its cause.
+class AuditTaskMaxBytesGuard {
+public:
+	AuditTaskMaxBytesGuard() : saved(SERVER_KNOBS->AUDIT_TASK_MAX_BYTES) {}
+	~AuditTaskMaxBytesGuard() { set(saved); }
+	AuditTaskMaxBytesGuard(AuditTaskMaxBytesGuard const&) = delete;
+	AuditTaskMaxBytesGuard& operator=(AuditTaskMaxBytesGuard const&) = delete;
+
+	void set(int64_t value) { const_cast<ServerKnobs*>(SERVER_KNOBS)->AUDIT_TASK_MAX_BYTES = value; }
+
+private:
+	int64_t saved;
+};
+
+} // namespace
+
+TEST_CASE("/DataDistribution/Audit/BoundAuditTaskRange") {
+	KeyRange shard = KeyRangeRef("a"_sr, "z"_sr);
+	AuditTaskMaxBytesGuard maxBytes;
+
+	// A fat shard is subdivided at the reported split points.
+	{
+		maxBytes.set(1000);
+		auto processor = makeReference<AuditSplitTestTxnProcessor>(std::vector<std::string>{ "a", "m", "z" });
+		std::vector<KeyRange> ranges = co_await boundAuditTaskRange(processor, UID(), shard);
+		ASSERT_EQ(ranges.size(), 2);
+		ASSERT(ranges[0] == KeyRangeRef("a"_sr, "m"_sr));
+		ASSERT(ranges[1] == KeyRangeRef("m"_sr, "z"_sr));
+		ASSERT_EQ(processor->getSplitCalls(), 1);
+
+		// REGRESSION: minSplitBytes above target/2 makes the storage server leave shards below
+		// 2 * minSplitBytes whole. Silent when wrong -- the only symptom is a slow tail that looks like
+		// ordinary variance.
+		ASSERT(processor->getLastMinSplitBytes() > 0);
+		ASSERT(processor->getLastMinSplitBytes() * 2 <= SERVER_KNOBS->AUDIT_TASK_MAX_BYTES);
+	}
+
+	// A shard smaller than the cap reports no interior points and stays whole.
+	{
+		maxBytes.set(1000);
+		auto processor = makeReference<AuditSplitTestTxnProcessor>(std::vector<std::string>{ "a", "z" });
+		std::vector<KeyRange> ranges = co_await boundAuditTaskRange(processor, UID(), shard);
+		ASSERT_EQ(ranges.size(), 1);
+		ASSERT(ranges[0] == shard);
+	}
+
+	// Knob disabled: no metrics read at all, and the shard is used as-is.
+	{
+		maxBytes.set(0);
+		auto processor = makeReference<AuditSplitTestTxnProcessor>(std::vector<std::string>{ "a", "m", "z" });
+		std::vector<KeyRange> ranges = co_await boundAuditTaskRange(processor, UID(), shard);
+		ASSERT_EQ(ranges.size(), 1);
+		ASSERT(ranges[0] == shard);
+		ASSERT_EQ(processor->getSplitCalls(), 0);
+	}
+
+	// A failed metrics read must degrade to the unsplit shard rather than fail the audit: an audit that
+	// dies because a size estimate was unavailable is strictly worse than one straggler task.
+	{
+		maxBytes.set(1000);
+		auto processor =
+		    makeReference<AuditSplitTestTxnProcessor>(std::vector<std::string>{}, Optional<Error>(timed_out()));
+		std::vector<KeyRange> ranges = co_await boundAuditTaskRange(processor, UID(), shard);
+		ASSERT_EQ(ranges.size(), 1);
+		ASSERT(ranges[0] == shard);
+	}
+
+	// A cap small enough that target/2 would round to zero must still send a usable minSplitBytes: a
+	// zero or negative value would fall back to MIN_SHARD_BYTES on the server, silently ignoring the cap.
+	{
+		maxBytes.set(1);
+		auto processor = makeReference<AuditSplitTestTxnProcessor>(std::vector<std::string>{ "a", "m", "z" });
+		std::vector<KeyRange> ranges = co_await boundAuditTaskRange(processor, UID(), shard);
+		ASSERT_EQ(ranges.size(), 2);
+		ASSERT(processor->getLastMinSplitBytes() >= 1);
+	}
+
+	co_return;
+}
 
 TEST_CASE("/DataDistribution/Initialization/DcIds") {
 	RegionInfo configuredPrimary;

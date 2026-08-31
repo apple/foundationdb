@@ -2273,6 +2273,7 @@ Future<Void> waitForFullReplication(Database cx) {
 			config.fromKeyValues((VectorRef<KeyValueRef>)confResults);
 
 			std::vector<Future<Optional<Value>>> replicasFutures;
+			replicasFutures.reserve(config.regions.size());
 			for (auto& region : config.regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}

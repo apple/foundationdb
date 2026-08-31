@@ -7044,6 +7044,7 @@ Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDa
                                                                                    Optional<UID> actionId,
                                                                                    double timeout) {
 	std::vector<Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>>> futures;
+	futures.reserve(ranges.size());
 
 	// TODO(heliu): Avoid send requests to the same shard.
 	for (const auto& range : ranges) {

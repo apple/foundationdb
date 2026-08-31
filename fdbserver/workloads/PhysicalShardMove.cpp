@@ -260,6 +260,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			Error err;
 			try {
 				std::vector<Future<Optional<Value>>> checkpointEntries;
+				checkpointEntries.reserve(checkpointIds.size());
 				for (const UID& id : checkpointIds) {
 					checkpointEntries.push_back(tr.get(checkpointKeyFor(id)));
 				}
@@ -380,6 +381,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		std::vector<UID> checkpointIds;
+		checkpointIds.reserve(records.size());
 		for (const auto& it : records) {
 			checkpointIds.push_back(it.second.checkpointID);
 		}

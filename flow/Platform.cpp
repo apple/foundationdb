@@ -1206,7 +1206,7 @@ void getNetworkTraffic(const IPAddress& ip,
 		struct if_msghdr* ifm = (struct if_msghdr*)next;
 		next += ifm->ifm_msglen;
 
-		if ((ifm->ifm_type = RTM_IFINFO2)) {
+		if (ifm->ifm_type == RTM_IFINFO2) {
 			struct if_msghdr2* if2m = (struct if_msghdr2*)ifm;
 			struct sockaddr_dl* sdl = (struct sockaddr_dl*)(if2m + 1);
 
@@ -1313,23 +1313,25 @@ DiskStatistics getDiskStatistics(std::string const& directory) {
 
 	DiskStatistics diskStats;
 
-	if ((number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsReadsKey)))) {
+	number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsReadsKey));
+	if (number) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &diskStats.reads);
 	}
 
-	if ((number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsWritesKey)))) {
+	number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsWritesKey));
+	if (number) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &diskStats.writes);
 	}
 
 	uint64_t nanoSecs;
-	if ((number =
-	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalReadTimeKey)))) {
+	number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalReadTimeKey));
+	if (number) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
 		diskStats.readMilliSecs += nanoSecs / 1000000;
 		diskStats.IOMilliSecs += nanoSecs / 1000000;
 	}
-	if ((number =
-	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalWriteTimeKey)))) {
+	number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalWriteTimeKey));
+	if (number) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
 		diskStats.writeMilliSecs += nanoSecs / 1000000;
 		diskStats.IOMilliSecs += nanoSecs / 1000000;
@@ -3137,8 +3139,8 @@ int setEnvironmentVar(const char* name, const char* value, int overwrite) {
 #define getcwd(buf, maxlen) _getcwd(buf, maxlen)
 #endif
 std::string getWorkingDirectory() {
-	char* buf;
-	if ((buf = getcwd(nullptr, 0)) == nullptr) {
+	char* buf = getcwd(nullptr, 0);
+	if (buf == nullptr) {
 		TraceEvent(SevWarnAlways, "GetWorkingDirectoryError").GetLastError();
 		throw platform_error();
 	}

@@ -2987,6 +2987,7 @@ public:
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
 		int blockSize = self->physicalPageSize;
 		std::vector<Future<int>> reads;
+		reads.reserve(pageIDs.size());
 		for (int i = 0; i < pageIDs.size(); ++i) {
 			reads.push_back(
 			    readPhysicalBlock(self, page, i * blockSize, blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
@@ -10301,7 +10302,9 @@ TEST_CASE("Lredwood/correctness/seekExactKey") {
 	          Optional<Value>(StringRef(format("value-%04d-%s", 150, std::string(512, 'v').c_str()))));
 	ASSERT_EQ(emptyValue, Optional<Value>(""_sr));
 
-	kvStore = keyValueStoreRedwoodV1(kvFile, UID(), {}, 65536);
+	// Keep the large leaf, its ancestors, and pager metadata cached even with buggified page sizes.
+	// The earlier reads exercise eviction with a small cache; this phase requires a cache hit.
+	kvStore = keyValueStoreRedwoodV1(kvFile, UID(), {}, FLOW_KNOBS->PAGE_CACHE_4K);
 	co_await kvStore->init();
 	unsigned int cacheHitsBefore = g_redwoodMetrics.metric.pagerCacheHit;
 	co_await checkExactKVStoreKey(kvStore, largeKey.toString(), largeValue.toString());
