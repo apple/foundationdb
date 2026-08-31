@@ -2031,7 +2031,7 @@ TLogPeekMemoryVersions peekMessageVersionsFromMemory(Reference<LogData> self, Ta
 	return result;
 }
 
-Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, Tag tag, int logRouters) {
+AsyncResult<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, Tag tag, int logRouters) {
 	// See the comment in LogSystem.cpp for the binary format of commitBlob.
 	std::vector<StringRef> relevantMessages;
 	BinaryReader rd(commitBlob, AssumeVersion(g_network->protocolVersion()));
