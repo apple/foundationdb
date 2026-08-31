@@ -24,6 +24,7 @@
 
 #include "macro.hpp"
 #include "mako.hpp"
+#include "random.hpp"
 #include "fdbclient/zipf.h"
 #include <cassert>
 #include <chrono>
@@ -75,15 +76,6 @@ inline void randomAlphanumString(Char* str, int len) {
 			str[i] = 'A' + value - chars_per_alpha;
 		else
 			str[i] = '0' + value - 2 * chars_per_alpha;
-	}
-}
-
-/* random string */
-template <typename Char>
-force_inline void randomString(Char* str, int len) {
-	assert(len >= 0);
-	for (auto i = 0; i < len; i++) {
-		str[i] = ('!' + urand(0, 'z' - '!')); /* generate a char from '!' to 'z' */
 	}
 }
 

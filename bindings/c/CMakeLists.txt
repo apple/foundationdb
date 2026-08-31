@@ -122,6 +122,7 @@ if(NOT WIN32)
     test/mako/operations.hpp
     test/mako/operations.cpp
     test/mako/process.hpp
+    test/mako/random.hpp
     test/mako/shm.hpp
     test/mako/stats.hpp
     test/mako/time.hpp
@@ -180,6 +181,7 @@ if(NOT WIN32)
     add_library(fdb_c_client_memory_test OBJECT test/client_memory_test.cpp test/unit/fdb_api.cpp test/unit/fdb_api.hpp)
     if(BUILD_MAKO)
       add_library(mako OBJECT ${MAKO_SRCS})
+      add_library(mako_random_tests OBJECT test/unit/mako_random_tests.cpp)
     endif()
     add_library(fdb_c_setup_tests OBJECT test/unit/setup_tests.cpp)
     add_library(fdb_c_unit_tests_version_510 OBJECT ${UNIT_TEST_VERSION_510_SRCS})
@@ -193,6 +195,7 @@ if(NOT WIN32)
     add_executable(fdb_c_client_memory_test test/client_memory_test.cpp test/unit/fdb_api.cpp test/unit/fdb_api.hpp)
     if(BUILD_MAKO)
       add_executable(mako ${MAKO_SRCS})
+      add_executable(mako_random_tests test/unit/mako_random_tests.cpp)
     endif()
     add_executable(fdb_c_setup_tests test/unit/setup_tests.cpp)
     add_executable(fdb_c_unit_tests)
@@ -232,10 +235,13 @@ if(NOT WIN32)
   target_include_directories(fdb_c_client_config_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
 
   if(BUILD_MAKO)
+    target_link_libraries(mako_random_tests PRIVATE doctest Threads::Threads)
     # do not set RPATH for mako
     set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
     target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
     if(NOT OPEN_FOR_IDE)
+      add_test(NAME mako_random_tests COMMAND $<TARGET_FILE:mako_random_tests>)
+      set_tests_properties(mako_random_tests PROPERTIES TIMEOUT 30)
       strip_debug_symbols(mako)
       if(NOT GENERATE_DEBUG_PACKAGES)
         add_custom_target(prepare_mako_install ALL DEPENDS strip_only_mako)
