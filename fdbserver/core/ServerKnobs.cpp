@@ -1197,8 +1197,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// crawling through tiny batches.
 	init( AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN,                  256e3 ); if( randomize && buggify() ) AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN = 1000;
 	// Max bytes of keyspace one audit task covers, for every audit type (ValidateHA, ValidateReplica,
-	// ValidateRestore). Tasks default to one keyServers shard, and a shard bigger than this is subdivided
-	// so that no single task dominates.
+	// ValidateRestore, RangeDigest). Tasks default to one keyServers shard, and a shard bigger than this
+	// is subdivided so that no single task dominates.
 	//
 	// This bounds the audit phase's wall-clock: a task is scanned start to finish by one storage server,
 	// so the phase cannot end before its largest task does, and making individual tasks faster cannot help.

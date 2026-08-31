@@ -4898,7 +4898,8 @@ static Future<std::vector<KeyRange>> boundAuditTaskRange(Reference<IDDTxnProcess
 }
 
 // Partition the input range into multiple subranges according to the range ownership, and
-// schedule ha/replica/restore audit tasks of each subrange on the server which owns the subrange
+// schedule ha/replica/restore/range_digest audit tasks of each subrange on the server which owns
+// the subrange
 // Automatically retry until complete or timed out
 Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
                                   std::shared_ptr<DDAudit> audit,

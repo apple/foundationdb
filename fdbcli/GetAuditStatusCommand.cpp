@@ -135,10 +135,41 @@ Future<AuditPhase> getAuditProgressByServer(Database cx,
 	co_return AuditPhase::Complete;
 }
 
+// Per-range view for a RangeDigest audit. Reports the digest of each audited range so that a root
+// mismatch can be localized to the ranges whose digests differ, rather than only to the whole
+// keyspace. Only available while the audit is Running: the progress metadata is cleared at Complete.
+Future<Void> getRangeDigestProgressByRange(Database cx, UID auditId, KeyRange auditRange) {
+	std::vector<RangeDigestRangeEntry> entries = co_await getRangeDigestProgress(cx, auditId, auditRange);
+	int64_t counted = 0;
+	int64_t kvCount = 0;
+	int64_t byteCount = 0;
+	for (const auto& entry : entries) {
+		if (!entry.present) {
+			fmt::println("( Ongoing    ) {}", entry.boundaryRange.toString());
+			continue;
+		}
+		if (entry.rejectReason != nullptr) {
+			fmt::println("( {:<10} ) {}", entry.rejectReason, entry.boundaryRange.toString());
+			continue;
+		}
+		++counted;
+		kvCount += entry.state.kvCount;
+		byteCount += entry.state.byteCount;
+		fmt::println("( Complete   ) {} digest {} kv {} bytes {}",
+		             entry.boundaryRange.toString(),
+		             entry.state.digestToHex(),
+		             entry.state.kvCount,
+		             entry.state.byteCount);
+	}
+	fmt::println("Countable ranges: {}/{}, kv {}, bytes {}", counted, entries.size(), kvCount, byteCount);
+	co_return;
+}
+
 Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
-	if (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	    auditType == AuditType::ValidateLocationMetadata || auditType == AuditType::ValidateRestore ||
-	    auditType == AuditType::RangeDigest) {
+	if (auditType == AuditType::RangeDigest) {
+		co_await getRangeDigestProgressByRange(cx, auditId, auditRange);
+	} else if (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
+	           auditType == AuditType::ValidateLocationMetadata || auditType == AuditType::ValidateRestore) {
 		co_await getAuditProgressByRange(cx, auditType, auditId, auditRange);
 	} else if (auditType == AuditType::ValidateStorageServerShard) {
 		std::vector<Future<Void>> fs;
@@ -218,29 +249,17 @@ Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> toke
 		AuditStorageState res = co_await getAuditState(cx, type, id);
 		if (res.getPhase() == AuditPhase::Running) {
 			co_await getAuditProgress(cx, res.getType(), res.id, res.range);
+		} else if (res.getType() == AuditType::RangeDigest) {
+			// Per-range progress is cleared once the audit reaches Complete, so the per-range digests
+			// are no longer readable here. The combined root survives on the top-level record, and the
+			// per-range history remains in the SSAuditRangeDigestComplete trace events.
+			fmt::println("Already complete; `get_audit_status range_digest id {}' reports the combined "
+			             "cluster root. Per-range digests are no longer stored -- see the "
+			             "SSAuditRangeDigestComplete trace events.",
+			             id.toString());
 		} else {
 			fmt::println("Already complete");
 		}
-	} else if (tokencmp(tokens[2], "root")) {
-		// The combined RangeDigest cluster root is stored in the top-level audit record when the
-		// audit completes (per-range progress is cleared at that point).
-		if (tokens.size() != 4 || type != AuditType::RangeDigest) {
-			printUsage(tokens[0]);
-			co_return false;
-		}
-		const UID id = UID::fromString(tokens[3].toString());
-		AuditStorageState res = co_await getAuditState(cx, type, id);
-		if (res.getPhase() != AuditPhase::Complete) {
-			fmt::println("RangeDigest audit {} is not complete (phase {}); root is only final when complete.",
-			             id.toString(),
-			             static_cast<int>(res.getPhase()));
-			co_return true;
-		}
-		RangeDigest root = RangeDigest::fromBytes(res.digest);
-		fmt::println("RangeDigest root : {}", root.toHex());
-		fmt::println("KV count         : {}", res.kvCount);
-		fmt::println("Bytes            : {}", res.byteCount);
-		fmt::println("Audit range      : {}", res.range.toString());
 	} else if (tokencmp(tokens[2], "recent")) {
 		int count = CLIENT_KNOBS->TOO_MANY;
 		if (tokens.size() == 4) {
@@ -275,14 +294,16 @@ Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> toke
 CommandFactory getAuditStatusFactory(
     "get_audit_status",
     CommandHelp("get_audit_status [ha|replica|locationmetadata|ssshard|validate_restore|range_digest] "
-                "[id|recent|phase|progress|root] [ARGs]",
+                "[id|recent|phase|progress] [ARGs]",
                 "Retrieve audit storage status",
                 "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
                 "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
                 "To fetch status of audits in a specific phase: `get_audit_status [Type] phase "
                 "[running|complete|failed|error] count'\n"
                 "To fetch audit progress via ID: `get_audit_status [Type] progress [ID]'\n"
-                "To fetch the combined RangeDigest cluster root: `get_audit_status range_digest root [ID]'\n"
+                "For `range_digest', the record reported by `id' carries the combined cluster root as\n"
+                "[Digest], along with [KVCount] and [Bytes]; it is final once [Phase] is Complete=2.\n"
+                "While the audit is Running, `progress' additionally reports the per-range digests.\n"
                 "Supported types include: 'ha', `replica`, `locationmetadata`, `ssshard`, `validate_restore`, "
                 "`range_digest`. \n"
                 "If specified, `Count' is how many rows to audit.\n"

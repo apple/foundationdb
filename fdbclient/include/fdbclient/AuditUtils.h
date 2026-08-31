@@ -100,7 +100,28 @@ struct RangeDigestSummary {
 // Read the persisted per-range RangeDigest progress for `auditId` over `range` and combine it
 // into a single cluster root (plus kv/byte totals). Because the combine is additive, this is
 // independent of how the ranges were partitioned across storage servers.
+//
+// Stops at the first range it cannot count, so on !complete the totals are partial by construction
+// and only `incompleteRange` is meaningful.
 Future<RangeDigestSummary> getRangeDigestSummary(Database cx, UID auditId, KeyRange range);
+
+// One entry of the persisted per-range RangeDigest progress, as read at a krm boundary.
+struct RangeDigestRangeEntry {
+	KeyRange boundaryRange; // the range this row was read at
+	AuditStorageState state; // decoded row; meaningful only when `present`
+	bool present = false; // false when the progress map has no row covering `boundaryRange`
+	const char* rejectReason = nullptr; // nullptr when the row may be counted into a root
+};
+
+// Per-range detail behind getRangeDigestSummary, for operator inspection while an audit is Running.
+// Unlike the summary this reads every range, so a partially covered audit still reports what it has.
+// The progress metadata is cleared once the audit reaches Complete, after which this reads empty and
+// the per-range history survives only in the SSAuditRangeDigestComplete trace events.
+Future<std::vector<RangeDigestRangeEntry>> getRangeDigestProgress(Database cx, UID auditId, KeyRange range);
+
+// Countability rules for one persisted per-range row; nullptr means the row may be counted.
+// Shared so the summary and the operator-facing progress view cannot disagree about what counts.
+const char* rangeDigestRowRejectReason(const AuditStorageState& s, KeyRange boundaryRange);
 
 // Check whether a specific server's audit progress is complete for the given range.
 Future<bool> checkAuditProgressCompleteByServer(Database cx,

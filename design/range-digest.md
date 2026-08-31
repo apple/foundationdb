@@ -151,11 +151,33 @@ compares two settled states) but would generalize the primitive to a live cluste
 
 ### Mismatch localization
 
-Because the root is additive over any partition, a divergence can be bisected by
-re-running a digest over narrower key ranges, down to the offending region —
-without re-hashing the whole keyspace. The per-range digests are not available to
-bisect from: they are audit progress metadata, cleared once the audit reaches
-`Complete`, so localization is by re-audit rather than by inspection.
+Two roots differing tells you the datasets differ, not where. Localization works
+from the per-range digests, which each storage server emits as it finishes a task:
+
+    SSAuditRangeDigestComplete  AuditRange=<range> Digest=<hex> KVCount=<n> Bytes=<n>
+
+Diffing those events between the two runs identifies the ranges whose digests
+disagree. This is the primary mechanism, and it is how a 935,560 key-value
+shortfall was localized to a single bulkload task at 10B scale. Two consequences
+follow from it living in the trace logs: localization depends on log retention, and
+it needs the events from *both* runs, so the earlier run's logs must be kept as long
+as its root is still something you might compare against.
+
+While an audit is `Running` the same per-range digests are also queryable directly:
+
+    get_audit_status range_digest progress <id>
+
+That view disappears at `Complete`, when the progress metadata is cleared.
+
+Bisection by re-audit is the fallback: because the root is additive over any
+partition, a digest over a narrower range is directly comparable, so the divergent
+region can be found by halving. It costs about one extra full digest in total
+(`N/2 + N/4 + … ≈ N`) rather than a few cheap probes, and — the real limitation — it
+requires *both* datasets to still exist. That does not hold for the backup/restore
+case this feature was built for: the source keyspace is cleared before the restore,
+so only the restored side can be re-audited and the original survives solely as a
+32-byte root. Re-audit is therefore available when fingerprinting a live cluster
+that is still around, and the trace events are what remain otherwise.
 
 ### Failure handling
 

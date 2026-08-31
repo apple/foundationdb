@@ -32,9 +32,13 @@
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/ClusterConnectionFile.h"
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/RangeDigest.h"
+#include "fdbclient/SystemData.h"
+#include "fdbserver/core/QuietDatabase.h"
 #include "fdbserver/tester/workloads.h"
 
 struct RangeDigestValidationWorkload : TestWorkload {
@@ -55,6 +59,9 @@ struct RangeDigestValidationWorkload : TestWorkload {
 	int expectMinShards;
 	double shardSettleTimeout;
 	bool strictShardCheck;
+	double quiesceTimeout;
+	double exclusionTimeout;
+	bool forceMovementBetweenDigests;
 	// A run is only meaningful if the content comparison actually executed. Absent this, every error
 	// path is a silent skip and a permanently broken digest still yields a green test.
 	bool validated = false;
@@ -75,6 +82,9 @@ struct RangeDigestValidationWorkload : TestWorkload {
 		expectMinShards = getOption(options, "expectMinShards"_sr, 2);
 		shardSettleTimeout = getOption(options, "shardSettleTimeout"_sr, 60.0);
 		strictShardCheck = getOption(options, "strictShardCheck"_sr, false);
+		quiesceTimeout = getOption(options, "quiesceTimeout"_sr, 120.0);
+		exclusionTimeout = getOption(options, "exclusionTimeout"_sr, 180.0);
+		forceMovementBetweenDigests = getOption(options, "forceMovementBetweenDigests"_sr, true);
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -181,6 +191,184 @@ struct RangeDigestValidationWorkload : TestWorkload {
 			co_await tr.onError(err);
 		}
 	}
+
+	// Canonical description of how normalKeys is currently partitioned AND who owns each piece, so a
+	// repartition can be demonstrated rather than assumed. Ownership matters independently of
+	// boundaries: relocating a shard to a different team changes which server folds those keys while
+	// leaving the boundary list identical.
+	//
+	// `owners`, when non-null, collects the servers currently holding any of normalKeys. Excluding a
+	// server outside that set relocates nothing, which at this dataset size is the common case: ~1MB
+	// spread over a triple-replicated 18-machine cluster leaves most servers holding no rdv/ keys at all.
+	Future<std::string> capturePartition(Database cx, std::set<UID>* owners = nullptr) {
+		Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		while (true) {
+			Error err;
+			try {
+				RangeResult shards = co_await krmGetRanges(
+				    &tr, keyServersPrefix, normalKeys, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY);
+				RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+				std::string out;
+				if (owners != nullptr) {
+					owners->clear();
+				}
+				for (int i = 0; i + 1 < shards.size(); ++i) {
+					std::vector<UID> src, dest;
+					UID srcId, destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+					std::sort(src.begin(), src.end());
+					out += shards[i].key.toString() + "=";
+					for (const UID& id : src) {
+						out += id.shortString() + ",";
+						if (owners != nullptr) {
+							owners->insert(id);
+						}
+					}
+					out += ";";
+				}
+				co_return out;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
+	// Wait for data distribution to go idle. The digest requires a quiescent cluster: every server
+	// folds at its own read version, and the additive combine assumes each key-value is folded exactly
+	// once, so a shard in flight can be counted by both the losing and the gaining server or by
+	// neither. Digesting mid-movement is not a theoretical hazard -- at 100M scale it produced a root
+	// over-counting ~104.8M against a true ~100M.
+	//
+	// Returns false on timeout so the caller can decline to assert rather than digest a moving cluster.
+	Future<bool> waitForQuiescence(Database cx, double timeoutSeconds) {
+		double start = now();
+		while (now() - start < timeoutSeconds) {
+			Error err;
+			try {
+				int64_t inFlight = co_await getDataInFlight(cx, dbInfo);
+				int64_t queueSize = co_await getDataDistributionQueueSize(cx, dbInfo, /*reportInFlight=*/true);
+				if (inFlight == 0 && queueSize == 0) {
+					TraceEvent("RangeDigestValidationQuiesced").detail("Elapsed", now() - start);
+					co_return true;
+				}
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
+			}
+			if (err.code() != invalid_error_code) {
+				// These metrics come from per-worker event logs, so they throw (attribute_not_found when
+				// a server's worker cannot be found, timed_out when it does not answer) exactly while the
+				// cluster is churning -- which is when this is called. Not being able to observe
+				// quiescence is not evidence of it, so keep polling and let the timeout be the only exit.
+				TraceEvent(SevInfo, "RangeDigestValidationQuiesceProbeFailed")
+				    .error(err)
+				    .detail("Elapsed", now() - start);
+			}
+			co_await delay(1.0);
+		}
+		TraceEvent(SevWarn, "RangeDigestValidationQuiesceTimeout").detail("Timeout", timeoutSeconds);
+		co_return false;
+	}
+
+	// Force a repartition between the two digests by excluding one storage server, so DD relocates its
+	// shards onto other teams. Without this the second digest re-runs over the same layout and asserts
+	// only that a deterministic fold is deterministic -- it would pass even if the digest were
+	// partition-DEPENDENT, which is the one property the whole before/after comparison rests on.
+	//
+	// Uses exclusion rather than a direct moveKeys: this audit is driven by data distribution, so
+	// setDDMode(0) (which RandomMoveKeys needs to take the moveKeys lock) risks stalling the very
+	// mechanism under test.
+	//
+	// Returns false when no repartition was performed. That is never a failure: a simulated cluster
+	// that cannot spare a server must not turn this test red.
+	Future<bool> forceRepartition(Database cx) {
+		// Read the configured replication factor rather than assuming triple: excluding down to exactly
+		// the replica count leaves DD no destination team and the exclusion never completes.
+		DatabaseConfiguration configuration;
+		{
+			Transaction tr(cx);
+			while (true) {
+				Error err;
+				try {
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+					RangeResult res = co_await tr.getRange(configKeys, 1000);
+					ASSERT(!res.more);
+					for (const auto& kv : res) {
+						configuration.set(kv.key, kv.value);
+					}
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr.onError(err);
+			}
+		}
+
+		// Only a server that actually holds part of normalKeys is worth excluding; draining a server
+		// with no rdv/ keys relocates nothing and leaves the layout identical, which is what happens on
+		// most seeds because the dataset is far smaller than the fleet.
+		std::set<UID> owners;
+		co_await capturePartition(cx, &owners);
+
+		std::vector<StorageServerInterface> servers = co_await getStorageServers(cx);
+		std::vector<StorageServerInterface> candidates;
+		int nonTssCount = 0;
+		for (const auto& ss : servers) {
+			if (ss.isTss()) {
+				continue;
+			}
+			++nonTssCount;
+			if (owners.count(ss.id()) > 0) {
+				candidates.push_back(ss);
+			}
+		}
+		if (nonTssCount <= configuration.storageTeamSize + 1 || candidates.empty()) {
+			TraceEvent(SevWarn, "RangeDigestValidationSkipRepartition")
+			    .detail("Reason", candidates.empty() ? "NoServerOwnsAuditRange" : "TooFewStorageServers")
+			    .detail("NonTssServers", nonTssCount)
+			    .detail("OwningCandidates", candidates.size())
+			    .detail("StorageTeamSize", configuration.storageTeamSize);
+			co_return false;
+		}
+
+		const StorageServerInterface victim = candidates[deterministicRandom()->randomInt(0, candidates.size())];
+		AddressExclusion exclusion(victim.address().ip, victim.address().port);
+		TraceEvent("RangeDigestValidationExcluding").detail("Server", victim.id()).detail("Address", victim.address());
+		try {
+			co_await excludeServers(cx, std::vector<AddressExclusion>{ exclusion });
+			// waitForAllExcluded: return only once the server holds no data, i.e. the relocation the
+			// repartition depends on has actually happened.
+			Optional<std::set<NetworkAddress>> excluded = co_await timeout(
+			    checkForExcludingServers(cx, std::vector<AddressExclusion>{ exclusion }, /*waitForAllExcluded=*/true),
+			    exclusionTimeout);
+			if (!excluded.present()) {
+				TraceEvent(SevWarn, "RangeDigestValidationSkipRepartition")
+				    .detail("Reason", "ExclusionTimedOut")
+				    .detail("Server", victim.id());
+				co_await includeServers(cx, std::vector<AddressExclusion>(1));
+				co_return false;
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			TraceEvent(SevWarn, "RangeDigestValidationSkipRepartition")
+			    .error(e)
+			    .detail("Reason", "ExclusionFailed")
+			    .detail("Server", victim.id());
+			co_return false;
+		}
+		TraceEvent("RangeDigestValidationExcluded").detail("Server", victim.id());
+		co_return true;
+	}
+
 	// Retries the whole audit on transient cluster errors (e.g. movekeys_conflict during DD failover),
 	// mirroring RestoreValidation's tolerance for buggify-induced instability.
 	Future<RangeDigestSummary> runOneDigest(Database cx) {
@@ -305,13 +493,48 @@ struct RangeDigestValidationWorkload : TestWorkload {
 		ExpectedDigest expected;
 		RangeDigestSummary first;
 		RangeDigestSummary second;
+		bool repartitioned = false;
+		bool partitionActuallyChanged = false;
 		try {
+			// The audit requires a quiescent cluster. The load above is small enough that DD normally
+			// settles long before this, but relying on that is relying on the dataset staying small.
+			if (!co_await waitForQuiescence(cx, quiesceTimeout)) {
+				TraceEvent(SevWarnAlways, "RangeDigestValidationInconclusive")
+				    .detail("Reason", "Cluster never quiesced before the first digest");
+				co_return;
+			}
+
 			expected = co_await computeExpectedDigest(cx);
 			TraceEvent("RangeDigestValidationExpected")
 			    .detail("Root", expected.digest.toHex())
 			    .detail("KVCount", expected.kvCount)
 			    .detail("Bytes", expected.byteCount);
 			first = co_await runOneDigest(cx);
+
+			// Repartition between the digests so the second one is taken over a different physical
+			// layout. Without this the second digest only re-confirms determinism.
+			std::string partitionBefore = co_await capturePartition(cx);
+			if (forceMovementBetweenDigests) {
+				repartitioned = co_await forceRepartition(cx);
+			}
+			if (repartitioned) {
+				// The exclusion guarantees the excluded server is drained, not that the cluster as a
+				// whole is idle; DD keeps rebalancing after. Digesting now would re-create the 100M
+				// over-count, so settle before the second digest rather than after re-including.
+				if (!co_await waitForQuiescence(cx, quiesceTimeout)) {
+					TraceEvent(SevWarnAlways, "RangeDigestValidationInconclusive")
+					    .detail("Reason", "Cluster never re-quiesced after the forced repartition");
+					co_await includeServers(cx, std::vector<AddressExclusion>(1));
+					co_return;
+				}
+				std::string partitionAfter = co_await capturePartition(cx);
+				partitionActuallyChanged = partitionAfter != partitionBefore;
+				TraceEvent("RangeDigestValidationRepartitioned")
+				    .detail("PartitionChanged", partitionActuallyChanged)
+				    .detail("ShardsBefore", std::count(partitionBefore.begin(), partitionBefore.end(), ';'))
+				    .detail("ShardsAfter", std::count(partitionAfter.begin(), partitionAfter.end(), ';'));
+			}
+
 			second = co_await runOneDigest(cx);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -336,10 +559,15 @@ struct RangeDigestValidationWorkload : TestWorkload {
 			    .detail("ExpectedBytes", expected.byteCount);
 			ASSERT(false);
 		}
+		// When the layout provably changed, this is a partition-independence assertion; otherwise it
+		// degrades to the determinism check it has always been. PartitionChanged distinguishes the two
+		// in the trace, so a green run cannot be mistaken for the stronger claim.
 		if (second.root != first.root) {
 			TraceEvent(SevError, "RangeDigestValidationNondeterministicRoot")
 			    .detail("FirstRoot", first.root.toHex())
-			    .detail("SecondRoot", second.root.toHex());
+			    .detail("SecondRoot", second.root.toHex())
+			    .detail("Repartitioned", repartitioned)
+			    .detail("PartitionChanged", partitionActuallyChanged);
 			ASSERT(false);
 		}
 
@@ -347,8 +575,15 @@ struct RangeDigestValidationWorkload : TestWorkload {
 		    .detail("Root", first.root.toHex())
 		    .detail("KVCount", first.kvCount)
 		    .detail("Bytes", first.byteCount)
-		    .detail("Shards", shards);
+		    .detail("Shards", shards)
+		    .detail("Repartitioned", repartitioned)
+		    .detail("PartitionChanged", partitionActuallyChanged);
 		validated = true;
+		if (repartitioned) {
+			// Leave the fleet as we found it for any workload that follows and for the end-of-test
+			// quiescence check.
+			co_await includeServers(cx, std::vector<AddressExclusion>(1));
+		}
 	}
 };
 
