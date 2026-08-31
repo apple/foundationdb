@@ -42,7 +42,7 @@
 //
 // Finally it resets usable_regions=1 so subsequent checks are not stuck.
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/tester/workloads.h"
