@@ -325,7 +325,7 @@ struct RangeDigestValidationWorkload : TestWorkload {
 				continue;
 			}
 			++nonTssCount;
-			if (owners.count(ss.id()) > 0) {
+			if (owners.contains(ss.id())) {
 				candidates.push_back(ss);
 			}
 		}
