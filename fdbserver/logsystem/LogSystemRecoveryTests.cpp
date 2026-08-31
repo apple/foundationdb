@@ -58,6 +58,66 @@ std::tuple<int, std::vector<TLogLockResult>, bool> makeLogGroupResults(
 
 void forceLinkLogSystemRecoveryTests() {}
 
+TEST_CASE("/LogSystem/LogPushData/AddTagsBorrowsContainers") {
+	class NonCopyableTags : NonCopyable {
+	public:
+		explicit NonCopyableTags(std::vector<Tag> tags) : tags(std::move(tags)) {}
+		auto begin() const { return tags.begin(); }
+		auto end() const { return tags.end(); }
+
+	private:
+		std::vector<Tag> tags;
+	};
+
+	LocalityData locality;
+	auto logSet = makeSingleLogSet({ TLogInterface(locality) });
+	logSet->locality = tagLocalitySpecial;
+	logSet->tLogPolicy = makeReference<PolicyOne>();
+	logSet->updateLocalitySet({ locality });
+	auto logSystem = makeReference<LogSystem>(UID(), locality, LogEpoch(1));
+	logSystem->tLogs.push_back(logSet);
+	LogPushData actual(logSystem, 1);
+	LogPushData expected(logSystem, 1);
+
+	const Tag storageTag(0, 1);
+	const Tag cdcTag(tagLocalityCDC, 3);
+	std::vector<Tag> vectorTags{ storageTag, cdcTag, storageTag };
+	std::set<Tag> setTags{ storageTag, cdcTag };
+	actual.addTags(vectorTags);
+	actual.addTags(std::as_const(setTags));
+	for (Tag tag : vectorTags) {
+		expected.addTag(tag);
+	}
+	for (Tag tag : setTags) {
+		expected.addTag(tag);
+	}
+	vectorTags.clear();
+	setTags.clear();
+	actual.addTags(std::vector<Tag>{});
+	actual.addTags(std::set<Tag>{ cdcTag });
+	expected.addTag(cdcTag);
+	{
+		const NonCopyableTags tags({ cdcTag, storageTag });
+		actual.addTags(tags);
+		expected.addTag(cdcTag);
+		expected.addTag(storageTag);
+	}
+	actual.writeMessage("first"_sr, false);
+	expected.writeMessage("first"_sr, false);
+	ASSERT_EQ(actual.getMessages(0), expected.getMessages(0));
+
+	actual.addTags(std::vector<Tag>{ storageTag });
+	expected.addTag(storageTag);
+	actual.writeMessage("second"_sr, false);
+	expected.writeMessage("second"_sr, false);
+	ASSERT_EQ(actual.getMessages(0), expected.getMessages(0));
+	ASSERT_EQ(actual.getMutationCount(), 2);
+	std::set<Tag> writtenTags;
+	actual.saveTags(writtenTags);
+	ASSERT_EQ(writtenTags, (std::set<Tag>{ storageTag, cdcTag }));
+	return Void();
+}
+
 TEST_CASE("/LogSystem/GetPseudoPopTag/LogRouterWithoutMappedLocality") {
 	LocalityData locality;
 	auto logSystem = makeReference<LogSystem>(UID(), locality, LogEpoch(1));
