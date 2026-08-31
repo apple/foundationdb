@@ -368,7 +368,8 @@ Future<std::vector<std::string>> listContainers_impl(std::string baseURL, Option
 			                               /*isBackup=*/true,
 			                               /*encryptionBlockSize=*/0);
 
-			std::vector<std::string> results = co_await BackupContainerBlobStore::listURLs(bstore, dummy.getBucket());
+			std::vector<std::string> results =
+			    co_await BackupContainerBlobStore::listURLs(bstore, dummy.getBucket(), dummy.getPrefix());
 			co_return results;
 		} else {
 			IBackupContainer::lastOpenError = "invalid URL prefix";
