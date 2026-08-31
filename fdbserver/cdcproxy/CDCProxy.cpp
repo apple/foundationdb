@@ -432,11 +432,13 @@ Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef c
 	return Optional<MutationRef>();
 }
 
+FDB_BOOLEAN_PARAM(PrioritizeConsume);
+
 Future<CDCStreamReadState> readCDCStreamState(Database cx,
                                               CDCStreamId streamId,
                                               UID expectedProxyId,
                                               bool requireKeys,
-                                              bool prioritizeConsume = false) {
+                                              PrioritizeConsume prioritizeConsume = PrioritizeConsume::False) {
 	if (streamId == 0) {
 		throw client_invalid_operation();
 	}
@@ -1517,7 +1519,8 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 			ASSERT_GT(stream->activeConsumes, 0);
 			--stream->activeConsumes;
 		});
-		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, request.cursor.streamId, id, true, true);
+		const CDCStreamReadState metadata =
+		    co_await readCDCStreamState(cx, request.cursor.streamId, id, true, PrioritizeConsume::True);
 		CODE_PROBE(stream->minVersion < metadata.minVersion, "Native CDC consume reconciles a durable acknowledgement");
 		reconcileStreamMinVersion(stream, metadata.minVersion);
 		if (request.cursor.lastConsumedVersion > stream->bufferedThrough) {
