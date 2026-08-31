@@ -19,6 +19,8 @@
  */
 #include "TesterApiWorkload.h"
 #include "test/fdb_api.hpp"
+#include <atomic>
+#include <memory>
 
 namespace FdbApiTester {
 
@@ -48,10 +50,18 @@ private:
 		execTransaction(
 		    [key, initialVal](auto ctx) {
 			    // Set the key to initialVal.
+			    ctx->makeSelfConflicting();
 			    ctx->tx().set(key, initialVal);
 			    ctx->commit();
 		    },
 		    [this, key, newVal, cont]() {
+			    // Finish both transactions before another operation can reuse this key.
+			    auto remaining = std::make_shared<std::atomic<int>>(2);
+			    auto transactionDone = [this, remaining, cont] {
+				    if (--(*remaining) == 0) {
+					    schedule(cont);
+				    }
+			    };
 			    execTransaction(
 			        [key, newVal](auto ctx) {
 				        // Check the value of the key.
@@ -66,23 +76,25 @@ private:
 						        auto watchF = ctx->tx().watch(key);
 						        auto commitF = ctx->tx().commit();
 
-						        ctx->continueAfterAll({ commitF, watchF }, [ctx] {
+						        // A failed commit can leave watchF pending. Handle commit errors first.
+						        ctx->continueAfter(commitF, [ctx, watchF] {
 							        // Wait for the watch to report a change (to newVal).
-							        ctx->done();
+							        ctx->continueAfter(watchF, [ctx] { ctx->done(); });
 						        });
 					        }
 				        });
 			        },
-			        [this, cont]() { schedule(cont); });
-			    schedule([this, key, newVal] {
+			        transactionDone);
+			    schedule([this, key, newVal, transactionDone] {
 				    execTransaction(
 				        // Set the key to a newVal which is guaranteed to be different from initialVal, i.e.,
 				        // must trigger the watch.
 				        [key, newVal](auto ctx) {
+					        ctx->makeSelfConflicting();
 					        ctx->tx().set(key, newVal);
 					        ctx->commit();
 				        },
-				        []() {});
+				        transactionDone);
 			    });
 		    });
 	}
