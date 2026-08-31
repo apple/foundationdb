@@ -478,8 +478,8 @@ Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> releaseDe
 	return releaseResolvingAfterImpl(self, releaseDelay, localBatchNumber);
 }
 
-static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Reference<Histogram> dist,
-                                                                   Future<ResolveTransactionBatchReply> in) {
+static AsyncResult<ResolveTransactionBatchReply> trackResolutionMetrics(Reference<Histogram> dist,
+                                                                        Future<ResolveTransactionBatchReply> in) {
 	double startTime = g_network->timer_monotonic();
 	ResolveTransactionBatchReply reply = co_await in;
 	dist->sampleSeconds(g_network->timer_monotonic() - startTime);
@@ -964,7 +964,7 @@ Future<Void> getResolution(CommitBatchContext* self) {
 		ASSERT(requests.requests[r].txnStateTransactions.size() == requests.requests[0].txnStateTransactions.size());
 
 	pProxyCommitData->stats.txnCommitResolving += trs.size();
-	std::vector<Future<ResolveTransactionBatchReply>> replies;
+	std::vector<AsyncResult<ResolveTransactionBatchReply>> replies;
 	Future<ResolveTransactionBatchReply> singleResolverReply;
 	double singleResolverStart = 0;
 	if (pProxyCommitData->resolvers.size() == 1) {
@@ -1011,7 +1011,7 @@ Future<Void> getResolution(CommitBatchContext* self) {
 		self->resolution.clear();
 		self->resolution.push_back(std::move(resolutionResp));
 	} else {
-		std::vector<ResolveTransactionBatchReply> resolutionResp = co_await getAll(replies);
+		std::vector<ResolveTransactionBatchReply> resolutionResp = co_await getAllAsync(std::move(replies));
 		self->resolution = std::move(resolutionResp);
 	}
 

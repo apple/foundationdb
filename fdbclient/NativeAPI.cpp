@@ -1388,14 +1388,15 @@ void DatabaseContext::updateBackoff(const Error& err) {
 	}
 }
 
-Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database cx,
-                                                                        KeyRange keys,
-                                                                        int limit,
-                                                                        Reverse reverse,
-                                                                        SpanContext spanContext,
-                                                                        Optional<UID> debugID,
-                                                                        UseProvisionalProxies useProvisionalProxies,
-                                                                        Version version) {
+AsyncResult<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
+    Database cx,
+    KeyRange keys,
+    int limit,
+    Reverse reverse,
+    SpanContext spanContext,
+    Optional<UID> debugID,
+    UseProvisionalProxies useProvisionalProxies,
+    Version version) {
 	Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
@@ -1452,6 +1453,12 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database
 	}
 }
 
+// Complete cache hits synchronously without adding a wrapper coroutine around cache misses.
+static AsyncResult<std::vector<KeyRangeLocationInfo>> readyKeyRangeLocations(
+    std::vector<KeyRangeLocationInfo> locations) {
+	co_return locations;
+}
+
 // Get the SS locations for each shard in the 'keys' key-range;
 // Returned vector size is the number of shards in the input keys key-range.
 // Returned vector element is <ShardRange, storage server location info> pairs, where
@@ -1459,15 +1466,15 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database
 // Example: If query the function with  key range (b, d), the returned list of pairs could be something like:
 // [([a, b1), locationInfo), ([b1, c), locationInfo), ([c, d1), locationInfo)].
 template <class F>
-Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& cx,
-                                                               KeyRange const& keys,
-                                                               int limit,
-                                                               Reverse reverse,
-                                                               F StorageServerInterface::* member,
-                                                               SpanContext const& spanContext,
-                                                               Optional<UID> const& debugID,
-                                                               UseProvisionalProxies useProvisionalProxies,
-                                                               Version version) {
+AsyncResult<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& cx,
+                                                                    KeyRange const& keys,
+                                                                    int limit,
+                                                                    Reverse reverse,
+                                                                    F StorageServerInterface::* member,
+                                                                    SpanContext const& spanContext,
+                                                                    Optional<UID> const& debugID,
+                                                                    UseProvisionalProxies useProvisionalProxies,
+                                                                    Version version) {
 
 	ASSERT(!keys.empty());
 
@@ -1498,15 +1505,15 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& c
 		    cx, keys, limit, reverse, spanContext, debugID, useProvisionalProxies, version);
 	}
 
-	return locations;
+	return readyKeyRangeLocations(std::move(locations));
 }
 
 template <class F>
-Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<TransactionState> trState,
-                                                               KeyRange const& keys,
-                                                               int limit,
-                                                               Reverse reverse,
-                                                               F StorageServerInterface::* member) {
+AsyncResult<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<TransactionState> trState,
+                                                                    KeyRange const& keys,
+                                                                    int limit,
+                                                                    Reverse reverse,
+                                                                    F StorageServerInterface::* member) {
 	return getKeyRangeLocations(trState->cx,
 	                            keys,
 	                            limit,
@@ -6960,7 +6967,7 @@ static Future<CheckpointMetaData> getCheckpointMetaDataInternal(KeyRange range,
 	throw error.get();
 }
 
-static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDataForRange(
+static AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDataForRange(
     Database cxInput,
     KeyRange rangeInput,
     Version version,
@@ -7037,13 +7044,13 @@ static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpoin
 	co_return res;
 }
 
-Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(Database cx,
-                                                                                   std::vector<KeyRange> ranges,
-                                                                                   Version version,
-                                                                                   CheckpointFormat format,
-                                                                                   Optional<UID> actionId,
-                                                                                   double timeout) {
-	std::vector<Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>>> futures;
+AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(Database cx,
+                                                                                        std::vector<KeyRange> ranges,
+                                                                                        Version version,
+                                                                                        CheckpointFormat format,
+                                                                                        Optional<UID> actionId,
+                                                                                        double timeout) {
+	std::vector<AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>>> futures;
 	futures.reserve(ranges.size());
 
 	// TODO(heliu): Avoid send requests to the same shard.
@@ -7051,13 +7058,14 @@ Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDa
 		futures.push_back(getCheckpointMetaDataForRange(cx, range, version, format, actionId, timeout));
 	}
 
-	std::vector<std::vector<std::pair<KeyRange, CheckpointMetaData>>> results = co_await getAll(futures);
+	std::vector<std::vector<std::pair<KeyRange, CheckpointMetaData>>> results =
+	    co_await getAllAsync(std::move(futures));
 
 	std::vector<std::pair<KeyRange, CheckpointMetaData>> res;
 
-	for (const auto& r : results) {
+	for (auto& r : results) {
 		ASSERT(!r.empty());
-		res.insert(res.end(), r.begin(), r.end());
+		res.insert(res.end(), std::make_move_iterator(r.begin()), std::make_move_iterator(r.end()));
 	}
 
 	co_return res;

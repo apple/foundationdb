@@ -432,10 +432,10 @@ Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef c
 	return Optional<MutationRef>();
 }
 
-Future<CDCStreamReadState> readCDCStreamState(Database cx,
-                                              CDCStreamId streamId,
-                                              UID expectedProxyId,
-                                              bool requireKeys) {
+AsyncResult<CDCStreamReadState> readCDCStreamState(Database cx,
+                                                   CDCStreamId streamId,
+                                                   UID expectedProxyId,
+                                                   bool requireKeys) {
 	if (streamId == 0) {
 		throw client_invalid_operation();
 	}
@@ -1211,7 +1211,7 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 
 // Post-GA optimization: persist per-tag safe-pop state or coordinate pops centrally instead of rebuilding minima from
 // all stream history on every acknowledgement scan. Revisit if acknowledgement volume makes this scan material.
-Future<CDCPopState> readPopState(Database cx) {
+AsyncResult<CDCPopState> readPopState(Database cx) {
 	Transaction tr(cx);
 	while (true) {
 		Error err;
