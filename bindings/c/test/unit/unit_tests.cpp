@@ -1972,6 +1972,36 @@ TEST_CASE("fdb_database_get_server_protocol") {
 	fdb_future_destroy(protocolFuture);
 }
 
+TEST_CASE("CDC C binding rejects invalid registration ranges") {
+	const uint8_t name[] = "invalid-cdc-stream";
+	const uint8_t begin[] = "a";
+	const uint8_t end[] = "b";
+	FDBKeyRange range{ begin, 1, end, 1 };
+	auto checkInvalid = [&](uint8_t const* nameInput, int nameLength, FDBKeyRange const* ranges, int rangeCount) {
+		FDBFuture* future = fdb_database_register_cdc_stream(db, nameInput, nameLength, ranges, rangeCount);
+		REQUIRE(future != nullptr);
+		fdb_check(fdb_future_block_until_ready(future));
+		CHECK(fdb_future_get_error(future) == 2000); // client_invalid_operation
+		fdb_future_destroy(future);
+	};
+
+	checkInvalid(name, sizeof(name) - 1, &range, -1);
+	checkInvalid(name, sizeof(name) - 1, &range, 0);
+	checkInvalid(name, sizeof(name) - 1, &range, 1025);
+	checkInvalid(name, sizeof(name) - 1, nullptr, 1);
+	checkInvalid(nullptr, 1, &range, 1);
+	checkInvalid(name, -1, &range, 1);
+	checkInvalid(name, 0, &range, 1);
+	for (FDBKeyRange invalid : { FDBKeyRange{ begin, -1, end, 1 },
+	                             FDBKeyRange{ begin, 1, end, -1 },
+	                             FDBKeyRange{ nullptr, 1, end, 1 },
+	                             FDBKeyRange{ begin, 1, nullptr, 1 },
+	                             FDBKeyRange{ begin, 1, begin, 1 },
+	                             FDBKeyRange{ end, 1, begin, 1 } }) {
+		checkInvalid(name, sizeof(name) - 1, &invalid, 1);
+	}
+}
+
 TEST_CASE("CDC C binding end-to-end") {
 	using FuturePtr = std::unique_ptr<FDBFuture, decltype(&fdb_future_destroy)>;
 	using ConsumerPtr = std::unique_ptr<FDBCdcConsumer, decltype(&fdb_cdc_consumer_destroy)>;
@@ -2073,10 +2103,13 @@ TEST_CASE("CDC C binding end-to-end") {
 	};
 
 	const std::string streamName = key("cdc-stream");
-	const std::string rangeBegin = key("cdc-data/");
+	const std::string rangeBegin = key("cdc-data/a/");
 	const std::string rangeEnd = strinc_str(rangeBegin);
+	const std::string secondRangeBegin = key("cdc-data/c/");
+	const std::string secondRangeEnd = strinc_str(secondRangeBegin);
 	const std::string firstKey = rangeBegin + "first";
-	const std::string secondKey = rangeBegin + "second";
+	const std::string secondKey = secondRangeBegin + "second";
+	const std::string gapKey = key("cdc-data/b/gap");
 	const std::string outsideKey = key("outside-cdc-range");
 	const std::string firstValue = "first-value";
 	const std::string secondValue = "second-value";
@@ -2088,18 +2121,30 @@ TEST_CASE("CDC C binding end-to-end") {
 	std::string nameInput = streamName;
 	std::string beginInput = rangeBegin;
 	std::string endInput = rangeEnd;
-	auto registerFuture =
-	    ownFuture(fdb_database_register_cdc_stream(db,
-	                                               reinterpret_cast<uint8_t const*>(nameInput.data()),
-	                                               nameInput.size(),
-	                                               reinterpret_cast<uint8_t const*>(beginInput.data()),
-	                                               beginInput.size(),
-	                                               reinterpret_cast<uint8_t const*>(endInput.data()),
-	                                               endInput.size()));
+	std::string secondBeginInput = secondRangeBegin;
+	std::string secondEndInput = secondRangeEnd;
+	std::vector<FDBKeyRange> rangesInput{ { reinterpret_cast<uint8_t const*>(secondBeginInput.data()),
+		                                    static_cast<int>(secondBeginInput.size()),
+		                                    reinterpret_cast<uint8_t const*>(secondEndInput.data()),
+		                                    static_cast<int>(secondEndInput.size()) },
+		                                  { reinterpret_cast<uint8_t const*>(beginInput.data()),
+		                                    static_cast<int>(beginInput.size()),
+		                                    reinterpret_cast<uint8_t const*>(endInput.data()),
+		                                    static_cast<int>(endInput.size()) } };
+	// Repeated intervals must not duplicate delivered mutations.
+	rangesInput.push_back(rangesInput.back());
+	auto registerFuture = ownFuture(fdb_database_register_cdc_stream(db,
+	                                                                 reinterpret_cast<uint8_t const*>(nameInput.data()),
+	                                                                 nameInput.size(),
+	                                                                 rangesInput.data(),
+	                                                                 rangesInput.size()));
 	REQUIRE(registerFuture != nullptr);
 	std::fill(nameInput.begin(), nameInput.end(), 'x');
 	std::fill(beginInput.begin(), beginInput.end(), 'x');
 	std::fill(endInput.begin(), endInput.end(), 'x');
+	std::fill(secondBeginInput.begin(), secondBeginInput.end(), 'x');
+	std::fill(secondEndInput.begin(), secondEndInput.end(), 'x');
+	std::fill(rangesInput.begin(), rangesInput.end(), FDBKeyRange{ nullptr, -1, nullptr, -1 });
 	waitForSuccess(registerFuture.get());
 
 	uint64_t streamId = 0;
@@ -2119,10 +2164,16 @@ TEST_CASE("CDC C binding end-to-end") {
 		}
 		foundStream = true;
 		CHECK(streams[i].stream_id == streamId);
-		CHECK(std::string(reinterpret_cast<char const*>(streams[i].key_range.begin_key),
-		                  streams[i].key_range.begin_key_length) == rangeBegin);
-		CHECK(std::string(reinterpret_cast<char const*>(streams[i].key_range.end_key),
-		                  streams[i].key_range.end_key_length) == rangeEnd);
+		REQUIRE(streams[i].range_count == 2);
+		REQUIRE(streams[i].ranges != nullptr);
+		CHECK(std::string(reinterpret_cast<char const*>(streams[i].ranges[0].begin_key),
+		                  streams[i].ranges[0].begin_key_length) == rangeBegin);
+		CHECK(std::string(reinterpret_cast<char const*>(streams[i].ranges[0].end_key),
+		                  streams[i].ranges[0].end_key_length) == rangeEnd);
+		CHECK(std::string(reinterpret_cast<char const*>(streams[i].ranges[1].begin_key),
+		                  streams[i].ranges[1].begin_key_length) == secondRangeBegin);
+		CHECK(std::string(reinterpret_cast<char const*>(streams[i].ranges[1].end_key),
+		                  streams[i].ranges[1].end_key_length) == secondRangeEnd);
 		CHECK(streams[i].min_version >= 0);
 	}
 	REQUIRE(foundStream);
@@ -2145,8 +2196,10 @@ TEST_CASE("CDC C binding end-to-end") {
 	CHECK(positionStreamId == streamId);
 	CHECK(positionVersion == -1);
 
-	const int64_t setVersion =
-	    commitSetValues({ { firstKey, firstValue }, { secondKey, secondValue }, { outsideKey, "outside-value" } });
+	const int64_t setVersion = commitSetValues({ { firstKey, firstValue },
+	                                             { secondKey, secondValue },
+	                                             { gapKey, "gap-value" },
+	                                             { outsideKey, "outside-value" } });
 	auto setReply = consumeThroughVersion(consumer.get(), setVersion);
 	CHECK(setReply.version == setVersion);
 	CHECK(setReply.lastConsumedVersion >= setVersion);
@@ -2181,14 +2234,20 @@ TEST_CASE("CDC C binding end-to-end") {
 	CHECK(positionStreamId == streamId);
 	CHECK(positionVersion == setReply.lastConsumedVersion);
 
-	const std::string clearEnd = strinc_str(firstKey);
+	const std::string clearEnd = strinc_str(secondKey);
 	const int64_t clearVersion = commitClearRange(firstKey, clearEnd);
 	auto clearReply = consumeThroughVersion(resumedConsumer.get(), clearVersion);
 	CHECK(clearReply.version == clearVersion);
-	REQUIRE(clearReply.mutations.size() == 1);
-	CHECK(clearReply.mutations[0].type == FDB_CDC_MUTATION_TYPE_CLEAR_RANGE);
-	CHECK(clearReply.mutations[0].param1 == firstKey);
-	CHECK(clearReply.mutations[0].param2 == clearEnd);
+	REQUIRE(clearReply.mutations.size() == 2);
+	std::map<std::string, std::string> expectedClears{ { firstKey, rangeEnd }, { secondRangeBegin, clearEnd } };
+	for (auto const& mutation : clearReply.mutations) {
+		CHECK(mutation.type == FDB_CDC_MUTATION_TYPE_CLEAR_RANGE);
+		auto expected = expectedClears.find(mutation.param1);
+		REQUIRE(expected != expectedClears.end());
+		CHECK(mutation.param2 == expected->second);
+		expectedClears.erase(expected);
+	}
+	CHECK(expectedClears.empty());
 
 	auto resumedAcknowledgeFuture = ownFuture(fdb_cdc_consumer_acknowledge(resumedConsumer.get()));
 	REQUIRE(resumedAcknowledgeFuture != nullptr);

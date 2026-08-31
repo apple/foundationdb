@@ -839,18 +839,18 @@ CDCStreamId decodeCDCStreamKey(KeyRef const& key) {
 	return streamId;
 }
 
-Value cdcStreamKeysValue(KeyRangeRef const& keys) {
+Value cdcStreamKeysValue(std::vector<KeyRange> const& ranges) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withNativeCdc()));
-	wr << keys;
+	wr << ranges;
 	return wr.toValue();
 }
 
-KeyRange decodeCDCStreamKeysValue(ValueRef const& value) {
-	KeyRange keys;
+std::vector<KeyRange> decodeCDCStreamKeysValue(ValueRef const& value) {
+	std::vector<KeyRange> ranges;
 	BinaryReader reader(value, IncludeVersion());
 	ASSERT_WE_THINK(reader.protocolVersion().hasNativeCdc());
-	reader >> keys;
-	return keys;
+	reader >> ranges;
+	return ranges;
 }
 
 static Key cdcTagHistoryPrefixFor(CDCStreamId streamId) {
@@ -1944,7 +1944,7 @@ TEST_CASE("noSim/SystemData/DataMoveId") {
 TEST_CASE("/SystemData/NativeCDC") {
 	const Key name = "orders"_sr;
 	const CDCStreamId streamId = 42;
-	const KeyRange keys(KeyRangeRef("a"_sr, "z"_sr));
+	const std::vector<KeyRange> ranges{ KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("x"_sr, "z"_sr) };
 	const Version minVersion = 123456789;
 	const Tag tag(tagLocalityCDC, 9);
 	const UID proxyId(1, 2);
@@ -1953,7 +1953,7 @@ TEST_CASE("/SystemData/NativeCDC") {
 	ASSERT_EQ(decodeCDCStreamNameValue(cdcStreamNameValue(streamId)), streamId);
 	ASSERT_EQ(decodeCDCMaxStreamIdValue(cdcMaxStreamIdValue(streamId)), streamId);
 	ASSERT_EQ(decodeCDCStreamKey(cdcStreamKeyFor(streamId)), streamId);
-	ASSERT_EQ(decodeCDCStreamKeysValue(cdcStreamKeysValue(keys)), keys);
+	ASSERT(decodeCDCStreamKeysValue(cdcStreamKeysValue(ranges)) == ranges);
 	const Key tagOwnerKey = cdcTagOwnerKeyFor(tag);
 	ASSERT_EQ(decodeCDCTagOwnerKey(tagOwnerKey), tag);
 	ASSERT(cdcTagOwnerKeys.contains(tagOwnerKey));
