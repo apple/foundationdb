@@ -670,6 +670,7 @@ TEST_CASE("/flow/flow/quorum") {
 	std::vector<Promise<int>> ps(5);
 	std::vector<Future<int>> fs;
 	std::vector<Future<Void>> qs;
+	fs.reserve(ps.size());
 	for (auto& p : ps)
 		fs.push_back(p.getFuture());
 
@@ -912,6 +913,7 @@ TEST_CASE("/flow/flow/yieldedFuture/progress") {
 	Future<Void> i = success(u);
 
 	std::vector<Future<Void>> v;
+	v.reserve(5);
 	for (int i = 0; i < 5; i++)
 		v.push_back(yieldedFuture(u));
 	auto numReady = [&v]() { return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); }); };
@@ -943,6 +945,7 @@ TEST_CASE("/flow/flow/yieldedFuture/random") {
 		Future<Void> i = success(u);
 
 		std::vector<Future<Void>> v;
+		v.reserve(25);
 		for (int i = 0; i < 25; i++)
 			v.push_back(yieldedFuture(u));
 		auto numReady = [&v]() {
@@ -991,6 +994,7 @@ TEST_CASE("/flow/perf/yieldedFuture") {
 	std::vector<Future<Void>> ys;
 
 	start = timer();
+	ys.reserve(N);
 	for (int i = 0; i < N; i++)
 		ys.push_back(yieldedFuture(f));
 	printf("yieldedFuture(f) create: %0.1f M/sec\n", N / 1e6 / (timer() - start));

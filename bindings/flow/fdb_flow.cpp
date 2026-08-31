@@ -53,6 +53,7 @@ Future<Void> _test() {
 	// for (int i = 0; i < 100000; i++) {
 	// 	Version v = wait( tr->getReadVersion() );
 	// }
+	versions.reserve(100000);
 	for (int i = 0; i < 100000; i++) {
 		versions.push_back(tr->getReadVersion());
 	}

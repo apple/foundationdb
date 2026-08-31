@@ -324,6 +324,7 @@ public:
 
 	Future<Void> updateStorageMetrics() override {
 		std::vector<Future<Void>> futures;
+		futures.reserve(teams.size());
 
 		for (auto& team : teams) {
 			futures.push_back(team->updateStorageMetrics());

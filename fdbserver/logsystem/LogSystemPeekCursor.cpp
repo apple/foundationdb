@@ -824,6 +824,7 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> cons
 
 Reference<IReplayPeekCursor> MergedPeekCursor::cloneNoMore() {
 	std::vector<Reference<ServerPeekCursor>> cursors;
+	cursors.reserve(serverCursors.size());
 	for (const auto& it : serverCursors) {
 		cursors.push_back(it->cloneServerNoMore());
 	}
