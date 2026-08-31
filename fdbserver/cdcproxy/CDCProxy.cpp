@@ -435,7 +435,8 @@ Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef c
 Future<CDCStreamReadState> readCDCStreamState(Database cx,
                                               CDCStreamId streamId,
                                               UID expectedProxyId,
-                                              bool requireKeys) {
+                                              bool requireKeys,
+                                              bool prioritizeConsume = false) {
 	if (streamId == 0) {
 		throw client_invalid_operation();
 	}
@@ -446,6 +447,10 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			if (prioritizeConsume) {
+				// Draining committed CDC data must continue while ordinary transaction admission is throttled.
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
 
 			Future<Optional<Value>> keysFuture = tr.get(cdcStreamKeyFor(streamId));
 			Future<Optional<Value>> minVersionFuture = tr.get(cdcMinVersionKeyFor(streamId));
@@ -1512,7 +1517,7 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 			ASSERT_GT(stream->activeConsumes, 0);
 			--stream->activeConsumes;
 		});
-		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, request.cursor.streamId, id, true);
+		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, request.cursor.streamId, id, true, true);
 		CODE_PROBE(stream->minVersion < metadata.minVersion, "Native CDC consume reconciles a durable acknowledgement");
 		reconcileStreamMinVersion(stream, metadata.minVersion);
 		if (request.cursor.lastConsumedVersion > stream->bufferedThrough) {
