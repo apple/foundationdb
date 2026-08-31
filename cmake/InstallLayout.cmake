@@ -133,6 +133,10 @@ set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
 ################################################################################
 
 set(GENERATE_DEBUG_PACKAGES ON CACHE BOOL "Build debug rpm/deb packages")
+# disable dwz compression which is slow on large binaries
+set(CPACK_RPM_SPEC_MORE_DEFINE "
+%define _find_debuginfo_dwz_opts %{nil}
+")
 
 ################################################################################
 # Alternatives config
