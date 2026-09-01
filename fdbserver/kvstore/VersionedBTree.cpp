@@ -7580,21 +7580,21 @@ public:
 		//     If there is a record in the tree > query then moveNext() will move to it.
 		// If non-zero is returned then the cursor is valid and the return value is logically equivalent
 		// to query.compare(cursor.get())
-		Future<int> seek_impl(BTreeCursor* self, RedwoodRecordRef query) {
+		Future<int> seek_impl(RedwoodRecordRef query) {
 			RedwoodRecordRef internalPageQuery = query.withMaxPageID();
-			self->path.resize(1);
-			debug_printf("seek(%s) start cursor = %s\n", query.toString().c_str(), self->toString().c_str());
+			this->path.resize(1);
+			debug_printf("seek(%s) start cursor = %s\n", query.toString().c_str(), this->toString().c_str());
 
 			while (true) {
-				auto& entry = self->path.back();
+				auto& entry = this->path.back();
 				if (entry.btPage()->isLeaf()) {
 					int cmp = entry.cursor.seek(query);
-					self->valid = entry.cursor.valid() && !entry.cursor.isErased();
+					this->valid = entry.cursor.valid() && !entry.cursor.isErased();
 					debug_printf("seek(%s) loop exit cmp=%d cursor=%s\n",
 					             query.toString().c_str(),
 					             cmp,
-					             self->toString().c_str());
-					co_return self->valid ? cmp : 0;
+					             this->toString().c_str());
+					co_return this->valid ? cmp : 0;
 				}
 
 				// Internal page, so seek to the branch where query must be
@@ -7603,29 +7603,27 @@ public:
 				// or it finds an entry with a null child page then query does not exist in the BTree.
 				if (entry.cursor.seekLessThan(internalPageQuery) && entry.cursor.get().value.present()) {
 					debug_printf(
-					    "seek(%s) loop seek success cursor=%s\n", query.toString().c_str(), self->toString().c_str());
-					Future<Void> f = self->pushPage(entry.cursor);
+					    "seek(%s) loop seek success cursor=%s\n", query.toString().c_str(), this->toString().c_str());
+					Future<Void> f = this->pushPage(entry.cursor);
 					co_await f;
 				} else {
-					self->valid = false;
+					this->valid = false;
 					debug_printf(
-					    "seek(%s) loop exit cmp=0 cursor=%s\n", query.toString().c_str(), self->toString().c_str());
+					    "seek(%s) loop exit cmp=0 cursor=%s\n", query.toString().c_str(), this->toString().c_str());
 					co_return 0;
 				}
 			}
 		}
 
-		Future<int> seek(RedwoodRecordRef query) { return path.empty() ? 0 : seek_impl(this, query); }
+		Future<int> seek(RedwoodRecordRef query) { return path.empty() ? 0 : seek_impl(query); }
 
-		Future<Void> seekGTE_impl(BTreeCursor* self, RedwoodRecordRef query) {
+		Future<Void> seekGTE(RedwoodRecordRef query) {
 			debug_printf("seekGTE(%s) start\n", query.toString().c_str());
-			int cmp = co_await self->seek(query);
-			if (cmp > 0 || (cmp == 0 && !self->isValid())) {
-				co_await self->moveNext();
+			int cmp = co_await this->seek(query);
+			if (cmp > 0 || (cmp == 0 && !this->isValid())) {
+				co_await this->moveNext();
 			}
 		}
-
-		Future<Void> seekGTE(RedwoodRecordRef query) { return seekGTE_impl(this, query); }
 
 		Future<Void> seekExactKeySlow(Key key, Future<Void> pageFuture) {
 			co_await pageFuture;
@@ -7723,22 +7721,20 @@ public:
 			}
 		}
 
-		Future<Void> seekLT_impl(BTreeCursor* self, RedwoodRecordRef query) {
+		Future<Void> seekLT(RedwoodRecordRef query) {
 			debug_printf("seekLT(%s) start\n", query.toString().c_str());
-			int cmp = co_await self->seek(query);
+			int cmp = co_await this->seek(query);
 			if (cmp <= 0) {
-				co_await self->movePrev();
+				co_await this->movePrev();
 			}
 		}
 
-		Future<Void> seekLT(RedwoodRecordRef query) { return seekLT_impl(this, query); }
-
-		Future<Void> move_impl(BTreeCursor* self, bool forward) {
+		Future<Void> move_impl(bool forward) {
 			// Try to the move cursor at the end of the path in the correct direction
-			debug_printf("move%s() start cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
+			debug_printf("move%s() start cursor=%s\n", forward ? "Next" : "Prev", this->toString().c_str());
 			while (1) {
-				debug_printf("move%s() first loop cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
-				auto& entry = self->path.back();
+				debug_printf("move%s() first loop cursor=%s\n", forward ? "Next" : "Prev", this->toString().c_str());
+				auto& entry = this->path.back();
 				bool success;
 				if (entry.cursor.valid()) {
 					success = forward ? entry.cursor.moveNext() : entry.cursor.movePrev();
@@ -7757,20 +7753,20 @@ public:
 					break;
 				}
 
-				if (self->path.size() == 1) {
-					self->valid = false;
-					debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", self->toString(1).c_str());
+				if (this->path.size() == 1) {
+					this->valid = false;
+					debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", this->toString(1).c_str());
 					co_return;
 				}
 
 				// Move to parent
-				self->path.pop_back();
+				this->path.pop_back();
 			}
 
 			// While not on a leaf page, move down to get to one.
 			while (1) {
-				debug_printf("move%s() second loop cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
-				auto& entry = self->path.back();
+				debug_printf("move%s() second loop cursor=%s\n", forward ? "Next" : "Prev", this->toString().c_str());
+				auto& entry = this->path.back();
 				if (entry.btPage()->isLeaf()) {
 					break;
 				}
@@ -7781,18 +7777,18 @@ public:
 					UNSTOPPABLE_ASSERT(entry.cursor.get().value.present());
 				}
 
-				co_await self->pushPage(entry.cursor);
-				auto& newEntry = self->path.back();
+				co_await this->pushPage(entry.cursor);
+				auto& newEntry = this->path.back();
 				UNSTOPPABLE_ASSERT(forward ? newEntry.cursor.moveFirst() : newEntry.cursor.moveLast());
 			}
 
-			self->valid = true;
+			this->valid = true;
 
-			debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", self->toString(1).c_str());
+			debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", this->toString(1).c_str());
 		}
 
-		Future<Void> moveNext() { return path.empty() ? Void() : move_impl(this, true); }
-		Future<Void> movePrev() { return path.empty() ? Void() : move_impl(this, false); }
+		Future<Void> moveNext() { return path.empty() ? Void() : move_impl(true); }
+		Future<Void> movePrev() { return path.empty() ? Void() : move_impl(false); }
 	};
 
 	Future<Void> initBTreeCursor(BTreeCursor* cursor,
