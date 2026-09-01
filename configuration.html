@@ -5,14 +5,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Configuration &#8212; FoundationDB ON documentation</title>
+    <title>Configuration &#8212; FoundationDB 7.4.7 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
-    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
     <script src="_static/jquery.js"></script>
-    <script src="_static/underscore.js"></script>
     <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
     <script src="_static/doctools.js"></script>
+    <script src="_static/sphinx_highlight.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Moving a Cluster to New Machines" href="moving-a-cluster.html" />
     <link rel="prev" title="Administration" href="administration.html" />
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.3.79</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.7</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -55,140 +55,7 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"><ul class="current">
-<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
-<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
-<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
-<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
-<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
-<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
-<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
-<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
-<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
-<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
-<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
-<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
-<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
-<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
-<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
-<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
-<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
-<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
-<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
-<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
-<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
-<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
-<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
-<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
-<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
-<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
-<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
-<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
-<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
-<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
-<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
-<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
-<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
-<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
-<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
-</ul>
-</li>
-<li class="toctree-l1 current"><a class="reference internal" href="administration.html">Administration</a><ul class="current">
-<li class="toctree-l2 current"><a class="current reference internal" href="#">Configuration</a></li>
-<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
-<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
-<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
-<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
-</ul>
-</li>
-</ul>
-</ul>
+      aria-labelledby="dLabelGlobalToc"></ul>
 </li>
               
                 <li class="dropdown">
@@ -414,11 +281,11 @@
 </ul>
 <p><code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> supports a <code class="docutils literal notranslate"><span class="pre">coordinators</span></code> command to specify the new list of coordinators:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbcli
-Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
+Using cluster file `/etc/foundationdb/fdb.cluster'.
 
 The database is available.
 
-Welcome to the fdbcli. For help, type `help&#39;.
+Welcome to the fdbcli. For help, type `help'.
 fdb&gt; coordinators 10.0.4.1:4500 10.0.4.2:4500 10.0.4.3:4500
 Coordinators changed
 </pre></div>
@@ -482,11 +349,11 @@ Coordinators changed
 <p>If some servers or clients are unable to write to their cluster file or are disconnected during the change of coordinators (and too many of the old coordinators become unavailable before they come back up), an administrator will need to manually copy the new cluster file to each affected machine and restart the database server or client, as if adding a new server or client to the cluster.</p>
 <p>The <code class="docutils literal notranslate"><span class="pre">coordinators</span></code> command also supports a convenience option, <code class="docutils literal notranslate"><span class="pre">coordinators</span> <span class="pre">auto</span></code>, that automatically selects a set of coordination servers appropriate for the redundancy mode:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host1$ fdbcli
-Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
+Using cluster file `/etc/foundationdb/fdb.cluster'.
 
 The database is available.
 
-Welcome to the fdbcli. For help, type `help&#39;.
+Welcome to the fdbcli. For help, type `help'.
 fdb&gt; coordinators auto
 Coordinators changed
 </pre></div>
@@ -549,6 +416,7 @@ Coordinators changed
 <span class="c1"># initial-restart-delay = 0</span>
 <span class="c1"># restart-backoff = 60.0</span>
 <span class="c1"># restart-delay-reset-interval = 60</span>
+<span class="c1"># envvars = FOO=BAR BAZ=FOO</span>
 <span class="c1"># delete-envvars =</span>
 <span class="c1"># kill-on-configuration-change = true</span>
 <span class="c1"># disable-lifecycle-logging = false</span>
@@ -557,7 +425,8 @@ Coordinators changed
 <p>Contains settings applicable to all processes (e.g. fdbserver, backup_agent).</p>
 <ul class="simple">
 <li><p><code class="docutils literal notranslate"><span class="pre">cluster-file</span></code>: Specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the <code class="docutils literal notranslate"><span class="pre">[fdbmonitor]</span></code> section).</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">delete-envvars</span></code>: A space separated list of environment variables to remove from the environments of child processes. This can be used if the <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> process needs to be run with environment variables that are undesired in its children.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">envvars</span></code>: A space separated list of environment variables to be added to child processes’ environment variables. Every environment variable in the list must be of the form <code class="docutils literal notranslate"><span class="pre">A=B</span></code> where <code class="docutils literal notranslate"><span class="pre">A</span></code> and <code class="docutils literal notranslate"><span class="pre">B</span></code> are key and value names respectively.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">delete-envvars</span></code>: A space separated list of environment variables to remove from the environments of child processes. This can be used if the <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> process needs to be run with environment variables that are undesired in its children. This takes precedence over envvars field.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">kill-on-configuration-change</span></code>: If <code class="docutils literal notranslate"><span class="pre">true</span></code>, affected processes will be restarted whenever the configuration file changes. Defaults to <code class="docutils literal notranslate"><span class="pre">true</span></code>.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">disable-lifecycle-logging</span></code>: If <code class="docutils literal notranslate"><span class="pre">true</span></code>, <code class="docutils literal notranslate"><span class="pre">fdbmonitor</span></code> will not write log events when processes start or terminate. Defaults to <code class="docutils literal notranslate"><span class="pre">false</span></code>.</p></li>
 </ul>
@@ -677,11 +546,11 @@ Coordinators changed
 <span id="configuration-choosing-redundancy-mode"></span><h2>Choosing a redundancy mode</h2>
 <p>FoundationDB supports a variety of redundancy modes. These modes define storage requirements, required cluster size, and resilience to failure. To change the redundancy mode, use the <code class="docutils literal notranslate"><span class="pre">configure</span></code> command of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code>. For example:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbcli
-Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
+Using cluster file `/etc/foundationdb/fdb.cluster'.
 
 The database is available.
 
-Welcome to the fdbcli. For help, type `help&#39;.
+Welcome to the fdbcli. For help, type `help'.
 fdb&gt; configure double
 Configuration changed.
 </pre></div>
@@ -801,11 +670,11 @@ after which data may be lost</p></td>
 <p>For all storage engines, FoundationDB commits transactions to disk with the number of copies indicated by the redundancy mode before reporting them committed. This procedure guarantees the <em>durability</em> needed for full ACID compliance. At the point of the commit, FoundationDB may have only <em>logged</em> the transaction, deferring the work of updating the disk representation. This deferral has significant advantages for latency and burst performance. Due to this deferral, it is possible for disk space usage to continue increasing after the last commit.</p>
 <p>To change the storage engine, use the <code class="docutils literal notranslate"><span class="pre">configure</span></code> command of <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code>. For example:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbcli
-Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
+Using cluster file `/etc/foundationdb/fdb.cluster'.
 
 The database is available.
 
-Welcome to the fdbcli. For help, type `help&#39;.
+Welcome to the fdbcli. For help, type `help'.
 fdb&gt; configure ssd
 Configuration changed.
 </pre></div>
@@ -950,25 +819,25 @@ Disk identifier: 0xe5169faa
 <h3>Changing the region configuration</h3>
 <p>To change the region configuration, use the <code class="docutils literal notranslate"><span class="pre">fileconfigure</span></code> command <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code>. For example:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbcli
-Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
+Using cluster file `/etc/foundationdb/fdb.cluster'.
 
 The database is available.
 
-Welcome to the fdbcli. For help, type `help&#39;.
+Welcome to the fdbcli. For help, type `help'.
 fdb&gt; fileconfigure regions.json
 Configuration changed.
 </pre></div>
 </div>
 <p>Regions are configured in FoundationDB as a json document. For example:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="s2">&quot;regions&quot;</span><span class="p">:[{</span>
-    <span class="s2">&quot;datacenters&quot;</span><span class="p">:[{</span>
-        <span class="s2">&quot;id&quot;</span><span class="p">:</span><span class="s2">&quot;WC1&quot;</span><span class="p">,</span>
-        <span class="s2">&quot;priority&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
-        <span class="s2">&quot;satellite&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
-        <span class="s2">&quot;satellite_logs&quot;</span><span class="p">:</span><span class="mi">2</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="s2">"regions"</span><span class="p">:[{</span>
+    <span class="s2">"datacenters"</span><span class="p">:[{</span>
+        <span class="s2">"id"</span><span class="p">:</span><span class="s2">"WC1"</span><span class="p">,</span>
+        <span class="s2">"priority"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
+        <span class="s2">"satellite"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
+        <span class="s2">"satellite_logs"</span><span class="p">:</span><span class="mi">2</span>
     <span class="p">}],</span>
-    <span class="s2">&quot;satellite_redundancy_mode&quot;</span><span class="p">:</span><span class="s2">&quot;one_satellite_double&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;satellite_logs&quot;</span><span class="p">:</span><span class="mi">2</span>
+    <span class="s2">"satellite_redundancy_mode"</span><span class="p">:</span><span class="s2">"one_satellite_double"</span><span class="p">,</span>
+    <span class="s2">"satellite_logs"</span><span class="p">:</span><span class="mi">2</span>
 <span class="p">}]</span>
 </pre></div>
 </div>
@@ -1003,21 +872,21 @@ Configuration changed.
 <h3>Asymmetric configurations</h3>
 <p>The fact that satellite policies are configured per region allows for asymmetric configurations. For example, FoundationDB can have a three datacenter setup where there are two datacenters on the west coast (WC1, WC2) and one datacenter on the east coast (EC1). The west coast region can be set as the preferred active region by setting the priority of its primary datacenter higher than the east coast datacenter. The west coast region should have a satellite policy configured, so that when it is active, FoundationDB is making mutations durable in both west coast datacenters. In the rare event that one of the west coast datacenters has failed, FoundationDB will fail over to the east coast datacenter. Because this region does not have a satellite datacenter, the mutations will only be made durable in one datacenter while the transaction subsystem is located here. However, this is justifiable because the region will only be active if a datacenter has already been lost.</p>
 <p>This is the region configuration that implements the example:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="s2">&quot;regions&quot;</span><span class="p">:[{</span>
-    <span class="s2">&quot;datacenters&quot;</span><span class="p">:[{</span>
-        <span class="s2">&quot;id&quot;</span><span class="p">:</span><span class="s2">&quot;WC1&quot;</span><span class="p">,</span>
-        <span class="s2">&quot;priority&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="s2">"regions"</span><span class="p">:[{</span>
+    <span class="s2">"datacenters"</span><span class="p">:[{</span>
+        <span class="s2">"id"</span><span class="p">:</span><span class="s2">"WC1"</span><span class="p">,</span>
+        <span class="s2">"priority"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
     <span class="p">},{</span>
-        <span class="s2">&quot;id&quot;</span><span class="p">:</span><span class="s2">&quot;WC2&quot;</span><span class="p">,</span>
-        <span class="s2">&quot;priority&quot;</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span>
-        <span class="s2">&quot;satellite&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
-        <span class="s2">&quot;satellite_logs&quot;</span><span class="p">:</span><span class="mi">2</span>
+        <span class="s2">"id"</span><span class="p">:</span><span class="s2">"WC2"</span><span class="p">,</span>
+        <span class="s2">"priority"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span>
+        <span class="s2">"satellite"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
+        <span class="s2">"satellite_logs"</span><span class="p">:</span><span class="mi">2</span>
     <span class="p">}],</span>
-    <span class="s2">&quot;satellite_redundancy_mode&quot;</span><span class="p">:</span><span class="s2">&quot;one_satellite_double&quot;</span>
+    <span class="s2">"satellite_redundancy_mode"</span><span class="p">:</span><span class="s2">"one_satellite_double"</span>
 <span class="p">},{</span>
-    <span class="s2">&quot;datacenters&quot;</span><span class="p">:[{</span>
-        <span class="s2">&quot;id&quot;</span><span class="p">:</span><span class="s2">&quot;EC1&quot;</span><span class="p">,</span>
-        <span class="s2">&quot;priority&quot;</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span>
+    <span class="s2">"datacenters"</span><span class="p">:[{</span>
+        <span class="s2">"id"</span><span class="p">:</span><span class="s2">"EC1"</span><span class="p">,</span>
+        <span class="s2">"priority"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span>
     <span class="p">}]</span>
 <span class="p">}]</span>
 </pre></div>
@@ -1030,7 +899,7 @@ Configuration changed.
 <p class="admonition-title">Warning</p>
 <p>In release 6.0, <code class="docutils literal notranslate"><span class="pre">usable_regions</span></code> can only be configured to the values of <code class="docutils literal notranslate"><span class="pre">1</span></code> or <code class="docutils literal notranslate"><span class="pre">2</span></code>, and a maximum of 2 regions can be defined in the <code class="docutils literal notranslate"><span class="pre">regions</span></code> json object.</p>
 </div>
-<p>Increasing the <code class="docutils literal notranslate"><span class="pre">usable_regions</span></code> will start copying data from the active region to the remote region. Reducing the <code class="docutils literal notranslate"><span class="pre">usable_regions</span></code> will immediately drop the replicas in the remote region. During these changes, only one primary datacenter can have priority &gt;= 0. This enforces exactly which region will lose its replica.</p>
+<p>Increasing the <code class="docutils literal notranslate"><span class="pre">usable_regions</span></code> will start copying data from the active region to the remote region. Reducing the <code class="docutils literal notranslate"><span class="pre">usable_regions</span></code> will drop the replicas in the remote region (on data distributor noticing the configuration change and marking the remote region’s replicas as “undesired”). During these changes, only one primary datacenter can have priority &gt;= 0. This enforces exactly which region will lose its replica.</p>
 </section>
 <section id="changing-the-log-routers-configuration">
 <h3>Changing the log routers configuration</h3>
@@ -1144,8 +1013,8 @@ Configuration changed.
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jul 16, 2026.<br/>
+        &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Sep 01, 2026.<br/>
     </p>
   </div>
 </footer>

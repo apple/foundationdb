@@ -5,14 +5,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>BulkDump (Dev) &#8212; FoundationDB 7.4.6 documentation</title>
+    <title>BulkDump (Dev) &#8212; FoundationDB 7.4.7 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
-    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
     <script src="_static/jquery.js"></script>
-    <script src="_static/underscore.js"></script>
     <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
     <script src="_static/doctools.js"></script>
+    <script src="_static/sphinx_highlight.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Audit Storage" href="auditstorage.html" />
     <link rel="prev" title="FoundationDB Range Locks (WiP)" href="rangelock.html" />
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.6</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.7</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -194,7 +194,7 @@ When loading a cluster, users can use this global manifest to rebuild the data.<
 <h3>How to use?</h3>
 <p>Currently, FDBCLI tools and low-level ManagementAPIs are provided to submit a job or clear a job.
 These operations are achieved by issuing transactions to update the bulkdump metadata.
-Submitting a job is achieved by writting the job metadata to the bulkdump metadata range of the job.
+Submitting a job is achieved by writing the job metadata to the bulkdump metadata range of the job.
 When submitting a job, the API checks if there is any ongoing bulkdump job. If yes, it will reject the job. Otherwise, it accepts the job.
 Clearing a job is achieved by erasing the entire user range space of the bulkdump metadata range. When clearing a job, all metadata will be cleared and any ongoing task is stopped (with some latency).</p>
 <p>FDBCLI provides following interfaces to do the operations:</p>
@@ -271,7 +271,7 @@ Clearing a job is achieved by erasing the entire user range space of the bulkdum
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 30, 2026.<br/>
+      Last updated on Sep 01, 2026.<br/>
     </p>
   </div>
 </footer>

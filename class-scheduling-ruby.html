@@ -5,14 +5,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Class Scheduling in Ruby &#8212; FoundationDB ON documentation</title>
+    <title>Class Scheduling in Ruby &#8212; FoundationDB 7.4.7 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
-    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
     <script src="_static/jquery.js"></script>
-    <script src="_static/underscore.js"></script>
     <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
     <script src="_static/doctools.js"></script>
+    <script src="_static/sphinx_highlight.js"></script>
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Class Scheduling in Java" href="class-scheduling-java.html" />
     <link rel="prev" title="Class Scheduling" href="class-scheduling.html" />
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.3.79</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.7</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -55,140 +55,7 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"><ul class="current">
-<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
-<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
-<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
-<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
-<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
-<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
-<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
-<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
-<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
-<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
-<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
-<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
-<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
-<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
-<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
-<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
-<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
-<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
-<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
-<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
-<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
-<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
-<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
-<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
-<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
-<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
-<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
-<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
-<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
-<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
-<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
-<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
-<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
-</ul>
-</li>
-<li class="toctree-l1 current"><a class="reference internal" href="tutorials.html">Tutorials</a><ul class="current">
-<li class="toctree-l2 current"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
-<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
-<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
-<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
-<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
-<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
-<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
-</ul>
-</li>
-</ul>
-</ul>
+      aria-labelledby="dLabelGlobalToc"></ul>
 </li>
               
                 <li class="dropdown">
@@ -309,12 +176,12 @@
 <p>If you have not yet installed FoundationDB, see <a class="reference internal" href="getting-started-mac.html"><span class="doc">Getting Started on macOS</span></a> or <a class="reference internal" href="getting-started-linux.html"><span class="doc">Getting Started on Linux</span></a>.</p>
 <p>Open a Ruby interactive interpreter and import the FoundationDB API module:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>$ irb
-&gt; require &#39;fdb&#39;
+&gt; require 'fdb'
 =&gt; true
 </pre></div>
 </div>
 <p>Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">730</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">740</span>
 <span class="o">=&gt;</span> <span class="n">nil</span>
 </pre></div>
 </div>
@@ -324,21 +191,21 @@
 </pre></div>
 </div>
 <p>We are ready to use the database. In Ruby, using the <code class="docutils literal notranslate"><span class="pre">[]</span></code> operator on the database object is a convenient syntax for performing a read or write on the database. First, let’s simply write a key-value pair:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="nd">@db</span><span class="p">[</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;world&#39;</span>
-<span class="o">=&gt;</span> <span class="s2">&quot;world&quot;</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="nd">@db</span><span class="p">[</span><span class="s1">'hello'</span><span class="p">]</span> <span class="o">=</span> <span class="s1">'world'</span>
+<span class="o">=&gt;</span> <span class="s2">"world"</span>
 </pre></div>
 </div>
 <p>When this command returns without exception, the modification is durably stored in FoundationDB! Under the covers, this function creates a transaction with a single modification. We’ll see later how to do multiple operations in a single transaction. For now, let’s read back the data:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span> <span class="s1">&#39;hello &#39;</span><span class="p">,</span> <span class="nd">@db</span><span class="p">[</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span> <span class="s1">'hello '</span><span class="p">,</span> <span class="nd">@db</span><span class="p">[</span><span class="s1">'hello'</span><span class="p">]</span>
 <span class="go">hello world =&gt; nil</span>
 </pre></div>
 </div>
 <p>If this is all working, it looks like we are ready to start building a real application. For reference, here’s the full code for “hello world”:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="nb">require</span><span class="w"> </span><span class="s1">&#39;fdb&#39;</span>
-<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span><span class="w"> </span><span class="mi">730</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="nb">require</span><span class="w"> </span><span class="s1">'fdb'</span>
+<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span><span class="w"> </span><span class="mi">740</span>
 <span class="vi">@db</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">.</span><span class="n">open</span>
-<span class="vi">@db</span><span class="o">[</span><span class="s1">&#39;hello&#39;</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;world&#39;</span>
-<span class="nb">print</span><span class="w"> </span><span class="s1">&#39;hello &#39;</span><span class="p">,</span><span class="w"> </span><span class="vi">@db</span><span class="o">[</span><span class="s1">&#39;hello&#39;</span><span class="o">]</span>
+<span class="vi">@db</span><span class="o">[</span><span class="s1">'hello'</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'world'</span>
+<span class="nb">print</span><span class="w"> </span><span class="s1">'hello '</span><span class="p">,</span><span class="w"> </span><span class="vi">@db</span><span class="o">[</span><span class="s1">'hello'</span><span class="o">]</span>
 </pre></div>
 </div>
 </section>
@@ -357,12 +224,12 @@
 <section id="data-model">
 <span id="class-sched-ruby-data-model"></span><h3>Data model</h3>
 <p>First, we need to design a <a class="reference internal" href="data-modeling.html"><span class="doc">data model</span></a>. A data model is just a method for storing our application data using keys and values in FoundationDB. We seem to have two main types of data: (1) a list of classes and (2) a record of which students will attend which classes. Let’s keep attending data like this:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># [&#39;attends&#39;, student, class] = &#39;&#39;</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># ['attends', student, class] = ''</span>
 </pre></div>
 </div>
 <p>We’ll just store the key with a blank value to indicate that a student is signed up for a particular class. For this application, we’re going to think about a key-value pair’s key as a <a class="reference internal" href="data-modeling.html#data-modeling-tuples"><span class="std std-ref">tuple</span></a>. Encoding a tuple of data elements into a key is a very common pattern for an ordered key-value store.</p>
 <p>We’ll keep data about classes like this:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># [&#39;class&#39;, class_name] = seats_available</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># ['class', class_name] = seats_available</span>
 </pre></div>
 </div>
 <p>Similarly, each such key will represent an available class. We’ll use <code class="docutils literal notranslate"><span class="pre">seats_available</span></code> to record the number of seats available.</p>
@@ -372,7 +239,7 @@
 <p>We’re going to rely on the powerful guarantees of transactions to help keep all of our modifications straight, so let’s look at a nice way that the FoundationDB Ruby API lets you write a transactional function. The <code class="xref py py-meth docutils literal notranslate"><span class="pre">transact()</span></code> method ensures that a code block is executed transactionally. Let’s write the very simple <code class="docutils literal notranslate"><span class="pre">add_class</span></code> function we will use to populate the database’s class list:</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_class</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;100&#39;</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'100'</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
 </pre></div>
@@ -380,7 +247,7 @@
 <p>A function using this approach has a parameter taking either a <code class="xref py py-class docutils literal notranslate"><span class="pre">Database</span></code> or <code class="xref py py-class docutils literal notranslate"><span class="pre">Transaction</span></code> on which it calls the <code class="xref py py-meth docutils literal notranslate"><span class="pre">transact()</span></code> method. The block passed to <code class="xref py py-meth docutils literal notranslate"><span class="pre">transact()</span></code> is parameterized by the transaction the function will use to do reads and writes.</p>
 <p>When <em>calling</em> such a function, however, you can pass a <code class="xref py py-class docutils literal notranslate"><span class="pre">Database</span></code> instead of a <code class="xref py py-class docutils literal notranslate"><span class="pre">Transaction</span></code>. The method <em>automatically creates a transaction and implements a retry loop</em> to ensure that the transaction eventually commits.</p>
 <p>For a FoundationDB database <code class="docutils literal notranslate"><span class="pre">&#64;db</span></code>:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">add_class</span><span class="p">(</span><span class="vi">@db</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;class1&#39;</span><span class="p">)</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">add_class</span><span class="p">(</span><span class="vi">@db</span><span class="p">,</span><span class="w"> </span><span class="s1">'class1'</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>is equivalent to something like:</p>
@@ -388,7 +255,7 @@
 <span class="n">committed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kp">false</span>
 <span class="k">while</span><span class="w"> </span><span class="o">!</span><span class="n">committed</span>
 <span class="w">    </span><span class="k">begin</span>
-<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;100&#39;</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'100'</span>
 <span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">commit</span><span class="o">.</span><span class="n">wait</span>
 <span class="w">        </span><span class="n">committed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kp">true</span>
 <span class="w">    </span><span class="k">rescue</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Error</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">e</span>
@@ -407,14 +274,14 @@
 <section id="making-some-sample-classes">
 <h3>Making some sample classes</h3>
 <p>Let’s make some sample classes and put them in the <code class="docutils literal notranslate"><span class="pre">&#64;class_names</span></code> variable. We’ll make individual classes from combinations of class types, levels, and times:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="c1"># Generate 1,620 classes like &#39;9:00 chem for dummies&#39;</span>
-<span class="n">levels</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="s1">&#39;intro&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;for dummies&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;remedial&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;101&#39;</span><span class="p">,</span>
-<span class="w">          </span><span class="s1">&#39;201&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;301&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;mastery&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;lab&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;seminar&#39;</span><span class="o">]</span>
-<span class="n">types</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="s1">&#39;chem&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;bio&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;cs&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;geometry&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;calc&#39;</span><span class="p">,</span>
-<span class="w">         </span><span class="s1">&#39;alg&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;film&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;music&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;art&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;dance&#39;</span><span class="o">]</span>
-<span class="n">times</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Array</span><span class="p">(</span><span class="mi">2</span><span class="o">...</span><span class="mi">20</span><span class="p">)</span><span class="o">.</span><span class="n">map</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">h</span><span class="o">|</span><span class="w"> </span><span class="n">h</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;UTF-8&#39;</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">&#39;:00&#39;</span><span class="p">}</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="c1"># Generate 1,620 classes like '9:00 chem for dummies'</span>
+<span class="n">levels</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="s1">'intro'</span><span class="p">,</span><span class="w"> </span><span class="s1">'for dummies'</span><span class="p">,</span><span class="w"> </span><span class="s1">'remedial'</span><span class="p">,</span><span class="w"> </span><span class="s1">'101'</span><span class="p">,</span>
+<span class="w">          </span><span class="s1">'201'</span><span class="p">,</span><span class="w"> </span><span class="s1">'301'</span><span class="p">,</span><span class="w"> </span><span class="s1">'mastery'</span><span class="p">,</span><span class="w"> </span><span class="s1">'lab'</span><span class="p">,</span><span class="w"> </span><span class="s1">'seminar'</span><span class="o">]</span>
+<span class="n">types</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="s1">'chem'</span><span class="p">,</span><span class="w"> </span><span class="s1">'bio'</span><span class="p">,</span><span class="w"> </span><span class="s1">'cs'</span><span class="p">,</span><span class="w"> </span><span class="s1">'geometry'</span><span class="p">,</span><span class="w"> </span><span class="s1">'calc'</span><span class="p">,</span>
+<span class="w">         </span><span class="s1">'alg'</span><span class="p">,</span><span class="w"> </span><span class="s1">'film'</span><span class="p">,</span><span class="w"> </span><span class="s1">'music'</span><span class="p">,</span><span class="w"> </span><span class="s1">'art'</span><span class="p">,</span><span class="w"> </span><span class="s1">'dance'</span><span class="o">]</span>
+<span class="n">times</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Array</span><span class="p">(</span><span class="mi">2</span><span class="o">...</span><span class="mi">20</span><span class="p">)</span><span class="o">.</span><span class="n">map</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">h</span><span class="o">|</span><span class="w"> </span><span class="n">h</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">'UTF-8'</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">':00'</span><span class="p">}</span>
 <span class="n">class_combos</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">times</span><span class="o">.</span><span class="n">product</span><span class="p">(</span><span class="n">types</span><span class="p">,</span><span class="w"> </span><span class="n">levels</span><span class="p">)</span>
-<span class="vi">@class_names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">class_combos</span><span class="o">.</span><span class="n">map</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">combo</span><span class="o">|</span><span class="w"> </span><span class="n">combo</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">)}</span>
+<span class="vi">@class_names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">class_combos</span><span class="o">.</span><span class="n">map</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">combo</span><span class="o">|</span><span class="w"> </span><span class="n">combo</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s1">' '</span><span class="p">)}</span>
 </pre></div>
 </div>
 </section>
@@ -423,8 +290,8 @@
 <p>We initialize the database with our class list:</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">init</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">clear_range_start_with</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;attends&#39;</span><span class="o">]</span><span class="p">))</span>
-<span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">clear_range_start_with</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="o">]</span><span class="p">))</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">clear_range_start_with</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'attends'</span><span class="o">]</span><span class="p">))</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">clear_range_start_with</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="o">]</span><span class="p">))</span>
 <span class="w">        </span><span class="vi">@class_names</span><span class="o">.</span><span class="n">each</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">class_name</span><span class="o">|</span>
 <span class="w">            </span><span class="n">add_class</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span><span class="w"> </span><span class="n">class_name</span><span class="p">)</span>
 <span class="w">        </span><span class="k">end</span>
@@ -439,7 +306,7 @@
 <p>Before students can do anything else, they need to be able to retrieve a list of available classes from the database. Because FoundationDB sorts its data by key and therefore has efficient range-read capability, we can retrieve all of the classes in a single database call. We find this range of keys with <code class="xref py py-meth docutils literal notranslate"><span class="pre">get_range()</span></code>:</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">available_classes</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="o">]</span><span class="p">)</span>
 <span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">kv</span><span class="o">|</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">kv</span><span class="o">.</span><span class="n">key</span><span class="p">)</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">}</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
@@ -452,8 +319,8 @@
 <p>We finally get to the crucial function. A student has decided on a class (by name) and wants to sign up. The <code class="docutils literal notranslate"><span class="pre">signup</span></code> function will take a student (<code class="docutils literal notranslate"><span class="pre">s</span></code>) and a class (<code class="docutils literal notranslate"><span class="pre">c</span></code>):</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">signup</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;attends&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
-<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&#39;</span>
+<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'attends'</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">''</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
 </pre></div>
@@ -465,7 +332,7 @@
 <p>Dropping a class is similar to signing up:</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">drop</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;attends&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'attends'</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
 <span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">clear</span><span class="p">(</span><span class="n">rec</span><span class="p">)</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
@@ -482,7 +349,7 @@
 <p>Let’s go back to the data model. Remember that we stored the number of seats in the class in the value of the key-value entry in the class list. Let’s refine that a bit to track the <em>remaining</em> number of seats in the class. The initialization can work the same way (in our example, all classes initially have 100 seats), but the <code class="docutils literal notranslate"><span class="pre">available_classes</span></code>, <code class="docutils literal notranslate"><span class="pre">signup</span></code>, and <code class="docutils literal notranslate"><span class="pre">drop</span></code> functions are going to have to change. Let’s start with <code class="docutils literal notranslate"><span class="pre">available_classes</span></code>:</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">available_classes</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="o">]</span><span class="p">)</span>
 <span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">kv</span><span class="o">|</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">kv</span><span class="o">.</span><span class="n">key</span><span class="p">)</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">kv</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">to_i</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
@@ -491,18 +358,18 @@
 <p>This is easy – we simply add a condition to check that the value is non-zero. Let’s check out <code class="docutils literal notranslate"><span class="pre">signup</span></code> next:</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">signup</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;attends&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'attends'</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
 <span class="hll"><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="ow">not</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">].</span><span class="n">nil?</span>
 </span><span class="hll"><span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="c1"># already signed up</span>
 </span><span class="hll"><span class="w">        </span><span class="k">end</span>
 </span><span class="hll">
-</span><span class="hll"><span class="w">        </span><span class="n">seats_left</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">].</span><span class="n">to_i</span>
+</span><span class="hll"><span class="w">        </span><span class="n">seats_left</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">].</span><span class="n">to_i</span>
 </span><span class="hll"><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">seats_left</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span>
-</span><span class="hll"><span class="w">            </span><span class="k">raise</span><span class="w"> </span><span class="s1">&#39;No remaining seats&#39;</span>
+</span><span class="hll"><span class="w">            </span><span class="k">raise</span><span class="w"> </span><span class="s1">'No remaining seats'</span>
 </span><span class="hll"><span class="w">        </span><span class="k">end</span>
 </span><span class="hll">
-</span><span class="hll"><span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">seats_left</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;UTF-8&#39;</span><span class="p">)</span>
-</span><span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&#39;</span>
+</span><span class="hll"><span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">seats_left</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">'UTF-8'</span><span class="p">)</span>
+</span><span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">''</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
 </pre></div>
@@ -524,12 +391,12 @@
 <p>Let’s finish up the limited seats feature by modifying the drop function:</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">drop</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;attends&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'attends'</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
 <span class="hll"><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">].</span><span class="n">nil?</span>
 </span><span class="hll"><span class="w">            </span><span class="k">return</span><span class="w">  </span><span class="c1"># not taking this class</span>
 </span><span class="hll"><span class="w">        </span><span class="k">end</span>
-</span><span class="hll"><span class="w">        </span><span class="n">class_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
-</span><span class="hll"><span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">class_key</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">tr</span><span class="o">[</span><span class="n">class_key</span><span class="o">].</span><span class="n">to_i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;UTF-8&#39;</span><span class="p">)</span>
+</span><span class="hll"><span class="w">        </span><span class="n">class_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
+</span><span class="hll"><span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">class_key</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">tr</span><span class="o">[</span><span class="n">class_key</span><span class="o">].</span><span class="n">to_i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">'UTF-8'</span><span class="p">)</span>
 </span><span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">clear</span><span class="p">(</span><span class="n">rec</span><span class="p">)</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
@@ -542,24 +409,24 @@
 <p>Of course, as soon as our new version of the system goes live, we hear of a trick that certain students are using. They are signing up for all classes immediately, and only later dropping those that they don’t want to take. This has led to an unusable system, and we have been asked to fix it. We decide to limit students to five classes:</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">signup</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;attends&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'attends'</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
 <span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="ow">not</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">].</span><span class="n">nil?</span>
 <span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="c1"># already signed up</span>
 <span class="w">        </span><span class="k">end</span>
 
-<span class="w">        </span><span class="n">seats_left</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">].</span><span class="n">to_i</span>
+<span class="w">        </span><span class="n">seats_left</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">].</span><span class="n">to_i</span>
 <span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">seats_left</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span>
-<span class="w">            </span><span class="k">raise</span><span class="w"> </span><span class="s1">&#39;No remaining seats&#39;</span>
+<span class="w">            </span><span class="k">raise</span><span class="w"> </span><span class="s1">'No remaining seats'</span>
 <span class="w">        </span><span class="k">end</span>
 
-<span class="hll"><span class="w">        </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;attends&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="o">]</span><span class="p">)</span>
+<span class="hll"><span class="w">        </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">'attends'</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="o">]</span><span class="p">)</span>
 </span><span class="hll"><span class="w">        </span><span class="n">classes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span>
 </span><span class="hll"><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">classes</span><span class="o">.</span><span class="n">count</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">5</span>
-</span><span class="hll"><span class="w">            </span><span class="k">raise</span><span class="w"> </span><span class="s1">&#39;Too many classes&#39;</span>
+</span><span class="hll"><span class="w">            </span><span class="k">raise</span><span class="w"> </span><span class="s1">'Too many classes'</span>
 </span><span class="hll"><span class="w">        </span><span class="k">end</span>
 </span>
-<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">seats_left</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;UTF-8&#39;</span><span class="p">)</span>
-<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&#39;</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">seats_left</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">'UTF-8'</span><span class="p">)</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">''</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
 </pre></div>
@@ -602,17 +469,17 @@
 <section id="appendix-class-scheduling-rb">
 <span id="class-sched-ruby-appendix"></span><h2>Appendix: class_scheduling.rb</h2>
 <p>Here’s the code for the scheduling tutorial:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="nb">require</span><span class="w"> </span><span class="s1">&#39;fdb&#39;</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="nb">require</span><span class="w"> </span><span class="s1">'fdb'</span>
 
-<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span><span class="w"> </span><span class="mi">730</span>
+<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span><span class="w"> </span><span class="mi">740</span>
 
 <span class="c1">####################################</span>
 <span class="c1">##        Initialization          ##</span>
 <span class="c1">####################################</span>
 
 <span class="c1"># Data model:</span>
-<span class="c1"># [&#39;attends&#39;, student, class] = &#39;&#39;</span>
-<span class="c1"># [&#39;class&#39;, class_name] = seats_left</span>
+<span class="c1"># ['attends', student, class] = ''</span>
+<span class="c1"># ['class', class_name] = seats_left</span>
 
 <span class="vi">@db</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">.</span><span class="n">open</span>
 <span class="vi">@db</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_transaction_timeout</span><span class="p">(</span><span class="mi">60000</span><span class="p">)</span><span class="w">  </span><span class="c1"># 60,000 ms = 1 minute</span>
@@ -620,23 +487,23 @@
 
 <span class="k">def</span><span class="w"> </span><span class="nf">add_class</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;100&#39;</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'100'</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
 
-<span class="c1"># Generate 1,620 classes like &#39;9:00 chem for dummies&#39;</span>
-<span class="n">levels</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="s1">&#39;intro&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;for dummies&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;remedial&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;101&#39;</span><span class="p">,</span>
-<span class="w">          </span><span class="s1">&#39;201&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;301&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;mastery&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;lab&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;seminar&#39;</span><span class="o">]</span>
-<span class="n">types</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="s1">&#39;chem&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;bio&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;cs&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;geometry&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;calc&#39;</span><span class="p">,</span>
-<span class="w">         </span><span class="s1">&#39;alg&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;film&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;music&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;art&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;dance&#39;</span><span class="o">]</span>
-<span class="n">times</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Array</span><span class="p">(</span><span class="mi">2</span><span class="o">...</span><span class="mi">20</span><span class="p">)</span><span class="o">.</span><span class="n">map</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">h</span><span class="o">|</span><span class="w"> </span><span class="n">h</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;UTF-8&#39;</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">&#39;:00&#39;</span><span class="p">}</span>
+<span class="c1"># Generate 1,620 classes like '9:00 chem for dummies'</span>
+<span class="n">levels</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="s1">'intro'</span><span class="p">,</span><span class="w"> </span><span class="s1">'for dummies'</span><span class="p">,</span><span class="w"> </span><span class="s1">'remedial'</span><span class="p">,</span><span class="w"> </span><span class="s1">'101'</span><span class="p">,</span>
+<span class="w">          </span><span class="s1">'201'</span><span class="p">,</span><span class="w"> </span><span class="s1">'301'</span><span class="p">,</span><span class="w"> </span><span class="s1">'mastery'</span><span class="p">,</span><span class="w"> </span><span class="s1">'lab'</span><span class="p">,</span><span class="w"> </span><span class="s1">'seminar'</span><span class="o">]</span>
+<span class="n">types</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="s1">'chem'</span><span class="p">,</span><span class="w"> </span><span class="s1">'bio'</span><span class="p">,</span><span class="w"> </span><span class="s1">'cs'</span><span class="p">,</span><span class="w"> </span><span class="s1">'geometry'</span><span class="p">,</span><span class="w"> </span><span class="s1">'calc'</span><span class="p">,</span>
+<span class="w">         </span><span class="s1">'alg'</span><span class="p">,</span><span class="w"> </span><span class="s1">'film'</span><span class="p">,</span><span class="w"> </span><span class="s1">'music'</span><span class="p">,</span><span class="w"> </span><span class="s1">'art'</span><span class="p">,</span><span class="w"> </span><span class="s1">'dance'</span><span class="o">]</span>
+<span class="n">times</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Array</span><span class="p">(</span><span class="mi">2</span><span class="o">...</span><span class="mi">20</span><span class="p">)</span><span class="o">.</span><span class="n">map</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">h</span><span class="o">|</span><span class="w"> </span><span class="n">h</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">'UTF-8'</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">':00'</span><span class="p">}</span>
 <span class="n">class_combos</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">times</span><span class="o">.</span><span class="n">product</span><span class="p">(</span><span class="n">types</span><span class="p">,</span><span class="w"> </span><span class="n">levels</span><span class="p">)</span>
-<span class="vi">@class_names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">class_combos</span><span class="o">.</span><span class="n">map</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">combo</span><span class="o">|</span><span class="w"> </span><span class="n">combo</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">)}</span>
+<span class="vi">@class_names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">class_combos</span><span class="o">.</span><span class="n">map</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">combo</span><span class="o">|</span><span class="w"> </span><span class="n">combo</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s1">' '</span><span class="p">)}</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">init</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">clear_range_start_with</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;attends&#39;</span><span class="o">]</span><span class="p">))</span>
-<span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">clear_range_start_with</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="o">]</span><span class="p">))</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">clear_range_start_with</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'attends'</span><span class="o">]</span><span class="p">))</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">clear_range_start_with</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="o">]</span><span class="p">))</span>
 <span class="w">        </span><span class="vi">@class_names</span><span class="o">.</span><span class="n">each</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">class_name</span><span class="o">|</span>
 <span class="w">            </span><span class="n">add_class</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span><span class="w"> </span><span class="n">class_name</span><span class="p">)</span>
 <span class="w">        </span><span class="k">end</span>
@@ -645,42 +512,42 @@
 
 <span class="k">def</span><span class="w"> </span><span class="nf">available_classes</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="o">]</span><span class="p">)</span>
 <span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">kv</span><span class="o">|</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">kv</span><span class="o">.</span><span class="n">key</span><span class="p">)</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">kv</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">to_i</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">signup</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;attends&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'attends'</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
 <span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="ow">not</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">].</span><span class="n">nil?</span>
 <span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="c1"># already signed up</span>
 <span class="w">        </span><span class="k">end</span>
 
-<span class="w">        </span><span class="n">seats_left</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">].</span><span class="n">to_i</span>
+<span class="w">        </span><span class="n">seats_left</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">].</span><span class="n">to_i</span>
 <span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">seats_left</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span>
-<span class="w">            </span><span class="k">raise</span><span class="w"> </span><span class="s1">&#39;No remaining seats&#39;</span>
+<span class="w">            </span><span class="k">raise</span><span class="w"> </span><span class="s1">'No remaining seats'</span>
 <span class="w">        </span><span class="k">end</span>
 
-<span class="w">        </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;attends&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">'attends'</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="o">]</span><span class="p">)</span>
 <span class="w">        </span><span class="n">classes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span>
 <span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">classes</span><span class="o">.</span><span class="n">count</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">5</span>
-<span class="w">            </span><span class="k">raise</span><span class="w"> </span><span class="s1">&#39;Too many classes&#39;</span>
+<span class="w">            </span><span class="k">raise</span><span class="w"> </span><span class="s1">'Too many classes'</span>
 <span class="w">        </span><span class="k">end</span>
 
-<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">seats_left</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;UTF-8&#39;</span><span class="p">)</span>
-<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&#39;</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">seats_left</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">'UTF-8'</span><span class="p">)</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">''</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">drop</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">)</span>
 <span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;attends&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">rec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'attends'</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
 <span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="n">rec</span><span class="o">].</span><span class="n">nil?</span>
 <span class="w">            </span><span class="k">return</span><span class="w">  </span><span class="c1"># not taking this class</span>
 <span class="w">        </span><span class="k">end</span>
-<span class="w">        </span><span class="n">class_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;class&#39;</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
-<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">class_key</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">tr</span><span class="o">[</span><span class="n">class_key</span><span class="o">].</span><span class="n">to_i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;UTF-8&#39;</span><span class="p">)</span>
+<span class="w">        </span><span class="n">class_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">'class'</span><span class="p">,</span><span class="n">c</span><span class="o">]</span><span class="p">)</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">class_key</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">tr</span><span class="o">[</span><span class="n">class_key</span><span class="o">].</span><span class="n">to_i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">'UTF-8'</span><span class="p">)</span>
 <span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">clear</span><span class="p">(</span><span class="n">rec</span><span class="p">)</span>
 <span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
@@ -697,7 +564,7 @@
 <span class="c1">####################################</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">indecisive_student</span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">ops</span><span class="p">)</span>
-<span class="w">    </span><span class="n">student_ID</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;s%d&quot;</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">i</span>
+<span class="w">    </span><span class="n">student_ID</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"s%d"</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">i</span>
 <span class="w">    </span><span class="n">all_classes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="vi">@class_names</span>
 <span class="w">    </span><span class="n">my_classes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[]</span>
 
@@ -705,10 +572,10 @@
 <span class="w">        </span><span class="n">class_count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">my_classes</span><span class="o">.</span><span class="n">length</span>
 <span class="w">        </span><span class="n">moods</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[]</span>
 <span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">class_count</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span>
-<span class="w">            </span><span class="n">moods</span><span class="o">.</span><span class="n">push</span><span class="p">(</span><span class="s1">&#39;drop&#39;</span><span class="p">,</span><span class="s1">&#39;switch&#39;</span><span class="p">)</span>
+<span class="w">            </span><span class="n">moods</span><span class="o">.</span><span class="n">push</span><span class="p">(</span><span class="s1">'drop'</span><span class="p">,</span><span class="s1">'switch'</span><span class="p">)</span>
 <span class="w">        </span><span class="k">end</span>
 <span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">class_count</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">5</span>
-<span class="w">            </span><span class="n">moods</span><span class="o">.</span><span class="n">push</span><span class="p">(</span><span class="s1">&#39;add&#39;</span><span class="p">)</span>
+<span class="w">            </span><span class="n">moods</span><span class="o">.</span><span class="n">push</span><span class="p">(</span><span class="s1">'add'</span><span class="p">)</span>
 <span class="w">        </span><span class="k">end</span>
 <span class="w">        </span><span class="n">mood</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">moods</span><span class="o">.</span><span class="n">sample</span>
 
@@ -716,15 +583,15 @@
 <span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="n">all_classes</span><span class="o">.</span><span class="n">empty?</span>
 <span class="w">                </span><span class="n">all_classes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">available_classes</span><span class="p">(</span><span class="vi">@db</span><span class="p">)</span>
 <span class="w">            </span><span class="k">end</span>
-<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="n">mood</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;add&#39;</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="n">mood</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">'add'</span>
 <span class="w">                </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">all_classes</span><span class="o">.</span><span class="n">sample</span>
 <span class="w">                </span><span class="n">signup</span><span class="p">(</span><span class="vi">@db</span><span class="p">,</span><span class="w"> </span><span class="n">student_ID</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">)</span>
 <span class="w">                </span><span class="n">my_classes</span><span class="o">.</span><span class="n">push</span><span class="p">(</span><span class="n">c</span><span class="p">)</span>
-<span class="w">            </span><span class="k">elsif</span><span class="w"> </span><span class="n">mood</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;drop&#39;</span>
+<span class="w">            </span><span class="k">elsif</span><span class="w"> </span><span class="n">mood</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">'drop'</span>
 <span class="w">                </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">my_classes</span><span class="o">.</span><span class="n">sample</span>
 <span class="w">                </span><span class="n">drop</span><span class="p">(</span><span class="vi">@db</span><span class="p">,</span><span class="w"> </span><span class="n">student_ID</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">)</span>
 <span class="w">                </span><span class="n">my_classes</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">c</span><span class="p">)</span>
-<span class="w">            </span><span class="k">elsif</span><span class="w"> </span><span class="n">mood</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;switch&#39;</span>
+<span class="w">            </span><span class="k">elsif</span><span class="w"> </span><span class="n">mood</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">'switch'</span>
 <span class="w">                </span><span class="n">old_c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">my_classes</span><span class="o">.</span><span class="n">sample</span>
 <span class="w">                </span><span class="n">new_c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">all_classes</span><span class="o">.</span><span class="n">sample</span>
 <span class="w">                </span><span class="n">switch</span><span class="p">(</span><span class="vi">@db</span><span class="p">,</span><span class="w"> </span><span class="n">student_ID</span><span class="p">,</span><span class="w"> </span><span class="n">old_c</span><span class="p">,</span><span class="w"> </span><span class="n">new_c</span><span class="p">)</span>
@@ -732,7 +599,7 @@
 <span class="w">                </span><span class="n">my_classes</span><span class="o">.</span><span class="n">push</span><span class="p">(</span><span class="n">new_c</span><span class="p">)</span>
 <span class="w">            </span><span class="k">end</span>
 <span class="w">        </span><span class="k">rescue</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">e</span>
-<span class="w">            </span><span class="nb">print</span><span class="w"> </span><span class="n">e</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;Need to recheck available classes.&quot;</span>
+<span class="w">            </span><span class="nb">print</span><span class="w"> </span><span class="n">e</span><span class="p">,</span><span class="w"> </span><span class="s2">"Need to recheck available classes."</span>
 <span class="w">            </span><span class="n">all_classes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[]</span>
 <span class="w">        </span><span class="k">end</span>
 <span class="w">    </span><span class="k">end</span>
@@ -743,12 +610,12 @@
 <span class="w">                                       </span><span class="n">indecisive_student</span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">ops_per_student</span><span class="p">)}</span>
 <span class="w">                                    </span><span class="p">}</span>
 <span class="w">    </span><span class="n">threads</span><span class="o">.</span><span class="n">each</span><span class="w"> </span><span class="p">{</span><span class="o">|</span><span class="n">thr</span><span class="o">|</span><span class="w"> </span><span class="n">thr</span><span class="o">.</span><span class="n">join</span><span class="p">}</span>
-<span class="w">    </span><span class="nb">print</span><span class="w"> </span><span class="s2">&quot;Ran %d transactions&quot;</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="p">(</span><span class="n">students</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ops_per_student</span><span class="p">)</span>
+<span class="w">    </span><span class="nb">print</span><span class="w"> </span><span class="s2">"Ran %d transactions"</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="p">(</span><span class="n">students</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ops_per_student</span><span class="p">)</span>
 <span class="k">end</span>
 
 <span class="k">if</span><span class="w"> </span><span class="bp">__FILE__</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="vg">$0</span>
 <span class="w">    </span><span class="n">init</span><span class="p">(</span><span class="vi">@db</span><span class="p">)</span>
-<span class="w">    </span><span class="nb">print</span><span class="w"> </span><span class="s2">&quot;initialized&quot;</span>
+<span class="w">    </span><span class="nb">print</span><span class="w"> </span><span class="s2">"initialized"</span>
 <span class="w">    </span><span class="n">run</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">10</span><span class="p">)</span>
 <span class="k">end</span>
 </pre></div>
@@ -775,8 +642,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jul 16, 2026.<br/>
+        &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Sep 01, 2026.<br/>
     </p>
   </div>
 </footer>

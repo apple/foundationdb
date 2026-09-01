@@ -5,17 +5,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Release Notes &#8212; FoundationDB ON documentation</title>
+    <title>Release Notes - 1.0 &#8212; FoundationDB 7.4.7 documentation</title>
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
-    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
     <script src="../_static/jquery.js"></script>
-    <script src="../_static/underscore.js"></script>
     <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
     <script src="../_static/doctools.js"></script>
+    <script src="../_static/sphinx_highlight.js"></script>
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Release Notes" href="release-notes-200.html" />
-    <link rel="prev" title="Release Notes" href="release-notes-023.html" />
+    <link rel="next" title="Release Notes - 2.0" href="release-notes-200.html" />
+    <link rel="prev" title="Earlier Release Notes" href="../earlier-release-notes.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.3.79</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.7</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -55,140 +55,7 @@
      href="../index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"><ul class="current">
-<li class="toctree-l1"><a class="reference internal" href="../local-dev.html">Local Development</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../internal-dev-tools.html">Internal Dev Tools</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../why-foundationdb.html">Why FoundationDB</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="../transaction-manifesto.html">Transaction Manifesto</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../cap-theorem.html">CAP Theorem</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../consistency.html">Consistency</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../scalability.html">Scalability</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="../technical-overview.html">Technical Overview</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="../architecture.html">Architecture</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../performance.html">Performance</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../benchmarking.html">Benchmarking</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../engineering.html">Engineering</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../features.html">Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../layer-concept.html">Layer Concept</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../anti-features.html">Anti-Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../experimental-features.html">Experimental-Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../transaction-processing.html">Transaction Processing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../fault-tolerance.html">Fault Tolerance</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../flow.html">Flow</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../testing.html">Simulation and Testing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../kv-architecture.html">FoundationDB Architecture</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../read-write-path.html">FDB Read and Write Path</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../consistency-check-urgent.html">Consistency Checker Urgent</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="../client-design.html">Client Design</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="../getting-started-mac.html">Getting Started on macOS</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../getting-started-linux.html">Getting Started on Linux</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../downloads.html">Downloads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../developer-guide.html">Developer Guide</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../data-modeling.html">Data Modeling</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../client-testing.html">Client Testing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#api-tester">API Tester</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api-general.html">Using FoundationDB Clients</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../transaction-tagging.html">Transaction Tagging</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../known-limitations.html">Known Limitations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../tenants.html">Tenants</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../automatic-idempotency.html">Automatic Idempotency</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="../design-recipes.html">Design Recipes</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="../blob.html">Blob</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../blob-java.html">Blob</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents.html">Hierarchical Documents</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../hierarchical-documents-java.html">Hierarchical Documents</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../multimaps.html">Multimaps</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../multimaps-java.html">Multimaps</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../priority-queues.html">Priority Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../priority-queues-java.html">Priority Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../queues.html">Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../queues-java.html">Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads.html">Segmented Range Reads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../segmented-range-reads-java.html">Segmented Range Reads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../simple-indexes.html">Simple Indexes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../simple-indexes-java.html">Simple Indexes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing.html">Spatial Indexing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../spatial-indexing-java.html">Spatial Indexing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection.html">Subspace Indirection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../subspace-indirection-java.html">Subspace Indirection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../tables.html">Tables</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../tables-java.html">Tables</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../vector.html">Vector</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../vector-java.html">Vector</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="../api-reference.html">API Reference</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="../api-python.html">Python API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api-ruby.html">Ruby API</a></li>
-<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
-<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api-c.html">C API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api-error-codes.html">Error Codes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../special-keys.html">Special Keys</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../global-configuration.html">Global Configuration</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="../tutorials.html">Tutorials</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="../class-scheduling.html">Class Scheduling</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../largeval.html">Managing Large Values and Blobs</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../time-series.html">Time-Series Data</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="../administration.html">Administration</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="../configuration.html">Configuration</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../tls.html">Transport Layer Security</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../authorization.html">Authorization</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="../monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
-<li class="toctree-l1"><a class="reference internal" href="../redwood.html">Redwood Storage Engine</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../visibility.html">Visibility Documents</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="../request-tracing.html">Request Tracing</a></li>
-</ul>
-</li>
-<li class="toctree-l1 current"><a class="reference internal" href="../earlier-release-notes.html">Earlier Release Notes</a><ul class="current">
-<li class="toctree-l2"><a class="reference internal" href="release-notes-014.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-016.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-021.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-022.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-023.html">Release Notes</a></li>
-<li class="toctree-l2 current"><a class="current reference internal" href="#">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-200.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-300.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-400.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-410.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-420.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-430.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-440.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-450.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-460.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-500.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-510.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-520.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-600.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-610.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-620.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-630.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-700.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-710.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-720.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-730.html">Release Notes</a></li>
-</ul>
-</li>
-</ul>
-</ul>
+      aria-labelledby="dLabelGlobalToc"></ul>
 </li>
               
                 <li class="dropdown">
@@ -200,7 +67,7 @@
   <ul class="dropdown-menu localtoc"
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
-<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#">Release Notes - 1.0</a><ul>
 <li><a class="reference internal" href="#id1">1.0.1</a></li>
 <li><a class="reference internal" href="#id2">1.0.0</a><ul>
 <li><a class="reference internal" href="#java">Java</a></li>
@@ -208,7 +75,47 @@
 <li><a class="reference internal" href="#node-and-ruby">Node and Ruby</a></li>
 <li><a class="reference internal" href="#all">All</a></li>
 <li><a class="reference internal" href="#fixes">Fixes</a></li>
-<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#beta-3">Beta 3</a><ul>
+<li><a class="reference internal" href="#features">Features</a></li>
+<li><a class="reference internal" href="#id3">Java</a></li>
+<li><a class="reference internal" href="#id4">Python</a></li>
+<li><a class="reference internal" href="#performance">Performance</a></li>
+<li><a class="reference internal" href="#id5">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#beta-2">Beta 2</a><ul>
+<li><a class="reference internal" href="#id6">Features</a></li>
+<li><a class="reference internal" href="#id7">Performance</a></li>
+<li><a class="reference internal" href="#language-apis">Language APIs</a></li>
+<li><a class="reference internal" href="#id8">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#beta-1">Beta 1</a><ul>
+<li><a class="reference internal" href="#platform-support">Platform support</a></li>
+<li><a class="reference internal" href="#id9">Features</a></li>
+<li><a class="reference internal" href="#id10">Performance</a></li>
+<li><a class="reference internal" href="#changes-to-all-apis">Changes to all APIs</a></li>
+<li><a class="reference internal" href="#id11">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#alpha-6">Alpha 6</a><ul>
+<li><a class="reference internal" href="#id12">Platform support</a></li>
+<li><a class="reference internal" href="#id13">Features</a></li>
+<li><a class="reference internal" href="#id14">Performance</a></li>
+<li><a class="reference internal" href="#id15">Fixes</a></li>
+<li><a class="reference internal" href="#id16">Changes to all APIs</a></li>
+<li><a class="reference internal" href="#changes-to-the-java-api">Changes to the Java API</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#alpha-5">Alpha 5</a><ul>
+<li><a class="reference internal" href="#language-support">Language support</a></li>
+<li><a class="reference internal" href="#alpha-5-rel-notes-features">Features</a></li>
+<li><a class="reference internal" href="#compatibility">Compatibility</a></li>
+<li><a class="reference internal" href="#id19">Changes to all APIs</a></li>
+<li><a class="reference internal" href="#python-api-changes">Python API changes</a></li>
+<li><a class="reference internal" href="#c-api-changes">C API changes</a></li>
 </ul>
 </li>
 </ul>
@@ -222,11 +129,11 @@
               
                 
   <li>
-    <a href="release-notes-023.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
+    <a href="../earlier-release-notes.html" title="Previous Chapter: Earlier Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Earlier Release Notes</span>
     </a>
   </li>
   <li>
-    <a href="release-notes-200.html" title="Next Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes &raquo;</span>
+    <a href="release-notes-200.html" title="Next Chapter: Release Notes - 2.0"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes - 2.0 &raquo;</span>
     </a>
   </li>
               
@@ -254,7 +161,7 @@
   <div class="row">
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
-<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#">Release Notes - 1.0</a><ul>
 <li><a class="reference internal" href="#id1">1.0.1</a></li>
 <li><a class="reference internal" href="#id2">1.0.0</a><ul>
 <li><a class="reference internal" href="#java">Java</a></li>
@@ -262,7 +169,47 @@
 <li><a class="reference internal" href="#node-and-ruby">Node and Ruby</a></li>
 <li><a class="reference internal" href="#all">All</a></li>
 <li><a class="reference internal" href="#fixes">Fixes</a></li>
-<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#beta-3">Beta 3</a><ul>
+<li><a class="reference internal" href="#features">Features</a></li>
+<li><a class="reference internal" href="#id3">Java</a></li>
+<li><a class="reference internal" href="#id4">Python</a></li>
+<li><a class="reference internal" href="#performance">Performance</a></li>
+<li><a class="reference internal" href="#id5">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#beta-2">Beta 2</a><ul>
+<li><a class="reference internal" href="#id6">Features</a></li>
+<li><a class="reference internal" href="#id7">Performance</a></li>
+<li><a class="reference internal" href="#language-apis">Language APIs</a></li>
+<li><a class="reference internal" href="#id8">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#beta-1">Beta 1</a><ul>
+<li><a class="reference internal" href="#platform-support">Platform support</a></li>
+<li><a class="reference internal" href="#id9">Features</a></li>
+<li><a class="reference internal" href="#id10">Performance</a></li>
+<li><a class="reference internal" href="#changes-to-all-apis">Changes to all APIs</a></li>
+<li><a class="reference internal" href="#id11">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#alpha-6">Alpha 6</a><ul>
+<li><a class="reference internal" href="#id12">Platform support</a></li>
+<li><a class="reference internal" href="#id13">Features</a></li>
+<li><a class="reference internal" href="#id14">Performance</a></li>
+<li><a class="reference internal" href="#id15">Fixes</a></li>
+<li><a class="reference internal" href="#id16">Changes to all APIs</a></li>
+<li><a class="reference internal" href="#changes-to-the-java-api">Changes to the Java API</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#alpha-5">Alpha 5</a><ul>
+<li><a class="reference internal" href="#language-support">Language support</a></li>
+<li><a class="reference internal" href="#alpha-5-rel-notes-features">Features</a></li>
+<li><a class="reference internal" href="#compatibility">Compatibility</a></li>
+<li><a class="reference internal" href="#id19">Changes to all APIs</a></li>
+<li><a class="reference internal" href="#python-api-changes">Python API changes</a></li>
+<li><a class="reference internal" href="#c-api-changes">C API changes</a></li>
 </ul>
 </li>
 </ul>
@@ -273,8 +220,8 @@
       </div>
     <div class="body col-md-9 content" role="main">
       
-  <section id="release-notes">
-<h1>Release Notes</h1>
+  <section id="release-notes-1-0">
+<h1>Release Notes - 1.0</h1>
 <section id="id1">
 <h2>1.0.1</h2>
 <ul class="simple">
@@ -324,14 +271,302 @@
 <li><p>Multiple watches set on the same key were not correctly triggered by a subsequent write in the same transaction.</p></li>
 </ul>
 </section>
-<section id="earlier-release-notes">
-<h3>Earlier release notes</h3>
+</section>
+<section id="beta-3">
+<h2>Beta 3</h2>
+<p>The Beta 3 release focuses on major improvements across our language APIs, including new capabilities for locality, watches, transaction cancellation and timeouts, explicit conflict ranges, and atomic operations. It also improves performance and removes known limitations.</p>
+<section id="features">
+<h3>Features</h3>
 <ul class="simple">
-<li><p><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></p></li>
-<li><p><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></p></li>
+<li><p>Discover where keys are physically stored using the new <a class="reference internal" href="../api-python.html#api-python-locality"><span class="std std-ref">locality</span></a> API.</p></li>
+<li><p>Create <a class="reference internal" href="../api-python.html#api-python-watches"><span class="std std-ref">watches</span></a> that asynchronously report changes to the values of specified keys.</p></li>
+<li><p><a class="reference internal" href="../api-python.html#api-python-cancel"><span class="std std-ref">Cancel</span></a> transactions or set them to automatically <a class="reference internal" href="../api-python.html#api-python-timeout"><span class="std std-ref">timeout</span></a> and cancel.</p></li>
+<li><p>Explicitly add read or write <a class="reference internal" href="../api-python.html#api-python-conflict-ranges"><span class="std std-ref">conflict ranges</span></a>.</p></li>
+<li><p>Perform <a class="reference internal" href="../api-python.html#api-python-transaction-atomic-operations"><span class="std std-ref">atomic operations</span></a> that transform a value (e.g. incrementing it) without client reads to avoid transaction conflicts.</p></li>
+<li><p>API version updated to 23.</p></li>
+</ul>
+</section>
+<section id="id3">
+<h3>Java</h3>
+<p>Based on customer feedback and internal testing, the API has been significantly revised for increased performance and ease of use. This is a <strong>breaking</strong> API change. We will continue to make the previous JAR
+available for the time being.</p>
+<ul class="simple">
+<li><p>The asynchronous programming library has been moved to its own package (<code class="docutils literal notranslate"><span class="pre">com.foundationdb.async</span></code>). The library has a host of new members for greater flexibility and more predictable error handling.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Database.run(...)</span></code> can now return an arbitrary object from user code, simplifying use of this recommended retry loop.</p></li>
+<li><p>The new interface <code class="docutils literal notranslate"><span class="pre">Function</span></code> replaces several interfaces: <code class="docutils literal notranslate"><span class="pre">Mapper</span></code>, <code class="docutils literal notranslate"><span class="pre">Block</span></code>, <code class="docutils literal notranslate"><span class="pre">Retryable</span></code>, and <code class="docutils literal notranslate"><span class="pre">AsyncRetryable</span></code>.</p></li>
+<li><p>Added the ability to cancel any <code class="docutils literal notranslate"><span class="pre">Future</span></code> instance, even one not backed with native resources.</p></li>
+<li><p>Removed <code class="docutils literal notranslate"><span class="pre">onSuccess()</span></code> and <code class="docutils literal notranslate"><span class="pre">onFailure()</span></code> in favor of <code class="docutils literal notranslate"><span class="pre">map()</span></code> and <code class="docutils literal notranslate"><span class="pre">flatMap()</span></code>. If code needs simple triggering, <code class="docutils literal notranslate"><span class="pre">onReady()</span></code> is still available.</p></li>
+<li><p>Range iteration via <code class="docutils literal notranslate"><span class="pre">Transaction.getRange(...)</span></code> starts fetching data immediately upon invocation. This simplifies development of code that reads ranges in parallel.</p></li>
+<li><p>Many other changes that facilitate writing fast, efficient, and correct Java applications!</p></li>
+</ul>
+</section>
+<section id="id4">
+<h3>Python</h3>
+<ul class="simple">
+<li><p>Python API methods that <a class="reference internal" href="../api-python.html#api-python-keys"><span class="std std-ref">accept a key</span></a> will also accept a Python object with an <code class="docutils literal notranslate"><span class="pre">as_foundationdb_key()</span></code> method that returns a key. Likewise, methods that accept a value will also accept a Python object with an <code class="docutils literal notranslate"><span class="pre">as_foundationdb_value()</span></code> method that returns a value.</p></li>
+</ul>
+</section>
+<section id="performance">
+<h3>Performance</h3>
+<ul class="simple">
+<li><p>Clients can preferentially communicate with servers on the same machine or in the same datacenter for <a class="reference internal" href="../api-python.html#api-python-database-options"><span class="std std-ref">location-aware load balancing</span></a>.</p></li>
+<li><p>Removed from the client library debugging code included in versions up through Beta 2, leading to higher, more predictable performance.</p></li>
+<li><p>Improved data distribution algorithms to optimize data movement during failure scenarios.</p></li>
+<li><p>Improved range-read iterators in Node.js using lazy evaluation.</p></li>
+<li><p>Improved client-side range-read prefetching in Node.js, Ruby, and Python.</p></li>
+<li><p>Incrementally improved performance across all language bindings.</p></li>
+</ul>
+</section>
+<section id="id5">
+<h3>Fixes</h3>
+<ul class="simple">
+<li><p>A storage node could be prevented from rejoining the cluster until the process was restarted.</p></li>
+<li><p>A reverse <code class="docutils literal notranslate"><span class="pre">GetRange</span></code> request using a row limit and an end key selector that enters the system keyspace could return too few results.</p></li>
+<li><p>A machine power loss immediately following a process restart could result in an invalid transaction log.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GetRange</span></code> could improperly cache too large a range of data when the end key selector resolved past the end of user keyspace, temporarily resulting in incorrect answers to read requests.</p></li>
+<li><p>In Node.js, reusing a range iterator for a second request could result in an incomplete result set.</p></li>
+</ul>
+</section>
+</section>
+<section id="beta-2">
+<h2>Beta 2</h2>
+<section id="id6">
+<h3>Features</h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> history is stored between sessions; consecutive duplicate commands are stored as a single history entry</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> tool prints a minimal cluster status message if an operation does not complete in 5 seconds.</p></li>
+</ul>
+</section>
+<section id="id7">
+<h3>Performance</h3>
+<ul class="simple">
+<li><p>Support for databases up to 100TB (aggregate key-value size). We recommend you contact us for configuration suggestions for databases exceeding 10TB.</p></li>
+<li><p>Reduced client CPU usage when returning locally cached values.</p></li>
+<li><p>Clients do not write to the database if a value is set to its known current value.</p></li>
+<li><p>Improved transaction queuing behavior when a significant portion of transactions are “System Immediate” priority.</p></li>
+<li><p>Reduced downtime in certain server-rejoin situations.</p></li>
+</ul>
+</section>
+<section id="language-apis">
+<h3>Language APIs</h3>
+<ul>
+<li><p>All</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>The API version has been updated from 21 to 22. (Thanks to our API versioning technology, programs requesting earlier API versions will work unmodified.) There are no changes required to migrate from version 21 to 22.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">open()</span></code> call blocks until the client can communicate with the cluster.</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p>Node.js</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Support for Node.js v0.10.x.</p></li>
+<li><p>Functions throw errors of type <code class="docutils literal notranslate"><span class="pre">FDBError</span></code>.</p></li>
+<li><p>Removed some variables from the global scope.</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p>Java</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Compiles class files with 1.6 source and target flags.</p></li>
+<li><p>Single-jar packaging for all platforms. (In rare cases, setting the <code class="docutils literal notranslate"><span class="pre">FDB_LIBRARY_PATH_FDB_JAVA</span></code> environment variable will be required if you previously relied on loading the library from a system path.)</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p>Ruby</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Support for Ruby on Windows. Requires Ruby version at least 2.0.0 (x64).</p></li>
+<li><p>Added implementation of <code class="docutils literal notranslate"><span class="pre">on_ready()</span></code>.</p></li>
+</ul>
+</div></blockquote>
+</li>
+</ul>
+</section>
+<section id="id8">
+<h3>Fixes</h3>
+<ul class="simple">
+<li><p>Coordinators could fail to respond if they were busy with other work.</p></li>
+<li><p>Fixed a rare segmentation fault on cluster shutdown.</p></li>
+<li><p>Fixed an issue where CLI status could sometimes fail.</p></li>
+<li><p>Status showed the wrong explanation when performance was limited by system write-to-read latency limit.</p></li>
+<li><p>Fixed a rare issue where a “stuck” process trying to participate in the database could run out of RAM.</p></li>
+<li><p>Increased robustness of FoundationDB server when loaded with large data sets.</p></li>
+<li><p>Eliminated certain cases where the data distribution algorithm could do unnecessary splitting and merging work.</p></li>
+<li><p>Several fixes for rare issues encountered by our fault simulation framework.</p></li>
+<li><p>Certain uncommon usage of on_ready() in Python could cause segmentation faults.</p></li>
+</ul>
+</section>
+</section>
+<section id="beta-1">
+<h2>Beta 1</h2>
+<section id="platform-support">
+<h3>Platform support</h3>
+<ul class="simple">
+<li><p>Added AWS CloudFormation support for FoundationDB.</p></li>
+</ul>
+</section>
+<section id="id9">
+<h3>Features</h3>
+<ul class="simple">
+<li><p>Servers can be safely <a class="reference internal" href="../administration.html#removing-machines-from-a-cluster"><span class="std std-ref">removed</span></a> from the cluster.</p></li>
+<li><p><a class="reference internal" href="../administration.html#administration-monitoring-cluster-status"><span class="std std-ref">Improved status</span></a> with information about database configuration, health, workload, and performance.</p></li>
+<li><p>Improved resiliency against low disk space conditions.</p></li>
+<li><p>The CLI can automatically choose <a class="reference internal" href="../configuration.html#configuration-changing-coordination-servers"><span class="std std-ref">coordination servers</span></a>.</p></li>
+<li><p>The CLI allows multiple semicolon separated commands per line; a new –exec flag was added to the CLI to pass commands to the CLI and quit when done.</p></li>
+<li><p>Old <a class="reference internal" href="../administration.html#administration-managing-trace-files"><span class="std std-ref">log files</span></a> are automatically deleted.</p></li>
+<li><p>More specific <a class="reference internal" href="../api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error codes</span></a>.</p></li>
+</ul>
+</section>
+<section id="id10">
+<h3>Performance</h3>
+<ul class="simple">
+<li><p>Reduced latency of getRange when iterating through large amounts of data.</p></li>
+<li><p>Reduced idle CPU usage.</p></li>
+<li><p>Java API: Join in ArrayUtil is efficient for all container types.</p></li>
+<li><p>Java API: Optimized tuple creation.</p></li>
+</ul>
+</section>
+<section id="changes-to-all-apis">
+<h3>Changes to all APIs</h3>
+<ul class="simple">
+<li><p>The API version has been updated from 16 to 21. (Thanks to our API versioning technology, programs requesting earlier API versions will work unmodified.) There are no changes required to migrate from version 16 to 21.</p></li>
+</ul>
+</section>
+<section id="id11">
+<h3>Fixes</h3>
+<ul class="simple">
+<li><p>Commit could return the error commit_conflict (renamed to not_committed) after the transaction successfully committed. (This was previously documented as a known limitation.)</p></li>
+<li><p>If a call to commit returned an error, but onError was not called, the transaction would not be reset.</p></li>
+<li><p>The memory storage engine was too aggressive in reserving disk space.</p></li>
+<li><p>If a key selector in a getRange resolved to the beginning or the end of the database, then its transaction may not have correctly conflicted with other transactions.</p></li>
+<li><p>Ranges passed to clearRange and getRange with the begin key larger than the end could incorrectly cause client API errors.</p></li>
+<li><p>Databases with small amounts of data in them (~20000 bytes) would sometimes slowly move data back and forth between the servers.</p></li>
+<li><p>Large network latencies (&gt; ~250 ms) could impede data balancing between servers.</p></li>
+<li><p>Setting callbacks or calling <code class="docutils literal notranslate"><span class="pre">blockUntilReady</span></code> on a future from multiple threads resulted in an error.</p></li>
+<li><p>If a machine running the memory storage engine was killed multiple times in close succession, data loss might occur.</p></li>
+<li><p>C: The headers were not standards compliant and would not compile in some environments.</p></li>
+<li><p>Ruby: API versions were not checked for validity.</p></li>
+<li><p>Windows: The server could crash on non-English versions of Windows.</p></li>
+<li><p>Windows: Manually running fdbserver.exe could fail because of overly restrictive permissions set on shared resources.</p></li>
+<li><p>OS X: Java client had an extraneous linker dependency.</p></li>
+<li><p>Java: In multithreaded conditions, getRange and AsyncUtil.whileTrue() could sometimes never return.</p></li>
+<li><p>Python/Ruby: In multithreaded conditions, the client worker thread could crash.</p></li>
+</ul>
+</section>
+</section>
+<section id="alpha-6">
+<h2>Alpha 6</h2>
+<section id="id12">
+<h3>Platform support</h3>
+<ul class="simple">
+<li><p>FoundationDB now supports both clients and development servers on <a class="reference internal" href="../getting-started-mac.html"><span class="doc">Mac OS X</span></a>.</p></li>
+<li><p>FoundationDB now supports both clients and development servers on (64-bit) Windows.</p></li>
+<li><p>All language APIs are supported on Linux, Mac, and Windows (except for Ruby on Windows, because there is not a 64-bit Ruby for Windows.)</p></li>
+</ul>
+</section>
+<section id="id13">
+<h3>Features</h3>
+<ul class="simple">
+<li><p>The set of coordination servers can be safely <a class="reference internal" href="../configuration.html#configuration-changing-coordination-servers"><span class="std std-ref">changed</span></a> on-the-fly via the CLI.</p></li>
+<li><p>Unintentional deletion of the coordination state files is now ACID-safe and self-correcting when a majority of the state files still exist.</p></li>
+<li><p>The <a class="reference internal" href="../configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a> file format has changed.</p></li>
+<li><p>A new more flexible and automatic system for <a class="reference internal" href="../configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">network configuration</span></a>. Common server setups will auto-configure using the cluster file. More advanced setups are supported via separate configurable listen and public addresses.</p></li>
+<li><p>The CLI now support tab-completion.</p></li>
+<li><p>The CLI now supports setting transaction options</p></li>
+<li><p>The CLI has a new command “getrangekeys” that returns the keys in a range and omits the values.</p></li>
+<li><p>The database size estimate shown in the CLI status is much more accurate.</p></li>
+</ul>
+</section>
+<section id="id14">
+<h3>Performance</h3>
+<ul class="simple">
+<li><p>Improved latency performance for intense workloads with range-read operations.</p></li>
+<li><p>Improved performance and decreased memory usage for certain intense write workloads targeting a small set of keys (such as sequential insert).</p></li>
+</ul>
+</section>
+<section id="id15">
+<h3>Fixes</h3>
+<ul class="simple">
+<li><p>An incorrect result could be returned by a range read when: (1) The range start was specified using a non-default “less than” type key selector; and (2) the range read started at the beginning of the database; and (3) the transaction also included a prior write to a key less than the key of the begin key selector.</p></li>
+<li><p>In certain cases a FoundationDB cluster would not correctly re-configure itself to achieve a more optimal usage of servers of specific machine classes.</p></li>
+</ul>
+</section>
+<section id="id16">
+<h3>Changes to all APIs</h3>
+<ul class="simple">
+<li><p>The API version has been updated from 14 to 16. (Thanks to our API versioning technology, programs requesting API version 14 will work unmodified.)</p></li>
+<li><p>Calling the <a class="reference internal" href="../api-python.html#fdb.Transaction.reset" title="fdb.Transaction.reset"><code class="xref py py-meth docutils literal notranslate"><span class="pre">reset</span></code></a> method of a transaction now also resets transaction options.</p></li>
+<li><p><a class="reference internal" href="../developer-guide.html#system-keys"><span class="std std-ref">System keys</span></a> (those beginning with the byte <code class="docutils literal notranslate"><span class="pre">0xFF</span></code>) are now inaccessible by default.</p></li>
+<li><p>Simpler network setup: The network connection options are no longer necessary and have been deprecated.</p></li>
+<li><p>Three new transaction options (<a class="reference internal" href="../api-python.html#fdb.Transaction.options.set_read_ahead_disable" title="fdb.Transaction.options.set_read_ahead_disable"><code class="xref py py-meth docutils literal notranslate"><span class="pre">READ_AHEAD_DISABLE</span></code></a>, <a class="reference internal" href="../api-python.html#fdb.Transaction.options.set_read_your_writes_disable" title="fdb.Transaction.options.set_read_your_writes_disable"><code class="xref py py-meth docutils literal notranslate"><span class="pre">READ_YOUR_WRITES_DISABLE</span></code></a>, and <a class="reference internal" href="../api-python.html#fdb.Transaction.options.set_access_system_keys" title="fdb.Transaction.options.set_access_system_keys"><code class="xref py py-meth docutils literal notranslate"><span class="pre">ACCESS_SYSTEM_KEYS</span></code></a>) enable more control for advanced applications.</p></li>
+</ul>
+</section>
+<section id="changes-to-the-java-api">
+<h3>Changes to the Java API</h3>
+<ul class="simple">
+<li><p>A new construct <a class="reference external" href="../javadoc/com/apple/cie/foundationdb/async/AsyncUtil.html#whileTrue-com.apple.foundationdb.async.Function-">AsyncUtil.whileTrue()</a> simplifies writing loops using the asynchronous version of the Java FDB client.</p></li>
+</ul>
+</section>
+</section>
+<section id="alpha-5">
+<h2>Alpha 5</h2>
+<section id="language-support">
+<h3>Language support</h3>
+<ul class="simple">
+<li><p>FoundationDB now supports <a class="reference internal" href="../api-ruby.html"><span class="doc">Ruby</span></a></p></li>
+<li><p>FoundationDB now supports Node.js</p></li>
+<li><p>FoundationDB now supports <a class="reference external" href="/javadoc/index.html">Java</a> and other JVM languages.</p></li>
+</ul>
+</section>
+<section id="alpha-5-rel-notes-features">
+<span id="id18"></span><h3>Features</h3>
+<ul class="simple">
+<li><p>A new <a class="reference internal" href="../backups.html"><span class="doc">backup</span></a> system allows scheduled backups of a snapshot of the FoundationDB database to an external filesystem.</p></li>
+<li><p><a class="reference internal" href="../index.html"><span class="doc">Integrated HTML documentation</span></a></p></li>
+<li><p><a class="reference internal" href="../developer-guide.html#snapshot-isolation"><span class="std std-ref">Snapshot reads</span></a> allow API clients to selectively relax FoundationDB’s strong isolation guarantee. Appropriate use can of them can reduce <a class="reference internal" href="../developer-guide.html#conflict-ranges"><span class="std std-ref">Conflict ranges</span></a> but makes reasoning about concurrency harder.</p></li>
+<li><p><a class="reference internal" href="../api-python.html#streaming-mode-python"><span class="std std-ref">Streaming modes</span></a> allow API clients to adjust how FoundationDB transfers data for range reads for improved performance.</p></li>
+<li><p>Client APIs automatically detect the appropriate network interface (local address) when connecting to a cluster, and will look for a <a class="reference internal" href="../administration.html#default-cluster-file"><span class="std std-ref">Default cluster file</span></a>.</p></li>
+</ul>
+</section>
+<section id="compatibility">
+<h3>Compatibility</h3>
+<ul class="simple">
+<li><p>Tuples encoded with prior alpha versions are incompatible with the tuple layer in Alpha 5.</p></li>
+<li><p>Databases created with Alpha 4 will be compatible. (See <a class="reference internal" href="../administration.html#upgrading-from-older-versions"><span class="std std-ref">Upgrading from older versions</span></a> for upgrade instructions)</p></li>
+<li><p>Databases created before Alpha 4 will be incompatible. (See <a class="reference internal" href="../administration.html#upgrading-from-older-versions"><span class="std std-ref">Upgrading from older versions</span></a> for details)</p></li>
+</ul>
+</section>
+<section id="id19">
+<h3>Changes to all APIs</h3>
+<ul class="simple">
+<li><p>The API version has been updated to 14.</p></li>
+<li><p><a class="reference internal" href="../developer-guide.html#snapshot-isolation"><span class="std std-ref">Snapshot reads</span></a> (see <a class="reference internal" href="#alpha-5-rel-notes-features"><span class="std std-ref">Features</span></a>, above).</p></li>
+<li><p><a class="reference internal" href="../api-python.html#streaming-mode-python"><span class="std std-ref">Streaming modes</span></a> (see <a class="reference internal" href="#alpha-5-rel-notes-features"><span class="std std-ref">Features</span></a>, above).</p></li>
+<li><p>Automatic network interface detection (see <a class="reference internal" href="#alpha-5-rel-notes-features"><span class="std std-ref">Features</span></a>, above).</p></li>
+<li><p>The tuple layer supports unicode strings (encoded as UTF-8), has a more compact encoding, and is not compatible with data from prior versions.</p></li>
+<li><p>Reversed range reads are now exposed through a separate parameter rather than via a negative <code class="docutils literal notranslate"><span class="pre">limit</span></code>.</p></li>
+<li><p>Extensible options are now exposed at the network, cluster, database and transaction levels. The parameters to <a class="reference internal" href="../api-c.html#c.fdb_setup_network" title="fdb_setup_network"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_setup_network()</span></code></a> and <code class="xref py py-func docutils literal notranslate"><span class="pre">fdb.init()</span></code> have been replaced by network options.</p></li>
+<li><p>Option enumerations are available in a machine-readable format for the benefit of third-party language binding developers.</p></li>
+</ul>
+</section>
+<section id="python-api-changes">
+<h3>Python API changes</h3>
+<ul class="simple">
+<li><p><a class="reference internal" href="../api-python.html#fdb.open" title="fdb.open"><code class="xref py py-func docutils literal notranslate"><span class="pre">fdb.open()</span></code></a> can be called with no parameters to use the <a class="reference internal" href="../administration.html#default-cluster-file"><span class="std std-ref">Default cluster file</span></a>.</p></li>
+<li><p>Waiting on a Future object has changed from <code class="docutils literal notranslate"><span class="pre">.get()</span></code> to <a class="reference internal" href="../api-python.html#fdb.Future.wait" title="fdb.Future.wait"><code class="xref py py-meth docutils literal notranslate"><span class="pre">.wait()</span></code></a></p></li>
+<li><p>Reversed range reads can by specified by passing a slice object with a -1 step.</p></li>
+<li><p>The convenience read methods on <a class="reference internal" href="../api-python.html#fdb.Database" title="fdb.Database"><code class="xref py py-class docutils literal notranslate"><span class="pre">fdb.Database</span></code></a> are now transactional.</p></li>
+</ul>
+</section>
+<section id="c-api-changes">
+<h3>C API changes</h3>
+<ul class="simple">
+<li><p>Byte limits exposed in <a class="reference internal" href="../api-c.html#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_transaction_get_range()</span></code></a>.  These are not currently exposed by any of the higher level clients (and usually streaming modes should be preferred).</p></li>
+<li><p><a class="reference internal" href="../api-c.html#c.fdb_future_get_keyvalue_array" title="fdb_future_get_keyvalue_array"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_keyvalue_array()</span></code></a> returns an explicit flag indicating whether there is more data in the range beyond the limits passed to <a class="reference internal" href="../api-c.html#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_transaction_get_range()</span></code></a>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fdb_transaction_get_range_selector</span></code> has been eliminated - <a class="reference internal" href="../api-c.html#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_transaction_get_range()</span></code></a> always takes key selectors.</p></li>
 </ul>
 </section>
 </section>
@@ -356,8 +591,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jul 16, 2026.<br/>
+        &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Sep 01, 2026.<br/>
     </p>
   </div>
 </footer>

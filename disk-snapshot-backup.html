@@ -5,14 +5,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Disk snapshot backup and Restore &#8212; FoundationDB ON documentation</title>
+    <title>Disk snapshot backup and Restore &#8212; FoundationDB 7.4.7 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
-    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
     <script src="_static/jquery.js"></script>
-    <script src="_static/underscore.js"></script>
     <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
     <script src="_static/doctools.js"></script>
+    <script src="_static/sphinx_highlight.js"></script>
     <link rel="search" title="Search" href="search.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
@@ -36,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.3.79</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.7</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -53,140 +53,7 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"><ul>
-<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
-<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
-<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
-<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
-<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
-<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
-<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
-<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
-<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
-<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
-<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
-<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
-<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
-<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
-<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
-<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
-<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
-<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
-<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
-<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
-<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
-<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
-<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
-<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
-<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
-<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
-<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
-<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
-<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
-<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
-<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
-<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
-<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
-<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
-<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
-<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
-<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
-<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
-<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
-<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
-<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
-<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
-</ul>
-</li>
-</ul>
-</ul>
+      aria-labelledby="dLabelGlobalToc"></ul>
 </li>
               
                 <li class="dropdown">
@@ -303,7 +170,7 @@
 <ul>
 <li><p>Write a program that will snapshot the local disk store when invoked by the <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> with the following arguments:</p>
 <ul class="simple">
-<li><p>UID - 32 byte alpha-numeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup</p></li>
+<li><p>UID - 32 byte alphanumeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup</p></li>
 <li><p>Version - version string of the FoundationDB binary</p></li>
 <li><p>Path - path of the FoundationDB <code class="docutils literal notranslate"><span class="pre">datadir</span></code> to be snapshotted, <code class="docutils literal notranslate"><span class="pre">datadir</span></code> specified in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a></p></li>
 <li><p>Role - <code class="docutils literal notranslate"><span class="pre">tlog</span></code>/<code class="docutils literal notranslate"><span class="pre">storage</span></code>/<code class="docutils literal notranslate"><span class="pre">coordinator</span></code>, identifies the role of the node on which the snapshot is being invoked</p></li>
@@ -311,7 +178,7 @@
 </li>
 <li><p>Install <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> on the FoundationDB instance in a secure path that can be invoked by the <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code></p></li>
 <li><p>Set a new config parameter <code class="docutils literal notranslate"><span class="pre">whitelist_binpath</span></code> in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a>, whose value is the <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> absolute path. Running any <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command will validate that it is in the <code class="docutils literal notranslate"><span class="pre">whitelist_binpath</span></code>. This is a security mechanism to stop running a random/insecure command on the cluster by a client using the <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command. Example configuration entry will look like:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">whitelist_binpath</span> <span class="o">=</span> <span class="s2">&quot;/bin/snap_create.sh&quot;</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">whitelist_binpath</span> <span class="o">=</span> <span class="s2">"/bin/snap_create.sh"</span>
 </pre></div>
 </div>
 </li>
@@ -492,7 +359,7 @@ coordinator nodes</p></td>
 <li><p>Check the status of the cluster and write a few sample keys:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>fdb&gt; status
 
-Using cluster file `/mnt/source/fdb.cluster&#39;.
+Using cluster file `/mnt/source/fdb.cluster'.
 
 Configuration:
   Redundancy mode        - single
@@ -541,8 +408,8 @@ Committed (80235963)
 <li><p>Write a <code class="docutils literal notranslate"><span class="pre">snap</span> <span class="pre">create</span> <span class="pre">binary</span></code> which copies the <code class="docutils literal notranslate"><span class="pre">datadir</span></code> to a user passed destination directory location:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>#!/bin/sh
 
-while (( &quot;$#&quot; )); do
-    case &quot;$1&quot; in
+while (( "$#" )); do
+    case "$1" in
         --uid)
             SNAPUID=$2
             shift 2
@@ -565,8 +432,8 @@ while (( &quot;$#&quot; )); do
     esac
 done
 
-mkdir -p &quot;$DESTDIR/$SNAPUID/$ROLE&quot; || exit 1
-cp &quot;$DATADIR/&quot;* &quot;$DESTDIR/$SNAPUID/$ROLE/&quot; || exit 1
+mkdir -p "$DESTDIR/$SNAPUID/$ROLE" || exit 1
+cp "$DATADIR/"* "$DESTDIR/$SNAPUID/$ROLE/" || exit 1
 
 exit 0
 </pre></div>
@@ -610,7 +477,7 @@ log2-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792.sqlite  logqueue-V_3_LS_2-b9990ae
 <li><p>Verify the cluster is healthy and check the sample keys that we added are there:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>fdb&gt; status
 
-Using cluster file `/mnt/restore/fdb.cluster&#39;.
+Using cluster file `/mnt/restore/fdb.cluster'.
 
 Configuration:
   Redundancy mode        - single
@@ -649,9 +516,9 @@ Backup and DR:
 Client time: 12/11/19 09:04:53
 
 fdb&gt; get key1
-`key1&#39; is `value1&#39;
+`key1' is `value1'
 fdb&gt; get key2
-`key2&#39; is `value2&#39;
+`key2' is `value2'
 </pre></div>
 </div>
 </li>
@@ -678,8 +545,8 @@ fdb&gt; get key2
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jul 16, 2026.<br/>
+        &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Sep 01, 2026.<br/>
     </p>
   </div>
 </footer>

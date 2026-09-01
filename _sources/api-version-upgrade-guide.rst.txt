@@ -9,6 +9,14 @@ This document provides an overview of changes that an application developer may 
 
 For more details about API versions, see :ref:`api-versions`.
 
+.. _api-version-upgrade-guide-740:
+
+API version 740
+===============
+
+General
+-------
+
 .. _api-version-upgrade-guide-730:
 
 API version 730
@@ -278,4 +286,4 @@ Java bindings
 Older API versions
 ==================
 
-API versions from the beta and alpha releases of Foundationdb (pre-100) are not documented here. See :doc:`release-notes/release-notes-023` for details about changes in those releases.
+API versions from the beta and alpha releases of Foundationdb (pre-100) are not documented here. See :doc:`release-notes/release-notes-100` for details about changes in those releases.
