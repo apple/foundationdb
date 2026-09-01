@@ -258,8 +258,11 @@ root — it makes the combine visibly incomplete rather than plausibly wrong.
 
 ## Observability/Supportability Considerations
 
-- Per-range digests are progress metadata and are cleared when the audit completes; a mismatch is
-  localized by re-auditing narrower ranges rather than by inspecting them.
+- A root mismatch is localized from the per-range digests: live via `get_audit_status range_digest
+  progress <id>` while the audit is Running, and afterwards from the `SSAuditRangeDigestComplete`
+  trace events, which outlive the progress metadata cleared at `Complete`. Localization therefore
+  depends on log retention on *both* sides of a comparison. Re-auditing narrower ranges is the
+  fallback and needs both datasets to still exist.
 - The validation workload emits `RangeDigestValidationSuccess` with the root, key-value count and
   byte count on a successful comparison, and fails `check()` if the comparison never ran.
 - Because the digest reads at cluster scale, its throughput (MB/s) and duration are

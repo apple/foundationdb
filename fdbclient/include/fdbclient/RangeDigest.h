@@ -66,10 +66,18 @@
 // and single-version invariants the MVCC way. Unnecessary for the backup/restore
 // use case (which compares two settled states) but would generalize the primitive.
 //
-// A mismatch of two roots can be localized by re-running a digest over narrower
-// key ranges to bisect the divergent region, which the additive combine makes
-// valid at any granularity. The per-range digests are not available for this:
-// they are progress metadata, cleared when the audit reaches Complete.
+// A mismatch of two roots says the datasets differ, not where. Localization works
+// from the per-range digests: queryable while the audit is Running via
+// `get_audit_status range_digest progress`, and durable in the
+// SSAuditRangeDigestComplete trace events, which outlive the progress metadata the
+// audit clears at Complete. Diffing those between the two runs names the divergent
+// ranges directly, so it needs the earlier run's logs retained as long as its root
+// is still worth comparing against.
+//
+// Re-running a digest over narrower ranges to bisect is the fallback -- valid at any
+// granularity because the combine is additive, but it costs about one extra full
+// digest and requires both datasets to still exist, which the backup/restore case
+// usually cannot offer.
 struct RangeDigest {
 	// Big-endian 256-bit accumulator (most-significant byte first). Zero is the
 	// identity for combine and the digest of the empty set.
