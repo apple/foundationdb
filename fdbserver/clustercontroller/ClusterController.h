@@ -297,8 +297,9 @@ public:
 		unsigned multiplier = 1;
 
 		static unsigned roleWeight(recruitment::ClusterRole role) {
-			// TO DO: Introduce knobs for different weights of different
-			// roles
+			// All roles currently contribute equally to the usage weight.
+			// Per-role weights can be introduced here if different roles
+			// should affect load differently.
 			return 1;
 		}
 
@@ -311,7 +312,10 @@ public:
 
 		unsigned getWeight() const { return weight * multiplier; }
 
-		unsigned getUniqueHash() const { return roles.to_ulong(); }
+		unsigned getUniqueHash() const {
+			static_assert(recruitment::NoRole <= 32, "role bitset must fit in an unsigned");
+			return roles.to_ulong();
+		}
 
 		std::string toString() const {
 			std::string roleCodes;
@@ -1598,8 +1602,11 @@ public:
 	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
 	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
 	    bool checkStable = false) {
-		// for avoiding recruiting workers with worse fitness
-		recruitment::Fitness used_fitness = recruitment::NeverAssign;
+		// Do not recruit workers with worse fitness than the already-accepted minWorker.
+		// The ceiling is fixed for the whole loop: lowering it to the best bucket
+		// consumed would stop the fill at the first fitness level and prevent reaching
+		// `amount` from worse-but-acceptable buckets. With no minWorker there is no gate.
+		recruitment::Fitness used_fitness = minWorker.present() ? minWorker.get().fitness : recruitment::NeverAssign;
 		struct WorkerFitnessKey {
 			recruitment::Fitness fitness;
 			unsigned used;
@@ -1614,7 +1621,6 @@ public:
 		std::map<WorkerFitnessKey, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		if (minWorker.present()) {
-			used_fitness = minWorker.get().fitness;
 			results.push_back(minWorker.get().worker);
 		}
 		if (amount <= results.size()) {
@@ -1642,11 +1648,9 @@ public:
 		}
 
 		for (auto& it : fitness_workers) {
-			recruitment::Fitness next_fitness = it.first.fitness;
-
-			if (next_fitness > used_fitness)
+			if (it.first.fitness > used_fitness) {
 				break; // do not recruit with a greater fitness
-			used_fitness = next_fitness;
+			}
 			deterministicRandom()->randomShuffle(it.second);
 			for (int i = 0; i < it.second.size(); i++) {
 				results.push_back(it.second[i]);
@@ -1699,7 +1703,7 @@ public:
 					TraceEvent(SevError, "UsedNotFound").detail("ProcessId", it.interf.locality.processId().get());
 					ASSERT(false);
 				}
-				if ((unsigned)thisUsed->second.getWeight() == 0) {
+				if (thisUsed->second.getWeight() == 0) {
 					TraceEvent(SevError, "UsedIsZero").detail("ProcessId", it.interf.locality.processId().get());
 					ASSERT(false);
 				}
@@ -1758,7 +1762,7 @@ public:
 			       degraded == r.degraded;
 		}
 
-		std::string toString() const { return format("%d %d %d %d %d", worstFit, worstUsed, count, degraded, bestFit); }
+		std::string toString() const { return format("%d %u %d %d %d", worstFit, worstUsed, count, degraded, bestFit); }
 	};
 
 	std::set<Optional<Standalone<StringRef>>> getDatacenters(DatabaseConfiguration const& conf,
@@ -2396,6 +2400,8 @@ public:
 					               secondUsed,
 					               recruitment::Resolver,
 					               "Resolver");
+					updateIdUsed(rep.backupWorkers, recruitment::Backup, firstUsed);
+					updateIdUsed(compare.backupWorkers, recruitment::Backup, secondUsed);
 					compareWorkers(req.configuration,
 					               rep.backupWorkers,
 					               firstUsed,

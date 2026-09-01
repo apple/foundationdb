@@ -4815,6 +4815,7 @@ TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
 			               false,
 			               true,
 			               Standalone<VectorRef<StringRef>>());
+			data.id_worker[wi.locality.processId()].verified = true;
 			workers.push_back(wi);
 		}
 		return workers;
@@ -4842,13 +4843,15 @@ TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
 	data.db.fullyRecoveredConfig = config;
 
 	// Use findWorkersForConfigurationDispatch — the production code path
-	// that handles full recruitment: TLogs + two-level proxy/resolver recruiting
+	// that handles full recruitment: TLogs + two-level proxy/resolver recruiting.
+	// checkGoodRecruitment=true also exercises the operation_failed gate: since the
+	// desired counts are reachable here, recruitment must succeed instead of failing.
 	RecruitFromConfigurationRequest req;
 	req.configuration = config;
 	req.recruitSeedServers = false;
 	req.maxOldLogRouters = 0;
 
-	auto reply = data.findWorkersForConfigurationDispatch(req, false);
+	auto reply = data.findWorkersForConfigurationDispatch(req, true);
 
 	ASSERT(reply.tLogs.size() == numWorkersPerClass);
 	ASSERT(reply.commitProxies.size() == numWorkersPerClass);
@@ -4897,31 +4900,200 @@ TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
 		}
 	}
 
-	// Verify determinism: a second call with the same inputs must produce the same result.
-	// The getUniqueHash() from WorkerUsage ensures stable ordering of candidates
-	// with equal fitness
+	// Verify determinism: a second recruitment with the same inputs must place every
+	// role on the same set of processes. Sets are compared instead of positions because
+	// the order of candidates within a bucket is randomized.
 	{
-		auto reply2 = data.findWorkersForConfigurationDispatch(req, false);
+		auto reply2 = data.findWorkersForConfigurationDispatch(req, true);
 
-		ASSERT_EQ(reply.tLogs.size(), reply2.tLogs.size());
-		for (int i = 0; i < reply.tLogs.size(); ++i) {
-			ASSERT(reply.tLogs[i].locality.processId() == reply2.tLogs[i].locality.processId());
-		}
+		auto pidSet = [](const auto& interfaces) {
+			std::set<Optional<Standalone<StringRef>>> pids;
+			for (const auto& interf : interfaces) {
+				pids.insert(interf.locality.processId());
+			}
+			return pids;
+		};
 
-		ASSERT_EQ(reply.commitProxies.size(), reply2.commitProxies.size());
-		for (int i = 0; i < reply.commitProxies.size(); ++i) {
-			ASSERT(reply.commitProxies[i].locality.processId() == reply2.commitProxies[i].locality.processId());
-		}
+		ASSERT(pidSet(reply.tLogs) == pidSet(reply2.tLogs));
+		ASSERT(pidSet(reply.commitProxies) == pidSet(reply2.commitProxies));
+		ASSERT(pidSet(reply.grvProxies) == pidSet(reply2.grvProxies));
+		ASSERT(pidSet(reply.resolvers) == pidSet(reply2.resolvers));
+	}
 
-		ASSERT_EQ(reply.grvProxies.size(), reply2.grvProxies.size());
-		for (int i = 0; i < reply.grvProxies.size(); ++i) {
-			ASSERT(reply.grvProxies[i].locality.processId() == reply2.grvProxies[i].locality.processId());
-		}
+	return Void();
+}
 
-		ASSERT_EQ(reply.resolvers.size(), reply2.resolvers.size());
-		for (int i = 0; i < reply.resolvers.size(); ++i) {
-			ASSERT(reply.resolvers[i].locality.processId() == reply2.resolvers[i].locality.processId());
+// Regression test: proxy recruitment must fill across fitness levels up to the
+// minWorker fitness ceiling. With 2 dedicated commit_proxy processes (BestFit) and
+// 3 stateless processes (GoodFit), all 3 desired commit proxies must be recruited;
+// the fill loop must not stop after consuming the BestFit bucket.
+TEST_CASE("/fdbserver/clustercontroller/proxyRecruitmentAcrossFitnessLevels") {
+	ClusterControllerFullInterface cci;
+	cci.initEndpoints();
+
+	ClusterControllerData data(cci,
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+
+	auto makeWorkers = [&](ProcessClass::ClassType classType, StringRef prefix, int count) {
+		std::vector<WorkerInterface> workers;
+		for (int i = 0; i < count; i++) {
+			auto pid = prefix.toString() + std::to_string(i);
+			WorkerInterface wi;
+			wi.initEndpoints();
+			wi.locality.set(LocalityData::keyZoneId, Standalone<StringRef>(pid + "_zone"));
+			wi.locality.set(LocalityData::keyProcessId, Standalone<StringRef>(pid));
+			data.id_worker[wi.locality.processId()] =
+			    WorkerInfo(Future<Void>(),
+			               ReplyPromise<RegisterWorkerReply>(),
+			               0,
+			               wi,
+			               ProcessClass(classType, ProcessClass::CommandLineSource),
+			               ProcessClass(classType, ProcessClass::CommandLineSource),
+			               ClusterControllerPriorityInfo(
+			                   recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown),
+			               false,
+			               true,
+			               Standalone<VectorRef<StringRef>>());
+			data.id_worker[wi.locality.processId()].verified = true;
+			workers.push_back(wi);
 		}
+		return workers;
+	};
+
+	auto dedicatedWorkers = makeWorkers(ProcessClass::CommitProxyClass, "cp"_sr, 2);
+	auto statelessWorkers = makeWorkers(ProcessClass::StatelessClass, "sl"_sr, 3);
+	auto transactionWorkers = makeWorkers(ProcessClass::TransactionClass, "tx"_sr, 3);
+
+	data.masterProcessId = statelessWorkers[0].locality.processId();
+	data.clusterControllerProcessId = statelessWorkers[1].locality.processId();
+	data.startTime = now();
+	data.gotFullyRecoveredConfig = true;
+	data.gotProcessClasses = true;
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+	config.tLogReplicationFactor = 3;
+	config.desiredTLogCount = 3;
+	config.commitProxyCount = 3;
+	config.grvProxyCount = 3;
+	config.resolverCount = 3;
+	config.tLogPolicy = makeReference<PolicyOne>();
+	data.db.config = config;
+	data.db.fullyRecoveredConfig = config;
+
+	RecruitFromConfigurationRequest req;
+	req.configuration = config;
+	req.recruitSeedServers = false;
+	req.maxOldLogRouters = 0;
+
+	// checkGoodRecruitment=true: before the fix this configuration returned only 2
+	// commit proxies, which tripped the good-recruitment gate and surfaced as
+	// operation_failed instead of a successful recruitment.
+	auto reply = data.findWorkersForConfigurationDispatch(req, true);
+
+	ASSERT_EQ(3, reply.commitProxies.size());
+	ASSERT_EQ(3, reply.grvProxies.size());
+	ASSERT_EQ(3, reply.resolvers.size());
+
+	// Commit proxies must span both fitness levels: both dedicated (BestFit)
+	// processes plus one stateless (GoodFit) process.
+	std::set<Optional<Standalone<StringRef>>> dedicatedPids;
+	std::set<Optional<Standalone<StringRef>>> statelessPids;
+	for (const auto& w : dedicatedWorkers) {
+		dedicatedPids.insert(w.locality.processId());
+	}
+	for (const auto& w : statelessWorkers) {
+		statelessPids.insert(w.locality.processId());
+	}
+	int dedicatedCount = 0;
+	int statelessCount = 0;
+	for (const auto& cp : reply.commitProxies) {
+		if (dedicatedPids.contains(cp.locality.processId())) {
+			dedicatedCount++;
+		} else {
+			ASSERT(statelessPids.contains(cp.locality.processId()));
+			statelessCount++;
+		}
+	}
+	ASSERT_EQ(2, dedicatedCount);
+	ASSERT_EQ(1, statelessCount);
+
+	return Void();
+}
+
+// Regression test: recruitment without a minWorker (log routers, backup workers)
+// is not fitness-gated and must fall back to worse fitness buckets to reach the
+// requested amount.
+TEST_CASE("/fdbserver/clustercontroller/logRouterRecruitmentAcrossFitnessLevels") {
+	ClusterControllerFullInterface cci;
+	cci.initEndpoints();
+
+	ClusterControllerData data(cci,
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+
+	auto makeWorkers = [&](ProcessClass::ClassType classType, StringRef prefix, int count) {
+		std::vector<WorkerInterface> workers;
+		for (int i = 0; i < count; i++) {
+			auto pid = prefix.toString() + std::to_string(i);
+			WorkerInterface wi;
+			wi.initEndpoints();
+			wi.locality.set(LocalityData::keyZoneId, Standalone<StringRef>(pid + "_zone"));
+			wi.locality.set(LocalityData::keyProcessId, Standalone<StringRef>(pid));
+			data.id_worker[wi.locality.processId()] =
+			    WorkerInfo(Future<Void>(),
+			               ReplyPromise<RegisterWorkerReply>(),
+			               0,
+			               wi,
+			               ProcessClass(classType, ProcessClass::CommandLineSource),
+			               ProcessClass(classType, ProcessClass::CommandLineSource),
+			               ClusterControllerPriorityInfo(
+			                   recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown),
+			               false,
+			               true,
+			               Standalone<VectorRef<StringRef>>());
+			data.id_worker[wi.locality.processId()].verified = true;
+			workers.push_back(wi);
+		}
+		return workers;
+	};
+
+	// For LogRouter: stateless -> GoodFit, transaction -> OkayFit.
+	auto statelessWorkers = makeWorkers(ProcessClass::StatelessClass, "sl"_sr, 2);
+	auto transactionWorkers = makeWorkers(ProcessClass::TransactionClass, "tx"_sr, 2);
+
+	data.masterProcessId = statelessWorkers[0].locality.processId();
+	data.clusterControllerProcessId = statelessWorkers[1].locality.processId();
+	data.startTime = now();
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+	data.db.config = config;
+	data.db.fullyRecoveredConfig = config;
+
+	ClusterControllerData::WorkerUsages id_used;
+	data.updateKnownIds(&id_used);
+
+	auto logRouters = data.getWorkersForRoleInDatacenter(
+	    Optional<Standalone<StringRef>>(), recruitment::LogRouter, 4, config, id_used);
+
+	ASSERT_EQ(4, logRouters.size());
+
+	// All four processes must be used: both fitness levels.
+	std::set<Optional<Standalone<StringRef>>> recruitedPids;
+	for (const auto& w : logRouters) {
+		recruitedPids.insert(w.interf.locality.processId());
+	}
+	for (const auto& w : statelessWorkers) {
+		ASSERT(recruitedPids.contains(w.locality.processId()));
+	}
+	for (const auto& w : transactionWorkers) {
+		ASSERT(recruitedPids.contains(w.locality.processId()));
 	}
 
 	return Void();
