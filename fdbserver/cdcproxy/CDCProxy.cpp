@@ -444,10 +444,13 @@ Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef c
 	return Optional<MutationRef>();
 }
 
-Future<CDCStreamReadState> readCDCStreamState(Database cx,
-                                              CDCStreamId streamId,
-                                              UID expectedProxyId,
-                                              bool requireKeys) {
+FDB_BOOLEAN_PARAM(PrioritizeConsume);
+
+AsyncResult<CDCStreamReadState> readCDCStreamState(Database cx,
+                                                   CDCStreamId streamId,
+                                                   UID expectedProxyId,
+                                                   bool requireKeys,
+                                                   PrioritizeConsume prioritizeConsume = PrioritizeConsume::False) {
 	if (streamId == 0) {
 		throw client_invalid_operation();
 	}
@@ -458,6 +461,10 @@ Future<CDCStreamReadState> readCDCStreamState(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			if (prioritizeConsume) {
+				// Draining committed CDC data must continue while ordinary transaction admission is throttled.
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
 
 			Future<Optional<Value>> keysFuture = tr.get(cdcStreamKeyFor(streamId));
 			Future<Optional<Value>> minVersionFuture = tr.get(cdcMinVersionKeyFor(streamId));
@@ -1368,7 +1375,7 @@ Future<Void> CDCProxy::initializeStream(Reference<CDCBufferedStream> stream) {
 
 // Post-GA optimization: persist per-tag safe-pop state or coordinate pops centrally instead of rebuilding minima from
 // all stream history on every acknowledgement scan. Revisit if acknowledgement volume makes this scan material.
-Future<CDCPopState> readPopState(Database cx) {
+AsyncResult<CDCPopState> readPopState(Database cx) {
 	Transaction tr(cx);
 	while (true) {
 		Error err;
@@ -1669,7 +1676,8 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 			ASSERT_GT(stream->activeConsumes, 0);
 			--stream->activeConsumes;
 		});
-		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, request.cursor.streamId, id, true);
+		const CDCStreamReadState metadata =
+		    co_await readCDCStreamState(cx, request.cursor.streamId, id, true, PrioritizeConsume::True);
 		if (stream->tooOld) {
 			throw transaction_too_old();
 		}
