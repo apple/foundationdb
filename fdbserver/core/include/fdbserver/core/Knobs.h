@@ -434,6 +434,16 @@ public:
 	int BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE; // the block size when performing async read/write for bulkload
 	int MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK; // the max number of manifest that a bulkload task can process
 	bool BULKLOAD_SIM_FAILURE_INJECTION; // Set to true to inject failure in bulkload simulation
+	int BULKLOAD_SIM_INJECT_DEST_TEAM_FAILURES; // Simulation-only test hook: how many bulkload data moves to tell that
+	                                            // their destination team went unhealthy. Zero by default, so no other
+	                                            // test changes behaviour. Waiting for a real team to fail within the
+	                                            // window a bulkload move is in flight covers that path far too rarely
+	int DD_BULKLOAD_MAX_RETRYABLE_REDISPATCH; // How many times a bulkload task may be re-dispatched after a recoverable
+	                                          // data move failure before it is marked Error. A knob rather than an
+	                                          // in-code constant so the buggified value is drawn once per process:
+	                                          // re-drawing it per dispatch would compare a fresh random bound against
+	                                          // a monotonic restartCount, making the effective budget the minimum of
+	                                          // the draws.
 	double DD_BULKLOAD_POWER_OF_D_RATIO; // When selecting the dest team, DD randomly chooses 1/D portion of all valid
 	                                     // teams as the candidates and the DD selects the team with the minimal number
 	                                     // of ongoing tasks from the candidates as the dest team.
@@ -1105,6 +1115,12 @@ public:
 	int AUDIT_STORAGE_RATE_PER_SERVER_MAX;
 	bool ENABLE_AUDIT_VERBOSE_TRACE;
 	int AUDIT_RESTORE_BATCH_KEY_LIMIT;
+	// int, not int64_t: these feed GetRangeLimits::bytes, which is an int. Declaring them wider only
+	// moves the narrowing to the use site, where an out-of-range value can land on -1, which
+	// GetRangeLimits reads as BYTE_LIMIT_UNLIMITED and so silently removes the bound entirely.
+	int AUDIT_RESTORE_BATCH_BYTE_LIMIT;
+	int AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN; // floor the adaptive batch budget backs off to
+	int64_t AUDIT_TASK_MAX_BYTES; // cap on one audit task's range; 0 disables subdivision
 	int64_t AUDIT_PROGRESS_PERSIST_BYTES_INTERVAL;
 	double AUDIT_LOCATION_METADATA_INTERVAL;
 	bool LOGGING_STORAGE_COMMIT_WHEN_IO_TIMEOUT;

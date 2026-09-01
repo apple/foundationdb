@@ -1,5 +1,5 @@
 /*
- * NativeAPI.actor.h
+ * NativeAPI.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,12 +18,8 @@
  * limitations under the License.
  */
 
-#pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
-#define FDBCLIENT_NATIVEAPI_ACTOR_G_H
-#include "fdbclient/NativeAPI.actor.g.h"
-#elif !defined(FDBCLIENT_NATIVEAPI_ACTOR_H)
-#define FDBCLIENT_NATIVEAPI_ACTOR_H
+#ifndef FDBCLIENT_NATIVEAPI_H
+#define FDBCLIENT_NATIVEAPI_H
 
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
@@ -41,7 +37,6 @@
 #include "fdbclient/ClientLogEvents.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Tracing.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 /*
 // CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like buggify() but for client side testing)
@@ -106,9 +101,9 @@ public:
 
 	static Database createSimulatedExtraDatabase(std::string connectionString);
 
-	Database() {} // an uninitialized database can be destructed or reassigned safely; that's it
+	Database() = default; // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator=(Database const& rhs) { db = rhs.db; }
-	Database(Database const& rhs) : db(rhs.db) {}
+	Database(Database const& rhs) = default;
 	Database(Database&& r) noexcept : db(std::move(r.db)) {}
 	void operator=(Database&& r) noexcept { db = std::move(r.db); }
 
@@ -206,10 +201,10 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
 
 	template <typename T>
-	void addLog(const T& event) {
+	void addLog(const T& event, SpanContext spanContext) {
 		if (logLocation & TRACE_LOG) {
 			ASSERT(!identifier.empty());
-			event.logEvent(identifier, maxFieldLength);
+			event.logEvent(identifier, maxFieldLength, spanContext);
 		}
 
 		if (flushed) {
@@ -540,7 +535,7 @@ Future<Void> Database::run(Fun fun) {
 	}
 }
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext);
+Future<Version> waitForCommittedVersion(Database const& cx, Version const& version, SpanContext const& spanContext);
 Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys, int shardLimit);
 
 // Takes a snapshot of the cluster, specifically the following persistent
@@ -564,7 +559,7 @@ Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
 // Gets checkpoint metadata for `ranges` at the specific version, with the particular format.
 // Returns a list of [range, checkpoint], where the `checkpoint` has data over `range`.
 // checkpoint_not_found() error will be returned if the specific checkpoint cannot be found.
-Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
+AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
     Database cx,
     std::vector<KeyRange> ranges,
     Version version,
@@ -588,11 +583,11 @@ inline uint64_t getWriteOperationCost(uint64_t bytes) {
 
 // Measured in bytes, rounded up to the nearest page size.
 inline uint64_t getReadOperationCost(uint64_t bytes) {
-	if (bytes == 0) {
-		return CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	} else {
-		return ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	const uint64_t pageSize = CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	if (bytes <= pageSize) {
+		return pageSize;
 	}
+	return ((bytes - 1) / pageSize + 1) * pageSize;
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
@@ -631,12 +626,12 @@ Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(Version version,
 // Return the suggested split points from storage server.The locations tell which interface should
 // serve the request. `limit` is the current estimated storage metrics of `keys`.The returned points, if present,
 // guarantee the metrics of split result is within limit.
-ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocations(
-    std::vector<KeyRangeLocationInfo> locations,
-    KeyRange keys,
-    StorageMetrics limit,
-    StorageMetrics estimated,
-    Optional<int> minSplitBytes);
+Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLocations(
+    std::vector<KeyRangeLocationInfo> const& locations,
+    KeyRange const& keys,
+    StorageMetrics const& limit,
+    StorageMetrics const& estimated,
+    Optional<int> const& minSplitBytes);
 
 Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
 
@@ -653,5 +648,4 @@ Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 
 Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr);
 
-#include "flow/unactorcompiler.h"
-#endif
+#endif // FDBCLIENT_NATIVEAPI_H

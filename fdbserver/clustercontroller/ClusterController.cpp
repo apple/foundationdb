@@ -40,7 +40,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/BooleanParam.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/BackupInterface.h"
 #include "fdbserver/core/CoordinatedState.h"
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
@@ -581,6 +581,7 @@ Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 
 Future<std::vector<int>> monitorCDCProxies(std::vector<CDCProxyInterface> const& cdcProxies) {
 	std::vector<Future<Void>> failures;
+	failures.reserve(cdcProxies.size());
 	for (const auto& proxy : cdcProxies) {
 		failures.push_back(
 		    waitFailureClient(proxy.waitFailure,

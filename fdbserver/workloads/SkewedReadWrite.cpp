@@ -23,7 +23,7 @@
 #include <vector>
 
 #include "fdbrpc/DDSketch.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.h"
 #include "fdbserver/tester/workloads.h"
@@ -274,6 +274,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 			std::vector<KeyRange> extra_ranges;
 			int reads = aTransaction ? self->readsPerTransactionA : self->readsPerTransactionB;
 			int writes = aTransaction ? self->writesPerTransactionA : self->writesPerTransactionB;
+			keys.reserve(reads > 0 ? reads : 0);
 			for (int op = 0; op < reads; op++)
 				keys.push_back(self->getRandomKey(self->nodeCount));
 

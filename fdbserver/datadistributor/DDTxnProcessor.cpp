@@ -19,7 +19,7 @@
  */
 
 #include "DDTxnProcessor.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ManagementAPI.h"
 #include "DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
@@ -151,6 +151,7 @@ class DDTxnProcessorImpl {
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
 					std::vector<Future<Optional<Value>>> serverListEntries;
+					serverListEntries.reserve(src.size());
 					for (int j = 0; j < src.size(); ++j) {
 						serverListEntries.push_back(tr.get(serverListKeyFor(src[j])));
 					}

@@ -1073,10 +1073,7 @@ Future<bool> checkExclusion(Database db,
 			}
 		}
 
-	}
-	// NOTE: ActorCompiler only accepts Error& or ... (for std::exception), it is not possible to capture
-	// std::exception&
-	catch (...) {
+	} catch (...) {
 		*msg = ManagementAPIError::toJsonString(
 		    false, markFailed ? "exclude failed" : "exclude", errorString + "General exception raised.\n");
 		co_return false;
@@ -1258,6 +1255,7 @@ Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ryw, Key
 	std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
 	// Decode the excluded localities to check if any server is excluded by locality.
 	std::vector<std::pair<std::string, std::string>> decodedExcludedLocalities;
+	decodedExcludedLocalities.reserve(excludedLocalities.size());
 	for (auto& excludedLocality : excludedLocalities) {
 		decodedExcludedLocalities.push_back(decodeLocality(excludedLocality));
 	}

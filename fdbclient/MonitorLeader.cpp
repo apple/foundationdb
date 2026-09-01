@@ -22,7 +22,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/WellKnownEndpoints.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.h"
@@ -277,6 +277,7 @@ Future<std::vector<NetworkAddress>> tryResolveHostnamesImpl(ClusterConnectionStr
 		allCoordinatorsSet.insert(coord);
 	}
 	std::vector<Future<Void>> fs;
+	fs.reserve(self->hostnames.size());
 	for (auto& hostname : self->hostnames) {
 		fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
 			if (addr.present()) {
@@ -889,6 +890,7 @@ void shrinkProxyList(ClientDBInfo& ni,
                      std::vector<GrvProxyInterface>& lastGrvProxies) {
 	if (ni.commitProxies.size() > CLIENT_KNOBS->MAX_COMMIT_PROXY_CONNECTIONS) {
 		std::vector<UID> commitProxyUIDs;
+		commitProxyUIDs.reserve(ni.commitProxies.size());
 		for (auto& commitProxy : ni.commitProxies) {
 			commitProxyUIDs.push_back(commitProxy.id());
 		}
@@ -906,6 +908,7 @@ void shrinkProxyList(ClientDBInfo& ni,
 	}
 	if (ni.grvProxies.size() > CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS) {
 		std::vector<UID> grvProxyUIDs;
+		grvProxyUIDs.reserve(ni.grvProxies.size());
 		for (auto& grvProxy : ni.grvProxies) {
 			grvProxyUIDs.push_back(grvProxy.id());
 		}

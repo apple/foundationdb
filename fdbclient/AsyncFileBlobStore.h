@@ -125,7 +125,7 @@ public:
 			data = (const uint8_t*)data + finishlen;
 
 			// End current part (and start new one)
-			co_await f->endCurrentPart(f.getPtr(), true);
+			co_await f->endCurrentPart(true);
 			p = f->m_parts.back().getPtr();
 		}
 
@@ -147,33 +147,33 @@ public:
 		return Void();
 	}
 
-	static Future<std::string> doPartUpload(AsyncFileBlobStoreWrite* f, Part* p) {
+	Future<std::string> doPartUpload(Part* p) {
 		p->finalizeChecksum();
-		std::string upload_id = co_await f->getUploadID();
-		std::string etag = co_await f->m_bstore->uploadPart(
-		    f->m_bucket, f->m_object, upload_id, p->number, &p->content, p->length, p->checksumString);
+		std::string upload_id = co_await getUploadID();
+		std::string etag = co_await m_bstore->uploadPart(
+		    m_bucket, m_object, upload_id, p->number, &p->content, p->length, p->checksumString);
 		co_return etag;
 	}
 
-	static Future<Void> doFinishUpload(AsyncFileBlobStoreWrite* f) {
+	Future<Void> doFinishUpload() {
 		// If there is only 1 part then it has not yet been uploaded so just write the whole file at once.
-		if (f->m_parts.size() == 1) {
-			Reference<Part> part = f->m_parts.back();
+		if (m_parts.size() == 1) {
+			Reference<Part> part = m_parts.back();
 			part->finalizeChecksum();
-			co_await f->m_bstore->writeEntireFileFromBuffer(
-			    f->m_bucket, f->m_object, &part->content, part->length, part->checksumString);
+			co_await m_bstore->writeEntireFileFromBuffer(
+			    m_bucket, m_object, &part->content, part->length, part->checksumString);
 			co_return;
 		}
 
 		// There are at least 2 parts.  End the last part (which could be empty)
-		co_await f->endCurrentPart(f);
+		co_await endCurrentPart();
 
 		IBlobStoreEndpoint::MultiPartSetT partSet;
 		std::vector<Reference<Part>>::iterator p;
 
 		// Wait for all the parts to be done to get their ETags, populate the partSet required to finish the object
 		// upload.
-		for (p = f->m_parts.begin(); p != f->m_parts.end(); ++p) {
+		for (p = m_parts.begin(); p != m_parts.end(); ++p) {
 			std::string tag = co_await (*p)->etag;
 			if ((*p)->length > 0) { // The last part might be empty and has to be omitted.
 				partSet[(*p)->number] = IBlobStoreEndpoint::PartInfo(tag, (*p)->checksumString);
@@ -182,14 +182,14 @@ public:
 
 		// No need to wait for the upload ID here because the above loop waited for all the parts and each part required
 		// the upload ID so it is ready
-		Optional<std::string> checksumSHA256 = co_await f->m_bstore->finishMultiPartUpload(
-		    f->m_bucket, f->m_object, f->m_upload_id.get(), partSet, f->m_cursor);
+		Optional<std::string> checksumSHA256 =
+		    co_await m_bstore->finishMultiPartUpload(m_bucket, m_object, m_upload_id.get(), partSet, m_cursor);
 
 		// Log the checksum if present - this is just a hash of the multipart structure, not the object content
 		if (checksumSHA256.present()) {
 			TraceEvent(SevDebug, "AsyncFileBlobStoreMultipartUploadChecksum")
-			    .detail("Bucket", f->m_bucket)
-			    .detail("Object", f->m_object)
+			    .detail("Bucket", m_bucket)
+			    .detail("Object", m_object)
 			    .detail("ChecksumSHA256", checksumSHA256.get())
 			    .detail("Note", "This is a hash of the multipart structure, not object content");
 		}
@@ -199,7 +199,7 @@ public:
 	Future<Void> sync() override {
 		// Only initiate the finish operation once, and also prevent further writing.
 		if (!m_finished.isValid()) {
-			m_finished = doFinishUpload(this);
+			m_finished = doFinishUpload();
 			m_cursor = -1; // Cause future write attempts to fail
 		}
 
@@ -247,24 +247,23 @@ private:
 	FlowLock m_concurrentUploads;
 
 	// End the current part and start uploading it, but also wait for a part to finish if too many are in transit.
-	static Future<Void> endCurrentPart(AsyncFileBlobStoreWrite* f, bool startNew = false) {
-		if (f->m_parts.back()->length == 0)
+	Future<Void> endCurrentPart(bool startNew = false) {
+		if (m_parts.back()->length == 0)
 			co_return;
 
 		// Wait for an upload slot to be available
-		co_await f->m_concurrentUploads.take();
+		co_await m_concurrentUploads.take();
 
 		// Do the upload, and if it fails forward errors to m_error and also stop if anything else sends an error to
 		// m_error Also, hold a releaser for the concurrent upload slot while all that is going on.
-		auto releaser = std::make_shared<FlowLock::Releaser>(f->m_concurrentUploads, 1);
-		f->m_parts.back()->etag =
-		    holdWhile(releaser, joinErrorGroup(doPartUpload(f, f->m_parts.back().getPtr()), f->m_error));
+		auto releaser = std::make_shared<FlowLock::Releaser>(m_concurrentUploads, 1);
+		m_parts.back()->etag = holdWhile(releaser, joinErrorGroup(doPartUpload(m_parts.back().getPtr()), m_error));
 
 		// Make a new part to write to
 		if (startNew) {
-			f->m_parts.push_back(makeReference<Part>(f->m_parts.size() + 1,
-			                                         f->m_bstore->knobs.multipart_min_part_size,
-			                                         f->m_bstore->knobs.enable_object_integrity_check));
+			m_parts.push_back(makeReference<Part>(m_parts.size() + 1,
+			                                      m_bstore->knobs.multipart_min_part_size,
+			                                      m_bstore->knobs.enable_object_integrity_check));
 		}
 	}
 

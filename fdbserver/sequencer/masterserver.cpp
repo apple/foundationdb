@@ -255,7 +255,9 @@ class LiveCommittedVersionServer {
 			if (req.debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
 				                      req.debugID.get().first(),
-				                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
+				                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion",
+				                      req.spanContext.traceID,
+				                      req.spanContext.spanID);
 			}
 
 			if (self->liveCommittedVersion.get() == invalidVersion) {

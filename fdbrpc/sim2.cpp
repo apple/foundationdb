@@ -766,8 +766,8 @@ private:
 			throw io_error();
 		}
 
-		unsigned int read_bytes = 0;
-		if ((read_bytes = _read(self->h, data, (unsigned int)length)) == -1) {
+		unsigned int read_bytes = _read(self->h, data, (unsigned int)length);
+		if (read_bytes == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 2);
 			throw io_error();
 		}
@@ -813,8 +813,8 @@ private:
 			throw io_error();
 		}
 
-		unsigned int write_bytes = 0;
-		if ((write_bytes = _write(self->h, (void*)data.begin(), data.size())) == -1) {
+		unsigned int write_bytes = _write(self->h, (void*)data.begin(), data.size());
+		if (write_bytes == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 4);
 			throw io_error();
 		}
@@ -1088,7 +1088,7 @@ public:
 			return delay(getCurrentProcess()->rebooting ? 0 : .001, taskID) || checkShutdown(this, taskID);
 		}
 		setCurrentTask(taskID);
-		return Void();
+		return readyYield;
 	}
 	bool check_yield(TaskPriority taskID) override {
 		if (yielded)
@@ -2401,6 +2401,7 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
+	Future<Void> readyYield = Void();
 	bool printSimTime;
 
 private:

@@ -132,10 +132,6 @@ if(USE_CLANG_TIDY)
   message(STATUS "clang-tidy enabled for C/C++ compilation: ${_clang_tidy_command_display}")
 endif()
 
-if(NOT OPEN_FOR_IDE)
-  add_compile_definitions(NO_INTELLISENSE)
-endif()
-
 if(NOT WIN32)
   include(CheckIncludeFile)
   CHECK_INCLUDE_FILE("stdatomic.h" HAS_C11_ATOMICS)

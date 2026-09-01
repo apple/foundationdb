@@ -110,7 +110,7 @@ GetValueRequest req;
 req.key = myKey;
 req.reply = ReplyPromise<GetValueReply>();  // self-addressed envelope
 stream.send(req);
-GetValueReply reply = wait(req.reply.getFuture());
+GetValueReply reply = co_await req.reply.getFuture();
 ```
 
 ### ReplyPromise<T> ([`fdbrpc.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/fdbrpc.h)`:131-204`)
@@ -142,7 +142,7 @@ SERVER:
 CLIENT:
 12. connectionReader() receives reply packet
 13. Token lookup → NetSAV::receive() → deserialize → SAV::send(value)
-14. Client's wait() resolves
+14. Client's `co_await` resumes with the reply
 ```
 
 ### ReplyPromiseStream<T> ([`fdbrpc.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/fdbrpc.h)`:460-640`)
@@ -361,7 +361,7 @@ Simulates network impairment:
 
 ---
 
-## Load Balancing -- `LoadBalance.actor.h`
+## Load Balancing -- `LoadBalance.h`
 
 Client-side request distribution:
 
@@ -398,7 +398,7 @@ Client-side request distribution:
 | [`fdbrpc/include/fdbrpc/FailureMonitor.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/FailureMonitor.h) | Failure detection interface and implementation |
 | [`fdbrpc/include/fdbrpc/Locality.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/Locality.h) | LocalityData, ProcessClass, LBDistance |
 | [`fdbrpc/include/fdbrpc/ReplicationPolicy.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/ReplicationPolicy.h) | PolicyOne, PolicyAcross, PolicyAnd |
-| `fdbrpc/include/fdbrpc/LoadBalance.actor.h` | Client-side load balancing |
+| `fdbrpc/include/fdbrpc/LoadBalance.h` | Client-side load balancing |
 | [`fdbrpc/sim2.cpp`](https://github.com/apple/foundationdb/blob/main/fdbrpc/sim2.cpp) | Sim2 deterministic simulator |
 | [`fdbrpc/include/fdbrpc/simulator.h`](https://github.com/apple/foundationdb/blob/main/fdbrpc/include/fdbrpc/simulator.h) | ISimulator interface, ProcessInfo |
 | `flow/include/flow/IConnection.h` | IConnection, IListener interfaces |
