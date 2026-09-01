@@ -274,28 +274,26 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 	// Requires hasMutations() return true before calling this function.
 	// The caller must hold on the the arena associated with the mutation.
-	Future<VersionedData> getNextMutation() { return getMutationImpl(this); }
+	Future<VersionedData> getNextMutation() {
+		ASSERT(!fileProgress.empty() && !fileProgress[0]->mutations.empty());
 
-	static Future<VersionedData> getMutationImpl(MutationFilesReadProgress* self) {
-		ASSERT(!self->fileProgress.empty() && !self->fileProgress[0]->mutations.empty());
-
-		Reference<FileProgress> fp = self->fileProgress[0];
+		Reference<FileProgress> fp = fileProgress[0];
 		VersionedData data = fp->mutations[0];
 		fp->mutations.erase(fp->mutations.begin());
 		if (fp->mutations.empty()) {
 			// decode one more block
-			co_await decodeToVersion(fp, /*version=*/0, self->endVersion, self->getLogFile(fp->idx));
+			co_await decodeToVersion(fp, /*version=*/0, endVersion, getLogFile(fp->idx));
 		}
 
 		if (fp->empty()) {
-			self->fileProgress.erase(self->fileProgress.begin());
+			fileProgress.erase(fileProgress.begin());
 		} else {
 			// Keep fileProgress sorted
-			for (int i = 1; i < self->fileProgress.size(); i++) {
-				if (*self->fileProgress[i - 1] <= *self->fileProgress[i]) {
+			for (int i = 1; i < fileProgress.size(); i++) {
+				if (*fileProgress[i - 1] <= *fileProgress[i]) {
 					break;
 				}
-				std::swap(self->fileProgress[i - 1], self->fileProgress[i]);
+				std::swap(fileProgress[i - 1], fileProgress[i]);
 			}
 		}
 		co_return data;
@@ -303,13 +301,11 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 	LogFile& getLogFile(int index) { return files[index]; }
 
-	Future<Void> openLogFiles(Reference<IBackupContainer> container) { return openLogFilesImpl(this, container); }
-
 	// Opens log files in the progress and starts decoding until the beginVersion is seen.
-	static Future<Void> openLogFilesImpl(MutationFilesReadProgress* progress, Reference<IBackupContainer> container) {
+	Future<Void> openLogFiles(Reference<IBackupContainer> container) {
 		std::vector<Future<Reference<IAsyncFile>>> asyncFiles;
-		asyncFiles.reserve(progress->files.size());
-		for (const auto& file : progress->files) {
+		asyncFiles.reserve(files.size());
+		for (const auto& file : files) {
 			asyncFiles.push_back(container->readFile(file.fileName));
 		}
 		co_await waitForAll(asyncFiles); // open all files
@@ -318,14 +314,13 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		std::vector<Future<Void>> fileDecodes;
 		for (int i = 0; i < asyncFiles.size(); i++) {
 			auto fp = makeReference<FileProgress>(asyncFiles[i].get(), i);
-			progress->fileProgress.push_back(fp);
-			fileDecodes.push_back(
-			    decodeToVersion(fp, progress->beginVersion, progress->endVersion, progress->getLogFile(i)));
+			fileProgress.push_back(fp);
+			fileDecodes.push_back(decodeToVersion(fp, beginVersion, endVersion, getLogFile(i)));
 		}
 
 		co_await waitForAll(fileDecodes);
 
-		progress->sortAndRemoveEmpty();
+		sortAndRemoveEmpty();
 	}
 
 	// Decodes the file until EOF or an mutation >= minVersion and saves these mutations.
@@ -398,37 +393,35 @@ struct LogFileWriter {
 	}
 
 	// Start a new block if needed, then write the key and value
-	static Future<Void> writeKV_impl(LogFileWriter* self, Key k, Value v) {
+	Future<Void> writeKV(Key k, Value v) {
 		// If key and value do not fit in this block, end it and start a new one
 		int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
-		if (self->file->size() + toWrite > self->blockEnd) {
+		if (file->size() + toWrite > blockEnd) {
 			// Write padding if needed
-			int bytesLeft = self->blockEnd - self->file->size();
+			int bytesLeft = blockEnd - file->size();
 			if (bytesLeft > 0) {
 				Value paddingFFs = fileBackup::makePadding(bytesLeft);
-				co_await self->file->append(paddingFFs.begin(), bytesLeft);
+				co_await file->append(paddingFFs.begin(), bytesLeft);
 			}
 
 			// Set new blockEnd
-			self->blockEnd += self->blockSize;
+			blockEnd += blockSize;
 
 			// write Header
-			co_await self->file->append((uint8_t*)&BACKUP_AGENT_MLOG_VERSION, sizeof(BACKUP_AGENT_MLOG_VERSION));
+			co_await file->append((uint8_t*)&BACKUP_AGENT_MLOG_VERSION, sizeof(BACKUP_AGENT_MLOG_VERSION));
 		}
 
-		co_await self->file->appendStringRefWithLen(k);
-		co_await self->file->appendStringRefWithLen(v);
+		co_await file->appendStringRefWithLen(k);
+		co_await file->appendStringRefWithLen(v);
 
 		// At this point we should be in whatever the current block is or the block size is too small
-		if (self->file->size() > self->blockEnd)
+		if (file->size() > blockEnd)
 			throw backup_bad_block_size();
 	}
 
-	Future<Void> writeKV(Key k, Value v) { return writeKV_impl(this, k, v); }
-
 	// Adds a new mutation to an internal buffer and writes out when encountering
 	// a new commitVersion or exceeding the block size.
-	static Future<Void> addMutation(LogFileWriter* self, Version commitVersion, MutationListRef mutations) {
+	Future<Void> addMutation(Version commitVersion, MutationListRef mutations) {
 		Standalone<StringRef> value = BinaryWriter::toValue(mutations, IncludeVersion());
 
 		int part = 0;
@@ -437,7 +430,7 @@ struct LogFileWriter {
 			    part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
 			    std::min(value.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
 			Standalone<StringRef> key = getBlockKey(commitVersion, part);
-			co_await writeKV_impl(self, key, partBuf);
+			co_await writeKV(key, partBuf);
 		}
 	}
 
@@ -478,7 +471,7 @@ Future<Void> convert(ConvertParams params) {
 
 		// emit a mutation batch to file when encounter a new version
 		if (list.totalSize() > 0 && version != data.version.version) {
-			co_await LogFileWriter::addMutation(&logFile, version, list);
+			co_await logFile.addMutation(version, list);
 			list = MutationList();
 			arena = Arena();
 		}
@@ -493,7 +486,7 @@ Future<Void> convert(ConvertParams params) {
 		version = data.version.version;
 	}
 	if (list.totalSize() > 0) {
-		co_await LogFileWriter::addMutation(&logFile, version, list);
+		co_await logFile.addMutation(version, list);
 	}
 
 	co_await outFile->finish();
