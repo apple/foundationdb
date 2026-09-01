@@ -2211,6 +2211,176 @@ TEST_CASE("CDC C binding end-to-end") {
 	}
 }
 
+TEST_CASE("CDC C binding edge cases and failure modes") {
+	using FuturePtr = std::unique_ptr<FDBFuture, decltype(&fdb_future_destroy)>;
+	using ConsumerPtr = std::unique_ptr<FDBCdcConsumer, decltype(&fdb_cdc_consumer_destroy)>;
+
+	auto ownFuture = [](FDBFuture* future) { return FuturePtr(future, &fdb_future_destroy); };
+	auto ownConsumer = [](FDBCdcConsumer* consumer) { return ConsumerPtr(consumer, &fdb_cdc_consumer_destroy); };
+	auto waitForSuccess = [](FDBFuture* future) {
+		fdb_check(fdb_future_block_until_ready(future));
+		fdb_check(fdb_future_get_error(future));
+	};
+	auto commitSetValues = [](std::vector<std::pair<std::string, std::string>> const& values) {
+		fdb::Transaction tr(db);
+		while (true) {
+			for (auto const& [key, value] : values) {
+				tr.set(key, value);
+			}
+			fdb::EmptyFuture commitFuture = tr.commit();
+			fdb_error_t err = wait_future(commitFuture);
+			if (err) {
+				fdb::EmptyFuture onErrorFuture = tr.on_error(err);
+				fdb_check(wait_future(onErrorFuture));
+				continue;
+			}
+			int64_t committedVersion;
+			fdb_check(tr.get_committed_version(&committedVersion));
+			return committedVersion;
+		}
+	};
+
+	// 1. Calling fdb_cdc_consumer_destroy(nullptr) must be safe and not crash.
+	fdb_cdc_consumer_destroy(nullptr);
+
+	// 2. Creating a consumer for a non-existent stream must fail with client_invalid_operation (2000).
+	const std::string nonExistentStream = key("cdc-nonexistent-stream");
+	auto invalidCreateFuture = ownFuture(fdb_database_create_cdc_consumer(
+	    db, reinterpret_cast<uint8_t const*>(nonExistentStream.data()), nonExistentStream.size()));
+	REQUIRE(invalidCreateFuture != nullptr);
+	fdb_check(fdb_future_block_until_ready(invalidCreateFuture.get()));
+	CHECK(fdb_future_get_error(invalidCreateFuture.get()) == 2000); // client_invalid_operation
+
+	// 3. Register a stream and verify future release memory on registration, consumer creation, list, and consume.
+	const std::string streamName = key("cdc-edge-stream");
+	const std::string rangeBegin = key("cdc-edge-data/");
+	const std::string rangeEnd = strinc_str(rangeBegin);
+	const std::string testKey = rangeBegin + "item";
+
+	auto registerFuture =
+	    ownFuture(fdb_database_register_cdc_stream(db,
+	                                               reinterpret_cast<uint8_t const*>(streamName.data()),
+	                                               streamName.size(),
+	                                               reinterpret_cast<uint8_t const*>(rangeBegin.data()),
+	                                               rangeBegin.size(),
+	                                               reinterpret_cast<uint8_t const*>(rangeEnd.data()),
+	                                               rangeEnd.size()));
+	REQUIRE(registerFuture != nullptr);
+	waitForSuccess(registerFuture.get());
+
+	uint64_t streamId = 0;
+	fdb_check(fdb_future_get_uint64(registerFuture.get(), &streamId));
+	REQUIRE(streamId != 0);
+
+	// Test memory release on register future
+	fdb_future_release_memory(registerFuture.get());
+	uint64_t releasedStreamId = 0;
+	CHECK(fdb_future_get_uint64(registerFuture.get(), &releasedStreamId) == 1102); // future_released
+
+	// Test memory release on list streams future
+	auto listFuture = ownFuture(fdb_database_list_cdc_streams(db));
+	REQUIRE(listFuture != nullptr);
+	waitForSuccess(listFuture.get());
+	FDBCdcStreamInfo const* streams = nullptr;
+	int streamCount = -1;
+	fdb_check(fdb_future_get_cdc_stream_info_array(listFuture.get(), &streams, &streamCount));
+	CHECK(streamCount > 0);
+	fdb_future_release_memory(listFuture.get());
+	CHECK(fdb_future_get_cdc_stream_info_array(listFuture.get(), &streams, &streamCount) == 1102); // future_released
+
+	// Test memory release on create consumer future
+	auto createFuture = ownFuture(
+	    fdb_database_create_cdc_consumer(db, reinterpret_cast<uint8_t const*>(streamName.data()), streamName.size()));
+	REQUIRE(createFuture != nullptr);
+	waitForSuccess(createFuture.get());
+	FDBCdcConsumer* rawConsumer = nullptr;
+	fdb_check(fdb_future_get_cdc_consumer(createFuture.get(), &rawConsumer));
+	auto consumer = ownConsumer(rawConsumer);
+	REQUIRE(consumer != nullptr);
+
+	fdb_future_release_memory(createFuture.get());
+	FDBCdcConsumer* releasedConsumer = nullptr;
+	CHECK(fdb_future_get_cdc_consumer(createFuture.get(), &releasedConsumer) == 1102); // future_released
+
+	// 4. Calling acknowledge before any consume (initial position version is -1) must fail.
+	auto prematureAckFuture = ownFuture(fdb_cdc_consumer_acknowledge(consumer.get()));
+	REQUIRE(prematureAckFuture != nullptr);
+	fdb_check(fdb_future_block_until_ready(prematureAckFuture.get()));
+	CHECK(fdb_future_get_error(prematureAckFuture.get()) == 2000); // client_invalid_operation
+
+	// 5. Commit a mutation, consume it, and verify memory release on consume future.
+	commitSetValues({ { testKey, "val1" } });
+	auto consumeFuture = ownFuture(fdb_cdc_consumer_consume(consumer.get()));
+	REQUIRE(consumeFuture != nullptr);
+	waitForSuccess(consumeFuture.get());
+
+	FDBCdcVersionedMutations const* mutations = nullptr;
+	int mutationGroupCount = -1;
+	int64_t lastConsumedVersion = -1;
+	fdb_check(fdb_future_get_cdc_versioned_mutations(
+	    consumeFuture.get(), &mutations, &mutationGroupCount, &lastConsumedVersion));
+	CHECK(mutationGroupCount >= 1);
+	CHECK(lastConsumedVersion > 0);
+
+	fdb_future_release_memory(consumeFuture.get());
+	CHECK(fdb_future_get_cdc_versioned_mutations(
+	          consumeFuture.get(), &mutations, &mutationGroupCount, &lastConsumedVersion) == 1102); // future_released
+
+	// 6. Duplicate / rapid acknowledgements without intervening consume calls (must succeed idempotently).
+	auto ackFuture1 = ownFuture(fdb_cdc_consumer_acknowledge(consumer.get()));
+	REQUIRE(ackFuture1 != nullptr);
+	waitForSuccess(ackFuture1.get());
+
+	uint64_t posStreamId1 = 0;
+	int64_t posVersion1 = -1;
+	fdb_check(fdb_cdc_consumer_get_position(consumer.get(), &posStreamId1, &posVersion1));
+	CHECK(posStreamId1 == streamId);
+	CHECK(posVersion1 == lastConsumedVersion);
+
+	auto ackFuture2 = ownFuture(fdb_cdc_consumer_acknowledge(consumer.get()));
+	REQUIRE(ackFuture2 != nullptr);
+	waitForSuccess(ackFuture2.get());
+
+	uint64_t posStreamId2 = 0;
+	int64_t posVersion2 = -1;
+	fdb_check(fdb_cdc_consumer_get_position(consumer.get(), &posStreamId2, &posVersion2));
+	CHECK(posStreamId2 == posStreamId1);
+	CHECK(posVersion2 == posVersion1);
+
+	// 7. Resuming a consumer with a non-existent stream ID.
+	uint64_t nonExistentStreamId = 99999999ULL;
+	auto resumeInvalidFuture = ownFuture(fdb_database_resume_cdc_consumer(db, nonExistentStreamId, 100));
+	REQUIRE(resumeInvalidFuture != nullptr);
+	waitForSuccess(resumeInvalidFuture.get());
+
+	FDBCdcConsumer* rawResumedInvalid = nullptr;
+	fdb_check(fdb_future_get_cdc_consumer(resumeInvalidFuture.get(), &rawResumedInvalid));
+	auto resumedInvalidConsumer = ownConsumer(rawResumedInvalid);
+	REQUIRE(resumedInvalidConsumer != nullptr);
+
+	fdb_future_release_memory(resumeInvalidFuture.get());
+	FDBCdcConsumer* dummyResumedConsumer = nullptr;
+	CHECK(fdb_future_get_cdc_consumer(resumeInvalidFuture.get(), &dummyResumedConsumer) == 1102); // future_released
+
+	auto invalidConsumeFuture = ownFuture(fdb_cdc_consumer_consume(resumedInvalidConsumer.get()));
+	REQUIRE(invalidConsumeFuture != nullptr);
+	fdb_check(fdb_future_block_until_ready(invalidConsumeFuture.get()));
+	CHECK(fdb_future_get_error(invalidConsumeFuture.get()) == 2000); // client_invalid_operation
+	resumedInvalidConsumer.reset();
+
+	// 8. Consuming from a stream that has been removed mid-flight.
+	auto removeFuture = ownFuture(
+	    fdb_database_remove_cdc_stream(db, reinterpret_cast<uint8_t const*>(streamName.data()), streamName.size()));
+	REQUIRE(removeFuture != nullptr);
+	waitForSuccess(removeFuture.get());
+
+	// Consuming from the active consumer on the removed stream should fail
+	auto removedConsumeFuture = ownFuture(fdb_cdc_consumer_consume(consumer.get()));
+	REQUIRE(removedConsumeFuture != nullptr);
+	fdb_check(fdb_future_block_until_ready(removedConsumeFuture.get()));
+	CHECK(fdb_future_get_error(removedConsumeFuture.get()) == 2000); // client_invalid_operation
+}
+
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
 	// Watches created on a transaction with the option READ_YOUR_WRITES_DISABLE
 	// should return a watches_disabled error.

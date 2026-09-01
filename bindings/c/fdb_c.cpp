@@ -605,9 +605,11 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_resume_cdc_consumer(FDBDatabase* db
 }
 
 extern "C" DLLEXPORT void fdb_cdc_consumer_destroy(FDBCdcConsumer* consumer) {
-	try {
-		NATIVE_CDC_CONSUMER(consumer)->delref();
-	} catch (...) {
+	if (consumer) {
+		try {
+			NATIVE_CDC_CONSUMER(consumer)->delref();
+		} catch (...) {
+		}
 	}
 }
 
