@@ -1333,6 +1333,7 @@ void removeFailedWorker(WorkerInterface const& worker, ClusterControllerData* cl
 	    .detail("Address", worker.address());
 	cluster->removedDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
 	cluster->id_worker.erase(workerInfo);
+	cluster->updateDBInfo.trigger();
 	// Currently, only CC_ONLY_CONSIDER_INTRA_DC_LATENCY feature relies on addr_locality mapping. In the
 	// future, if needed, we can populate the mapping unconditionally.
 	if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY) {
