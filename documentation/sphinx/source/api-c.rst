@@ -655,7 +655,7 @@ select API version 800 or later before calling these functions.
 
 .. function:: void fdb_cdc_consumer_destroy(FDBCdcConsumer* consumer)
 
-   Releases an owned CDC consumer handle.
+   Releases an owned CDC consumer handle. Passing ``NULL`` is a safe no-op.
 
 .. function:: FDBFuture* fdb_cdc_consumer_consume(FDBCdcConsumer* consumer)
 
