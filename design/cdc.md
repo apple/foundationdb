@@ -568,7 +568,10 @@ and reserve that count times `MAXIMUM_PEEK_BYTES` before issuing a peek. The
 proxy marks these delivery cursors with the same per-reply limit; recovery
 cursors remain uncapped so that transaction-system replay is not constrained
 by a delivery memory knob. The pass also reserves a bounded materialization
-window. It retains the aggregate
+window. If a complete batch needs a larger window, the reader releases its
+cursor and reservation and reopens with the full required reservation. Readers
+therefore do not hold initial reservations while waiting for each other's
+materialization capacity. It retains the aggregate
 raw reservation while filtering and copying, then releases it and transfers
 only accepted filtered bytes to the stream buffers. Acknowledgement or stream
 removal releases those retained permits. The usable retained-batch capacity is
@@ -829,6 +832,27 @@ The implementation is structured around the following properties:
 * **Recovery retention:** active CDC tag history is included in recovery's
   required log data, and pending cleanup retains CDC proxy availability until
   it has been completed.
+
+### Retagging resource regression
+
+`NativeCdcRetaggingMemoryBound` exercises a pending committed retag with a
+4.5 KiB proxy budget and 1,152-byte raw peeks. A simulation barrier holds the old-tag
+reader and another stream's destination-tag reader after both have reserved
+their peek windows and selected batches requiring additional materialization
+capacity. Both must deliver complete versions before either acknowledges,
+without consume-lease expiry or proxy replacement releasing their reservations.
+The test checks buffered bytes, active permits, and the peak permit count.
+
+During a bounded acknowledgement pause, the test rereads actual TLog payloads
+on both tags, records their logical retained bytes and age, and verifies that
+they remain readable. It then acknowledges through the measured history and
+waits for TLog pop completion, history finalization, and retired metadata
+cleanup. This checks logical retention, not physical disk reclamation or an
+unconditional retention bound for an indefinitely paused consumer.
+
+This deterministic regression complements the producer-load retagging fixture.
+It does not qualify oscillating traffic during forced hot-shard relocation,
+production tail latency, or throughput with balancing enabled versus disabled.
 
 ## Current limitations and future work
 
