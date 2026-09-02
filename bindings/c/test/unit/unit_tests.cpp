@@ -2302,13 +2302,22 @@ TEST_CASE("CDC C binding edge cases and failure modes") {
 	FDBCdcConsumer* releasedConsumer = nullptr;
 	CHECK(fdb_future_get_cdc_consumer(createFuture.get(), &releasedConsumer) == 1102); // future_released
 
-	// 4. Calling acknowledge before any consume (initial position version is -1) must fail.
+	// 4. get_position on a fresh consumer returns the initial cursor (streamId set, version == invalidVersion).
+	{
+		uint64_t freshStreamId = 0;
+		int64_t freshVersion = 0;
+		fdb_check(fdb_cdc_consumer_get_position(consumer.get(), &freshStreamId, &freshVersion));
+		CHECK(freshStreamId == streamId);
+		CHECK(freshVersion == -1); // invalidVersion
+	}
+
+	// 5. Calling acknowledge before any consume (initial position version is -1) must fail.
 	auto prematureAckFuture = ownFuture(fdb_cdc_consumer_acknowledge(consumer.get()));
 	REQUIRE(prematureAckFuture != nullptr);
 	fdb_check(fdb_future_block_until_ready(prematureAckFuture.get()));
 	CHECK(fdb_future_get_error(prematureAckFuture.get()) == 2000); // client_invalid_operation
 
-	// 5. Commit a mutation, consume it, and verify memory release on consume future.
+	// 6. Commit a mutation, consume it, and verify memory release on consume future.
 	commitSetValues({ { testKey, "val1" } });
 	auto consumeFuture = ownFuture(fdb_cdc_consumer_consume(consumer.get()));
 	REQUIRE(consumeFuture != nullptr);
@@ -2326,7 +2335,7 @@ TEST_CASE("CDC C binding edge cases and failure modes") {
 	CHECK(fdb_future_get_cdc_versioned_mutations(
 	          consumeFuture.get(), &mutations, &mutationGroupCount, &lastConsumedVersion) == 1102); // future_released
 
-	// 6. Duplicate / rapid acknowledgements without intervening consume calls (must succeed idempotently).
+	// 7. Duplicate / rapid acknowledgements without intervening consume calls (must succeed idempotently).
 	auto ackFuture1 = ownFuture(fdb_cdc_consumer_acknowledge(consumer.get()));
 	REQUIRE(ackFuture1 != nullptr);
 	waitForSuccess(ackFuture1.get());
@@ -2347,7 +2356,9 @@ TEST_CASE("CDC C binding edge cases and failure modes") {
 	CHECK(posStreamId2 == posStreamId1);
 	CHECK(posVersion2 == posVersion1);
 
-	// 7. Resuming a consumer with a non-existent stream ID.
+	// 8. Resuming a consumer with a non-existent stream ID.
+	// Resume is a client-local cursor construction — it succeeds immediately.
+	// The invalid stream ID is only detected when consume() tries to look up the proxy.
 	uint64_t nonExistentStreamId = 99999999ULL;
 	auto resumeInvalidFuture = ownFuture(fdb_database_resume_cdc_consumer(db, nonExistentStreamId, 100));
 	REQUIRE(resumeInvalidFuture != nullptr);
@@ -2368,13 +2379,13 @@ TEST_CASE("CDC C binding edge cases and failure modes") {
 	CHECK(fdb_future_get_error(invalidConsumeFuture.get()) == 2000); // client_invalid_operation
 	resumedInvalidConsumer.reset();
 
-	// 8. Consuming from a stream that has been removed mid-flight.
+	// 9. Consuming from a stream that has been removed mid-flight.
 	auto removeFuture = ownFuture(
 	    fdb_database_remove_cdc_stream(db, reinterpret_cast<uint8_t const*>(streamName.data()), streamName.size()));
 	REQUIRE(removeFuture != nullptr);
 	waitForSuccess(removeFuture.get());
 
-	// Consuming from the active consumer on the removed stream should fail
+	// getNativeCdcStreamProxy detects the removal and throws client_invalid_operation.
 	auto removedConsumeFuture = ownFuture(fdb_cdc_consumer_consume(consumer.get()));
 	REQUIRE(removedConsumeFuture != nullptr);
 	fdb_check(fdb_future_block_until_ready(removedConsumeFuture.get()));
