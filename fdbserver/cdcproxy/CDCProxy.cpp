@@ -184,8 +184,11 @@ public:
 	std::unordered_map<CDCStreamId, int64_t> const& estimatedBytes() const { return streamBytes; }
 };
 
-constexpr int64_t CDC_PROXY_BUFFERED_PREFIX_BYTES = 512 << 10;
 constexpr int CDC_PROXY_BUFFERED_PREFIX_VERSIONS = 64;
+
+int64_t cdcBufferedPrefixByteTarget(int64_t byteLimit, int nativeCdcTarget) {
+	return std::min<int64_t>(byteLimit, std::max(1, nativeCdcTarget));
+}
 
 // The payload budget deliberately leaves room for RPC framing below PACKET_LIMIT. The estimate used for individual
 // versions is also conservative: it uses the stream's in-memory accounting, whose MutationRef storage is larger than
@@ -933,8 +936,9 @@ CDCCommittedPrefix CDCProxy::committedBufferedPrefix(Reference<CDCBufferedTag> t
                                                      int64_t byteLimit) {
 	Reference<IReplayPeekCursor> scanCursor = cursor->cloneNoMore();
 	scanCursor->setProtocolVersion(g_network->protocolVersion());
-	CDCCommittedPrefix prefix(
-	    begin - 1, std::min(byteLimit, CDC_PROXY_BUFFERED_PREFIX_BYTES), CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
+	CDCCommittedPrefix prefix(begin - 1,
+	                          cdcBufferedPrefixByteTarget(byteLimit, SERVER_KNOBS->NATIVE_CDC_BATCH_TARGET_BYTES),
+	                          CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
 	while (scanCursor->hasMessage()) {
 		const Version version = scanCursor->version().version;
 		prefix.advanceGapThrough(committedPeekThrough(version - 1, committedThrough));
@@ -2144,28 +2148,45 @@ TEST_CASE("/NativeCDC/ProxyCommittedBufferedPrefixLargeVersions") {
 	ASSERT_EQ(versionBytes,
 	          sizeof(VersionedMutationsRef) + mutationsPerVersion * (mutation.expectedSize() + sizeof(MutationRef)));
 
-	// A version with this large-value workload exceeds the old soft cap, but several whole versions should fit.
+	// Several whole large versions fit without allowing a partial version or increasing the version-count bound.
 	ASSERT_GT(versionBytes, 64 << 10);
-	const int64_t versionsThatFit = CDC_PROXY_BUFFERED_PREFIX_BYTES / versionBytes;
-	ASSERT_GT(versionsThatFit, 1);
-	ASSERT_LT(versionsThatFit, CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
-	CDCCommittedPrefix largeVersions(
-	    firstVersion - 1, CDC_PROXY_BUFFERED_PREFIX_BYTES, CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
-	for (int64_t offset = 0; offset < versionsThatFit; ++offset) {
-		ASSERT(largeVersions.includeVersion(firstVersion + offset, { { stream->streamId, versionBytes } }));
-	}
-	ASSERT_EQ(largeVersions.bufferedThrough(), firstVersion + versionsThatFit - 1);
-	ASSERT(!largeVersions.includeVersion(firstVersion + versionsThatFit, { { stream->streamId, versionBytes } }));
-	ASSERT_EQ(largeVersions.bufferedThrough(), firstVersion + versionsThatFit - 1);
+	for (int target : { 512 << 10, 1 << 20, 2 << 20 }) {
+		const int64_t byteTarget = cdcBufferedPrefixByteTarget(10 << 20, target);
+		const int64_t versionsThatFit = byteTarget / versionBytes;
+		ASSERT_GT(versionsThatFit, 1);
+		ASSERT_LT(versionsThatFit, CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
+		CDCCommittedPrefix largeVersions(firstVersion - 1, byteTarget, CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
+		for (int64_t offset = 0; offset < versionsThatFit; ++offset) {
+			ASSERT(largeVersions.includeVersion(firstVersion + offset, { { stream->streamId, versionBytes } }));
+		}
+		ASSERT_EQ(largeVersions.bufferedThrough(), firstVersion + versionsThatFit - 1);
+		ASSERT(!largeVersions.includeVersion(firstVersion + versionsThatFit, { { stream->streamId, versionBytes } }));
+		ASSERT_EQ(largeVersions.bufferedThrough(), firstVersion + versionsThatFit - 1);
 
-	// Raising the byte cap must not enlarge the bound on work for small or empty versions.
-	CDCCommittedPrefix boundedVersions(
-	    firstVersion - 1, CDC_PROXY_BUFFERED_PREFIX_BYTES, CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
-	for (int offset = 0; offset < CDC_PROXY_BUFFERED_PREFIX_VERSIONS; ++offset) {
-		ASSERT(boundedVersions.includeVersion(firstVersion + offset, {}));
+		CDCCommittedPrefix boundedVersions(firstVersion - 1, byteTarget, CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
+		for (int offset = 0; offset < CDC_PROXY_BUFFERED_PREFIX_VERSIONS; ++offset) {
+			ASSERT(boundedVersions.includeVersion(firstVersion + offset, {}));
+		}
+		ASSERT(!boundedVersions.includeVersion(firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS, {}));
+		ASSERT_EQ(boundedVersions.bufferedThrough(), firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS - 1);
 	}
-	ASSERT(!boundedVersions.includeVersion(firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS, {}));
-	ASSERT_EQ(boundedVersions.bufferedThrough(), firstVersion + CDC_PROXY_BUFFERED_PREFIX_VERSIONS - 1);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ProxyBufferedPrefixByteTarget") {
+	for (int target :
+	     { std::numeric_limits<int>::min(), -1, 0, 1, 512 << 10, 1 << 20, 2 << 20, std::numeric_limits<int>::max() }) {
+		for (int64_t limit :
+		     { int64_t(1), int64_t(4096), int64_t(512 << 10), int64_t(2 << 20), std::numeric_limits<int64_t>::max() }) {
+			ASSERT_EQ(cdcBufferedPrefixByteTarget(limit, target), std::min<int64_t>(limit, std::max(1, target)));
+		}
+	}
+	ASSERT_EQ(cdcBufferedPrefixByteTarget(10 << 20, 512 << 10), 512 << 10);
+	ASSERT_EQ(cdcBufferedPrefixByteTarget(512 << 10, 2 << 20), 512 << 10);
+	CDCCommittedPrefix oversizedFirst(99, cdcBufferedPrefixByteTarget(4096, 0), CDC_PROXY_BUFFERED_PREFIX_VERSIONS);
+	ASSERT(oversizedFirst.includeVersion(100, { { 1, 4096 } }));
+	ASSERT(!oversizedFirst.includeVersion(101, { { 1, 1 } }));
+	ASSERT_EQ(oversizedFirst.bufferedThrough(), 100);
 	return Void();
 }
 

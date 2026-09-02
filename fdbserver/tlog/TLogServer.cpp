@@ -2061,10 +2061,10 @@ int tLogPeekReplyByteLimit(Tag tag, int requestedLimit) {
 	           : 0;
 }
 
-int tLogPeekByteTarget(int replyByteLimit) {
+int tLogPeekByteTarget(int replyByteLimit, int nativeCdcTarget) {
 	// Positive limits apply only to Native CDC. Complete versions and a spilled prefix plus its captured memory
 	// tail can cross this batching target; replyByteLimit remains the hard bound.
-	return replyByteLimit > 0 ? std::min(replyByteLimit, 512 << 10) : SERVER_KNOBS->DESIRED_TOTAL_BYTES;
+	return replyByteLimit > 0 ? std::clamp(nativeCdcTarget, 1, replyByteLimit) : SERVER_KNOBS->DESIRED_TOTAL_BYTES;
 }
 
 enum class TLogPeekVersionAppendResult { Appended, ReplyByteLimitReached, VersionTooLarge };
@@ -2116,7 +2116,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	}
 
 	const int replyByteLimit = tLogPeekReplyByteLimit(reqTag, reqReplyByteLimit);
-	const int peekByteTarget = tLogPeekByteTarget(replyByteLimit);
+	const int peekByteTarget = tLogPeekByteTarget(replyByteLimit, SERVER_KNOBS->NATIVE_CDC_BATCH_TARGET_BYTES);
 	bool replyByteLimitReached = false;
 	bool replyVersionTooLarge = false;
 	int oversizedVersionBytes = 0;
@@ -4465,45 +4465,65 @@ TEST_CASE("/NativeCDC/TLogPeekReplyLimit") {
 
 TEST_CASE("/NativeCDC/TLogPeekByteTarget") {
 	constexpr int NATIVE_CDC_TARGET = 512 << 10;
-	ASSERT_EQ(tLogPeekByteTarget(0), SERVER_KNOBS->DESIRED_TOTAL_BYTES);
-	for (int limit :
-	     { 1, 4096, NATIVE_CDC_TARGET - 1, NATIVE_CDC_TARGET, NATIVE_CDC_TARGET + 1, 2 * NATIVE_CDC_TARGET }) {
-		ASSERT_EQ(tLogPeekByteTarget(limit), std::min(limit, NATIVE_CDC_TARGET));
-	}
-	ASSERT_EQ(tLogPeekByteTarget(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), 0)), SERVER_KNOBS->DESIRED_TOTAL_BYTES);
-	ASSERT_EQ(tLogPeekByteTarget(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES)),
-	          std::min(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, NATIVE_CDC_TARGET));
-	for (Tag tag : { Tag(0, 0), Tag(tagLocalityLogRouter, 0), Tag(tagLocalityTxs, 0) }) {
-		ASSERT_EQ(tLogPeekByteTarget(tLogPeekReplyByteLimit(tag, 2 * NATIVE_CDC_TARGET)),
+	for (int target : { std::numeric_limits<int>::min(),
+	                    -1,
+	                    0,
+	                    1,
+	                    NATIVE_CDC_TARGET,
+	                    1 << 20,
+	                    2 << 20,
+	                    std::numeric_limits<int>::max() }) {
+		ASSERT_EQ(tLogPeekByteTarget(0, target), SERVER_KNOBS->DESIRED_TOTAL_BYTES);
+		ASSERT_EQ(tLogPeekByteTarget(-1, target), SERVER_KNOBS->DESIRED_TOTAL_BYTES);
+		for (int limit : { 1,
+		                   4096,
+		                   NATIVE_CDC_TARGET - 1,
+		                   NATIVE_CDC_TARGET,
+		                   NATIVE_CDC_TARGET + 1,
+		                   2 << 20,
+		                   std::numeric_limits<int>::max() }) {
+			ASSERT_EQ(tLogPeekByteTarget(limit, target), std::min(limit, std::max(1, target)));
+		}
+		ASSERT_EQ(tLogPeekByteTarget(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), 0), target),
 		          SERVER_KNOBS->DESIRED_TOTAL_BYTES);
+		ASSERT_EQ(tLogPeekByteTarget(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES),
+		                             target),
+		          std::min(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, std::max(1, target)));
+		for (Tag tag : { Tag(0, 0), Tag(tagLocalityLogRouter, 0), Tag(tagLocalityTxs, 0) }) {
+			ASSERT_EQ(tLogPeekByteTarget(tLogPeekReplyByteLimit(tag, 2 * NATIVE_CDC_TARGET), target),
+			          SERVER_KNOBS->DESIRED_TOTAL_BYTES);
+		}
 	}
+	ASSERT_EQ(tLogPeekByteTarget(2 * NATIVE_CDC_TARGET, NATIVE_CDC_TARGET), NATIVE_CDC_TARGET);
 	return Void();
 }
 
 TEST_CASE("/NativeCDC/TLogPeekSoftTargetVersionBoundary") {
-	const int replyByteLimit = 1 << 20;
-	const int byteTarget = tLogPeekByteTarget(replyByteLimit);
-	BinaryWriter version(Unversioned());
-	version << VERSION_HEADER << Version(1);
-	const std::string payload(byteTarget, 'x');
-	version.serializeBytes(StringRef(payload));
-	const auto versionMessages = version.toValue();
-	ASSERT_GT(versionMessages.size(), byteTarget);
-	ASSERT_LT(versionMessages.size(), replyByteLimit);
+	for (int target : { 512 << 10, 1 << 20, 2 << 20 }) {
+		const int replyByteLimit = 2 * target;
+		const int byteTarget = tLogPeekByteTarget(replyByteLimit, target);
+		BinaryWriter version(Unversioned());
+		version << VERSION_HEADER << Version(1);
+		const std::string payload(byteTarget, 'x');
+		version.serializeBytes(StringRef(payload));
+		const auto versionMessages = version.toValue();
+		ASSERT_GT(versionMessages.size(), byteTarget);
+		ASSERT_LT(versionMessages.size(), replyByteLimit);
 
-	// The soft target must not reject an indivisible version accepted by the existing hard limit.
-	BinaryWriter reply(Unversioned());
-	ASSERT(appendTLogPeekVersion(reply, versionMessages, replyByteLimit) == TLogPeekVersionAppendResult::Appended);
-	ASSERT_EQ(reply.getLength(), versionMessages.size());
-	ASSERT(appendTLogPeekVersion(reply, versionMessages, replyByteLimit) ==
-	       TLogPeekVersionAppendResult::ReplyByteLimitReached);
-	ASSERT_EQ(reply.getLength(), versionMessages.size());
-	ASSERT_EQ(tLogPeekTruncatedEndVersion(Optional<Version>(2), Optional<Version>(1)), 2);
+		// The soft target must not reject an indivisible version accepted by the existing hard limit.
+		BinaryWriter reply(Unversioned());
+		ASSERT(appendTLogPeekVersion(reply, versionMessages, replyByteLimit) == TLogPeekVersionAppendResult::Appended);
+		ASSERT_EQ(reply.getLength(), versionMessages.size());
+		ASSERT(appendTLogPeekVersion(reply, versionMessages, replyByteLimit) ==
+		       TLogPeekVersionAppendResult::ReplyByteLimitReached);
+		ASSERT_EQ(reply.getLength(), versionMessages.size());
+		ASSERT_EQ(tLogPeekTruncatedEndVersion(Optional<Version>(2), Optional<Version>(1)), 2);
 
-	BinaryWriter oversizedReply(Unversioned());
-	ASSERT(appendTLogPeekVersion(oversizedReply, versionMessages, versionMessages.size() - 1) ==
-	       TLogPeekVersionAppendResult::VersionTooLarge);
-	ASSERT_EQ(oversizedReply.getLength(), 0);
+		BinaryWriter oversizedReply(Unversioned());
+		ASSERT(appendTLogPeekVersion(oversizedReply, versionMessages, versionMessages.size() - 1) ==
+		       TLogPeekVersionAppendResult::VersionTooLarge);
+		ASSERT_EQ(oversizedReply.getLength(), 0);
+	}
 	return Void();
 }
 
