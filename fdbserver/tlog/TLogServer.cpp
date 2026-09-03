@@ -4603,6 +4603,8 @@ public:
 
 	Future<Void> commitFrontier(Version frontier, Version previous = 99) {
 		TLogCommitRequest req;
+		// A real request is timestamped by transport delivery; this fixture invokes the handler directly.
+		req.setRequestTime(g_network->timer());
 		req.prevVersion = previous;
 		req.version = previous + 1;
 		req.knownCommittedVersion = std::max<Version>(99, frontier);
@@ -4747,9 +4749,9 @@ TEST_CASE("/NativeCDC/TLogCommittedFrontier/MultipleWaiters") {
 	for (auto& reply : replies) {
 		peeks.push_back(fixture.peek(reply));
 	}
+	co_await delay(0.02);
 	co_await fixture.commitFrontier(98);
 	co_await fixture.commitFrontier(99);
-	co_await delay(0.02);
 	ASSERT(fixture.frontier() == 99);
 	for (auto& reply : replies) {
 		ASSERT(!reply.getFuture().isReady());
@@ -4771,6 +4773,7 @@ TEST_CASE("/NativeCDC/TLogCommittedFrontier/OutOfOrderCommit") {
 	CommittedPeekTestFixture fixture;
 	Promise<TLogPeekReply> reply;
 	Future<Void> peek = fixture.peek(reply);
+	co_await delay(0.02);
 	Future<Void> commit = fixture.commitFrontier(100, 101);
 	ASSERT(!commit.isReady());
 	ASSERT(!reply.getFuture().isReady());
