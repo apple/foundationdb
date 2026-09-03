@@ -62,20 +62,17 @@ Enable simulation tests in cmake: `-DENABLE_SIMULATION_TESTS=ON`
 
 FoundationDB is a distributed ordered key-value store with strict serializability. The codebase is organized into ~12 subsystems. For background on subsystems before diving into code, the `design/` directory holds human-authored design docs and `design/AI-generated/` holds subsystem maps and per-subsystem diagrams (start with `design/AI-generated/foundationdb_subsystem_map.md`).
 
-### Concurrency Model: Flow Actors and C++ Coroutines
+### Concurrency Model: C++ Coroutines
 
-FDB uses cooperative single-threaded concurrency. Code is written using either:
-
-- **Flow actors** (`.actor.cpp` / `.actor.h` files): A custom preprocessor (`actorcompiler`) translates `ACTOR`, `state`, `wait()`, `choose/when` syntax into generated C++ state machines. The `#include "flow/actorcompiler.h"` must be the **last** include in actor files.
-- **C++ coroutines**: Newer code uses `co_await` and `co_return` instead of `wait()` and actor-style `return`. Coroutines can appear in regular `.cpp` files and in `.actor.cpp` files that still contain actorcompiler input; actors and coroutines can be mixed. New code should use coroutines; see `design/coroutines.md`.
+FDB uses cooperative single-threaded concurrency. Asynchronous functions use
+standard C++ coroutines with `co_await` and `co_return` in ordinary `.cpp` and
+`.h` files. See `design/coroutines.md` for coroutine and cancellation semantics.
 
 Key types: `Future<T>`, `Promise<T>`, `PromiseStream<T>`, `Reference<T>` (ref-counted pointer), `Optional<T>`, `ErrorOr<T>`, `Arena` (region-based allocation).
 
 #### Common pitfalls
 
-- `wait()` / `waitNext()` cannot appear inside ternary expressions, function arguments, or other sub-expressions. Assign to a `state` variable first, or use a small gating actor.
 - C++ coroutines: `co_await` is not allowed inside a `catch` handler. Capture the error, exit the catch, then `co_await` outside.
-- `ACTOR` functions declared in headers must not be defined inside an anonymous namespace, or call sites get ambiguous-overload errors.
 - Errors are integer codes (`flow/include/flow/error_definitions.h`), not exceptions with messages. When you `catch (Error& e)`, re-throw `actor_cancelled` (and never silently swallow `broken_promise`) — eating cancellation causes hangs and leaks. Transaction retry goes through `tr.onError(e)`, not a bare loop.
 - `StringRef`/`KeyRef`/`ValueRef` are non-owning views into an `Arena`. Returning or storing one past its arena's lifetime is a dangling-reference bug; use `Standalone<>` (or `Key`/`Value`) when you need to own the bytes.
 
@@ -83,7 +80,7 @@ Key types: `Future<T>`, `Promise<T>`, `PromiseStream<T>`, `Reference<T>` (ref-co
 
 - **`flow/`** — Async runtime, event loop, tracing, deterministic random, arenas
 - **`fdbrpc/`** — Endpoint-addressed RPC, peer management, failure monitor, Sim2 (deterministic simulation network)
-- **`fdbclient/`** — Transaction API (`NativeAPI.actor.cpp`), read-your-writes (`ReadYourWrites.actor.cpp`), location cache, multi-version client
+- **`fdbclient/`** — Transaction API (`NativeAPI.cpp`), read-your-writes (`ReadYourWrites.cpp`), location cache, multi-version client
 - **`fdbserver/`** — All server roles, organized by subdirectory:
   - `clustercontroller/` — Leader election, role recruitment, ServerDBInfo broadcasting
   - `coordinator/` — Paxos-based coordination state (generation registers)
@@ -134,7 +131,38 @@ Before changing a serialized type that persists on disk, inspect its `serializer
 
 `clang-format` is used. Python code uses `black` and `flake8` (pre-commit hooks: `pip install pre-commit && pre-commit install`).
 
-Edit `.actor.cpp` and `.actor.h` sources, not actorcompiler-generated output under the build directory.
+Edit tracked `.cpp` and `.h` sources, not generated output under the build directory.
+
+## Source File Headers
+
+Every new `.cpp` / `.h` file starts with the standard Apache 2.0 license block, with the filename on line 2 and the current year on the copyright line. Copy from any existing file in the tree (e.g. `flow/Knobs.cpp`). Add file-purpose comments *after* the license block, not in place of it.
+
+## Code Comments
+
+General guidance: comments should maximize clarity. They should be clear without being verbose. They should be concise without being cryptic.
+
+Scope: the guidance here mainly governs inline and implementation comments. Comments on public-facing APIs are contract statements and must be clear, precise, and complete.
+
+Audience: assume the readers of FDB are senior engineers fluent in asynchronous and concurrent programming, distributed systems, and stateful complex systems generally. Calibrate "non-obvious" to that reader — do not explain the language, the standard library, Flow/actor idioms, or established patterns they already know. Reserve comments for what such a reader could not quickly infer from the code itself.
+
+Implementation comments should focus on important, non-obvious fundamental rationale, motivation, and explanation of extremely subtle phenomena. Writing down important invariants — and the preconditions a piece of code requires of its caller (e.g. a lock that must be held, or a version that must already be durable) — is also a good idea.
+
+Do not write comments about mundane day-to-day development refactorings — junk like `// This used to be part of xyzFunc in Foo.cpp but we moved it here so that aaaFunc could also call it`.
+
+Do not write caller-location / "happening elsewhere" comments — narration of who invokes this code or where it is used ("called from X", "used by Y"). They duplicate what a search answers instantly and rot when callers change; describe what the code requires and guarantees on its own terms. Stating a real invariant is fine — "recovery is the only path that repairs" — naming the callers that happen to exist today is not.
+
+After writing or changing a bunch of code, make a pass over it one last time to review the comments. Ask yourself: am I rambling? Am I repeating what the code is showing? Am I just telling stories here? Is the information I'm writing going to be relevant and important a week from now, a month from now, a year from now? Is it genuinely essential and **non-obvious from the code itself**?
+
+## Code Review
+
+Unless you have specific instructions to the contrary, when asked to review code (named files or a diff), address all of these explicitly:
+
+- What is it trying to accomplish?
+- Is it correct?
+- Are there bugs?
+- Are there omissions?
+- Are there things that could be done better?
+- Should it be LGTM'd? (clear yes / no / not-yet)
 
 ## Branching
 

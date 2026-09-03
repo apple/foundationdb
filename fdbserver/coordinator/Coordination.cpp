@@ -21,6 +21,7 @@
 #include <cstdint>
 
 #include "fdbserver/coordinator/CoordinationServer.h"
+#include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/Knobs.h"
 #include "OnDemandStore.h"
 #include "fdbserver/core/WorkerInterface.h"
@@ -28,7 +29,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/network.h"
 #include "flow/CoroUtils.h"
@@ -44,21 +45,20 @@ const std::string fileCoordinatorPrefix = "coordination-";
 class LivenessChecker {
 	double threshold;
 	AsyncVar<double> lastTime;
-	static Future<Void> checkStuck(LivenessChecker const* self) {
-		while (true) {
-			auto res = co_await race(delayUntil(self->lastTime.get() + self->threshold), self->lastTime.onChange());
-			if (res.index() == 0) {
-				co_return;
-			}
-		}
-	}
 
 public:
 	explicit LivenessChecker(double threshold) : threshold(threshold), lastTime(now()) {}
 
 	void confirmLiveness() { lastTime.set(now()); }
 
-	Future<Void> checkStuck() const { return checkStuck(this); }
+	Future<Void> checkStuck() const {
+		while (true) {
+			auto res = co_await race(delayUntil(lastTime.get() + threshold), lastTime.onChange());
+			if (res.index() == 0) {
+				co_return;
+			}
+		}
+	}
 };
 
 struct GenerationRegVal {
@@ -581,10 +581,10 @@ struct LeaderRegisterCollection {
 
 	explicit LeaderRegisterCollection(OnDemandStore* pStore) : actors(false), pStore(pStore) {}
 
-	static Future<Void> init(LeaderRegisterCollection* self) {
-		if (!self->pStore->exists())
+	Future<Void> init() {
+		if (!pStore->exists())
 			co_return;
-		OnDemandStore& store = *self->pStore;
+		OnDemandStore& store = *pStore;
 		Future<Standalone<RangeResultRef>> forwardingInfoF = store->readRange(fwdKeys);
 		Future<Standalone<RangeResultRef>> forwardingTimeF = store->readRange(fwdTimeKeys);
 		co_await (success(forwardingInfoF) && success(forwardingTimeF));
@@ -594,11 +594,11 @@ struct LeaderRegisterCollection {
 			LeaderInfo forwardInfo;
 			forwardInfo.forward = true;
 			forwardInfo.serializedInfo = forwardingInfo[i].value;
-			self->forward[forwardingInfo[i].key.removePrefix(fwdKeys.begin)] = forwardInfo;
+			forward[forwardingInfo[i].key.removePrefix(fwdKeys.begin)] = forwardInfo;
 		}
 		for (int i = 0; i < forwardingTime.size(); i++) {
 			double time = BinaryReader::fromStringRef<double>(forwardingTime[i].value, Unversioned());
-			self->forwardStartTime[forwardingTime[i].key.removePrefix(fwdTimeKeys.begin)] = time;
+			forwardStartTime[forwardingTime[i].key.removePrefix(fwdTimeKeys.begin)] = time;
 		}
 	}
 
@@ -626,31 +626,26 @@ struct LeaderRegisterCollection {
 	// When the lead coordinator changes, store the new connection ID in the "fwd" keyspace.
 	// If a request arrives using an old connection id, resend it to the new coordinator using the stored connection id.
 	// Store when this change took place in the fwdTime keyspace.
-	static Future<Void> setForward(LeaderRegisterCollection* self,
-	                               KeyRef key,
-	                               ClusterConnectionString conn,
-	                               ForwardRequest req,
-	                               UID id) {
+	Future<Void> setForward(KeyRef key, ClusterConnectionString conn, ForwardRequest req, UID id) {
 		double forwardTime = now();
 		LeaderInfo forwardInfo;
 		forwardInfo.forward = true;
 		forwardInfo.serializedInfo = conn.toString();
-		self->forward[key] = forwardInfo;
-		self->forwardStartTime[key] = forwardTime;
-		OnDemandStore& store = *self->pStore;
+		forward[key] = forwardInfo;
+		forwardStartTime[key] = forwardTime;
+		OnDemandStore& store = *pStore;
 		store->set(KeyValueRef(key.withPrefix(fwdKeys.begin), conn.toString()));
 		store->set(KeyValueRef(key.withPrefix(fwdTimeKeys.begin), BinaryWriter::toValue(forwardTime, Unversioned())));
 		co_await store->commit();
 		// Do not process a forwarding request until after it has been made durable in case the coordinator restarts
-		self->getInterface(req.key, id).forward.send(req);
+		getInterface(req.key, id).forward.send(req);
 	}
 
 	LeaderElectionRegInterface& getInterface(KeyRef key, UID id) {
 		auto i = registerInterfaces.find(key);
 		if (i == registerInterfaces.end()) {
 			Key k = key;
-			Future<Void> a =
-			    wrap(this, k, LeaderRegister::run(makeReference<LeaderRegister>(registerInterfaces[k], k)), id);
+			Future<Void> a = wrap(k, LeaderRegister::run(makeReference<LeaderRegister>(registerInterfaces[k], k)), id);
 			if (a.isError())
 				throw a.getError();
 			ASSERT(!a.isReady());
@@ -661,7 +656,7 @@ struct LeaderRegisterCollection {
 		return i->value;
 	}
 
-	static Future<Void> wrap(LeaderRegisterCollection* self, Key key, Future<Void> actor, UID id) {
+	Future<Void> wrap(Key key, Future<Void> actor, UID id) {
 		Error e;
 		try {
 			// FIXME: Get worker ID here
@@ -674,7 +669,7 @@ struct LeaderRegisterCollection {
 				throw;
 			e = err;
 		}
-		self->registerInterfaces.erase(key);
+		registerInterfaces.erase(key);
 		if (e.code() != invalid_error_code)
 			throw e;
 	}
@@ -831,8 +826,7 @@ class LeaderServer {
 					    .detail("IncomingClusterKey", req.key);
 					req.reply.sendError(wrong_connection_file());
 				} else {
-					forwarders.add(LeaderRegisterCollection::setForward(
-					    &regs, req.key, ClusterConnectionString(req.conn.toString()), req, id));
+					forwarders.add(regs.setForward(req.key, ClusterConnectionString(req.conn.toString()), req, id));
 				}
 			}
 		}
@@ -852,7 +846,7 @@ public:
 	  : interf(interf), id(id), ccr(ccr), regs(pStore), forwarders(false) {}
 
 	Future<Void> run() {
-		co_await LeaderRegisterCollection::init(&regs);
+		co_await regs.init();
 		co_await race(serveCheckDescriptorMutableRequests(),
 		              serveOpenDatabaseRequests(),
 		              serveElectionResultRequests(),
@@ -874,7 +868,9 @@ Future<Void> leaderServer(LeaderElectionRegInterface interf,
 	co_await server.run();
 }
 
-Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
+static Future<Void> coordinationServerOnce(std::string dataFolder,
+                                           Reference<IClusterConnectionRecord> ccr,
+                                           bool* repairedIncompleteQueue) {
 	UID myID = deterministicRandom()->randomUniqueID();
 	LeaderElectionRegInterface myLeaderInterface(g_network);
 	GenerationRegInterface myInterface(g_network);
@@ -921,7 +917,8 @@ Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnec
 	// queue state on the coordinator. In the long term, we should either
 	// modify simulation to consider injected errors as fatal or allow the
 	// coordinator to manually fix disk queue state in real clusters.
-	if (g_network->isSimulated() && g_simulator->speedUpSimulation && err.code() == error_code_file_not_found) {
+	if (g_network->isSimulated() && (g_simulator->speedUpSimulation || fdbSimulationPolicyState().restarted) &&
+	    err.code() == error_code_file_not_found) {
 		std::vector<Future<Reference<IAsyncFile>>> fs;
 		fs.reserve(2);
 		for (int i = 0; i < 2; ++i) {
@@ -956,9 +953,36 @@ Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnec
 			co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "0.fdq"),
 			                                                    true);
 		}
+		if (repairedIncompleteQueue != nullptr) {
+			*repairedIncompleteQueue = true;
+		}
 	}
 
 	throw err;
+}
+
+static Future<Void> restartCoordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
+	while (true) {
+		bool repairedIncompleteQueue = false;
+		try {
+			co_await coordinationServerOnce(dataFolder, ccr, &repairedIncompleteQueue);
+			co_return;
+		} catch (Error& e) {
+			if (e.code() != error_code_file_not_found || !repairedIncompleteQueue) {
+				throw;
+			}
+		}
+
+		TraceEvent("CoordinatorRetryAfterIncompleteQueue").detail("Folder", dataFolder);
+		co_await delay(0);
+	}
+}
+
+Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
+	if (g_network->isSimulated() && fdbSimulationPolicyState().restarted) {
+		return restartCoordinationServer(dataFolder, ccr);
+	}
+	return coordinationServerOnce(dataFolder, ccr, nullptr);
 }
 
 Future<Void> changeClusterDescription(std::string datafolder, KeyRef newClusterKey, KeyRef oldClusterKey) {

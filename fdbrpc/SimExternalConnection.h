@@ -34,7 +34,6 @@ class SimExternalConnection final : public IConnection, public ReferenceCounted<
 	explicit SimExternalConnection(boost::asio::ip::tcp::socket&& socket);
 	UID dbgid;
 	std::deque<uint8_t> readBuffer;
-	AsyncTrigger onReadableTrigger;
 	friend class SimExternalConnectionImpl;
 	template <class P, class... Args>
 	friend Reference<P> makeReference(Args&&... args);

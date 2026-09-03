@@ -22,6 +22,7 @@
 // FIXME: actually it should be renamed "ReplyComparison" because TSS vs SS
 // is just one use case.  This code is agnostic to the specific use cases.
 // Fundamentally it is just about comparing replies. Where they came from is incidental.
+#include "fdbclient/ProxyLoadBalanceMetrics.h"
 #include "fdbclient/StorageServerInterface.h"
 
 #include "crc32/crc32c.h" // for crc32c_append, to checksum values in tss trace events
@@ -235,19 +236,25 @@ static std::string hexStringRef(const StringRef& s) {
 	return result;
 }
 
+template <class Request, class Reply>
 static void traceKeyValuesDiff(TraceEvent& event,
-                               const KeySelectorRef& begin,
-                               const KeySelectorRef& end,
-                               Version version,
-                               int limit,
-                               int limitBytes,
-                               const VectorRef<KeyValueRef>& ssKV,
-                               bool ssMore,
-                               const VectorRef<KeyValueRef>& tssKV,
-                               bool tssMore,
+                               const Request& request,
+                               const Reply& source,
+                               const Reply& target,
                                const ComparisonType& type) {
-	traceKeyValuesSummary(
-	    event, begin, end, version, limit, limitBytes, ssKV.size(), ssMore, tssKV.size(), tssMore, type);
+	const auto& ssKV = source.data;
+	const auto& tssKV = target.data;
+	traceKeyValuesSummary(event,
+	                      request.begin,
+	                      request.end,
+	                      request.version,
+	                      request.limit,
+	                      request.limitBytes,
+	                      ssKV.size(),
+	                      source.more,
+	                      tssKV.size(),
+	                      target.more,
+	                      type);
 	bool mismatchFound = false;
 	for (int i = 0; i < std::max(ssKV.size(), tssKV.size()); i++) {
 		if (i >= ssKV.size() || i >= tssKV.size() || ssKV[i] != tssKV[i]) {
@@ -279,17 +286,7 @@ void TSS_traceMismatch(TraceEvent& event,
                        const GetKeyValuesReply& src,
                        const GetKeyValuesReply& tss,
                        const ComparisonType& type) {
-	traceKeyValuesDiff(event,
-	                   req.begin,
-	                   req.end,
-	                   req.version,
-	                   req.limit,
-	                   req.limitBytes,
-	                   src.data,
-	                   src.more,
-	                   tss.data,
-	                   tss.more,
-	                   type);
+	traceKeyValuesDiff(event, req, src, tss, type);
 }
 
 // range reads and flat map
@@ -334,24 +331,13 @@ const char* LB_mismatchTraceName(const GetKeyValuesStreamRequest& req, const Com
 	return type == TSS_COMPARISON ? "TSSMismatchGetKeyValuesStream" : "ReplicaMismatchGetKeyValuesStream";
 }
 
-// TODO this is all duplicated from above, simplify?
 template <>
 void TSS_traceMismatch(TraceEvent& event,
                        const GetKeyValuesStreamRequest& req,
                        const GetKeyValuesStreamReply& src,
                        const GetKeyValuesStreamReply& tss,
                        const ComparisonType& type) {
-	traceKeyValuesDiff(event,
-	                   req.begin,
-	                   req.end,
-	                   req.version,
-	                   req.limit,
-	                   req.limitBytes,
-	                   src.data,
-	                   src.more,
-	                   tss.data,
-	                   tss.more,
-	                   type);
+	traceKeyValuesDiff(event, req, src, tss, type);
 }
 
 template <>
@@ -532,6 +518,78 @@ template <>
 void TSSMetrics::recordLatency(const OverlappingChangeFeedsRequest& req, double ssLatency, double tssLatency) {}
 
 // -------------------
+
+namespace {
+class LoadBalanceTestInterface {
+public:
+	PublicRequestStream<WaitMetricsRequest> waitMetrics;
+
+	UID id() const { return waitMetrics.getEndpoint().token; }
+	std::string toString() const { return id().shortString(); }
+};
+
+Future<Void> replyToWaitMetricsRequest(FutureStream<WaitMetricsRequest> requests) {
+	ReplyPromise<StorageMetrics> reply;
+	{
+		WaitMetricsRequest request = co_await requests;
+		reply = std::move(request.reply);
+	}
+	reply.send(StorageMetrics());
+	co_return;
+}
+} // namespace
+
+TEST_CASE("/fdbclient/LoadBalance/releasesCompletedRequest") {
+	StorageServerInterface storageServer;
+	FutureStream<WaitMetricsRequest> requests = storageServer.waitMetrics.getFuture();
+	IFailureMonitor::failureMonitor().setStatus(storageServer.waitMetrics.getEndpoint().getPrimaryAddress(),
+	                                            FailureStatus(false));
+	auto server = makeReference<ReferencedInterface<StorageServerInterface>>(storageServer);
+	auto alternatives = makeReference<MultiInterface<ReferencedInterface<StorageServerInterface>>>(
+	    std::vector<Reference<ReferencedInterface<StorageServerInterface>>>{ server });
+
+	WaitMetricsRequest request(
+	    0, KeyRangeRef("load-balance-begin"_sr, "load-balance-end"_sr), StorageMetrics(), StorageMetrics());
+	ReplyPromise<StorageMetrics> reply = request.reply;
+	Future<StorageMetrics> result = loadBalance(alternatives, &StorageServerInterface::waitMetrics, std::move(request));
+
+	ASSERT(!result.isReady());
+	ASSERT(alternatives->debugGetReferenceCount() > 1);
+	ASSERT(reply.getPromiseReferenceCount() > 1);
+	co_await replyToWaitMetricsRequest(requests);
+
+	ASSERT(result.isReady());
+	ASSERT(!result.isError());
+	ASSERT(alternatives->debugGetReferenceCount() == 1);
+	ASSERT(reply.getPromiseReferenceCount() == 1);
+	co_return;
+}
+
+TEST_CASE("/fdbclient/BasicLoadBalance/releasesCompletedRequest") {
+	LoadBalanceTestInterface server;
+	FutureStream<WaitMetricsRequest> requests = server.waitMetrics.getFuture();
+	IFailureMonitor::failureMonitor().setStatus(server.waitMetrics.getEndpoint().getPrimaryAddress(),
+	                                            FailureStatus(false));
+	auto alternatives = makeReference<ModelInterface<LoadBalanceTestInterface, ProxyCpuMetric>>(
+	    std::vector<LoadBalanceTestInterface>{ server });
+
+	WaitMetricsRequest request(
+	    0, KeyRangeRef("load-balance-begin"_sr, "load-balance-end"_sr), StorageMetrics(), StorageMetrics());
+	ReplyPromise<StorageMetrics> reply = request.reply;
+	Future<StorageMetrics> result =
+	    basicLoadBalance(alternatives, &LoadBalanceTestInterface::waitMetrics, std::move(request));
+
+	ASSERT(!result.isReady());
+	ASSERT(alternatives->debugGetReferenceCount() > 1);
+	ASSERT(reply.getPromiseReferenceCount() > 1);
+	co_await replyToWaitMetricsRequest(requests);
+
+	ASSERT(result.isReady());
+	ASSERT(!result.isError());
+	ASSERT(alternatives->debugGetReferenceCount() == 1);
+	ASSERT(reply.getPromiseReferenceCount() == 1);
+	co_return;
+}
 
 TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 	printf("testing tss comparisons\n");

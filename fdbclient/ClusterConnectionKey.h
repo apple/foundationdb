@@ -21,7 +21,7 @@
 #pragma once
 
 #include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 
 // An implementation of IClusterConnectionRecord backed by a key in a FoundationDB database.
 class ClusterConnectionKey : public IClusterConnectionRecord, ReferenceCounted<ClusterConnectionKey>, NonCopyable {

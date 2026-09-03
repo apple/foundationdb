@@ -26,7 +26,7 @@
 #include "flow/Optional.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 struct TxnTimeout : TestWorkload {
 	static constexpr auto NAME = "TxnTimeout";
@@ -68,7 +68,8 @@ struct TxnTimeout : TestWorkload {
 			return Void();
 		}
 
-		return timeout(reportErrors(workload(this, db), "TxnTimeoutError"), testDuration, Void());
+		// Let in-flight transactions drain so the final success count includes every attempted transaction.
+		return reportErrors(workload(this, db), "TxnTimeoutError");
 	}
 
 	Future<bool> check(const Database& db) override {
@@ -141,6 +142,7 @@ struct TxnTimeout : TestWorkload {
 	// Runs database population concurrently across actors and clients
 	Future<Void> populateDatabaseAllActors(Database db) {
 		std::vector<Future<Void>> populationActors;
+		populationActors.reserve(actorsPerClient > 0 ? actorsPerClient : 0);
 		for (int actorIdx = 0; actorIdx < actorsPerClient; ++actorIdx) {
 			populationActors.push_back(populateDatabase(db, actorIdx));
 		}
@@ -307,6 +309,7 @@ struct TxnTimeout : TestWorkload {
 
 		// Phase 2: Run transaction clients that test timeout behavior
 		std::vector<Future<Void>> txnClients;
+		txnClients.reserve(self->actorsPerClient > 0 ? self->actorsPerClient : 0);
 		for (int actorIdx = 0; actorIdx < self->actorsPerClient; ++actorIdx) {
 			txnClients.emplace_back(txnClient(db, actorIdx));
 		}

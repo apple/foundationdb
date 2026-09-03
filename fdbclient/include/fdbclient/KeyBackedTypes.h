@@ -35,12 +35,12 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/CoroUtils.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/serialize.h"
 #include "flow/ThreadHelper.h"
 
 #define KEYBACKEDTYPES_DEBUG 0
-#if KEYBACKEDTYPES_DEBUG || !defined(NO_INTELLISENSE)
+#if KEYBACKEDTYPES_DEBUG
 #define kbt_debug fmt::print
 #else
 #define kbt_debug(...)
@@ -176,6 +176,7 @@ struct TupleCodec<std::vector<T>> {
 	static std::vector<T> unpack(Standalone<StringRef> const& val) {
 		Tuple t = Tuple::unpack(val);
 		std::vector<T> v;
+		v.reserve(t.size());
 
 		for (int i = 0; i < t.size(); i++) {
 			v.push_back(TupleCodec<T>::unpack(t.getString(i)));

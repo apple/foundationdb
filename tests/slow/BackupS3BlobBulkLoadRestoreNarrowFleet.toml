@@ -1,0 +1,157 @@
+# BulkLoad restore onto a fleet with barely room for a disjoint destination team
+#
+# Variant of BackupS3BlobBulkLoadRestore.toml that cuts the extra storage machines its sibling tests rely
+# on down to the minimum that still permits a legal destination team, so bulk-load task placement
+# genuinely fails and the restore has to recover by narrowing task ranges rather than by having spare
+# capacity. See the comment on the configuration below for where that minimum comes from.
+#
+# Reproduces the condition measured on a 100M-key validation cluster of ~40 storage servers: every
+# candidate destination team is rejected for overlapping the source, so the team selector reports
+# ValidTeamSize 0 with no unhealthy or ineligible teams involved. On that cluster the recovery path ran
+# end to end - GetTeamFailedToFindValidTeam, then a relocation declared stuck, then a task split - and the
+# restore completed with the consistency check passing.
+#
+# A run that exercises the fix logs GetTeamFailedToFindValidTeam followed by BulkLoad task splits, and no
+# SplitDeclined. Exact counts depend on the dataset knobs below, so they are deliberately not asserted
+# here; a fleet large enough to place a disjoint team makes the test vacuous rather than failing it.
+#
+# The rest of this file is inherited from BackupS3BlobBulkLoadRestore.toml.
+#
+# BulkLoad Validation Test
+# Tests that BulkLoad restore produces identical results to traditional restore
+#
+# This test validates BulkLoad produces the same data as traditional restore:
+# - Backup creates BOTH range files AND SST files (snapshotMode=2)
+#   - Range files are used by traditional restore
+#   - SST files are used by BulkLoad restore
+# - Validation: compare BulkLoad restore vs traditional restore
+#   1. Restore with --add-prefix to system keyspace using TRADITIONAL (rangefile) mode
+#      This creates a "known good" baseline
+#   2. Clear normalKeys (original data)
+#   3. Restore to normalKeys using BULKLOAD mode (reads SST files)
+#   4. Run audit_storage validate_restore to compare:
+#      - BulkLoad-restored data (in normalKeys)
+#      - Traditional-restored data (in system key prefix)
+#   5. Clean up validation prefix data
+# - This validates BulkLoad produces identical results to traditional restore
+#
+# Configuration aligned with working tests/slow/BulkDumpingS3.toml
+
+testClass = "Backup"
+
+[configuration]
+storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] # FIXME: remove after allowing bulkloading with fetchKey and shardedrocksdb
+disableTss = true # TODO(BulkLoad): support TSS
+
+# HA (multi-region) configuration - randomly enabled for test coverage
+generateFearless = false
+simpleConfig = false
+minimumRegions = 1
+# singleRegion not set - allows random HA configuration
+
+# Ensure enough storage servers for non-overlapping BulkLoad teams
+extraMachineCountDC = 3
+# Far below the sibling tests' extraStorageMachineCountPerDC = 5, but deliberately not zero.
+#
+# Bulk-load team selection rejects any team sharing a server with the source, and source is the union of
+# the owners of every shard the task range spans, so a wide enough task range has no legal destination
+# team. That state is DDBulkLoadEngineTaskGetTeamFailedToFindValidTeam with ValidTeamSize 0 and every
+# candidate team duplicated, which no number of attempts can clear because each one recomputes the same
+# source set. Provoking it is the point of this test, and a small fleet is how it is provoked.
+#
+# It is escapable only by narrowing the range, so the task is split. Narrowing bottoms out at a range
+# inside one shard, whose source is that shard's StorageTeamSize machines -- so the fleet must be able to
+# field a team of StorageTeamSize machines that avoids those, i.e. at least 2 * StorageTeamSize machines
+# with data. Teams are built per machine, not per server, so extra storage servers on existing machines do
+# not help. Omitting this knob entirely leaves 5 healthy machines against StorageTeamSize 3: all
+# C(5,3) = 10 machine teams exist, every one of them necessarily touches the 3 source machines, and the
+# restore fails no matter how finely the task is split. Measured that way on seed 22222 -- 252 consecutive
+# placement failures, ValidTeamSize 0 throughout, TotalHealthyMachines 5, CurrentMachineTeams 10 of 10
+# possible. That is the test asserting something no fix can deliver.
+#
+# 1 lands the fleet exactly on the threshold, which is where the test has to sit to be worth anything: a
+# source of StorageTeamSize machines leaves precisely one legal machine team, so placement still fails
+# often enough to force splitting, yet a destination exists. Raising it to 2 was measured to make the test
+# vacuous -- 17 of 17 seeds completed without a single placement failure or split, so it stopped testing
+# the thing it exists to test.
+extraStorageMachineCountPerDC = 1
+# The knobs below still matter for keeping the test honest: manifests are written one per shard
+# (FileBackupAgent.cpp), so min_shard_bytes controls how many exist and
+# manifest_count_max_per_bulkload_task how many a task groups. Left to their defaults this test degrades
+# into a single task holding a single manifest over the whole key space, which is not worth asserting on.
+
+# Explicit simple config - single replication, single region, explicit process counts
+config = "triple usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
+
+# Disable buggify and fault injection to avoid interference with MockS3/BulkLoad
+buggify = false
+faultInjection = false
+
+# Required knobs for BulkLoad functionality (from BulkDumpingS3.toml)
+[[knobs]]
+manifest_count_max_per_bulkload_task = 10
+min_shard_bytes = 10000
+bulkload_sim_failure_injection = false
+shard_encode_location_metadata = true
+enable_read_lock_on_range = true
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
+min_byte_sampling_probability = 0.5
+cc_enforce_use_unfit_dd_in_sim = true
+disable_audit_storage_final_replica_check_in_sim = true
+max_trace_lines = 5000000
+# Allow more time for BulkDump job to complete (Linux runs 4x slower than macOS)
+bulkdump_job_timeout = 1200
+bulkload_job_timeout = 1200
+
+# Disable buggified delays
+[[flow_knobs]]
+MAX_BUGGIFIED_DELAY = 0.0
+
+# S3/Blobstore settings for stability/determinism
+blobstore_max_connection_life = 300
+blobstore_request_timeout_min = 300
+blobstore_request_tries = 5
+blobstore_connect_tries = 5
+blobstore_connect_timeout = 30
+http_send_size = 1024
+http_read_size = 1024
+connection_monitor_loop_time = 0.1
+connection_monitor_timeout = 1.0
+connection_monitor_idle_timeout = 60.0
+dd_team_zero_server_left_log_delay = 0
+dd_rebalance_parallelism = 1
+
+[[test]]
+testTitle = 'BackupS3BlobBulkLoadRestoreNarrowFleet'
+useDB = true
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+waitForQuiescence = false
+connectionFailuresDisableDuration = 1000000
+runFailureWorkloads = false
+timeout = 3600
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 2000
+    transactionsPerSecond = 100.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'BackupS3BlobCorrectness'
+    backupAfter = 10.0
+    restoreAfter = 600.0
+    abortAndRestartAfter = 0.0
+    stopDifferentialAfter = 0.0
+    performRestore = true
+    backupRangesCount = -1
+    skipDirtyRestore = false
+    backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
+    # BulkDump/BulkLoad integration options
+    snapshotMode = 2           # 2 = BOTH (creates range files AND SST files for comparison)
+    useRangeFileRestore = false # false = use BulkLoad for restore
+    # Validation: Compare BulkLoad-restored vs traditional-restored using audit_storage validate_restore
+    # Compares BulkLoad-restored (normalKeys) vs traditional-restored (prefix)
+    performValidation = true

@@ -49,14 +49,13 @@
 #include "flow/flow.h"
 #include "flow/swift.h"
 #include "flow/swift/ABI/Task.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
 #include "flow/TLSConfig.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/FlowTransport.h"
 #include "AsyncFileWriteChecker.h"
 #include "fdbrpc/genericactors.h"
-#include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/FaultInjection.h"
 #include "flow/TaskQueue.h"
 #include "flow/IUDPSocket.h"
@@ -688,17 +687,180 @@ public:
 
 	int64_t debugFD() const override { return (int64_t)h; }
 
-	Future<int> read(void* data, int length, int64_t offset) override { return read_impl(this, data, length, offset); }
+	Future<int> read(void* data, int length, int64_t offset) override {
+		ASSERT((this->flags & IAsyncFile::OPEN_NO_AIO) != 0 ||
+		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
+		UID opId = deterministicRandom()->randomUniqueID();
+		if (randLog) {
+			fmt::print(randLog,
+			           "SFR1 {0} {1} {2} {3} {4}\n",
+			           this->dbgId.shortString(),
+			           this->filename,
+			           opId.shortString(),
+			           length,
+			           offset);
+		}
 
-	Future<Void> write(void const* data, int length, int64_t offset) override {
-		return write_impl(this, StringRef((const uint8_t*)data, length), offset);
+		co_await waitUntilDiskReady(this->diskParameters, length);
+
+		if (_lseeki64(this->h, offset, SEEK_SET) == -1) {
+			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 1);
+			throw io_error();
+		}
+
+		unsigned int read_bytes = _read(this->h, data, (unsigned int)length);
+		if (read_bytes == -1) {
+			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 2);
+			throw io_error();
+		}
+
+		if (randLog) {
+			uint32_t a = crc32c_append(0, (const uint8_t*)data, read_bytes);
+			fprintf(randLog,
+			        "SFR2 %s %s %s %d %d\n",
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
+			        opId.shortString().c_str(),
+			        read_bytes,
+			        a);
+		}
+
+		debugFileCheck("SimpleFileRead", this->filename, data, offset, length);
+
+		INJECT_FAULT(io_timeout, "SimpleFile::read"); // SimpleFile::read io_timeout injected
+		INJECT_FAULT(io_error, "SimpleFile::read"); // SimpleFile::read io_error injected
+
+		co_return read_bytes;
 	}
 
-	Future<Void> truncate(int64_t size) override { return truncate_impl(this, size); }
+	Future<Void> write(void const* data, int length, int64_t offset) override {
+		return write_impl(StringRef((const uint8_t*)data, length), offset);
+	}
 
-	Future<Void> sync() override { return sync_impl(this); }
+	Future<Void> truncate(int64_t size) override {
+		UID opId = deterministicRandom()->randomUniqueID();
+		if (randLog)
+			fmt::print(
+			    randLog, "SFT1 {0} {1} {2} {3}\n", this->dbgId.shortString(), this->filename, opId.shortString(), size);
 
-	Future<int64_t> size() const override { return size_impl(this); }
+		// KAIO will return EINVAL, as len==0 is an error.
+		if ((this->flags & IAsyncFile::OPEN_NO_AIO) == 0 && size == 0) {
+			throw io_error();
+		}
+
+		if (this->delayOnWrite)
+			co_await waitUntilDiskReady(this->diskParameters, 0);
+
+		if (_chsize(this->h, (long)size) == -1) {
+			TraceEvent(SevWarn, "SimpleFileIOError")
+			    .detail("Location", 6)
+			    .detail("Filename", this->filename)
+			    .detail("Size", size)
+			    .detail("Fd", this->h)
+			    .GetLastError();
+			throw io_error();
+		}
+
+		if (randLog) {
+			fprintf(randLog,
+			        "SFT2 %s %s %s\n",
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
+			        opId.shortString().c_str());
+		}
+
+		INJECT_FAULT(io_timeout, "SimpleFile::truncate"); // SimpleFile::truncate inject io_timeout
+		INJECT_FAULT(io_error, "SimpleFile::truncate"); // SimpleFile::truncate inject io_error
+
+		co_return;
+	}
+
+	// Simulated sync does not actually do anything besides wait a random amount of time
+	Future<Void> sync() override {
+		UID opId = deterministicRandom()->randomUniqueID();
+		if (randLog) {
+			fprintf(randLog,
+			        "SFC1 %s %s %s\n",
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
+			        opId.shortString().c_str());
+		}
+
+		if (this->delayOnWrite)
+			co_await waitUntilDiskReady(this->diskParameters, 0, true);
+
+		if (this->flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
+			this->flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
+			auto& machineCache = g_simulator->getCurrentProcess()->machine->openFiles;
+			std::string sourceFilename = this->filename + ".part";
+
+			if (machineCache.contains(sourceFilename)) {
+				// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
+				using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
+				TraceEvent("SimpleFileRename")
+				    .detail("From", sourceFilename)
+				    .detail("To", this->filename)
+				    .detail("SourceCount", machineCache.count(sourceFilename))
+				    .detail("FileCount", machineCache.count(this->filename));
+				auto maxBlockValue = std::numeric_limits<block_value_type>::max();
+				g_simulator->corruptedBlocks.erase(
+				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
+				    g_simulator->corruptedBlocks.upper_bound(std::make_pair(this->filename, maxBlockValue)));
+				// next we need to rename all files. In practice, the number of corruptions for a given file should be
+				// very small
+				auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
+				     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(sourceFilename, maxBlockValue));
+				for (auto iter = begin; iter != end; ++iter) {
+					g_simulator->corruptedBlocks.emplace(this->filename, iter->second);
+				}
+				g_simulator->corruptedBlocks.erase(begin, end);
+				renameFile(sourceFilename.c_str(), this->filename.c_str());
+
+				machineCache[this->filename] = machineCache[sourceFilename];
+				machineCache.erase(sourceFilename);
+				this->actualFilename = this->filename;
+			}
+		}
+
+		if (randLog) {
+			fprintf(randLog,
+			        "SFC2 %s %s %s\n",
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
+			        opId.shortString().c_str());
+		}
+
+		INJECT_FAULT(io_timeout, "SimpleFile::sync"); // SimpleFile::sync inject io_timeout
+		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_errot
+
+		co_return;
+	}
+
+	Future<int64_t> size() const override {
+		UID opId = deterministicRandom()->randomUniqueID();
+		if (randLog) {
+			fprintf(randLog,
+			        "SFS1 %s %s %s\n",
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
+			        opId.shortString().c_str());
+		}
+
+		co_await waitUntilDiskReady(this->diskParameters, 0);
+
+		int64_t pos = _lseeki64(this->h, 0L, SEEK_END);
+		if (pos == -1) {
+			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 8);
+			throw io_error();
+		}
+
+		if (randLog)
+			fmt::print(
+			    randLog, "SFS2 {0} {1} {2} {3}\n", this->dbgId.shortString(), this->filename, opId.shortString(), pos);
+		INJECT_FAULT(io_error, "SimpleFile::size"); // SimpleFile::size inject io_error
+
+		co_return pos;
+	}
 
 	std::string getFilename() const override { return actualFilename; }
 
@@ -746,76 +908,30 @@ private:
 		return outFlags;
 	}
 
-	static Future<int> read_impl(SimpleFile* self, void* data, int length, int64_t offset) {
-		ASSERT((self->flags & IAsyncFile::OPEN_NO_AIO) != 0 ||
-		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
-		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog) {
-			fmt::print(randLog,
-			           "SFR1 {0} {1} {2} {3} {4}\n",
-			           self->dbgId.shortString(),
-			           self->filename,
-			           opId.shortString(),
-			           length,
-			           offset);
-		}
-
-		co_await waitUntilDiskReady(self->diskParameters, length);
-
-		if (_lseeki64(self->h, offset, SEEK_SET) == -1) {
-			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 1);
-			throw io_error();
-		}
-
-		unsigned int read_bytes = 0;
-		if ((read_bytes = _read(self->h, data, (unsigned int)length)) == -1) {
-			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 2);
-			throw io_error();
-		}
-
-		if (randLog) {
-			uint32_t a = crc32c_append(0, (const uint8_t*)data, read_bytes);
-			fprintf(randLog,
-			        "SFR2 %s %s %s %d %d\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str(),
-			        read_bytes,
-			        a);
-		}
-
-		debugFileCheck("SimpleFileRead", self->filename, data, offset, length);
-
-		INJECT_FAULT(io_timeout, "SimpleFile::read"); // SimpleFile::read io_timeout injected
-		INJECT_FAULT(io_error, "SimpleFile::read"); // SimpleFile::read io_error injected
-
-		co_return read_bytes;
-	}
-
-	static Future<Void> write_impl(SimpleFile* self, StringRef data, int64_t offset) {
+	Future<Void> write_impl(StringRef data, int64_t offset) {
 		UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog) {
 			uint32_t a = crc32c_append(0, data.begin(), data.size());
 			fmt::print(randLog,
 			           "SFW1 {0} {1} {2} {3} {4} {5}\n",
-			           self->dbgId.shortString(),
-			           self->filename,
+			           this->dbgId.shortString(),
+			           this->filename,
 			           opId.shortString(),
 			           a,
 			           data.size(),
 			           offset);
 		}
 
-		if (self->delayOnWrite)
-			co_await waitUntilDiskReady(self->diskParameters, data.size());
+		if (this->delayOnWrite)
+			co_await waitUntilDiskReady(this->diskParameters, data.size());
 
-		if (_lseeki64(self->h, offset, SEEK_SET) == -1) {
+		if (_lseeki64(this->h, offset, SEEK_SET) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 3);
 			throw io_error();
 		}
 
-		unsigned int write_bytes = 0;
-		if ((write_bytes = _write(self->h, (void*)data.begin(), data.size())) == -1) {
+		unsigned int write_bytes = _write(this->h, (void*)data.begin(), data.size());
+		if (write_bytes == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 4);
 			throw io_error();
 		}
@@ -828,142 +944,17 @@ private:
 		if (randLog) {
 			fprintf(randLog,
 			        "SFW2 %s %s %s\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
 			        opId.shortString().c_str());
 		}
 
-		debugFileCheck("SimpleFileWrite", self->filename, (void*)data.begin(), offset, data.size());
+		debugFileCheck("SimpleFileWrite", this->filename, (void*)data.begin(), offset, data.size());
 
 		INJECT_FAULT(io_timeout, "SimpleFile::write"); // SimpleFile::write inject io_timeout
 		INJECT_FAULT(io_error, "SimpleFile::write"); // SimpleFile::write inject io_error
 
 		co_return;
-	}
-
-	static Future<Void> truncate_impl(SimpleFile* self, int64_t size) {
-		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog)
-			fmt::print(
-			    randLog, "SFT1 {0} {1} {2} {3}\n", self->dbgId.shortString(), self->filename, opId.shortString(), size);
-
-		// KAIO will return EINVAL, as len==0 is an error.
-		if ((self->flags & IAsyncFile::OPEN_NO_AIO) == 0 && size == 0) {
-			throw io_error();
-		}
-
-		if (self->delayOnWrite)
-			co_await waitUntilDiskReady(self->diskParameters, 0);
-
-		if (_chsize(self->h, (long)size) == -1) {
-			TraceEvent(SevWarn, "SimpleFileIOError")
-			    .detail("Location", 6)
-			    .detail("Filename", self->filename)
-			    .detail("Size", size)
-			    .detail("Fd", self->h)
-			    .GetLastError();
-			throw io_error();
-		}
-
-		if (randLog) {
-			fprintf(randLog,
-			        "SFT2 %s %s %s\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str());
-		}
-
-		INJECT_FAULT(io_timeout, "SimpleFile::truncate"); // SimpleFile::truncate inject io_timeout
-		INJECT_FAULT(io_error, "SimpleFile::truncate"); // SimpleFile::truncate inject io_error
-
-		co_return;
-	}
-
-	// Simulated sync does not actually do anything besides wait a random amount of time
-	static Future<Void> sync_impl(SimpleFile* self) {
-		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog) {
-			fprintf(randLog,
-			        "SFC1 %s %s %s\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str());
-		}
-
-		if (self->delayOnWrite)
-			co_await waitUntilDiskReady(self->diskParameters, 0, true);
-
-		if (self->flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
-			self->flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
-			auto& machineCache = g_simulator->getCurrentProcess()->machine->openFiles;
-			std::string sourceFilename = self->filename + ".part";
-
-			if (machineCache.contains(sourceFilename)) {
-				// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
-				using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
-				TraceEvent("SimpleFileRename")
-				    .detail("From", sourceFilename)
-				    .detail("To", self->filename)
-				    .detail("SourceCount", machineCache.count(sourceFilename))
-				    .detail("FileCount", machineCache.count(self->filename));
-				auto maxBlockValue = std::numeric_limits<block_value_type>::max();
-				g_simulator->corruptedBlocks.erase(
-				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
-				    g_simulator->corruptedBlocks.upper_bound(std::make_pair(self->filename, maxBlockValue)));
-				// next we need to rename all files. In practice, the number of corruptions for a given file should be
-				// very small
-				auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
-				     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(sourceFilename, maxBlockValue));
-				for (auto iter = begin; iter != end; ++iter) {
-					g_simulator->corruptedBlocks.emplace(self->filename, iter->second);
-				}
-				g_simulator->corruptedBlocks.erase(begin, end);
-				renameFile(sourceFilename.c_str(), self->filename.c_str());
-
-				machineCache[self->filename] = machineCache[sourceFilename];
-				machineCache.erase(sourceFilename);
-				self->actualFilename = self->filename;
-			}
-		}
-
-		if (randLog) {
-			fprintf(randLog,
-			        "SFC2 %s %s %s\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str());
-		}
-
-		INJECT_FAULT(io_timeout, "SimpleFile::sync"); // SimpleFile::sync inject io_timeout
-		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_errot
-
-		co_return;
-	}
-
-	static Future<int64_t> size_impl(SimpleFile const* self) {
-		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog) {
-			fprintf(randLog,
-			        "SFS1 %s %s %s\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str());
-		}
-
-		co_await waitUntilDiskReady(self->diskParameters, 0);
-
-		int64_t pos = _lseeki64(self->h, 0L, SEEK_END);
-		if (pos == -1) {
-			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 8);
-			throw io_error();
-		}
-
-		if (randLog)
-			fmt::print(
-			    randLog, "SFS2 {0} {1} {2} {3}\n", self->dbgId.shortString(), self->filename, opId.shortString(), pos);
-		INJECT_FAULT(io_error, "SimpleFile::size"); // SimpleFile::size inject io_error
-
-		co_return pos;
 	}
 };
 
@@ -1089,7 +1080,7 @@ public:
 			return delay(getCurrentProcess()->rebooting ? 0 : .001, taskID) || checkShutdown(this, taskID);
 		}
 		setCurrentTask(taskID);
-		return Void();
+		return readyYield;
 	}
 	bool check_yield(TaskPriority taskID) override {
 		if (yielded)
@@ -2402,6 +2393,7 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
+	Future<Void> readyYield = Void();
 	bool printSimTime;
 
 private:
@@ -2619,7 +2611,7 @@ void startNewSimulator(bool printSimTime) {
 	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;
 }
 
-Future<Void> startUnitTestSimulator() {
+Future<Void> startUnitTestSimulator(int wellKnownEndpointCount) {
 	startNewSimulator(false);
 	Standalone<StringRef> processId(deterministicRandom()->randomUniqueID().toString());
 	auto* process = g_simulator->newProcess(
@@ -2653,13 +2645,13 @@ Future<Void> startUnitTestSimulator() {
 	httpProcess->excludeFromRestarts = true;
 	co_await g_simulator->onProcess(httpProcess, TaskPriority::DefaultYield);
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(true, 1, wellKnownEndpointCount);
 	(void)FlowTransport::transport().bind(httpProcess->address, httpProcess->address);
 	g_simulator->addSimHTTPProcess(makeReference<HTTP::SimServerContext>());
 
 	co_await g_simulator->onProcess(process, TaskPriority::DefaultYield);
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(true, 1, wellKnownEndpointCount);
 	(void)FlowTransport::transport().bind(process->address, process->address);
 }
 

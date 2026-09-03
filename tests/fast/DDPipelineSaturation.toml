@@ -5,6 +5,19 @@
 # DDRelocationQueue.cpp. The limit is pinned to 20 -- the realistic
 # low end of the knob's range -- rather than an unrealistically small value
 # that would destabilize unrelated simulations.
+#
+# The sharded RocksDB engine is excluded because it cannot absorb the shard
+# explosion this test creates on purpose. Every physical shard becomes a RocksDB
+# column family carrying a SHARDED_ROCKSDB_WRITE_BUFFER_SIZE (16MB in
+# simulation) write buffer, and each KVS instance additionally reserves a
+# SHARDED_ROCKSDB_BLOCK_CACHE_SIZE (128MB) block cache. The Attrition workloads
+# below churn shards faster than the empty-shard cleaner reclaims their column
+# families, so with min_shard_bytes pinned 1000x below its default those budgets
+# accumulate -- and since every simulated process shares one address space, they
+# sum into a single RSS that crosses the 8GB memory limit at roughly simtime
+# 300, killing the run with FDB_EXIT_NO_MEM.
+[configuration]
+storageEngineExcludeTypes = [5]
 
 [[knobs]]
 dd_max_pipeline_moves = 20

@@ -22,9 +22,6 @@
 #include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
 #include "flow/BooleanParam.h"
-#ifdef BUILD_AZURE_BACKUP
-#include "fdbclient/BackupContainerAzureBlobStore.h"
-#endif
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "BackupContainerLocalDirectory.h"
 #include "BackupContainerBlobStore.h"
@@ -54,7 +51,7 @@ public:
 
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of
 	// megabytes.
-	static Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
+	static AsyncResult<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
 	    Reference<BackupContainerFileSystem> bc,
 	    KeyspaceSnapshotFile snapshot) {
 		// Read the range file list for the specified version range, and then index them by fileName.
@@ -152,7 +149,7 @@ public:
 			}
 		}
 
-		co_return std::make_pair(results, fileKeyRanges);
+		co_return std::make_pair(std::move(results), std::move(fileKeyRanges));
 	}
 
 	// Find what should be the filename of a path by finding whatever is after the last forward or backward slash, or
@@ -1618,7 +1615,7 @@ Future<Void> BackupContainerFileSystem::writePartitionListFile(Version v, std::s
 	                       contents);
 }
 
-Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>>
+AsyncResult<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>>
 BackupContainerFileSystem::readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
 	return BackupContainerFileSystemImpl::readKeyspaceSnapshot(Reference<BackupContainerFileSystem>::addRef(this),
 	                                                           snapshot);

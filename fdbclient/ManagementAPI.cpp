@@ -24,9 +24,11 @@
 #include <vector>
 
 #include "fdbclient/BulkDumping.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/IClientApi.h"
 #include "fdbclient/RangeLock.h"
 #include "flow/Error.h"
 #include "fmt/format.h"
@@ -36,10 +38,11 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/ManagementAPI.h"
 
 #include "fdbclient/SystemData.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
@@ -1422,6 +1425,37 @@ Reference<IQuorumChange> autoQuorumChange(int desired) {
 	return makeReference<AutoQuorumChange>(desired);
 }
 
+Future<std::vector<std::string>> getManagementApiSpecialKeyValues(Reference<IDatabase> db,
+                                                                  KeyRange range,
+                                                                  const char* errorEvent) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
+		Error err;
+		try {
+			ThreadFuture<RangeResult> resultFuture = tr->getRange(range, CLIENT_KNOBS->TOO_MANY);
+			RangeResult result = co_await safeThreadFutureToFuture(resultFuture);
+			ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
+
+			std::vector<std::string> values;
+			values.reserve(result.size());
+			for (const auto& entry : result) {
+				values.push_back(entry.key.removePrefix(range.begin).toString());
+			}
+			co_return values;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			err = e;
+		}
+
+		if (errorEvent != nullptr) {
+			TraceEvent(SevWarn, errorEvent).error(err);
+		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
+	}
+}
+
 Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> servers, bool failed) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1457,32 +1491,28 @@ Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> serve
 
 Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
 	if (cx->apiVersionAtLeast(700)) {
-		ReadYourWritesTransaction ryw(cx);
-		while (true) {
-			Error err;
-			try {
-				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
-				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				ryw.set(
-				    SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failed" : "excluded", "force"),
-				    ValueRef());
-				for (auto& s : servers) {
-					Key addr = failed
-					               ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(s.toString())
-					               : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(s.toString());
-					ryw.set(addr, ValueRef());
-				}
-				TraceEvent("ExcludeServersSpecialKeySpaceCommit")
-				    .detail("Servers", describe(servers))
-				    .detail("ExcludeFailed", failed);
-				co_await ryw.commit();
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent("ExcludeServersError").errorUnsuppressed(err);
-			co_await ryw.onError(err);
-		}
+		co_await runRYWTransactionVoid(
+		    cx,
+		    [&servers, failed](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
+			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			    ryw->set(
+			        SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failed" : "excluded", "force"),
+			        ValueRef());
+			    for (const auto& server : servers) {
+				    Key address =
+				        failed
+				            ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(server.toString())
+				            : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(server.toString());
+				    ryw->set(address, ValueRef());
+			    }
+			    TraceEvent("ExcludeServersSpecialKeySpaceCommit")
+			        .detail("Servers", describe(servers))
+			        .detail("ExcludeFailed", failed);
+			    return Void();
+		    },
+		    "ExcludeServersError");
+		co_return;
 	} else {
 		Transaction tr(cx);
 		while (true) {
@@ -1536,33 +1566,28 @@ Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::string> 
 // excludes localities by setting the keys.
 Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed) {
 	if (cx->apiVersionAtLeast(700)) {
-		ReadYourWritesTransaction ryw(cx);
-		while (true) {
-			Error err;
-			try {
-				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
-				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
-				            failed ? "failed_locality" : "excluded_locality", "force"),
-				        ValueRef());
-				for (const auto& l : localities) {
-					Key addr = failed
-					               ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(l)
-					               : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(l);
-					ryw.set(addr, ValueRef());
-				}
-				TraceEvent("ExcludeLocalitiesSpecialKeySpaceCommit")
-				    .detail("Localities", describe(localities))
-				    .detail("ExcludeFailed", failed);
-
-				co_await ryw.commit();
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent("ExcludeLocalitiesError").errorUnsuppressed(err);
-			co_await ryw.onError(err);
-		}
+		co_await runRYWTransactionVoid(
+		    cx,
+		    [&localities, failed](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
+			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			    ryw->set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
+			                 failed ? "failed_locality" : "excluded_locality", "force"),
+			             ValueRef());
+			    for (const auto& locality : localities) {
+				    Key address =
+				        failed
+				            ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(locality)
+				            : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(locality);
+				    ryw->set(address, ValueRef());
+			    }
+			    TraceEvent("ExcludeLocalitiesSpecialKeySpaceCommit")
+			        .detail("Localities", describe(localities))
+			        .detail("ExcludeFailed", failed);
+			    return Void();
+		    },
+		    "ExcludeLocalitiesError");
+		co_return;
 	} else {
 		Transaction tr(cx);
 		while (true) {
@@ -1583,46 +1608,35 @@ Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> loca
 Future<Void> includeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	if (cx->apiVersionAtLeast(700)) {
-		ReadYourWritesTransaction ryw(cx);
-		while (true) {
-			Error err;
-			try {
-				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
-				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				for (auto& s : servers) {
-					if (!s.isValid()) {
-						if (failed) {
-							ryw.clear(SpecialKeySpace::getManagementApiCommandRange("failed"));
-						} else {
-							ryw.clear(SpecialKeySpace::getManagementApiCommandRange("exclude"));
-						}
-					} else {
-						Key addr =
-						    failed ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(s.toString())
-						           : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(s.toString());
-						ryw.clear(addr);
-						// Eliminate both any ip-level exclusion (1.2.3.4) and any
-						// port-level exclusions (1.2.3.4:5)
-						// The range ['IP', 'IP;'] was originally deleted. ';' is
-						// char(':' + 1). This does not work, as other for all
-						// x between 0 and 9, 'IPx' will also be in this range.
-						//
-						// This is why we now make two clears: first only of the ip
-						// address, the second will delete all ports.
-						if (s.isWholeMachine())
-							ryw.clear(KeyRangeRef(addr.withSuffix(":"_sr), addr.withSuffix(";"_sr)));
-					}
-				}
-				TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
-
-				co_await ryw.commit();
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent("IncludeServersError").errorUnsuppressed(err);
-			co_await ryw.onError(err);
-		}
+		co_await runRYWTransactionVoid(
+		    cx,
+		    [&servers, failed](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
+			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			    for (const auto& server : servers) {
+				    if (!server.isValid()) {
+					    ryw->clear(SpecialKeySpace::getManagementApiCommandRange(failed ? "failed" : "exclude"));
+				    } else {
+					    Key address =
+					        failed
+					            ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(server.toString())
+					            : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(
+					                  server.toString());
+					    ryw->clear(address);
+					    // Eliminate both any ip-level exclusion (1.2.3.4) and any
+					    // port-level exclusions (1.2.3.4:5). Clearing ['IP', 'IP;']
+					    // would also include 'IPx', so clear the IP and port range
+					    // separately.
+					    if (server.isWholeMachine()) {
+						    ryw->clear(KeyRangeRef(address.withSuffix(":"_sr), address.withSuffix(";"_sr)));
+					    }
+				    }
+			    }
+			    TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
+			    return Void();
+		    },
+		    "IncludeServersError");
+		co_return;
 	} else {
 		Transaction tr(cx);
 		while (true) {
@@ -1690,39 +1704,32 @@ Future<Void> includeServers(Database cx, std::vector<AddressExclusion> servers, 
 Future<Void> includeLocalities(Database cx, std::vector<std::string> localities, bool failed, bool includeAll) {
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	if (cx->apiVersionAtLeast(700)) {
-		ReadYourWritesTransaction ryw(cx);
-		while (true) {
-			Error err;
-			try {
-				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
-				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				if (includeAll) {
-					if (failed) {
-						ryw.clear(SpecialKeySpace::getManagementApiCommandRange("failedlocality"));
-					} else {
-						ryw.clear(SpecialKeySpace::getManagementApiCommandRange("excludedlocality"));
-					}
-				} else {
-					for (const auto& l : localities) {
-						Key locality =
-						    failed ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(l)
-						           : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(l);
-						ryw.clear(locality);
-					}
-				}
-				TraceEvent("IncludeLocalitiesCommit")
-				    .detail("Localities", describe(localities))
-				    .detail("Failed", failed)
-				    .detail("IncludeAll", includeAll);
-
-				co_await ryw.commit();
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent("IncludeLocalitiesError").errorUnsuppressed(err);
-			co_await ryw.onError(err);
-		}
+		co_await runRYWTransactionVoid(
+		    cx,
+		    [&localities, failed, includeAll](Reference<ReadYourWritesTransaction> ryw) -> Future<Void> {
+			    ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
+			    ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			    if (includeAll) {
+				    ryw->clear(
+				        SpecialKeySpace::getManagementApiCommandRange(failed ? "failedlocality" : "excludedlocality"));
+			    } else {
+				    for (const auto& locality : localities) {
+					    Key key =
+					        failed
+					            ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(locality)
+					            : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality")
+					                  .withSuffix(locality);
+					    ryw->clear(key);
+				    }
+			    }
+			    TraceEvent("IncludeLocalitiesCommit")
+			        .detail("Localities", describe(localities))
+			        .detail("Failed", failed)
+			        .detail("IncludeAll", includeAll);
+			    return Void();
+		    },
+		    "IncludeLocalitiesError");
+		co_return;
 	} else {
 		Transaction tr(cx);
 		while (true) {
@@ -2267,6 +2274,7 @@ Future<Void> waitForFullReplication(Database cx) {
 			config.fromKeyValues((VectorRef<KeyValueRef>)confResults);
 
 			std::vector<Future<Optional<Value>>> replicasFutures;
+			replicasFutures.reserve(config.regions.size());
 			for (auto& region : config.regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
@@ -2763,7 +2771,7 @@ Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState)
 	tr->set(newJobKey, bulkLoadJobValue(jobState));
 }
 
-AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
+AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx, bool lockAware) {
 	RangeResult jobHistoryResult;
 	Key beginKey = bulkLoadJobHistoryKeys.begin;
 	Key endKey = bulkLoadJobHistoryKeys.end;
@@ -2772,6 +2780,15 @@ AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx
 	while (true) {
 		Error err;
 		try {
+			// READ_LOCK_AWARE is the load-bearing one: a caller may read this while the database is
+			// locked -- a restore holds the lock while deciding whether its bulkload job succeeded --
+			// and database_locked is retryable, so without it the loop below spins forever instead of
+			// failing. The read-only variant suffices here and enforces that this stays a read.
+			// READ_SYSTEM_KEYS is belt-and-braces for a system-keyspace range.
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			if (lockAware) {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			}
 			jobHistoryResult.clear();
 			jobHistoryResult =
 			    co_await tr.getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX);

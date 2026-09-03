@@ -25,6 +25,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/logsystem/ApplyMetadataMutation.h"
+#include "fdbserver/logsystem/CDCRoutingTable.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"
@@ -88,6 +89,19 @@ struct ProxyStats {
 	LatencySample commitBatchingEmptyMessageRatio;
 
 	LatencySample commitBatchingWindowSize;
+
+	// Number of transactions in the batch
+	LatencySample commitBatchTransactions;
+	// Summary length of transactions in the batch
+	LatencySample commitBatchBytes;
+	// what time transactions were waiting in the batch before they
+	// started processing with commitBatch()
+	LatencySample commitBatchingWaiting;
+	LatencySample commitPreresolutionLatency;
+	LatencySample commitResolutionLatency;
+	LatencySample commitPostresolutionLatency;
+	LatencySample commitTLogLoggingLatency;
+	LatencySample commitReplyLatency;
 
 	LatencySample computeLatency;
 
@@ -183,6 +197,38 @@ struct ProxyStats {
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitBatchTransactions("CommitBatchTransactions",
+	                            id,
+	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitBatchBytes("CommitBatchBytes",
+	                     id,
+	                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                     SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitBatchingWaiting("CommitBatchingWaiting",
+	                          id,
+	                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitPreresolutionLatency("CommitPreresolutionLatency",
+	                               id,
+	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitResolutionLatency("CommitResolutionLatency",
+	                            id,
+	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitPostresolutionLatency("CommitPostresolutionLatency",
+	                                id,
+	                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                                SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitTLogLoggingLatency("CommitTLogLoggingLatency",
+	                             id,
+	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    commitReplyLatency("CommitReplyLatency",
+	                       id,
+	                       SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                       SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    computeLatency("ComputeLatency",
 	                   id,
 	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -437,10 +483,11 @@ public:
 
 	bool isLocked(const KeyRange& range) const {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
-		if (range.end >= normalKeys.end) {
+		const KeyRangeRef normalRange = range & normalKeys;
+		if (normalRange.empty()) {
 			return false;
 		}
-		for (auto lockRange : coreMap.intersectingRanges(range)) {
+		for (auto lockRange : coreMap.intersectingRanges(normalRange)) {
 			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ExclusiveReadLock)) {
 				return true;
 			}

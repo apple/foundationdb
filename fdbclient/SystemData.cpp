@@ -787,6 +787,7 @@ const KeyRangeRef cdcStreamNameKeys("\xff/cdc/name/"_sr, "\xff/cdc/name0"_sr);
 const KeyRef cdcMaxStreamIdKey = "\xff/cdc/maxStreamId"_sr;
 const KeyRangeRef cdcStreamKeys("\xff/cdc/keys/"_sr, "\xff/cdc/keys0"_sr);
 const KeyRangeRef cdcTagHistoryKeys("\xff/cdc/tagHistory/"_sr, "\xff/cdc/tagHistory0"_sr);
+const KeyRangeRef cdcTagOwnerKeys("\xff\x02/cdc/tagOwner/"_sr, "\xff\x02/cdc/tagOwner0"_sr);
 const KeyRangeRef cdcMinVersionKeys("\xff\x02/cdc/minVersion/"_sr, "\xff\x02/cdc/minVersion0"_sr);
 const KeyRangeRef cdcRetiredTagPopKeys("\xff/cdc/retiredTagPop/"_sr, "\xff/cdc/retiredTagPop0"_sr);
 const KeyRangeRef cdcRetiredTagPopVersionKeys("\xff\x02/cdc/retiredTagPopVersion/"_sr,
@@ -882,6 +883,28 @@ CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key) {
 	BinaryReader reader(key.removePrefix(cdcTagHistoryKeys.begin), Unversioned());
 	reader >> streamId >> encodedVersion >> tag;
 	return CDCTagHistoryEntry(streamId, bigEndian64(encodedVersion), tag);
+}
+
+Key cdcTagOwnerKeyFor(Tag tag) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcTagOwnerKeys.begin);
+	wr << tag;
+	return wr.toValue();
+}
+
+Tag decodeCDCTagOwnerKey(KeyRef const& key) {
+	Tag tag;
+	BinaryReader reader(key.removePrefix(cdcTagOwnerKeys.begin), Unversioned());
+	reader >> tag;
+	return tag;
+}
+
+Value cdcTagOwnerValue(CDCStreamId streamId) {
+	return cdcStreamNameValue(streamId);
+}
+
+CDCStreamId decodeCDCTagOwnerValue(ValueRef const& value) {
+	return decodeCDCStreamNameValue(value);
 }
 
 Key cdcMinVersionKeyFor(CDCStreamId streamId) {
@@ -1721,6 +1744,7 @@ const KeyRangeRef monitorConfKeys("\xff\x02/monitorConf/"_sr, "\xff\x02/monitorC
 
 const KeyRef healthyZoneKey = "\xff\x02/healthyZone"_sr;
 const StringRef ignoreSSFailuresZoneString = "IgnoreSSFailures"_sr;
+const KeyRef healthyZoneStartVersionKey = "\xff\x02/healthyZoneStartVersion"_sr;
 const KeyRef rebalanceDDIgnoreKey = "\xff\x02/rebalanceDDIgnored"_sr;
 
 Value healthyZoneValue(StringRef const& zoneId, Version version) {
@@ -1930,6 +1954,11 @@ TEST_CASE("/SystemData/NativeCDC") {
 	ASSERT_EQ(decodeCDCMaxStreamIdValue(cdcMaxStreamIdValue(streamId)), streamId);
 	ASSERT_EQ(decodeCDCStreamKey(cdcStreamKeyFor(streamId)), streamId);
 	ASSERT_EQ(decodeCDCStreamKeysValue(cdcStreamKeysValue(keys)), keys);
+	const Key tagOwnerKey = cdcTagOwnerKeyFor(tag);
+	ASSERT_EQ(decodeCDCTagOwnerKey(tagOwnerKey), tag);
+	ASSERT(cdcTagOwnerKeys.contains(tagOwnerKey));
+	ASSERT(nonMetadataSystemKeys.contains(tagOwnerKey));
+	ASSERT_EQ(decodeCDCTagOwnerValue(cdcTagOwnerValue(streamId)), streamId);
 	ASSERT_EQ(decodeCDCMinVersionKey(cdcMinVersionKeyFor(streamId)), streamId);
 	ASSERT_EQ(decodeCDCMinVersionValue(cdcMinVersionValue(minVersion)), minVersion);
 	ASSERT(nonMetadataSystemKeys.contains(cdcMinVersionKeyFor(streamId)));

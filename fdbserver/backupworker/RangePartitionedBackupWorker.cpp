@@ -239,6 +239,7 @@ struct RangePartitionedBackupData {
 
 	Future<Void> waitAllBackupsReady() {
 		std::vector<Future<Void>> all;
+		all.reserve(backups.size());
 		for (auto& [uid, info] : backups) {
 			all.push_back(info.waitBackupReady());
 		}
@@ -909,6 +910,7 @@ Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastV
 	// Finish files
 	// TODO akanksha: Add FileLevel checksum.
 	std::vector<Future<Void>> finished;
+	finished.reserve(activeFiles.size());
 	for (auto& lf : activeFiles) {
 		finished.push_back(lf.file->finish());
 	}

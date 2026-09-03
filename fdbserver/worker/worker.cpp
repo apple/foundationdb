@@ -24,6 +24,7 @@
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "flow/ApiVersion.h"
 #include "flow/Buggify.h"
 #include "flow/CodeProbe.h"
@@ -47,7 +48,7 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "MetricLogger.h"
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/backupworker/RangePartitionedBackupWorker.h"
@@ -83,7 +84,7 @@
 #include "flow/ThreadHelper.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
 #include "flow/ChaosMetrics.h"
@@ -1355,7 +1356,7 @@ Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInte
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			Optional<PrimaryAndRemoteAddresses> storageServers;
 			if (db.present()) {
-				co_await store(storageServers, getStorageServers(db.get(), dbInfo));
+				storageServers = co_await getStorageServers(db.get(), dbInfo);
 			}
 			req = doPeerHealthCheck(interf, locality, dbInfo, req, enablePrimaryTxnSystemHealthCheck, storageServers);
 
@@ -2981,7 +2982,7 @@ Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 	// When set to true, the health monitor running in this worker starts monitor other transaction process in this
 	// cluster.
-	Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck = makeReference<AsyncVar<bool>>(false);
+	auto enablePrimaryTxnSystemHealthCheck = makeReference<AsyncVar<bool>>(false);
 
 	co_await yield();
 	Future<Void> grpc = registerWorkerGrpcServices(interf.id(), connRecord);
@@ -3570,10 +3571,10 @@ TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
 		co_return;
 	}
 
-	co_await success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                     ProtocolVersion::withTSS())));
+	co_await errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                             ProtocolVersion::withStorageInterfaceReadiness(),
+	                                             ProtocolVersion::withStorageInterfaceReadiness(),
+	                                             ProtocolVersion::withTSS()));
 
 	ErrorOr<SWVersion> swversion = co_await errorOr(
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness()));
@@ -3593,10 +3594,10 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 		co_return;
 	}
 
-	co_await success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                     ProtocolVersion::withTSS())));
+	co_await errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                             ProtocolVersion::withStorageInterfaceReadiness(),
+	                                             ProtocolVersion::withStorageInterfaceReadiness(),
+	                                             ProtocolVersion::withTSS()));
 
 	{
 		ErrorOr<SWVersion> swversion = co_await errorOr(
@@ -3613,10 +3614,10 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 		}
 	}
 
-	co_await success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                     ProtocolVersion::withTSS(),
-	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                     ProtocolVersion::withTSS())));
+	co_await errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                             ProtocolVersion::withTSS(),
+	                                             ProtocolVersion::withStorageInterfaceReadiness(),
+	                                             ProtocolVersion::withTSS()));
 
 	{
 		ErrorOr<SWVersion> swversion = co_await errorOr(
@@ -3673,10 +3674,10 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 		co_return;
 	}
 
-	co_await success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                     ProtocolVersion::withTSS(),
-	                                                     ProtocolVersion::withTSS(),
-	                                                     ProtocolVersion::withCacheRole())));
+	co_await errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                             ProtocolVersion::withTSS(),
+	                                             ProtocolVersion::withTSS(),
+	                                             ProtocolVersion::withCacheRole()));
 
 	{
 		ErrorOr<SWVersion> swversion = co_await errorOr(
@@ -3689,10 +3690,10 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 		}
 	}
 
-	co_await success(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                     ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                     ProtocolVersion::withTSS())));
+	co_await errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                             ProtocolVersion::withStorageInterfaceReadiness(),
+	                                             ProtocolVersion::withStorageInterfaceReadiness(),
+	                                             ProtocolVersion::withTSS()));
 
 	{
 		ErrorOr<SWVersion> swversion = co_await errorOr(

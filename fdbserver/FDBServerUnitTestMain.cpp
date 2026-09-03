@@ -18,21 +18,47 @@
  * limitations under the License.
  */
 
+#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/FlowTransport.h"
+#include "fdbrpc/Net2FileSystem.h"
+#include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/Knobs.h"
+#include "flow/TLSConfig.h"
 #include "flow/UnitTestRunner.h"
 
 #ifndef FDBSERVER_UNIT_TEST_SUITE
 #error "FDBSERVER_UNIT_TEST_SUITE must be defined"
 #endif
 
+#ifndef FDBSERVER_UNIT_TEST_NORMAL_IGNORE
+#define FDBSERVER_UNIT_TEST_NORMAL_IGNORE
+#endif
+
 namespace {
 Future<Void> initializeSimulation() {
 	resetServerKnobs(Randomize::True, IsSimulated::True);
-	return startUnitTestSimulator();
+	CoroThreadPool::init();
+	return startUnitTestSimulator(WLTOKEN_RESERVED_COUNT);
+}
+
+void initializeNetwork() {
+	resetServerKnobs(Randomize::False, IsSimulated::False);
+	CoroThreadPool::init();
+	g_network = newNet2(TLSConfig());
+	g_network->addStopCallback(Net2FileSystem::stop);
+	Net2FileSystem::newFileSystem();
+	FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
+	const NetworkAddress address = NetworkAddress::parse("127.0.0.1:0");
+	FlowTransport::transport().bind(address, address);
 }
 } // namespace
 
 int main(int argc, char** argv) {
-	return runUnitTests(argc, argv, UnitTestRunnerConfig(FDBSERVER_UNIT_TEST_SUITE, initializeSimulation));
+	return runUnitTests(
+	    argc,
+	    argv,
+	    UnitTestRunnerConfig(
+	        FDBSERVER_UNIT_TEST_SUITE, initializeSimulation, initializeNetwork, { FDBSERVER_UNIT_TEST_NORMAL_IGNORE }));
 }

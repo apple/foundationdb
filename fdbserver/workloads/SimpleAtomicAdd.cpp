@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/flow.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 struct SimpleAtomicAddWorkload : TestWorkload {
 	static constexpr auto NAME = "SimpleAtomicAdd";

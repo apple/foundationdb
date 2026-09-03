@@ -41,11 +41,11 @@
 
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ClusterConnectionFile.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
-#include "fdbrpc/WellKnownEndpoints.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.h"
@@ -77,6 +77,7 @@
 #include "flow/ProtocolVersion.h"
 #include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
+#include "flow/MemoryTracker.h"
 #include "flow/TLSConfig.h"
 #include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
@@ -242,9 +243,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 
 // clang-format on
 
-extern void dsltest();
 extern void pingtest();
-extern void copyTest();
 extern void versionedMapTest();
 extern void createTemplateDatabase();
 
@@ -315,7 +314,7 @@ public:
 	boost::interprocess::permissions permission;
 
 private:
-	explicit(false) WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
+	WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
 #ifdef _WIN32
 	SECURITY_ATTRIBUTES sa;
 #endif
@@ -705,54 +704,9 @@ static void printUsage(const char* name, bool devhelp) {
 
 extern bool g_crashOnError;
 
-#if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-void* operator new(std::size_t size) {
-	void* p = malloc(size);
-	if (!p)
-		throw std::bad_alloc();
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete(void* ptr) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// scalar, nothrow new and it matching delete
-void* operator new(std::size_t size, const std::nothrow_t&) throw() {
-	void* p = malloc(size);
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete(void* ptr, const std::nothrow_t&) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// array throwing new and matching delete[]
-void* operator new[](std::size_t size) {
-	void* p = malloc(size);
-	if (!p)
-		throw std::bad_alloc();
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete[](void* ptr) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-
-// array, nothrow new and matching delete[]
-void* operator new[](std::size_t size, const std::nothrow_t&) throw() {
-	void* p = malloc(size);
-	recordAllocation(p, size);
-	return p;
-}
-void operator delete[](void* ptr, const std::nothrow_t&) throw() {
-	recordDeallocation(ptr);
-	free(ptr);
-}
-#endif
+// The global operator new / operator delete replacements (both the legacy
+// ALLOC_INSTRUMENTATION accounting hooks and the sampled memory tracker) live in
+// fdbserver/GlobalNewDelete.cpp.
 
 Optional<bool> checkBuggifyOverride(const char* testFile) {
 	std::ifstream ifs;
@@ -984,7 +938,6 @@ enum class ServerRole {
 	ConsistencyCheck,
 	ConsistencyCheckUrgent,
 	CreateTemplateDatabase,
-	DSLTest,
 	FDBD,
 	KVFileGenerateIOLogChecksums,
 	KVFileIntegrityCheck,
@@ -1270,8 +1223,6 @@ private:
 					role = ServerRole::SkipListTest;
 				else if (!strcmp(sRole, "search"))
 					role = ServerRole::SearchMutations;
-				else if (!strcmp(sRole, "dsltest"))
-					role = ServerRole::DSLTest;
 				else if (!strcmp(sRole, "versionedmaptest"))
 					role = ServerRole::VersionedMapTest;
 				else if (!strcmp(sRole, "createtemplatedb"))
@@ -1955,6 +1906,13 @@ int main(int argc, char* argv[]) {
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		initializeServerKnobs(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
+		// Knobs are now final; initialize the sampled memory tracker from them on
+		// this (soon-to-be network) thread, before any serving role starts. Reading
+		// the sample-inverse knob explicitly here — rather than inferring it from
+		// the first allocation — keeps early startup allocations from latching the
+		// tracker off before the knobs were configured. See design/memory-tracker.md.
+		memTrackerInit();
+
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
 
@@ -1970,11 +1928,6 @@ int main(int argc, char* argv[]) {
 
 		if (role == ServerRole::SkipListTest) {
 			skipListTest();
-			flushAndExit(FDB_EXIT_SUCCESS);
-		}
-
-		if (role == ServerRole::DSLTest) {
-			dsltest();
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
 

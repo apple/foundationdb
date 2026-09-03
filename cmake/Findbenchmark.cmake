@@ -39,12 +39,14 @@ macro(_finalize_find_package_benchmark)
     REQUIRED_VARS benchmark_INCLUDE_DIR benchmark_LIBRARY benchmark_main_LIBRARY)
 
   if(benchmark_FOUND)
-    add_library(benchmark::benchmark UNKNOWN IMPORTED)
+    # GLOBAL, because fdb_setup_googlebenchmark() is called from whichever bench directory is
+    # configured first, and the resulting fdb_google_benchmark target is linked from all of them.
+    add_library(benchmark::benchmark UNKNOWN IMPORTED GLOBAL)
     set_target_properties(
       benchmark::benchmark PROPERTIES
       INTERFACE_INCLUDE_DIRECTORIES "${benchmark_INCLUDE_DIR}"
       IMPORTED_LOCATION "${benchmark_LIBRARY}")
-    add_library(benchmark::benchmark_main UNKNOWN IMPORTED)
+    add_library(benchmark::benchmark_main UNKNOWN IMPORTED GLOBAL)
     set_target_properties(
         benchmark::benchmark_main PROPERTIES
         IMPORTED_LOCATION "${benchmark_main_LIBRARY}")

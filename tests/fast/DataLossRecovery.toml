@@ -1,17 +1,20 @@
 [configuration]
-# Disable buggify for this test. The workload disables DD and manually moves
-# shards via startMoveKeys. With buggify enabled, injected delays cause
-# transaction_too_old on every retry (transaction body exceeds the 5-second
-# read version window), while BUGGIFY also reduces START_MOVE_KEYS_MAX_RETRIES
-# from 50 to 10. The combination is self-defeating: the test exhausts retries
-# before DD recognizes it has been disabled and releases the move keys lock.
-buggify = false
 generateFearless = false
 config = 'triple'
 processesPerMachine = 2
 coordinators = 3
 machineCount = 45
 asanMachineCount = 20
+
+# This test intentionally triggers data movement via moveKeys, which relies on system txns.
+# When simulation picks a very low txn lifetime window e.g. 1s, these system txns get rejected as
+# too old. moveKeys retries, but it's expected for these txns to take a bit longer, so every retry
+# fails too and it eventually gives up. That error fails the start of this test.
+# So for this test, we set both txn lifetime windows (read and write) to the standard 5s.
+# Specifically, versions are set to 5M, because in FDB, VERSIONS_PER_SECOND is 1M.
+[[knobs]]
+max_read_transaction_life_versions = 5000000
+max_write_transaction_life_versions = 5000000
 
 [[test]]
 testTitle = 'DataLossRecovery'

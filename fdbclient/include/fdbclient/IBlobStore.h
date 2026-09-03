@@ -191,7 +191,7 @@ public:
 		}
 
 		// CROSS_PROCESS_FIX: Copy constructor with cross-process detection
-		explicit(false) ReusableConnection(const ReusableConnection& other)
+		ReusableConnection(const ReusableConnection& other)
 		  : conn(other.conn), expirationTime(other.expirationTime), creatingProcess(other.creatingProcess) {
 			if (g_network && g_network->isSimulated() && creatingProcess.isValid() &&
 			    creatingProcess != g_network->getLocalAddress()) {

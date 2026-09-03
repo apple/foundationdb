@@ -20,6 +20,7 @@
 
 #include "flow/FastAlloc.h"
 
+#include "flow/MemoryTracker.h"
 #include "flow/ThreadPrimitives.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
@@ -108,9 +109,6 @@ bool valgrindPrecise() {
 	return result;
 }
 #endif
-
-template <int Size>
-void* FastAllocator<Size>::freelist = nullptr;
 
 std::atomic<int64_t> g_hugeArenaMemory(0);
 
@@ -386,18 +384,28 @@ void* FastAllocator<Size>::allocate() {
 	bytes->increment(size);
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
-	// Some usages of FastAllocator require 4096 byte alignment.
-	return aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+	{
+		// Some usages of FastAllocator require 4096 byte alignment.
+		// This path bypasses the freelist and the memTrackerOnAlloc at the bottom
+		// of the function, so track here too — otherwise every FastAllocator size
+		// class (and the small Arena blocks backed by it) would be invisible to the
+		// tracker under gperftools / ASan. Symmetric with release() below. (Braces
+		// scope this `p` so it can't collide with the freelist `p` compiled below.)
+		void* p = aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+		memTrackerOnAlloc(p, Size);
+		return p;
+	}
 #endif
 
 #if VALGRIND
 	if (valgrindPrecise()) {
 		// Some usages of FastAllocator require 4096 byte alignment
-		return aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+		void* p = aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
+		memTrackerOnAlloc(p, Size); // track here too (see the gperftools/ASan path above)
+		return p;
 	}
 #endif
 
-#if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData();
 	if (!thr.freelist) {
 		ASSERT(thr.count == 0);
@@ -417,21 +425,13 @@ void* FastAllocator<Size>::allocate() {
 	thr.freelist = *(void**)p;
 	ASSERT(!thr.freelist == (thr.count == 0)); // freelist is empty if and only if count is 0
 	// check( p, true );
-#else
-	void* p = freelist;
-	if (!p)
-		getMagazine();
-#if VALGRIND
-	VALGRIND_MAKE_MEM_DEFINED(p, sizeof(void*));
-#endif
-	freelist = *(void**)p;
-#endif
 #if VALGRIND
 	VALGRIND_MALLOCLIKE_BLOCK(p, Size, 0, 0);
 #endif
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
 	recordAllocation(p, Size);
 #endif
+	memTrackerOnAlloc(p, Size);
 	return p;
 }
 
@@ -470,16 +470,19 @@ void FastAllocator<Size>::release(void* ptr) {
 	bytes->increment(size);
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
+	// Mirror allocate()'s early-return tracking so frees on this path debit the
+	// live table (without this the block would leak in the tracker's accounting).
+	memTrackerOnFree(ptr);
 	return aligned_free(ptr);
 #endif
 
 #if VALGRIND
 	if (valgrindPrecise()) {
+		memTrackerOnFree(ptr); // mirror allocate() (see the gperftools/ASan path above)
 		return aligned_free(ptr);
 	}
 #endif
 
-#if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData();
 	if (thr.count == magazine_size) {
 		if (thr.alternate) // Two full magazines, return one
@@ -498,10 +501,6 @@ void FastAllocator<Size>::release(void* ptr) {
 	*(void**)ptr = thr.freelist;
 	// check(ptr, false);
 	thr.freelist = ptr;
-#else
-	*(void**)ptr = freelist;
-	freelist = ptr;
-#endif
 
 #if VALGRIND
 	VALGRIND_FREELIKE_BLOCK(ptr, 0);
@@ -509,6 +508,7 @@ void FastAllocator<Size>::release(void* ptr) {
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
 	recordDeallocation(ptr);
 #endif
+	memTrackerOnFree(ptr);
 }
 
 template <int Size>

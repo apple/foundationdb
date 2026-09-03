@@ -105,54 +105,50 @@ No explicit backpressure -- values accumulate in the queue. Implicit pressure: i
 
 ---
 
-## The Actor System
+## Actors and C++20 Coroutines
 
-### ACTOR Compiler
+### Coroutine Functions
 
-FDB uses a custom **C# actor compiler** (`actorcompiler.exe`) that transforms `.actor.cpp` files into standard C++. The `ACTOR` keyword marks a function as a coroutine:
+FDB's asynchronous functions use standard C++20 coroutines in `.cpp` and `.h` files. A coroutine returns a `Future<T>` and uses `co_await` to await asynchronous results:
 
 ```cpp
-ACTOR Future<int> myActor(Future<int> input) {
-    state int x = 42;           // persists across waits
-    int val = wait(input);      // suspension point
-    return val + x;
+Future<int> myActor(Future<int> input) {
+    int x = 42;
+    int val = co_await input;
+    co_return val + x;
 }
 ```
 
-The compiler:
-1. Scans for `wait()` and `waitNext()` calls
-2. Breaks the function into callback states at each suspension point
-3. Generates a C++ class inheriting from `Actor<ReturnType>` with a SAV
-4. Each `wait()` becomes a callback registration + return
-5. `state` variables are promoted to class members (persist across suspensions)
+The C++ compiler preserves parameters and local variables needed across suspension in the coroutine frame. Flow connects that frame to its existing Future/Promise and callback machinery; these asynchronous tasks are still called actors.
 
-**Key macros** (`actorcompiler.h`):
-- `ACTOR` -- marks coroutine function
-- `state` -- marks variables that survive across `wait()`
-- `wait(Future<T>)` -- suspend until Future ready, return T
-- `waitNext(FutureStream<T>)` -- suspend until next stream value
-- `choose { when(wait(a)) {...} when(wait(b)) {...} }` -- race two futures
-- `loop` -- `while(true)` alias
+**Common operations:**
+- `co_await future` -- obtain a Future's value, suspending only if it is not ready
+- `co_await stream` -- consume the next value from a `FutureStream<T>`
+- `co_return value` -- complete a `Future<T>` coroutine; use `co_return;` for `Future<Void>`
+- `co_await race(a, b)` -- await the first of several futures through `flow/CoroUtils.h`
+- `while (true)` -- repeat an asynchronous service loop
+
+See [Writing Coroutines in FoundationDB](../coroutines.md) for usage and lifetime rules.
 
 ### C++20 Coroutine Integration -- [`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)
 
-The codebase is being migrated from the custom actor compiler to C++20 native coroutines:
+Flow supplies the promise and awaiter types used by the C++ coroutine machinery:
 
-**CoroPromise<T>** ([`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)`:737-844`):
+**CoroPromise<T, ...>** ([`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)):
 - The `promise_type` for `Future<T>` coroutines
 - Embeds a `CoroActor<T>` which inherits from `Actor<T>` (which inherits from SAV)
 - `get_return_object()` returns `Future<T>` backed by the coroutine's SAV
 - `initial_suspend()` returns `suspend_never` (eager start)
 - `await_transform()` overloads convert `Future<U>` into `AwaitableFuture`
 
-**AwaitableFuture** ([`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)`:453-534`):
+**AwaitableFuture** ([`CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h)):
 - The awaiter type for `co_await Future<T>`
 - `await_ready()` -- checks if future is ready or coroutine cancelled
 - `await_suspend()` -- registers callback with the future's SAV
 - `await_resume()` -- extracts value or throws error
 - Inherits from `Callback<T>` so it can be inserted into SAV's callback chain
 
-**Cancellation:** `CoroActor::cancel()` sets `ACTOR_WAIT_STATE_CANCELLED` and resumes the coroutine, which checks the flag in `await_ready()` and throws `actor_cancelled()`.
+**Cancellation:** For an ordinary cancellable coroutine, `CoroActor::cancel()` sets `ACTOR_WAIT_STATE_CANCELLED` and resumes the coroutine if it is suspended. The awaiter's resume path throws `actor_cancelled()` into the coroutine. If cancellation is already set when a new await begins, the readiness check routes directly to that error path.
 
 ---
 
@@ -310,7 +306,7 @@ TraceEvent("MyEvent", self->dbgid)
 
 ---
 
-## Generic Actors -- [`genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h)
+## Generic Actors -- [`genericactors.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.h)
 
 Key utility actors:
 
@@ -328,7 +324,7 @@ Key utility actors:
 | `holdWhile(object, Future<T>)` | Keep object alive until future resolves |
 | `uncancellable(Future<T>)` | Prevent cancellation |
 
-**AsyncVar<T>** ([`genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h)`:753-785`):
+**AsyncVar<T>** ([`genericactors.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.h)`:753-785`):
 - Reactive variable: holds a value, notifies on change
 - `get()` -- current value
 - `onChange()` -- returns `Future<Void>` that fires on next change
@@ -342,12 +338,12 @@ Key utility actors:
 ### Actor Execution Cycle
 
 ```
-1. Actor created → SAV allocated, initial code runs until first wait()
-2. wait(future) → registers callback on future's SAV, returns to event loop
+1. Coroutine called → frame and SAV created, code runs eagerly until it suspends or completes
+2. co_await pendingFuture → registers callback on the future's SAV and suspends
 3. Event fires (network data, timer, another actor sends) → SAV::send(value)
 4. Callback chain walked → actor's callback called
-5. Actor resumes from wait point, runs until next wait() or return
-6. return value → SAV::send(value) on actor's own SAV → caller's callback fires
+5. Coroutine resumes from suspension, runs until another pending await or completion
+6. co_return value → completes the coroutine's own SAV → caller's callback fires
 ```
 
 ### Memory Flow
@@ -370,9 +366,9 @@ Key utility actors:
 | [`flow/include/flow/Arena.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Arena.h) | Arena, StringRef, Standalone, VectorRef |
 | [`flow/include/flow/Error.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/Error.h) | Error class and error code definitions |
 | [`flow/include/flow/CoroutinesImpl.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroutinesImpl.h) | C++20 coroutine integration (CoroPromise, AwaitableFuture) |
-| [`flow/include/flow/genericactors.actor.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.actor.h) | Utility actors (delay, timeout, waitForAll, AsyncVar) |
+| [`flow/include/flow/genericactors.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/genericactors.h) | Utility actors (delay, timeout, waitForAll, AsyncVar) |
 | [`flow/include/flow/serialize.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/serialize.h) | Serialization framework |
 | `flow/include/flow/FastAlloc.h` | Thread-local pool allocator |
 | [`flow/Net2.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Net2.cpp) | Real event loop (Boost.ASIO based) |
 | [`flow/Trace.cpp`](https://github.com/apple/foundationdb/blob/main/flow/Trace.cpp) | Structured event tracing |
-| `flow/include/flow/actorcompiler.h` | ACTOR/wait/state macro definitions |
+| [`flow/include/flow/CoroUtils.h`](https://github.com/apple/foundationdb/blob/main/flow/include/flow/CoroUtils.h) | Coroutine selection helpers (Choose, race) |

@@ -120,6 +120,7 @@ void populateVersionVector(VersionVector& vv,
 	}
 
 	// Populate ids.
+	ids.reserve(tagCount > 0 ? tagCount : 0);
 	for (int i = 0; i < tagCount; i++) {
 		// Some of the ids could be duplicates, that's fine.
 		ids.push_back(deterministicRandom()->randomInt(0, maxTagId));

@@ -27,7 +27,7 @@
 #include <string>
 #include <vector>
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/tester/KnobKeyValuePairs.h"
 #include "fdbserver/core/TesterInterface.h"

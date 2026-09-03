@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/TesterInterface.h"

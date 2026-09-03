@@ -323,6 +323,15 @@ Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag);
 KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId);
 CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key);
 
+// "\xff\x02/cdc/tagOwner/[[Tag]]" := "[[CDCStreamId]]"
+// Derived lookup hint, not authoritative ownership. Validate the stream is active
+// on this tag and read its durable proxy assignment in the same transaction.
+extern const KeyRangeRef cdcTagOwnerKeys;
+Key cdcTagOwnerKeyFor(Tag tag);
+Tag decodeCDCTagOwnerKey(KeyRef const& key);
+Value cdcTagOwnerValue(CDCStreamId streamId);
+CDCStreamId decodeCDCTagOwnerValue(ValueRef const& value);
+
 // Native CDC acknowledgement progress is regular storage-server-backed system data.
 // "\xff\x02/cdc/minVersion/[[CDCStreamId]]" := "[[Version]]"
 // The initial value is versionstamped at stream registration commit.
@@ -778,6 +787,12 @@ extern const KeyRangeRef monitorConfKeys;
 
 extern const KeyRef healthyZoneKey;
 extern const StringRef ignoreSSFailuresZoneString;
+// Stores the version at which the current healthyZoneKey window started. Written and read only by
+// the Data Distributor (fdbserver/datadistributor/DDTeamCollection.actor.cpp), so a DD recruited
+// mid-maintenance can recover the true start version. Without persisting this information the
+// true start time of the maintenance mode would be lost when a DD is recruited during maintenance
+// mode. To preserve the current semantics of healthyZoneKey this additional key was added.
+extern const KeyRef healthyZoneStartVersionKey;
 extern const KeyRef rebalanceDDIgnoreKey;
 namespace DDIgnore {
 enum IgnoreType : uint8_t { NONE = 0, REBALANCE_DISK = 1, REBALANCE_READ = 2, ALL = 3 };

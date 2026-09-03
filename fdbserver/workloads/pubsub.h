@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 
 /*
  * ///////////////

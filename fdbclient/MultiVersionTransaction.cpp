@@ -28,6 +28,7 @@
 #include <sanitizer/lsan_interface.h>
 #endif
 
+#include "fdbclient/ClientOptionValidation.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.h"
@@ -47,7 +48,7 @@
 #include <fcntl.h>
 #endif // __unixish__
 
-#ifdef FDBCLIENT_NATIVEAPI_ACTOR_H
+#ifdef FDBCLIENT_NATIVEAPI_H
 #error "MVC should not depend on the Native API"
 #endif
 
@@ -1412,30 +1413,6 @@ Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, double
 	tsav->trySendError(transaction_timed_out());
 }
 
-namespace {
-
-void validateOptionValuePresent(Optional<StringRef> value) {
-	if (!value.present()) {
-		throw invalid_option_value();
-	}
-}
-
-int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
-	validateOptionValuePresent(value);
-	if (value.get().size() != 8) {
-		throw invalid_option_value();
-	}
-
-	int64_t passed = *((int64_t*)(value.get().begin()));
-	if (passed > maxValue || passed < minValue) {
-		throw invalid_option_value();
-	}
-
-	return passed;
-}
-
-} // namespace
-
 // Configure a timeout based on the options set for this transaction. This timeout only applies
 // if we don't have an underlying database object to connect with.
 void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
@@ -2286,9 +2263,9 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 			char tempName[MAX_TMP_NAME_LENGTH];
 			snprintf(tempName, MAX_TMP_NAME_LENGTH, "%s/%s-XXXXXX", tmpDir.c_str(), filename.c_str());
 			int tempFd = mkstemp(tempName);
-			int fd;
+			int fd = open(path.c_str(), O_RDONLY);
 
-			if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
+			if (fd == -1) {
 				TraceEvent("ExternalClientNotFound").detail("LibraryPath", path);
 				throw file_not_found();
 			}

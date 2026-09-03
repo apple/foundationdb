@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 // This workload validates the MAX_GRV_QUEUE_DELAY transaction option end-to-end.
 // The test file lowers GRV ratekeeper limits so a burst of uncached GRV requests

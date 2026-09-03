@@ -27,16 +27,17 @@
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/IRandom.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include <compare>
 #include <vector>
 #include <unordered_map>
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/ProxyLoadBalanceMetrics.h"
 #include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbrpc/QueueModel.h"
@@ -72,8 +73,8 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
 };
 
-using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
-using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
+using CommitProxyInfo = ModelInterface<CommitProxyInterface, ProxyCpuMetric>;
+using GrvProxyInfo = ModelInterface<GrvProxyInterface, ProxyGrvMetric>;
 
 class ClientTagThrottleData : NonCopyable {
 private:
@@ -367,7 +368,7 @@ public:
 	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
 	UID proxiesLastChange;
 	LocalityData clientLocality;
-	QueueModel queueModel;
+	StorageServerQueueModel queueModel;
 	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::False };
 
 	struct VersionRequest {

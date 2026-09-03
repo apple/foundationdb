@@ -372,7 +372,7 @@ Future<Void> serverPeekParallelGetMoreImpl(ServerPeekCursor* self, TaskPriority 
 				//
 				// A cursor for a log router can be delayed indefinitely during a network partition, so only fail
 				// simulation tests sufficiently far after we finish simulating network partitions.
-				CODE_PROBE(e.code() == error_code_timed_out, "peek cursor timed out");
+				CODE_PROBE(e.code() == error_code_timed_out, "peek cursor timed out", probe::decoration::rare);
 				if (g_network->isSimulated() && now() >= g_simulator->connectionFailureEnableTime +
 				                                             FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS +
 				                                             SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME) {
@@ -824,6 +824,7 @@ MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ServerPeekCursor>> cons
 
 Reference<IReplayPeekCursor> MergedPeekCursor::cloneNoMore() {
 	std::vector<Reference<ServerPeekCursor>> cursors;
+	cursors.reserve(serverCursors.size());
 	for (const auto& it : serverCursors) {
 		cursors.push_back(it->cloneServerNoMore());
 	}

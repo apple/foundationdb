@@ -20,9 +20,9 @@
 
 #include <vector>
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/tester/workloads.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 // If the log->storage propagation delay is longer than 1 second, then it's likely that our read
 // will see a `future_version` error from the storage server.  We need to retry the read until

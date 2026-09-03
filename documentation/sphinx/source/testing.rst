@@ -10,7 +10,7 @@ Rigorous testing is central to our engineering process. The :doc:`features of ou
 Simulation
 ==========
 
-Simulation is a powerful tool for testing system correctness. Our simulation technology, called Simulation, is enabled by and tightly integrated with :doc:`flow`, our programming language for actor-based concurrency. In addition to generating efficient production code, Flow works with Simulation for simulated execution.
+Simulation is a powerful tool for testing system correctness. Our simulation technology, called Simulation, is enabled by and tightly integrated with :doc:`flow`, our asynchronous runtime for C++ coroutines. Flow supports both production execution and deterministic simulated execution.
 
 The major goal of Simulation is to make sure that we find and diagnose issues in simulation rather than the real world. Simulation runs tens of thousands of simulations every night, each one simulating large numbers of component failures. Based on the volume of tests that we run and the increased intensity of the failures in our scenarios, we estimate that we have run the equivalent of roughly one trillion CPU-hours of simulation on FoundationDB.
 
@@ -35,7 +35,7 @@ Several standalone unit-test binaries can also run their tests under Simulation.
 
    ./bin/fdbclient_test --simulation
 
-When a binary is run in simulation mode without an explicit test filter, tests whose names start with ``noSim/`` are skipped. The ``flow_test`` target does not support this option because it is not linked with simulator support.
+Without an explicit test filter, simulation mode skips ``noSim/...``, incompatible ``/fdbrpc/grpc``, and opt-in performance or long-running correctness tests. Normal mode skips standalone-incompatible gRPC and simulation-only HTTP-server, mock-DNS, external-client, and file-shutdown tests, tests requiring an external backup URL, and opt-in performance or long-running correctness tests. An explicit ``--filter`` can still select any of these tests. The ``flow_test`` target does not support simulation because it is not linked with simulator support.
 
 Performance testing with Circus
 ===============================

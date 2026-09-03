@@ -23,11 +23,12 @@
 
 #include "fmt/format.h"
 #include "fdbrpc/genericactors.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/WorkerEvents.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 
 #include "ClusterHealthIFactor.h"
 #include "ClusterHealthMonitor.h"

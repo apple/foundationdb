@@ -54,7 +54,7 @@
 #include <ctime>
 #include <climits>
 #include "flow/IAsyncFile.h"
-#include "flow/genericactors.actor.h"
+#include "flow/genericactors.h"
 #include "flow/Hash3.h"
 #include "flow/xxhash.h"
 
@@ -71,9 +71,21 @@ std::atomic<int> g_bulkDumpTaskCompleteCount(0);
 std::atomic<int> g_bulkLoadRestoreTaskCompleteCount(0);
 
 // Helper function to monitor BulkDump job completion
-// Returns true if job completed successfully, false if timed out
+// Returns true if the job completed, false if it stopped making progress for timeoutDuration.
+//
+// The budget is a no-progress window, not a total duration. A dump advances one bounded slice per
+// scheduling round (the SS returns after SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST batches and the
+// remainder is re-dispatched on a later round), so total time scales with the size of the range and
+// with how finely it is sharded -- not with the health of the job. A wall-clock budget therefore fails
+// dumps that are advancing perfectly well, while still not catching a job that is truly wedged sooner
+// than the budget. Measuring absence of progress separates the two.
 Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeoutDuration, double pollInterval) {
-	double timeoutStart = now();
+	double lastProgressTime = now();
+	size_t lastCompleteCount = 0;
+	// Counting completed ranges walks the job's bulkdump metadata, so it must be sampled far more
+	// coarsely than the liveness poll.
+	double progressCheckInterval = std::max(pollInterval, timeoutDuration / 10);
+	double lastProgressCheck = now();
 	Transaction tr(cx);
 
 	while (true) {
@@ -86,8 +98,26 @@ Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeout
 				co_return true; // Job completed successfully
 			}
 
-			if (now() - timeoutStart > timeoutDuration) {
-				co_return false; // Timed out
+			if (now() - lastProgressCheck >= progressCheckInterval) {
+				lastProgressCheck = now();
+				// A sample that fails carries no information: leave the window running rather than
+				// letting a transient read error either fail the backup or extend its deadline.
+				try {
+					size_t completeCount = co_await getBulkDumpCompleteTaskCount(cx, currentJob.get().getJobRange());
+					if (completeCount > lastCompleteCount) {
+						lastCompleteCount = completeCount;
+						lastProgressTime = now();
+					}
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw;
+					}
+					TraceEvent(SevWarn, "BulkDumpProgressCheckFailed").error(e).detail("BulkDumpJobId", jobId);
+				}
+			}
+
+			if (now() - lastProgressTime > timeoutDuration) {
+				co_return false; // No progress within the window
 			}
 
 			co_await delay(pollInterval);
@@ -242,6 +272,7 @@ Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap* tagsMap,
 	Key prefix = tagsMap->prefix; // Copying it here as tagsMap lifetime is not tied to this actor
 	TagMap::RangeResultType tagPairs = co_await tagsMap->getRange(tr, std::string(), {}, 1e6, snapshot);
 	std::vector<KeyBackedTag> results;
+	results.reserve(tagPairs.results.size());
 	for (auto& p : tagPairs.results)
 		results.push_back(KeyBackedTag(p.first, prefix));
 	co_return results;
@@ -258,6 +289,7 @@ Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr
 	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
 
 	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
+	futures.reserve(tags.size());
 	for (const auto& tag : tags) {
 		futures.push_back(tag.get(tr));
 	}
@@ -288,6 +320,7 @@ Future<bool> anyRangePartitionedBackupRunning(Reference<ReadYourWritesTransactio
 	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
 
 	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
+	futures.reserve(tags.size());
 	for (const auto& tag : tags) {
 		futures.push_back(tag.get(tr));
 	}
@@ -365,18 +398,13 @@ public:
 	KeyBackedBinaryValue<int64_t> bulkLoadTotalTasks() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
-		return getRestoreRangesOrDefault_impl(this, tr);
-	}
-
-	static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig* self,
-	                                                                    Reference<ReadYourWritesTransaction> tr) {
 		std::vector<KeyRange> ranges;
 		int batchSize = buggify() ? 1 : CLIENT_KNOBS->RESTORE_RANGES_READ_BATCH;
 		Optional<KeyRange> begin;
 		Arena arena;
 		while (true) {
 			KeyBackedSet<KeyRange>::RangeResultType rangeResult =
-			    co_await self->restoreRangeSet().getRange(tr, begin, {}, batchSize);
+			    co_await restoreRangeSet().getRange(tr, begin, {}, batchSize);
 			ranges.insert(ranges.end(), rangeResult.results.begin(), rangeResult.results.end());
 			if (!rangeResult.more) {
 				break;
@@ -387,10 +415,10 @@ public:
 
 		// fall back to original fields if the new field is empty
 		if (ranges.empty()) {
-			std::vector<KeyRange> _ranges = co_await self->restoreRanges().getD(tr);
+			std::vector<KeyRange> _ranges = co_await restoreRanges().getD(tr);
 			ranges = _ranges;
 			if (ranges.empty()) {
-				KeyRange range = co_await self->restoreRange().getD(tr);
+				KeyRange range = co_await restoreRange().getD(tr);
 				ranges.push_back(range);
 			}
 		}
@@ -541,19 +569,15 @@ public:
 		           });
 	}
 
-	static Future<Version> getCurrentVersion_impl(RestoreConfig* self, Reference<ReadYourWritesTransaction> tr) {
-		ERestoreState status = co_await self->stateEnum().getD(tr);
+	Future<Version> getCurrentVersion(Reference<ReadYourWritesTransaction> tr) {
+		ERestoreState status = co_await stateEnum().getD(tr);
 		Version version = -1;
 		if (status == ERestoreState::RUNNING) {
-			version = co_await self->getApplyBeginVersion(tr);
+			version = co_await getApplyBeginVersion(tr);
 		} else if (status == ERestoreState::COMPLETED) {
-			version = co_await self->restoreVersion().getD(tr);
+			version = co_await restoreVersion().getD(tr);
 		}
 		co_return version;
-	}
-
-	Future<Version> getCurrentVersion(Reference<ReadYourWritesTransaction> tr) {
-		return getCurrentVersion_impl(this, tr);
 	}
 
 	static Future<std::string> getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
@@ -630,8 +654,48 @@ Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulk
 	co_return std::make_tuple(completedTasks, submittedTasks, triggeredTasks, runningTasks, totalTasks, completedBytes);
 }
 
+// Record a terminal bulkload-restore failure in the restore's own state and abort it.
+//
+// ABORTED is what makes the failure stick: throwing alone leaves the restore retryable, so the retry
+// re-reads the same finished job and reaches the same terminal condition. ABORTED also puts the restore
+// outside isRunnable(), which makes abortRestore() return before reaching its unlockDatabase() call -- so
+// this must release the lock itself, or a failed restore leaves the database locked with no route out
+// through the restore API. The commit retries because an unpersisted ABORTED loses both properties.
+Future<Void> abortBulkLoadRestore(Database cx, RestoreConfig restore, std::string message) {
+	co_await restore.logError(cx, restore_bulkload_failed(), message);
+	Reference<ReadYourWritesTransaction> abortTr(new ReadYourWritesTransaction(cx));
+	while (true) {
+		Error err;
+		try {
+			abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			abortTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			restore.stateEnum().set(abortTr, ERestoreState::ABORTED);
+			restore.clearApplyMutationsKeys(abortTr);
+			bool unlockDB = co_await restore.unlockDBAfterRestore().getD(abortTr, Snapshot::False, true);
+			if (unlockDB) {
+				co_await unlockDatabase(abortTr, restore.getUid());
+			}
+			co_await abortTr->commit();
+			co_return;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			err = e;
+		}
+		co_await abortTr->onError(err);
+	}
+}
+
 // Monitor BulkLoad job completion and update restore progress counters
 // restoreUid is used to update the RestoreConfig progress
+//
+// Returns false when the job stops making progress for timeoutDuration, not when it has simply been
+// running that long. A restore's duration is a function of how much data it moves, so a wall-clock budget
+// aborts large restores that are advancing normally -- BULKLOAD_JOB_TIMEOUT's own comment concedes as much
+// ("large DBs may take days" against a 24 hour default). The task counters this loop already maintains for
+// the status display are exactly the progress signal needed, so measuring absence of progress costs
+// nothing extra here.
 Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
                                                       UID jobId,
                                                       UID restoreUid,
@@ -639,7 +703,9 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
                                                       double timeoutDuration,
                                                       double pollInterval,
                                                       bool lockAware) {
-	double timeoutStart = now();
+	double lastProgressTime = now();
+	int64_t lastCompletedTasks = -1;
+	int64_t lastCompletedBytes = -1;
 	RestoreConfig restore(restoreUid);
 
 	while (true) {
@@ -647,12 +713,91 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 		bool stillRunning = currentJob.present() && currentJob.get().getJobId() == jobId;
 
 		if (!stillRunning) {
+			// The job's live metadata is gone, which says the job manager finished walking the job
+			// range -- not that every task succeeded. A job that ends with a task in Error is
+			// archived to history in the same transaction that clears the live metadata, so treating
+			// "no longer running" as success reports a restore complete while part of the key space
+			// was never ingested. Consult the archived phase before declaring success.
+			// lockAware: the restore holds the database lock while it runs, so a plain read here
+			// retries on database_locked until its transaction gives up, and the caller waits forever.
+			std::vector<BulkLoadJobState> history;
+			Optional<Error> historyReadError;
+			try {
+				history = co_await getBulkLoadJobFromHistory(cx, lockAware);
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				historyReadError = e;
+			}
+			if (historyReadError.present()) {
+				// Fail closed. The tempting argument is that every task reported done, so the restore is
+				// very likely fine -- but the task counters reporting completion while a task's range was
+				// never ingested is the exact failure this check exists to catch, so they cannot be the
+				// grounds for skipping it. getBulkLoadJobFromHistory retries every retryable error
+				// indefinitely, so reaching here means a non-retryable one, not a transient blip: the
+				// least safe moment to assume success.
+				//
+				// The cost is real and is why this is logged loudly rather than quietly: a restore whose
+				// data is intact can be failed because a system-keyspace read was unavailable. Retrying
+				// the restore is the remedy.
+				TraceEvent(SevWarnAlways, "BulkLoadRestoreJobOutcomeUnknown")
+				    .error(historyReadError.get())
+				    .detail("RestoreUID", restoreUid)
+				    .detail("BulkLoadJobId", jobId)
+				    .detail("Reason",
+				            "Could not read the archived bulkload job phase, so the restore's outcome is "
+				            "unverifiable; failing closed rather than reporting success")
+				    .detail("Cost", "A restore whose data is intact may be failed by this; retry the restore")
+				    .detail("TasksReportedComplete", lastCompletedTasks)
+				    .detail("BytesReportedComplete", lastCompletedBytes);
+				co_await abortBulkLoadRestore(
+				    cx,
+				    restore,
+				    "BulkLoad restore failed: the archived bulkload job phase could not be read, so the "
+				    "restore's outcome could not be verified");
+				throw restore_bulkload_failed();
+			}
+			// Complete is the only phase that attests every task was ingested: the job manager sets it
+			// via setCompletePhase() only after walking the whole job range with no task in Error.
+			// Error and Cancelled both reach history with the live metadata already cleared -- a cancel
+			// wipes job and task metadata in the same transaction that archives -- so anything other
+			// than Complete, including a job missing from history altogether, leaves part of the key
+			// space unaccounted for and must fail the restore rather than report success.
+			Optional<BulkLoadJobPhase> archivedPhase;
+			for (const auto& job : history) {
+				if (job.getJobId() == jobId) {
+					archivedPhase = job.getPhase();
+					break;
+				}
+			}
+			if (!archivedPhase.present() || archivedPhase.get() != BulkLoadJobPhase::Complete) {
+				// A task that could not be loaded is a property of this restore, not a defect in the
+				// code, so this is not SevError: the restore failing is the signal, and a SevError
+				// would additionally fail any simulation that provokes the condition.
+				TraceEvent(SevWarnAlways, "BulkLoadRestoreJobDidNotComplete")
+				    .detail("RestoreUID", restoreUid)
+				    .detail("BulkLoadJobId", jobId)
+				    .detail("JobPhase",
+				            archivedPhase.present() ? convertBulkLoadJobPhaseToString(archivedPhase.get())
+				                                    : "AbsentFromHistory")
+				    .detail("TasksReportedComplete", lastCompletedTasks)
+				    .detail("BytesReportedComplete", lastCompletedBytes);
+				co_await abortBulkLoadRestore(
+				    cx, restore, "BulkLoad restore failed: the bulkload job did not complete");
+				throw restore_bulkload_failed();
+			}
 			co_return true;
 		}
 
 		// Update progress based on completed bulkload tasks
 		try {
 			auto [completed, submitted, triggered, running, total, bytes] = co_await getBulkLoadTaskProgress(cx, jobId);
+			if (completed > lastCompletedTasks || bytes > lastCompletedBytes) {
+				lastCompletedTasks = completed;
+				lastCompletedBytes = bytes;
+				lastProgressTime = now();
+			}
 			if (total > 0) {
 				// For bulkload restores, fileBlockCount is 0, so use task count as "blocks"
 				// This provides meaningful progress tracking for the restore status display
@@ -700,8 +845,8 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 			TraceEvent(SevWarn, "BulkLoadRestoreProgressError").error(e).detail("JobId", jobId);
 		}
 
-		if (now() - timeoutStart > timeoutDuration) {
-			co_return false; // Timed out
+		if (now() - lastProgressTime > timeoutDuration) {
+			co_return false; // No progress within the window
 		}
 
 		co_await delay(pollInterval);
@@ -3683,12 +3828,27 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				                                                       CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT,
 				                                                       5.0); // Poll every 5 seconds
 
+				// A bulkdump that did not finish leaves no keyspace snapshot, and therefore no bulkDumpJobId
+				// for a bulkload restore to locate its data. Reporting the backup as successful in that
+				// state claims delivery of something that was asked for and not produced: the caller finds
+				// out only much later, when a restore aborts with BulkLoadRestoreNoBulkDumpJobId and
+				// appears to blame the restore for a backup-side omission hours earlier.
+				//
+				// This also restores symmetry the path had lost. The dataset-completeness check below fails
+				// the backup for the same class of problem, but it sits inside the `completed` branch and so
+				// never ran on this route -- a timeout was the one way to skip every check and still report
+				// success. Mode restoration needs no handling here; the catch below already does it on the
+				// error path.
 				if (!completed) {
-					TraceEvent(SevWarn, "BulkDumpTaskTimeout")
+					TraceEvent(SevError, "BulkDumpTaskTimeout")
 					    .detail("BackupUID", config.getUid())
 					    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
-					    .detail("TimeoutDuration", 300.0);
+					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT)
+					    .detail("Reason",
+					            "BulkDump made no progress within the timeout; backup would not be "
+					            "bulkload-restorable");
 					Params.timeoutOccurred().set(task, true);
+					throw backup_error();
 				}
 
 				TraceEvent("BulkDumpTaskComplete")
@@ -3719,6 +3879,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 
 					// Build beginEndKeys from backup ranges
 					std::vector<std::pair<Key, Key>> beginEndKeys;
+					beginEndKeys.reserve(backupRanges.size());
 					for (const auto& range : backupRanges) {
 						beginEndKeys.emplace_back(range.begin, range.end);
 					}
@@ -4298,7 +4459,8 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					TraceEvent(SevWarn, "BulkLoadRestoreTimeout")
 					    .detail("RestoreUID", restore.getUid())
 					    .detail("BulkLoadJobId", bulkLoadJob.getJobId())
-					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKLOAD_JOB_TIMEOUT);
+					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKLOAD_JOB_TIMEOUT)
+					    .detail("Reason", "BulkLoad restore made no progress within the timeout");
 					// Restore original BulkLoad mode before throwing
 					if (originalBulkLoadMode != 1) {
 						co_await setBulkLoadMode(cx, originalBulkLoadMode);
@@ -6396,7 +6558,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreVersion", restoreVersion)
 				    .detail("Dest", destVersion);
 				if (destVersion <= restoreVersion) {
-					CODE_PROBE(true, "Forcing restored cluster to higher version");
+					CODE_PROBE(true, "Forcing restored cluster to higher version", probe::decoration::rare);
 					tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion + 1, Unversioned()));
 					co_await tr->commit();
 					tr->reset();

@@ -207,6 +207,27 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                      "counter":0,
                      "roughness":0.0
                   },
+                  "active_watches":0,
+                  "total_watches":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "triggered_watches":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "timed_out_watches":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
+                  "errored_watches":{
+                     "hz":0.0,
+                     "counter":0,
+                     "roughness":0.0
+                  },
                   "mutation_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -289,6 +310,102 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                      "p99":0.0,
                      "p99.9":0.0
                   },
+                  "commit_batch_transactions":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_batch_bytes":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_batching_waiting":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_preresolution_latency":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_resolution_latency":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_postresolution_latency":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_tlog_logging_latency":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_reply_latency":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
                   "grv_latency_bands":{
                      "$map": 1
                   },
@@ -328,7 +445,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "type":"x",
                   "name":{
                      "$enum":[
-                        "file_open_error",
                         "incorrect_cluster_file_contents",
                         "trace_log_file_write_error",
                         "trace_log_could_not_create_file",

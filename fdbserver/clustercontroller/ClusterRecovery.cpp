@@ -1006,7 +1006,7 @@ Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<L
 			                       std::vector<UID>());
 		} else {
 			// The cluster should enter the accepting commits phase soon, and then we will register again
-			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet", probe::decoration::rare);
+			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet");
 		}
 	}
 }
@@ -1165,8 +1165,8 @@ Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 		                                // this timeout monitor. Triggering more timeouts can make the situation worse.
 	}
 
-	// Calculate timeout with exponential backoff
-	const double scalingFactor = std::pow(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR, unfinishedRecoveries);
+	// The current attempt is still in progress; only preceding attempts contribute to the backoff.
+	const double scalingFactor = std::pow(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR, unfinishedRecoveries - 1);
 	const double scaledTimeout = std::min(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT * scalingFactor,
 	                                      SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT);
 

@@ -22,7 +22,7 @@
 
 #include <deque>
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "flow/flow.h"
 #include "flow/ActorCollection.h"
 
@@ -61,7 +61,6 @@ public:
 
 	void startReading(Database cx);
 	Future<Void> getNext(Database cx);
-	static Future<Void> getNext_impl(PipelinedReader* self, Database cx);
 
 	void release() { readerLimit.release(); }
 
@@ -109,15 +108,14 @@ public:
 	                                                   Key beginKey,
 	                                                   unsigned pd) {
 		Reference<MutationLogReader> self(new MutationLogReader(cx, bv, ev, uid, beginKey, pd));
-		co_await self->initializePQ(self.getPtr());
+		co_await self->initializePQ();
 		co_return self;
 	}
 
 	Future<Standalone<RangeResultRef>> getNext();
 
 private:
-	static Future<Void> initializePQ(MutationLogReader* self);
-	static Future<Standalone<RangeResultRef>> getNext_impl(MutationLogReader* self);
+	Future<Void> initializePQ();
 
 	std::vector<std::unique_ptr<mutation_log_reader::PipelinedReader>> pipelinedReaders;
 	std::priority_queue<mutation_log_reader::RangeResultBlock> priorityQueue;
