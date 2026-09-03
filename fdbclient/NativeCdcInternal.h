@@ -23,6 +23,41 @@
 #pragma once
 
 #include "fdbclient/NativeCdc.h"
+#include "fdbclient/SystemData.h"
+
+// A durable snapshot used to fence a sampled balancing decision.
+struct NativeCdcTagState {
+	CDCStreamId streamId = 0;
+	KeyRange keys;
+	Key historyKey;
+	CDCTagHistoryEntry assignment;
+	UID proxyId;
+	Version minVersion = invalidVersion;
+	bool pending = false;
+};
+
+// An absent result means the bounded snapshot is incomplete; it must not be used
+// as an empty or zero-load configuration.
+Future<Optional<NativeCdcTagState>> readNativeCdcTagState(Transaction* tr, CDCStreamId streamId);
+Future<Optional<std::vector<NativeCdcTagState>>> readNativeCdcTagStates(Transaction* tr, int maxStreams);
+// These helpers revalidate the durable identity and prepare mutations without
+// committing. The caller must fence its controller ownership in this transaction.
+Future<bool> retagNativeCdcStream(Transaction* tr, NativeCdcTagState expected, Tag destination);
+Future<bool> finishNativeCdcRetag(Transaction* tr, NativeCdcTagState expected);
+
+struct NativeCdcRegistrationResult {
+	CDCStreamId streamId;
+	// Describes only mutations prepared by this helper, not unrelated caller mutations.
+	bool requiresCommit;
+};
+
+// Prepares one registration without committing or retrying. The caller sets LOCK_AWARE and ACCESS_SYSTEM_KEYS
+// and owns commit and retry handling. Transaction does not read its own writes: prepare at most one registration
+// per transaction, without earlier mutations to the CDC metadata this operation reads.
+Future<NativeCdcRegistrationResult> prepareNativeCdcStreamRegistration(Transaction* tr,
+                                                                       Key name,
+                                                                       KeyRange keys,
+                                                                       UID proxyId);
 
 // Durable metadata operations used by CDC server roles. Registration is
 // feature gated; drain and cleanup operations remain available for streams

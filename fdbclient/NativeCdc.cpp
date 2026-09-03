@@ -56,6 +56,7 @@ class NativeCdcIdentifierAllocator {
 	bool sawStream = false;
 	CDCStreamId maxStreamId = 0;
 	std::unordered_map<CDCTagId, uint32_t> tagStreamCounts;
+	std::unordered_map<CDCTagId, int64_t> tagWriteRates;
 
 public:
 	void observeStreamId(CDCStreamId streamId) {
@@ -66,6 +67,14 @@ public:
 	void observeTag(Tag tag) {
 		ASSERT_WE_THINK(tag.locality == tagLocalityCDC);
 		++tagStreamCounts[tag.id];
+	}
+
+	void observeTagLoad(Tag tag, CDCTagLoadSample const& sample, ValueRef generation, Version readVersion) {
+		if (tag.locality == tagLocalityCDC && sample.assignmentChange == generation && sample.sampleVersion >= 0 &&
+		    sample.sampleVersion <= readVersion && sample.validThrough >= readVersion &&
+		    sample.bytesWrittenPerKSecond >= 0) {
+			tagWriteRates[tag.id] = sample.bytesWrittenPerKSecond;
+		}
 	}
 
 	bool hasStreams(Tag tag) const { return tagStreamCounts.contains(tag.id); }
@@ -79,18 +88,24 @@ public:
 		if (!validNativeCdcTagCount(tagCount)) {
 			throw invalid_option_value();
 		}
+		const bool completeLoad = !tagStreamCounts.empty() &&
+		                          std::all_of(tagStreamCounts.begin(), tagStreamCounts.end(), [&](auto const& entry) {
+			                          return entry.first >= tagCount || tagWriteRates.contains(entry.first);
+		                          });
 		uint32_t leastStreams = std::numeric_limits<uint32_t>::max();
+		int64_t leastWriteRate = std::numeric_limits<int64_t>::max();
 		CDCTagId selectedTagId = 0;
-		// TODO: Use data-distributor-observed per-tag write throughput to rebalance CDC tags, including
-		// migrating active streams with versioned tag-history assignments.
 		for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(tagCount); ++tagId) {
 			auto count = tagStreamCounts.find(static_cast<CDCTagId>(tagId));
 			const uint32_t streamCount = count == tagStreamCounts.end() ? 0 : count->second;
-			if (streamCount < leastStreams) {
+			const int64_t writeRate = completeLoad && streamCount > 0 ? tagWriteRates.at(tagId) : 0;
+			if (writeRate < leastWriteRate || (writeRate == leastWriteRate && streamCount < leastStreams)) {
+				leastWriteRate = writeRate;
 				leastStreams = streamCount;
 				selectedTagId = static_cast<CDCTagId>(tagId);
 			}
 		}
+		CODE_PROBE(completeLoad, "Native CDC registration places streams using fresh producer throughput");
 		return { streamId, Tag(tagLocalityCDC, selectedTagId) };
 	}
 };
@@ -237,6 +252,54 @@ Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAlloca
 	for (const auto& tagAssignment : currentTags) {
 		allocator->observeTag(tagAssignment.second);
 	}
+	if (!currentTags.empty()) {
+		const Value generation = (co_await tr->get(cdcProxyAssignmentChangeKey)).orDefault(Value());
+		const Version readVersion = co_await tr->getReadVersion();
+		begin = cdcTagLoadKeys.begin;
+		while (begin < cdcTagLoadKeys.end) {
+			RangeResult samples = co_await tr->getRange(KeyRangeRef(begin, cdcTagLoadKeys.end), CLIENT_KNOBS->TOO_MANY);
+			for (const auto& sample : samples) {
+				allocator->observeTagLoad(
+				    decodeCDCTagLoadKey(sample.key), decodeCDCTagLoadValue(sample.value), generation, readVersion);
+			}
+			if (!samples.more) {
+				break;
+			}
+			begin = keyAfter(samples.back().key);
+		}
+	}
+}
+
+Future<Optional<NativeCdcTagState>> readNativeCdcTagStateImpl(Transaction* tr, CDCStreamId streamId) {
+	Future<Optional<Value>> keysFuture = tr->get(cdcStreamKeyFor(streamId));
+	Future<Optional<Value>> minimumFuture = tr->get(cdcMinVersionKeyFor(streamId));
+	Future<Optional<UID>> ownerFuture = getNativeCdcProxyAssignment(tr, streamId);
+	Future<RangeResult> historyFuture =
+	    tr->getRange(cdcTagHistoryRangeFor(streamId), 3, Snapshot::False, Reverse::True);
+	const Optional<Value> keys = co_await keysFuture;
+	const Optional<Value> minimum = co_await minimumFuture;
+	const Optional<UID> owner = co_await ownerFuture;
+	const RangeResult history = co_await historyFuture;
+	if (!keys.present() || !minimum.present() || !owner.present() || history.empty() || history.more ||
+	    history.size() > 2) {
+		co_return Optional<NativeCdcTagState>();
+	}
+	NativeCdcTagState state;
+	state.streamId = streamId;
+	state.keys = decodeCDCStreamKeysValue(keys.get());
+	state.historyKey = history.front().key;
+	state.assignment = decodeCDCTagHistoryEntry(history.front().key, history.front().value);
+	state.proxyId = owner.get();
+	state.minVersion = decodeCDCMinVersionValue(minimum.get());
+	state.pending = history.size() > 1 || !history.front().value.empty();
+	co_return state;
+}
+
+bool sameNativeCdcTagState(NativeCdcTagState const& current, NativeCdcTagState const& expected) {
+	return current.streamId == expected.streamId && current.keys == expected.keys &&
+	       current.historyKey == expected.historyKey && current.proxyId == expected.proxyId &&
+	       current.assignment.version == expected.assignment.version &&
+	       current.assignment.tag == expected.assignment.tag;
 }
 
 bool retryNativeCdcProxyRequest(Error const& error) {
@@ -386,6 +449,157 @@ Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database c
 
 } // namespace
 
+Future<Optional<NativeCdcTagState>> readNativeCdcTagState(Transaction* tr, CDCStreamId streamId) {
+	return readNativeCdcTagStateImpl(tr, streamId);
+}
+
+Future<Optional<std::vector<NativeCdcTagState>>> readNativeCdcTagStates(Transaction* tr, int maxStreams) {
+	if (maxStreams <= 0 || maxStreams == std::numeric_limits<int>::max()) {
+		throw invalid_option_value();
+	}
+	const RangeResult streams = co_await tr->getRange(cdcStreamKeys, maxStreams + 1);
+	if (streams.more || streams.size() > maxStreams) {
+		co_return Optional<std::vector<NativeCdcTagState>>();
+	}
+	std::vector<Future<Optional<NativeCdcTagState>>> reads;
+	reads.reserve(streams.size());
+	for (const auto& stream : streams) {
+		reads.push_back(readNativeCdcTagState(tr, decodeCDCStreamKey(stream.key)));
+	}
+	const std::vector<Optional<NativeCdcTagState>> states = co_await getAll(reads);
+	std::vector<NativeCdcTagState> result;
+	result.reserve(states.size());
+	for (const auto& state : states) {
+		if (!state.present()) {
+			co_return Optional<std::vector<NativeCdcTagState>>();
+		}
+		result.push_back(state.get());
+	}
+	co_return Optional<std::vector<NativeCdcTagState>>(std::move(result));
+}
+
+Future<bool> retagNativeCdcStream(Transaction* tr, NativeCdcTagState expected, Tag destination) {
+	Optional<NativeCdcTagState> current = co_await readNativeCdcTagState(tr, expected.streamId);
+	if (!current.present() || !sameNativeCdcTagState(current.get(), expected) || current.get().pending ||
+	    destination.locality != tagLocalityCDC || destination == current.get().assignment.tag) {
+		co_return false;
+	}
+	const Optional<UID> destinationOwner = co_await getNativeCdcProxyAssignmentForTag(tr, destination);
+	if (destinationOwner.present() && destinationOwner.get() != current.get().proxyId) {
+		co_return false;
+	}
+	const Version readVersion = co_await tr->getReadVersion();
+	const auto& clientInfo = tr->getDatabase()->clientInfo->get();
+	if (!clientInfo.nativeCdcEnabled || !validNativeCdcTagCount(clientInfo.nativeCdcTagCount) ||
+	    destination.id >= clientInfo.nativeCdcTagCount) {
+		co_return false;
+	}
+	const Key historyKey = cdcTagHistoryKeyFor(expected.streamId, readVersion, destination);
+	if (historyKey <= current.get().historyKey) {
+		co_return false;
+	}
+	// The key orders assignments, while the value supplies the exact routing
+	// cutover. A read-version boundary could skip writes before this commit.
+	tr->atomicOp(historyKey, cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
+	signalNativeCdcProxyAssignmentChange(tr);
+	co_return true;
+}
+
+Future<bool> finishNativeCdcRetag(Transaction* tr, NativeCdcTagState expected) {
+	const Optional<NativeCdcTagState> current = co_await readNativeCdcTagState(tr, expected.streamId);
+	if (!current.present() || !sameNativeCdcTagState(current.get(), expected) || !current.get().pending ||
+	    current.get().minVersion < current.get().assignment.version) {
+		co_return false;
+	}
+	const RangeResult history = co_await tr->getRange(cdcTagHistoryRangeFor(expected.streamId), 3);
+	if (history.more || history.empty() || history.size() > 2 || history.back().key != current.get().historyKey) {
+		co_return false;
+	}
+	std::set<Tag> retiredTags;
+	for (const auto& row : history) {
+		const Tag tag = decodeCDCTagHistoryEntry(row.key, row.value).tag;
+		if (tag != current.get().assignment.tag) {
+			retiredTags.insert(tag);
+		}
+	}
+	tr->clear(cdcTagHistoryRangeFor(expected.streamId));
+	tr->set(cdcTagHistoryKeyFor(expected.streamId, current.get().assignment.version, current.get().assignment.tag),
+	        Value());
+	for (const Tag tag : retiredTags) {
+		// Dropping a history row must retain its final-pop obligation, including
+		// when another stream still protects the same tag or recovery intervenes.
+		tr->set(cdcRetiredTagPopKeyFor(tag), Value());
+		tr->atomicOp(cdcRetiredTagPopVersionKeyFor(tag),
+		             cdcVersionstampedMinVersionValue(),
+		             MutationRef::SetVersionstampedValue);
+	}
+	signalNativeCdcProxyAssignmentChange(tr);
+	co_return true;
+}
+
+Future<NativeCdcRegistrationResult> prepareNativeCdcStreamRegistration(Transaction* tr,
+                                                                       Key name,
+                                                                       KeyRange keys,
+                                                                       UID proxyId) {
+	validateNativeCdcStream(name, keys);
+
+	const Key nameKey = cdcStreamNameKeyFor(name);
+	Optional<Value> currentId = co_await tr->get(nameKey);
+	if (currentId.present()) {
+		const CDCStreamId streamId = decodeCDCStreamNameValue(currentId.get());
+		Optional<Value> currentKeys = co_await tr->get(cdcStreamKeyFor(streamId));
+		if (!currentKeys.present() || decodeCDCStreamKeysValue(currentKeys.get()) != keys) {
+			throw client_invalid_operation();
+		}
+		if (!(co_await getNativeCdcProxyAssignment(tr, streamId)).present()) {
+			CODE_PROBE(true, "Native CDC registration restores missing stream owner", probe::decoration::rare);
+			const Tag tag = co_await getNativeCdcCurrentTag(tr, streamId);
+			Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(tr, tag);
+			CODE_PROBE(
+			    sharedTagProxy.present(), "Native CDC shared-tag streams use one owner", probe::decoration::rare);
+			const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
+			tr->set(cdcProxyKeyFor(streamId, selectedProxy), Value());
+			if (!sharedTagProxy.present()) {
+				tr->set(cdcTagOwnerKeyFor(tag), cdcTagOwnerValue(streamId));
+			}
+			signalNativeCdcProxyAssignmentChange(tr);
+			co_return NativeCdcRegistrationResult{ streamId, true };
+		}
+		co_return NativeCdcRegistrationResult{ streamId, false };
+	}
+
+	// Disabling CDC stops new admission, but existing registrations and
+	// owner repair must remain available so durable streams can drain.
+	const bool nativeCdcEnabled = tr->getDatabase()->clientInfo->get().nativeCdcEnabled;
+	const int nativeCdcTagCount = tr->getDatabase()->clientInfo->get().nativeCdcTagCount;
+	validateNativeCdcEnabled(nativeCdcEnabled);
+	NativeCdcIdentifierAllocator allocator;
+	co_await observeNativeCdcMetadata(tr, &allocator);
+	const auto [streamId, tag] = allocator.allocate(nativeCdcTagCount);
+	// The read version is a conservative lower bound for tag routing.
+	// The versionstamped minimum below is the commit version, and stream
+	// initialization takes their maximum before exposing mutations.
+	const Version registrationVersion = co_await tr->getReadVersion();
+
+	tr->set(nameKey, cdcStreamNameValue(streamId));
+	tr->set(cdcMaxStreamIdKey, cdcMaxStreamIdValue(streamId));
+	tr->set(cdcStreamKeyFor(streamId), cdcStreamKeysValue(keys));
+	tr->set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
+	tr->atomicOp(
+	    cdcMinVersionKeyFor(streamId), cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
+	Optional<UID> sharedTagProxy;
+	if (allocator.hasStreams(tag)) {
+		sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(tr, tag);
+	}
+	const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
+	tr->set(cdcProxyKeyFor(streamId, selectedProxy), Value());
+	if (!sharedTagProxy.present()) {
+		tr->set(cdcTagOwnerKeyFor(tag), cdcTagOwnerValue(streamId));
+	}
+	signalNativeCdcProxyAssignmentChange(tr);
+	co_return NativeCdcRegistrationResult{ streamId, true };
+}
+
 Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, UID proxyId) {
 	validateNativeCdcStream(name, keys);
 
@@ -396,63 +610,12 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			const Key nameKey = cdcStreamNameKeyFor(name);
-			Optional<Value> currentId = co_await tr.get(nameKey);
-			if (currentId.present()) {
-				const CDCStreamId streamId = decodeCDCStreamNameValue(currentId.get());
-				Optional<Value> currentKeys = co_await tr.get(cdcStreamKeyFor(streamId));
-				if (!currentKeys.present() || decodeCDCStreamKeysValue(currentKeys.get()) != keys) {
-					throw client_invalid_operation();
-				}
-				if (!(co_await getNativeCdcProxyAssignment(&tr, streamId)).present()) {
-					CODE_PROBE(true, "Native CDC registration restores missing stream owner", probe::decoration::rare);
-					const Tag tag = co_await getNativeCdcCurrentTag(&tr, streamId);
-					Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
-					CODE_PROBE(sharedTagProxy.present(),
-					           "Native CDC shared-tag streams use one owner",
-					           probe::decoration::rare);
-					const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
-					tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
-					if (!sharedTagProxy.present()) {
-						tr.set(cdcTagOwnerKeyFor(tag), cdcTagOwnerValue(streamId));
-					}
-					signalNativeCdcProxyAssignmentChange(&tr);
-					co_await tr.commit();
-				}
-				co_return streamId;
+			const NativeCdcRegistrationResult result =
+			    co_await prepareNativeCdcStreamRegistration(&tr, name, keys, proxyId);
+			if (result.requiresCommit) {
+				co_await tr.commit();
 			}
-
-			// Disabling CDC stops new admission, but existing registrations and
-			// owner repair must remain available so durable streams can drain.
-			const bool nativeCdcEnabled = cx->clientInfo->get().nativeCdcEnabled;
-			const int nativeCdcTagCount = cx->clientInfo->get().nativeCdcTagCount;
-			validateNativeCdcEnabled(nativeCdcEnabled);
-			NativeCdcIdentifierAllocator allocator;
-			co_await observeNativeCdcMetadata(&tr, &allocator);
-			const auto [streamId, tag] = allocator.allocate(nativeCdcTagCount);
-			// The read version is a conservative lower bound for tag routing.
-			// The versionstamped minimum below is the commit version, and stream
-			// initialization takes their maximum before exposing mutations.
-			const Version registrationVersion = co_await tr.getReadVersion();
-
-			tr.set(nameKey, cdcStreamNameValue(streamId));
-			tr.set(cdcMaxStreamIdKey, cdcMaxStreamIdValue(streamId));
-			tr.set(cdcStreamKeyFor(streamId), cdcStreamKeysValue(keys));
-			tr.set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
-			tr.atomicOp(
-			    cdcMinVersionKeyFor(streamId), cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
-			Optional<UID> sharedTagProxy;
-			if (allocator.hasStreams(tag)) {
-				sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
-			}
-			const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
-			tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
-			if (!sharedTagProxy.present()) {
-				tr.set(cdcTagOwnerKeyFor(tag), cdcTagOwnerValue(streamId));
-			}
-			signalNativeCdcProxyAssignmentChange(&tr);
-			co_await tr.commit();
-			co_return streamId;
+			co_return result.streamId;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -920,6 +1083,42 @@ TEST_CASE("/NativeCDC/LifecycleAllocation") {
 	ASSERT_EQ(sharedId, 1);
 	ASSERT_EQ(sharedTag, Tag(tagLocalityCDC, 0));
 
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ThroughputPlacement") {
+	const Value generation = "current"_sr;
+	const Tag hotTag(tagLocalityCDC, 0);
+	const Tag coldTag(tagLocalityCDC, 1);
+	const CDCTagLoadSample hot{ generation, 100, 200, 100000 };
+	const CDCTagLoadSample cold{ generation, 100, 200, 0 };
+	auto select = [&](CDCTagLoadSample const& hotSample, Optional<CDCTagLoadSample> coldSample, int tagCount = 2) {
+		NativeCdcIdentifierAllocator allocator;
+		allocator.observeTag(hotTag);
+		allocator.observeTag(coldTag);
+		allocator.observeTag(coldTag);
+		allocator.observeTagLoad(hotTag, hotSample, generation, 150);
+		if (coldSample.present()) {
+			allocator.observeTagLoad(coldTag, coldSample.get(), generation, 150);
+		}
+		return allocator.allocate(tagCount).second;
+	};
+	ASSERT_EQ(select(hot, cold), coldTag);
+	ASSERT_EQ(select(hot, Optional<CDCTagLoadSample>()), hotTag);
+	ASSERT_EQ(select(hot, cold, 3), Tag(tagLocalityCDC, 2));
+
+	CDCTagLoadSample invalid = cold;
+	invalid.assignmentChange = "previous"_sr;
+	ASSERT_EQ(select(hot, invalid), hotTag);
+	invalid = cold;
+	invalid.validThrough = 149;
+	ASSERT_EQ(select(hot, invalid), hotTag);
+	invalid = cold;
+	invalid.sampleVersion = 151;
+	ASSERT_EQ(select(hot, invalid), hotTag);
+	invalid = cold;
+	invalid.bytesWrittenPerKSecond = -1;
+	ASSERT_EQ(select(hot, invalid), hotTag);
 	return Void();
 }
 

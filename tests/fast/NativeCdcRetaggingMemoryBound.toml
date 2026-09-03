@@ -1,0 +1,43 @@
+[configuration]
+config = 'single logs=1 commit_proxies=1 grv_proxies=1'
+singleRegion = true
+datacenters = 1
+machineCount = 10
+statelessProcessClassesPerDC = 4
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 2
+native_cdc_tag_balancing_enabled = true
+# Fixture commits the retag; suppress load-driven moves while retaining normal finalization.
+native_cdc_tag_min_bytes_per_second_improvement = 1000000000
+native_cdc_tag_sample_interval = 0.25
+cdc_proxy_buffer_bytes = 4608
+maximum_peek_bytes = 1152
+cdc_proxy_consume_reply_bytes = 4096
+# Progress has a much shorter deadline, so expiry cannot release a contended reservation.
+cdc_proxy_consume_poll_timeout = 600.0
+cdc_proxy_pop_scan_interval = 600.0
+
+[[test]]
+testTitle = 'NativeCdcRetaggingMemoryBound'
+useDB = true
+runFailureWorkloads = false
+runConsistencyCheck = false
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+timeout = 600
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 2
+    minStreamCount = 2
+    maxStreamCount = 2
+    keyCount = 2
+    writesPerRound = 1
+    rounds = 0
+    testRetaggingMemoryBound = true
+    retentionValidationDelay = 1.0
+    operationTimeout = 20.0

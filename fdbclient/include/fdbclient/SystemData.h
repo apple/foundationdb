@@ -300,7 +300,9 @@ CDCStreamId decodeCDCStreamKey(KeyRef const& key);
 Value cdcStreamKeysValue(KeyRangeRef const& keys);
 KeyRange decodeCDCStreamKeysValue(ValueRef const& value);
 
-// "\xff/cdc/tagHistory/[[CDCStreamId]][[Version]][[Tag]]" := ""
+// "\xff/cdc/tagHistory/[[CDCStreamId]][[Version]][[Tag]]" := "" | commit versionstamp
+// Empty values use the key's version. A pending live retag stores its exact commit
+// boundary in the value; the key retains the transaction read version for ordering.
 struct CDCTagHistoryEntry {
 	constexpr static FileIdentifier file_identifier = 13091844;
 
@@ -322,6 +324,22 @@ extern const KeyRangeRef cdcTagHistoryKeys;
 Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag);
 KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId);
 CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key);
+CDCTagHistoryEntry decodeCDCTagHistoryEntry(KeyRef const& key, ValueRef const& value);
+
+// Advisory producer-write samples. The assignment generation invalidates every
+// comparison when registrations, tag histories, or durable ownership change.
+struct CDCTagLoadSample {
+	Value assignmentChange;
+	Version sampleVersion = invalidVersion;
+	Version validThrough = invalidVersion;
+	int64_t bytesWrittenPerKSecond = 0;
+};
+
+extern const KeyRangeRef cdcTagLoadKeys;
+Key cdcTagLoadKeyFor(Tag tag);
+Tag decodeCDCTagLoadKey(KeyRef const& key);
+Value cdcTagLoadValue(CDCTagLoadSample const& sample);
+CDCTagLoadSample decodeCDCTagLoadValue(ValueRef const& value);
 
 // "\xff\x02/cdc/tagOwner/[[Tag]]" := "[[CDCStreamId]]"
 // Derived lookup hint, not authoritative ownership. Validate the stream is active
