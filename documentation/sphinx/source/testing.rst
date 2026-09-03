@@ -70,7 +70,7 @@ they exercise different seeds and schedules, including cases that standalone
 runners exclude.
 
 Running unit tests in simulation
--------------------------------
+--------------------------------
 
 Several standalone unit-test binaries can also run their tests under Simulation. The ``fdbclient_test``, ``fdbrpc_test``, and ``fdbserver_*_test`` targets support the ``--simulation`` flag. For example:
 
