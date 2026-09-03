@@ -1,3 +1,22 @@
+# BulkLoad restore onto a fleet with barely room for a disjoint destination team
+#
+# Variant of BackupS3BlobBulkLoadRestore.toml that cuts the extra storage machines its sibling tests rely
+# on down to the minimum that still permits a legal destination team, so bulk-load task placement
+# genuinely fails and the restore has to recover by narrowing task ranges rather than by having spare
+# capacity. See the comment on the configuration below for where that minimum comes from.
+#
+# Reproduces the condition measured on a 100M-key validation cluster of ~40 storage servers: every
+# candidate destination team is rejected for overlapping the source, so the team selector reports
+# ValidTeamSize 0 with no unhealthy or ineligible teams involved. On that cluster the recovery path ran
+# end to end - GetTeamFailedToFindValidTeam, then a relocation declared stuck, then a task split - and the
+# restore completed with the consistency check passing.
+#
+# A run that exercises the fix logs GetTeamFailedToFindValidTeam followed by BulkLoad task splits, and no
+# SplitDeclined. Exact counts depend on the dataset knobs below, so they are deliberately not asserted
+# here; a fleet large enough to place a disjoint team makes the test vacuous rather than failing it.
+#
+# The rest of this file is inherited from BackupS3BlobBulkLoadRestore.toml.
+#
 # BulkLoad Validation Test
 # Tests that BulkLoad restore produces identical results to traditional restore
 #
@@ -32,13 +51,34 @@ minimumRegions = 1
 
 # Ensure enough storage servers for non-overlapping BulkLoad teams
 extraMachineCountDC = 3
-# Dedicated storage-class machines so bulk-load team selection can find a team disjoint from the
-# source: it rejects any team sharing a server with the source (DDTeamCollection). Without these,
-# runs fail with DDBulkLoadEngineTaskGetTeamFailedToFindValidTeam reporting ValidTeamSize 0 with
-# every candidate team duplicated, the task is marked Error, and the restore is incomplete.
-# extraMachineCountDC above adds ordinary machines, which do not supply that capacity. Per DC, so
-# this holds for the multi-region variants too. See tests/fast/BulkLoading.toml for the same guard.
-extraStorageMachineCountPerDC = 5
+# Far below the sibling tests' extraStorageMachineCountPerDC = 5, but deliberately not zero.
+#
+# Bulk-load team selection rejects any team sharing a server with the source, and source is the union of
+# the owners of every shard the task range spans, so a wide enough task range has no legal destination
+# team. That state is DDBulkLoadEngineTaskGetTeamFailedToFindValidTeam with ValidTeamSize 0 and every
+# candidate team duplicated, which no number of attempts can clear because each one recomputes the same
+# source set. Provoking it is the point of this test, and a small fleet is how it is provoked.
+#
+# It is escapable only by narrowing the range, so the task is split. Narrowing bottoms out at a range
+# inside one shard, whose source is that shard's StorageTeamSize machines -- so the fleet must be able to
+# field a team of StorageTeamSize machines that avoids those, i.e. at least 2 * StorageTeamSize machines
+# with data. Teams are built per machine, not per server, so extra storage servers on existing machines do
+# not help. Omitting this knob entirely leaves 5 healthy machines against StorageTeamSize 3: all
+# C(5,3) = 10 machine teams exist, every one of them necessarily touches the 3 source machines, and the
+# restore fails no matter how finely the task is split. Measured that way on seed 22222 -- 252 consecutive
+# placement failures, ValidTeamSize 0 throughout, TotalHealthyMachines 5, CurrentMachineTeams 10 of 10
+# possible. That is the test asserting something no fix can deliver.
+#
+# 1 lands the fleet exactly on the threshold, which is where the test has to sit to be worth anything: a
+# source of StorageTeamSize machines leaves precisely one legal machine team, so placement still fails
+# often enough to force splitting, yet a destination exists. Raising it to 2 was measured to make the test
+# vacuous -- 17 of 17 seeds completed without a single placement failure or split, so it stopped testing
+# the thing it exists to test.
+extraStorageMachineCountPerDC = 1
+# The knobs below still matter for keeping the test honest: manifests are written one per shard
+# (FileBackupAgent.cpp), so min_shard_bytes controls how many exist and
+# manifest_count_max_per_bulkload_task how many a task groups. Left to their defaults this test degrades
+# into a single task holding a single manifest over the whole key space, which is not worth asserting on.
 
 # Explicit simple config - single replication, single region, explicit process counts
 config = "triple usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
@@ -49,6 +89,8 @@ faultInjection = false
 
 # Required knobs for BulkLoad functionality (from BulkDumpingS3.toml)
 [[knobs]]
+manifest_count_max_per_bulkload_task = 10
+min_shard_bytes = 10000
 bulkload_sim_failure_injection = false
 shard_encode_location_metadata = true
 enable_read_lock_on_range = true
@@ -82,7 +124,7 @@ dd_team_zero_server_left_log_delay = 0
 dd_rebalance_parallelism = 1
 
 [[test]]
-testTitle = 'BackupS3BlobBulkLoadRestore'
+testTitle = 'BackupS3BlobBulkLoadRestoreNarrowFleet'
 useDB = true
 clearAfterTest = false
 simBackupAgents = 'BackupToFile'
@@ -93,7 +135,7 @@ timeout = 3600
 
     [[test.workload]]
     testName = 'Cycle'
-    nodeCount = 100
+    nodeCount = 2000
     transactionsPerSecond = 100.0
     testDuration = 30.0
 

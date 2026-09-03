@@ -204,8 +204,7 @@ endfunction()
 function(add_flow_target)
   set(options EXECUTABLE STATIC_LIBRARY DYNAMIC_LIBRARY LINK_TEST)
   set(oneValueArgs NAME)
-  set(multiValueArgs SRCS COVERAGE_FILTER_OUT DISABLE_ACTOR_DIAGNOSTICS
-                     ADDL_SRCS)
+  set(multiValueArgs SRCS COVERAGE_FILTER_OUT ADDL_SRCS)
   cmake_parse_arguments(AFT "${options}" "${oneValueArgs}" "${multiValueArgs}"
                         "${ARGN}")
   if(NOT AFT_NAME)
@@ -214,79 +213,18 @@ function(add_flow_target)
   if(NOT AFT_SRCS)
     message(FATAL_ERROR "No sources provided")
   endif()
-  # foreach(src IN LISTS AFT_SRCS) is_header(h "${src}") if(NOT h) list(SRCS
-  # "${CMAKE_CURRENT_SOURCE_DIR}/${src}") endif() endforeach()
   if(OPEN_FOR_IDE)
-    # Intentionally omit ${AFT_DISABLE_ACTOR_DIAGNOSTICS} since we don't want
-    # diagnostics
     set(sources ${AFT_SRCS} ${AFT_ADDL_SRCS})
     add_library(${AFT_NAME} OBJECT ${sources})
   else()
-    create_build_dirs(${AFT_SRCS} ${AFT_DISABLE_ACTOR_DIAGNOSTICS})
-    foreach(src IN LISTS AFT_SRCS AFT_DISABLE_ACTOR_DIAGNOSTICS)
+    foreach(src IN LISTS AFT_SRCS)
       is_header(hdr ${src})
-      set(in_filename "${src}")
-      if(${src} MATCHES ".*\\.actor\\.(h|cpp)")
-        set(is_actor_file YES)
-        if(${src} MATCHES ".*\\.h")
-          string(REPLACE ".actor.h" ".actor.g.h" out_filename ${in_filename})
-        else()
-          string(REPLACE ".actor.cpp" ".actor.g.cpp" out_filename
-                         ${in_filename})
-        endif()
-      else()
-        set(is_actor_file NO)
-        set(out_filename "${src}")
-      endif()
-
-      set(in_file "${CMAKE_CURRENT_SOURCE_DIR}/${in_filename}")
-      if(is_actor_file)
-        if(hdr)
-          list(APPEND HEADER_LIST ${in_file})
-        endif()
-        set(out_file "${CMAKE_CURRENT_BINARY_DIR}/${out_filename}")
-      else()
-        set(out_file "${in_file}")
-      endif()
-
+      get_filename_component(source_file "${src}" ABSOLUTE
+                             BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
       if(hdr)
-        list(APPEND HEADER_LIST ${out_file})
+        list(APPEND HEADER_LIST ${source_file})
       endif()
-
-      list(APPEND sources ${out_file})
-      set(actor_compiler_flags "")
-      if(is_actor_file)
-        list(APPEND actors ${in_file})
-        list(APPEND actor_compiler_flags "--generate-probes")
-        foreach(s IN LISTS AFT_DISABLE_ACTOR_DIAGNOSTICS)
-          if("${s}" STREQUAL "${src}")
-            list(APPEND actor_compiler_flags "--disable-diagnostics")
-            break()
-          endif()
-        endforeach()
-
-        list(APPEND generated_files ${out_file})
-        if(ACTORCOMPILER_CSHARP_COMMAND)
-          set(py_out_file "${out_file}.py_gen")
-          set(cs_out_file "${out_file}.cs_gen")
-          add_custom_command(OUTPUT "${out_file}"
-            COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_SOURCE_DIR}"
-                    ${ACTORCOMPILER_PY_COMMAND} "${in_file}" "${py_out_file}" ${actor_compiler_flags}
-            COMMAND ${ACTORCOMPILER_CSHARP_COMMAND} "${in_file}" "${cs_out_file}" ${actor_compiler_flags}
-            COMMAND ${Python3_EXECUTABLE}
-                    ${CMAKE_SOURCE_DIR}/flow/actorcompiler_py/compare_actor_output.py
-                    "${cs_out_file}" "${py_out_file}"
-            COMMAND ${CMAKE_COMMAND} -E copy "${py_out_file}" "${out_file}"
-            DEPENDS "${in_file}" actorcompiler
-            COMMENT "Compile and compare actor: ${src}")
-        else()
-          add_custom_command(OUTPUT "${out_file}"
-            COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_SOURCE_DIR}"
-                    ${ACTORCOMPILER_COMMAND} "${in_file}" "${out_file}" ${actor_compiler_flags}
-            DEPENDS "${in_file}" actorcompiler
-            COMMENT "Compile actor: ${src}")
-        endif()
-      endif()
+      list(APPEND sources ${source_file})
     endforeach()
     if(PASS_COMPILATION_UNIT)
       foreach(s IN LISTS sources)
@@ -319,34 +257,19 @@ function(add_flow_target)
       add_executable(${AFT_NAME} ${sources} ${AFT_ADDL_SRCS})
     endif()
 
-    foreach(src IN LISTS sources AFT_ADDL_SRCS)
-      get_filename_component(dname ${CMAKE_CURRENT_SOURCE_DIR} NAME)
-      string(REGEX REPLACE "\\..*" "" fname ${src})
-      string(REPLACE / _ fname ${fname})
-      # set_source_files_properties(${src} PROPERTIES COMPILE_DEFINITIONS
-      # FNAME=${dname}_${fname})
-    endforeach()
-
     set_property(TARGET ${AFT_NAME} PROPERTY SOURCE_FILES ${AFT_SRCS})
     set_property(TARGET ${AFT_NAME} PROPERTY HEADER_FILES ${HEADER_LIST})
     set_property(TARGET ${AFT_NAME} PROPERTY COVERAGE_FILTERS ${AFT_SRCS})
-    if(generated_files)
-      set_source_files_properties(${generated_files} PROPERTIES SKIP_LINTING ON)
-    endif()
-
-    add_custom_target(${AFT_NAME}_actors DEPENDS ${generated_files})
     if(TARGET fdboptions AND NOT "${AFT_NAME}" STREQUAL "fdboptions")
       if(DEFINED FDB_OPTIONS_H)
         set_source_files_properties(${sources} ${AFT_ADDL_SRCS}
           APPEND PROPERTY OBJECT_DEPENDS ${FDB_OPTIONS_H})
       endif()
-      add_dependencies(${AFT_NAME}_actors fdboptions)
       add_dependencies(${AFT_NAME} fdboptions)
       if(TARGET fdboptions_vex)
-        add_dependencies(${AFT_NAME}_actors fdboptions_vex)
+        add_dependencies(${AFT_NAME} fdboptions_vex)
       endif()
     endif()
-    add_dependencies(${AFT_NAME} ${AFT_NAME}_actors)
     generate_coverage_xml(${AFT_NAME})
     if(strip_target)
       strip_debug_symbols(${AFT_NAME})

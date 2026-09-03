@@ -294,10 +294,4 @@ private:
 	ThreadNotifiedQueue<T>* queue;
 };
 
-// Fixes IDE build.
-#ifndef NO_INTELLISENSE
-template <class T>
-T waitNext(const ThreadFutureStream<T>&);
-#endif
-
 #endif

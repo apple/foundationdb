@@ -272,6 +272,7 @@ Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap* tagsMap,
 	Key prefix = tagsMap->prefix; // Copying it here as tagsMap lifetime is not tied to this actor
 	TagMap::RangeResultType tagPairs = co_await tagsMap->getRange(tr, std::string(), {}, 1e6, snapshot);
 	std::vector<KeyBackedTag> results;
+	results.reserve(tagPairs.results.size());
 	for (auto& p : tagPairs.results)
 		results.push_back(KeyBackedTag(p.first, prefix));
 	co_return results;
@@ -288,6 +289,7 @@ Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr
 	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
 
 	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
+	futures.reserve(tags.size());
 	for (const auto& tag : tags) {
 		futures.push_back(tag.get(tr));
 	}
@@ -318,6 +320,7 @@ Future<bool> anyRangePartitionedBackupRunning(Reference<ReadYourWritesTransactio
 	std::vector<KeyBackedTag> tags = co_await getAllBackupTags(tr);
 
 	std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
+	futures.reserve(tags.size());
 	for (const auto& tag : tags) {
 		futures.push_back(tag.get(tr));
 	}
@@ -395,18 +398,13 @@ public:
 	KeyBackedBinaryValue<int64_t> bulkLoadTotalTasks() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
-		return getRestoreRangesOrDefault_impl(this, tr);
-	}
-
-	static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig* self,
-	                                                                    Reference<ReadYourWritesTransaction> tr) {
 		std::vector<KeyRange> ranges;
 		int batchSize = buggify() ? 1 : CLIENT_KNOBS->RESTORE_RANGES_READ_BATCH;
 		Optional<KeyRange> begin;
 		Arena arena;
 		while (true) {
 			KeyBackedSet<KeyRange>::RangeResultType rangeResult =
-			    co_await self->restoreRangeSet().getRange(tr, begin, {}, batchSize);
+			    co_await restoreRangeSet().getRange(tr, begin, {}, batchSize);
 			ranges.insert(ranges.end(), rangeResult.results.begin(), rangeResult.results.end());
 			if (!rangeResult.more) {
 				break;
@@ -417,10 +415,10 @@ public:
 
 		// fall back to original fields if the new field is empty
 		if (ranges.empty()) {
-			std::vector<KeyRange> _ranges = co_await self->restoreRanges().getD(tr);
+			std::vector<KeyRange> _ranges = co_await restoreRanges().getD(tr);
 			ranges = _ranges;
 			if (ranges.empty()) {
-				KeyRange range = co_await self->restoreRange().getD(tr);
+				KeyRange range = co_await restoreRange().getD(tr);
 				ranges.push_back(range);
 			}
 		}
@@ -571,19 +569,15 @@ public:
 		           });
 	}
 
-	static Future<Version> getCurrentVersion_impl(RestoreConfig* self, Reference<ReadYourWritesTransaction> tr) {
-		ERestoreState status = co_await self->stateEnum().getD(tr);
+	Future<Version> getCurrentVersion(Reference<ReadYourWritesTransaction> tr) {
+		ERestoreState status = co_await stateEnum().getD(tr);
 		Version version = -1;
 		if (status == ERestoreState::RUNNING) {
-			version = co_await self->getApplyBeginVersion(tr);
+			version = co_await getApplyBeginVersion(tr);
 		} else if (status == ERestoreState::COMPLETED) {
-			version = co_await self->restoreVersion().getD(tr);
+			version = co_await restoreVersion().getD(tr);
 		}
 		co_return version;
-	}
-
-	Future<Version> getCurrentVersion(Reference<ReadYourWritesTransaction> tr) {
-		return getCurrentVersion_impl(this, tr);
 	}
 
 	static Future<std::string> getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
@@ -660,6 +654,39 @@ Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulk
 	co_return std::make_tuple(completedTasks, submittedTasks, triggeredTasks, runningTasks, totalTasks, completedBytes);
 }
 
+// Record a terminal bulkload-restore failure in the restore's own state and abort it.
+//
+// ABORTED is what makes the failure stick: throwing alone leaves the restore retryable, so the retry
+// re-reads the same finished job and reaches the same terminal condition. ABORTED also puts the restore
+// outside isRunnable(), which makes abortRestore() return before reaching its unlockDatabase() call -- so
+// this must release the lock itself, or a failed restore leaves the database locked with no route out
+// through the restore API. The commit retries because an unpersisted ABORTED loses both properties.
+Future<Void> abortBulkLoadRestore(Database cx, RestoreConfig restore, std::string message) {
+	co_await restore.logError(cx, restore_bulkload_failed(), message);
+	Reference<ReadYourWritesTransaction> abortTr(new ReadYourWritesTransaction(cx));
+	while (true) {
+		Error err;
+		try {
+			abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			abortTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			restore.stateEnum().set(abortTr, ERestoreState::ABORTED);
+			restore.clearApplyMutationsKeys(abortTr);
+			bool unlockDB = co_await restore.unlockDBAfterRestore().getD(abortTr, Snapshot::False, true);
+			if (unlockDB) {
+				co_await unlockDatabase(abortTr, restore.getUid());
+			}
+			co_await abortTr->commit();
+			co_return;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			err = e;
+		}
+		co_await abortTr->onError(err);
+	}
+}
+
 // Monitor BulkLoad job completion and update restore progress counters
 // restoreUid is used to update the RestoreConfig progress
 //
@@ -686,6 +713,80 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 		bool stillRunning = currentJob.present() && currentJob.get().getJobId() == jobId;
 
 		if (!stillRunning) {
+			// The job's live metadata is gone, which says the job manager finished walking the job
+			// range -- not that every task succeeded. A job that ends with a task in Error is
+			// archived to history in the same transaction that clears the live metadata, so treating
+			// "no longer running" as success reports a restore complete while part of the key space
+			// was never ingested. Consult the archived phase before declaring success.
+			// lockAware: the restore holds the database lock while it runs, so a plain read here
+			// retries on database_locked until its transaction gives up, and the caller waits forever.
+			std::vector<BulkLoadJobState> history;
+			Optional<Error> historyReadError;
+			try {
+				history = co_await getBulkLoadJobFromHistory(cx, lockAware);
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				historyReadError = e;
+			}
+			if (historyReadError.present()) {
+				// Fail closed. The tempting argument is that every task reported done, so the restore is
+				// very likely fine -- but the task counters reporting completion while a task's range was
+				// never ingested is the exact failure this check exists to catch, so they cannot be the
+				// grounds for skipping it. getBulkLoadJobFromHistory retries every retryable error
+				// indefinitely, so reaching here means a non-retryable one, not a transient blip: the
+				// least safe moment to assume success.
+				//
+				// The cost is real and is why this is logged loudly rather than quietly: a restore whose
+				// data is intact can be failed because a system-keyspace read was unavailable. Retrying
+				// the restore is the remedy.
+				TraceEvent(SevWarnAlways, "BulkLoadRestoreJobOutcomeUnknown")
+				    .error(historyReadError.get())
+				    .detail("RestoreUID", restoreUid)
+				    .detail("BulkLoadJobId", jobId)
+				    .detail("Reason",
+				            "Could not read the archived bulkload job phase, so the restore's outcome is "
+				            "unverifiable; failing closed rather than reporting success")
+				    .detail("Cost", "A restore whose data is intact may be failed by this; retry the restore")
+				    .detail("TasksReportedComplete", lastCompletedTasks)
+				    .detail("BytesReportedComplete", lastCompletedBytes);
+				co_await abortBulkLoadRestore(
+				    cx,
+				    restore,
+				    "BulkLoad restore failed: the archived bulkload job phase could not be read, so the "
+				    "restore's outcome could not be verified");
+				throw restore_bulkload_failed();
+			}
+			// Complete is the only phase that attests every task was ingested: the job manager sets it
+			// via setCompletePhase() only after walking the whole job range with no task in Error.
+			// Error and Cancelled both reach history with the live metadata already cleared -- a cancel
+			// wipes job and task metadata in the same transaction that archives -- so anything other
+			// than Complete, including a job missing from history altogether, leaves part of the key
+			// space unaccounted for and must fail the restore rather than report success.
+			Optional<BulkLoadJobPhase> archivedPhase;
+			for (const auto& job : history) {
+				if (job.getJobId() == jobId) {
+					archivedPhase = job.getPhase();
+					break;
+				}
+			}
+			if (!archivedPhase.present() || archivedPhase.get() != BulkLoadJobPhase::Complete) {
+				// A task that could not be loaded is a property of this restore, not a defect in the
+				// code, so this is not SevError: the restore failing is the signal, and a SevError
+				// would additionally fail any simulation that provokes the condition.
+				TraceEvent(SevWarnAlways, "BulkLoadRestoreJobDidNotComplete")
+				    .detail("RestoreUID", restoreUid)
+				    .detail("BulkLoadJobId", jobId)
+				    .detail("JobPhase",
+				            archivedPhase.present() ? convertBulkLoadJobPhaseToString(archivedPhase.get())
+				                                    : "AbsentFromHistory")
+				    .detail("TasksReportedComplete", lastCompletedTasks)
+				    .detail("BytesReportedComplete", lastCompletedBytes);
+				co_await abortBulkLoadRestore(
+				    cx, restore, "BulkLoad restore failed: the bulkload job did not complete");
+				throw restore_bulkload_failed();
+			}
 			co_return true;
 		}
 
@@ -3778,6 +3879,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 
 					// Build beginEndKeys from backup ranges
 					std::vector<std::pair<Key, Key>> beginEndKeys;
+					beginEndKeys.reserve(backupRanges.size());
 					for (const auto& range : backupRanges) {
 						beginEndKeys.emplace_back(range.begin, range.end);
 					}

@@ -1397,6 +1397,37 @@ private:
 	T t;
 };
 
+template <class T>
+struct EnsureTableRef
+  : std::conditional_t<HasFileIdentifier<T>::value, detail::YesFileIdentifier<T>, detail::NoFileIdentifier> {
+	EnsureTableRef() = default;
+	explicit EnsureTableRef(const T& t) : t(&t) {}
+
+	template <class Archive>
+	void serialize(Archive& ar) {
+		if constexpr (is_fb_function<Archive>) {
+			// Vtable collection walks default-constructed union alternatives, which have no referenced value.
+			T value{};
+			if constexpr (detail::expect_serialize_member<T>) {
+				if constexpr (serializable_traits<T>::value) {
+					serializable_traits<T>::serialize(ar, value);
+				} else {
+					value.serialize(ar);
+				}
+			} else {
+				serializer(ar, value);
+			}
+		} else {
+			serializer(ar, const_cast<T&>(*t));
+		}
+	}
+
+	const T& asUnderlyingType() const { return *t; }
+
+private:
+	const T* t = nullptr;
+};
+
 namespace detail {
 
 // Ensure if there's a LoadSaveHelper specialization available for T it gets used.
@@ -1415,6 +1446,25 @@ struct LoadSaveHelper<EnsureTable<T>, Context> : Context {
 
 	template <class Writer>
 	RelativeOffset save(const EnsureTable<T>& member, Writer& writer, const VTableSet* vtables) {
+		if constexpr (expect_serialize_member<T>) {
+			return alreadyATable.save(member.asUnderlyingType(), writer, vtables);
+		} else {
+			FakeRoot<T> t{ const_cast<T&>(member.asUnderlyingType()) };
+			return wrapInTable.save(t, writer, vtables);
+		}
+	}
+
+private:
+	LoadSaveHelper<T, Context> alreadyATable;
+	LoadSaveHelper<FakeRoot<T>, Context> wrapInTable;
+};
+
+template <class T, class Context>
+struct LoadSaveHelper<EnsureTableRef<T>, Context> : Context {
+	explicit LoadSaveHelper(const Context& context) : Context(context), alreadyATable(context), wrapInTable(context) {}
+
+	template <class Writer>
+	RelativeOffset save(const EnsureTableRef<T>& member, Writer& writer, const VTableSet* vtables) {
 		if constexpr (expect_serialize_member<T>) {
 			return alreadyATable.save(member.asUnderlyingType(), writer, vtables);
 		} else {

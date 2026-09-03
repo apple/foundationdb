@@ -196,6 +196,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				co_await waitForAll(results);
 
 				std::vector<RangeResult> ret;
+				ret.reserve(results.size());
 				for (const auto& result : results) {
 					ret.push_back(result.get());
 				}

@@ -88,70 +88,70 @@ struct CoordinatedStateImpl {
 		// || rep.rgen > gen // setExclusive isn't absolutely doomed, but it may/probably will fail
 	}
 
-	static Future<Value> read(CoordinatedStateImpl* self) {
-		ASSERT(self->stage == 0);
+	Future<Value> read() {
+		ASSERT(stage == 0);
 
 		{
-			self->stage = 1;
-			GenerationRegReadReply rep = co_await self->replicatedRead(
-			    self, GenerationRegReadRequest(self->coordinators.clusterKey, UniqueGeneration()));
-			self->conflictGen = std::max(self->conflictGen, std::max(rep.gen.generation, rep.rgen.generation)) + 1;
-			self->gen = UniqueGeneration(self->conflictGen, deterministicRandom()->randomUniqueID());
+			stage = 1;
+			GenerationRegReadReply rep =
+			    co_await replicatedRead(GenerationRegReadRequest(coordinators.clusterKey, UniqueGeneration()));
+			conflictGen = std::max(conflictGen, std::max(rep.gen.generation, rep.rgen.generation)) + 1;
+			gen = UniqueGeneration(conflictGen, deterministicRandom()->randomUniqueID());
 		}
 
 		{
-			self->stage = 2;
+			stage = 2;
 			GenerationRegReadReply rep =
-			    co_await self->replicatedRead(self, GenerationRegReadRequest(self->coordinators.clusterKey, self->gen));
-			self->stage = 3;
-			self->conflictGen = std::max(self->conflictGen, std::max(rep.gen.generation, rep.rgen.generation));
-			if (self->isDoomed(rep))
-				self->doomed = true;
-			self->initial = rep.gen.generation == 0;
+			    co_await replicatedRead(GenerationRegReadRequest(coordinators.clusterKey, gen));
+			stage = 3;
+			conflictGen = std::max(conflictGen, std::max(rep.gen.generation, rep.rgen.generation));
+			if (isDoomed(rep))
+				doomed = true;
+			initial = rep.gen.generation == 0;
 
-			self->stage = 4;
+			stage = 4;
 			co_return rep.value.present() ? rep.value.get() : Value();
 		}
 	}
-	static Future<Void> onConflict(CoordinatedStateImpl* self) {
-		ASSERT(self->stage == 4);
-		if (self->doomed)
+	Future<Void> onConflict() {
+		ASSERT(stage == 4);
+		if (doomed)
 			co_return;
 		while (true) {
 			co_await delay(SERVER_KNOBS->COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL);
-			GenerationRegReadReply rep = co_await self->replicatedRead(
-			    self, GenerationRegReadRequest(self->coordinators.clusterKey, UniqueGeneration()));
-			if (self->stage > 4)
+			GenerationRegReadReply rep =
+			    co_await replicatedRead(GenerationRegReadRequest(coordinators.clusterKey, UniqueGeneration()));
+			if (stage > 4)
 				break;
-			self->conflictGen = std::max(self->conflictGen, std::max(rep.gen.generation, rep.rgen.generation));
-			if (self->isDoomed(rep))
+			conflictGen = std::max(conflictGen, std::max(rep.gen.generation, rep.rgen.generation));
+			if (isDoomed(rep))
 				co_return;
 		}
 		co_await Future<Void>(Never());
 	}
-	static Future<Void> setExclusive(CoordinatedStateImpl* self, Value v) {
-		ASSERT(self->stage == 4);
-		self->stage = 5;
+	Future<Void> setExclusive(Value v) {
+		ASSERT(stage == 4);
+		stage = 5;
 
-		UniqueGeneration wgen = co_await self->replicatedWrite(
-		    self, GenerationRegWriteRequest(KeyValueRef(self->coordinators.clusterKey, v), self->gen));
-		self->stage = 6;
+		UniqueGeneration wgen =
+		    co_await replicatedWrite(GenerationRegWriteRequest(KeyValueRef(coordinators.clusterKey, v), gen));
+		stage = 6;
 
 		TraceEvent("CoordinatedStateSet")
-		    .detail("Gen", self->gen.generation)
+		    .detail("Gen", gen.generation)
 		    .detail("Wgen", wgen.generation)
-		    .detail("Genu", self->gen.uid)
+		    .detail("Genu", gen.uid)
 		    .detail("Wgenu", wgen.uid)
-		    .detail("Cgen", self->conflictGen);
+		    .detail("Cgen", conflictGen);
 
-		if (wgen != self->gen) {
-			self->conflictGen = std::max(self->conflictGen, wgen.generation);
+		if (wgen != gen) {
+			conflictGen = std::max(conflictGen, wgen.generation);
 			throw coordinated_state_conflict();
 		}
 	}
 
-	static Future<GenerationRegReadReply> replicatedRead(CoordinatedStateImpl* self, GenerationRegReadRequest req) {
-		std::vector<GenerationRegInterface>& replicas = self->coordinators.stateServers;
+	Future<GenerationRegReadReply> replicatedRead(GenerationRegReadRequest req) {
+		std::vector<GenerationRegInterface>& replicas = coordinators.stateServers;
 		std::vector<Future<GenerationRegReadReply>> rep_empty_reply;
 		std::vector<Future<GenerationRegReadReply>> rep_reply;
 		for (int i = 0; i < replicas.size(); i++) {
@@ -159,7 +159,7 @@ struct CoordinatedStateImpl {
 			    waitAndSendRead(replicas[i], GenerationRegReadRequest(req.key, req.gen));
 			rep_empty_reply.push_back(nonemptyToNever(reply));
 			rep_reply.push_back(emptyToNever(reply));
-			self->ac.add(success(reply));
+			ac.add(success(reply));
 		}
 
 		Future<Void> majorityEmpty =
@@ -192,16 +192,16 @@ struct CoordinatedStateImpl {
 		}
 	}
 
-	static Future<UniqueGeneration> replicatedWrite(CoordinatedStateImpl* self, GenerationRegWriteRequest req) {
-		std::vector<GenerationRegInterface>& replicas = self->coordinators.stateServers;
+	Future<UniqueGeneration> replicatedWrite(GenerationRegWriteRequest req) {
+		std::vector<GenerationRegInterface>& replicas = coordinators.stateServers;
 		std::vector<Future<UniqueGeneration>> wrep_reply;
 		for (int i = 0; i < replicas.size(); i++) {
 			Future<UniqueGeneration> reply = waitAndSendWrite(replicas[i], GenerationRegWriteRequest(req.kv, req.gen));
 			wrep_reply.push_back(reply);
-			self->ac.add(success(reply));
+			ac.add(success(reply));
 		}
 
-		co_await quorum(wrep_reply, self->initial ? replicas.size() : replicas.size() / 2 + 1);
+		co_await quorum(wrep_reply, initial ? replicas.size() : replicas.size() / 2 + 1);
 
 		UniqueGeneration maxGen;
 		for (int i = 0; i < wrep_reply.size(); i++)
@@ -215,13 +215,13 @@ CoordinatedState::CoordinatedState(ServerCoordinators const& coord)
   : impl(PImpl<CoordinatedStateImpl>::create(coord)) {}
 CoordinatedState::~CoordinatedState() = default;
 Future<Value> CoordinatedState::read() {
-	return CoordinatedStateImpl::read(impl.get());
+	return impl->read();
 }
 Future<Void> CoordinatedState::onConflict() {
-	return CoordinatedStateImpl::onConflict(impl.get());
+	return impl->onConflict();
 }
 Future<Void> CoordinatedState::setExclusive(Value v) {
-	return CoordinatedStateImpl::setExclusive(impl.get(), v);
+	return impl->setExclusive(v);
 }
 uint64_t CoordinatedState::getConflict() const {
 	return impl->getConflict();
@@ -255,9 +255,9 @@ struct MovableCoordinatedStateImpl {
 
 	explicit MovableCoordinatedStateImpl(ServerCoordinators const& c) : coordinators(c), cs(c) {}
 
-	static Future<Value> read(MovableCoordinatedStateImpl* self) {
+	Future<Value> read() {
 		MovableValue moveState;
-		Value rawValue = co_await self->cs.read();
+		Value rawValue = co_await cs.read();
 		if (!rawValue.empty()) {
 			BinaryReader r(rawValue, IncludeVersion());
 			if (!r.protocolVersion().hasMovableCoordinatedState()) {
@@ -272,8 +272,7 @@ struct MovableCoordinatedStateImpl {
 		if (moveState.mode == MovableValue::MaybeTo) {
 			CODE_PROBE(true, "Maybe moveto state");
 			ASSERT(moveState.other.present());
-			co_await moveTo(
-			    self, &self->cs, ClusterConnectionString(moveState.other.get().toString()), moveState.value);
+			co_await moveTo(&cs, ClusterConnectionString(moveState.other.get().toString()), moveState.value);
 		}
 		co_return moveState.value;
 	}
@@ -287,15 +286,15 @@ struct MovableCoordinatedStateImpl {
 		return cs.setExclusive(lastCSValue.get());
 	}
 
-	static Future<Void> move(MovableCoordinatedStateImpl* self, ClusterConnectionString nc) {
+	Future<Void> move(ClusterConnectionString nc) {
 		// Call only after setExclusive returns.  Attempts to move the coordinated state
 		// permanently to the new ServerCoordinators, which must be uninitialized.  Returns when the process has
 		// reached the point where a leader elected by the new coordinators should be doing the rest of the work
 		// (and therefore the caller should die).
-		CoordinatedState cs(self->coordinators);
+		CoordinatedState cs(coordinators);
 		CoordinatedState nccs(ServerCoordinators(makeReference<ClusterConnectionMemoryRecord>(nc)));
 		Future<Void> creationTimeout = delay(30);
-		ASSERT(self->lastValue.present() && self->lastCSValue.present());
+		ASSERT(lastValue.present() && lastCSValue.present());
 		TraceEvent("StartMove").detail("ConnectionString", nc.toString());
 		{
 			auto res = co_await race(creationTimeout, nccs.read());
@@ -309,12 +308,12 @@ struct MovableCoordinatedStateImpl {
 		TraceEvent("FinishedRead").detail("ConnectionString", nc.toString());
 
 		{
-			auto res = co_await race(creationTimeout,
-			                         nccs.setExclusive(BinaryWriter::toValue(
-			                             MovableValue(self->lastValue.get(),
-			                                          MovableValue::MovingFrom,
-			                                          self->coordinators.ccr->getConnectionString().toString()),
-			                             IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()))));
+			auto res = co_await race(
+			    creationTimeout,
+			    nccs.setExclusive(BinaryWriter::toValue(
+			        MovableValue(
+			            lastValue.get(), MovableValue::MovingFrom, coordinators.ccr->getConnectionString().toString()),
+			        IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()))));
 			if (res.index() == 0) {
 				throw new_coordinators_timed_out();
 			}
@@ -325,22 +324,19 @@ struct MovableCoordinatedStateImpl {
 			co_await delay(5);
 
 		Value oldQuorumState = co_await cs.read();
-		if (oldQuorumState != self->lastCSValue.get()) {
+		if (oldQuorumState != lastCSValue.get()) {
 			CODE_PROBE(
 			    true, "Quorum change aborted by concurrent write to old coordination state", probe::decoration::rare);
 			TraceEvent("QuorumChangeAbortedByConcurrency").log();
 			throw coordinated_state_conflict();
 		}
 
-		co_await moveTo(self, &cs, nc, self->lastValue.get());
+		co_await moveTo(&cs, nc, lastValue.get());
 
 		throw coordinators_changed();
 	}
 
-	static Future<Void> moveTo(MovableCoordinatedStateImpl* self,
-	                           CoordinatedState* coordinatedState,
-	                           ClusterConnectionString nc,
-	                           Value value) {
+	Future<Void> moveTo(CoordinatedState* coordinatedState, ClusterConnectionString nc, Value value) {
 		co_await coordinatedState->setExclusive(
 		    BinaryWriter::toValue(MovableValue(value, MovableValue::MaybeTo, nc.toString()),
 		                          IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2())));
@@ -351,7 +347,7 @@ struct MovableCoordinatedStateImpl {
 		// SOMEDAY: If we are worried about someone magically getting the new cluster ID and interfering, do a second
 		// cs.setExclusive( encode( ReallyTo, ... ) )
 		TraceEvent("ChangingQuorum").detail("ConnectionString", nc.toString());
-		co_await changeLeaderCoordinators(self->coordinators, StringRef(nc.toString()));
+		co_await changeLeaderCoordinators(coordinators, StringRef(nc.toString()));
 		TraceEvent("ChangedQuorum").detail("ConnectionString", nc.toString());
 		throw coordinators_changed();
 	}
@@ -362,7 +358,7 @@ MovableCoordinatedState::MovableCoordinatedState(class ServerCoordinators const&
   : impl(PImpl<MovableCoordinatedStateImpl>::create(coord)) {}
 MovableCoordinatedState::~MovableCoordinatedState() = default;
 Future<Value> MovableCoordinatedState::read() {
-	return MovableCoordinatedStateImpl::read(impl.get());
+	return impl->read();
 }
 Future<Void> MovableCoordinatedState::onConflict() {
 	return impl->onConflict();
@@ -371,7 +367,7 @@ Future<Void> MovableCoordinatedState::setExclusive(Value v) {
 	return impl->setExclusive(v);
 }
 Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
-	return MovableCoordinatedStateImpl::move(impl.get(), nc);
+	return impl->move(nc);
 }
 
 Optional<Value> updateCCSInMovableValue(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey) {

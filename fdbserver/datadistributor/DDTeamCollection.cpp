@@ -3320,6 +3320,7 @@ public:
 
 	static Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId) {
 		std::vector<Future<Void>> serverUpdates;
+		serverUpdates.reserve(self->server_info.size());
 
 		for (auto& it : self->server_info) {
 			serverUpdates.push_back(it.second->updated.getFuture());

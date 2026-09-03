@@ -370,6 +370,16 @@ public:
 
 	int getUnhealthyRelocationCount() const override;
 
+	// Simulation-only test hook, off by default (BULKLOAD_SIM_INJECT_DEST_TEAM_FAILURES). A team rarely
+	// goes unhealthy inside the window a bulkload move is in flight, so the retry and give-up paths need
+	// the failure injected. The budget is spent on a single task, because the give-up path bounds one
+	// task's restartCount and a budget spread across tasks never reaches it. Per-DDQueue rather than
+	// process-global: simulated processes share an address space, so file statics would make one budget
+	// serve every simulated data distributor in the run.
+	bool injectBulkLoadDestinationTeamFailure(bool doBulkLoading, const RelocateData& rd);
+	int bulkLoadInjectedDestTeamFailures = 0;
+	UID bulkLoadInjectionTargetTaskId;
+
 	void processRelocationComplete(const RelocateData& done);
 
 	Future<SrcDestTeamPair> getSrcDestTeams(const int& teamCollectionIndex,
