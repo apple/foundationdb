@@ -410,7 +410,8 @@ Future<NativeCdcProxyStatus> sampleNativeCdcProxy(CDCProxyInterface proxy, std::
 			const size_t end = std::min(streamIds.size(), begin + GetCDCProxyStatusRequest::MAX_STREAMS);
 			GetCDCProxyStatusRequest request;
 			request.streamIds.assign(streamIds.begin() + begin, streamIds.begin() + end);
-			samples.push_back(timeoutError(throwErrorOr(proxy.getStatus.tryGetReply(request)), 2.0));
+			samples.push_back(timeoutError(throwErrorOr(proxy.getStatus.tryGetReply(request)),
+			                               CLIENT_KNOBS->NATIVE_CDC_STATUS_TIMEOUT));
 		}
 		co_await waitForAll(samples);
 		CDCProxyStatusReply combined = samples.front().get();
