@@ -436,13 +436,13 @@ Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef c
 	return Optional<MutationRef>();
 }
 
-FDB_BOOLEAN_PARAM(PrioritizeConsume);
+FDB_BOOLEAN_PARAM(PrioritizeDrain);
 
 AsyncResult<CDCStreamReadState> readCDCStreamState(Database cx,
                                                    CDCStreamId streamId,
                                                    UID expectedProxyId,
                                                    bool requireKeys,
-                                                   PrioritizeConsume prioritizeConsume = PrioritizeConsume::False) {
+                                                   PrioritizeDrain prioritizeDrain = PrioritizeDrain::False) {
 	if (streamId == 0) {
 		throw client_invalid_operation();
 	}
@@ -453,7 +453,7 @@ AsyncResult<CDCStreamReadState> readCDCStreamState(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			if (prioritizeConsume) {
+			if (prioritizeDrain) {
 				// Draining committed CDC data must continue while ordinary transaction admission is throttled.
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
@@ -1527,7 +1527,7 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 			--stream->activeConsumes;
 		});
 		const CDCStreamReadState metadata =
-		    co_await readCDCStreamState(cx, request.cursor.streamId, id, true, PrioritizeConsume::True);
+		    co_await readCDCStreamState(cx, request.cursor.streamId, id, true, PrioritizeDrain::True);
 		CODE_PROBE(stream->minVersion < metadata.minVersion, "Native CDC consume reconciles a durable acknowledgement");
 		reconcileStreamMinVersion(stream, metadata.minVersion);
 		if (request.cursor.lastConsumedVersion > stream->bufferedThrough) {
@@ -1611,7 +1611,8 @@ Future<Void> CDCProxy::acknowledge(CDCAckRequest request) {
 		if (request.version < 0 || request.version >= std::numeric_limits<Version>::max() - 1) {
 			throw client_invalid_operation();
 		}
-		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, request.streamId, id, false);
+		const CDCStreamReadState metadata =
+		    co_await readCDCStreamState(cx, request.streamId, id, false, PrioritizeDrain::True);
 		if (metadata.minVersion <= request.version) {
 			throw client_invalid_operation();
 		}
