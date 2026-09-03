@@ -4746,6 +4746,7 @@ TEST_CASE("/NativeCDC/TLogCommittedFrontier/MultipleWaiters") {
 	CommittedPeekTestFixture fixture;
 	std::vector<Promise<TLogPeekReply>> replies(8);
 	std::vector<Future<Void>> peeks;
+	peeks.reserve(replies.size());
 	for (auto& reply : replies) {
 		peeks.push_back(fixture.peek(reply));
 	}
