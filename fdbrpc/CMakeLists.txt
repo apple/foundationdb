@@ -23,7 +23,7 @@ target_link_libraries(fdbrpclinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbrp
 target_include_directories(fdbrpclinktest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 
 add_flow_target(EXECUTABLE NAME fdbrpc_test SRCS fdbrpc_test.cpp)
-set_target_properties(fdbrpc_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+register_fdb_unit_tests(fdbrpc_test SIMULATION)
 target_link_libraries(fdbrpc_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbrpc>" rapidjson)
 
 if(COMPILE_EIO)
