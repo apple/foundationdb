@@ -4,20 +4,8 @@
 Release Notes (8.0)
 ###################
 
-8.0.0 (unreleased)
-==================
-
-.. note::
-
-   These are draft notes for the upcoming 8.0 release. They summarize notable
-   changes on ``main`` relative to ``release-7.4`` as of September 3, 2026.
-   Release contents, experimental feature status, and upgrade guidance remain
-   subject to review before release.
-
-.. Audit snapshot: main 3e8f0d8546c7cf723bb33e0decdb31fa1e9db841;
-   release-7.4 a5c62d6846c0402801e8fb9ac881fc9a86c2304a.
-   Compare branch-tip trees as well as history: cherry-picked 7.4 fixes are
-   not necessarily new in 8.0. See the accompanying PR for the audit method.
+8.0.0
+=====
 
 Compatibility and removed features
 ----------------------------------
