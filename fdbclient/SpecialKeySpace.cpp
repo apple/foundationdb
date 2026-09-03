@@ -29,6 +29,7 @@
 #include <unordered_set>
 
 #include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/Knobs.h"

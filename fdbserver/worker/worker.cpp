@@ -24,6 +24,7 @@
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "flow/ApiVersion.h"
 #include "flow/Buggify.h"
 #include "flow/CodeProbe.h"
