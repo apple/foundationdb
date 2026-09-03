@@ -1184,6 +1184,30 @@ Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 	throw cluster_recovery_failed();
 }
 
+TEST_CASE("/ClusterRecovery/InitializationTimeoutBackoff") {
+	// Exercise the production deadlines with virtual time rather than waiting minutes in native unit runs.
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	const double baseTimeout = SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT;
+	const double growthFactor = SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR;
+	const double maxTimeout = SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT;
+	std::vector<std::pair<int, double>> cases{ { 1, std::min(baseTimeout, maxTimeout) },
+		                                       { 2, std::min(baseTimeout * growthFactor, maxTimeout) } };
+	const int cappedAttempt =
+	    1 + static_cast<int>(std::ceil(std::log(maxTimeout / baseTimeout) / std::log(growthFactor)));
+	if (cappedAttempt > 2 && cappedAttempt < SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES) {
+		cases.emplace_back(cappedAttempt, maxTimeout);
+	}
+	for (auto [unfinishedRecoveries, expectedTimeout] : cases) {
+		const double start = now();
+		ErrorOr<Void> result = co_await errorOr(monitorInitializingTxnSystem(unfinishedRecoveries));
+		ASSERT(result.isError() && result.getError().code() == error_code_cluster_recovery_failed);
+		ASSERT(std::abs(now() - start - expectedTimeout) < 1e-6);
+	}
+}
+
 Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
     Reference<ClusterRecoveryData> self,
     std::vector<StorageServerInterface>* seedServers,
