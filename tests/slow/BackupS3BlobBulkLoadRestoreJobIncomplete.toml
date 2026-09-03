@@ -55,6 +55,13 @@ bulkload_sim_inject_dest_team_failures = 40
 # Pin the budget: as a buggify draw it would be a fresh random 1-3 per dispatch, so the give-up path would be
 # reached or not depending on the draw rather than on the injection count.
 dd_bulkload_max_retryable_redispatch = 20
+
+# One manifest per task, so exhausting the budget marks the task Error instead of narrowing it. Exceeding
+# the budget first attempts splitBulkLoadTask, which declines only for a task holding a single manifest; a
+# task that is narrowed is not marked Error, and its children carry fresh task IDs, so the injection -- which
+# is pinned to one task ID -- stops firing and the job completes. In simulation this knob is an unconditional
+# random 1-10 that `buggify = false` does not suppress, so only a draw of 1 reaches the give-up path.
+manifest_count_max_per_bulkload_task = 1
 shard_encode_location_metadata = true
 enable_read_lock_on_range = true
 enable_version_vector = false
