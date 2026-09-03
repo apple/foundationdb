@@ -21,6 +21,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/NativeAPI.h"
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
