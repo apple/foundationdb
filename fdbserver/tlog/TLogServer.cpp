@@ -58,6 +58,30 @@ FDB_BOOLEAN_PARAM(NothingPersistent);
 FDB_BOOLEAN_PARAM(PoppedRecently);
 FDB_BOOLEAN_PARAM(UnpoppedRecovered);
 
+// Commit progress can advance without appending another message to this log. Keep its wakeup separate from
+// LogData::version, and do not allocate a new notification on foreground commits when no reader is waiting.
+class CommittedVersion : NonCopyable {
+public:
+	Version get() const { return value; }
+	Future<Void> onAdvance() const { return changed.getFuture(); }
+
+	void advance(Version version) {
+		if (version <= value) {
+			return;
+		}
+		value = version;
+		if (changed.getFutureReferenceCount() > 0) {
+			Promise<Void> notification;
+			notification.swap(changed);
+			notification.send(Void());
+		}
+	}
+
+private:
+	Version value = 0;
+	Promise<Void> changed;
+};
+
 } // namespace
 
 struct TLogQueueEntryRef {
@@ -560,7 +584,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Version knownCommittedVersion; // The maximum version that a proxy has told us that is committed (all TLogs have
 	                               // ack'd a commit for this version).
 	Version durableKnownCommittedVersion;
-	Version minKnownCommittedVersion;
+	CommittedVersion minKnownCommittedVersion;
 	Version queuePoppedVersion; // The disk queue has been popped up until the location which represents this version.
 	Version minPoppedTagVersion;
 	Tag minPoppedTag; // The tag (locality >= 0) that makes tLog hold its data and cause tLog's disk queue increasing.
@@ -707,15 +731,15 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	                 std::vector<Tag> tags,
 	                 std::string context)
 	  : initialized(false), queueCommittingVersion(0), knownCommittedVersion(0), durableKnownCommittedVersion(0),
-	    minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0), minPoppedTag(invalidTag),
-	    minSysPopTagVersion(0), minSysPopTag(invalidTag), unpoppedRecoveredTagCount(0),
-	    cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), tagMessageCount("tagMessageCount", cc),
-	    bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
-	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), emptyPeeks("EmptyPeeks", cc),
-	    nonEmptyPeeks("NonEmptyPeeks", cc), persistentDataUpdateBatches("PersistentDataUpdateBatches", cc),
-	    dirtyTagsProcessed("DirtyTagsProcessed", cc), logId(interf.id()), protocolVersion(protocolVersion),
-	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
-	    recoveryTxnVersion(1), logSystem(new AsyncVar<Reference<LogSystem>>()),
+	    queuePoppedVersion(0), minPoppedTagVersion(0), minPoppedTag(invalidTag), minSysPopTagVersion(0),
+	    minSysPopTag(invalidTag), unpoppedRecoveredTagCount(0), cc("TLog", interf.id().toString()),
+	    bytesInput("BytesInput", cc), tagMessageCount("tagMessageCount", cc), bytesDurable("BytesDurable", cc),
+	    blockingPeeks("BlockingPeeks", cc), blockingPeekTimeouts("BlockingPeekTimeouts", cc),
+	    emptyPeeks("EmptyPeeks", cc), nonEmptyPeeks("NonEmptyPeeks", cc),
+	    persistentDataUpdateBatches("PersistentDataUpdateBatches", cc), dirtyTagsProcessed("DirtyTagsProcessed", cc),
+	    logId(interf.id()), protocolVersion(protocolVersion), newPersistentDataVersion(invalidVersion),
+	    tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1), recoveryTxnVersion(1),
+	    logSystem(new AsyncVar<Reference<LogSystem>>()),
 	    logSystemConsumer(new AsyncVar<Reference<LogSystemConsumer>>()), remoteTag(remoteTag), isPrimary(isPrimary),
 	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
 	    recruitmentID(recruitmentID), logSpillType(logSpillType), allTags(tags.begin(), tags.end()),
@@ -1899,6 +1923,26 @@ Future<Void> waitForMessagesForTag(Reference<LogData> self, Tag reqTag, Version 
 	}
 }
 
+Future<Void> waitForCommittedVersion(Reference<LogData> self, Version begin, double deadline) {
+	if (self->stopped() || self->minKnownCommittedVersion.get() >= begin) {
+		co_return;
+	}
+	++self->blockingPeeks;
+	Future<Void> expired = delay(std::max(0.0, deadline - now()), TaskPriority::TLogPeekReply);
+	while (!self->stopped() && self->minKnownCommittedVersion.get() < begin) {
+		// No suspension separates the level check from registration. A canceled peek removes its callback;
+		// no threshold entry remains waiting for some future commit.
+		auto ready =
+		    co_await race(self->minKnownCommittedVersion.onAdvance(), expired, self->stoppedPromise.getFuture());
+		// Promise notification is synchronous. Never scan/materialize a reply on the tLogCommit or stop stack.
+		co_await delay(0, TaskPriority::TLogPeekReply);
+		if (ready.index() == 1) {
+			++self->blockingPeekTimeouts;
+			co_return;
+		}
+	}
+}
+
 void peekMessagesFromMemory(Reference<LogData> self,
                             Tag tag,
                             Version begin,
@@ -2268,6 +2312,16 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		co_await delay(0, TaskPriority::TLogSpilledPeekReply);
 	}
 
+	const bool waitForCommittedFrontier = replyByteLimit > 0 && reqTag.locality == tagLocalityCDC &&
+	                                      !reqReturnIfBlocked && !reqOnlySpilled && !logData->stopped() &&
+	                                      (!reqEnd.present() || reqEnd.get() == std::numeric_limits<Version>::max());
+	if (waitForCommittedFrontier && poppedVersion(logData, reqTag) <= reqBegin) {
+		// A speculative message (or an empty tail) cannot advance native CDC until this frontier reaches begin.
+		// Waiting here lets commit progress wake the same capped peek instead of returning a stale frontier to
+		// the proxy. Keep finite/recovery, nonblocking, and uncapped peeks on their existing paths.
+		co_await waitForCommittedVersion(logData, reqBegin, now() + SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT);
+	}
+
 	double workStart = now();
 	Version poppedVer{ 0 };
 	Version endVersion{ 0 };
@@ -2298,7 +2352,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 		auto tagData = logData->getTagData(reqTag);
 		bool tagRecovered = tagData && !tagData->unpoppedRecovered;
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && poppedVer <= reqBegin &&
+		if (!waitForCommittedFrontier && SERVER_KNOBS->ENABLE_VERSION_VECTOR && poppedVer <= reqBegin &&
 		    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled &&
 		    (reqTag.locality >= 0 || reqTag.locality == tagLocalityCDC) && !reqReturnIfBlocked && tagRecovered) {
 			double startTime = now();
@@ -2323,7 +2377,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		if (poppedVer > reqBegin) {
 			TLogPeekReply rep;
 			rep.maxKnownVersion = logData->version.get();
-			rep.minKnownCommittedVersion = logData->minKnownCommittedVersion;
+			rep.minKnownCommittedVersion = logData->minKnownCommittedVersion.get();
 			rep.popped = poppedVer;
 			rep.end = poppedVer;
 			rep.onlySpilled = false;
@@ -2540,7 +2594,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		//   - Have data return to the caller, or
 		//   - Batching empty peek is disabled, or
 		//   - Batching empty peek interval has been reached.
-		if (replyByteLimitReached || messages.getLength() > 0 || !SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG ||
+		if (waitForCommittedFrontier || replyByteLimitReached || messages.getLength() > 0 ||
+		    !SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG ||
 		    (now() - blockStart > SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG_INTERVAL)) {
 			break;
 		}
@@ -2572,7 +2627,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	TLogPeekReply reply;
 	reply.maxKnownVersion = logData->version.get();
-	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
+	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion.get();
 	auto messagesValue = messages.toValue();
 	reply.arena.dependsOn(messagesValue.arena());
 	reply.messages = messagesValue;
@@ -2847,7 +2902,7 @@ Future<Void> tLogCommit(TLogData* self,
 		                      req.spanContext.spanID);
 	}
 
-	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
+	logData->minKnownCommittedVersion.advance(req.minKnownCommittedVersion);
 
 	co_await logData->version.whenAtLeast(req.prevVersion);
 	// Time until now has been spent waiting in the queue to do actual work.
@@ -3583,8 +3638,7 @@ Future<Void> pullAsyncData(TLogData* self,
 
 					if (poppedIsKnownCommitted) {
 						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
-						logData->minKnownCommittedVersion =
-						    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
+						logData->minKnownCommittedVersion.advance(r->getMinKnownCommittedVersion());
 					}
 
 					co_await waitUntilTLogAcceptsNewData(self, logData, ver, endVersion);
@@ -3624,8 +3678,7 @@ Future<Void> pullAsyncData(TLogData* self,
 
 						if (poppedIsKnownCommitted) {
 							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
-							logData->minKnownCommittedVersion =
-							    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
+							logData->minKnownCommittedVersion.advance(r->getMinKnownCommittedVersion());
 						}
 
 						co_await waitUntilTLogAcceptsNewData(self, logData, ver, endVersion);
@@ -4446,6 +4499,329 @@ Future<Void> tLog(IKeyValueStore* persistentData,
 }
 
 // UNIT TESTS
+namespace {
+
+class CommittedPeekTestKnobs : NonCopyable {
+public:
+	explicit CommittedPeekTestKnobs(bool batchEmpty = true)
+	  : versionVector(SERVER_KNOBS->ENABLE_VERSION_VECTOR),
+	    recoveryReply(SERVER_KNOBS->ENABLE_VERSION_VECTOR_REPLY_RECOVERY),
+	    batching(SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG), timeout(SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT),
+	    batchingInterval(SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG_INTERVAL) {
+		auto* knobs = const_cast<ServerKnobs*>(SERVER_KNOBS);
+		knobs->ENABLE_VERSION_VECTOR = true;
+		knobs->ENABLE_VERSION_VECTOR_REPLY_RECOVERY = false;
+		knobs->PEEK_BATCHING_EMPTY_MSG = batchEmpty;
+		knobs->BLOCKING_PEEK_TIMEOUT = 0.4;
+		knobs->PEEK_BATCHING_EMPTY_MSG_INTERVAL = 0.4;
+	}
+
+	~CommittedPeekTestKnobs() {
+		auto* knobs = const_cast<ServerKnobs*>(SERVER_KNOBS);
+		knobs->ENABLE_VERSION_VECTOR = versionVector;
+		knobs->ENABLE_VERSION_VECTOR_REPLY_RECOVERY = recoveryReply;
+		knobs->PEEK_BATCHING_EMPTY_MSG = batching;
+		knobs->BLOCKING_PEEK_TIMEOUT = timeout;
+		knobs->PEEK_BATCHING_EMPTY_MSG_INTERVAL = batchingInterval;
+	}
+
+private:
+	const bool versionVector;
+	const bool recoveryReply;
+	const bool batching;
+	const double timeout;
+	const double batchingInterval;
+};
+
+class CommittedPeekTestFixture : NonCopyable {
+public:
+	explicit CommittedPeekTestFixture(bool batchEmpty = true, Version initialCommitted = 99)
+	  : knobs(batchEmpty), shared(deterministicRandom()->randomUniqueID(),
+	                              deterministicRandom()->randomUniqueID(),
+	                              nullptr,
+	                              nullptr,
+	                              makeReference<AsyncVar<ServerDBInfo>>(ServerDBInfo()),
+	                              makeReference<AsyncVar<bool>>(false),
+	                              makeReference<AsyncVar<bool>>(false),
+	                              "",
+	                              makeReference<AsyncVar<bool>>(false)),
+	    queue(shared.persistentQueue), logData(makeReference<LogData>(&shared,
+	                                                                  TLogInterface(LocalityData()),
+	                                                                  invalidTag,
+	                                                                  true,
+	                                                                  0,
+	                                                                  0,
+	                                                                  deterministicRandom()->randomUniqueID(),
+	                                                                  g_network->protocolVersion(),
+	                                                                  TLogSpillType::VALUE,
+	                                                                  std::vector<Tag>{ cdcTag() },
+	                                                                  "CommittedPeekTest")) {
+		logData->version.set(100);
+		logData->queueCommittedVersion.set(100);
+		logData->knownCommittedVersion = initialCommitted;
+		logData->durableKnownCommittedVersion = initialCommitted;
+		logData->minKnownCommittedVersion.advance(initialCommitted);
+		logData->persistentDataVersion = 0;
+		logData->persistentDataDurableVersion = 0;
+		logData->locality = 0;
+		logData->getTagData(cdcTag());
+		logData->createTagData(cdcTag(), 0, NothingPersistent::True, PoppedRecently::False, UnpoppedRecovered::False);
+	}
+
+	~CommittedPeekTestFixture() {
+		// This fixture only exercises in-memory peeks and duplicate commits. Termination prevents
+		// LogData's normal persistent-state removal from dereferencing the absent disk stores.
+		shared.terminated.send(Void());
+	}
+
+	static Tag cdcTag() { return Tag(tagLocalityCDC, 0); }
+
+	static TLogPeekRequest request() { return TLogPeekRequest(100, cdcTag(), false, false, {}, {}, {}, 4096); }
+
+	Future<Void> peek(Promise<TLogPeekReply> reply, const TLogPeekRequest& req = request()) {
+		return tLogPeekMessages(reply,
+		                        &shared,
+		                        logData,
+		                        req.begin,
+		                        req.tag,
+		                        req.returnIfBlocked,
+		                        req.onlySpilled,
+		                        req.sequence,
+		                        req.end,
+		                        req.returnEmptyIfStopped,
+		                        req.replyByteLimit);
+	}
+
+	void addMessage(Tag tag = cdcTag()) {
+		BinaryWriter message(Unversioned());
+		message << int32_t(0) << uint32_t(1) << uint16_t(1) << tag;
+		message << MutationRef(MutationRef::SetValue, "frontier-key"_sr, "frontier-value"_sr);
+		*reinterpret_cast<int32_t*>(message.getData()) = message.getLength() - sizeof(int32_t);
+		auto bytes = message.toValue();
+		commitMessages(&shared, logData, 100, bytes.arena(), bytes);
+	}
+
+	Future<Void> commitFrontier(Version frontier, Version previous = 99) {
+		TLogCommitRequest req;
+		req.prevVersion = previous;
+		req.version = previous + 1;
+		req.knownCommittedVersion = std::max<Version>(99, frontier);
+		req.minKnownCommittedVersion = frontier;
+		req.seqPrevVersion = previous;
+		req.tLogCount = 1;
+		return tLogCommit(&shared, req, logData, PromiseStream<Void>());
+	}
+
+	void advance(Version frontier) { logData->minKnownCommittedVersion.advance(frontier); }
+	void stop() { logData->stop(); }
+	void popPastBegin() { logData->getTagData(cdcTag())->popped = 101; }
+	Version frontier() const { return logData->minKnownCommittedVersion.get(); }
+	int64_t timedOutPeeks() const { return logData->blockingPeekTimeouts.getValue(); }
+	void assertNoDiskCommit() const {
+		ASSERT(shared.diskQueueCommitBytes == 0);
+		ASSERT(logData->version.get() == 100);
+	}
+
+private:
+	CommittedPeekTestKnobs knobs;
+	TLogData shared;
+	std::unique_ptr<TLogQueue> queue;
+	Reference<LogData> logData;
+};
+
+Future<Void> testCommittedPeekProgress(bool speculative) {
+	CommittedPeekTestFixture fixture;
+	if (speculative) {
+		fixture.addMessage();
+	}
+	Promise<TLogPeekReply> reply;
+	Future<Void> peek = fixture.peek(reply);
+	ASSERT(!reply.getFuture().isReady());
+	co_await delay(0.02);
+	ASSERT(!reply.getFuture().isReady());
+	Future<Void> commit = fixture.commitFrontier(100);
+	ASSERT(!reply.getFuture().isReady());
+	co_await commit;
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 0.2);
+	co_await peek;
+	ASSERT(result.minKnownCommittedVersion == 100);
+	ASSERT(result.maxKnownVersion == 100);
+	ASSERT(result.end == 101);
+	ASSERT(result.messages.empty() == !speculative);
+	if (speculative) {
+		BinaryReader reader(result.messages, Unversioned());
+		int32_t header;
+		Version version;
+		reader >> header >> version;
+		ASSERT(header == VERSION_HEADER);
+		ASSERT(version == 100);
+	}
+	fixture.assertNoDiskCommit();
+}
+
+} // namespace
+
+TEST_CASE("/NativeCDC/TLogCommittedFrontier/Empty") {
+	co_await testCommittedPeekProgress(false);
+}
+
+TEST_CASE("/NativeCDC/TLogCommittedFrontier/Speculative") {
+	co_await testCommittedPeekProgress(true);
+}
+
+TEST_CASE("/NativeCDC/TLogCommittedFrontier/AlreadyCommitted") {
+	CommittedPeekTestFixture fixture;
+	fixture.advance(100);
+	Promise<TLogPeekReply> reply;
+	Future<Void> peek = fixture.peek(reply);
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 0.2);
+	co_await peek;
+	ASSERT(result.minKnownCommittedVersion == 100);
+	ASSERT(result.messages.empty());
+}
+
+TEST_CASE("/NativeCDC/TLogCommittedFrontier/Timeout") {
+	CommittedPeekTestFixture fixture;
+	Promise<TLogPeekReply> reply;
+	double started = now();
+	Future<Void> peek = fixture.peek(reply);
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 1.0);
+	co_await peek;
+	ASSERT(now() - started >= 0.35);
+	ASSERT(result.minKnownCommittedVersion == 99);
+	ASSERT(result.messages.empty());
+	ASSERT(fixture.timedOutPeeks() == 1);
+}
+
+TEST_CASE("/NativeCDC/TLogCommittedFrontier/Stop") {
+	CommittedPeekTestFixture fixture;
+	Promise<TLogPeekReply> reply;
+	Future<Void> peek = fixture.peek(reply);
+	co_await delay(0.02);
+	ASSERT(!reply.getFuture().isReady());
+	fixture.stop();
+	ASSERT(!reply.getFuture().isReady());
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 0.2);
+	co_await peek;
+	ASSERT(result.minKnownCommittedVersion == 99);
+	ASSERT(result.messages.empty());
+}
+
+TEST_CASE("/NativeCDC/TLogCommittedFrontier/AbsoluteDeadline") {
+	CommittedPeekTestFixture fixture(true, 90);
+	Promise<TLogPeekReply> reply;
+	double started = now();
+	Future<Void> peek = fixture.peek(reply);
+	for (Version frontier = 91; frontier <= 93; ++frontier) {
+		co_await delay(0.1);
+		fixture.advance(frontier);
+	}
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 0.2);
+	co_await peek;
+	ASSERT(now() - started >= 0.35 && now() - started < 0.6);
+	ASSERT(result.minKnownCommittedVersion == 93);
+	ASSERT(fixture.timedOutPeeks() == 1);
+}
+
+TEST_CASE("/NativeCDC/TLogCommittedFrontier/Cancellation") {
+	CommittedPeekTestFixture fixture;
+	Promise<TLogPeekReply> abandonedReply;
+	Future<Void> abandoned = fixture.peek(abandonedReply);
+	co_await delay(0.02);
+	abandoned.cancel();
+	ASSERT(abandoned.isReady() && abandoned.isError());
+	ASSERT(abandoned.getError().code() == error_code_actor_cancelled);
+	Promise<TLogPeekReply> reply;
+	Future<Void> peek = fixture.peek(reply);
+	fixture.advance(100);
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 0.2);
+	co_await peek;
+	ASSERT(result.minKnownCommittedVersion == 100);
+	ASSERT(!abandonedReply.getFuture().isReady());
+}
+
+TEST_CASE("/NativeCDC/TLogCommittedFrontier/MultipleWaiters") {
+	CommittedPeekTestFixture fixture;
+	std::vector<Promise<TLogPeekReply>> replies(8);
+	std::vector<Future<Void>> peeks;
+	for (auto& reply : replies) {
+		peeks.push_back(fixture.peek(reply));
+	}
+	co_await fixture.commitFrontier(98);
+	co_await fixture.commitFrontier(99);
+	co_await delay(0.02);
+	ASSERT(fixture.frontier() == 99);
+	for (auto& reply : replies) {
+		ASSERT(!reply.getFuture().isReady());
+	}
+	Future<Void> commit = fixture.commitFrontier(100);
+	for (auto& reply : replies) {
+		ASSERT(!reply.getFuture().isReady());
+	}
+	co_await commit;
+	for (auto& reply : replies) {
+		TLogPeekReply result = co_await timeoutError(reply.getFuture(), 0.2);
+		ASSERT(result.minKnownCommittedVersion == 100);
+	}
+	co_await waitForAll(peeks);
+	fixture.assertNoDiskCommit();
+}
+
+TEST_CASE("/NativeCDC/TLogCommittedFrontier/OutOfOrderCommit") {
+	CommittedPeekTestFixture fixture;
+	Promise<TLogPeekReply> reply;
+	Future<Void> peek = fixture.peek(reply);
+	Future<Void> commit = fixture.commitFrontier(100, 101);
+	ASSERT(!commit.isReady());
+	ASSERT(!reply.getFuture().isReady());
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 0.2);
+	co_await peek;
+	ASSERT(result.minKnownCommittedVersion == 100);
+	ASSERT(!commit.isReady());
+	commit.cancel();
+	ASSERT(commit.isReady() && commit.isError());
+	ASSERT(commit.getError().code() == error_code_actor_cancelled);
+	fixture.assertNoDiskCommit();
+}
+
+TEST_CASE("/NativeCDC/TLogCommittedFrontier/Bypass") {
+	for (int scenario = 0; scenario < 6; ++scenario) {
+		CommittedPeekTestFixture fixture(false);
+		TLogPeekRequest req = fixture.request();
+		if (scenario == 0) {
+			req.end = 101;
+		} else if (scenario == 1) {
+			req.returnIfBlocked = true;
+		} else if (scenario == 2) {
+			req.onlySpilled = true;
+		} else if (scenario == 3) {
+			req.replyByteLimit = 0;
+		} else if (scenario == 4) {
+			req.tag = Tag(0, 0);
+		} else {
+			fixture.stop();
+		}
+		fixture.addMessage(req.tag);
+		Promise<TLogPeekReply> reply;
+		Future<Void> peek = fixture.peek(reply, req);
+		TLogPeekReply result = co_await timeoutError(reply.getFuture(), 0.2);
+		co_await peek;
+		ASSERT(result.minKnownCommittedVersion == 99);
+		ASSERT(fixture.timedOutPeeks() == 0);
+	}
+}
+
+TEST_CASE("/NativeCDC/TLogCommittedFrontier/Popped") {
+	CommittedPeekTestFixture fixture;
+	fixture.popPastBegin();
+	Promise<TLogPeekReply> reply;
+	Future<Void> peek = fixture.peek(reply);
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 0.2);
+	co_await peek;
+	ASSERT(result.popped.present() && result.popped.get() == 101);
+	ASSERT(result.minKnownCommittedVersion == 99);
+}
+
 TEST_CASE("/NativeCDC/TLogPeekReplyLimit") {
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), 0) == 0);
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES) ==

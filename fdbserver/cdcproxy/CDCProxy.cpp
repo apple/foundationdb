@@ -195,6 +195,10 @@ bool hasCompleteLogSystemConfig(LogSystemConfig const& config) {
 
 enum class CDCBufferTagPassResult { RETRY, WAIT_FOR_COMMIT, STOP };
 
+double remainingCommitWait(double passStart, double waitInterval, double currentTime) {
+	return std::max(0.0, passStart + waitInterval - currentTime);
+}
+
 Optional<CDCBufferPassLimits> calculateBufferPassLimits(int64_t bufferBytes,
                                                         int64_t maximumPeekBytes,
                                                         int64_t retainedReplyCount) {
@@ -1146,17 +1150,20 @@ Future<Void> CDCProxy::bufferTag(Reference<CDCBufferedTag> tag) {
 			continue;
 		}
 
+		const double passStart = now();
 		const CDCBufferTagPassResult result = co_await bufferTagPass(tag, begin.get());
 		if (result == CDCBufferTagPassResult::STOP) {
 			co_return;
 		}
 		if (result == CDCBufferTagPassResult::WAIT_FOR_COMMIT) {
-			// The cursor may already hold a speculative message, so getMore() would complete immediately without
-			// refreshing its committed frontier. Drop that arena and reopen after one blocking-peek interval.
-			auto waitForCommit = co_await race(delay(SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT),
-			                                   logSystem->onChange(),
-			                                   tag->stopped.onTrigger(),
-			                                   tag->refresh.onTrigger());
+			// Older TLogs can immediately return a speculative message, for which getMore() would not refresh
+			// the committed frontier. Retain their bounded fallback, but do not add a second blocking-peek
+			// interval when a TLog already waited for commit progress. The zero-delay case still yields.
+			auto waitForCommit =
+			    co_await race(delay(remainingCommitWait(passStart, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT, now())),
+			                  logSystem->onChange(),
+			                  tag->stopped.onTrigger(),
+			                  tag->refresh.onTrigger());
 			if (waitForCommit.index() == 2) {
 				co_return;
 			}
@@ -1955,6 +1962,17 @@ TEST_CASE("/NativeCDC/ProxyBufferCandidateSelection") {
 	ASSERT_EQ(rejectsOverLimit.oversizedStreamIds.front(), 1);
 	ASSERT(rejectsOverLimit.selectedStreamIds.contains(2));
 
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/CommitWaitDeadlineBudget") {
+	// Immediate legacy replies retain the fallback; time already spent in the pass is not charged twice.
+	ASSERT_EQ(remainingCommitWait(0.0, 0.4, 0.0), 0.4);
+	ASSERT_EQ(remainingCommitWait(0.0, 0.4, 0.2), 0.2);
+	ASSERT_EQ(remainingCommitWait(0.0, 0.4, 0.4), 0.0);
+	// Capacity waiting is part of the same pass, even when it exceeds the timeout before a peek is issued.
+	ASSERT_EQ(remainingCommitWait(0.0, 0.4, 2.0), 0.0);
+	ASSERT_EQ(remainingCommitWait(8.0, 0.5, 8.125), 0.375);
 	return Void();
 }
 
