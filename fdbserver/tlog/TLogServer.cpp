@@ -4593,7 +4593,7 @@ public:
 	}
 
 	void addMessage(Tag tag = cdcTag()) {
-		BinaryWriter message(Unversioned());
+		BinaryWriter message(AssumeVersion(g_network->protocolVersion()));
 		message << int32_t(0) << uint32_t(1) << uint16_t(1) << tag;
 		message << MutationRef(MutationRef::SetValue, "frontier-key"_sr, "frontier-value"_sr);
 		*reinterpret_cast<int32_t*>(message.getData()) = message.getLength() - sizeof(int32_t);
