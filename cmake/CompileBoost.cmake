@@ -33,7 +33,14 @@ function(compile_boost)
   message(STATUS "Use ${BOOST_TOOLSET} to build boost")
 
   # Configure b2 command
-  set(B2_COMMAND "./b2")
+  # b2's clang-darwin toolset passes an explicit --target, which suppresses Apple
+  # clang's SDK inference, and macOS keeps no C++ headers outside the SDK. Hand b2
+  # the same sysroot the main build uses so boost compiles against an identical SDK.
+  if(APPLE AND CMAKE_OSX_SYSROOT)
+    set(B2_COMMAND ${CMAKE_COMMAND} -E env "SDKROOT=${CMAKE_OSX_SYSROOT}" ./b2)
+  else()
+    set(B2_COMMAND "./b2")
+  endif()
   set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++17 --no-warnings)
   set(BOOST_LINK_FLAGS "")
   if(APPLE OR ICX OR USE_LIBCXX)
