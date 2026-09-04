@@ -352,6 +352,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 
 	Future<Void> onWritable() override { return whenWritable(this); }
 	Future<Void> onReadable() override { return whenReadable(this); }
+	Future<Void> onSentBytesForTest() const { return sentBytes.onChange(); }
 
 	bool isPeerGone() const { return !peer || peerProcess->failed; }
 
@@ -491,23 +492,29 @@ private:
 	}
 	static Future<Void> receiver(Sim2Conn* self) {
 		while (true) {
-			if (self->sentBytes.get() != self->receivedBytes.get())
-				co_await g_simulator->onProcess(self->peerProcess);
-			while (self->sentBytes.get() == self->receivedBytes.get()) {
-				if (self->stopReceive.get()) {
-					if (g_simulator->getCurrentProcess() != self->process) {
-						co_await g_simulator->onProcess(self->process);
-					}
-					if (self->sentBytes.get() == self->receivedBytes.get()) {
-						self->incomingClosed.set(true);
-						co_return;
-					}
-					break;
+			if (self->stopReceive.get()) {
+				if (g_simulator->getCurrentProcess() != self->process) {
+					co_await g_simulator->onProcess(self->process);
 				}
+				// Bytes already sent remain in recvBuf even if the peer process has exited.
+				auto keepAlive = Reference<Sim2Conn>::addRef(self);
+				self->receivedBytes.set(self->sentBytes.get());
+				self->incomingClosed.set(true);
+				co_return;
+			}
+			if (self->sentBytes.get() != self->receivedBytes.get())
+				co_await (g_simulator->onProcess(self->peerProcess) || self->stopReceive.onChange());
+			while (self->sentBytes.get() == self->receivedBytes.get() && !self->stopReceive.get()) {
 				co_await (self->sentBytes.onChange() || self->stopReceive.onChange());
 			}
+			if (self->stopReceive.get()) {
+				continue;
+			}
 			if (g_simulator->getCurrentProcess() != self->peerProcess) {
-				co_await g_simulator->onProcess(self->peerProcess);
+				co_await (g_simulator->onProcess(self->peerProcess) || self->stopReceive.onChange());
+			}
+			if (self->stopReceive.get()) {
+				continue;
 			}
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 
@@ -524,21 +531,21 @@ private:
 			    deterministicRandom()->random01() < .5
 			        ? self->sentBytes.get()
 			        : deterministicRandom()->randomInt64(self->receivedBytes.get(), self->sentBytes.get() + 1);
-			co_await delay(g_clogging.getSendDelay(
-			    self->peerProcess->address, self->process->address, self->isStableConnection()));
+			co_await (delay(g_clogging.getSendDelay(
+			              self->peerProcess->address, self->process->address, self->isStableConnection())) ||
+			          self->stopReceive.onChange());
+			if (self->stopReceive.get()) {
+				continue;
+			}
 			co_await g_simulator->onProcess(self->process);
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
-			co_await delay(g_clogging.getRecvDelay(
-			    self->peerProcess->address, self->process->address, self->isStableConnection()));
-			ASSERT(g_simulator->getCurrentProcess() == self->process);
-			bool drained = self->stopReceive.get() && pos == self->sentBytes.get();
-			if (drained) {
-				// Publishing the final bytes may let a reader release its last reference to this connection.
-				auto keepAlive = Reference<Sim2Conn>::addRef(self);
-				self->receivedBytes.set(pos);
-				self->incomingClosed.set(true);
-				co_return;
+			co_await (delay(g_clogging.getRecvDelay(
+			              self->peerProcess->address, self->process->address, self->isStableConnection())) ||
+			          self->stopReceive.onChange());
+			if (self->stopReceive.get()) {
+				continue;
 			}
+			ASSERT(g_simulator->getCurrentProcess() == self->process);
 			self->receivedBytes.set(pos);
 			co_await Future<Void>(Void()); // Prior notification can delete self and cancel this actor
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
@@ -701,6 +708,60 @@ TEST_CASE("/fdbrpc/Sim2Conn/drainBeforePeerCloseError") {
 	senderConn->close();
 	co_await timeoutError(receiverConn->onReadable(), 3.0);
 	uint8_t byte;
+	ASSERT_EQ(receiverConn->read(&byte, &byte + 1), 1);
+	ASSERT_EQ(byte, static_cast<uint8_t>('x'));
+	try {
+		co_await timeoutError(receiverConn->onReadable(), 3.0);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	receiverConn->close();
+}
+
+TEST_CASE("/fdbrpc/Sim2Conn/closeWithInFlightBytesAndDeadPeer") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	auto receiverProcess = g_simulator->getCurrentProcess();
+	auto port = g_simulator->getMachineById(receiverProcess->locality.machineId())->getRandomPort();
+	auto senderProcess = g_simulator->newProcess("Sim2ConnTestPeer",
+	                                             receiverProcess->address.ip,
+	                                             port,
+	                                             false,
+	                                             1,
+	                                             receiverProcess->locality,
+	                                             receiverProcess->metadata,
+	                                             "",
+	                                             "",
+	                                             receiverProcess->protocolVersion,
+	                                             false);
+	senderProcess->excludeFromRestarts = true;
+	auto senderConn = makeReference<Sim2Conn>(senderProcess);
+	auto receiverConn = makeReference<Sim2Conn>(receiverProcess);
+	senderConn->connect(receiverConn, receiverProcess->address);
+	receiverConn->connect(senderConn, senderProcess->address);
+	senderConn->stableConnection = receiverConn->stableConnection = true;
+
+	uint8_t byte;
+	ASSERT_EQ(receiverConn->read(&byte, &byte + 1), 0);
+	Future<Void> readable = receiverConn->onReadable();
+	Future<Void> sent = receiverConn->onSentBytesForTest();
+	co_await g_simulator->onProcess(senderProcess);
+	UnsentPacketQueue packet;
+	auto buffer = packet.getWriteBuffer(1);
+	buffer->data()[0] = 'x';
+	buffer->bytes_written = 1;
+	ASSERT_EQ(senderConn->write(packet.getUnsent(), 1), 1);
+	packet.sent(1);
+	co_await timeoutError(sent, 1.0);
+	senderConn->close();
+	g_simulator->killProcess(senderProcess, ISimulator::KillType::KillInstantly);
+	co_await g_simulator->onProcess(receiverProcess);
+	g_simulator->destroyProcess(senderProcess);
+	ASSERT(!readable.isReady());
+	co_await timeoutError(readable, 3.0);
 	ASSERT_EQ(receiverConn->read(&byte, &byte + 1), 1);
 	ASSERT_EQ(byte, static_cast<uint8_t>('x'));
 	try {
