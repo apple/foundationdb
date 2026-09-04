@@ -3140,9 +3140,31 @@ struct DDQueueImpl {
 
 		auto const highestPriorityRelocation = self->getHighestPriorityRelocation();
 
+		// InFlight and InQueue below are counters, maintained by increment/decrement as relocations are
+		// launched and completed. They have been observed diverging badly from the work actually present
+		// — an order of magnitude — which makes them useless for judging whether DD is holding real work
+		// or has simply lost count. The retained-object sizes here are the independent view: they are
+		// what DD's resident memory is actually made of, so they distinguish a genuine backlog from
+		// counter drift, and they are the accounting to reach for when DD approaches its memory limit.
+		//
+		// fetchKeysComplete in particular is the known driver of DD memory growth: relocations land
+		// there once their fetch finishes and wait to be retired, so it grows without bound whenever
+		// completion processing falls behind.
+		int serverQueueEntries = 0;
+		for (auto const& [serverId, serverQueue] : self->queue) {
+			serverQueueEntries += serverQueue.size();
+		}
+
 		TraceEvent("MovingData", self->distributorId)
 		    .detail("InFlight", self->activeRelocations)
 		    .detail("InQueue", self->queuedRelocations)
+		    .detail("FetchKeysComplete", self->fetchKeysComplete.size())
+		    .detail("FetchingSourcesQueue", self->fetchingSourcesQueue.size())
+		    .detail("ServerQueues", self->queue.size())
+		    .detail("ServerQueueEntries", serverQueueEntries)
+		    .detail("BusySourceServers", self->busymap.size())
+		    .detail("BusyDestServers", self->destBusymap.size())
+		    .detail("LastAsSourceEntries", self->lastAsSource.size())
 		    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
 		    .detail("UnhealthyRelocations", self->unhealthyRelocations)
 		    .detail("HighestPriority", highestPriorityRelocation)

@@ -668,6 +668,14 @@ protected:
 
 	void updateTeamEligibility();
 
+	// Emits DDServerEligibility, no more often than DD_SERVER_ELIGIBILITY_LOGGING_INTERVAL. Called from
+	// the periodic logging path rather than from the eligibility survey, so the gauges keep arriving when
+	// nothing is asking for teams.
+	void traceServerEligibility() const;
+	// Initialised well below any plausible now() so the first call always emits. A zero here would
+	// suppress the whole first interval whenever now() starts near zero, as it does under simulation.
+	mutable double lastServerEligibilityTrace = -1e9;
+
 public:
 	Reference<IDDTxnProcessor> db;
 
