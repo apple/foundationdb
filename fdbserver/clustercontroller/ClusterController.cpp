@@ -4815,8 +4815,8 @@ TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
 			               ReplyPromise<RegisterWorkerReply>(),
 			               0,
 			               wi,
-			               ProcessClass(classType, ProcessClass::CommandLineSource),
-			               ProcessClass(classType, ProcessClass::CommandLineSource),
+			               ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource),
+			               ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource),
 			               ClusterControllerPriorityInfo(
 			                   recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown),
 			               false,
@@ -5123,18 +5123,17 @@ TEST_CASE("/fdbserver/clustercontroller/singletonPlacementKeepsSnapshotAmplifica
 		wi.initEndpoints();
 		wi.locality.set(LocalityData::keyZoneId, Standalone<StringRef>(pid.toString() + "_zone"));
 		wi.locality.set(LocalityData::keyProcessId, Standalone<StringRef>(pid));
-		data.id_worker[wi.locality.processId()] =
-		    WorkerInfo(Future<Void>(),
-		               ReplyPromise<RegisterWorkerReply>(),
-		               0,
-		               wi,
-		               ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource),
-		               ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource),
-		               ClusterControllerPriorityInfo(
-		                   recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown),
-		               false,
-		               true,
-		               Standalone<VectorRef<StringRef>>());
+		data.id_worker[wi.locality.processId()] = WorkerInfo(
+		    Future<Void>(),
+		    ReplyPromise<RegisterWorkerReply>(),
+		    0,
+		    wi,
+		    ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource),
+		    ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource),
+		    ClusterControllerPriorityInfo(recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown),
+		    false,
+		    true,
+		    Standalone<VectorRef<StringRef>>());
 		data.id_worker[wi.locality.processId()].verified = true;
 		return wi.locality.processId();
 	};
