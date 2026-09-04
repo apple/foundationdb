@@ -2234,7 +2234,7 @@ public:
 		if (!containsMutation) {
 			position = LogMessageVersion(101);
 		}
-		co_return Void();
+		co_return;
 	}
 	bool isExhausted() const override { return fetched && !hasMessage(); }
 	LogMessageVersion const& version() const override { return position; }
@@ -2309,7 +2309,7 @@ public:
 		test.proxy.clearBufferedMutations(first);
 		test.proxy.clearBufferedMutations(second);
 		ASSERT_EQ(test.proxy.bufferLock.activePermits(), 0);
-		co_return Void();
+		co_return;
 	}
 
 	static Future<Void> capacity(bool queued = false) {
@@ -2335,7 +2335,7 @@ public:
 		if (queued) {
 			waiting.cancel();
 		}
-		co_return Void();
+		co_return;
 	}
 
 	static Future<Void> extraCapacity() {
@@ -2346,7 +2346,7 @@ public:
 		if (passLimit.preferredBufferedBytes == passLimit.hardBufferedBytes) {
 			// Small randomized budgets have no valid batch requiring an additional reservation.
 			ASSERT_EQ(passLimit.reservationBytes, limit);
-			co_return Void();
+			co_return;
 		}
 		co_await test.proxy.bufferLock.take(TaskPriority::TLogPeekReply, limit - passLimit.reservationBytes);
 		FlowLock::Releaser held(test.proxy.bufferLock, limit - passLimit.reservationBytes);
@@ -2364,7 +2364,7 @@ public:
 		ASSERT_EQ(test.proxy.bufferLock.activePermits(), limit);
 		ASSERT(stream->mutations.empty());
 		ASSERT_EQ(stream->bufferedThrough, 99);
-		co_return Void();
+		co_return;
 	}
 
 	static Future<Void> interrupted(int action) {
@@ -2398,7 +2398,7 @@ public:
 		ASSERT(!stream->readAhead.claimedBy(test.tag.getPtr()));
 		ASSERT(!stream->readAhead.armedFor(99));
 		ASSERT_EQ(test.proxy.bufferLock.activePermits(), 0);
-		co_return Void();
+		co_return;
 	}
 
 	static Future<Void> empty() {
@@ -2411,7 +2411,7 @@ public:
 		ASSERT(stream->mutations.empty());
 		ASSERT_EQ(test.proxy.bufferLock.activePermits(), 0);
 		ASSERT(!test.proxy.nextTagPrefetchVersion(test.tag).present());
-		co_return Void();
+		co_return;
 	}
 };
 
