@@ -1382,6 +1382,36 @@ TEST_CASE("/flow/flow/AsyncMap/randomized") {
 	}
 }
 
+TEST_CASE("/flow/flow/AsyncMap/basic") {
+	Future<Void> pending;
+	{
+		AsyncMap<int, int> map;
+		map.set(10, 1);
+		ASSERT(map.get(10) == 1);
+		ASSERT(map.get(20) == 0);
+
+		Future<Void> first = map.onChange(10);
+		Future<Void> second = map.onChange(20);
+		pending = map.onChange(30);
+		ASSERT(!first.isReady() && !second.isReady() && !pending.isReady());
+
+		map.set(10, 0);
+		ASSERT(first.isReady() && !first.isError());
+		ASSERT(!second.isReady() && map.get(10) == 0);
+		map.set(20, 5);
+		ASSERT(second.isReady() && !second.isError() && map.get(20) == 5);
+
+		first = map.onChange(10);
+		second = map.onChange(20);
+		map.triggerRange(15, 25);
+		ASSERT(!first.isReady() && second.isReady() && !second.isError());
+		ASSERT(map.get(20) == 5);
+	}
+	ASSERT(pending.isReady() && pending.isError());
+	ASSERT(pending.getError().code() == error_code_broken_promise);
+	return Void();
+}
+
 TEST_CASE("/flow/flow/YieldedAsyncMap/basic") {
 	YieldedAsyncMap<int, int> yam;
 	Future<Void> y0 = yam.onChange(1);
