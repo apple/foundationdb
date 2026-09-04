@@ -917,10 +917,13 @@ void CDCProxy::changeStreamReadDemand(Reference<CDCBufferedStream> stream, int d
 		bool refresh = true;
 	};
 	std::vector<TagDemandSnapshot> snapshots;
-	snapshots.reserve(stream->tagIntervals.size());
+	std::unordered_set<Tag> seenTags;
+	const size_t maxSnapshots = std::min(stream->tagIntervals.size(), tags.size());
+	snapshots.reserve(maxSnapshots);
+	seenTags.reserve(maxSnapshots);
 	for (const auto& interval : stream->tagIntervals) {
 		auto found = tags.find(interval.tag);
-		if (found != tags.end()) {
+		if (found != tags.end() && seenTags.insert(interval.tag).second) {
 			snapshots.push_back({ found->second, nextTagReadVersion(found->second) });
 		}
 	}
