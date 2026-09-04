@@ -1614,7 +1614,7 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 
 Future<Void> startTransaction(Reference<TransactionState> trStateInput) {
 	Reference<TransactionState> trState(std::move(trStateInput));
-	co_await success(trState->readVersionFuture);
+	co_await trState->readVersionFuture;
 }
 
 TEST_CASE("/fdbclient/NativeAPI/startTransaction/releasesStateOnCompletion") {
