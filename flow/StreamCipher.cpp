@@ -124,15 +124,22 @@ StringRef EncryptionStreamCipher::encrypt(unsigned char const* plaintext, int le
 	CODE_PROBE(true, "Encrypting data with StreamCipher");
 	auto ciphertext = new (arena) unsigned char[len + AES_BLOCK_SIZE];
 	int bytes{ 0 };
-	EVP_EncryptUpdate(cipher.getCtx(), ciphertext, &bytes, plaintext, len);
+	if (EVP_EncryptUpdate(cipher.getCtx(), ciphertext, &bytes, plaintext, len) != 1) {
+		throw encrypt_ops_error();
+	}
 	return StringRef(ciphertext, bytes);
 }
 
 StringRef EncryptionStreamCipher::finish(Arena& arena) {
-	auto ciphertext = new (arena) unsigned char[AES_BLOCK_SIZE];
+	auto ciphertext = new (arena) unsigned char[AES_BLOCK_SIZE + GCM_TAG_LEN];
 	int bytes{ 0 };
-	EVP_EncryptFinal_ex(cipher.getCtx(), ciphertext, &bytes);
-	return StringRef(ciphertext, bytes);
+	if (EVP_EncryptFinal_ex(cipher.getCtx(), ciphertext, &bytes) != 1) {
+		throw encrypt_ops_error();
+	}
+	if (EVP_CIPHER_CTX_ctrl(cipher.getCtx(), EVP_CTRL_GCM_GET_TAG, GCM_TAG_LEN, ciphertext + bytes) != 1) {
+		throw encrypt_ops_error();
+	}
+	return StringRef(ciphertext, bytes + GCM_TAG_LEN);
 }
 
 DecryptionStreamCipher::DecryptionStreamCipher(const StreamCipherKey* key, const StreamCipher::IV& iv)
@@ -146,16 +153,22 @@ StringRef DecryptionStreamCipher::decrypt(unsigned char const* ciphertext, int l
 	CODE_PROBE(true, "Decrypting data with StreamCipher");
 	auto plaintext = new (arena) unsigned char[len];
 	int bytesDecrypted{ 0 };
-	EVP_DecryptUpdate(cipher.getCtx(), plaintext, &bytesDecrypted, ciphertext, len);
-	int finalBlockBytes{ 0 };
-	EVP_DecryptFinal_ex(cipher.getCtx(), plaintext + bytesDecrypted, &finalBlockBytes);
-	return StringRef(plaintext, bytesDecrypted + finalBlockBytes);
+	if (EVP_DecryptUpdate(cipher.getCtx(), plaintext, &bytesDecrypted, ciphertext, len) != 1) {
+		throw encrypt_ops_error();
+	}
+	return StringRef(plaintext, bytesDecrypted);
 }
 
-StringRef DecryptionStreamCipher::finish(Arena& arena) {
+StringRef DecryptionStreamCipher::finish(const uint8_t* tag, Arena& arena) {
+	if (EVP_CIPHER_CTX_ctrl(cipher.getCtx(), EVP_CTRL_GCM_SET_TAG, GCM_TAG_LEN, const_cast<uint8_t*>(tag)) != 1) {
+		throw encrypt_ops_error();
+	}
 	auto plaintext = new (arena) unsigned char[AES_BLOCK_SIZE];
 	int finalBlockBytes{ 0 };
-	EVP_DecryptFinal_ex(cipher.getCtx(), plaintext, &finalBlockBytes);
+	if (EVP_DecryptFinal_ex(cipher.getCtx(), plaintext, &finalBlockBytes) != 1) {
+		TraceEvent(SevWarn, "DecryptGcmTagMismatch").log();
+		throw restore_corrupted_data();
+	}
 	return StringRef(plaintext, finalBlockBytes);
 }
 
@@ -206,17 +219,18 @@ TEST_CASE("flow/StreamCipher") {
 			encryptedOffset += encrypted.size();
 			index += chunkSize;
 		}
+		ciphertext.resize(encryptedOffset + GCM_TAG_LEN);
 		const auto encrypted = encryptor.finish(arena);
 		std::copy(encrypted.begin(), encrypted.end(), &ciphertext[encryptedOffset]);
-		ciphertext.resize(encryptedOffset + encrypted.size());
 	}
 
 	{
 		DecryptionStreamCipher decryptor(key, iv);
 		int index = 0;
 		int decryptedOffset = 0;
-		while (index < plaintext.size()) {
-			const auto chunkSize = std::min<int>(deterministicRandom()->randomInt(1, 101), plaintext.size() - index);
+		const int payloadSize = ciphertext.size() - GCM_TAG_LEN;
+		while (index < payloadSize) {
+			const auto chunkSize = std::min<int>(deterministicRandom()->randomInt(1, 101), payloadSize - index);
 			const auto decrypted = decryptor.decrypt(&ciphertext[index], chunkSize, arena);
 			TraceEvent("StreamCipherTestDecryptedChunk")
 			    .detail("DecryptedSize", decrypted.size())
@@ -226,7 +240,7 @@ TEST_CASE("flow/StreamCipher") {
 			decryptedOffset += decrypted.size();
 			index += chunkSize;
 		}
-		const auto decrypted = decryptor.finish(arena);
+		const auto decrypted = decryptor.finish(&ciphertext[payloadSize], arena);
 		std::copy(decrypted.begin(), decrypted.end(), &decryptedtext[decryptedOffset]);
 		ASSERT_EQ(decryptedOffset + decrypted.size(), plaintext.size());
 		decryptedtext.resize(decryptedOffset + decrypted.size());
