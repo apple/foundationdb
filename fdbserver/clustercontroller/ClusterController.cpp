@@ -1094,6 +1094,15 @@ bool isHealthySingleton(ClusterControllerData* self,
 	}
 }
 
+// Amplify the accumulated non-singleton usage once, so that each singleton placed
+// afterwards still costs one unit: one non-singleton role must outweigh all
+// singleton placements combined.
+static void amplifyNonSingletonUsage(ClusterControllerData::WorkerUsages& id_used) {
+	for (auto& it : id_used) {
+		it.second.weight *= PID_USED_AMP_FOR_NON_SINGLETON;
+	}
+}
+
 // Returns a mapping from pid->pidCount for pids
 std::map<Optional<Standalone<StringRef>>, int> getColocCounts(
     const std::vector<Optional<Standalone<StringRef>>>& pids) {
@@ -1122,9 +1131,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// so we artificially amplify the pid count for the processes used by non-singleton roles.
 	// In other words, we make the processes used for other roles less desirable to be used
 	// by singletons as well.
-	for (auto& it : id_used) {
-		it.second.multiplier *= PID_USED_AMP_FOR_NON_SINGLETON;
-	}
+	amplifyNonSingletonUsage(id_used);
 
 	// Try to find a new process for each singleton.
 	WorkerDetails newRKWorker = findNewProcessForSingleton(self, recruitment::Ratekeeper, id_used);
@@ -5095,6 +5102,75 @@ TEST_CASE("/fdbserver/clustercontroller/logRouterRecruitmentAcrossFitnessLevels"
 	for (const auto& w : transactionWorkers) {
 		ASSERT(recruitedPids.contains(w.locality.processId()));
 	}
+
+	return Void();
+}
+
+// Regression test for the singleton-placement amplification: PID_USED_AMP_FOR_NON_SINGLETON
+// must amplify the accumulated non-singleton usage once (snapshot semantics), so each
+// singleton placed afterwards still costs one unit. With a one-unit read-time factor the
+// first singleton placement on the lighter process would tie it with the busier process
+// and subsequent placements could leak onto the busier process.
+TEST_CASE("/fdbserver/clustercontroller/singletonPlacementKeepsSnapshotAmplification") {
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+
+	auto addWorker = [&](StringRef pid) -> Optional<Standalone<StringRef>> {
+		WorkerInterface wi;
+		wi.initEndpoints();
+		wi.locality.set(LocalityData::keyZoneId, Standalone<StringRef>(pid.toString() + "_zone"));
+		wi.locality.set(LocalityData::keyProcessId, Standalone<StringRef>(pid));
+		data.id_worker[wi.locality.processId()] =
+		    WorkerInfo(Future<Void>(),
+		               ReplyPromise<RegisterWorkerReply>(),
+		               0,
+		               wi,
+		               ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource),
+		               ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource),
+		               ClusterControllerPriorityInfo(
+		                   recruitment::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown),
+		               false,
+		               true,
+		               Standalone<VectorRef<StringRef>>());
+		data.id_worker[wi.locality.processId()].verified = true;
+		return wi.locality.processId();
+	};
+
+	// Process A carries one non-singleton role, process B carries two.
+	auto pidA = addWorker("a"_sr);
+	auto pidB = addWorker("b"_sr);
+	// Unverified master process so onMasterIsBetter() never redirects placements.
+	data.masterProcessId = addWorker("m"_sr);
+	data.id_worker[data.masterProcessId.get()].verified = false;
+	data.startTime = now();
+	data.db.config.initialized = true;
+
+	ClusterControllerData::WorkerUsages id_used;
+	id_used[pidA].addRole(recruitment::CommitProxy);
+	id_used[pidB].addRole(recruitment::CommitProxy);
+	id_used[pidB].addRole(recruitment::GrvProxy);
+
+	amplifyNonSingletonUsage(id_used);
+	ASSERT_EQ(PID_USED_AMP_FOR_NON_SINGLETON, id_used[pidA].getWeight());
+	ASSERT_EQ(2 * PID_USED_AMP_FOR_NON_SINGLETON, id_used[pidB].getWeight());
+
+	// All three singletons must land on A (100 -> 101 -> 102 -> 103 < 200), and each
+	// placement must cost exactly one unit: with a read-time factor A would tie B at 200
+	// after the first placement.
+	const recruitment::ClusterRole singletonRoles[] = { recruitment::Ratekeeper,
+		                                                recruitment::DataDistributor,
+		                                                recruitment::ConsistencyScan };
+	unsigned expectedWeight = PID_USED_AMP_FOR_NON_SINGLETON;
+	for (const auto& role : singletonRoles) {
+		WorkerDetails worker = findNewProcessForSingleton(&data, role, id_used);
+		ASSERT(worker.interf.locality.processId() == pidA);
+		expectedWeight += 1;
+		ASSERT_EQ(expectedWeight, id_used[pidA].getWeight());
+	}
+	ASSERT_EQ(2 * PID_USED_AMP_FOR_NON_SINGLETON, id_used[pidB].getWeight());
 
 	return Void();
 }

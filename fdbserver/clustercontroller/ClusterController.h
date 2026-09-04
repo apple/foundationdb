@@ -294,7 +294,6 @@ public:
 	struct WorkerUsage {
 		std::bitset<recruitment::NoRole> roles;
 		unsigned weight = 0;
-		unsigned multiplier = 1;
 
 		static unsigned roleWeight(recruitment::ClusterRole role) {
 			// All roles currently contribute equally to the usage weight.
@@ -310,7 +309,7 @@ public:
 			}
 		}
 
-		unsigned getWeight() const { return weight * multiplier; }
+		unsigned getWeight() const { return weight; }
 
 		unsigned getUniqueHash() const {
 			static_assert(recruitment::NoRole <= 32, "role bitset must fit in an unsigned");
