@@ -170,6 +170,11 @@ Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 			// TODO: Remove this max-version exception and the corresponding check in updater()
 			// once compatibility with older cluster controllers that emit the sentinel is no longer required.
 			if (reply.version < largestSeen && largestSeen != std::numeric_limits<Version>::max()) {
+				TraceEvent("GlobalConfigRefreshStaleSnapshot")
+				    .suppressFor(1.0)
+				    .detail("LastKnownVersion", lastKnown)
+				    .detail("LargestSeenVersion", largestSeen)
+				    .detail("ReplyVersion", reply.version);
 				co_await delay(0.25);
 				continue;
 			}
