@@ -2,7 +2,7 @@ include_guard(GLOBAL)
 
 option(ENABLE_UNIT_TESTS "Build and register per-library unit tests with CTest" ${BUILD_TESTING})
 set(UNIT_TEST_SEED "1" CACHE STRING "Decimal random seed for CTest unit tests (0 chooses a random seed)")
-set(UNIT_TEST_TIMEOUT "1800" CACHE STRING "Wall-clock timeout in seconds for each CTest unit suite")
+set(UNIT_TEST_TIMEOUT "600" CACHE STRING "Wall-clock timeout in seconds for each CTest unit suite")
 
 if(AUTO_DISCOVER_UNIT_TESTS)
   message(DEPRECATION "AUTO_DISCOVER_UNIT_TESTS has been replaced by ENABLE_UNIT_TESTS; source-based test discovery is no longer used")

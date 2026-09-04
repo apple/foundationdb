@@ -47,7 +47,7 @@ entry. The memory-tracker suite is available when ``FDB_MEMORY_TRACKER=ON``.
 
 ``UNIT_TEST_SEED`` is a decimal seed shared by these entries, independent of
 the cluster simulation seed. It defaults to ``1``; set it to ``0`` to choose a
-random seed, which each runner prints. ``UNIT_TEST_TIMEOUT`` defaults to 1800
+random seed, which each runner prints. ``UNIT_TEST_TIMEOUT`` defaults to 600
 wall-clock seconds per suite. Each runner uses a separate temporary directory,
 so CTest can run suites concurrently. To reproduce an individual failure:
 
