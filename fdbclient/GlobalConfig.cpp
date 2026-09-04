@@ -167,6 +167,8 @@ Future<Version> GlobalConfig::refresh(Version lastKnown, Version largestSeen) {
 			                                           &GrvProxyInterface::refreshGlobalConfig,
 			                                           GlobalConfigRefreshRequest{ lastKnown }),
 			                          CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT);
+			// TODO: Remove this max-version exception and the corresponding check in updater()
+			// once compatibility with older cluster controllers that emit the sentinel is no longer required.
 			if (reply.version < largestSeen && largestSeen != std::numeric_limits<Version>::max()) {
 				co_await delay(0.25);
 				continue;
