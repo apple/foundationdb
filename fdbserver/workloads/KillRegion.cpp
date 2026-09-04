@@ -1,5 +1,5 @@
 /*
- * KillRegion.actor.cpp
+ * KillRegion.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
