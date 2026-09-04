@@ -23,7 +23,7 @@ import flow_swift
 
 struct StreamTests: SimpleSwiftTestSuite {
     var tests: [TestCase] {
-        /// Corresponds to FlowTests.actor.cpp "/flow/flow/trivial promisestreams"
+        /// Corresponds to FlowTests.cpp "/flow/flow/trivial promisestreams"
         TestCase("PromiseStream: await stream.waitNext") {
             var ps = PromiseStreamCInt()
             var fs: FutureStreamCInt = ps.getFuture()
@@ -75,23 +75,12 @@ struct StreamTests: SimpleSwiftTestSuite {
             precondition(sum == expected, "Expected \(expected) but got \(sum)")
         }
 
-        /// This test showcases a semantic 1:1 equivalent of a "loop choose {}"
+        /// This test uses a task group to choose between asynchronous operations.
         /// It should be more efficient since we're using child tasks inside a task group,
         /// which can benefit from being allocated inside the parent task.
         ///
-        /// Equivalent to `tutorial.actor.cpp::someFuture(Future<int> ready)`
+        /// See also `documentation/coro_tutorial/tutorial.cpp::someFuture(Future<int> ready)`.
         TestCase("1:1 simulate a 'loop choose {}' in Swift, with TaskGroup") {
-            //    ACTOR Future<Void> someFuture(Future<int> ready) {
-            //        loop choose {
-            //            when(wait(delay(0.5))) { std::cout << "Still waiting...\n"; }
-            //            when(int r = wait(ready)) {
-            //                std::cout << format("Ready %d\n", r);
-            //                wait(delay(double(r)));
-            //                std::cout << "Done\n";
-            //                return Void();
-            //            }
-            //        }
-            //    }
             let promise = PromiseVoid()
 
             Task {

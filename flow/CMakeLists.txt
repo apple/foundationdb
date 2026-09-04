@@ -165,7 +165,6 @@ foreach(ft flow flow_sampling flowlinktest flow_test)
 endforeach()
 
 if(OPEN_FOR_IDE)
-  # AcAC requires actor transpiler
   add_library(acac OBJECT acac.cpp)
 else()
   add_executable(acac acac.cpp)
@@ -173,9 +172,6 @@ endif()
 target_link_libraries(acac PUBLIC flow boost_target_program_options)
 
 target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
-if(WIN32)
-  add_dependencies(flow_sampling_actors flow_actors)
-endif()
 
 if(OPEN_FOR_IDE)
   add_library(mkcert OBJECT MkCertCli.cpp)
@@ -253,7 +249,7 @@ if(WITH_SWIFT)
   target_compile_options(
     flow_swift
     PRIVATE
-      "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++20 -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml>"
+      "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++20 -Xfrontend -validate-tbd-against-ir=none -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml>"
   )
 
   # Ensure that C++ code in fdbserver can import Swift using a compatibility
@@ -270,8 +266,6 @@ if(WITH_SWIFT)
     FLAGS
     -Xcc
     -std=c++20
-    -Xcc
-    -DNO_INTELLISENSE
     -Xcc
     -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml
     # Important: This is needed to avoid including headers that depends on this
@@ -291,16 +285,12 @@ if(WITH_SWIFT)
     -Xcc
     -std=c++20
     -Xcc
-    -DNO_INTELLISENSE
-    -Xcc
     -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml)
 
-  add_dependencies(flow_swift_checked_continuation_header flow_actors
-                   boost_target ProtocolVersion)
+  add_dependencies(flow_swift_checked_continuation_header boost_target ProtocolVersion)
   add_dependencies(flow_swift_header flow_swift_checked_continuation_header)
   add_dependencies(flow_swift flow_swift_header)
 
-  add_dependencies(flow_swift flow_actors)
   add_dependencies(flow_swift boost_target)
   # TODO(swift): rdar://99107402 - this will only work once CMake 3.25 is
   # released: target_link_libraries(flow PRIVATE flow_swift)

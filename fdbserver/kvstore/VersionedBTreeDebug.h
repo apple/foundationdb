@@ -49,7 +49,6 @@ bool enableRedwoodDebug();
 #define debug_print_always(str) debug_printf_always("%s\n", str.c_str())
 #define debug_printf_noop(...)
 
-#if defined(NO_INTELLISENSE)
 #if REDWOOD_DEBUG
 
 // debug_print() only outputs the line if the enableRedwoodDebug() pass.
@@ -61,10 +60,6 @@ bool enableRedwoodDebug();
 
 // Completely compile out debug statements if REDWOOD_DEBUG is off.
 #define debug_printf debug_printf_noop
-#endif
-#else
-// To get error-checking on debug_printf statements in IDE
-#define debug_printf printf
 #endif
 
 #define BEACON debug_printf_always("HERE\n")

@@ -24,6 +24,7 @@
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "flow/ApiVersion.h"
 #include "flow/Buggify.h"
 #include "flow/CodeProbe.h"
@@ -47,7 +48,7 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "MetricLogger.h"
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/backupworker/RangePartitionedBackupWorker.h"

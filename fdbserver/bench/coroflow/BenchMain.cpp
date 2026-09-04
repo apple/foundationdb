@@ -1,5 +1,5 @@
 /*
- * unactorcompiler.h
+ * BenchMain.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,20 +18,9 @@
  * limitations under the License.
  */
 
-#ifndef POST_ACTOR_COMPILER
+#include "fdbserver/CoroFlow.h"
+#include "flow/BenchMain.h"
 
-#ifndef NO_INTELLISENSE
-#undef ACTOR
-#undef SWIFT_ACTOR
-#undef state
-#undef UNCANCELLABLE
-#undef choose
-#undef when
-#endif
-
-#undef THIS
-#undef THIS_ADDR
-
-#endif
-
-// loop is still defined
+int main(int argc, char** argv) {
+	return runBenchmarks(argc, argv, [] { CoroThreadPool::init(); });
+}

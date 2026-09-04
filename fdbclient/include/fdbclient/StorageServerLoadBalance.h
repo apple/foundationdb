@@ -1,5 +1,5 @@
 /*
- * StorageServerLoadBalance.actor.h
+ * StorageServerLoadBalance.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,21 +20,14 @@
 
 #pragma once
 
-// This header is included at the end of StorageServerInterface.h, after the storage-server request and reply types are
-// defined. Keeping these hooks here lets fdbrpc's generic load balancer stay unaware of storage-specific comparisons.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_STORAGESERVERLOADBALANCE_ACTOR_G_H)
-#define FDBCLIENT_STORAGESERVERLOADBALANCE_ACTOR_G_H
-#include "fdbclient/StorageServerLoadBalance.actor.g.h"
-#elif !defined(FDBCLIENT_STORAGESERVERLOADBALANCE_ACTOR_H)
-#define FDBCLIENT_STORAGESERVERLOADBALANCE_ACTOR_H
-
-#include "fdbrpc/simulator.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbclient/SimulationCapabilities.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "flow/CoroUtils.h"
 
 enum ComparisonType { TSS_COMPARISON, REPLICA_COMPARISON };
 
 // FIXME: use a less obscure name than `P` here
-ACTOR template <class Req, class Resp, bool P>
+template <class Req, class Resp, bool P>
 Future<Void> tssComparison(Req req,
                            Future<ErrorOr<Resp>> fSource,
                            Future<ErrorOr<Resp>> fTss,
@@ -42,35 +35,30 @@ Future<Void> tssComparison(Req req,
                            uint64_t srcEndpointId,
                            Reference<MultiInterface<ReferencedInterface<StorageServerInterface>>> ssTeam,
                            RequestStream<Req, P> StorageServerInterface::* channel) {
-	state double startTime = now();
-	state Future<Optional<ErrorOr<Resp>>> fTssWithTimeout = timeout(fTss, FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT);
-	state int finished = 0;
-	state double srcEndTime;
-	state double tssEndTime;
+	double startTime = now();
+	Future<Optional<ErrorOr<Resp>>> fTssWithTimeout = timeout(fTss, FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT);
+	int finished = 0;
+	double srcEndTime{ 0 };
+	double tssEndTime{ 0 };
 	// we want to record ss/tss errors to metrics
-	state int srcErrorCode = error_code_success;
-	state int tssErrorCode = error_code_success;
-	state ErrorOr<Resp> src;
-	state Optional<ErrorOr<Resp>> tss;
+	int srcErrorCode = error_code_success;
+	int tssErrorCode = error_code_success;
+	ErrorOr<Resp> src;
+	Optional<ErrorOr<Resp>> tss;
 
-	loop {
-		choose {
-			when(wait(store(src, fSource))) {
-				srcEndTime = now();
-				fSource = Never();
-				finished++;
-				if (finished == 2) {
-					break;
-				}
-			}
-			when(wait(store(tss, fTssWithTimeout))) {
-				tssEndTime = now();
-				fTssWithTimeout = Never();
-				finished++;
-				if (finished == 2) {
-					break;
-				}
-			}
+	while (true) {
+		auto res = co_await race(fSource, fTssWithTimeout);
+		if (res.index() == 0) {
+			src = std::get<0>(std::move(res));
+			srcEndTime = now();
+			fSource = Never();
+		} else {
+			tss = std::get<1>(std::move(res));
+			tssEndTime = now();
+			fTssWithTimeout = Never();
+		}
+		if (++finished == 2) {
+			break;
 		}
 	}
 	++tssData.metrics->requests;
@@ -99,11 +87,10 @@ Future<Void> tssComparison(Req req,
 
 			if (!TSS_doCompare(src.get(), tss.get().get())) {
 				CODE_PROBE(true, "TSS Mismatch");
-				state TraceEvent mismatchEvent(
-				    (simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
-				        ? SevWarnAlways
-				        : SevError,
-				    LB_mismatchTraceName(req, TSS_COMPARISON));
+				TraceEvent mismatchEvent((fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch))
+				                             ? SevWarnAlways
+				                             : SevError,
+				                         LB_mismatchTraceName(req, TSS_COMPARISON));
 				mismatchEvent.setMaxEventLength(FLOW_KNOBS->TSS_LARGE_TRACE_SIZE);
 				mismatchEvent.detail("TSSID", tssData.tssId);
 
@@ -112,7 +99,7 @@ Future<Void> tssComparison(Req req,
 
 					// if there is more than 1 SS in the team, attempt to verify that the other SS servers have the same
 					// data
-					state std::vector<Future<ErrorOr<Resp>>> restOfTeamFutures;
+					std::vector<Future<ErrorOr<Resp>>> restOfTeamFutures;
 					restOfTeamFutures.reserve(ssTeam->size() - 1);
 					for (int i = 0; i < ssTeam->size(); i++) {
 						RequestStream<Req, P> const* si = &ssTeam->get(i, channel);
@@ -123,7 +110,7 @@ Future<Void> tssComparison(Req req,
 						}
 					}
 
-					wait(waitForAllReady(restOfTeamFutures));
+					co_await waitForAllReady(restOfTeamFutures);
 
 					int numError = 0;
 					int numMatchSS = 0;
@@ -165,7 +152,7 @@ Future<Void> tssComparison(Req req,
 						// record a summarized trace event instead
 						TraceEvent summaryEvent(
 						    (g_network->isSimulated() &&
-						     simulationPolicyHasCapability(ISimulationPolicy::Capability::WarnOnStorageMismatch))
+						     fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch))
 						        ? SevWarnAlways
 						        : SevError,
 						    LB_mismatchTraceName(req, TSS_COMPARISON));
@@ -193,24 +180,22 @@ Future<Void> tssComparison(Req req,
 		    .detail("SSError", srcErrorCode)
 		    .detail("TSSError", tssErrorCode);
 	}
-
-	return Void();
 }
 
-ACTOR template <class Req, class Resp, bool P>
+template <class Req, class Resp, bool P>
 Future<Void> replicaComparison(Req req,
                                Future<ErrorOr<Resp>> fSource,
                                uint64_t srcEndpointId,
                                Reference<MultiInterface<ReferencedInterface<StorageServerInterface>>> ssTeam,
                                RequestStream<Req, P> StorageServerInterface::* channel,
                                int requiredReplicas) {
-	state ErrorOr<Resp> src;
+	ErrorOr<Resp> src;
 
 	if (ssTeam->size() <= 1 || requiredReplicas == 0) {
-		return Void();
+		co_return;
 	}
 
-	wait(store(src, fSource));
+	co_await store(src, fSource);
 
 	if (src.isError()) {
 		ASSERT_WE_THINK(false); // TODO: Change this into an ASSERT after getting enough test coverage.
@@ -218,7 +203,7 @@ Future<Void> replicaComparison(Req req,
 			throw src.getError();
 		}
 	} else {
-		state Optional<LoadBalancedReply> srcLB = getLoadBalancedReply(&src.get());
+		Optional<LoadBalancedReply> srcLB = getLoadBalancedReply(&src.get());
 
 		if (srcLB.present() && srcLB.get().error.present()) {
 			ASSERT_WE_THINK(false); // TODO: Change this into an ASSERT after getting enough test coverage.
@@ -255,7 +240,7 @@ Future<Void> replicaComparison(Req req,
 					    .detail("AvailableReplicas", candidates.size());
 				}
 			}
-			state std::vector<Future<Optional<ErrorOr<Resp>>>> restOfTeamFutures;
+			std::vector<Future<Optional<ErrorOr<Resp>>>> restOfTeamFutures;
 			restOfTeamFutures.reserve(numReplicaToRead);
 			// Randomly select numReplicaToRead SSes to read from
 			deterministicRandom()->randomShuffle(candidates);
@@ -275,7 +260,7 @@ Future<Void> replicaComparison(Req req,
 				         : timeout(errorOr(si->getReply(req)), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)));
 			}
 
-			wait(waitForAllReady(restOfTeamFutures));
+			co_await waitForAllReady(restOfTeamFutures);
 
 			int numError = 0;
 			int numMismatch = 0;
@@ -359,7 +344,6 @@ Future<Void> replicaComparison(Req req,
 			}
 		}
 	}
-	return Void();
 }
 
 template <class Request, bool P>
@@ -433,6 +417,3 @@ struct LoadBalanceRequestHooks<Request,
 		return Void();
 	}
 };
-
-#include "flow/unactorcompiler.h"
-#endif

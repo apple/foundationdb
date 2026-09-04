@@ -20,7 +20,7 @@
 
 #include "flow/Hash3.h"
 #include "flow/UnitTest.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RunRYWTransaction.h"
@@ -129,7 +129,51 @@ public:
 
 	// Before calling push, pop, or commit, the user must call readNext() until it throws
 	//    end_of_stream(). It may not be called again thereafter.
-	Future<TLogQueueEntry> readNext(TLogData* tLog) { return readNext(this, tLog); }
+	Future<TLogQueueEntry> readNext(TLogData* tLog) {
+		TLogQueueEntry result;
+		int zeroFillSize = 0;
+
+		while (true) {
+			IDiskQueue::location startloc = queue->getNextReadLocation();
+			Standalone<StringRef> h = co_await queue->readNext(sizeof(uint32_t));
+			if (h.size() != sizeof(uint32_t)) {
+				if (!h.empty()) {
+					CODE_PROBE(true, "Zero fill within size field", probe::decoration::rare);
+					int payloadSize = 0;
+					memcpy(&payloadSize, h.begin(), h.size());
+					zeroFillSize = sizeof(uint32_t) - h.size(); // zero fill the size itself
+					zeroFillSize += payloadSize + 1; // and then the contents and valid flag
+				}
+				break;
+			}
+
+			uint32_t payloadSize = *(uint32_t*)h.begin();
+			ASSERT(payloadSize < (100 << 20));
+
+			Standalone<StringRef> e = co_await queue->readNext(payloadSize + 1);
+			if (e.size() != payloadSize + 1) {
+				CODE_PROBE(true, "Zero fill within payload");
+				zeroFillSize = payloadSize + 1 - e.size();
+				break;
+			}
+
+			if (e[payloadSize]) {
+				ASSERT(e[payloadSize] == 1);
+				Arena a = e.arena();
+				ArenaReader ar(a, e.substr(0, payloadSize), IncludeVersion());
+				ar >> result;
+				const IDiskQueue::location endloc = queue->getNextReadLocation();
+				updateVersionSizes(result, tLog, startloc, endloc);
+				co_return result;
+			}
+		}
+		if (zeroFillSize) {
+			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue");
+			for (int i = 0; i < zeroFillSize; i++)
+				queue->push(StringRef((const uint8_t*)"", 1));
+		}
+		throw end_of_stream();
+	}
 
 	Future<bool> initializeRecovery(IDiskQueue::location recoverAt) { return queue->initializeRecovery(recoverAt); }
 
@@ -159,52 +203,6 @@ private:
 	                        TLogData* tLog,
 	                        IDiskQueue::location start,
 	                        IDiskQueue::location end);
-
-	static Future<TLogQueueEntry> readNext(TLogQueue* self, TLogData* tLog) {
-		TLogQueueEntry result;
-		int zeroFillSize = 0;
-
-		while (true) {
-			IDiskQueue::location startloc = self->queue->getNextReadLocation();
-			Standalone<StringRef> h = co_await self->queue->readNext(sizeof(uint32_t));
-			if (h.size() != sizeof(uint32_t)) {
-				if (!h.empty()) {
-					CODE_PROBE(true, "Zero fill within size field", probe::decoration::rare);
-					int payloadSize = 0;
-					memcpy(&payloadSize, h.begin(), h.size());
-					zeroFillSize = sizeof(uint32_t) - h.size(); // zero fill the size itself
-					zeroFillSize += payloadSize + 1; // and then the contents and valid flag
-				}
-				break;
-			}
-
-			uint32_t payloadSize = *(uint32_t*)h.begin();
-			ASSERT(payloadSize < (100 << 20));
-
-			Standalone<StringRef> e = co_await self->queue->readNext(payloadSize + 1);
-			if (e.size() != payloadSize + 1) {
-				CODE_PROBE(true, "Zero fill within payload");
-				zeroFillSize = payloadSize + 1 - e.size();
-				break;
-			}
-
-			if (e[payloadSize]) {
-				ASSERT(e[payloadSize] == 1);
-				Arena a = e.arena();
-				ArenaReader ar(a, e.substr(0, payloadSize), IncludeVersion());
-				ar >> result;
-				const IDiskQueue::location endloc = self->queue->getNextReadLocation();
-				self->updateVersionSizes(result, tLog, startloc, endloc);
-				co_return result;
-			}
-		}
-		if (zeroFillSize) {
-			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue");
-			for (int i = 0; i < zeroFillSize; i++)
-				self->queue->push(StringRef((const uint8_t*)"", 1));
-		}
-		throw end_of_stream();
-	}
 };
 
 ////// Persistence format (for self->persistentData)
@@ -2031,7 +2029,7 @@ TLogPeekMemoryVersions peekMessageVersionsFromMemory(Reference<LogData> self, Ta
 	return result;
 }
 
-Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, Tag tag, int logRouters) {
+AsyncResult<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, Tag tag, int logRouters) {
 	// See the comment in LogSystem.cpp for the binary format of commitBlob.
 	std::vector<StringRef> relevantMessages;
 	BinaryReader rd(commitBlob, AssumeVersion(g_network->protocolVersion()));

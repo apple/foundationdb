@@ -24,7 +24,7 @@
 
 #include "fdbclient/CDCProxyInterface.h"
 #include "fdbclient/NativeCdcClient.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 
 class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
 	static Future<CDCConsumeReply> consumeImpl(Reference<NativeCdcConsumer> self);

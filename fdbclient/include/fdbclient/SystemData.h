@@ -323,6 +323,15 @@ Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag);
 KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId);
 CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key);
 
+// "\xff\x02/cdc/tagOwner/[[Tag]]" := "[[CDCStreamId]]"
+// Derived lookup hint, not authoritative ownership. Validate the stream is active
+// on this tag and read its durable proxy assignment in the same transaction.
+extern const KeyRangeRef cdcTagOwnerKeys;
+Key cdcTagOwnerKeyFor(Tag tag);
+Tag decodeCDCTagOwnerKey(KeyRef const& key);
+Value cdcTagOwnerValue(CDCStreamId streamId);
+CDCStreamId decodeCDCTagOwnerValue(ValueRef const& value);
+
 // Native CDC acknowledgement progress is regular storage-server-backed system data.
 // "\xff\x02/cdc/minVersion/[[CDCStreamId]]" := "[[Version]]"
 // The initial value is versionstamped at stream registration commit.
