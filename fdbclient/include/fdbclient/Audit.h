@@ -41,6 +41,7 @@ enum class AuditType : uint8_t {
 	ValidateStorageServerShard = 4,
 	ValidateRestore = 5,
 	ValidateMetadataEncoding = 6,
+	RangeDigest = 7,
 };
 
 struct AuditStorageState {
@@ -56,7 +57,9 @@ struct AuditStorageState {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, auditServerId, range, type, phase, error, ddId, engineType);
+		// New fields must be appended (flatbuffers with IncludeVersion): old readers
+		// ignore trailing fields and new readers default-init them for old values.
+		serializer(ar, id, auditServerId, range, type, phase, error, ddId, engineType, digest, kvCount, byteCount);
 	}
 
 	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
@@ -69,11 +72,27 @@ struct AuditStorageState {
 		std::string res = "AuditStorageState: [ID]: " + id.toString() +
 		                  ", [Range]: " + Traceable<KeyRangeRef>::toString(range) +
 		                  ", [Type]: " + std::to_string(type) + ", [Phase]: " + std::to_string(phase);
+		if (getType() == AuditType::RangeDigest) {
+			res += ", [KVCount]: " + std::to_string(kvCount) + ", [Bytes]: " + std::to_string(byteCount) +
+			       ", [Digest]: " + digestToHex();
+		}
 		if (!error.empty()) {
 			res += ", [Error]: " + error;
 		}
 
 		return res;
+	}
+
+	// Lower-case hex of the raw 32-byte RangeDigest state (empty string if unset).
+	std::string digestToHex() const {
+		static const char* hexDigits = "0123456789abcdef";
+		std::string out;
+		out.reserve(digest.size() * 2);
+		for (unsigned char b : digest) {
+			out.push_back(hexDigits[b >> 4]);
+			out.push_back(hexDigits[b & 0xf]);
+		}
+		return out;
 	}
 
 	UID id;
@@ -90,6 +109,10 @@ struct AuditStorageState {
 	uint8_t phase;
 	KeyValueStoreType engineType;
 	std::string error;
+	// RangeDigest results (unused/empty for other audit types):
+	std::string digest; // raw 32-byte big-endian RangeDigest state for `range`
+	int64_t kvCount = 0; // number of key-values folded into `digest`
+	int64_t byteCount = 0; // sum of key+value bytes folded into `digest`
 };
 
 struct AuditStorageRequest {
