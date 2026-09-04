@@ -122,6 +122,9 @@ inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/managemen
 Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
 Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                         std::map<std::string, StorageServerInterface>* interfaces);
+Future<Void> getActiveLogAddresses(Reference<IDatabase> db,
+                                   std::set<NetworkAddress>* logAddresses,
+                                   int* unknownInterfaceLogCount);
 
 bool tokencmp(StringRef token, const char* command);
 void printUsage(StringRef command);

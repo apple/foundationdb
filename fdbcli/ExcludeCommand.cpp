@@ -269,9 +269,13 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 		bool markFailed = false;
 		std::vector<ProcessData> workers;
 		std::map<std::string, StorageServerInterface> server_interfaces;
+		std::set<NetworkAddress> activeLogAddresses;
+		int unknownInterfaceLogCount = 0;
 		Future<bool> future_workers = fdb_cli::getWorkers(db, &workers);
 		Future<Void> future_server_interfaces = fdb_cli::getStorageServerInterfaces(db, &server_interfaces);
-		co_await (success(future_workers) && success(future_server_interfaces));
+		Future<Void> future_active_logs =
+		    fdb_cli::getActiveLogAddresses(db, &activeLogAddresses, &unknownInterfaceLogCount);
+		co_await (success(future_workers) && success(future_server_interfaces) && success(future_active_logs));
 
 		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
 			if (*t == "FORCE"_sr) {
@@ -393,6 +397,48 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 			    "  %s  ---- WARNING: Currently no servers found with this locality match! Be sure that you excluded "
 			    "the correct locality.\n",
 			    locality.c_str());
+		}
+
+		// Locality is resolved to addresses using the worker list and the persisted storage server list, but log
+		// servers have no equivalent persisted, locality-tagged record: a log that isn't currently registered as a
+		// worker (down or partitioned) cannot be matched to any locality and is silently left out of the exclusion
+		// set. Warn about any such log so the operator doesn't mistake this command's completion for a guarantee
+		// that these logs' data has been moved.
+		if (!exclusionLocalities.empty()) {
+			std::set<NetworkAddress> knownAddresses;
+			for (const auto& w : workers) {
+				knownAddresses.insert(w.address);
+			}
+			for (const auto& [_addr, ssi] : server_interfaces) {
+				knownAddresses.insert(ssi.address());
+				if (ssi.secondaryAddress().present()) {
+					knownAddresses.insert(ssi.secondaryAddress().get());
+				}
+			}
+
+			std::vector<NetworkAddress> unresolvedLogs;
+			for (const auto& addr : activeLogAddresses) {
+				if (knownAddresses.find(addr) == knownAddresses.end()) {
+					unresolvedLogs.push_back(addr);
+				}
+			}
+
+			if (!unresolvedLogs.empty() || unknownInterfaceLogCount > 0) {
+				fprintf(stderr,
+				        "WARNING: as of the cluster's last recovery, %zu log server(s) were not currently reporting "
+				        "to the cluster and %d log server(s) had no known network interface at all, so it could "
+				        "not be determined whether they match the locality being excluded:\n",
+				        unresolvedLogs.size(),
+				        unknownInterfaceLogCount);
+				for (const auto& addr : unresolvedLogs) {
+					fprintf(stderr, "  %s\n", addr.toString().c_str());
+				}
+				fprintf(stderr,
+				        "  If any of the above belong to the excluded locality, this command could not wait for "
+				        "their data to be safely moved and will not report them as excluded. Verify their "
+				        "locality once they reconnect, or exclude their addresses explicitly, before removing any "
+				        "hardware.\n");
+			}
 		}
 
 		co_await checkForCoordinators(db, exclusionSet);
