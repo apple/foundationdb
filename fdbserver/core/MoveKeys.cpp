@@ -230,11 +230,21 @@ Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID
 }
 } // namespace
 
+DDEnabledState::DDEnabledState() : shardMetadataFormatIsNew_(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {}
+
 bool DDEnabledState::sameId(const UID& id) const {
 	return ddEnabledStatusUID == id;
 }
 bool DDEnabledState::isEnabled() const {
 	return stateValue == ENABLED;
+}
+
+bool DDEnabledState::shardEncodeLocationMetadata() const {
+	return shardMetadataFormatIsNew_;
+}
+
+void DDEnabledState::setShardEncodeLocationMetadata(bool isNewFormat) {
+	shardMetadataFormatIsNew_ = isNewFormat;
 }
 
 bool DDEnabledState::isBlobRestorePreparing() const {
@@ -513,11 +523,12 @@ Future<Void> auditLocationMetadataPreCheck(Database occ,
                                            KeyRange range,
                                            std::vector<UID> servers,
                                            std::string context,
-                                           UID dataMoveId) {
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+                                           UID dataMoveId,
+                                           const DDEnabledState* ddEnabledState) {
+	if (!ddEnabledState->shardEncodeLocationMetadata()) {
 		throw dd_config_changed();
 	}
-	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 
 	if (range.empty()) {
 		TraceEvent(SevWarn, "CheckLocationMetadataEmptyInputRange").detail("By", "PreCheck").detail("Range", range);
@@ -583,11 +594,15 @@ Future<Void> auditLocationMetadataPreCheck(Database occ,
 	}
 }
 
-Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::string context, UID dataMoveId) {
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+Future<Void> auditLocationMetadataPostCheck(Database occ,
+                                            KeyRange range,
+                                            std::string context,
+                                            UID dataMoveId,
+                                            const DDEnabledState* ddEnabledState) {
+	if (!ddEnabledState->shardEncodeLocationMetadata()) {
 		throw dd_config_changed();
 	}
-	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 
 	if (range.empty()) {
 		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "CheckLocationMetadataEmptyInputRange")
@@ -721,10 +736,10 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
                                         FlowLock* cleanUpDataMoveParallelismLock,
                                         UID dataMoveId,
                                         const DDEnabledState* ddEnabledState) {
-	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (!ddEnabledState->shardEncodeLocationMetadata()) {
 		throw dd_config_changed();
 	}
-	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
 	static auto* counters = makeCounters("/movekeys/cleanUpSingleShardDataMove");
 
@@ -752,7 +767,7 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 				throw operation_cancelled();
 			}
 			if (currentShards.empty()) {
-				if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				if (!ddEnabledState->shardEncodeLocationMetadata()) {
 					throw dd_config_changed();
 				}
 				ASSERT(!currentShards.empty());
@@ -780,7 +795,7 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 				std::vector<UID> servers(src.size() + dest.size());
 				std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 				co_await auditLocationMetadataPreCheck(
-				    occ, &tr, keys, servers, "cleanUpSingleShardDataMove_precheck", dataMoveId);
+				    occ, &tr, keys, servers, "cleanUpSingleShardDataMove_precheck", dataMoveId, ddEnabledState);
 			}
 
 			TraceEvent(SevInfo, "CleanUpSingleShardDataMove", dataMoveId)
@@ -809,7 +824,8 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 
 			// Post validate consistency of update of keyServers and serverKeys
 			if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-				co_await auditLocationMetadataPostCheck(occ, keys, "cleanUpSingleShardDataMove_postcheck", dataMoveId);
+				co_await auditLocationMetadataPostCheck(
+				    occ, keys, "cleanUpSingleShardDataMove_postcheck", dataMoveId, ddEnabledState);
 			}
 			break;
 		} catch (Error& e) {
@@ -2167,8 +2183,13 @@ static Future<Void> startMoveShards(Database occ,
 						if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 							std::vector<UID> servers(src.size() + dest.size());
 							std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-							co_await auditLocationMetadataPreCheck(
-							    occ, &tr, rangeIntersectKeys, servers, "startMoveShards_precheck", dataMoveId);
+							co_await auditLocationMetadataPreCheck(occ,
+							                                       &tr,
+							                                       rangeIntersectKeys,
+							                                       servers,
+							                                       "startMoveShards_precheck",
+							                                       dataMoveId,
+							                                       ddEnabledState);
 						}
 
 						if (destId.isValid()) {
@@ -2338,7 +2359,8 @@ static Future<Void> startMoveShards(Database occ,
 				if (currentKeys.end == keys.end) {
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-						co_await auditLocationMetadataPostCheck(occ, keys, "startMoveShards_postcheck", dataMoveId);
+						co_await auditLocationMetadataPostCheck(
+						    occ, keys, "startMoveShards_postcheck", dataMoveId, ddEnabledState);
 					}
 					break;
 				}
@@ -2459,7 +2481,8 @@ static Future<DecodedShardsKeyServers> decodeAndPreCheckShards(Database occ,
                                                                DataMoveMetaData const& dataMove,
                                                                UID relocationIntervalId,
                                                                Severity sevDm,
-                                                               bool* cancelDataMove) {
+                                                               bool* cancelDataMove,
+                                                               const DDEnabledState* ddEnabledState) {
 	std::vector<UID> completeSrc;
 	std::unordered_set<UID> allServers;
 
@@ -2493,7 +2516,7 @@ static Future<DecodedShardsKeyServers> decodeAndPreCheckShards(Database occ,
 			std::vector<UID> servers(src.size() + dest.size());
 			std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 			co_await auditLocationMetadataPreCheck(
-			    occ, tr, currentRange, servers, "finishMoveShards_precheck", dataMoveId);
+			    occ, tr, currentRange, servers, "finishMoveShards_precheck", dataMoveId, ddEnabledState);
 		}
 
 		std::sort(dest.begin(), dest.end());
@@ -2951,7 +2974,8 @@ static Future<Void> finishMoveShards(Database occ,
 				                                                                   dataMove,
 				                                                                   relocationIntervalId,
 				                                                                   sevDm,
-				                                                                   &cancelDataMove);
+				                                                                   &cancelDataMove,
+				                                                                   ddEnabledState);
 
 				// Read the destination SSes' interfaces and record the read
 				// version waitForShardReady will need after we drop the txn.
@@ -3033,7 +3057,8 @@ static Future<Void> finishMoveShards(Database occ,
 							co_await auditLocationMetadataPostCheck(occ,
 							                                        postWaitDataMove.ranges.front(),
 							                                        "finishMoveShards_postcheck",
-							                                        relocationIntervalId);
+							                                        relocationIntervalId,
+							                                        ddEnabledState);
 						}
 						break;
 					}
@@ -3572,7 +3597,7 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 						                                  DataMovementReason::ASSIGN_EMPTY_RANGE);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
-						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+						if (ddEnabledState->shardEncodeLocationMetadata()) {
 							tr.set(keyServersKey(it.key), keyServersValue(teamForDroppedRange, {}, shardId, UID()));
 						} else {
 							tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange));
@@ -3592,7 +3617,7 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 						// Note, there could be data loss.
 						std::vector<Future<Void>> emptyRangeActors;
 						for (const UID& id : teamForDroppedRange) {
-							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								emptyRangeActors.push_back(krmSetRangeCoalescing(
 								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysValue(shardId)));
 							} else {
@@ -3615,7 +3640,13 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 						    .detail("Key", it.key)
 						    .detail("ValueSrc", describe(src))
 						    .detail("ValueDest", describe(dest));
-						if (srcId != anonymousShardId) {
+						// Only preserve new-format (shardId-encoded) keyServers when the
+						// cluster is writing new format. During a rollback (target
+						// original) this failed-server cleanup must not re-introduce a
+						// new-format entry behind the DD-init rewrite — write old
+						// (tag-based) format. Mirrors the gated drop-all-replicas branch
+						// above.
+						if (srcId != anonymousShardId && ddEnabledState->shardEncodeLocationMetadata()) {
 							if (dest.empty())
 								destId = UID();
 							tr.set(keyServersKey(it.key), keyServersValue(src, dest, srcId, destId));
@@ -3809,8 +3840,13 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 						std::vector<UID> servers(src.size() + dest.size());
 						std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-						co_await auditLocationMetadataPreCheck(
-						    occ, &tr, rangeIntersectKeys, servers, "cleanUpDataMoveCore_precheck", dataMoveId);
+						co_await auditLocationMetadataPreCheck(occ,
+						                                       &tr,
+						                                       rangeIntersectKeys,
+						                                       servers,
+						                                       "cleanUpDataMoveCore_precheck",
+						                                       dataMoveId,
+						                                       ddEnabledState);
 					}
 
 					for (const auto& uid : src) {
@@ -3845,11 +3881,15 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 						oldDests.insert(uid);
 					}
 
-					krmSetPreviouslyEmptyRange(&tr,
-					                           keyServersPrefix,
-					                           rangeIntersectKeys,
-					                           keyServersValue(src, {}, srcId, UID()),
-					                           currentShards[i + 1].value);
+					// During a rollback (target original) this physical-datamove
+					// cleanup must not re-introduce a new-format (shardId-encoded)
+					// keyServers entry behind the DD-init rewrite — write old
+					// (tag-based) format.
+					Value cleanupKsValue = ddEnabledState->shardEncodeLocationMetadata()
+					                           ? keyServersValue(src, {}, srcId, UID())
+					                           : keyServersValue(UIDtoTagMap, src, {});
+					krmSetPreviouslyEmptyRange(
+					    &tr, keyServersPrefix, rangeIntersectKeys, cleanupKsValue, currentShards[i + 1].value);
 				}
 
 				if (range.end == dataMove.ranges.front().end) {
@@ -3886,7 +3926,7 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 						co_await auditLocationMetadataPostCheck(
-						    occ, dataMove.ranges.front(), "cleanUpDataMoveCore_postcheck", dataMoveId);
+						    occ, dataMove.ranges.front(), "cleanUpDataMoveCore_postcheck", dataMoveId, ddEnabledState);
 					}
 					break;
 				}
@@ -3949,9 +3989,10 @@ Future<Void> cleanUpDataMove(Database occ,
 Future<Void> rawStartMovement(Database occ,
                               const MoveKeysParams& params,
                               std::map<UID, StorageServerInterface>& tssMapping) {
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		// A relocation launched before the knob changed can still carry the old-path sentinel.
-		// Never persist it as a shard-encoded data move; restart DD with the new configuration.
+	if (params.ddEnabledState->shardEncodeLocationMetadata()) {
+		// A relocation launched before the target format changed can still carry the old-path
+		// sentinel. Never persist it as a shard-encoded data move; restart DD with the new
+		// configuration.
 		if (!params.ranges.present() || params.dataMoveId == anonymousShardId) {
 			throw dd_config_changed();
 		}
@@ -3984,7 +4025,7 @@ Future<Void> rawStartMovement(Database occ,
 Future<Void> rawCheckFetchingState(const Database& cx,
                                    const MoveKeysParams& params,
                                    const std::map<UID, StorageServerInterface>& tssMapping) {
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (params.ddEnabledState->shardEncodeLocationMetadata()) {
 		if (!params.ranges.present()) {
 			throw dd_config_changed();
 		}
@@ -4012,7 +4053,7 @@ Future<Void> rawCheckFetchingState(const Database& cx,
 Future<Void> rawFinishMovement(Database occ,
                                const MoveKeysParams& params,
                                const std::map<UID, StorageServerInterface>& tssMapping) {
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (params.ddEnabledState->shardEncodeLocationMetadata()) {
 		if (!params.ranges.present()) {
 			throw dd_config_changed();
 		}
