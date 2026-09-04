@@ -176,6 +176,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DESIRED_UPDATE_BYTES,                2*DESIRED_TOTAL_BYTES );
 	init( UPDATE_DELAY,                                        0.001 );
 	init( MAXIMUM_PEEK_BYTES,                                   10e6 );
+	init( NATIVE_CDC_BATCH_TARGET_BYTES,                   512 << 10 );
 	init( CDC_PROXY_CONSUME_REPLY_BYTES,                         10e6 );
 	init( CDC_PROXY_BUFFER_BYTES,                                1e9 );
 	if (randomize && buggify()) {

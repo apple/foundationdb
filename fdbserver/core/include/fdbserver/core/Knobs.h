@@ -72,6 +72,7 @@ public:
 	int DESIRED_UPDATE_BYTES;
 	double UPDATE_DELAY;
 	int MAXIMUM_PEEK_BYTES;
+	int NATIVE_CDC_BATCH_TARGET_BYTES; // Soft proxy/TLog target; nonpositive values use a one-byte target.
 	int64_t CDC_PROXY_CONSUME_REPLY_BYTES;
 	int64_t CDC_PROXY_BUFFER_BYTES;
 	double CDC_PROXY_CONSUME_POLL_TIMEOUT;
