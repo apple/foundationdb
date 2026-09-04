@@ -58,6 +58,14 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
+	ThreadFuture<Void> registerRangeLockOwner(const KeyRef& ownerId, const StringRef& description) override;
+	ThreadFuture<Void> removeRangeLockOwner(const KeyRef& ownerId) override;
+	ThreadFuture<std::vector<RangeLockOwnerInfo>> listRangeLockOwners() override;
+	ThreadFuture<Void> takeExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) override;
+	ThreadFuture<Void> releaseExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) override;
+	ThreadFuture<std::vector<RangeLockInfo>> listExclusiveReadLocks(const KeyRangeRef& keys) override;
+	ThreadFuture<Void> releaseAllExclusiveReadLocks(const KeyRef& ownerId) override;
+
 	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) override;
 	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
 	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;
