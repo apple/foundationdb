@@ -502,7 +502,10 @@ class CDCProxy {
 	void deactivateStream(Reference<CDCBufferedStream> stream);
 	void refreshStreamTags(Reference<CDCBufferedStream> stream);
 	void changeStreamReadDemand(Reference<CDCBufferedStream> stream, int delta);
-	Optional<Version> nextTagReadVersionForStream(Reference<CDCBufferedTag> tag, Reference<CDCBufferedStream> stream);
+	bool tagDemandChangeNeedsRefresh(Reference<CDCBufferedTag> tag, Reference<CDCBufferedStream> stream, int delta);
+	Optional<Version> nextTagReadVersionForStream(Reference<CDCBufferedTag> tag,
+	                                              Reference<CDCBufferedStream> stream,
+	                                              bool ignoreReadInterest = false);
 	Optional<Version> nextTagReadVersion(Reference<CDCBufferedTag> tag);
 	Optional<Version> nextTagPrefetchVersion(Reference<CDCBufferedTag> tag);
 	void advanceTagBufferedThrough(Reference<CDCBufferedTag> tag,
@@ -908,13 +911,63 @@ void CDCProxy::refreshStreamTags(Reference<CDCBufferedStream> stream) {
 	}
 }
 
+bool CDCProxy::tagDemandChangeNeedsRefresh(Reference<CDCBufferedTag> tag,
+                                           Reference<CDCBufferedStream> stream,
+                                           int delta) {
+	const bool beforeInterest = hasCDCReadInterest(stream, tag);
+	const bool afterInterest = stream->readDemand + delta > 0 || stream->readAhead.claimedBy(tag.getPtr());
+	Optional<Version> before;
+	Optional<Version> after;
+	for (const CDCStreamId streamId : tag->streamIds) {
+		auto found = streams.find(streamId);
+		if (found == streams.end()) {
+			continue;
+		}
+		const bool changedStream = found->second.getPtr() == stream.getPtr();
+		const auto candidate = nextTagReadVersionForStream(tag, found->second, changedStream);
+		if (!candidate.present()) {
+			continue;
+		}
+		if ((!changedStream || beforeInterest) && (!before.present() || candidate.get() < before.get())) {
+			before = candidate;
+		}
+		if ((!changedStream || afterInterest) && (!after.present() || candidate.get() < after.get())) {
+			after = candidate;
+		}
+	}
+	// Absent frontiers must still wake a dormant reader; only equal, present work preserves its peek.
+	return !before.present() || !after.present() || before.get() != after.get();
+}
+
 void CDCProxy::changeStreamReadDemand(Reference<CDCBufferedStream> stream, int delta) {
 	ASSERT(delta == 1 || delta == -1);
 	ASSERT_GE(stream->readDemand + delta, 0);
+	auto refreshCurrentTag = [this](Reference<CDCBufferedTag> const& tag, bool refresh) {
+		auto found = tags.find(tag->tag);
+		if (found != tags.end() && (found->second.getPtr() != tag.getPtr() || refresh)) {
+			found->second->refresh.trigger();
+		}
+	};
+	// A stream with one tag needs neither scratch container on each consume wait.
+	if (stream->tagIntervals.size() <= 1) {
+		Reference<CDCBufferedTag> tag;
+		bool refresh = false;
+		if (!stream->tagIntervals.empty()) {
+			auto found = tags.find(stream->tagIntervals.front().tag);
+			if (found != tags.end()) {
+				tag = found->second;
+				refresh = tagDemandChangeNeedsRefresh(tag, stream, delta);
+			}
+		}
+		stream->readDemand += delta;
+		if (tag) {
+			refreshCurrentTag(tag, refresh);
+		}
+		return;
+	}
 	struct TagDemandSnapshot {
 		Reference<CDCBufferedTag> tag;
-		Optional<Version> before;
-		bool refresh = true;
+		bool refresh;
 	};
 	std::vector<TagDemandSnapshot> snapshots;
 	std::unordered_set<Tag> seenTags;
@@ -924,32 +977,23 @@ void CDCProxy::changeStreamReadDemand(Reference<CDCBufferedStream> stream, int d
 	for (const auto& interval : stream->tagIntervals) {
 		auto found = tags.find(interval.tag);
 		if (found != tags.end() && seenTags.insert(interval.tag).second) {
-			snapshots.push_back({ found->second, nextTagReadVersion(found->second) });
+			snapshots.push_back({ found->second, tagDemandChangeNeedsRefresh(found->second, stream, delta) });
 		}
 	}
 	stream->readDemand += delta;
-	for (auto& snapshot : snapshots) {
-		const auto after = nextTagReadVersion(snapshot.tag);
-		// A claimed prefetch (or another consumer) may already cover this exact earliest frontier.
-		// Count-only changes then need not discard its cursor. Absent or changed work still wakes it.
-		snapshot.refresh = !snapshot.before.present() || !after.present() || snapshot.before.get() != after.get();
-	}
+	// A claimed prefetch (or another consumer) may already cover the same frontier, avoiding a restart.
 	// Trigger callbacks can synchronously replace tags or change stream membership. Decide before triggering,
 	// retain no map iterators across callbacks, and never apply an old object's equality proof to a replacement.
 	for (const auto& snapshot : snapshots) {
-		auto found = tags.find(snapshot.tag->tag);
-		if (found != tags.end()) {
-			auto current = found->second;
-			if (current.getPtr() != snapshot.tag.getPtr() || snapshot.refresh) {
-				current->refresh.trigger();
-			}
-		}
+		refreshCurrentTag(snapshot.tag, snapshot.refresh);
 	}
 }
 
 Optional<Version> CDCProxy::nextTagReadVersionForStream(Reference<CDCBufferedTag> tag,
-                                                        Reference<CDCBufferedStream> stream) {
-	if (!stream->active || !stream->initialized || stream->bufferLimitExceeded || !hasCDCReadInterest(stream, tag)) {
+                                                        Reference<CDCBufferedStream> stream,
+                                                        bool ignoreReadInterest) {
+	if (!stream->active || !stream->initialized || stream->bufferLimitExceeded ||
+	    (!ignoreReadInterest && !hasCDCReadInterest(stream, tag))) {
 		return Optional<Version>();
 	}
 	Optional<Version> begin;
