@@ -48,12 +48,6 @@ jobs:
             fdb_c_generated             \
             fdb-java
 
-          # all flow actors, for generated headers
-          ACTORS=$(
-            ninja -t targets all | grep -v /build_output/ | grep '_actors:' | cut -d: -f1
-          )
-          ninja -v $ACTORS
-
           # all protobuf headers
           PB_HEADERS=$(
             ninja -t targets all | grep -v /build_output/ | grep '\.pb\.h:' | cut -d: -f1
@@ -72,9 +66,6 @@ jobs:
           while read FILE; do
             if [[ $FILE == contrib/* ]]; then
               continue  # skip contrib sources
-            fi
-            if [[ $FILE == *.actor.* ]]; then
-              continue  # actor syntax is not plain c++
             fi
             if [[ $FILE == flow/include/flow/CoroutinesImpl.h ]]; then
               continue  # internal implementation header, included only from Coroutines.h
@@ -101,6 +92,9 @@ jobs:
                 ;;
               fdbclient/S3BlobStore.cpp|fdbserver/kvstore/RocksDBLogForwarder.h)
                 continue
+                ;;
+              fdbserver/kvstore/ArtMutationBuffer.h)
+                continue  # included inside VersionedBTree's class definition
                 ;;
               fdbrpc/AsyncFileKAIO.h)
                 continue

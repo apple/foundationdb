@@ -147,6 +147,12 @@ public:
 		vo.read(*this);
 	}
 
+	template <class VersionOptions>
+	ArenaObjectReader(Arena&& arena, const StringRef& input, VersionOptions vo)
+	  : _data(input.begin()), _arena(std::move(arena)) {
+		vo.read(*this);
+	}
+
 	const uint8_t* data() { return _data; }
 
 	Arena& arena() { return _arena; }

@@ -37,7 +37,7 @@ public:
 
 		explicit const_iterator(art_iterator i) { artIterator = i; }
 
-		explicit(false) const_iterator(const const_iterator& i) { artIterator = i.artIterator; }
+		const_iterator(const const_iterator& i) { artIterator = i.artIterator; }
 
 		const KeyRef& key() const { return artIterator.key(); }
 
@@ -65,7 +65,7 @@ public:
 
 		explicit iterator(art_iterator i) { artIterator = i; }
 
-		explicit(false) iterator(const iterator& i) { artIterator = i.artIterator; }
+		iterator(const iterator& i) { artIterator = i.artIterator; }
 
 		const KeyRef& key() const { return artIterator.key(); }
 

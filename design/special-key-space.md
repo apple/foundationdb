@@ -57,21 +57,21 @@ private:
     std::map<Key, Value> CountryToCapitalCity;
 };
 // Instantiate the function object
-// In development, you should have a function object pointer in DatabaseContext(DatabaseContext.h) and initialize in DatabaseContext's constructor(NativeAPI.actor.cpp)
+// In development, you should have a function object pointer in DatabaseContext(DatabaseContext.h) and initialize in DatabaseContext's constructor(DatabaseContext.cpp)
 const KeyRangeRef exampleRange("\xff\xff/example/"_sr, "\xff\xff/example/\xff"_sr);
 SKRExampleImpl exampleImpl(exampleRange);
 // Assuming the database handler is `cx`, register to special-key-space
-// In development, you should register all function objects in the constructor of DatabaseContext(NativeAPI.actor.cpp)
+// In development, you should register all function objects in the constructor of DatabaseContext(DatabaseContext.cpp)
 cx->specialKeySpace->registerKeyRange(exampleRange, &exampleImpl);
 // Now any ReadYourWritesTransaction associated with `cx` is able to query the info
-state ReadYourWritesTransaction tr(cx);
+ReadYourWritesTransaction tr(cx);
 // get
-Optional<Value> res1 = wait(tr.get("\xff\xff/example/Japan"));
-ASSERT(res1.present() && res.getValue() == "Tokyo"_sr);
+Optional<Value> res1 = co_await tr.get("\xff\xff/example/Japan");
+ASSERT(res1.present() && res1.get() == "Tokyo"_sr);
 // getRange
 // Note: for getRange(key1, key2), both key1 and key2 should prefixed with \xff\xff
 // something like getRange("normal_key", "\xff\xff/...") is not supported yet
-RangeResult res2 = wait(tr.getRange("\xff\xff/example/U"_sr, "\xff\xff/example/U\xff"_sr));
+RangeResult res2 = co_await tr.getRange("\xff\xff/example/U"_sr, "\xff\xff/example/U\xff"_sr);
 // res2 should contain USA and UK
 ASSERT(
     res2.size() == 2 &&

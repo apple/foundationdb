@@ -28,7 +28,7 @@
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/WorkerEvents.h"
@@ -515,6 +515,11 @@ struct RolesInfo {
 			obj["low_priority_queries"] = StatusCounter(storageMetrics.getValue("LowPriorityQueries")).getStatus();
 			obj["bytes_queried"] = StatusCounter(storageMetrics.getValue("BytesQueried")).getStatus();
 			obj["keys_queried"] = StatusCounter(storageMetrics.getValue("RowsQueried")).getStatus();
+			obj.setKeyRawNumber("active_watches", storageMetrics.getValue("ActiveWatches"));
+			obj["total_watches"] = StatusCounter(storageMetrics.getValue("WatchQueries")).getStatus();
+			obj["triggered_watches"] = StatusCounter(storageMetrics.getValue("TriggeredWatches")).getStatus();
+			obj["timed_out_watches"] = StatusCounter(storageMetrics.getValue("TimedOutWatches")).getStatus();
+			obj["errored_watches"] = StatusCounter(storageMetrics.getValue("ErroredWatches")).getStatus();
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
 			obj["mutations"] = StatusCounter(storageMetrics.getValue("Mutations")).getStatus();
 			obj.setKeyRawNumber("local_rate", storageMetrics.getValue("LocalRate"));
@@ -670,6 +675,46 @@ struct RolesInfo {
 			TraceEventFields const& commitBatchingWindowSize = metrics.at("CommitBatchingWindowSize");
 			if (commitBatchingWindowSize.size()) {
 				obj["commit_batching_window_size"] = addLatencyStatistics(commitBatchingWindowSize);
+			}
+
+			TraceEventFields const& commitBatchTransactions = metrics.at("CommitBatchTransactions");
+			if (commitBatchTransactions.size()) {
+				obj["commit_batch_transactions"] = addLatencyStatistics(commitBatchTransactions);
+			}
+
+			TraceEventFields const& commitBatchBytes = metrics.at("CommitBatchBytes");
+			if (commitBatchBytes.size()) {
+				obj["commit_batch_bytes"] = addLatencyStatistics(commitBatchBytes);
+			}
+
+			TraceEventFields const& commitBatchingWaiting = metrics.at("CommitBatchingWaiting");
+			if (commitBatchingWaiting.size()) {
+				obj["commit_batching_waiting"] = addLatencyStatistics(commitBatchingWaiting);
+			}
+
+			TraceEventFields const& commitPreresolutionLatency = metrics.at("CommitPreresolutionLatency");
+			if (commitPreresolutionLatency.size()) {
+				obj["commit_preresolution_latency"] = addLatencyStatistics(commitPreresolutionLatency);
+			}
+
+			TraceEventFields const& commitResolutionLatency = metrics.at("CommitResolutionLatency");
+			if (commitResolutionLatency.size()) {
+				obj["commit_resolution_latency"] = addLatencyStatistics(commitResolutionLatency);
+			}
+
+			TraceEventFields const& commitPostresolutionLatency = metrics.at("CommitPostresolutionLatency");
+			if (commitPostresolutionLatency.size()) {
+				obj["commit_postresolution_latency"] = addLatencyStatistics(commitPostresolutionLatency);
+			}
+
+			TraceEventFields const& commitTLogLoggingLatency = metrics.at("CommitTLogLoggingLatency");
+			if (commitTLogLoggingLatency.size()) {
+				obj["commit_tlog_logging_latency"] = addLatencyStatistics(commitTLogLoggingLatency);
+			}
+
+			TraceEventFields const& commitReplyLatency = metrics.at("CommitReplyLatency");
+			if (commitReplyLatency.size()) {
+				obj["commit_reply_latency"] = addLatencyStatistics(commitReplyLatency);
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found) {
@@ -1997,7 +2042,12 @@ static Future<std::vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetric
 static Future<std::vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	std::vector<std::string> eventNames{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize" };
+	std::vector<std::string> eventNames{
+		"CommitLatencyMetrics",       "CommitLatencyBands",      "CommitBatchingWindowSize",
+		"CommitBatchTransactions",    "CommitBatchBytes",        "CommitBatchingWaiting",
+		"CommitPreresolutionLatency", "CommitResolutionLatency", "CommitPostresolutionLatency",
+		"CommitTLogLoggingLatency",   "CommitReplyLatency"
+	};
 	std::vector<std::pair<CommitProxyInterface, EventMap>> results =
 	    co_await getServerMetrics(db->get().client.commitProxies, address_workers, std::move(eventNames));
 
@@ -2690,6 +2740,7 @@ AsyncResult<JsonBuilderObject> layerStatusFetcher(Database cx,
 				// TODO:  Also fetch other linked subtrees of meta keys
 
 				std::vector<Future<RangeResult>> docFutures;
+				docFutures.reserve(jsonLayers.size());
 				for (int i = 0; i < jsonLayers.size(); ++i) {
 					docFutures.push_back(
 					    tr.getRange(KeyRangeRef(jsonLayers[i].value, strinc(jsonLayers[i].value)), 1000));

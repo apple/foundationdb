@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <utility>
+
 #include "flow/network.h"
 #include "flow/IRandom.h"
 #include "flow/Arena.h"
@@ -50,7 +52,7 @@ struct SpanContext {
 	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
 	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
 	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
-	explicit(false) SpanContext(const SpanContext& span) = default;
+	SpanContext(const SpanContext& span) = default;
 	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
 	std::string toString() const { return format("%016llx%016llx%016llx", traceID.first(), traceID.second(), spanID); };
 	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0 && spanID != 0; }
@@ -135,10 +137,7 @@ public:
 	    begin(g_network->now()) {
 		this->kind = SpanKind::SERVER;
 		this->status = SpanStatus::OK;
-		this->attributes.push_back(
-		    // this->arena, KeyValueRef("address"_sr, StringRef(this->arena, "localhost:4000")));
-		    this->arena,
-		    KeyValueRef("address"_sr, StringRef(this->arena, FlowTransport::transport().getLocalAddressAsString())));
+		ensureAddressAttribute();
 	}
 
 	// Construct Span with a location, parent, and optional links.
@@ -160,7 +159,7 @@ public:
 	explicit Span(const Location& location) : Span(location, SpanContext()) {}
 
 	Span(const Span&) = delete;
-	explicit(false) Span(Span&& o) {
+	Span(Span&& o) {
 		arena = std::move(o.arena);
 		context = o.context;
 		location = o.location;
@@ -170,6 +169,7 @@ public:
 		end = o.end;
 		links = o.links;
 		events = o.events;
+		attributes = std::exchange(o.attributes, decltype(o.attributes)());
 		status = o.status;
 		o.context = SpanContext();
 		o.parentContext = SpanContext();
@@ -207,6 +207,7 @@ public:
 				context.traceID = deterministicRandom()->randomUniqueID();
 				context.spanID = deterministicRandom()->randomUInt64();
 			}
+			ensureAddressAttribute();
 		}
 		return *this;
 	}
@@ -239,7 +240,23 @@ public:
 		context.traceID = parent.traceID;
 		context.spanID = deterministicRandom()->randomUInt64();
 		context.m_Flags = parent.m_Flags;
+		ensureAddressAttribute();
 		return *this;
+	}
+
+	void ensureAddressAttribute() {
+		// Unsampled spans are common on the client and storage read paths. Avoid copying the cached address into a new
+		// arena until the span is actually eligible to be emitted.
+		if (!context.isSampled()) {
+			return;
+		}
+		for (const auto& attribute : attributes) {
+			if (attribute.key == "address"_sr) {
+				return;
+			}
+		}
+		attributes.push_back(
+		    arena, KeyValueRef("address"_sr, StringRef(arena, FlowTransport::transport().getLocalAddressAsString())));
 	}
 
 	Arena arena;

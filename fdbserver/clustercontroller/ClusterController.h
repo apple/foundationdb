@@ -78,7 +78,7 @@ struct WorkerInfo : NonCopyable {
 	  : watcher(watcher), reply(reply), gen(gen), reboots(0), verified(false), initialClass(initialClass),
 	    priorityInfo(priorityInfo), details(interf, processClass, degraded, recoveredDiskFiles), issues(issues) {}
 
-	explicit(false) WorkerInfo(WorkerInfo&& r) noexcept
+	WorkerInfo(WorkerInfo&& r) noexcept
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots), verified(r.verified),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
 	    distributorInterf(std::move(r.distributorInterf)), ratekeeperInterf(std::move(r.ratekeeperInterf)),
@@ -3200,12 +3200,14 @@ public:
 
 		// Sort degraded peers based on the number of workers complaining about it.
 		std::vector<std::pair<int, NetworkAddress>> count2DegradedPeer;
+		count2DegradedPeer.reserve(degradedLinkDst2Src.size());
 		for (const auto& [degradedPeer, complainers] : degradedLinkDst2Src) {
 			count2DegradedPeer.push_back({ complainers.size(), degradedPeer });
 		}
 		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), deterministicDecendingOrder);
 
 		std::vector<std::pair<int, NetworkAddress>> count2DisconnectedPeer;
+		count2DisconnectedPeer.reserve(disconnectedLinkDst2Src.size());
 		for (const auto& [disconnectedPeer, complainers] : disconnectedLinkDst2Src) {
 			count2DisconnectedPeer.push_back({ complainers.size(), disconnectedPeer });
 		}

@@ -87,7 +87,7 @@ if (WITH_SWIFT)
   )
 
   # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
-  target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++20 -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml>")
+  target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++20 -Xfrontend -validate-tbd-against-ir=none -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml>")
 
   # Ensure that C++ code in fdbserver can import Swift using a compatibility header.
   include(SwiftToCXXInterop)
@@ -100,7 +100,7 @@ if (WITH_SWIFT)
      "${CMAKE_CURRENT_SOURCE_DIR}/swift_fdbserver_cxx_swift_value_conformance.swift"
      FLAGS
   -Xcc -fmodules-cache-path=${CLANG_MODULE_CACHE_PATH}
-  -Xcc -std=c++20 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml
+  -Xcc -std=c++20 -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml
   # Important: This is needed to avoid including header that depends on this generated header.
   -Xcc -DFDBSERVER_FORWARD_DECLARE_SWIFT_APIS
   -Xcc -DFOUNDATIONDB_FDBSERVER_STREAM_SUPPORT_H
@@ -112,20 +112,18 @@ if (WITH_SWIFT)
     "${CMAKE_CURRENT_BINARY_DIR}/include/SwiftModules/FDBServer"
      FLAGS
   -Xcc -fmodules-cache-path=${CLANG_MODULE_CACHE_PATH}
-  -Xcc -std=c++20 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml
+  -Xcc -std=c++20 -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml
   # Important: This is needed to avoid including the generated header while generating it.
   -DFDBSERVER_FORWARD_DECLARE_SWIFT_APIS
   -Xcc -DFDBSERVER_FORWARD_DECLARE_SWIFT_APIS
   )
 
-  add_dependencies(fdbserver_swift_to_cxx_conformance_header flow_swift flow_swift_header flow_actors fdbclient_actors fdbrpc_actors fdbserver_actors fdboptions)
+  add_dependencies(fdbserver_swift_to_cxx_conformance_header flow_swift flow_swift_header fdboptions)
   add_dependencies(fdbserver_swift_header fdbserver_swift_to_cxx_conformance_header)
   add_dependencies(fdbserver_swift fdbserver_swift_header)
 
   add_dependencies(fdbserver_swift flow_swift)
-  add_dependencies(fdbserver_swift flow_actors)
   add_dependencies(fdbserver_swift fdbclient_swift)
-  add_dependencies(fdbserver_swift fdbserver_actors)
   # This does not work! (see rdar://99107402)
   # target_link_libraries(flow PRIVATE flow_swift)
   add_dependencies(fdbserver fdbserver_swift)
