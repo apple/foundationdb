@@ -4,7 +4,7 @@ storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] #FIXME: remove after allowin
 disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
 
 # DD's bulk-load team selection rejects any team that shares a server with the source team
-# (DDTeamCollection.actor.cpp:266-282). Pin redundancy to 'triple' (matching
+# (DDTeamCollection.cpp:266-275). Pin redundancy to 'triple' (matching
 # PhysicalShardMove and StorageServerCheckpointRestore which exercise similar bulk-load
 # paths) so the simulator cannot pick three_data_hall or other modes whose tighter
 # topology constraints leave team selection with no disjoint candidate team -- the
