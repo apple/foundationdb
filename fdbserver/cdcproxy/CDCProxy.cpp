@@ -501,6 +501,7 @@ class CDCProxy {
 	void detachStreamFromTags(Reference<CDCBufferedStream> stream);
 	void deactivateStream(Reference<CDCBufferedStream> stream);
 	void refreshStreamTags(Reference<CDCBufferedStream> stream);
+	void changeStreamReadDemand(Reference<CDCBufferedStream> stream, int delta);
 	Optional<Version> nextTagReadVersionForStream(Reference<CDCBufferedTag> tag, Reference<CDCBufferedStream> stream);
 	Optional<Version> nextTagReadVersion(Reference<CDCBufferedTag> tag);
 	Optional<Version> nextTagPrefetchVersion(Reference<CDCBufferedTag> tag);
@@ -903,6 +904,42 @@ void CDCProxy::refreshStreamTags(Reference<CDCBufferedStream> stream) {
 		auto tag = tags.find(interval.tag);
 		if (tag != tags.end()) {
 			tag->second->refresh.trigger();
+		}
+	}
+}
+
+void CDCProxy::changeStreamReadDemand(Reference<CDCBufferedStream> stream, int delta) {
+	ASSERT(delta == 1 || delta == -1);
+	ASSERT_GE(stream->readDemand + delta, 0);
+	struct TagDemandSnapshot {
+		Reference<CDCBufferedTag> tag;
+		Optional<Version> before;
+		bool refresh = true;
+	};
+	std::vector<TagDemandSnapshot> snapshots;
+	snapshots.reserve(stream->tagIntervals.size());
+	for (const auto& interval : stream->tagIntervals) {
+		auto found = tags.find(interval.tag);
+		if (found != tags.end()) {
+			snapshots.push_back({ found->second, nextTagReadVersion(found->second) });
+		}
+	}
+	stream->readDemand += delta;
+	for (auto& snapshot : snapshots) {
+		const auto after = nextTagReadVersion(snapshot.tag);
+		// A claimed prefetch (or another consumer) may already cover this exact earliest frontier.
+		// Count-only changes then need not discard its cursor. Absent or changed work still wakes it.
+		snapshot.refresh = !snapshot.before.present() || !after.present() || snapshot.before.get() != after.get();
+	}
+	// Trigger callbacks can synchronously replace tags or change stream membership. Decide before triggering,
+	// retain no map iterators across callbacks, and never apply an old object's equality proof to a replacement.
+	for (const auto& snapshot : snapshots) {
+		auto found = tags.find(snapshot.tag->tag);
+		if (found != tags.end()) {
+			auto current = found->second;
+			if (current.getPtr() != snapshot.tag.getPtr() || snapshot.refresh) {
+				current->refresh.trigger();
+			}
 		}
 	}
 }
@@ -1718,13 +1755,8 @@ Future<Void> CDCProxy::waitForBufferedVersion(Reference<CDCBufferedStream> strea
 		co_return;
 	}
 
-	++stream->readDemand;
-	refreshStreamTags(stream);
-	ScopeExit releaseReadDemand([this, stream]() {
-		ASSERT_GT(stream->readDemand, 0);
-		--stream->readDemand;
-		refreshStreamTags(stream);
-	});
+	changeStreamReadDemand(stream, 1);
+	ScopeExit releaseReadDemand([this, stream]() { changeStreamReadDemand(stream, -1); });
 	while (stream->active && !stream->bufferLimitExceeded && stream->bufferedThrough < version) {
 		co_await stream->changed.onTrigger();
 	}
@@ -2281,6 +2313,188 @@ class CDCProxyPrefetchTest {
 	}
 
 public:
+	static Future<Void> sameFrontierDemand(bool release, bool expire = false) {
+		CDCProxyPrefetchTest test;
+		auto stream = test.addStream(1);
+		Future<Void> waiter;
+		if (release) {
+			waiter = test.proxy.waitForBufferedVersion(stream, 100);
+			ASSERT_EQ(stream->readDemand, 1);
+		}
+		Promise<Void> ready;
+		auto cursor = makeReference<CDCPrefetchTestCursor>(ready.getFuture());
+		auto work = test.proxy.bufferTagCursor(test.tag, 100, cursor, Never(), Prefetch::True);
+		co_await delay(0);
+		ASSERT_EQ(cursor->fetchCount(), 1);
+		ASSERT(stream->readAhead.claimedBy(test.tag.getPtr()));
+		if (release) {
+			waiter.cancel(); // Exercise the actual waiter's ScopeExit, not a direct count mutation.
+		} else {
+			waiter = test.proxy.waitForBufferedVersion(stream, 100);
+		}
+		co_await delay(0);
+		ASSERT_EQ(stream->readDemand, release ? 0 : 1);
+		ASSERT(!work.isReady());
+		ASSERT(stream->readAhead.claimedBy(test.tag.getPtr()));
+		if (expire) {
+			// Removing same-frontier demand must not promote the pass or renew its finite deadline.
+			ASSERT(release);
+			co_await work;
+			ASSERT_EQ(stream->bufferedThrough, 99);
+			ASSERT(stream->mutations.empty());
+		} else {
+			ready.send(Void());
+			co_await work;
+			if (!release) {
+				co_await waiter;
+			}
+			ASSERT_EQ(stream->bufferedThrough, 100);
+			ASSERT_EQ(stream->mutations.size(), 1);
+			ASSERT(!stream->readAhead.provesCursor(100, stream->minVersion));
+		}
+		ASSERT_EQ(cursor->fetchCount(), 1);
+		ASSERT_EQ(stream->readDemand, 0);
+		ASSERT(!stream->readAhead.claimedBy(test.tag.getPtr()));
+		ASSERT(!test.proxy.nextTagPrefetchVersion(test.tag).present());
+		ASSERT_EQ(test.proxy.bufferLock.activePermits(), test.proxy.bufferedBytes);
+		test.proxy.clearBufferedMutations(stream);
+		ASSERT_EQ(test.proxy.bufferLock.activePermits(), 0);
+		co_return;
+	}
+
+	static Future<Void> sharedDemand(Version next) {
+		CDCProxyPrefetchTest test;
+		auto first = test.addStream(1);
+		auto second = test.addStream(2);
+		second->readAhead.cancel();
+		second->bufferedThrough = next - 1;
+		second->tagIntervals.back().bufferedThrough = next - 1;
+		Promise<Void> ready;
+		auto cursor = makeReference<CDCPrefetchTestCursor>(ready.getFuture());
+		auto work = test.proxy.bufferTagCursor(test.tag, 100, cursor, Never(), Prefetch::True);
+		co_await delay(0);
+		ASSERT_EQ(cursor->fetchCount(), 1);
+		auto waiter = test.proxy.waitForBufferedVersion(second, next);
+		co_await delay(0);
+		if (next < 100) {
+			co_await work;
+			ASSERT_EQ(test.proxy.nextTagReadVersion(test.tag).get(), next);
+			ASSERT_EQ(first->bufferedThrough, 99);
+			ASSERT_EQ(second->bufferedThrough, next - 1);
+			ASSERT(first->mutations.empty());
+			ASSERT(second->mutations.empty());
+			waiter.cancel();
+		} else {
+			ASSERT(!work.isReady());
+			ASSERT_EQ(test.proxy.nextTagReadVersion(test.tag).get(), 100);
+			ready.send(Void());
+			co_await work;
+			ASSERT_EQ(first->bufferedThrough, 100);
+			ASSERT_EQ(first->mutations.size(), 1);
+			if (next == 100) {
+				co_await waiter;
+				ASSERT_EQ(second->bufferedThrough, 100);
+				ASSERT_EQ(second->mutations.size(), 1);
+			} else {
+				ASSERT(!waiter.isReady());
+				ASSERT_EQ(second->bufferedThrough, next - 1);
+				ASSERT(second->mutations.empty());
+				waiter.cancel();
+			}
+		}
+		ASSERT_EQ(second->readDemand, 0);
+		ASSERT(!first->readAhead.claimedBy(test.tag.getPtr()));
+		ASSERT(!first->readAhead.armedFor(first->bufferedThrough));
+		ASSERT(!first->readAhead.provesCursor(100, first->minVersion));
+		ASSERT_EQ(test.proxy.bufferLock.activePermits(), test.proxy.bufferedBytes);
+		test.proxy.clearBufferedMutations(first);
+		test.proxy.clearBufferedMutations(second);
+		ASSERT_EQ(test.proxy.bufferLock.activePermits(), 0);
+		co_return;
+	}
+
+	static Future<Void> lastDemandLeaves() {
+		CDCProxyPrefetchTest test;
+		auto stream = test.addStream(1);
+		stream->readAhead.cancel();
+		auto awakened = test.tag->refresh.onTrigger();
+		auto waiter = test.proxy.waitForBufferedVersion(stream, 100);
+		ASSERT(awakened.isReady()); // No interest -> real demand still wakes a dormant tag.
+		auto cursor = makeReference<CDCPrefetchTestCursor>(Never());
+		auto work = test.proxy.bufferTagCursor(test.tag, 100, cursor, Never(), Prefetch::False);
+		co_await delay(0);
+		ASSERT_EQ(cursor->fetchCount(), 1);
+		ASSERT(!work.isReady());
+		waiter.cancel();
+		co_await work;
+		ASSERT_EQ(stream->readDemand, 0);
+		ASSERT(!test.proxy.nextTagReadVersion(test.tag).present());
+		ASSERT_EQ(stream->bufferedThrough, 99);
+		ASSERT(stream->mutations.empty());
+		ASSERT_EQ(test.proxy.bufferLock.activePermits(), 0);
+		co_return;
+	}
+
+	static Future<Void> absentFrontierDemand() {
+		CDCProxyPrefetchTest test;
+		auto stream = test.addStream(1);
+		stream->readAhead.cancel();
+		stream->tagIntervals.back().end = 100;
+		auto acquired = test.tag->refresh.onTrigger();
+		auto waiter = test.proxy.waitForBufferedVersion(stream, 100);
+		ASSERT(acquired.isReady()); // Two absent frontiers must not count as equal, eligible work.
+		ASSERT(!test.proxy.nextTagReadVersion(test.tag).present());
+		auto released = test.tag->refresh.onTrigger();
+		waiter.cancel();
+		ASSERT(released.isReady());
+		ASSERT_EQ(stream->readDemand, 0);
+		co_return;
+	}
+
+	static Future<Void> replaceTagOnRefresh(CDCProxy* proxy,
+	                                        Reference<CDCBufferedTag> first,
+	                                        Reference<CDCBufferedTag> oldTag,
+	                                        Reference<CDCBufferedTag> replacement) {
+		co_await first->refresh.onTrigger();
+		oldTag->active = false;
+		oldTag->stopped.trigger();
+		proxy->tags[replacement->tag] = replacement;
+		co_return;
+	}
+
+	static Future<Void> demandRefreshReplacement() {
+		CDCProxyPrefetchTest test;
+		auto stream = test.addStream(1);
+		stream->readAhead.cancel();
+		stream->bufferedThrough = 98;
+		stream->tagIntervals[0].end = 100;
+		stream->tagIntervals[0].bufferedThrough = 98;
+		auto second = makeReference<CDCBufferedTag>(Tag(tagLocalityCDC, 1));
+		stream->tagIntervals.emplace_back(second->tag, 100, 200);
+		stream->tagIntervals.back().bufferedThrough = 99;
+		auto other = test.addStream(2);
+		test.tag->streamIds.erase(2);
+		other->tagIntervals[0].tag = second->tag;
+		second->streamIds = { 1, 2 };
+		test.proxy.tags[second->tag] = second;
+		CDCReadAheadPass pass(second);
+		pass.claim(other);
+		ASSERT_EQ(test.proxy.nextTagReadVersion(second).get(), 100);
+		auto replacement = makeReference<CDCBufferedTag>(second->tag);
+		replacement->streamIds = second->streamIds;
+		auto notified = replacement->refresh.onTrigger();
+		auto replace = replaceTagOnRefresh(&test.proxy, test.tag, second, replacement);
+		auto waiter = test.proxy.waitForBufferedVersion(stream, 99);
+		// The first notification runs the replacement coroutine synchronously. The equal second frontier
+		// was observed on the old object, so it cannot suppress a notification to the replacement.
+		ASSERT(replace.isReady());
+		ASSERT(notified.isReady());
+		ASSERT(test.proxy.tags.at(second->tag).getPtr() == replacement.getPtr());
+		waiter.cancel();
+		ASSERT_EQ(stream->readDemand, 0);
+		co_return;
+	}
+
 	static Future<Void> publish() {
 		CDCProxyPrefetchTest test;
 		auto first = test.addStream(1);
@@ -2501,6 +2715,34 @@ TEST_CASE("/NativeCDC/PrefetchIdleDeadline") {
 }
 TEST_CASE("/NativeCDC/PrefetchEmptyDoesNotRetry") {
 	return CDCProxyPrefetchTest::empty();
+}
+
+TEST_CASE("/NativeCDC/DemandRefresh/PrefetchAcquirePreservesPeek") {
+	return CDCProxyPrefetchTest::sameFrontierDemand(false);
+}
+TEST_CASE("/NativeCDC/DemandRefresh/PrefetchReleasePreservesPeek") {
+	return CDCProxyPrefetchTest::sameFrontierDemand(true);
+}
+TEST_CASE("/NativeCDC/DemandRefresh/PrefetchReleasePreservesDeadline") {
+	return CDCProxyPrefetchTest::sameFrontierDemand(true, true);
+}
+TEST_CASE("/NativeCDC/DemandRefresh/SharedEarlierRestartsPeek") {
+	return CDCProxyPrefetchTest::sharedDemand(50);
+}
+TEST_CASE("/NativeCDC/DemandRefresh/SharedSamePreservesPeek") {
+	return CDCProxyPrefetchTest::sharedDemand(100);
+}
+TEST_CASE("/NativeCDC/DemandRefresh/SharedLaterPreservesPeek") {
+	return CDCProxyPrefetchTest::sharedDemand(101);
+}
+TEST_CASE("/NativeCDC/DemandRefresh/LastDemandCancelsPeek") {
+	return CDCProxyPrefetchTest::lastDemandLeaves();
+}
+TEST_CASE("/NativeCDC/DemandRefresh/AbsentFrontiersNotify") {
+	return CDCProxyPrefetchTest::absentFrontierDemand();
+}
+TEST_CASE("/NativeCDC/DemandRefresh/TagReplacementNotifiesCurrentObject") {
+	return CDCProxyPrefetchTest::demandRefreshReplacement();
 }
 
 TEST_CASE("/NativeCDC/ProxyMutationFiltering") {
