@@ -29,6 +29,7 @@ env_set(TRACE_PC_GUARD_INSTRUMENTATION_LIB "" STRING "Path to a library containi
 env_set(PROFILE_INSTR_GENERATE OFF BOOL "If set, build FDB as an instrumentation build to generate profiles")
 env_set(PROFILE_INSTR_USE "" STRING "If set, build FDB with profile")
 env_set(FULL_DEBUG_SYMBOLS OFF BOOL "Generate full debug symbols")
+env_set(COMPRESS_DEBUG_SYMBOLS ON BOOL "Compress debug symbols")
 env_set(ENABLE_LONG_RUNNING_TESTS OFF BOOL "Add a long running tests package")
 
 set(is_swift_compile "$<COMPILE_LANGUAGE:Swift>")
@@ -207,36 +208,35 @@ else()
 
   add_compile_options("$<${is_cxx_compile}:-fno-omit-frame-pointer>")
 
+  # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
+  # in tools like addr2line omitting line numbers.
+  #  - Our rockylinux9 gcc   compile uses rh/gcc--toolset-13 -> binutils 2.40
+  #  - Our rockylinux9 clang compile uses rhel9 default      -> binutils 2.35.2
+  #  - MacOS/Darwin ld and lldb do not fully support dwarf-5 either (and also use clang)
   if(CLANG)
-    # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
-    # in tools like addr2line omitting line numbers. We can consider removing this once we are able 
-    # to use a version that has a fix.
     add_compile_options("$<${is_cxx_compile}:-gdwarf-4>")
-  endif()
-
-  if(FDB_RELEASE OR FULL_DEBUG_SYMBOLS OR CMAKE_BUILD_TYPE STREQUAL "Debug")
-    # Configure with FULL_DEBUG_SYMBOLS=ON to generate all symbols for debugging with gdb
-    # Also generating full debug symbols in release builds. CPack will strip them out
-    # and create a debuginfo rpm
-    add_compile_options("$<${is_cxx_compile}:-ggdb>")
   else()
-    # Generating minimal debug symbols by default. They are sufficient for testing purposes
-    add_compile_options("$<${is_cxx_compile}:-ggdb1>")
+    add_compile_options("$<${is_cxx_compile}:-gdwarf-5>")
   endif()
 
-  if(CLANG)
-    # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
-    # in tools like addr2line omitting line numbers. We can consider removing this once we are able 
-    # to use a version that has a fix.
-    add_compile_options("$<${is_cxx_compile}:-gdwarf-4>")
+  # Also generate debug symbols in release builds,
+  # CPack will strip them out and create a debuginfo rpm.
+  # (Just -g1 by default because g2+ is huge, and rpm debuginfo split is very slow.)
+  if(FULL_DEBUG_SYMBOLS)
+    # As much as possible, including macros etc.
+    add_compile_options("$<${is_cxx_compile}:-g3>")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    # Reasonable for debugging, including function locals and c++ namespaces.
+    add_compile_options("$<${is_cxx_compile}:-g2>")
+  else()
+    # Minimal debug symbols: enough for backtraces with line numbers, but no locals.
+    add_compile_options("$<${is_cxx_compile}:-g1>")
   endif()
 
-  if(NOT FDB_RELEASE)
-    # Enable compression of the debug sections. This reduces the size of the binaries several times. 
-    # We do not enable it release builds, because CPack fails to generate debuginfo packages when
-    # compression is enabled
+  # Enable compression of the debug sections by default, for half the size, or better.
+  if(COMPRESS_DEBUG_SYMBOLS)
     add_compile_options("$<${is_cxx_compile}:-gz>")
-    add_link_options("$<${is_cxx_compile}:-gz>")
+    add_link_options("$<${is_cxx_link}:-gz>")
   endif()
 
   if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)

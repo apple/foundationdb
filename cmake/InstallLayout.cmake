@@ -132,7 +132,7 @@ set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
 # User config
 ################################################################################
 
-set(GENERATE_DEBUG_PACKAGES "${FDB_RELEASE}" CACHE BOOL "Build debug rpm/deb packages (default: only ON for FDB_RELEASE)")
+set(GENERATE_DEBUG_PACKAGES ON CACHE BOOL "Build debug rpm/deb packages")
 
 ################################################################################
 # Alternatives config
@@ -230,6 +230,7 @@ string(REPLACE "-" "_" FDB_PACKAGE_VERSION ${FDB_VERSION})
 set(CPACK_RPM_PACKAGE_GROUP                                ${CURRENT_GIT_VERSION})
 set(CPACK_RPM_PACKAGE_LICENSE                              "Apache 2.0")
 set(CPACK_RPM_PACKAGE_NAME                                 "foundationdb")
+
 set(CPACK_RPM_CLIENTS-EL9_PACKAGE_NAME                     "${CPACK_RPM_PACKAGE_NAME}-clients")
 set(CPACK_RPM_CLIENTS-EL9_FILE_NAME                        "${CPACK_RPM_CLIENTS-EL9_PACKAGE_NAME}-${FDB_PACKAGE_VERSION}${package_version_postfix}.el9.${CMAKE_SYSTEM_PROCESSOR}.rpm")
 set(CPACK_RPM_CLIENTS-EL9_DEBUGINFO_FILE_NAME              "${CPACK_RPM_CLIENTS-EL9_PACKAGE_NAME}-${FDB_PACKAGE_VERSION}${package_version_postfix}.el9-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
@@ -273,8 +274,6 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/usr/lib64/cmake"
   "/etc/foundationdb"
   "/usr/lib64/pkgconfig"
-  "/usr/lib64/python2.7"
-  "/usr/lib64/python2.7/site-packages"
   "/var"
   "/var/log"
   "/var/lib"
@@ -286,10 +285,13 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/usr/lib/foundationdb"
   "/usr/lib/cmake"
   "/usr/lib/foundationdb-${FDB_VERSION}${FDB_BUILDTIME_STRING}/etc/foundationdb"
-  )
+)
+set(CPACK_RPM_DEBUGINFO_EXCLUDE_DIRS_ADDITION
+  "fdbclient/awssdk-src"
+  "fdbclient/awssdk-build"
+)
 set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX "/usr/src")
 set(CPACK_RPM_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
-#set(CPACK_RPM_BUILD_SOURCE_FDB_INSTALL_DIRS_PREFIX /usr/src)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
 ################################################################################
