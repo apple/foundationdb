@@ -2963,6 +2963,16 @@ void waitThread(THREAD_HANDLE thread) {
 #endif
 }
 
+void detachThread(THREAD_HANDLE thread) {
+#ifdef _WIN32
+	CloseHandle(thread);
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+	pthread_detach(thread);
+#else
+#error Port me!
+#endif
+}
+
 void setThreadPriority(int pri) {
 #ifdef __linux__
 	int tid = syscall(SYS_gettid);
