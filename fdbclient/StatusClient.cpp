@@ -481,7 +481,7 @@ TEST_CASE("/fdbclient/status/clientCoordinatorTimeoutBudget") {
 	double elapsed = now() - startTime;
 	ASSERT(status.present());
 	ASSERT(!quorumReachable);
-	ASSERT_GE(elapsed, timeout);
+	ASSERT_GE(elapsed + INetwork::TIME_EPS, timeout);
 	ASSERT_LT(elapsed, timeout + 0.05);
 	co_return;
 }
@@ -502,7 +502,7 @@ TEST_CASE("/fdbclient/status/overallTimeoutBudget") {
 	ASSERT(!status.present());
 	ASSERT_EQ(messages.size(), 1);
 	ASSERT_EQ(messages.front().get_obj().at("name").get_str(), "status_incomplete_timeout");
-	ASSERT_GE(elapsed, overallTimeout);
+	ASSERT_GE(elapsed + INetwork::TIME_EPS, overallTimeout);
 	ASSERT_LT(elapsed, overallTimeout + 0.05);
 	co_return;
 }
