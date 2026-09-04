@@ -1536,36 +1536,58 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.back().name), operationTimeout);
 		streams.pop_back();
 
-		const NativeCdcStatus blockedStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
-		ASSERT(blockedStatus.metadataComplete);
-		ASSERT_EQ(blockedStatus.streams.size(), 1);
+		NativeCdcStatus blockedStatus;
+		// A proxy sample can fail during recovery even though the durable status read succeeded.
+		const double sampleDeadline = now() + operationTimeout;
+		while (true) {
+			ASSERT_LT(now(), sampleDeadline);
+			blockedStatus = co_await timeoutError(getNativeCdcStatus(cx), sampleDeadline - now());
+			ASSERT(blockedStatus.metadataComplete);
+			ASSERT_EQ(blockedStatus.streams.size(), 1);
+			const NativeCdcStreamStatus& blocker = blockedStatus.streams.front();
+			ASSERT_EQ(blocker.info.streamId, streams.front().consumer->position().streamId);
+			ASSERT_EQ(blocker.info.name, streams.front().name);
+			ASSERT_EQ(blocker.info.keys, keys);
+			ASSERT_GT(blocker.info.minVersion, invalidVersion);
+			ASSERT_LE(blocker.info.minVersion, committed);
+			ASSERT_EQ(blocker.tags.size(), 1);
+			ASSERT_EQ(blockedStatus.tags.size(), 1);
+			const NativeCdcTagStatus& tag = blockedStatus.tags.front();
+			ASSERT_EQ(tag.tag, blocker.tags.front());
+			ASSERT(tag.pendingRetiredPop);
+			ASSERT_EQ(tag.blockingStreams.size(), 1);
+			ASSERT_EQ(tag.blockingStreams.front(), blocker.info.streamId);
+			ASSERT_GT(tag.safePopVersion, invalidVersion);
+			ASSERT_LE(tag.safePopVersion, committed);
+			ASSERT(blocker.owner.present());
+			const auto proxySample =
+			    std::find_if(blockedStatus.proxies.begin(),
+			                 blockedStatus.proxies.end(),
+			                 [&](NativeCdcProxyStatus const& proxy) { return proxy.id == blocker.owner.get(); });
+			if (proxySample == blockedStatus.proxies.end()) {
+				// The durable owner may not yet be in the published proxy list after replacement.
+				co_await delay(0.1);
+				continue;
+			}
+			if (!proxySample->sample.present()) {
+				ASSERT(proxySample->error.present());
+				const int code = proxySample->error.get().code();
+				if (code != error_code_timed_out && code != error_code_broken_promise &&
+				    code != error_code_connection_failed && code != error_code_request_maybe_delivered &&
+				    code != error_code_wrong_shard_server) {
+					throw proxySample->error.get();
+				}
+				co_await delay(0.1);
+				continue;
+			}
+			ASSERT_GT(proxySample->sample.get().bufferLimit, 0);
+			const auto& sampledStreams = proxySample->sample.get().streams;
+			ASSERT(std::any_of(sampledStreams.begin(), sampledStreams.end(), [&](CDCProxyStreamStatus const& stream) {
+				return stream.streamId == blocker.info.streamId;
+			}));
+			break;
+		}
 		const NativeCdcStreamStatus& blocker = blockedStatus.streams.front();
-		ASSERT_EQ(blocker.info.streamId, streams.front().consumer->position().streamId);
-		ASSERT_EQ(blocker.info.name, streams.front().name);
-		ASSERT_EQ(blocker.info.keys, keys);
-		ASSERT_GT(blocker.info.minVersion, invalidVersion);
-		ASSERT_LE(blocker.info.minVersion, committed);
-		ASSERT_EQ(blocker.tags.size(), 1);
-		ASSERT_EQ(blockedStatus.tags.size(), 1);
-		const NativeCdcTagStatus& tag = blockedStatus.tags.front();
-		ASSERT_EQ(tag.tag, blocker.tags.front());
-		ASSERT(tag.pendingRetiredPop);
-		ASSERT_EQ(tag.blockingStreams.size(), 1);
-		ASSERT_EQ(tag.blockingStreams.front(), blocker.info.streamId);
-		ASSERT_GT(tag.safePopVersion, invalidVersion);
-		ASSERT_LE(tag.safePopVersion, committed);
-		ASSERT(blocker.owner.present());
-		const auto proxySample =
-		    std::find_if(blockedStatus.proxies.begin(),
-		                 blockedStatus.proxies.end(),
-		                 [&](NativeCdcProxyStatus const& proxy) { return proxy.id == blocker.owner.get(); });
-		ASSERT(proxySample != blockedStatus.proxies.end());
-		ASSERT(proxySample->sample.present());
-		ASSERT_GT(proxySample->sample.get().bufferLimit, 0);
-		const auto& sampledStreams = proxySample->sample.get().streams;
-		ASSERT(std::any_of(sampledStreams.begin(), sampledStreams.end(), [&](CDCProxyStreamStatus const& stream) {
-			return stream.streamId == blocker.info.streamId;
-		}));
 
 		co_await setAllProxyPopsPaused(cx, false);
 		co_await consumeThroughValue(streams.front().consumer, committed, key, value);
