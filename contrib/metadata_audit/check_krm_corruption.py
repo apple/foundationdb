@@ -2320,7 +2320,7 @@ def check_key_servers(tr, live_servers, key_prefix=None, limit=100000):
     Returns dict with issues found.
 
     Checks for issues that would trigger DD asserts:
-    - ASSERT(src.size()) - empty source servers
+    - ASSERT(!src.empty()) - empty source servers
     - ASSERT(servers.size() > 0) - no servers for range
     - ASSERT_GT(keyServers.size(), 0) - keyServers empty
     - KRM uncoalesced assertion - adjacent entries with same value
@@ -2329,7 +2329,7 @@ def check_key_servers(tr, live_servers, key_prefix=None, limit=100000):
         'uncoalesced': [],      # Adjacent entries with same value (KRM assertion)
         'dead_servers': [],      # References to servers not in serverList
         'decode_errors': [],     # Values that couldn't be decoded
-        'empty_sources': [],     # Entries with no source servers (ASSERT(src.size()))
+        'empty_sources': [],     # Entries with no source servers (ASSERT(!src.empty()))
         'keyservers_empty': False,  # keyServers has no entries (ASSERT_GT)
         'coverage_gaps': [],    # Gaps in key range coverage
         # Shard statistics

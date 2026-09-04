@@ -4,7 +4,7 @@ storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] #FIXME: remove after allowin
 disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
 
 # DD's bulk-load team selection rejects any team that shares a server with the source team
-# (DDTeamCollection.cpp:266-275). Under triple replication on a small machineCount
+# (DDTeamCollection.cpp:268-284). Under triple replication on a small machineCount
 # every candidate team overlaps with the source and DD never finds a valid team -- the
 # test then stalls on DDBulkLoadEngineTaskGetTeamFailedToFindValidTeam, the load produces
 # no data, and the workload's processCheck assertion fires (KVS=N NewKVS=0). Pin enough
