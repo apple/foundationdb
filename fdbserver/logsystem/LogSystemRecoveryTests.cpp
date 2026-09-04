@@ -52,6 +52,13 @@ Reference<LogSet> makeRemotePrefixLogSet(const std::vector<TLogInterface>& tlogs
 	return logSet;
 }
 
+TLogInterface makeRemotePrefixRouterClient(TLogInterface router) {
+	// Streaming health checks and reply backpressure require transport-backed peek streams.
+	router.peekMessages = RequestStream<TLogPeekRequest>(router.peekMessages.getEndpoint());
+	router.peekStreamMessages = RequestStream<TLogPeekStreamRequest>(router.peekStreamMessages.getEndpoint());
+	return router;
+}
+
 Reference<LogSystem> makeLaggingRemoteLogSystem(const std::vector<TLogInterface>& remoteLogs,
                                                 const TLogInterface& oldRouter,
                                                 const TLogInterface& currentRouter) {
@@ -69,8 +76,8 @@ Reference<LogSystem> makeLaggingRemoteLogSystem(const std::vector<TLogInterface>
 	logSystem->logRouterTags = 1;
 	logSystem->tLogs.push_back(makeRemotePrefixLogSet({ TLogInterface(locality) }, true, 0, 100));
 	auto remote = makeRemotePrefixLogSet(remoteLogs, false, 1, 60);
-	remote->logRouters.push_back(
-	    makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(currentRouter)));
+	remote->logRouters.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
+	    OptionalInterface<TLogInterface>(makeRemotePrefixRouterClient(currentRouter))));
 	logSystem->tLogs.push_back(remote);
 
 	OldLogData old;
@@ -81,8 +88,8 @@ Reference<LogSystem> makeLaggingRemoteLogSystem(const std::vector<TLogInterface>
 	old.logRouterTags = 1;
 	old.tLogs.push_back(makeRemotePrefixLogSet({ TLogInterface(locality) }, true, 0, 50));
 	auto oldRemote = makeRemotePrefixLogSet({ TLogInterface(locality) }, false, 1, 60);
-	oldRemote->logRouters.push_back(
-	    makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(oldRouter)));
+	oldRemote->logRouters.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
+	    OptionalInterface<TLogInterface>(makeRemotePrefixRouterClient(oldRouter))));
 	old.tLogs.push_back(oldRemote);
 	logSystem->oldLogData.push_back(old);
 	// Make the ordinary generation-purge criteria eligible so the prefix barrier is the only retention gate.
