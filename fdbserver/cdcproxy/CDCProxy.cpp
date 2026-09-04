@@ -191,9 +191,10 @@ public:
 		}
 	}
 	bool empty() const { return streams.empty(); }
-	void claim(Reference<CDCBufferedStream> stream) {
-		if (nextCDCPrefetchVersion(stream, tag).present() &&
-		    stream->readAhead.claim(tag.getPtr(), stream->bufferedThrough)) {
+	void claim(Reference<CDCBufferedStream> stream, Version begin) {
+		const auto next = nextCDCPrefetchVersion(stream, tag);
+		// A later frontier keeps its credit for a pass that can actually reach it.
+		if (next.present() && next.get() == begin && stream->readAhead.claim(tag.getPtr(), stream->bufferedThrough)) {
 			streams.push_back(stream);
 		}
 	}
@@ -1349,7 +1350,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagCursor(Reference<CDCBufferedTa
 		for (const CDCStreamId streamId : tag->streamIds) {
 			auto stream = streams.find(streamId);
 			if (stream != streams.end()) {
-				readAhead.claim(stream->second);
+				readAhead.claim(stream->second, begin);
 			}
 		}
 	}
@@ -2279,15 +2280,16 @@ class CDCPrefetchTestCursor final : public IReplayPeekCursor, public ReferenceCo
 	Standalone<StringRef> payload;
 	Optional<ArenaReader> input;
 	Future<Void> ready;
-	LogMessageVersion position{ 100 };
+	Version messageVersion;
+	LogMessageVersion position;
 	bool fetched = false;
 	bool done = false;
 	bool containsMutation;
 	int fetches = 0;
 
 public:
-	explicit CDCPrefetchTestCursor(Future<Void> ready, bool containsMutation = true)
-	  : ready(ready), containsMutation(containsMutation) {
+	explicit CDCPrefetchTestCursor(Future<Void> ready, bool containsMutation = true, Version version = 100)
+	  : ready(ready), messageVersion(version), position(version), containsMutation(containsMutation) {
 		BinaryWriter writer(AssumeVersion(g_network->protocolVersion()));
 		writer << MutationRef(MutationRef::SetValue, "k"_sr, "value"_sr);
 		payload = writer.toValue();
@@ -2304,28 +2306,28 @@ public:
 	StringRef getMessageWithTags() override { return payload; }
 	void nextMessage() override {
 		done = true;
-		position = LogMessageVersion(101);
+		position = LogMessageVersion(messageVersion + 1);
 	}
 	Future<Void> getMore(TaskPriority taskID) override {
 		++fetches;
 		co_await ready;
 		fetched = true;
 		if (!containsMutation) {
-			position = LogMessageVersion(101);
+			position = LogMessageVersion(messageVersion + 1);
 		}
 		co_return;
 	}
 	bool isExhausted() const override { return fetched && !hasMessage(); }
 	LogMessageVersion const& version() const override { return position; }
 	Version popped() const override { return 0; }
-	Version getMinKnownCommittedVersion() const override { return 100; }
+	Version getMinKnownCommittedVersion() const override { return messageVersion; }
 	int64_t getMaxRetainedReplyCount() const override { return 1; }
 	void setReplyByteLimit(int limitBytes) override { ASSERT_GT(limitBytes, payload.size()); }
 	Optional<UID> getPrimaryPeekLocation() const override { return {}; }
 	Optional<UID> getCurrentPeekLocation() const override { return {}; }
-	Version getMaxKnownVersion() const override { return 100; }
+	Version getMaxKnownVersion() const override { return messageVersion; }
 	Reference<IReplayPeekCursor> cloneNoMore() override {
-		auto clone = makeReference<CDCPrefetchTestCursor>(Void(), containsMutation);
+		auto clone = makeReference<CDCPrefetchTestCursor>(Void(), containsMutation, messageVersion);
 		clone->position = position;
 		clone->fetched = fetched;
 		clone->done = done;
@@ -2525,7 +2527,7 @@ public:
 		second->streamIds = { 1, 2 };
 		test.proxy.tags[second->tag] = second;
 		CDCReadAheadPass pass(second);
-		pass.claim(other);
+		pass.claim(other, 100);
 		ASSERT_EQ(test.proxy.nextTagReadVersion(second).get(), 100);
 		auto replacement = makeReference<CDCBufferedTag>(second->tag);
 		replacement->streamIds = second->streamIds;
@@ -2573,6 +2575,40 @@ public:
 		co_return;
 	}
 
+	static Future<Void> staggeredSharedTag() {
+		CDCProxyPrefetchTest test;
+		auto first = test.addStream(1);
+		auto second = test.addStream(2);
+		second->bufferedThrough = 199;
+		second->tagIntervals.back().bufferedThrough = 199;
+		second->tagIntervals.back().end = 300;
+		ASSERT(second->readAhead.issueReply(199, 199, second->minVersion, true));
+
+		auto firstCursor = makeReference<CDCPrefetchTestCursor>(Void());
+		ASSERT_EQ(test.proxy.nextTagPrefetchVersion(test.tag).get(), 100);
+		co_await test.proxy.bufferTagCursor(test.tag, 100, firstCursor, Never(), Prefetch::True);
+		ASSERT_EQ(firstCursor->fetchCount(), 1);
+		ASSERT_EQ(first->bufferedThrough, 100);
+		ASSERT_EQ(first->mutations.size(), 1);
+		ASSERT_EQ(second->bufferedThrough, 199);
+		ASSERT(second->mutations.empty());
+		ASSERT(second->readAhead.armedFor(199));
+		ASSERT_EQ(test.proxy.nextTagPrefetchVersion(test.tag).get(), 200);
+
+		auto secondCursor = makeReference<CDCPrefetchTestCursor>(Void(), true, 200);
+		co_await test.proxy.bufferTagCursor(test.tag, 200, secondCursor, Never(), Prefetch::True);
+		ASSERT_EQ(secondCursor->fetchCount(), 1);
+		ASSERT_EQ(second->bufferedThrough, 200);
+		ASSERT_EQ(second->mutations.size(), 1);
+		ASSERT(!second->readAhead.provesCursor(200, second->minVersion));
+		ASSERT(!test.proxy.nextTagPrefetchVersion(test.tag).present());
+		ASSERT_EQ(test.proxy.bufferLock.activePermits(), test.proxy.bufferedBytes);
+		test.proxy.clearBufferedMutations(first);
+		test.proxy.clearBufferedMutations(second);
+		ASSERT_EQ(test.proxy.bufferLock.activePermits(), 0);
+		co_return;
+	}
+
 	static Future<Void> capacity(bool queued = false) {
 		CDCProxyPrefetchTest test;
 		auto stream = test.addStream(1);
@@ -2614,7 +2650,7 @@ public:
 		co_await test.proxy.bufferLock.take(TaskPriority::TLogPeekReply, passLimit.reservationBytes);
 		FlowLock::Releaser reservation(test.proxy.bufferLock, passLimit.reservationBytes);
 		CDCReadAheadPass pass(test.tag);
-		pass.claim(stream);
+		pass.claim(stream, 100);
 		CDCBufferSelection selection;
 		selection.selectedStreamIds.insert(1);
 		selection.selectedBytes = passLimit.preferredBufferedBytes + 1;
@@ -2715,7 +2751,7 @@ TEST_CASE("/NativeCDC/PrefetchCreditTailAndTags") {
 	ASSERT(!nextCDCPrefetchVersion(stream, second).present());
 	{
 		CDCReadAheadPass pass(first);
-		pass.claim(stream);
+		pass.claim(stream, 100);
 		ASSERT(hasCDCReadInterest(stream, first));
 		ASSERT(!hasCDCReadInterest(stream, second));
 		ASSERT(!nextCDCPrefetchVersion(stream, second).present());
@@ -2735,6 +2771,9 @@ TEST_CASE("/NativeCDC/PrefetchCreditTailAndTags") {
 
 TEST_CASE("/NativeCDC/PrefetchMaterializesSharedTag") {
 	return CDCProxyPrefetchTest::publish();
+}
+TEST_CASE("/NativeCDC/PrefetchPreservesLaterSharedTagCredit") {
+	return CDCProxyPrefetchTest::staggeredSharedTag();
 }
 TEST_CASE("/NativeCDC/PrefetchDeclinesUnavailableCapacity") {
 	return CDCProxyPrefetchTest::capacity();
