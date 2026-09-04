@@ -1694,7 +1694,7 @@ TEST_CASE("/flow/flow/FlowMutex") {
 					if (verbose) {
 						printf("Final wait in case error was injected by the last actor to finish\n");
 					}
-					co_await success(mutex.take());
+					co_await mutex.take();
 				}
 			} catch (Error& e) {
 				if (verbose) {
@@ -1838,7 +1838,7 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/peerDisconnect") {
 	// peer->disconnect, and PeerHolder only touches outstandingReplies. Note that Peer construction
 	// also updates the global failure monitor status for fakeAddr.
 	NetworkAddress fakeAddr = NetworkAddress::parse("1.2.3.4:1234");
-	Reference<Peer> peer = makeReference<Peer>(nullptr, fakeAddr);
+	auto peer = makeReference<Peer>(nullptr, fakeAddr);
 
 	// Create a value future that never resolves (simulating a stuck RPC to unreachable storage server)
 	Promise<Void> neverReply;
@@ -1967,8 +1967,8 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/retryOnDisconnect") {
 
 	NetworkAddress addr1 = NetworkAddress::parse("1.2.3.4:1234");
 	NetworkAddress addr2 = NetworkAddress::parse("1.2.3.5:1234");
-	Reference<Peer> peer1 = makeReference<Peer>(nullptr, addr1);
-	Reference<Peer> peer2 = makeReference<Peer>(nullptr, addr2);
+	auto peer1 = makeReference<Peer>(nullptr, addr1);
+	auto peer2 = makeReference<Peer>(nullptr, addr2);
 
 	int numAttempts = 0;
 
