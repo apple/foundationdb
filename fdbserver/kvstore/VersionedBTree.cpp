@@ -9979,7 +9979,7 @@ TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
 	Future<Reference<const ArenaPage>> survivingRead;
 	{
 		DWALPager::PageCacheEntry entry;
-		Reference<ArenaPage> firstPage = makeReference<ArenaPage>(4096, 4096);
+		auto firstPage = makeReference<ArenaPage>(4096, 4096);
 		ArenaPage* firstPagePtr = firstPage.getPtr();
 		entry.setReadFuture(firstPage);
 
@@ -9989,7 +9989,7 @@ TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
 		ASSERT(firstRead == entry.getReadFuture<true>());
 		ASSERT(entry.getReadFuture<false>().get().getPtr() == firstPagePtr);
 
-		Reference<ArenaPage> updatedPage = makeReference<ArenaPage>(4096, 4096);
+		auto updatedPage = makeReference<ArenaPage>(4096, 4096);
 		updatedPage->init(EncodingType::XXHash64, PageType::BTreeNode, 1);
 		memcpy(updatedPage->mutateData(), expectedPageContents.begin(), expectedPageContents.size());
 		ArenaPage* updatedPagePtr = updatedPage.getPtr();
@@ -10008,7 +10008,7 @@ TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
 		ASSERT(pendingRead.isReady() && pendingRead.isError());
 		ASSERT_EQ(pendingRead.getError().code(), error_code_actor_cancelled);
 		ASSERT(!secondPendingRead.isReady());
-		Reference<ArenaPage> pendingPage = makeReference<ArenaPage>(4096, 4096);
+		auto pendingPage = makeReference<ArenaPage>(4096, 4096);
 		ArenaPage* pendingPagePtr = pendingPage.getPtr();
 		pendingPromise.send(pendingPage);
 		ASSERT(secondPendingRead.isReady() && !secondPendingRead.isError());

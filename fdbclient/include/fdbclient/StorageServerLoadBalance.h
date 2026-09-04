@@ -195,7 +195,7 @@ Future<Void> replicaComparison(Req req,
 		co_return;
 	}
 
-	co_await store(src, fSource);
+	src = co_await fSource;
 
 	if (src.isError()) {
 		ASSERT_WE_THINK(false); // TODO: Change this into an ASSERT after getting enough test coverage.
