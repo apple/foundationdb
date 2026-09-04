@@ -956,6 +956,7 @@ Future<NativeCdcStatus> getNativeCdcStatus(Database cx) {
 		}
 	}
 	std::vector<Future<NativeCdcProxyStatus>> samples;
+	samples.reserve(clientInfo.cdcProxies.size());
 	for (const auto& proxy : clientInfo.cdcProxies) {
 		samples.push_back(sampleNativeCdcProxy(proxy, std::move(requests[proxy.id()])));
 	}
