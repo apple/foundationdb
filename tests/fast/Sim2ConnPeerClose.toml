@@ -1,0 +1,8 @@
+[[test]]
+testTitle = 'Sim2ConnPeerClose'
+startDelay = 0
+useDB = false
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    testsMatching = '/fdbrpc/Sim2Conn/'
