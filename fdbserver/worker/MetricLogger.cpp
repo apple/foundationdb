@@ -81,7 +81,7 @@ struct MetricsRule {
 	// For now this just returns true if pat is in subject.  Returns true if pat is empty.
 	// TODO:  Support more complex patterns?
 	static inline bool patternMatch(StringRef const& pat, StringRef const& subject) {
-		if (pat.size() == 0)
+		if (pat.empty())
 			return true;
 		for (int i = 0, iend = subject.size() - pat.size() + 1; i < iend; ++i)
 			if (subject.substr(i, pat.size()) == pat)
@@ -187,7 +187,7 @@ Future<Void> metricRuleUpdater(Database cx, MetricsConfig* config, TDMetricColle
 class MetricDB : public IMetricDB {
 public:
 	explicit MetricDB(ReadYourWritesTransaction* tr = nullptr) : tr(tr) {}
-	~MetricDB() override {}
+	~MetricDB() override = default;
 
 	// levelKey is the prefix for the entire level, no timestamp at the end
 	static Future<Optional<Standalone<StringRef>>> getLastBlock_impl(ReadYourWritesTransaction* tr,
@@ -215,7 +215,7 @@ Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricCollection*
 	while (true) {
 		batch.clear();
 		uint64_t rollTime = std::numeric_limits<uint64_t>::max();
-		if (collection->rollTimes.size()) {
+		if (!collection->rollTimes.empty()) {
 			rollTime = collection->rollTimes.front();
 			collection->rollTimes.pop_front();
 		}
@@ -272,7 +272,7 @@ Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricCollection*
 		// If there are more rolltimes then next dump is now, otherwise if no metrics are enabled then it is
 		// whenever the next metric is enabled but if there are metrics enabled then it is in 1 second.
 		Future<Void> nextDump;
-		if (collection->rollTimes.size() > 0)
+		if (!collection->rollTimes.empty())
 			nextDump = Void();
 		else {
 			nextDump = collection->metricEnabled.onTrigger();
@@ -388,7 +388,7 @@ Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, TDMetr
 
 Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
 	// Never log to an empty prefix, it's pretty much always a bad idea.
-	if (prefix.size() == 0) {
+	if (prefix.empty()) {
 		TraceEvent(SevWarnAlways, "TDMetricsRefusingEmptyPrefix").log();
 		co_return;
 	}
@@ -493,7 +493,7 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	};
 	std::string metricsConnFile = getenv2("METRICS_CONNFILE");
 	std::string metricsPrefix = getenv2("METRICS_PREFIX");
-	if (metricsConnFile == "") {
+	if (metricsConnFile.empty()) {
 		fprintf(stdout, "Metrics cluster file must be specified in environment variable METRICS_CONNFILE\n");
 		co_return;
 	}
