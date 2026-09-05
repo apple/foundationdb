@@ -6351,7 +6351,8 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 
 		// Use high priority for dispatch tasks that have to queue more blocks for the current batch
 		auto priority = (remainingInBatch > 0) ? 1u : 0u;
-		auto task = makeReference<Task>(RestoreDispatchTaskFunc::name, RestoreDispatchTaskFunc::version, doneKey, priority);
+		auto task =
+		    makeReference<Task>(RestoreDispatchTaskFunc::name, RestoreDispatchTaskFunc::version, doneKey, priority);
 
 		// Create a config from the parent task and bind it to the new task
 		co_await RestoreConfig(parentTask).toTask(tr, task);
