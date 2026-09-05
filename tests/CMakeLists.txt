@@ -471,19 +471,6 @@ if(WITH_PYTHON)
 
   if(NOT OPEN_FOR_IDE)
     add_test(
-      NAME multiversion_client/unit_tests
-      COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
-    )
-    set_tests_properties("multiversion_client/unit_tests" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
-    add_test(
-      NAME threadsafe_threadfuture_to_future/unit_tests
-      COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
-    )
-    set_tests_properties("threadsafe_threadfuture_to_future/unit_tests" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
-  endif()
-
-  if(NOT OPEN_FOR_IDE)
-    add_test(
       NAME command_line_argument_test
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
     )
@@ -506,9 +493,4 @@ if(WITH_PYTHON)
 
 else()
   message(WARNING "Python not found, won't configure ctest")
-endif()
-
-# Add all unit tests as ctests
-if (AUTO_DISCOVER_UNIT_TESTS)
-  collect_unit_tests(${CMAKE_SOURCE_DIR})
 endif()

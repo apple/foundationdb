@@ -2932,33 +2932,3 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 	co_await Future<Void>(Never());
 	ASSERT(false);
 }
-
-// Helper function to calculate the maximum satellite_logs based on available machines per datacenter
-// We count the minimum number of machines in any satellite datacenter to ensure we don't over-provision
-int getMaxSatelliteLogs() {
-	if (!g_network->isSimulated()) {
-		return 6; // Conservative default for non-simulated environments
-	}
-
-	// Count machines per datacenter
-	std::map<Optional<Standalone<StringRef>>, int> machinesPerDC;
-	for (auto& process : g_simulator->getAllProcesses()) {
-		if (process->locality.dcId().present()) {
-			machinesPerDC[process->locality.dcId()]++;
-		}
-	}
-
-	// Find the minimum machines in satellite DCs (0, 1, 2, 3, 4, 5).
-	// Note normal DCs can be selected as satellites, see usage of useNormalDCsAsSatellites.
-	int minSatelliteMachines = 6; // Start with max possible
-	for (int dcId = 0; dcId <= 5; dcId++) {
-		auto dcIdStr = Standalone<StringRef>(std::to_string(dcId));
-		int count = machinesPerDC[dcIdStr];
-		if (count > 0) {
-			minSatelliteMachines = std::min(minSatelliteMachines, count);
-		}
-	}
-
-	// Cap at 6 (the original max) and ensure at least 1
-	return std::max(1, std::min(6, minSatelliteMachines));
-}
