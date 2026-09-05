@@ -56,7 +56,6 @@
 #include "fdbrpc/FlowTransport.h"
 #include "AsyncFileWriteChecker.h"
 #include "fdbrpc/genericactors.h"
-#include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/FaultInjection.h"
 #include "flow/TaskQueue.h"
 #include "flow/IUDPSocket.h"
@@ -2612,7 +2611,7 @@ void startNewSimulator(bool printSimTime) {
 	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;
 }
 
-Future<Void> startUnitTestSimulator() {
+Future<Void> startUnitTestSimulator(int wellKnownEndpointCount) {
 	startNewSimulator(false);
 	Standalone<StringRef> processId(deterministicRandom()->randomUniqueID().toString());
 	auto* process = g_simulator->newProcess(
@@ -2646,13 +2645,13 @@ Future<Void> startUnitTestSimulator() {
 	httpProcess->excludeFromRestarts = true;
 	co_await g_simulator->onProcess(httpProcess, TaskPriority::DefaultYield);
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(true, 1, wellKnownEndpointCount);
 	(void)FlowTransport::transport().bind(httpProcess->address, httpProcess->address);
 	g_simulator->addSimHTTPProcess(makeReference<HTTP::SimServerContext>());
 
 	co_await g_simulator->onProcess(process, TaskPriority::DefaultYield);
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(true, 1, wellKnownEndpointCount);
 	(void)FlowTransport::transport().bind(process->address, process->address);
 }
 

@@ -19,10 +19,10 @@
  */
 
 #include "fdbclient/Knobs.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbrpc/simulator.h"
 #include "flow/TLSConfig.h"
 #include "flow/UnitTestRunner.h"
@@ -30,7 +30,7 @@
 namespace {
 Future<Void> initializeSimulation() {
 	resetClientKnobs(Randomize::True, IsSimulated::True);
-	return startUnitTestSimulator();
+	return startUnitTestSimulator(WLTOKEN_RESERVED_COUNT);
 }
 
 void initializeNetwork() {

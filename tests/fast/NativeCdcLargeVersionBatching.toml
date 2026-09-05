@@ -7,15 +7,16 @@ faultInjection = false
 [[knobs]]
 enable_native_cdc = true
 native_cdc_tag_count = 1
-# Several complete commit versions fit either reply bound, while all eight together do not.
-maximum_peek_bytes = 4096
-cdc_proxy_consume_reply_bytes = 4096
-cdc_proxy_buffer_bytes = 65536
+# Each two-value version exceeds 64 KiB; several fit 512 KiB, but all eight do not.
+maximum_peek_bytes = 524288
+cdc_proxy_consume_reply_bytes = 524288
+cdc_proxy_buffer_bytes = 8388608
 cdc_proxy_consume_poll_timeout = 30.0
 
 [[test]]
-testTitle = 'NativeCdcReplyChunking'
+testTitle = 'NativeCdcLargeVersionBatching'
 useDB = true
+timeout = 600
 waitForQuiescenceEnd = false
 connectionFailuresDisableDuration = 1000000
 runFailureWorkloads = false
@@ -29,5 +30,5 @@ runFailureWorkloads = false
     writesPerRound = 1
     rounds = 0
     testReplyChunking = true
-    memoryTestValueBytes = 512
+    memoryTestValueBytes = 40000
     operationTimeout = 120.0

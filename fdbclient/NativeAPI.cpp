@@ -73,7 +73,7 @@
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbclient/versions.h"
-#include "fdbrpc/WellKnownEndpoints.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
@@ -1614,7 +1614,7 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 
 Future<Void> startTransaction(Reference<TransactionState> trStateInput) {
 	Reference<TransactionState> trState(std::move(trStateInput));
-	co_await success(trState->readVersionFuture);
+	co_await trState->readVersionFuture;
 }
 
 TEST_CASE("/fdbclient/NativeAPI/startTransaction/releasesStateOnCompletion") {
@@ -2375,7 +2375,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trStateInput
 			req.arena.dependsOn(locations[shard].range.arena());
 
 			transformRangeLimits(limits, reverse, req);
-			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && (req.limit < 0) == reverse);
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
@@ -2772,7 +2772,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trStateInput,
 			}
 
 			transformRangeLimits(limits, reverse, req);
-			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && (req.limit < 0) == reverse);
 
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
 			req.spanContext = span.context;
@@ -3218,7 +3218,7 @@ Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
 			// keep shard's arena around in case of async tss comparison
 			req.arena.dependsOn(range.arena());
 
-			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && (req.limit < 0) == reverse);
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();

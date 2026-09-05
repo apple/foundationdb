@@ -2059,6 +2059,12 @@ int tLogPeekReplyByteLimit(Tag tag, int requestedLimit) {
 	           : 0;
 }
 
+int tLogPeekByteTarget(int replyByteLimit, int nativeCdcTarget) {
+	// Positive limits apply only to Native CDC. Complete versions and a spilled prefix plus its captured memory
+	// tail can cross this batching target; replyByteLimit remains the hard bound.
+	return replyByteLimit > 0 ? std::clamp(nativeCdcTarget, 1, replyByteLimit) : SERVER_KNOBS->DESIRED_TOTAL_BYTES;
+}
+
 enum class TLogPeekVersionAppendResult { Appended, ReplyByteLimitReached, VersionTooLarge };
 
 TLogPeekVersionAppendResult appendTLogPeekVersion(BinaryWriter& messages,
@@ -2108,6 +2114,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	}
 
 	const int replyByteLimit = tLogPeekReplyByteLimit(reqTag, reqReplyByteLimit);
+	const int peekByteTarget = tLogPeekByteTarget(replyByteLimit, SERVER_KNOBS->NATIVE_CDC_BATCH_TARGET_BYTES);
 	bool replyByteLimitReached = false;
 	bool replyVersionTooLarge = false;
 	int oversizedVersionBytes = 0;
@@ -2376,8 +2383,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			if (reqOnlySpilled) {
 				endVersion = logData->persistentDataDurableVersion + 1;
 			} else if (replyByteLimit > 0) {
-				memoryVersions = peekMessageVersionsFromMemory(
-				    logData, reqTag, reqBegin, std::min(replyByteLimit, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
+				memoryVersions = peekMessageVersionsFromMemory(logData, reqTag, reqBegin, peekByteTarget);
 			} else {
 				peekMessagesFromMemory(logData, reqTag, reqBegin, messages2, endVersion);
 			}
@@ -2387,8 +2393,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				    KeyRangeRef(
 				        persistTagMessagesKey(logData->logId, reqTag, reqBegin),
 				        persistTagMessagesKey(logData->logId, reqTag, logData->persistentDataDurableVersion + 1)),
-				    SERVER_KNOBS->DESIRED_TOTAL_BYTES,
-				    SERVER_KNOBS->DESIRED_TOTAL_BYTES);
+				    peekByteTarget,
+				    peekByteTarget);
 
 				for (auto& kv : kvs) {
 					auto ver = decodeTagMessagesKey(kv.key);
@@ -2404,7 +2410,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				if (replyByteLimitReached) {
 					setTruncatedEndVersion();
 					onlySpilled = true;
-				} else if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+				} else if (kvs.expectedSize() >= peekByteTarget) {
 					ASSERT(!kvs.empty());
 					endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
 					onlySpilled = true;
@@ -2417,7 +2423,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 					messages.serializeBytes(messages2.toValue());
 				}
 			} else {
-				// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
+				// FIXME: Limit to approximately peekByteTarget somehow.
 				RangeResult kvrefs = co_await self->persistentData->readRange(
 				    KeyRangeRef(
 				        persistTagMessageRefsKey(logData->logId, reqTag, reqBegin),
@@ -2437,7 +2443,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 					BinaryReader r(kv.value, AssumeVersion(logData->protocolVersion));
 					r >> spilledData;
 					for (const SpilledData& sd : spilledData) {
-						if (mutationBytes >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+						if (mutationBytes >= peekByteTarget) {
 							earlyEnd = true;
 							break;
 						}
@@ -2523,8 +2529,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			if (reqOnlySpilled) {
 				endVersion = logData->persistentDataDurableVersion + 1;
 			} else if (replyByteLimit > 0) {
-				auto memoryVersions = peekMessageVersionsFromMemory(
-				    logData, reqTag, reqBegin, std::min(replyByteLimit, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
+				auto memoryVersions = peekMessageVersionsFromMemory(logData, reqTag, reqBegin, peekByteTarget);
 				auto result = appendMemoryVersions(memoryVersions);
 				if (result != TLogPeekVersionAppendResult::Appended || memoryVersions.truncated) {
 					setTruncatedEndVersion();
@@ -4453,6 +4458,70 @@ TEST_CASE("/NativeCDC/TLogPeekReplyLimit") {
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), 4096) == std::min(4096, SERVER_KNOBS->MAXIMUM_PEEK_BYTES));
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityLogRouter, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES) == 0);
 	ASSERT(tLogPeekReplyByteLimit(Tag(tagLocalityTxs, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES) == 0);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TLogPeekByteTarget") {
+	constexpr int NATIVE_CDC_TARGET = 512 << 10;
+	for (int target : { std::numeric_limits<int>::min(),
+	                    -1,
+	                    0,
+	                    1,
+	                    NATIVE_CDC_TARGET,
+	                    1 << 20,
+	                    2 << 20,
+	                    std::numeric_limits<int>::max() }) {
+		ASSERT_EQ(tLogPeekByteTarget(0, target), SERVER_KNOBS->DESIRED_TOTAL_BYTES);
+		ASSERT_EQ(tLogPeekByteTarget(-1, target), SERVER_KNOBS->DESIRED_TOTAL_BYTES);
+		for (int limit : { 1,
+		                   4096,
+		                   NATIVE_CDC_TARGET - 1,
+		                   NATIVE_CDC_TARGET,
+		                   NATIVE_CDC_TARGET + 1,
+		                   2 << 20,
+		                   std::numeric_limits<int>::max() }) {
+			ASSERT_EQ(tLogPeekByteTarget(limit, target), std::min(limit, std::max(1, target)));
+		}
+		ASSERT_EQ(tLogPeekByteTarget(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), 0), target),
+		          SERVER_KNOBS->DESIRED_TOTAL_BYTES);
+		ASSERT_EQ(tLogPeekByteTarget(tLogPeekReplyByteLimit(Tag(tagLocalityCDC, 0), SERVER_KNOBS->MAXIMUM_PEEK_BYTES),
+		                             target),
+		          std::min(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, std::max(1, target)));
+		for (Tag tag : { Tag(0, 0), Tag(tagLocalityLogRouter, 0), Tag(tagLocalityTxs, 0) }) {
+			ASSERT_EQ(tLogPeekByteTarget(tLogPeekReplyByteLimit(tag, 2 * NATIVE_CDC_TARGET), target),
+			          SERVER_KNOBS->DESIRED_TOTAL_BYTES);
+		}
+	}
+	ASSERT_EQ(tLogPeekByteTarget(2 * NATIVE_CDC_TARGET, NATIVE_CDC_TARGET), NATIVE_CDC_TARGET);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TLogPeekSoftTargetVersionBoundary") {
+	for (int target : { 512 << 10, 1 << 20, 2 << 20 }) {
+		const int replyByteLimit = 2 * target;
+		const int byteTarget = tLogPeekByteTarget(replyByteLimit, target);
+		BinaryWriter version(Unversioned());
+		version << VERSION_HEADER << Version(1);
+		const std::string payload(byteTarget, 'x');
+		version.serializeBytes(StringRef(payload));
+		const auto versionMessages = version.toValue();
+		ASSERT_GT(versionMessages.size(), byteTarget);
+		ASSERT_LT(versionMessages.size(), replyByteLimit);
+
+		// The soft target must not reject an indivisible version accepted by the existing hard limit.
+		BinaryWriter reply(Unversioned());
+		ASSERT(appendTLogPeekVersion(reply, versionMessages, replyByteLimit) == TLogPeekVersionAppendResult::Appended);
+		ASSERT_EQ(reply.getLength(), versionMessages.size());
+		ASSERT(appendTLogPeekVersion(reply, versionMessages, replyByteLimit) ==
+		       TLogPeekVersionAppendResult::ReplyByteLimitReached);
+		ASSERT_EQ(reply.getLength(), versionMessages.size());
+		ASSERT_EQ(tLogPeekTruncatedEndVersion(Optional<Version>(2), Optional<Version>(1)), 2);
+
+		BinaryWriter oversizedReply(Unversioned());
+		ASSERT(appendTLogPeekVersion(oversizedReply, versionMessages, versionMessages.size() - 1) ==
+		       TLogPeekVersionAppendResult::VersionTooLarge);
+		ASSERT_EQ(oversizedReply.getLength(), 0);
+	}
 	return Void();
 }
 
