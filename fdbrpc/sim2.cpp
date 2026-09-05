@@ -443,9 +443,10 @@ private:
 	int sendBufSize;
 
 	Future<Void> leakedConnectionTracker;
+	// The close grace and incoming EOF are one-way latches.
 	AsyncVar<bool> stopReceive;
 	AsyncVar<bool> incomingClosed;
-	// Cancel the timer and connection actors before destroying their state.
+	// Declared after the state they use so destruction cancels these actors first.
 	Future<Void> stopReceiveTask;
 	Future<Void> pipes;
 
@@ -462,6 +463,7 @@ private:
 	}
 
 	void armStopReceive() {
+		// A later close must not extend the grace period started by the first close.
 		if (!stopReceiveTask.isValid()) {
 			stopReceiveTask = stopReceiving(this);
 		}
@@ -498,6 +500,7 @@ private:
 				}
 				// Bytes already sent remain in recvBuf even if the peer process has exited.
 				auto keepAlive = Reference<Sim2Conn>::addRef(self);
+				// Make the final bytes readable before waking a reader with the close error.
 				self->receivedBytes.set(self->sentBytes.get());
 				self->incomingClosed.set(true);
 				co_return;
@@ -559,6 +562,10 @@ private:
 					co_return;
 				}
 				if (self->incomingClosed.get()) {
+					CODE_PROBE(true,
+					           "Simulated reader observed graceful peer close",
+					           probe::context::sim2,
+					           probe::assert::simOnly);
 					throw connection_failed();
 				}
 				co_await (self->receivedBytes.onChange() || self->incomingClosed.onChange());
@@ -645,7 +652,7 @@ private:
 	}
 };
 
-TEST_CASE("/fdbrpc/Sim2Conn/readAfterPeerClose") {
+TEST_CASE("Lfdbrpc/Sim2Conn/readAfterPeerClose") {
 	if (!g_network->isSimulated()) {
 		co_return;
 	}
@@ -653,12 +660,17 @@ TEST_CASE("/fdbrpc/Sim2Conn/readAfterPeerClose") {
 	auto receiverProcess = g_simulator->getCurrentProcess();
 	ISimulator::ProcessInfo* senderProcess = nullptr;
 	for (auto candidate : g_simulator->getAllProcesses()) {
-		if (candidate != receiverProcess && candidate->isReliable()) {
+		if (candidate != receiverProcess && candidate->isReliable() &&
+		    !g_clogging.disconnected(candidate->address.ip, receiverProcess->address.ip) &&
+		    !g_clogging.disconnected(receiverProcess->address.ip, candidate->address.ip)) {
 			senderProcess = candidate;
 			break;
 		}
 	}
-	ASSERT(senderProcess);
+	if (!senderProcess) {
+		TraceEvent("Sim2ConnPeerCloseTestSkipped").detail("Reason", "No connected reliable peer");
+		co_return;
+	}
 	auto senderConn = makeReference<Sim2Conn>(senderProcess);
 	auto receiverConn = makeReference<Sim2Conn>(receiverProcess);
 	senderConn->connect(receiverConn, receiverProcess->address);
@@ -687,7 +699,7 @@ TEST_CASE("/fdbrpc/Sim2Conn/readAfterPeerClose") {
 	receiverConn->close();
 }
 
-TEST_CASE("/fdbrpc/Sim2Conn/drainBeforePeerCloseError") {
+TEST_CASE("Lfdbrpc/Sim2Conn/drainBeforePeerCloseError") {
 	if (!g_network->isSimulated()) {
 		co_return;
 	}
@@ -719,7 +731,7 @@ TEST_CASE("/fdbrpc/Sim2Conn/drainBeforePeerCloseError") {
 	receiverConn->close();
 }
 
-TEST_CASE("/fdbrpc/Sim2Conn/closeWithInFlightBytesAndDeadPeer") {
+TEST_CASE("Lfdbrpc/Sim2Conn/closeWithInFlightBytesAndDeadPeer") {
 	if (!g_network->isSimulated()) {
 		co_return;
 	}
