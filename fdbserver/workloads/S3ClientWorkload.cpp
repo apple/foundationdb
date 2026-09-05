@@ -27,7 +27,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/S3Client.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/BulkLoadUtil.h"

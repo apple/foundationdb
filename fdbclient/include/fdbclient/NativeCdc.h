@@ -24,7 +24,7 @@
 
 #include "fdbclient/CDCProxyInterface.h"
 #include "fdbclient/NativeCdcClient.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 
 class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
 	static Future<CDCConsumeReply> consumeImpl(Reference<NativeCdcConsumer> self);
@@ -56,6 +56,49 @@ public:
 Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys);
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);
+
+struct NativeCdcStreamStatus {
+	NativeCdcStreamInfo info;
+	Optional<UID> owner;
+	bool ownerPublished = false;
+	std::vector<Tag> tags;
+};
+
+struct NativeCdcTagStatus {
+	Tag tag;
+	Version safePopVersion = invalidVersion;
+	std::vector<CDCStreamId> blockingStreams;
+	bool pendingRetiredPop = false;
+	Version retiredPopVersion = invalidVersion;
+};
+
+struct NativeCdcProxyStatus {
+	UID id;
+	NetworkAddress address;
+	Optional<CDCProxyStatusReply> sample;
+	Optional<Error> error;
+};
+
+struct NativeCdcStatus {
+	Version readVersion = invalidVersion;
+	bool admissionEnabled = false;
+	int tagCount = 0;
+	bool metadataComplete = true;
+	std::vector<NativeCdcStreamStatus> streams;
+	std::vector<NativeCdcTagStatus> tags;
+	std::vector<NativeCdcProxyStatus> proxies;
+};
+
+// Durable fields share readVersion; proxy samples are advisory and may lag
+// acknowledgement or assignment changes. Missing samples remain explicit.
+Future<NativeCdcStatus> getNativeCdcStatus(Database cx);
+
+enum class NativeCdcRemoveResult { Removed, AlreadyAbsent, StreamReplaced };
+
+// Never removes a same-name replacement, including across retries. Removed
+// means the registration is gone, not that its retained history is reclaimed.
+Future<NativeCdcRemoveResult> removeNativeCdcStreamGuarded(Database cx, Key name, CDCStreamId expectedStreamId);
+
 // Uses the range registered for this name; consumers do not respecify it. A
 // CDCCursor remains a serializable position token and does not hold Database.
 Future<Reference<NativeCdcConsumer>> createNativeCdcConsumer(Database cx, Key name);

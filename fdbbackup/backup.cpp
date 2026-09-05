@@ -4526,6 +4526,7 @@ int main() {
 		int argc = static_cast<int>(persistentArgs.size());
 
 		std::vector<char*> argv;
+		argv.reserve(persistentArgs.size() + 1);
 		for (auto& arg : persistentArgs) {
 			argv.push_back(arg.data());
 		}

@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <map>
 #include <set>
 #include <unordered_map>
 #include <utility>
@@ -67,6 +68,8 @@ public:
 		ASSERT_WE_THINK(tag.locality == tagLocalityCDC);
 		++tagStreamCounts[tag.id];
 	}
+
+	bool hasStreams(Tag tag) const { return tagStreamCounts.contains(tag.id); }
 
 	std::pair<CDCStreamId, Tag> allocate(int tagCount) const {
 		if (sawStream && maxStreamId == std::numeric_limits<CDCStreamId>::max()) {
@@ -120,8 +123,29 @@ Future<Tag> getNativeCdcCurrentTag(Transaction* tr, CDCStreamId streamId) {
 	co_return decodeCDCTagHistoryKey(history.front().key).tag;
 }
 
-// TODO: Persist current per-tag ownership so registration does not reconstruct it by scanning all active streams.
 Future<Optional<UID>> getNativeCdcProxyAssignmentForTag(Transaction* tr, Tag targetTag) {
+	const Key ownerKey = cdcTagOwnerKeyFor(targetTag);
+	Optional<Value> indexedStream = co_await tr->get(ownerKey);
+	if (indexedStream.present()) {
+		const CDCStreamId streamId = decodeCDCTagOwnerValue(indexedStream.get());
+		Future<Optional<Value>> activeStream = tr->get(cdcStreamKeyFor(streamId));
+		RangeResult history = co_await tr->getRange(cdcTagHistoryRangeFor(streamId), 1, Snapshot::False, Reverse::True);
+		// Keep the await separate so GCC 13 does not evaluate history.front() before the short-circuit guards.
+		const Optional<Value> activeStreamValue = co_await activeStream;
+		// The index is derived: removal or retagging can invalidate its representative, and the per-stream
+		// assignment remains authoritative across proxy replacement, including by older metadata writers.
+		if (activeStreamValue.present() && !history.empty() &&
+		    decodeCDCTagHistoryKey(history.front().key).tag == targetTag) {
+			Optional<UID> proxyId = co_await getNativeCdcProxyAssignment(tr, streamId);
+			if (proxyId.present()) {
+				CODE_PROBE(true, "Native CDC resolves a shared tag owner from its persisted index");
+				co_return proxyId;
+			}
+		}
+		CODE_PROBE(true, "Native CDC rebuilds a stale tag owner index");
+		tr->clear(ownerKey);
+	}
+
 	std::set<CDCStreamId> activeStreamIds;
 	Key begin = cdcStreamKeys.begin;
 	while (begin < cdcStreamKeys.end) {
@@ -156,6 +180,8 @@ Future<Optional<UID>> getNativeCdcProxyAssignmentForTag(Transaction* tr, Tag tar
 		if (tag == targetTag) {
 			Optional<UID> proxyId = co_await getNativeCdcProxyAssignment(tr, streamId);
 			if (proxyId.present()) {
+				tr->set(ownerKey, cdcTagOwnerValue(streamId));
+				CODE_PROBE(true, "Native CDC reconstructs a missing tag owner index from active streams");
 				co_return proxyId;
 			}
 		}
@@ -359,6 +385,75 @@ Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database c
 	}
 }
 
+Future<Void> removeNativeCdcStreamById(Database cx, Key name, CDCStreamId streamId) {
+	while (true) {
+		Optional<CDCProxyInterface> proxy = co_await getNativeCdcStreamProxyForRemoval(cx, name, streamId);
+		if (!proxy.present()) {
+			co_return;
+		}
+		try {
+			Future<Void> proxyChanged = cx->clientInfo->onChange();
+			auto result = co_await race(
+			    throwErrorOr(proxy.get().removeStream.tryGetReply(CDCRemoveStreamRequest(name, streamId))),
+			    proxyChanged);
+			if (result.index() == 0) {
+				co_return;
+			}
+		} catch (Error& error) {
+			if (!retryNativeCdcProxyRequest(error)) {
+				throw;
+			}
+		}
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
+	}
+}
+
+Future<Standalone<VectorRef<KeyValueRef>>> readNativeCdcStatusRange(Transaction* tr, KeyRange keys) {
+	Standalone<VectorRef<KeyValueRef>> result;
+	Key begin = keys.begin;
+	while (begin < keys.end) {
+		RangeResult page = co_await tr->getRange(KeyRangeRef(begin, keys.end), CLIENT_KNOBS->TOO_MANY);
+		for (const auto& entry : page) {
+			result.push_back_deep(result.arena(), entry);
+		}
+		if (!page.more) {
+			break;
+		}
+		begin = keyAfter(page.back().key);
+	}
+	co_return result;
+}
+
+Future<NativeCdcProxyStatus> sampleNativeCdcProxy(CDCProxyInterface proxy, std::vector<CDCStreamId> streamIds) {
+	NativeCdcProxyStatus result;
+	result.id = proxy.id();
+	result.address = proxy.address();
+	try {
+		std::vector<Future<CDCProxyStatusReply>> samples;
+		for (size_t begin = 0; begin < streamIds.size() || samples.empty();
+		     begin += GetCDCProxyStatusRequest::MAX_STREAMS) {
+			const size_t end = std::min(streamIds.size(), begin + GetCDCProxyStatusRequest::MAX_STREAMS);
+			GetCDCProxyStatusRequest request;
+			request.streamIds.assign(streamIds.begin() + begin, streamIds.begin() + end);
+			samples.push_back(timeoutError(throwErrorOr(proxy.getStatus.tryGetReply(request)),
+			                               CLIENT_KNOBS->NATIVE_CDC_STATUS_TIMEOUT));
+		}
+		co_await waitForAll(samples);
+		CDCProxyStatusReply combined = samples.front().get();
+		for (size_t i = 1; i < samples.size(); ++i) {
+			const auto& streams = samples[i].get().streams;
+			combined.streams.insert(combined.streams.end(), streams.begin(), streams.end());
+		}
+		result.sample = std::move(combined);
+	} catch (Error& error) {
+		if (error.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		result.error = error;
+	}
+	co_return result;
+}
+
 } // namespace
 
 Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, UID proxyId) {
@@ -388,6 +483,9 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 					           probe::decoration::rare);
 					const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
 					tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
+					if (!sharedTagProxy.present()) {
+						tr.set(cdcTagOwnerKeyFor(tag), cdcTagOwnerValue(streamId));
+					}
 					signalNativeCdcProxyAssignmentChange(&tr);
 					co_await tr.commit();
 				}
@@ -413,9 +511,15 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys
 			tr.set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
 			tr.atomicOp(
 			    cdcMinVersionKeyFor(streamId), cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
-			Optional<UID> sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
+			Optional<UID> sharedTagProxy;
+			if (allocator.hasStreams(tag)) {
+				sharedTagProxy = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
+			}
 			const UID selectedProxy = sharedTagProxy.present() ? sharedTagProxy.get() : proxyId;
 			tr.set(cdcProxyKeyFor(streamId, selectedProxy), Value());
+			if (!sharedTagProxy.present()) {
+				tr.set(cdcTagOwnerKeyFor(tag), cdcTagOwnerValue(streamId));
+			}
 			signalNativeCdcProxyAssignmentChange(&tr);
 			co_await tr.commit();
 			co_return streamId;
@@ -474,6 +578,11 @@ Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, 
 			tr.clear(nameKey);
 			tr.clear(cdcStreamKeyFor(streamId));
 			for (const Tag& tag : removedTags) {
+				const Key ownerKey = cdcTagOwnerKeyFor(tag);
+				Optional<Value> indexedStream = co_await tr.get(ownerKey);
+				if (indexedStream.present() && decodeCDCTagOwnerValue(indexedStream.get()) == streamId) {
+					tr.clear(ownerKey);
+				}
 				tr.set(cdcRetiredTagPopKeyFor(tag), Value());
 				tr.atomicOp(cdcRetiredTagPopVersionKeyFor(tag),
 				            cdcVersionstampedMinVersionValue(),
@@ -487,6 +596,11 @@ Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, 
 			}
 			co_await tr.commit();
 			CODE_PROBE(!removedTags.empty(), "Native CDC removal records final tagged pop work");
+			TraceEvent("NativeCdcStreamRemoved")
+			    .detail("StreamId", streamId)
+			    .detail("ProxyID", proxyId)
+			    .detail("CommitVersion", tr.getCommittedVersion())
+			    .detail("RetiredTagCount", removedTags.size());
 			co_return true;
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server) {
@@ -714,6 +828,145 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx)
 	co_return co_await listNativeCdcStreams(cx);
 }
 
+Future<NativeCdcStatus> getNativeCdcStatus(Database cx) {
+	NativeCdcStatus result;
+	ClientDBInfo clientInfo;
+	Transaction tr(cx);
+	while (true) {
+		Error error;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			result = NativeCdcStatus();
+			result.readVersion = co_await tr.getReadVersion();
+			std::vector<Future<Standalone<VectorRef<KeyValueRef>>>> metadata;
+			for (KeyRangeRef keys : { cdcStreamNameKeys,
+			                          cdcStreamKeys,
+			                          cdcMinVersionKeys,
+			                          cdcProxyKeys,
+			                          cdcTagHistoryKeys,
+			                          cdcRetiredTagPopKeys,
+			                          cdcRetiredTagPopVersionKeys }) {
+				metadata.push_back(readNativeCdcStatusRange(&tr, keys));
+			}
+			co_await waitForAll(metadata);
+
+			std::map<CDCStreamId, NativeCdcStreamStatus> streams;
+			for (const auto& entry : metadata[0].get()) {
+				auto& stream = streams[decodeCDCStreamNameValue(entry.value)];
+				if (!stream.info.name.empty()) {
+					result.metadataComplete = false;
+				}
+				stream.info.name = decodeCDCStreamNameKey(entry.key);
+			}
+			for (const auto& entry : metadata[1].get()) {
+				streams[decodeCDCStreamKey(entry.key)].info.keys = decodeCDCStreamKeysValue(entry.value);
+			}
+			for (const auto& entry : metadata[2].get()) {
+				streams[decodeCDCMinVersionKey(entry.key)].info.minVersion = decodeCDCMinVersionValue(entry.value);
+			}
+			for (const auto& entry : metadata[3].get()) {
+				const auto [streamId, proxyId] = decodeCDCProxyKey(entry.key);
+				auto& stream = streams[streamId];
+				if (stream.owner.present()) {
+					result.metadataComplete = false;
+				}
+				stream.owner = proxyId;
+			}
+			for (const auto& entry : metadata[4].get()) {
+				const auto history = decodeCDCTagHistoryKey(entry.key);
+				streams[history.streamId].tags.push_back(history.tag);
+			}
+
+			std::map<Tag, NativeCdcTagStatus> tags;
+			std::set<Tag> incompleteTags;
+			for (auto& [streamId, stream] : streams) {
+				stream.info.streamId = streamId;
+				std::sort(stream.tags.begin(), stream.tags.end());
+				stream.tags.erase(std::unique(stream.tags.begin(), stream.tags.end()), stream.tags.end());
+				if (stream.info.name.empty() || stream.info.keys.empty() || stream.info.minVersion == invalidVersion ||
+				    stream.tags.empty()) {
+					result.metadataComplete = false;
+				}
+				for (const Tag& tag : stream.tags) {
+					auto& status = tags[tag];
+					status.tag = tag;
+					if (stream.info.minVersion == invalidVersion) {
+						incompleteTags.insert(tag);
+					} else if (status.safePopVersion == invalidVersion ||
+					           stream.info.minVersion < status.safePopVersion) {
+						status.safePopVersion = stream.info.minVersion;
+						status.blockingStreams = { streamId };
+					} else if (stream.info.minVersion == status.safePopVersion) {
+						status.blockingStreams.push_back(streamId);
+					}
+				}
+				result.streams.push_back(std::move(stream));
+			}
+			for (const auto& entry : metadata[5].get()) {
+				const Tag tag = decodeCDCRetiredTagPopKey(entry.key);
+				tags[tag].tag = tag;
+				tags[tag].pendingRetiredPop = true;
+			}
+			for (const auto& entry : metadata[6].get()) {
+				const Tag tag = decodeCDCRetiredTagPopVersionKey(entry.key);
+				auto& status = tags[tag];
+				status.tag = tag;
+				if (!status.pendingRetiredPop) {
+					result.metadataComplete = false;
+				}
+				status.pendingRetiredPop = true;
+				status.retiredPopVersion = decodeCDCMinVersionValue(entry.value);
+			}
+			for (auto& [tag, status] : tags) {
+				if (status.pendingRetiredPop && status.retiredPopVersion == invalidVersion) {
+					result.metadataComplete = false;
+				}
+				if (status.safePopVersion == invalidVersion) {
+					status.safePopVersion = status.retiredPopVersion;
+				}
+				if (incompleteTags.contains(tag)) {
+					status.safePopVersion = invalidVersion;
+				}
+				result.tags.push_back(std::move(status));
+			}
+			clientInfo = cx->clientInfo->get();
+			break;
+		} catch (Error& e) {
+			error = e;
+		}
+		co_await tr.onError(error);
+	}
+
+	result.admissionEnabled = clientInfo.nativeCdcEnabled;
+	result.tagCount = clientInfo.nativeCdcTagCount;
+	std::map<UID, std::vector<CDCStreamId>> requests;
+	for (const auto& proxy : clientInfo.cdcProxies) {
+		requests[proxy.id()];
+	}
+	for (auto& stream : result.streams) {
+		if (stream.owner.present()) {
+			auto request = requests.find(stream.owner.get());
+			const auto published = clientInfo.streamToCDCProxyId.find(stream.info.streamId);
+			stream.ownerPublished = request != requests.end() && published != clientInfo.streamToCDCProxyId.end() &&
+			                        published->second == stream.owner.get();
+			if (request != requests.end()) {
+				request->second.push_back(stream.info.streamId);
+			}
+		}
+	}
+	std::vector<Future<NativeCdcProxyStatus>> samples;
+	samples.reserve(clientInfo.cdcProxies.size());
+	for (const auto& proxy : clientInfo.cdcProxies) {
+		samples.push_back(sampleNativeCdcProxy(proxy, std::move(requests[proxy.id()])));
+	}
+	co_await waitForAll(samples);
+	for (const auto& sample : samples) {
+		result.proxies.push_back(sample.get());
+	}
+	co_return result;
+}
+
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 	if (name.empty()) {
 		throw client_invalid_operation();
@@ -724,26 +977,29 @@ Future<Void> removeNativeCdcStreamClient(Database cx, Key name) {
 		co_return;
 	}
 
-	while (true) {
-		Optional<CDCProxyInterface> proxy = co_await getNativeCdcStreamProxyForRemoval(cx, name, streamId.get());
-		if (!proxy.present()) {
-			co_return;
-		}
-		try {
-			Future<Void> proxyChanged = cx->clientInfo->onChange();
-			auto result = co_await race(
-			    throwErrorOr(proxy.get().removeStream.tryGetReply(CDCRemoveStreamRequest(name, streamId.get()))),
-			    proxyChanged);
-			if (result.index() == 0) {
-				co_return;
-			}
-		} catch (Error& error) {
-			if (!retryNativeCdcProxyRequest(error)) {
-				throw;
-			}
-		}
-		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
+	co_await removeNativeCdcStreamById(cx, name, streamId.get());
+}
+
+Future<NativeCdcRemoveResult> removeNativeCdcStreamGuarded(Database cx, Key name, CDCStreamId expectedStreamId) {
+	if (name.empty() || expectedStreamId == 0) {
+		throw client_invalid_operation();
 	}
+	Optional<CDCStreamId> current = co_await findNativeCdcStreamId(cx, name);
+	if (!current.present()) {
+		co_return NativeCdcRemoveResult::AlreadyAbsent;
+	}
+	if (current.get() != expectedStreamId) {
+		co_return NativeCdcRemoveResult::StreamReplaced;
+	}
+	co_await removeNativeCdcStreamById(cx, name, expectedStreamId);
+	current = co_await findNativeCdcStreamId(cx, name);
+	if (current.present()) {
+		if (current.get() != expectedStreamId) {
+			co_return NativeCdcRemoveResult::StreamReplaced;
+		}
+		throw operation_failed();
+	}
+	co_return NativeCdcRemoveResult::Removed;
 }
 
 Future<Reference<NativeCdcConsumer>> createNativeCdcConsumer(Database cx, Key name) {

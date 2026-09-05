@@ -980,6 +980,7 @@ Version LogSystem::getKnownCommittedVersion() {
 
 Future<Void> LogSystem::onKnownCommittedVersionChange() {
 	std::vector<Future<Void>> result;
+	result.reserve(lockResults.size());
 	for (auto& it : lockResults) {
 		result.push_back(LogSystem::getDurableVersionChanged(it));
 	}
