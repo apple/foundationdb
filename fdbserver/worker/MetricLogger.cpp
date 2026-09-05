@@ -154,7 +154,7 @@ struct MetricsConfig {
       Go back to wait for rule change
 */
 Future<Void> metricRuleUpdater(Database cx, MetricsConfig* config, TDMetricCollection* collection) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 	while (true) {
 		Future<Void> newMetric = collection->metricAdded.onTrigger();

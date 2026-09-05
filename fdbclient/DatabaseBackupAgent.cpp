@@ -633,7 +633,7 @@ struct EraseLogRangeTaskFunc : TaskFuncBase {
 
 		co_await checkTaskVersion(cx, task, EraseLogRangeTaskFunc::name, EraseLogRangeTaskFunc::version);
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(taskBucket->src));
+		auto tr = makeReference<ReadYourWritesTransaction>(taskBucket->src);
 		while (true) {
 			Error err;
 			bool hasErr = false;
@@ -1166,7 +1166,7 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 			}
 		}
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(taskBucket->src));
+		auto tr = makeReference<ReadYourWritesTransaction>(taskBucket->src);
 		Key logUidValue = task->params[DatabaseBackupAgent::keyConfigLogUid];
 		Key destUidValue = task->params[BackupAgentBase::destUid];
 		Version backupUid =
@@ -1649,7 +1649,7 @@ struct AbortOldBackupTaskFunc : TaskFuncBase {
 	                             Reference<FutureBucket> futureBucket,
 	                             Reference<Task> task) {
 		DatabaseBackupAgent srcDrAgent(taskBucket->src);
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Key tagNameKey;
 
 		while (true) {
@@ -1742,7 +1742,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 
 		// Retrieve backupRanges
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			Error err;
 			bool hasErr = false;
@@ -1771,7 +1771,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 
 		// Set destUidValue and versionKey on src side
 		Key destUidValue(logUidValue);
-		Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(taskBucket->src));
+		auto srcTr = makeReference<ReadYourWritesTransaction>(taskBucket->src);
 		while (true) {
 			Error err;
 			bool hasErr = false;
@@ -2020,7 +2020,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		    task->params[DatabaseBackupAgent::keyConfigBackupRanges], IncludeVersion());
 		Key beginVersionKey;
 
-		Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(taskBucket->src));
+		auto srcTr = makeReference<ReadYourWritesTransaction>(taskBucket->src);
 		while (true) {
 			Error err;
 			bool hasErr = false;
@@ -2077,7 +2077,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		}
 
 		while (true) {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2113,7 +2113,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 			}
 		}
 
-		Reference<ReadYourWritesTransaction> srcTr2(new ReadYourWritesTransaction(taskBucket->src));
+		auto srcTr2 = makeReference<ReadYourWritesTransaction>(taskBucket->src);
 		while (true) {
 			Error err;
 			bool hasErr = false;
@@ -2156,7 +2156,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 			}
 		}
 
-		Reference<ReadYourWritesTransaction> srcTr3(new ReadYourWritesTransaction(taskBucket->src));
+		auto srcTr3 = makeReference<ReadYourWritesTransaction>(taskBucket->src);
 		while (true) {
 			Error err;
 			bool hasErr = false;
@@ -2383,7 +2383,7 @@ public:
 		    .detail("LogUid", BinaryWriter::toValue(logUid, Unversioned()).printable());
 
 		while (true) {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 			while (true) {
 				Error err;
@@ -2430,7 +2430,7 @@ public:
 		                    .pack(DatabaseBackupAgent::keyStateStatus);
 
 		while (true) {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -2469,7 +2469,7 @@ public:
 		                    .pack(DatabaseBackupAgent::keyStateStatus);
 
 		while (true) {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -2840,7 +2840,7 @@ public:
 	                                AbortOldBackup abortOldBackup,
 	                                DstOnly dstOnly,
 	                                WaitForDestUID waitForDestUID) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Key logUidValue;
 		Key destUidValue;
 		UID logUid;
@@ -2954,7 +2954,7 @@ public:
 
 		if (!dstOnly) {
 			Future<Void> partialTimeout = partial ? delay(30.0) : Never();
-			Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(backupAgent->taskBucket->src));
+			auto srcTr = makeReference<ReadYourWritesTransaction>(backupAgent->taskBucket->src);
 
 			while (true) {
 				Error err;
@@ -3054,7 +3054,7 @@ public:
 	}
 
 	static Future<std::string> getStatus(DatabaseBackupAgent* backupAgent, Database cx, int errorLimit, Key tagName) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		std::string statusText;
 		int retries = 0;

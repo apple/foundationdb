@@ -2349,7 +2349,7 @@ public:
 
 		UID nextId = co_await self->getNextWigglingServerID();
 		StorageWiggleValue value(nextId);
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dbContext()));
+		auto tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
 		while (true) {
 			counters->started->increment(1);
 			// write the next server id

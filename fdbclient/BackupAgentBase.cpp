@@ -1081,7 +1081,7 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
 Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool deleteData) {
 	Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
 
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	Optional<Key> removingLogUid;
 	std::set<Key> loggedLogUids;
 
@@ -1172,7 +1172,7 @@ Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool deleteDat
 }
 
 Future<Void> cleanupBackup(Database cx, DeleteData deleteData) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	while (true) {
 		Error err;
 		try {
