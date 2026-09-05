@@ -3380,8 +3380,7 @@ TEST_CASE("/DataDistribution/DDQueue/ReplacementPreservesPipelineCapacity") {
 	// Replacing one queued move must not advertise a slot that another producer can consume.
 	ASSERT(!capacityChanged.isReady());
 
-	RelocateData adjacent(RelocateShard(
-	    KeyRangeRef("b"_sr, "c"_sr), priority, RelocateReason::OTHER, UID(3, 0)));
+	RelocateData adjacent(RelocateShard(KeyRangeRef("b"_sr, "c"_sr), priority, RelocateReason::OTHER, UID(3, 0)));
 	self.queueMap.insert(adjacent.keys, adjacent);
 	self.fetchingSourcesQueue.insert(adjacent);
 	self.activeRelocations--;
