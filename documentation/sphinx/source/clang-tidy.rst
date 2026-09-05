@@ -10,11 +10,11 @@ This guide explains how to run ``clang-tidy`` locally so you can fix issues befo
 What clang-tidy checks
 ======================
 
-FoundationDB configures 43 named checks in the ``.clang-tidy`` file at the repository root. The
+FoundationDB configures 48 named checks in the ``.clang-tidy`` file at the repository root. The
 active set depends on the clang-tidy version and can be inspected with ``clang-tidy --list-checks``.
 The intent is to enable more as we go forward. Here are some example rules:
 
-* **24 Bugprone rules** -- catch potential runtime errors, including assignments in conditions, truncated string literals with embedded NUL bytes, dangling returned references, incorrect forwarding, bytewise operations on non-trivially-copyable objects, incorrect erase/remove calls, and arithmetic widened after the calculation
+* **29 Bugprone rules** -- catch potential runtime errors, including chained comparisons, swapped arguments, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, and incorrect erase/remove calls
 * **1 C++ Core Guidelines rule** -- catch unsafe captures in coroutine lambdas (``cppcoreguidelines-avoid-capturing-lambda-coroutines``)
 * **2 Misc rules** -- catch redundant expressions and RAII objects held across coroutine suspension points
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
@@ -177,6 +177,11 @@ Known limitations
 -----------------
 
 Build-integrated clang-tidy skips bundled external-library targets, including ``crc32``, ``libb64``, ``md5``, ``libeio``, and ``libcoroutine``.
+
+``cppcoreguidelines-slicing`` is not enabled: ``Standalone<T>`` inherits ``T`` and
+owns its bytes in an ``Arena``, while passing a borrowed ``T`` view by value is
+an intentional FoundationDB pattern. The check cannot distinguish those borrows
+from unintended slicing; the borrow must still not outlive its owner.
 
 ``readability-simplify-boolean-expr`` is not enabled because it diagnoses ordinary
 uses of FoundationDB's ``ASSERT`` macro after macro expansion.

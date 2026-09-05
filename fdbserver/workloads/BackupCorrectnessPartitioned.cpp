@@ -37,7 +37,7 @@
 // mean a new test workload is warranted.  If the APIs are similar then why doesn't the old test work too?
 // In the mean time we are dealing with two heavily overlapping source files with tons of cut/paste
 // unmodified code:
-// diff -U 10 BackupCorrectness.actor.cpp BackupCorrectnessPartitioned.actor.cpp
+// diff -U 10 BackupCorrectness.cpp BackupCorrectnessPartitioned.cpp
 struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "BackupAndRestorePartitionedCorrectness";
 	double backupAfter, restoreAfter, abortAndRestartAfter;
