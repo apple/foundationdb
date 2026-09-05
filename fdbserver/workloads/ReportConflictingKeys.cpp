@@ -83,7 +83,6 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	// disable the default timeout setting
 	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
 
-	// Copied from tester.actor.cpp, added parameter to determine the key's length
 	Key keyForIndex(int n) {
 		double p = (double)n / nodeCount;
 		// 8 bytes for Cid_* suffix of each client
