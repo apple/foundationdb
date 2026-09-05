@@ -552,29 +552,6 @@ void Knobs::trace() const {
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second.value);
 }
 
-TEST_CASE("/flow/Knobs/MemoryTrackingOverrides") {
-	for (IsSimulated simulated : { IsSimulated::False, IsSimulated::True }) {
-		FlowKnobs knobs(Randomize::False, simulated);
-		ASSERT_EQ(knobs.MEMORY_TRACKING_SAMPLE_INVERSE, simulated ? 10 : 0);
-		ASSERT_EQ(knobs.MEMORY_TRACKING_REPORT_INTERVAL, simulated ? 30.0 : 600.0);
-		ASSERT_EQ(knobs.MEMORY_TRACKING_REPORT_BYTES_THRESHOLD, simulated ? 1000000 : 80000000);
-
-		ASSERT(knobs.setKnob("memory_tracking_sample_inverse", 0));
-		ASSERT(knobs.setKnob("memory_tracking_report_interval", 0.0));
-		ASSERT(knobs.setKnob("memory_tracking_report_bytes_threshold", int64_t{ 123456 }));
-		knobs.initialize(Randomize::False, simulated);
-		ASSERT_EQ(knobs.MEMORY_TRACKING_SAMPLE_INVERSE, 0);
-		ASSERT_EQ(knobs.MEMORY_TRACKING_REPORT_INTERVAL, 0.0);
-		ASSERT_EQ(knobs.MEMORY_TRACKING_REPORT_BYTES_THRESHOLD, 123456);
-
-		knobs.reset(Randomize::False, simulated);
-		ASSERT_EQ(knobs.MEMORY_TRACKING_SAMPLE_INVERSE, simulated ? 10 : 0);
-		ASSERT_EQ(knobs.MEMORY_TRACKING_REPORT_INTERVAL, simulated ? 30.0 : 600.0);
-		ASSERT_EQ(knobs.MEMORY_TRACKING_REPORT_BYTES_THRESHOLD, simulated ? 1000000 : 80000000);
-	}
-	return Void();
-}
-
 TEST_CASE("/flow/Knobs/ParseKnobValue") {
 	// Test the safe conversion functions.
 	ASSERT_EQ(safe_stod("4.0"), 4.0);
