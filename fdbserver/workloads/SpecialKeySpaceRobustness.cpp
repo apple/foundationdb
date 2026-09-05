@@ -348,17 +348,17 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 					// Very rarely, we get an empty worker list, thus no class_source data
 					if (class_source.present()) {
 						if (class_source.get() == "command_line"_sr) {
-							// if the process is rebooted after the commit,
-							// the class source is changed back to command_line
+							// Multiple worker incarnations can share an address. Only command_line
+							// rows explain this result; the updated incarnation must retain set_class.
 							LocalityData _locality(worker.locality);
 							std::vector<ProcessData> _workers = co_await getWorkers(&tx->getTransaction());
 							bool found = false;
 							for (const auto& w : _workers) {
 								auto w_addr = formatIpPort(w.address.ip, w.address.port);
-								if (w_addr == address) {
+								if (w_addr == address &&
+								    w.processClass.classSource() == ProcessClass::CommandLineSource) {
 									ASSERT(w.locality.describeProcessId() != _locality.describeProcessId());
 									found = true;
-									break;
 								}
 							}
 							ASSERT(found);
