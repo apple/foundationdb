@@ -2888,7 +2888,7 @@ Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTr
 	return excludeLocalityCommitActor(ryw, true);
 }
 
-// Defined in NativeAPI.actor.cpp
+// Defined in NativeAPI.cpp
 Future<bool> verifyInterfaceActor(Reference<FlowLock> const& connectLock, ClientWorkerInterface const& workerInterf);
 
 static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTransaction* ryw,
