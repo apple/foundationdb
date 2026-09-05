@@ -266,15 +266,15 @@ public:
 	// Intermediate counter changes must not wake producers with a slot that a replacement still needs.
 	class PipelineMutation : NonCopyable {
 	public:
-		explicit PipelineMutation(DDQueue& queue) : queue(queue) { ++queue.pipelineMutationDepth; }
+		explicit PipelineMutation(DDQueue& queue) : queue(&queue) { ++queue.pipelineMutationDepth; }
 		~PipelineMutation() {
-			if (--queue.pipelineMutationDepth == 0) {
-				queue.updatePipelineFull();
+			if (--queue->pipelineMutationDepth == 0) {
+				queue->updatePipelineFull();
 			}
 		}
 
 	private:
-		DDQueue& queue;
+		DDQueue* queue;
 	};
 
 	Reference<AsyncVar<bool>> pipelineFull;
