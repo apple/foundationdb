@@ -59,7 +59,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	// The setup move below can also fail for reasons that mean "that move did not happen, issue it
 	// again" rather than "the cluster is broken". FDB's own data distributor treats exactly this set as
 	// normal and simply reissues the relocation -- see normalDDQueueErrors() in
-	// DataDistribution.actor.cpp, and the matching suppression in DDRelocationQueue.actor.cpp. None of
+	// DataDistribution.cpp, and the matching suppression in DDRelocationQueue.cpp. None of
 	// them are retryable transaction errors, so tr.onError() would rethrow and kill the workload during
 	// start(). Reissue the move instead, at most this many times, after which the error propagates so a
 	// cluster that genuinely cannot move a shard is still reported. This is a bounded count and not a
