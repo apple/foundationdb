@@ -34,6 +34,7 @@
 #include <openssl/sha.h>
 
 #include <boost/algorithm/string.hpp>
+#include <boost/url/parse_query.hpp>
 #include <climits>
 #include <limits>
 
@@ -274,22 +275,7 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 		resourceFromURL->clear();
 
 	try {
-		// Replace HTML-encoded ampersands with raw ampersands
-		std::string decoded_url = url;
-		size_t pos = 0;
-		while ((pos = decoded_url.find("&amp;", pos)) != std::string::npos) {
-			decoded_url.replace(pos, 5, "&");
-			pos += 1;
-		}
-
-		// Also handle double-encoded ampersands
-		pos = 0;
-		while ((pos = decoded_url.find("&amp;amp;", pos)) != std::string::npos) {
-			decoded_url.replace(pos, 9, "&");
-			pos += 1;
-		}
-
-		StringRef t(decoded_url);
+		StringRef t(url);
 		StringRef prefix = t.eat("://");
 		if (prefix != "blobstore"_sr)
 			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
@@ -339,11 +325,19 @@ Reference<IBlobStoreEndpoint> IBlobStoreEndpoint::fromString(const std::string& 
 
 		BlobKnobs knobs;
 		HTTP::Headers extraHeaders;
-		while (1) {
-			StringRef name = t.eat("=");
+		std::string query = t.toString();
+		auto parsedQuery = boost::urls::parse_query(query);
+		if (!parsedQuery) {
+			throw format("Invalid blobstore URL query: %s", parsedQuery.error().message().c_str());
+		}
+		for (auto parameter : parsedQuery.value()) {
+			std::string nameString(parameter.key.data(), parameter.key.size());
+			std::string valueString =
+			    parameter.has_value ? std::string(parameter.value.data(), parameter.value.size()) : "";
+			StringRef name(nameString);
 			if (name.empty())
-				break;
-			StringRef value = t.eat("&");
+				continue;
+			StringRef value(valueString);
 
 			// Special case for header
 			if (name == "header"_sr) {

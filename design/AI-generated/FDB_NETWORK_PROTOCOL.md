@@ -1785,7 +1785,7 @@ difference exceeds `bytesLimit`. On cancellation, the client sends
 
 ## Appendix D: Client Library Protocol Flows
 
-**Source:** `fdbclient/NativeAPI.actor.cpp`, `fdbclient/MonitorLeader.cpp`,
+**Source:** `fdbclient/NativeAPI.cpp`, `fdbclient/MonitorLeader.cpp`,
 `fdbclient/GlobalConfig.cpp`
 
 This appendix describes the exact sequence of protocol messages the FDB client
@@ -2143,7 +2143,7 @@ Backoff: starts at `CLIENT_KNOBS->BACKOFF_DELAY`, multiplied by
 
 ## Appendix E: fdbcli Protocol Usage
 
-**Source:** `fdbcli/*.actor.cpp`, `fdbclient/include/fdbclient/ManagementAPI.h`
+**Source:** `fdbcli/*.cpp`, `fdbclient/include/fdbclient/ManagementAPI.h`
 
 The `fdbcli` command-line tool uses three protocol layers:
 1. **Normal transactions** via the NativeAPI (same as any client).
@@ -2309,7 +2309,7 @@ Taskbucket workflows that run as normal transactions within the cluster.
 
 ## Appendix F: Server-Side Protocol Flows
 
-**Source:** `fdbserver/commitproxy/CommitProxyServer.actor.cpp`,
+**Source:** `fdbserver/commitproxy/CommitProxyServer.cpp`,
 `fdbserver/clustercontroller/ClusterRecovery.cpp`,
 `fdbserver/storageserver/storageserver.cpp`,
 `fdbserver/sequencer/masterserver.cpp`

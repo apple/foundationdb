@@ -25,7 +25,7 @@
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbrpc/fdbrpc.h"
 
 struct MoveKeyLockInfo {

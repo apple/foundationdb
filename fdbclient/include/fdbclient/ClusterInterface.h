@@ -152,7 +152,7 @@ struct OpenDatabaseRequest {
 	}
 };
 
-// Instantiated in NativeAPI.actor.cpp
+// Instantiated in NativeAPI.cpp
 extern template class RequestStream<OpenDatabaseRequest, false>;
 extern template struct NetNotifiedQueue<OpenDatabaseRequest, false>;
 

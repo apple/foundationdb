@@ -24,7 +24,7 @@
 #include <list>
 
 #include "fdbcli/fdbcli.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/DataDistributionConfig.h"
 
 namespace fdb_cli {

@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/core/TesterInterface.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/tester/workloads.h"
@@ -52,31 +53,34 @@ public:
 		switch (opType) {
 		case 0:
 			CODE_PROBE(true, "Testing atomic Min");
-			return testMin(cx->clone(), this);
+			return testMin(cx->clone());
 		case 1:
 			CODE_PROBE(true, "Testing atomic And");
-			return testAnd(cx->clone(), this);
+			return testAnd(cx->clone());
 		case 2:
 			CODE_PROBE(true, "Testing atomic ByteMin");
-			return testByteMin(cx->clone(), this);
+			return testByteMin(cx->clone());
 		case 3:
 			CODE_PROBE(true, "Testing atomic ByteMax");
-			return testByteMax(cx->clone(), this);
+			return testByteMax(cx->clone());
 		case 4:
 			CODE_PROBE(true, "Testing atomic Or");
-			return testOr(cx->clone(), this);
+			return testOr(cx->clone());
 		case 5:
 			CODE_PROBE(true, "Testing atomic Max");
-			return testMax(cx->clone(), this);
+			return testMax(cx->clone());
 		case 6:
 			CODE_PROBE(true, "Testing atomic Xor");
-			return testXor(cx->clone(), this);
+			return testXor(cx->clone());
 		case 7:
 			CODE_PROBE(true, "Testing atomic Add");
-			return testAdd(cx->clone(), this);
+			return testAdd(cx->clone());
 		case 8:
 			CODE_PROBE(true, "Testing atomic CompareAndClear");
-			return testCompareAndClear(cx->clone(), this);
+			return testCompareAndClear(cx->clone());
+		case 9:
+			CODE_PROBE(true, "Testing atomic AppendIfFits");
+			return testAppendIfFits(cx->clone());
 		default:
 			ASSERT(false);
 		}
@@ -88,11 +92,49 @@ public:
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
+	Future<Void> testAppendIfFits(Database cx) {
+		const Key key = getTestKey("test_key_append_if_fits_");
+		const Value nearlyFull(std::string(CLIENT_KNOBS->VALUE_SIZE_LIMIT - 1, 'x'));
+		const Value full(std::string(CLIENT_KNOBS->VALUE_SIZE_LIMIT, 'x'));
+		const Value suffix("x"_sr);
+
+		co_await runRYWTransactionVoid(cx, [key, nearlyFull](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->set(key, nearlyFull);
+			return Void();
+		});
+		co_await runRYWTransactionVoid(cx, [key, suffix](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->atomicOp(key, suffix, MutationRef::AppendIfFits);
+			return Void();
+		});
+
+		Optional<Value> stored = co_await runRYWTransaction(
+		    cx, [key](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
+		ASSERT(stored.present());
+		ASSERT(stored.get() == full);
+
+		co_await runRYWTransactionVoid(cx, [key, suffix](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->atomicOp(key, suffix, MutationRef::AppendIfFits);
+			return Void();
+		});
+
+		stored = co_await runRYWTransaction(
+		    cx, [key](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
+		ASSERT(stored.present());
+		ASSERT(stored.get() == full);
+
+		Optional<Value> visible = co_await runRYWTransaction(
+		    cx, [key, nearlyFull, suffix](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+			    tr->set(key, nearlyFull);
+			    tr->atomicOp(key, suffix, MutationRef::AppendIfFits);
+			    tr->atomicOp(key, suffix, MutationRef::AppendIfFits);
+			    return tr->get(key);
+		    });
+		ASSERT(visible.present());
+		ASSERT(visible.get() == full);
+	}
+
 	// Test Atomic ops on non existing keys that results in a set
-	Future<Void> testAtomicOpSetOnNonExistingKey(Database cx,
-	                                             AtomicOpsApiCorrectnessWorkload* self,
-	                                             uint32_t opType,
-	                                             Key key) {
+	Future<Void> testAtomicOpSetOnNonExistingKey(Database cx, uint32_t opType, Key key) {
 		uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
 		Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
 
@@ -128,7 +170,7 @@ public:
 				    .detail("Op", opType)
 				    .detail("ExpectedOutput", intValue)
 				    .detail("ActualOutput", output);
-				self->testFailed = true;
+				testFailed = true;
 			}
 		}
 
@@ -149,16 +191,13 @@ public:
 				    .detail("Op", opType)
 				    .detail("ExpectedOutput", intValue)
 				    .detail("ActualOutput", output);
-				self->testFailed = true;
+				testFailed = true;
 			}
 		}
 	}
 
 	// Test Atomic ops on non existing keys that results in a unset
-	Future<Void> testAtomicOpUnsetOnNonExistingKey(Database cx,
-	                                               AtomicOpsApiCorrectnessWorkload* self,
-	                                               uint32_t opType,
-	                                               Key key) {
+	Future<Void> testAtomicOpUnsetOnNonExistingKey(Database cx, uint32_t opType, Key key) {
 		uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
 		Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
 
@@ -194,7 +233,7 @@ public:
 				    .detail("Op", opType)
 				    .detail("ExpectedOutput", 0)
 				    .detail("ActualOutput", output);
-				self->testFailed = true;
+				testFailed = true;
 			}
 		}
 
@@ -215,7 +254,7 @@ public:
 				    .detail("Op", opType)
 				    .detail("ExpectedOutput", 0)
 				    .detail("ActualOutput", output);
-				self->testFailed = true;
+				testFailed = true;
 			}
 		}
 	}
@@ -224,7 +263,6 @@ public:
 
 	// Test Atomic Ops when one of the value is empty
 	Future<Void> testAtomicOpOnEmptyValue(Database cx,
-	                                      AtomicOpsApiCorrectnessWorkload* self,
 	                                      uint32_t opType,
 	                                      Key key,
 	                                      DoAtomicOpOnEmptyValueFunction opFunc) {
@@ -269,7 +307,7 @@ public:
 				    .detail("Op", opType)
 				    .detail("ExpectedOutput", opFunc(existingVal, otherVal).toString())
 				    .detail("ActualOutput", output.toString());
-				self->testFailed = true;
+				testFailed = true;
 			}
 		}
 
@@ -289,7 +327,7 @@ public:
 				    .detail("Op", opType)
 				    .detail("ExpectedOutput", opFunc(existingVal, otherVal).toString())
 				    .detail("ActualOutput", output.toString());
-				self->testFailed = true;
+				testFailed = true;
 			}
 		}
 	}
@@ -297,11 +335,7 @@ public:
 	using DoAtomicOpFunction = std::function<uint64_t(uint64_t, uint64_t)>;
 
 	// Test atomic ops in the normal case when the existing value is present
-	Future<Void> testAtomicOpApi(Database cx,
-	                             AtomicOpsApiCorrectnessWorkload* self,
-	                             uint32_t opType,
-	                             Key key,
-	                             DoAtomicOpFunction opFunc) {
+	Future<Void> testAtomicOpApi(Database cx, uint32_t opType, Key key, DoAtomicOpFunction opFunc) {
 		uint64_t intValue1 = deterministicRandom()->randomInt(0, 10000000);
 		uint64_t intValue2 = deterministicRandom()->randomInt(0, 10000000);
 		Value val1 = StringRef((const uint8_t*)&intValue1, sizeof(intValue1));
@@ -344,7 +378,7 @@ public:
 				    .detail("AtomicOp", opType)
 				    .detail("ExpectedOutput", opFunc(intValue1, intValue2))
 				    .detail("ActualOutput", output);
-				self->testFailed = true;
+				testFailed = true;
 			}
 		}
 
@@ -368,15 +402,12 @@ public:
 				    .detail("AtomicOp", opType)
 				    .detail("ExpectedOutput", opFunc(intValue1, intValue2))
 				    .detail("ActualOutput", output);
-				self->testFailed = true;
+				testFailed = true;
 			}
 		}
 	}
 
-	Future<Void> testCompareAndClearAtomicOpApi(Database cx,
-	                                            AtomicOpsApiCorrectnessWorkload* self,
-	                                            Key key,
-	                                            bool keySet) {
+	Future<Void> testCompareAndClearAtomicOpApi(Database cx, Key key, bool keySet) {
 		uint64_t opType = MutationRef::CompareAndClear;
 		uint64_t intValue1 = deterministicRandom()->randomInt(0, 10000000);
 		uint64_t intValue2 =
@@ -440,7 +471,7 @@ public:
 					    .detail("AtomicOp", opType)
 					    .detail("ExpectedOutput", expectedOutput.get())
 					    .detail("ActualOutput", output);
-					self->testFailed = true;
+					testFailed = true;
 				}
 			}
 		}
@@ -472,24 +503,24 @@ public:
 					    .detail("AtomicOp", opType)
 					    .detail("ExpectedOutput", expectedOutput.get())
 					    .detail("ActualOutput", output);
-					self->testFailed = true;
+					testFailed = true;
 				}
 			}
 		}
 	}
 
-	Future<Void> testMin(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
+	Future<Void> testMin(Database cx) {
 		int currentApiVersion = getApiVersion(cx);
-		Key key = self->getTestKey("test_key_min_");
+		Key key = getTestKey("test_key_min_");
 
 		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("OpType", "MIN");
 		// API Version 500
 		setApiVersion(&cx, 500);
 		TraceEvent(SevInfo, "Running Atomic Op Min Correctness Test Api Version 500").log();
-		co_await self->testAtomicOpUnsetOnNonExistingKey(cx, self, MutationRef::Min, key);
-		co_await self->testAtomicOpApi(
-		    cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2; });
-		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Min, key, [](Value v1, Value v2) -> Value {
+		co_await testAtomicOpUnsetOnNonExistingKey(cx, MutationRef::Min, key);
+		co_await testAtomicOpApi(
+		    cx, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2; });
+		co_await testAtomicOpOnEmptyValue(cx, MutationRef::Min, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
 			if (v2.empty())
 				return StringRef();
@@ -501,10 +532,10 @@ public:
 		setApiVersion(&cx, currentApiVersion);
 		TraceEvent(SevInfo, "Running Atomic Op Min Correctness Current Api Version")
 		    .detail("Version", currentApiVersion);
-		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Min, key);
-		co_await self->testAtomicOpApi(
-		    cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2; });
-		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Min, key, [](Value v1, Value v2) -> Value {
+		co_await testAtomicOpSetOnNonExistingKey(cx, MutationRef::Min, key);
+		co_await testAtomicOpApi(
+		    cx, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2; });
+		co_await testAtomicOpOnEmptyValue(cx, MutationRef::Min, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
 			if (v2.empty())
 				return StringRef();
@@ -513,30 +544,28 @@ public:
 		});
 	}
 
-	Future<Void> testMax(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
-		Key key = self->getTestKey("test_key_max_");
+	Future<Void> testMax(Database cx) {
+		Key key = getTestKey("test_key_max_");
 
 		TraceEvent(SevInfo, "Running Atomic Op MAX Correctness Current Api Version").log();
-		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Max, key);
-		co_await self->testAtomicOpApi(
-		    cx, self, MutationRef::Max, key, [](uint64_t val1, uint64_t val2) { return val1 > val2 ? val1 : val2; });
-		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Max, key, [](Value v1, Value v2) -> Value {
-			return !v2.empty() ? v2 : StringRef();
-		});
+		co_await testAtomicOpSetOnNonExistingKey(cx, MutationRef::Max, key);
+		co_await testAtomicOpApi(
+		    cx, MutationRef::Max, key, [](uint64_t val1, uint64_t val2) { return val1 > val2 ? val1 : val2; });
+		co_await testAtomicOpOnEmptyValue(
+		    cx, MutationRef::Max, key, [](Value v1, Value v2) -> Value { return !v2.empty() ? v2 : StringRef(); });
 	}
 
-	Future<Void> testAnd(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
+	Future<Void> testAnd(Database cx) {
 		int currentApiVersion = getApiVersion(cx);
-		Key key = self->getTestKey("test_key_and_");
+		Key key = getTestKey("test_key_and_");
 
 		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("OpType", "AND");
 		// API Version 500
 		setApiVersion(&cx, 500);
 		TraceEvent(SevInfo, "Running Atomic Op AND Correctness Test Api Version 500").log();
-		co_await self->testAtomicOpUnsetOnNonExistingKey(cx, self, MutationRef::And, key);
-		co_await self->testAtomicOpApi(
-		    cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2; });
-		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::And, key, [](Value v1, Value v2) -> Value {
+		co_await testAtomicOpUnsetOnNonExistingKey(cx, MutationRef::And, key);
+		co_await testAtomicOpApi(cx, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2; });
+		co_await testAtomicOpOnEmptyValue(cx, MutationRef::And, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
 			if (v2.empty())
 				return StringRef();
@@ -548,10 +577,9 @@ public:
 		setApiVersion(&cx, currentApiVersion);
 		TraceEvent(SevInfo, "Running Atomic Op AND Correctness Current Api Version")
 		    .detail("Version", currentApiVersion);
-		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::And, key);
-		co_await self->testAtomicOpApi(
-		    cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2; });
-		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::And, key, [](Value v1, Value v2) -> Value {
+		co_await testAtomicOpSetOnNonExistingKey(cx, MutationRef::And, key);
+		co_await testAtomicOpApi(cx, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2; });
+		co_await testAtomicOpOnEmptyValue(cx, MutationRef::And, key, [](Value v1, Value v2) -> Value {
 			uint64_t zeroVal = 0;
 			if (v2.empty())
 				return StringRef();
@@ -560,73 +588,69 @@ public:
 		});
 	}
 
-	Future<Void> testOr(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
-		Key key = self->getTestKey("test_key_or_");
+	Future<Void> testOr(Database cx) {
+		Key key = getTestKey("test_key_or_");
 
 		TraceEvent(SevInfo, "Running Atomic Op OR Correctness Current Api Version").log();
-		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Or, key);
-		co_await self->testAtomicOpApi(
-		    cx, self, MutationRef::Or, key, [](uint64_t val1, uint64_t val2) { return val1 | val2; });
-		co_await self->testAtomicOpOnEmptyValue(
-		    cx, self, MutationRef::Or, key, [](Value v1, Value v2) -> Value { return !v2.empty() ? v2 : StringRef(); });
+		co_await testAtomicOpSetOnNonExistingKey(cx, MutationRef::Or, key);
+		co_await testAtomicOpApi(cx, MutationRef::Or, key, [](uint64_t val1, uint64_t val2) { return val1 | val2; });
+		co_await testAtomicOpOnEmptyValue(
+		    cx, MutationRef::Or, key, [](Value v1, Value v2) -> Value { return !v2.empty() ? v2 : StringRef(); });
 	}
 
-	Future<Void> testXor(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
-		Key key = self->getTestKey("test_key_xor_");
+	Future<Void> testXor(Database cx) {
+		Key key = getTestKey("test_key_xor_");
 
 		TraceEvent(SevInfo, "Running Atomic Op XOR Correctness Current Api Version").log();
-		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Xor, key);
-		co_await self->testAtomicOpApi(
-		    cx, self, MutationRef::Xor, key, [](uint64_t val1, uint64_t val2) { return val1 ^ val2; });
-		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::Xor, key, [](Value v1, Value v2) -> Value {
-			return !v2.empty() ? v2 : StringRef();
-		});
+		co_await testAtomicOpSetOnNonExistingKey(cx, MutationRef::Xor, key);
+		co_await testAtomicOpApi(cx, MutationRef::Xor, key, [](uint64_t val1, uint64_t val2) { return val1 ^ val2; });
+		co_await testAtomicOpOnEmptyValue(
+		    cx, MutationRef::Xor, key, [](Value v1, Value v2) -> Value { return !v2.empty() ? v2 : StringRef(); });
 	}
 
-	Future<Void> testAdd(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
-		Key key = self->getTestKey("test_key_add_");
+	Future<Void> testAdd(Database cx) {
+		Key key = getTestKey("test_key_add_");
 		TraceEvent(SevInfo, "Running Atomic Op ADD Correctness Current Api Version").log();
-		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::AddValue, key);
-		co_await self->testAtomicOpApi(
-		    cx, self, MutationRef::AddValue, key, [](uint64_t val1, uint64_t val2) { return val1 + val2; });
-		co_await self->testAtomicOpOnEmptyValue(cx, self, MutationRef::AddValue, key, [](Value v1, Value v2) -> Value {
-			return !v2.empty() ? v2 : StringRef();
-		});
+		co_await testAtomicOpSetOnNonExistingKey(cx, MutationRef::AddValue, key);
+		co_await testAtomicOpApi(
+		    cx, MutationRef::AddValue, key, [](uint64_t val1, uint64_t val2) { return val1 + val2; });
+		co_await testAtomicOpOnEmptyValue(
+		    cx, MutationRef::AddValue, key, [](Value v1, Value v2) -> Value { return !v2.empty() ? v2 : StringRef(); });
 	}
 
-	Future<Void> testCompareAndClear(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
-		Key key = self->getTestKey("test_key_compare_and_clear_");
+	Future<Void> testCompareAndClear(Database cx) {
+		Key key = getTestKey("test_key_compare_and_clear_");
 		TraceEvent(SevInfo, "Running Atomic Op COMPARE_AND_CLEAR Correctness Current Api Version").log();
-		co_await self->testCompareAndClearAtomicOpApi(cx, self, key, true);
-		co_await self->testCompareAndClearAtomicOpApi(cx, self, key, false);
+		co_await testCompareAndClearAtomicOpApi(cx, key, true);
+		co_await testCompareAndClearAtomicOpApi(cx, key, false);
 	}
 
-	Future<Void> testByteMin(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
-		Key key = self->getTestKey("test_key_byte_min_");
+	Future<Void> testByteMin(Database cx) {
+		Key key = getTestKey("test_key_byte_min_");
 
 		TraceEvent(SevInfo, "Running Atomic Op BYTE_MIN Correctness Current Api Version").log();
-		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::ByteMin, key);
-		co_await self->testAtomicOpApi(cx, self, MutationRef::ByteMin, key, [](uint64_t val1, uint64_t val2) {
+		co_await testAtomicOpSetOnNonExistingKey(cx, MutationRef::ByteMin, key);
+		co_await testAtomicOpApi(cx, MutationRef::ByteMin, key, [](uint64_t val1, uint64_t val2) {
 			return StringRef((const uint8_t*)&val1, sizeof(val1)) < StringRef((const uint8_t*)&val2, sizeof(val2))
 			           ? val1
 			           : val2;
 		});
-		co_await self->testAtomicOpOnEmptyValue(
-		    cx, self, MutationRef::ByteMin, key, [](Value v1, Value v2) -> Value { return StringRef(); });
+		co_await testAtomicOpOnEmptyValue(
+		    cx, MutationRef::ByteMin, key, [](Value v1, Value v2) -> Value { return StringRef(); });
 	}
 
-	Future<Void> testByteMax(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
-		Key key = self->getTestKey("test_key_byte_max_");
+	Future<Void> testByteMax(Database cx) {
+		Key key = getTestKey("test_key_byte_max_");
 
 		TraceEvent(SevInfo, "Running Atomic Op BYTE_MAX Correctness Current Api Version").log();
-		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::ByteMax, key);
-		co_await self->testAtomicOpApi(cx, self, MutationRef::ByteMax, key, [](uint64_t val1, uint64_t val2) {
+		co_await testAtomicOpSetOnNonExistingKey(cx, MutationRef::ByteMax, key);
+		co_await testAtomicOpApi(cx, MutationRef::ByteMax, key, [](uint64_t val1, uint64_t val2) {
 			return StringRef((const uint8_t*)&val1, sizeof(val1)) > StringRef((const uint8_t*)&val2, sizeof(val2))
 			           ? val1
 			           : val2;
 		});
-		co_await self->testAtomicOpOnEmptyValue(
-		    cx, self, MutationRef::ByteMax, key, [](Value v1, Value v2) -> Value { return !v1.empty() ? v1 : v2; });
+		co_await testAtomicOpOnEmptyValue(
+		    cx, MutationRef::ByteMax, key, [](Value v1, Value v2) -> Value { return !v1.empty() ? v1 : v2; });
 	}
 };
 

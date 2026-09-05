@@ -176,9 +176,9 @@ A typical consumer loop is:
 
 ```cpp
 co_await registerNativeCdcStreamClient(db, "orders"_sr, KeyRangeRef("order/"_sr, "order0"_sr));
-state Reference<NativeCdcConsumer> consumer = co_await createNativeCdcConsumer(db, "orders"_sr);
+Reference<NativeCdcConsumer> consumer = co_await createNativeCdcConsumer(db, "orders"_sr);
 
-loop {
+while (true) {
 	CDCConsumeReply reply = co_await consumer->consume();
 	for (auto const& versionedMutations : reply.mutations) {
 		// Apply all mutations for versionedMutations.version.
@@ -359,6 +359,7 @@ than transaction state:
 | --- | --- | --- |
 | `\xff\x02/cdc/minVersion/<streamId>` | `Version` | Earliest version that an active stream may still require. |
 | `\xff\x02/cdc/retiredTagPopVersion/<tag>` | `Version` | Final pop watermark required after a stream using a tag is removed. |
+| `\xff\x02/cdc/tagOwner/<tag>` | `CDCStreamId` | Derived representative stream used to look up a current tag's proxy owner. |
 
 The initial `minVersion` is written with a versionstamp at stream
 registration. When a consumer acknowledges processing through version `V`, the
@@ -394,6 +395,22 @@ properties rather than exceptional cases.
 
 The current proxy assignment at registration uses an available CDC proxy; it
 does not yet balance by stream traffic, memory use, or consumer lag.
+
+Registration reuses a tag's owner through a persisted representative stream.
+The lookup validates, in the registration transaction, that the representative
+is active and still uses that current tag, then reads its authoritative
+per-stream proxy assignment. Proxy replacement therefore does not require a
+second ownership update. A missing or stale entry is reconstructed from active
+stream metadata; registration on an unused tag establishes its first
+representative. Removing the representative clears the entry without disturbing
+other streams or their retained history.
+
+This index avoids repeated global ownership discovery for stable shared tags.
+It is derived storage-backed system data, not routing or retention authority,
+and can be discarded and rebuilt. Existing streams need no eager migration;
+validation also rejects stale representatives left by older metadata writers.
+The allocator's stream-count scan remains necessary, and ownership discovery
+still scans global metadata when the representative is absent or invalid.
 
 ### Metadata lifecycle example
 
@@ -773,8 +790,8 @@ policy simple.
   response to load. A future implementation can use versioned tag history to
   make such changes without losing the ability to read earlier tagged data.
 * The CDC client surface does not yet provide language-specific bindings beyond
-  the C API, administrative tooling, or a higher-level consumer checkpoint
-  abstraction.
+  the C API or a higher-level consumer checkpoint abstraction. Administrative
+  status and identity-guarded removal are available through `fdbcli`.
 
 These improvements must preserve the acknowledgement and retired-pop
 invariants above. In particular, moving a stream between tags cannot forget an
@@ -864,14 +881,32 @@ how often the global durable ownership scan actually runs. This makes the
 low-rate control-plane assumption for registration, removal, and assignment
 changes observable.
 
-Production operation needs tooling beyond the initial native API:
+The `fdbcli` CDC commands expose the retention control plane without changing
+its acknowledgement or removal semantics:
 
-| Operator need | Current mechanism | Needed production tooling |
+| Operator need | Command or signal | Interpretation |
 | --- | --- | --- |
-| Find a stalled consumer | `CDCProxyMetrics` reports the oldest required stream ID, acknowledgement lag, safe-pop distance, and buffer pressure. | A stream-listing view that joins stream name, range, owner, lag, retained bytes, and attributable TLog retention. |
-| Stop retaining abandoned history | `removeNativeCdcStreamClient()` explicitly removes a named stream and relinquishes its unread history. | An authenticated force-removal command with an explicit data-loss confirmation and audit trail. |
-| Prevent new CDC load while draining existing work | Disabling `ENABLE_NATIVE_CDC` rejects new names while allowing existing streams to drain or be removed. | A status command that distinguishes admission state from active and retired CDC work. |
-| Recover a downstream system after discarding CDC history | The downstream system can rebuild from a full scan after the stream is removed and later registered again. | A runbook that coordinates stream removal, downstream rebuild, and safe re-registration. |
+| Find a stalled consumer | `cdc status [json]` joins stream names, IDs, ranges, durable watermarks, owners, and shared-tag blockers. | Metadata is one transactional snapshot; proxy buffer and recovery samples are advisory and explicitly unavailable on timeout. |
+| Stop retaining abandoned history | `cdc remove <NAME> <EXPECTED_STREAM_ID> CONFIRM-DATA-LOSS` | The expected ID protects a same-name replacement. Removal relinquishes unread history, not user data, and retains final-pop work until safe cleanup. |
+| Prevent new CDC load while draining existing work | Disable `ENABLE_NATIVE_CDC` through the deployment's existing configuration procedure, then inspect `cdc status`. | Admission-off is distinct from active work, pending retired cleanup, and a fully drained metadata snapshot. |
+| Correlate an operator action | Enable CLI tracing with `--log --log-dir <incident-dir>`; removal attempt/result traces and the `NativeCdcStreamRemoved` server event identify the stream and operation. | Preserve trace logs with the operator's change record; traces are not a durable exactly-once audit log. |
+
+Status reads the existing metadata ranges in one transaction and inherits their
+stream-count and transaction-lifetime limits. It is intended for low-rate
+administration, not a high-frequency per-stream metrics poll. The production
+proxy status endpoint is trusted, accepts at most 256 stream IDs per request,
+and snapshots only existing memory. It performs no metadata scans or retention
+changes. The client uses bounded requests and reports unavailable proxy samples
+without discarding the durable status result. The interface adds an endpoint
+without changing existing serialized fields or endpoint offsets; older proxies
+can continue serving CDC while the new status sample is unavailable.
+
+The status view deliberately does not report per-stream TLog disk bytes. Shared
+tags and replicated log files make proxy buffer bytes and version distance
+insufficient for that attribution. `safe_pop_version` is a permissible exclusive
+pop frontier, not a physical-reclamation measurement. Pair CDC status with normal
+TLog free-space, spilling, and cluster recovery telemetry. Old-generation counts
+and recovery state do not by themselves prove that CDC caused the recovery delay.
 
 If a downstream consumer is wedged while CDC-retained TLog history pushes the
 cluster toward unacceptable spilling, automatic expiration is still the wrong
@@ -880,3 +915,58 @@ choose explicitly between preserving history while repairing the consumer, or
 removing the stream, accepting the CDC gap, and rebuilding downstream state from
 a full database scan. Disabling admission alone does not release history held
 by existing streams.
+
+### Stalled-consumer and drain procedure
+
+1. Run `cdc status json` and retain the snapshot with the incident record. Check
+   `metadata_complete`, each stream's `owner_published`, and proxy sampling errors
+   before interpreting missing information. Identify lagging streams and the
+   `blocking_stream_ids` on their shared tags.
+2. Compare successive durable watermarks with producer traffic, proxy buffer
+   pressure, and TLog disk headroom. Set warning and critical thresholds from the
+   deployment's measured write rate, disk budget, and consumer repair time;
+   version distance is neither elapsed time nor retained bytes. Alert on stalled
+   watermarks with shrinking disk headroom, persistently unavailable owners,
+   sustained buffer waiters, or retired work that does not make progress.
+3. If history is required, repair the consumer and resume from its last durable
+   checkpoint. Do not acknowledge data that has not been durably processed.
+   Disabling admission can prevent new streams but does not stop an existing
+   stream's retained history from growing.
+4. If history can be discarded, stop the affected downstream consumer, record
+   its name and exact stream ID, and start `fdbcli` with
+   `--log --log-dir <incident-dir>` before using the guarded removal command with
+   explicit loss confirmation. CLI tracing is off by default; preserve the command
+   output and trace logs with the operator's change record. Keep trusted
+   administrative access restricted using the deployment's existing network/TLS
+   controls. A changed stream ID requires a
+   fresh operator decision; do not retry removal by name alone. After an error or
+   interruption, inspect status: cancellation does not prove the removal was not
+   committed.
+5. Observe retired-tag cleanup and the unaffected consumers. Shared tags may
+   remain pinned by another stream. Check normal cluster recovery and disk
+   telemetry separately: an empty active list is not cleanup completion, and a
+   complete, drained metadata snapshot is not proof that disk reclamation has
+   already finished.
+6. To rebuild downstream state, register a new stream before establishing a
+   supported consistent snapshot at version `V`. Retain the new stream's history
+   while loading that snapshot into a replacement destination, then apply CDC
+   mutations after `V` and durably checkpoint before acknowledging. A scan across
+   unrelated read versions followed by registration can miss concurrent writes.
+   Use a supported snapshot/export protocol within its read-version constraints,
+   or quiesce writers if the downstream system cannot coordinate snapshot and
+   CDC positions. Cut over only after the replacement has caught up.
+
+For feature rollback, disable admission and keep CDC-capable binaries until
+`metadata_complete` and `metadata_drained` are both true: no active registrations
+or retired cleanup may remain. Catching up and acknowledging a stream does not
+remove its registration; remove it after safely processing its history. Check
+normal cluster health as well. Neither admission-off nor consumer catch-up alone
+permits a downgrade to binaries that do not support durable CDC state.
+
+Before production rollout, exercise the procedure under sustained writes with
+two shared-tag streams, one stopped consumer, proxy replacement, and transaction
+system recovery. Require independent mutation checks for the healthy stream,
+finite retired cleanup, and return to full recovery after the blocking history
+is released. The tooling and deterministic lifecycle tests are prerequisites;
+they do not establish a deployment's capacity thresholds, sustained-load results,
+or mixed-version upgrade/rollback qualification.

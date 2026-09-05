@@ -20,7 +20,7 @@
 
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/S3Client.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/Knobs.h"

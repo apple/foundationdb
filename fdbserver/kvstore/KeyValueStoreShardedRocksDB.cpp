@@ -1936,6 +1936,7 @@ public:
 
 	std::vector<rocksdb::ColumnFamilyHandle*> getColumnFamilies() {
 		std::vector<rocksdb::ColumnFamilyHandle*> res;
+		res.reserve(columnFamilyMap.size());
 		for (auto& [id, cf] : columnFamilyMap) {
 			res.push_back(cf);
 		}
@@ -4939,7 +4940,7 @@ TEST_CASE("noSim/determinism/checkpoint_metadata/serde3") {
 }
 
 TEST_CASE("noSim/determinism/checkpoint_metadata/serde4") {
-	checkpointMetadataSerdeTest("some_\nrocksdb_checkpoint_\nmetadata_123\0");
+	checkpointMetadataSerdeTest("some_\nrocksdb_checkpoint_\nmetadata_123\0"_sr.toString());
 	return Void();
 }
 
