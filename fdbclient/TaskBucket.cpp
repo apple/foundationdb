@@ -239,7 +239,7 @@ public:
 		Key taskUID = t.getString(0);
 		Subspace taskAvailableSpace = availableSpace.get(taskUID);
 
-		Reference<Task> task(new Task());
+		auto task = makeReference<Task>();
 		task->key = taskUID;
 
 		RangeResult values = co_await tr->getRange(taskAvailableSpace.range(), CLIENT_KNOBS->TOO_MANY);
@@ -1177,7 +1177,7 @@ public:
 		std::vector<Future<Void>> actions;
 
 		if (!values.empty()) {
-			Reference<Task> task(new Task());
+			auto task = makeReference<Task>();
 			Key lastTaskID;
 			for (auto& s : values) {
 				Tuple t = taskFuture->callbacks.unpack(s.key);

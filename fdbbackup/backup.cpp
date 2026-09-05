@@ -1513,7 +1513,7 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		}
 	} else if (exe == ProgramExe::DR_AGENT) {
 		DatabaseBackupAgent dba;
-		Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(dest));
+		auto tr2 = makeReference<ReadYourWritesTransaction>(dest);
 		tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
 		RangeResult tagNames = co_await tr2->getRange(dba.tagNames.range(), 10000, snapshot);
@@ -1676,7 +1676,7 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
 	std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
 	std::string rootKey = backupStatusPrefixRange.begin.toString() + name + "/json";
 	std::string instanceKey = rootKey + "/" + "agent-" + id;
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(statusUpdateDest));
+	auto tr = makeReference<ReadYourWritesTransaction>(statusUpdateDest);
 	Future<Void> pollRateUpdater;
 
 	// In order to report a useful networkAddress to the cluster's layer status JSON object, determine which local
@@ -2771,7 +2771,7 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 
 	KeyBackedTag tag = makeBackupTag(tagName);
 
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	while (true) {
 		Error err;
 		try {
