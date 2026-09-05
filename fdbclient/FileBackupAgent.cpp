@@ -663,7 +663,7 @@ Future<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> getBulk
 // through the restore API. The commit retries because an unpersisted ABORTED loses both properties.
 Future<Void> abortBulkLoadRestore(Database cx, RestoreConfig restore, std::string message) {
 	co_await restore.logError(cx, restore_bulkload_failed(), message);
-	Reference<ReadYourWritesTransaction> abortTr(new ReadYourWritesTransaction(cx));
+	auto abortTr = makeReference<ReadYourWritesTransaction>(cx);
 	while (true) {
 		Error err;
 		try {
@@ -808,7 +808,7 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 				int64_t blocksDispatched =
 				    totalBlocks > 0 ? (totalBlocks * (completed + inProgress)) / total : (completed + inProgress);
 
-				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				if (lockAware) {
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1860,7 +1860,7 @@ static Future<Key> addBackupTask(StringRef name,
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	Key doneKey = co_await completionKey.get(tr, taskBucket);
-	Reference<Task> task(new Task(name, version, doneKey, priority));
+	auto task = makeReference<Task>(name, version, doneKey, priority);
 
 	// Bind backup config to new task
 	// allow this new task to find the config(keyspace) of the parent task
@@ -2000,7 +2000,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		if (range.empty())
 			co_return false;
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig backup(task);
 		bool usedFile = false;
 
@@ -2078,7 +2078,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
 	                             Reference<Task> task) {
-		Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
+		auto lock = makeReference<FlowLock>(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 
 		co_await checkTaskVersion(cx, task, BackupRangeTaskFunc::name, BackupRangeTaskFunc::version);
 
@@ -2196,7 +2196,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				Version snapshotBeginVersion{ 0 };
 				int64_t snapshotRangeFileCount{ 0 };
 
-				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 				while (true) {
 					Error err;
 					try {
@@ -2364,11 +2364,11 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
 	                             Reference<Task> task) {
-		Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
+		auto lock = makeReference<FlowLock>(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 		co_await checkTaskVersion(cx, task, name, version);
 
 		double startTime = timer();
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		// The shard map will use 3 values classes.  Exactly SKIP, exactly DONE, then any number >= NOT_DONE_MIN
 		// which will mean not done. This is to enable an efficient coalesce() call to squash adjacent ranges which
@@ -2944,7 +2944,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
 	                             Reference<Task> task) {
-		Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
+		auto lock = makeReference<FlowLock>(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 
 		co_await checkTaskVersion(cx, task, BackupLogRangeTaskFunc::name, BackupLogRangeTaskFunc::version);
 
@@ -2954,7 +2954,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		BackupConfig config(task);
 		Reference<IBackupContainer> bc;
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3502,7 +3502,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 		Reference<IBackupContainer> bc;
 		DatabaseConfiguration dbConfig;
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		// Read the entire range file map into memory, then walk it backwards from its last entry to produce a list
 		// of non overlapping key range files
@@ -4031,7 +4031,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 	                             Reference<Task> task) {
 		co_await checkTaskVersion(cx, task, StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version);
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig config(task);
 		Future<Optional<MutationLogType>> mutationLogType;
 		while (true) {
@@ -4299,7 +4299,7 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				Reference<IBackupContainer> bcRef = IBackupContainer::openContainer(backupUrl, {}, {}, 0);
 
 				// Get restore ranges using a transaction
-				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				std::vector<KeyRange> restoreRanges = co_await restore.getRestoreRangesOrDefault(tr);
@@ -4360,7 +4360,7 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					co_await restore.logError(
 					    cx, restore_missing_data(), "BulkLoad restore failed: backup has no bulkdump data", nullptr);
 					// Abort the restore by setting state to ABORTED
-					Reference<ReadYourWritesTransaction> abortTr(new ReadYourWritesTransaction(cx));
+					auto abortTr = makeReference<ReadYourWritesTransaction>(cx);
 					abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					abortTr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					restore.stateEnum().set(abortTr, ERestoreState::ABORTED);
@@ -4380,7 +4380,7 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					co_await restore.logError(
 					    cx, restore_missing_data(), "BulkLoad restore failed: bulkdump dataset incomplete", nullptr);
 					// Abort the restore by setting state to ABORTED
-					Reference<ReadYourWritesTransaction> abortTr(new ReadYourWritesTransaction(cx));
+					auto abortTr = makeReference<ReadYourWritesTransaction>(cx);
 					abortTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					abortTr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					restore.stateEnum().set(abortTr, ERestoreState::ABORTED);
@@ -4555,7 +4555,7 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 	                           TaskCompletionKey completionKey,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(new Task(BulkLoadRestoreTaskFunc::name, BulkLoadRestoreTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(BulkLoadRestoreTaskFunc::name, BulkLoadRestoreTaskFunc::version, doneKey);
 
 		// Set task parameters
 		Params.restoreVersion().set(task, restoreVersion);
@@ -4617,7 +4617,7 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 	                           TaskCompletionKey completionKey,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(new Task(RestoreCompleteTaskFunc::name, RestoreCompleteTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(RestoreCompleteTaskFunc::name, RestoreCompleteTaskFunc::version, doneKey);
 
 		// Get restore config from parent task and bind it to new task
 		co_await RestoreConfig(parentTask).toTask(tr, task);
@@ -4710,7 +4710,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		    .detail("ReadOffset", readOffset)
 		    .detail("ReadLen", readLen);
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Future<Reference<IBackupContainer>> bc;
 		Future<std::vector<KeyRange>> restoreRanges;
 		Future<Key> addPrefix;
@@ -4923,7 +4923,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	                           TaskCompletionKey completionKey,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(new Task(RestoreRangeTaskFunc::name, RestoreRangeTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(RestoreRangeTaskFunc::name, RestoreRangeTaskFunc::version, doneKey);
 
 		// Create a restore config from the current task and bind it to the new task.
 		co_await RestoreConfig(parentTask).toTask(tr, task);
@@ -5146,7 +5146,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		    .detail("ReadOffset", readOffset)
 		    .detail("ReadLen", readLen);
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Reference<IBackupContainer> bc;
 		std::vector<KeyRange> ranges;
 
@@ -5269,7 +5269,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 	                           TaskCompletionKey completionKey,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(new Task(RestoreLogDataTaskFunc::name, RestoreLogDataTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(RestoreLogDataTaskFunc::name, RestoreLogDataTaskFunc::version, doneKey);
 
 		// Create a restore config from the current task and bind it to the new task.
 		// RestoreConfig(parentTask) creates prefix of : fileRestorePrefixRange.begin/uid->config/[uid]
@@ -5498,7 +5498,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	                                   Key mutationLogPrefix,
 	                                   Reference<Task> task,
 	                                   Reference<TaskBucket> taskBucket) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Standalone<VectorRef<KeyValueRef>> oldFormatMutations;
 		int mutationIndex = 0;
 		int mutationCount = 0;
@@ -5569,7 +5569,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		Version begin = Params.beginVersion().get(task);
 		Version end = Params.endVersion().get(task);
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Reference<IBackupContainer> bc;
 		std::vector<KeyRange> ranges; // this is the actual KV, not version
 		while (true) {
@@ -5710,8 +5710,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	                           TaskCompletionKey completionKey,
 	                           Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(
-		    new Task(RestoreLogDataPartitionedTaskFunc::name, RestoreLogDataPartitionedTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(
+		    RestoreLogDataPartitionedTaskFunc::name, RestoreLogDataPartitionedTaskFunc::version, doneKey);
 
 		// Create a restore config from the current task and bind it to the new task.
 		// RestoreConfig(parentTask) createsa prefix of : fileRestorePrefixRange.begin/uid->config/[uid]
@@ -5960,8 +5960,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 
 		// Use high priority for dispatch tasks that have to queue more blocks for the current batch
 		unsigned int priority = 0;
-		Reference<Task> task(new Task(
-		    RestoreDispatchPartitionedTaskFunc::name, RestoreDispatchPartitionedTaskFunc::version, doneKey, priority));
+		auto task = makeReference<Task>(
+		    RestoreDispatchPartitionedTaskFunc::name, RestoreDispatchPartitionedTaskFunc::version, doneKey, priority);
 
 		// Create a config from the parent task and bind it to the new task
 		co_await RestoreConfig(parentTask).toTask(tr, task);
@@ -6351,8 +6351,8 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 
 		// Use high priority for dispatch tasks that have to queue more blocks for the current batch
 		auto priority = (remainingInBatch > 0) ? 1u : 0u;
-		Reference<Task> task(
-		    new Task(RestoreDispatchTaskFunc::name, RestoreDispatchTaskFunc::version, doneKey, priority));
+		auto task =
+		    makeReference<Task>(RestoreDispatchTaskFunc::name, RestoreDispatchTaskFunc::version, doneKey, priority);
 
 		// Create a config from the parent task and bind it to the new task
 		co_await RestoreConfig(parentTask).toTask(tr, task);
@@ -6500,7 +6500,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	                             Reference<TaskBucket> taskBucket,
 	                             Reference<FutureBucket> futureBucket,
 	                             Reference<Task> task) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		RestoreConfig restore(task);
 		Version restoreVersion{ 0 };
 		Version beginVersion{ 0 };
@@ -6891,7 +6891,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
-		Reference<Task> task(new Task(StartFullRestoreTaskFunc::name, StartFullRestoreTaskFunc::version, doneKey));
+		auto task = makeReference<Task>(StartFullRestoreTaskFunc::name, StartFullRestoreTaskFunc::version, doneKey);
 
 		RestoreConfig restore(uid);
 		// Bind the restore config to the new task
@@ -6948,7 +6948,7 @@ public:
 		KeyBackedTag tag = makeBackupTag(tagName);
 
 		while (true) {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -7284,7 +7284,7 @@ public:
 	static Future<ERestoreState> waitRestore(Database cx, Key tagName, Verbose verbose) {
 		ERestoreState status;
 		while (true) {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 			Error err;
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -7441,7 +7441,7 @@ public:
 	}
 
 	static Future<Void> changePause(FileBackupAgent* backupAgent, Database db, bool pause) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
+		auto tr = makeReference<ReadYourWritesTransaction>(db);
 
 		while (true) {
 			Error err;
@@ -7497,7 +7497,7 @@ public:
 	}
 
 	static Future<std::string> getStatusJSON(FileBackupAgent* backupAgent, Database cx, std::string tagName) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		while (true) {
 			Error err;
@@ -7721,7 +7721,7 @@ public:
 	                                     Database cx,
 	                                     ShowErrors showErrors,
 	                                     std::string tagName) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		std::string statusText;
 
 		while (true) {
@@ -8108,7 +8108,7 @@ public:
 			printf("Restoring backup to version: %lld\n", (long long)targetVersion);
 		}
 
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			Error err;
 			try {

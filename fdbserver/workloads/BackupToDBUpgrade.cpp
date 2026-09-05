@@ -112,7 +112,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	                      Key tag,
 	                      Standalone<VectorRef<KeyRangeRef>> backupRanges) {
 		try {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(extraDB));
+			auto tr = makeReference<ReadYourWritesTransaction>(extraDB);
 			while (true) {
 				Error err;
 				try {
@@ -156,7 +156,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 		// Ensure that there is no left over key within the backup subspace
 		while (true) {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 			TraceEvent("DRU_CheckLeftoverkeys").detail("BackupTag", printable(tag));
 
@@ -398,7 +398,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 		try {
 			// Get restore ranges before aborting
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(extraDB));
+			auto tr = makeReference<ReadYourWritesTransaction>(extraDB);
 			while (true) {
 				Error err;
 				try {
@@ -469,7 +469,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			// restore database
 			TraceEvent("DRU_PrepareRestore").detail("RestoreTag", printable(restoreTag));
-			Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
+			auto tr2 = makeReference<ReadYourWritesTransaction>(cx);
 			while (true) {
 				Error err;
 				try {

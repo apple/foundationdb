@@ -167,7 +167,7 @@ struct BackupData {
 			const bool firstWorker = info->self->tag.id == 0;
 			bool allUpdated = false;
 			Optional<std::vector<std::pair<int64_t, int64_t>>> workers;
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 			while (true) {
 				Error err;
@@ -523,7 +523,7 @@ static Future<Void> monitorBackupStartedKeyChanges(BackupData* self) {
 
 // Set "latestBackupWorkerSavedVersion" key for backups
 Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedLogVersions) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 	while (true) {
 		Error err;
@@ -687,7 +687,7 @@ Future<Void> addMutation(Reference<IBackupFile> logFile,
 static Future<Void> updateLogBytesWritten(BackupData* self,
                                           std::vector<UID> backupUids,
                                           std::vector<Reference<IBackupFile>> logFiles) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 	ASSERT(backupUids.size() == logFiles.size());
 	while (true) {
@@ -1014,7 +1014,7 @@ Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogEpoch r
 }
 
 static Future<Void> monitorWorkerPause(BackupData* self) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	Future<Void> watch;
 
 	while (true) {

@@ -604,8 +604,8 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		// make sure when we change dd related special keys, we grab the two system keys,
 		// i.e. moveKeysLockOwnerKey and moveKeysLockWriteKey
 		{
-			Reference<ReadYourWritesTransaction> tr1(new ReadYourWritesTransaction(cx));
-			Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
+			auto tr1 = makeReference<ReadYourWritesTransaction>(cx);
+			auto tr2 = makeReference<ReadYourWritesTransaction>(cx);
 			while (true) {
 				Error err;
 				try {

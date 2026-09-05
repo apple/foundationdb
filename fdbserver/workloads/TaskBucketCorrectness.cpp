@@ -254,10 +254,10 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Subspace taskSubspace("backup-agent"_sr);
-		Reference<TaskBucket> taskBucket(new TaskBucket(taskSubspace.get("tasks"_sr)));
-		Reference<FutureBucket> futureBucket(new FutureBucket(taskSubspace.get("futures"_sr)));
+		auto taskBucket = makeReference<TaskBucket>(taskSubspace.get("tasks"_sr));
+		auto futureBucket = makeReference<FutureBucket>(taskSubspace.get("futures"_sr));
 
 		Error err;
 		try {
