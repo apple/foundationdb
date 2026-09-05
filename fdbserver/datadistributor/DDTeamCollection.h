@@ -668,13 +668,16 @@ protected:
 
 	void updateTeamEligibility();
 
-	// Emits DDServerEligibility, no more often than DD_SERVER_ELIGIBILITY_LOGGING_INTERVAL. Called from
-	// the periodic logging path rather than from the eligibility survey, so the gauges keep arriving when
-	// nothing is asking for teams.
+	// Driven by its own loop, not by the eligibility survey: a distributor that has stopped asking for
+	// teams is the state most worth seeing.
+	Future<Void> serverEligibilityLogger();
 	void traceServerEligibility() const;
-	// Initialised well below any plausible now() so the first call always emits. A zero here would
-	// suppress the whole first interval whenever now() starts near zero, as it does under simulation.
-	mutable double lastServerEligibilityTrace = -1e9;
+
+	// When updateTeamEligibility() last ran, unset if never. It is the only writer of the eligibility
+	// counters, and a team it has not visited reads as maximally eligible, since getCount() returns an
+	// unsigned sentinel. Fail-open is harmless on the getTeam path, which always surveys first, but it
+	// would have this gauge report nothing stranded before it can know; unset is reported as unknown.
+	Optional<double> lastEligibilitySurvey;
 
 public:
 	Reference<IDDTxnProcessor> db;

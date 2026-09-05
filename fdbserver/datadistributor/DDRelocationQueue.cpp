@@ -3140,16 +3140,10 @@ struct DDQueueImpl {
 
 		auto const highestPriorityRelocation = self->getHighestPriorityRelocation();
 
-		// InFlight and InQueue below are counters, maintained by increment/decrement as relocations are
-		// launched and completed. They have been observed diverging badly from the work actually present
-		// — an order of magnitude — which makes them useless for judging whether DD is holding real work
-		// or has simply lost count. The retained-object sizes here are the independent view: they are
-		// what DD's resident memory is actually made of, so they distinguish a genuine backlog from
-		// counter drift, and they are the accounting to reach for when DD approaches its memory limit.
-		//
-		// fetchKeysComplete in particular is the known driver of DD memory growth: relocations land
-		// there once their fetch finishes and wait to be retired, so it grows without bound whenever
-		// completion processing falls behind.
+		// InFlight and InQueue are counters and have been seen diverging from the work actually present
+		// by an order of magnitude, so also report the structures DD's memory consists of, which cannot
+		// drift. fetchKeysComplete is the known driver of that growth: relocations wait there to be
+		// retired, so it is unbounded whenever completion processing falls behind.
 		int serverQueueEntries = 0;
 		for (auto const& [serverId, serverQueue] : self->queue) {
 			serverQueueEntries += serverQueue.size();

@@ -458,10 +458,10 @@ int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) c
 	    SERVER_KNOBS->AVAILABLE_SPACE_RATIO_CUTOFF /
 	    (std::max(std::min(SERVER_KNOBS->AVAILABLE_SPACE_RATIO_CUTOFF, minAvailableSpaceRatio), 0.000001));
 	if (servers.size() > 2) {
-		// Squaring sharpens the penalty once a member is below AVAILABLE_SPACE_RATIO_CUTOFF, where
-		// losing a replica is costliest. Note the min() above clamps the ratio, so the multiplier is
-		// exactly 1.0 for any team above the cutoff: free space is a cliff at the cutoff, not a
-		// gradient, and it does not order two teams that both have room.
+		// servers.size() is the replication factor, so this is triple replication or wider, where losing
+		// a replica costs most. Note the min() above clamps the ratio, so the multiplier is exactly 1.0
+		// for any team above the cutoff: free space is a cliff there, not a gradient, and it does not
+		// order two teams that both have room.
 		availableSpaceMultiplier = availableSpaceMultiplier * availableSpaceMultiplier;
 	}
 
