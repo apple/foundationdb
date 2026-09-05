@@ -3345,6 +3345,39 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 	std::cout << "Finished.";
 }
 
+TEST_CASE("/DataDistribution/DDQueue/ReplacementPreservesPipelineCapacity") {
+	DDQueue self;
+	self.activeRelocations = SERVER_KNOBS->DD_MAX_PIPELINE_MOVES - 1;
+	self.queuedRelocations = 1;
+	self.pendingGateRelocations = 0;
+	self.unhealthyRelocations = 0;
+	self.pipelineFull = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingUnhealthy = makeReference<AsyncVar<bool>>(false);
+	self.rawProcessingWiggle = makeReference<AsyncVar<bool>>(false);
+	// Keep source discovery pending so this exercises queue replacement without a database.
+	self.fetchSourceLock = makeReference<FlowLock>(0);
+	const int priority = SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE;
+	RelocateShard request(KeyRangeRef("a"_sr, "b"_sr), priority, RelocateReason::OTHER, UID(1, 0));
+	RelocateData queued(request);
+	self.queueMap.insert(queued.keys, queued);
+	self.fetchingSourcesQueue.insert(queued);
+	self.startRelocation(priority, priority);
+	ASSERT(self.pipelineFull->get());
+	Future<Void> capacityChanged = self.pipelineFull->onChange();
+
+	std::set<UID> serversToLaunchFrom;
+	request.traceId = UID(2, 0);
+	self.queueRelocation(request, serversToLaunchFrom);
+
+	ASSERT_EQ(self.queuedRelocations, 1);
+	ASSERT_EQ(self.fetchingSourcesQueue.size(), 1);
+	ASSERT_EQ(self.pipelineSize(), SERVER_KNOBS->DD_MAX_PIPELINE_MOVES);
+	ASSERT(self.pipelineFull->get());
+	// Replacing one queued move must not advertise a slot that another producer can consume.
+	ASSERT(!capacityChanged.isReady());
+	return Void();
+}
+
 TEST_CASE("/DataDistribution/DDQueue/SourceDiscoveryPreservesReadRebalanceCooldown") {
 	DDQueue self;
 	const std::vector<UID> primary{ UID(1, 0), UID(2, 0), UID(3, 0) };
