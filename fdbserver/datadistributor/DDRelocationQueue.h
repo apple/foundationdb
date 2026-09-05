@@ -263,6 +263,20 @@ public:
 
 	void updatePipelineFull();
 
+	// Intermediate counter changes must not wake producers with a slot that a replacement still needs.
+	class PipelineMutation : NonCopyable {
+	public:
+		explicit PipelineMutation(DDQueue& queue) : queue(queue) { ++queue.pipelineMutationDepth; }
+		~PipelineMutation() {
+			if (--queue.pipelineMutationDepth == 0) {
+				queue.updatePipelineFull();
+			}
+		}
+
+	private:
+		DDQueue& queue;
+	};
+
 	Reference<AsyncVar<bool>> pipelineFull;
 
 	std::map<UID, Busyness> busymap; // UID is serverID
@@ -407,6 +421,9 @@ public:
 	                        const DDEnabledState* ddEnabledState);
 
 	explicit DDQueue(DDQueueInitParams const& params);
+
+private:
+	int pipelineMutationDepth = 0;
 };
 
 #endif // FOUNDATIONDB_DDRELOCATIONQUEUE_H
