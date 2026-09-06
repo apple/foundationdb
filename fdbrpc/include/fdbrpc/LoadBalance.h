@@ -268,22 +268,15 @@ struct RequestData : NonCopyable {
 		ASSERT(modelHolder->model);
 
 		QueueModel* model = modelHolder->model;
-		if (model->laggingRequestCount > FLOW_KNOBS->MAX_LAGGING_REQUESTS_OUTSTANDING ||
-		    model->laggingRequests.isReady()) {
-			model->laggingRequests.cancel();
-			model->laggingRequestCount = 0;
-			model->addActor = PromiseStream<Future<Void>>();
-			model->laggingRequests = actorCollection(model->addActor.getFuture(), &model->laggingRequestCount);
-		}
-
-		// We need to process the lagging request in order to update the queue model
-		Reference<ModelHolder> holderCapture = std::move(modelHolder);
-		auto triedAllOptionsCapture = triedAllOptions;
-		Future<Void> updateModel = map(response, [holderCapture, triedAllOptionsCapture](Reply result) {
-			checkAndProcessResultImpl(result, holderCapture, AtMostOnce::False, triedAllOptionsCapture);
-			return Void();
+		model->addLaggingRequest([&] {
+			// We need to process the lagging request in order to update the queue model
+			Reference<ModelHolder> holderCapture = std::move(modelHolder);
+			auto triedAllOptionsCapture = triedAllOptions;
+			return map(response, [holderCapture, triedAllOptionsCapture](Reply result) {
+				checkAndProcessResultImpl(result, holderCapture, AtMostOnce::False, triedAllOptionsCapture);
+				return Void();
+			});
 		});
-		model->addActor.send(updateModel);
 	}
 
 	~RequestData() {
