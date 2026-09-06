@@ -74,6 +74,8 @@ struct CDCTagInterval {
 
 struct CDCBufferedTag;
 
+FDB_BOOLEAN_PARAM(HasMutations);
+
 // Speculative buffering never proves a client cursor and never creates another read-ahead credit.
 class CDCStreamReadAhead {
 	enum class State { Idle, Armed, Claimed };
@@ -86,7 +88,7 @@ public:
 	bool provesCursor(Version cursor, Version minVersion) const {
 		return cursor <= std::max(issuedReplyThrough, minVersion - 1);
 	}
-	bool issueReply(Version through, Version bufferedThrough, Version minVersion, bool hasMutations) {
+	bool issueReply(Version through, Version bufferedThrough, Version minVersion, HasMutations hasMutations) {
 		const bool advanced = !provesCursor(through, minVersion);
 		if (state == State::Armed && creditThrough != bufferedThrough) {
 			cancel();
@@ -1919,8 +1921,10 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 		reply.lastConsumedVersion = selectedCDCConsumeReplyThrough(selection, stream->bufferedThrough);
 		// Record proof before send(), whose callbacks may run synchronously. Empty or capped replies do not
 		// extend the speculative horizon; neither does replaying an already issued cursor.
-		const bool armed = stream->readAhead.issueReply(
-		    reply.lastConsumedVersion, stream->bufferedThrough, stream->minVersion, !reply.mutations.empty());
+		const bool armed = stream->readAhead.issueReply(reply.lastConsumedVersion,
+		                                                stream->bufferedThrough,
+		                                                stream->minVersion,
+		                                                HasMutations(!reply.mutations.empty()));
 		request.reply.send(reply);
 		if (armed) {
 			refreshStreamTags(stream);
@@ -2359,7 +2363,7 @@ class CDCProxyPrefetchTest {
 		stream->keys = KeyRangeRef("a"_sr, "z"_sr);
 		stream->tagIntervals.emplace_back(tag->tag, 1, 200);
 		stream->tagIntervals.back().bufferedThrough = 99;
-		ASSERT(stream->readAhead.issueReply(99, 99, 1, true));
+		ASSERT(stream->readAhead.issueReply(99, 99, 1, HasMutations::True));
 		proxy.streams[id] = stream;
 		proxy.tags[tag->tag] = tag;
 		tag->streamIds.insert(id);
@@ -2589,7 +2593,7 @@ public:
 		second->bufferedThrough = 199;
 		second->tagIntervals.back().bufferedThrough = 199;
 		second->tagIntervals.back().end = 300;
-		ASSERT(second->readAhead.issueReply(199, 199, second->minVersion, true));
+		ASSERT(second->readAhead.issueReply(199, 199, second->minVersion, HasMutations::True));
 
 		auto firstCursor = makeReference<CDCPrefetchTestCursor>(Void());
 		ASSERT_EQ(test.proxy.nextTagPrefetchVersion(test.tag).get(), 100);
@@ -2725,17 +2729,18 @@ TEST_CASE("/NativeCDC/PrefetchCreditLifecycle") {
 	CDCStreamReadAhead credit;
 	auto tag = makeReference<CDCBufferedTag>(Tag(tagLocalityCDC, 0));
 	ASSERT(!credit.armedFor(99));
-	ASSERT(!credit.issueReply(99, 99, 100, true)); // Already covered by the durable floor.
-	ASSERT(!credit.issueReply(100, 100, 100, false)); // Empty progress is proved, but grants no lookahead.
+	ASSERT(!credit.issueReply(99, 99, 100, HasMutations::True)); // Already covered by the durable floor.
+	ASSERT(
+	    !credit.issueReply(100, 100, 100, HasMutations::False)); // Empty progress is proved, but grants no lookahead.
 	ASSERT(credit.provesCursor(100, 100));
-	ASSERT(!credit.issueReply(101, 102, 100, true)); // A capped reply has not drained the buffered tail.
-	ASSERT(credit.issueReply(102, 102, 100, true));
+	ASSERT(!credit.issueReply(101, 102, 100, HasMutations::True)); // A capped reply has not drained the buffered tail.
+	ASSERT(credit.issueReply(102, 102, 100, HasMutations::True));
 	ASSERT(credit.claim(tag.getPtr(), 102));
-	ASSERT(!credit.issueReply(103, 103, 100, true)); // No credit banking while a pass is active.
+	ASSERT(!credit.issueReply(103, 103, 100, HasMutations::True)); // No credit banking while a pass is active.
 	credit.finish(tag.getPtr());
 	ASSERT(!credit.armedFor(103));
-	ASSERT(!credit.issueReply(103, 103, 100, true)); // Replayed cursor.
-	ASSERT(credit.issueReply(104, 104, 100, true));
+	ASSERT(!credit.issueReply(103, 103, 100, HasMutations::True)); // Replayed cursor.
+	ASSERT(credit.issueReply(104, 104, 100, HasMutations::True));
 	credit.cancel();
 	ASSERT(!credit.claim(tag.getPtr(), 104));
 	ASSERT(!credit.provesCursor(105, 100));
@@ -2753,7 +2758,7 @@ TEST_CASE("/NativeCDC/PrefetchCreditTailAndTags") {
 	stream->tagIntervals.emplace_back(first->tag, 1, 101);
 	stream->tagIntervals.emplace_back(second->tag, 101, 200);
 	stream->tagIntervals[0].bufferedThrough = 99;
-	ASSERT(stream->readAhead.issueReply(99, 99, 1, true));
+	ASSERT(stream->readAhead.issueReply(99, 99, 1, HasMutations::True));
 	ASSERT_EQ(nextCDCPrefetchVersion(stream, first).get(), 100);
 	ASSERT(!nextCDCPrefetchVersion(stream, second).present());
 	{
@@ -2764,14 +2769,15 @@ TEST_CASE("/NativeCDC/PrefetchCreditTailAndTags") {
 		ASSERT(!nextCDCPrefetchVersion(stream, second).present());
 	}
 	ASSERT(!stream->readAhead.claimedBy(first.getPtr()));
-	ASSERT(stream->readAhead.issueReply(100, 100, 1, true));
+	ASSERT(stream->readAhead.issueReply(100, 100, 1, HasMutations::True));
 	stream->bufferedThrough = 102; // Real demand filled more data before the credit could start.
 	stream->tagIntervals[0].bufferedThrough = 100;
 	stream->tagIntervals[1].bufferedThrough = 102;
 	ASSERT(!nextCDCPrefetchVersion(stream, second).present());
-	ASSERT(!stream->readAhead.issueReply(101, 102, 1, true)); // Capped reply cannot revive the old credit.
+	ASSERT(
+	    !stream->readAhead.issueReply(101, 102, 1, HasMutations::True)); // Capped reply cannot revive the old credit.
 	ASSERT(!nextCDCPrefetchVersion(stream, second).present());
-	ASSERT(stream->readAhead.issueReply(102, 102, 1, true));
+	ASSERT(stream->readAhead.issueReply(102, 102, 1, HasMutations::True));
 	ASSERT_EQ(nextCDCPrefetchVersion(stream, second).get(), 103);
 	return Void();
 }
