@@ -691,13 +691,12 @@ public:
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // all machine teams
 
-	// IMPORTANT: teams and teamsByServerIDs MUST be consistent, so any time we
-	// mutate teams, we must also mutate teamsByServerIDs
+private:
+	// These must be updated together when adding or removing a team.
 	std::vector<Reference<TCTeamInfo>> teams;
-	// O(1) hash map from server ID string to team information
-	// Currently used by getTeamByServers
 	std::unordered_map<std::string, Reference<TCTeamInfo>> teamsByServerIDs;
 
+public:
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncTrigger printDetailedTeamsInfo;
 	Reference<LocalitySet> storageServerSet;
@@ -705,6 +704,7 @@ public:
 	explicit DDTeamCollection(DDTeamCollectionInitParams const& params);
 
 	~DDTeamCollection();
+	size_t teamCount() const { return teams.size(); }
 
 	void addLaggingStorageServer(Key zoneId);
 
