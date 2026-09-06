@@ -1,5 +1,13 @@
 include(AddFdbTest)
 
+# The module is also included by fdbcli; register this shared fixture only once.
+add_test(
+  NAME test_venv_setup
+  COMMAND bash -c ${test_venv_cmd}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(test_venv_setup PROPERTIES FIXTURES_SETUP test_virtual_env_setup TIMEOUT 120)
+set_tests_properties(test_venv_setup PROPERTIES RESOURCE_LOCK TEST_VENV_SETUP)
+
 # We need some variables to configure the test setup
 set(ENABLE_BUGGIFY ON CACHE BOOL "Enable buggify for tests")
 set(ENABLE_SIMULATION_TESTS OFF CACHE BOOL "Enable simulation tests (useful if you can't run Joshua)")

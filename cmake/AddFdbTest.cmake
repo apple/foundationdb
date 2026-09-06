@@ -600,12 +600,6 @@ string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
 string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
 string(APPEND test_venv_cmd "&& pip install --retries 9 -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt ")
 string(APPEND test_venv_cmd "&& pip install ${CMAKE_BINARY_DIR}/bindings/python ")
-add_test(
-  NAME test_venv_setup
-  COMMAND bash -c ${test_venv_cmd}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(test_venv_setup PROPERTIES FIXTURES_SETUP test_virtual_env_setup TIMEOUT 120)
-set_tests_properties(test_venv_setup PROPERTIES RESOURCE_LOCK TEST_VENV_SETUP)
 
 # Run the test command under Python venv as a cmd (Windows) or bash (Linux/Apple) script, which allows && or || chaining.
 function(add_python_venv_test)
