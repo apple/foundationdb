@@ -174,12 +174,12 @@ struct ArbitraryObject {
 		onDestruct = nullptr;
 	}
 
+private:
 	// ptr can be set to any arbitrary thing.  If it is not null at destruct time then
 	// onDestruct(ptr) will be called if onDestruct is not null.
 	void* ptr = nullptr;
 	void (*onDestruct)(void*) = nullptr;
 
-private:
 	// Call onDestruct(ptr) if needed but don't reset any state
 	void destructOnly() {
 		if (ptr != nullptr && onDestruct != nullptr) {
