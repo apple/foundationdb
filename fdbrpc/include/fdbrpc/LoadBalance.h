@@ -268,7 +268,7 @@ struct RequestData : NonCopyable {
 		ASSERT(modelHolder->model);
 
 		QueueModel* model = modelHolder->model;
-		model->addLaggingRequest([&] {
+		model->addLaggingRequest([this] {
 			// We need to process the lagging request in order to update the queue model
 			Reference<ModelHolder> holderCapture = std::move(modelHolder);
 			auto triedAllOptionsCapture = triedAllOptions;
