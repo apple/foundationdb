@@ -29,7 +29,8 @@
 // This is ReferenceCounted as it can be large and there is no reason to copy it as
 // it should not be modified locally.
 template <typename KeyType, typename ValueType>
-struct KeyRangeMapSnapshot : public ReferenceCounted<KeyRangeMapSnapshot<KeyType, ValueType>> {
+class KeyRangeMapSnapshot : public ReferenceCounted<KeyRangeMapSnapshot<KeyType, ValueType>> {
+public:
 	using Map = std::map<KeyType, ValueType>;
 
 	// A default constructed map snapshot can't be used to look anything up because no ranges are covered.
@@ -97,6 +98,11 @@ struct KeyRangeMapSnapshot : public ReferenceCounted<KeyRangeMapSnapshot<KeyType
 	}
 
 	Ranges ranges() const { return { { map.begin() }, { std::prev(map.end()) } }; }
+	size_t boundaryCount() const { return map.size(); }
+
+private:
+	template <typename, typename, typename, typename>
+	friend class KeyBackedRangeMap;
 
 	Map map;
 };
