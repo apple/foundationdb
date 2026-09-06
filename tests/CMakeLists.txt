@@ -1,5 +1,14 @@
 include(AddFdbTest)
 
+# Test for setting up Python venv for client tests.
+# Adding this test as a fixture to another test allows the use of non-native Python packages within client test scripts
+# by installing dependencies from requirements.txt
+set(test_venv_cmd "")
+string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
+string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
+string(APPEND test_venv_cmd "&& pip install --retries 9 -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt ")
+string(APPEND test_venv_cmd "&& pip install ${CMAKE_BINARY_DIR}/bindings/python ")
+
 # The module is also included by fdbcli; register this shared fixture only once.
 add_test(
   NAME test_venv_setup
