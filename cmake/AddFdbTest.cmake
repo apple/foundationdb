@@ -582,9 +582,7 @@ function(collect_unit_tests SOURCE_DIR)
   endforeach()
 endfunction()
 
-# Test for setting up Python venv for client tests.
-# Adding this test as a fixture to another test allows the use of non-native Python packages within client test scripts
-# by installing dependencies from requirements.txt
+# The test_venv_setup fixture is registered in tests/CMakeLists.txt.
 set(test_venv_dir ${CMAKE_BINARY_DIR}/tests/test_venv)
 if (WIN32)
   set(shell_cmd "cmd" CACHE INTERNAL "")
@@ -595,11 +593,6 @@ else()
   set(shell_opt "-c" CACHE INTERNAL "")
   set(test_venv_activate ". ${test_venv_dir}/bin/activate" CACHE INTERNAL "")
 endif()
-set(test_venv_cmd "")
-string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
-string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
-string(APPEND test_venv_cmd "&& pip install --retries 9 -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt ")
-string(APPEND test_venv_cmd "&& pip install ${CMAKE_BINARY_DIR}/bindings/python ")
 
 # Run the test command under Python venv as a cmd (Windows) or bash (Linux/Apple) script, which allows && or || chaining.
 function(add_python_venv_test)
