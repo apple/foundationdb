@@ -2198,7 +2198,7 @@ Future<Void> checkDataConsistency(Database cx,
 			TraceEvent("ConsistencyCheck_CheckSplits").detail("Range", range).detail("CanSplit", canSplit);
 			// Check if the storage server returns split point for the shard. There are cases where
 			// the split point returned by storage server is discarded because it's an unfair split.
-			// See splitStorageMetrics() in NativeAPI.actor.cpp.
+			// See splitStorageMetrics() in NativeAPI.cpp.
 			if (canSplit && sampledKeys > 5 && performQuiescentChecks) {
 				StorageMetrics splitMetrics;
 				splitMetrics.bytes = shardBounds.max.bytes / 2;

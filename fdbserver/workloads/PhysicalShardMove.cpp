@@ -590,6 +590,10 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		DDEnabledState ddEnabledState;
 
 		Transaction tr(cx);
+		// moveKeys() can fail with errors that mean "this move did not happen, issue it again"; see
+		// retryableDataMoveError(). Bound the reissues so a cluster that genuinely cannot move a
+		// shard still fails the test.
+		int moveReissues = 0;
 
 		while (true) {
 			Error err;
@@ -646,6 +650,17 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			}
 			if (err.code() == error_code_movekeys_conflict) {
 				// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+				tr.reset();
+			} else if (retryableDataMoveError(err) && moveReissues < MOVE_MAX_REISSUES) {
+				// The move did not happen; reissue it rather than letting tr.onError() rethrow.
+				// finish_move_keys_too_many_retries reaches here from finishMoveShards, which is
+				// the path this workload always takes.
+				++moveReissues;
+				TraceEvent(SevWarn, "TestMoveShardReissuing")
+				    .error(err)
+				    .detail("DataMoveID", dataMoveId)
+				    .detail("Reissue", moveReissues)
+				    .detail("Limit", MOVE_MAX_REISSUES);
 				tr.reset();
 			} else {
 				co_await tr.onError(err);

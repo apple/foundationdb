@@ -29,6 +29,7 @@
 #include <unordered_set>
 
 #include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/Knobs.h"
@@ -2887,7 +2888,7 @@ Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTr
 	return excludeLocalityCommitActor(ryw, true);
 }
 
-// Defined in NativeAPI.actor.cpp
+// Defined in NativeAPI.cpp
 Future<bool> verifyInterfaceActor(Reference<FlowLock> const& connectLock, ClientWorkerInterface const& workerInterf);
 
 static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTransaction* ryw,
@@ -2903,7 +2904,7 @@ static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTrans
 	RangeResult result;
 	if (verify) {
 		// if verify option is set, we try to talk to every worker and only returns those we can talk to
-		Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+		auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 		std::vector<Future<bool>> verifyInterfs;
 		for (const auto& [k_, value] : interfs) {
 			auto k = k_.withPrefix(prefix);

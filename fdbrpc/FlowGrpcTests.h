@@ -1,5 +1,5 @@
 /**
- * FlowGrpcTests.actor.cpp
+ * FlowGrpcTests.h
  *
  * This source file is part of the FoundationDB open source project
  *

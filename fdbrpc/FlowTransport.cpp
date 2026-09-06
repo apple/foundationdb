@@ -117,8 +117,10 @@ private:
 	uint32_t firstFree;
 };
 
-EndpointMap::EndpointMap(int wellKnownEndpointCount)
-  : wellKnownEndpointCount(wellKnownEndpointCount), data(wellKnownEndpointCount), firstFree(-1) {}
+EndpointMap::EndpointMap(int wellKnownEndpointCount) : wellKnownEndpointCount(wellKnownEndpointCount), firstFree(-1) {
+	ASSERT(wellKnownEndpointCount >= WLTOKEN_FIRST_AVAILABLE);
+	data.resize(wellKnownEndpointCount);
+}
 
 void EndpointMap::realloc() {
 	int oldSize = data.size();
@@ -132,8 +134,8 @@ void EndpointMap::realloc() {
 }
 
 void EndpointMap::insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority) {
-	int index = token.second();
-	ASSERT(index <= wellKnownEndpointCount);
+	const auto index = token.second();
+	ASSERT(index < uint64_t(wellKnownEndpointCount));
 	ASSERT(data[index].receiver == nullptr);
 	data[index].receiver = r;
 	data[index].token() =
@@ -228,6 +230,71 @@ void EndpointMap::remove(Endpoint::Token const& token, NetworkMessageReceiver* r
 		data[index].nextFree = firstFree;
 		firstFree = index;
 	}
+}
+
+namespace {
+
+class EndpointMapTestReceiver final : public NetworkMessageReceiver {
+public:
+	void receive(ArenaObjectReader&) override { ASSERT(false); }
+	bool isPublic() const override { return true; }
+};
+
+void testWellKnownEndpointReservation(int count) {
+	EndpointMapTestReceiver reservedReceiver;
+	EndpointMapTestReceiver dynamicReceiver;
+	EndpointMapTestReceiver replacementReceiver;
+	EndpointMap endpoints(count);
+	for (int index = 0; index < count; ++index) {
+		const auto token = Endpoint::wellKnownToken(index);
+		ASSERT(token == UID(-1, index));
+		endpoints.insertWellKnown(&reservedReceiver, token, TaskPriority::ReadSocket);
+		ASSERT(endpoints.get(token) == &reservedReceiver);
+		ASSERT(endpoints.getPriority(token) == TaskPriority::ReadSocket);
+	}
+
+	UID first(0x123456789abcdef0, 0xfedcba9800000000);
+	endpoints.insert(&dynamicReceiver, first, TaskPriority::DefaultPromiseEndpoint);
+	ASSERT(first == UID(0x123456789abcdef0, 0xfedcba9800000000 | uint32_t(count)));
+	ASSERT(endpoints.get(first) == &dynamicReceiver);
+	ASSERT(endpoints.getPriority(first) == TaskPriority::DefaultPromiseEndpoint);
+
+	UID second(0x223456789abcdef0, 0xfedcba9800000000);
+	endpoints.insert(&dynamicReceiver, second, TaskPriority::DefaultEndpoint);
+	ASSERT(uint32_t(second.second()) == uint32_t(count + 1));
+	endpoints.remove(first, &replacementReceiver);
+	ASSERT(endpoints.get(first) == &dynamicReceiver);
+	endpoints.remove(first, &dynamicReceiver);
+
+	UID replacement(0x323456789abcdef0, 0x7654321000000000);
+	endpoints.insert(&replacementReceiver, replacement, TaskPriority::DefaultEndpoint);
+	ASSERT(replacement == UID(0x323456789abcdef0, 0x7654321000000000 | uint32_t(count)));
+	ASSERT(endpoints.get(first) == nullptr);
+	ASSERT(endpoints.get(replacement) == &replacementReceiver);
+
+	const auto lastReserved = Endpoint::wellKnownToken(count - 1);
+	endpoints.remove(lastReserved, &reservedReceiver);
+	UID afterReservedRemoval(0x423456789abcdef0, 0x7654321000000000);
+	endpoints.insert(&dynamicReceiver, afterReservedRemoval, TaskPriority::DefaultEndpoint);
+	ASSERT(uint32_t(afterReservedRemoval.second()) == uint32_t(count + 2));
+	endpoints.insertWellKnown(&replacementReceiver, lastReserved, TaskPriority::DefaultEndpoint);
+	ASSERT(endpoints.get(lastReserved) == &replacementReceiver);
+	for (int index = 0; index < count - 1; ++index) {
+		ASSERT(endpoints.get(Endpoint::wellKnownToken(index)) == &reservedReceiver);
+	}
+}
+
+} // namespace
+
+TEST_CASE("/fdbrpc/FlowTransport/WellKnownEndpointReservations") {
+	static_assert(WLTOKEN_ENDPOINT_NOT_FOUND == 0);
+	static_assert(WLTOKEN_PING_PACKET == 1);
+	static_assert(WLTOKEN_UNAUTHORIZED_ENDPOINT == 2);
+	static_assert(WLTOKEN_FIRST_AVAILABLE == 3);
+	testWellKnownEndpointReservation(WLTOKEN_FIRST_AVAILABLE);
+	testWellKnownEndpointReservation(WLTOKEN_FIRST_AVAILABLE + 4);
+	testWellKnownEndpointReservation(129);
+	return Void();
 }
 
 struct EndpointNotFoundReceiver final : NetworkMessageReceiver {

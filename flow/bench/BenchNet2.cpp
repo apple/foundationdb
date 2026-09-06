@@ -1,8 +1,7 @@
 /*
  * BenchNet2.cpp
  *
- * C++20 coroutine versions of the ACTOR benchmarks in BenchNet2.actor.cpp.
- * Used to compare coroutine vs ACTOR performance for delay, yield, and net2 patterns.
+ * C++20 coroutine benchmarks for delay, yield, and net2 patterns.
  *
  * This source file is part of the FoundationDB open source project
  *

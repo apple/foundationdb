@@ -38,8 +38,14 @@
 
 class IConnection;
 
-// WL: Well-known
-enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_UNAUTHORIZED_ENDPOINT, WLTOKEN_FIRST_AVAILABLE };
+// Applications own IDs starting at WLTOKEN_FIRST_AVAILABLE and reserve their
+// exclusive upper bound when creating a transport.
+enum {
+	WLTOKEN_ENDPOINT_NOT_FOUND = 0,
+	WLTOKEN_PING_PACKET = 1,
+	WLTOKEN_UNAUTHORIZED_ENDPOINT = 2,
+	WLTOKEN_FIRST_AVAILABLE = 3
+};
 
 class Endpoint {
 public:

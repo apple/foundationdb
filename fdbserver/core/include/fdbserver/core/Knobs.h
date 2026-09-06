@@ -72,6 +72,7 @@ public:
 	int DESIRED_UPDATE_BYTES;
 	double UPDATE_DELAY;
 	int MAXIMUM_PEEK_BYTES;
+	int NATIVE_CDC_BATCH_TARGET_BYTES; // Soft proxy/TLog target; nonpositive values use a one-byte target.
 	int64_t CDC_PROXY_CONSUME_REPLY_BYTES;
 	int64_t CDC_PROXY_BUFFER_BYTES;
 	double CDC_PROXY_CONSUME_POLL_TIMEOUT;
@@ -331,6 +332,10 @@ public:
 	double TSS_RECRUITMENT_TIMEOUT;
 	double TSS_DD_CHECK_INTERVAL;
 	double DATA_DISTRIBUTION_LOGGING_INTERVAL;
+	// Cadence of DDServerEligibility. Coarse because it gauges conditions that persist for hours. A new
+	// team collection emits immediately, so distributor restarts are captured at any value. Lower it
+	// while watching a migration.
+	double DD_SERVER_ELIGIBILITY_LOGGING_INTERVAL;
 	double DD_ENABLED_CHECK_DELAY;
 	double DD_STALL_CHECK_DELAY;
 	double DD_LOW_BANDWIDTH_DELAY;
@@ -908,8 +913,8 @@ public:
 	double CC_RECOVERY_INIT_REQ_TIMEOUT; // Base timeout (seconds) for transaction system initialization during
 	                                     // recovery. Only applies to initializing_transaction_servers phase.
 	double CC_RECOVERY_INIT_REQ_GROWTH_FACTOR; // Base of the exponential backoff calculation. The timeout is calculated
-	                                           // as: base_timeout * (growth_factor ^ unfinished_recoveries). Must be >
-	                                           // 1 and <= 10 to prevent overflow.
+	                                           // as: base_timeout * (growth_factor ^ (unfinished_recoveries - 1)).
+	                                           // Growth factor must be > 1 and <= 10 to prevent overflow.
 	double CC_RECOVERY_INIT_REQ_MAX_TIMEOUT; // Maximum timeout (seconds) for transaction system initialization. Only
 	                                         // applies to initializing_transaction_servers phase.
 	int CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES; // Maximum unfinished recoveries after which transaction system

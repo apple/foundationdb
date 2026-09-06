@@ -195,6 +195,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( CHANGE_FEED_CACHE_LIMIT_BYTES,        500000 ); if( randomize && buggify() ) CHANGE_FEED_CACHE_LIMIT_BYTES = 50000;
 	init( ENABLE_NATIVE_CDC,                     false ); if( randomize && buggify() ) ENABLE_NATIVE_CDC = true;
 	init( NATIVE_CDC_TAG_COUNT,                    256 ); if( randomize && buggify() ) NATIVE_CDC_TAG_COUNT = 2;
+	init( NATIVE_CDC_STATUS_TIMEOUT,               2.0 );
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && buggify() ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && buggify() ) GRV_BATCH_TIMEOUT = 0.1;

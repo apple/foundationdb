@@ -45,7 +45,7 @@ set(OPEN_FOR_IDE
     CACHE BOOL "Open this in an IDE (won't compile/link)")
 set(AUTO_DISCOVER_UNIT_TESTS
     OFF
-    CACHE BOOL "Automatically discover unit-tests")
+    CACHE BOOL "Deprecated: use ENABLE_UNIT_TESTS for per-library CTest unit suites")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   if(OPEN_FOR_IDE)
@@ -289,6 +289,8 @@ endif()
 set(SANITIZER_OPTIONS
   "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions;LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/lsan.suppressions"
   CACHE STRING "Environment variables setting sanitizer options")
+
+include(AddFdbUnitTest)
 
 include(CompileBoost)
 include(GetFmt)
