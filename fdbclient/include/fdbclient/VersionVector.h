@@ -34,9 +34,6 @@ static const int InvalidEncodedSize = 0;
 struct VersionVector {
 	constexpr static FileIdentifier file_identifier = 5253554;
 	friend struct serializable_traits<VersionVector>;
-	friend struct dynamic_size_traits<VersionVector>;
-
-private:
 	boost::container::flat_map<Tag, Version> versions; // An ordered map. (Note:
 	                                                   // changing this to an unordered
 	                                                   // map will break the
@@ -45,7 +42,6 @@ private:
 	                    // there may or may not be a corresponding entry for this
 	                    // version in the "versions" map.)
 
-public:
 	VersionVector() : maxVersion(invalidVersion), cachedEncodedSize(InvalidEncodedSize) {}
 	explicit VersionVector(Version version) : maxVersion(version), cachedEncodedSize(InvalidEncodedSize) {}
 
@@ -58,7 +54,6 @@ private:
 	}
 
 	inline void invalidateCachedEncodedSize() { cachedEncodedSize = InvalidEncodedSize; }
-	void setMaxVersion(Version version) { maxVersion = version; }
 
 	// Encoded version vector size. Introduced to help speed up serialization.
 	// @note This encoded size is not meant to be kept in sync with the updates
@@ -69,6 +64,8 @@ private:
 
 public:
 	Version getMaxVersion() const { return maxVersion; }
+
+	void setMaxVersion(Version version) { maxVersion = version; }
 
 	int size() const { return versions.size(); }
 

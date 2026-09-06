@@ -50,7 +50,7 @@ json_spirit::mValue DDConfiguration::toJSON(RangeConfigMapSnapshot const& config
 
 	doc["numConfiguredRanges"] = configuredRanges;
 	doc["numDefaultRanges"] = defaultRanges;
-	doc["numBoundaries"] = (int)config.boundaryCount();
+	doc["numBoundaries"] = (int)config.map.size();
 
 	return doc;
 }
