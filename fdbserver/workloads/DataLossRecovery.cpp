@@ -56,28 +56,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	// propagated and the test fails exactly as it did before.
 	static constexpr double READ_RETRY_DEADLINE = 300.0;
 
-	// The setup move below can also fail for reasons that mean "that move did not happen, issue it
-	// again" rather than "the cluster is broken". FDB's own data distributor treats exactly this set as
-	// normal and simply reissues the relocation -- see normalDDQueueErrors() in
-	// DataDistribution.actor.cpp, and the matching suppression in DDRelocationQueue.actor.cpp. None of
-	// them are retryable transaction errors, so tr.onError() would rethrow and kill the workload during
-	// start(). Reissue the move instead, at most this many times, after which the error propagates so a
-	// cluster that genuinely cannot move a shard is still reported. This is a bounded count and not a
-	// wall-clock budget because one moveKeys() call can spend minutes inside finishMoveKeys()
-	// exhausting FINISH_MOVE_KEYS_MAX_RETRIES, which blows any sane deadline before the first reissue.
-	static constexpr int MOVE_MAX_REISSUES = 3;
-
-	static bool retryableDataMoveError(const Error& e) {
-		switch (e.code()) {
-		case error_code_finish_move_keys_too_many_retries:
-		case error_code_data_move_cancelled:
-		case error_code_data_move_dest_team_not_found:
-			return true;
-		default:
-			return false;
-		}
-	}
-
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	const bool enabled;

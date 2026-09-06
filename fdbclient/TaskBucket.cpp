@@ -239,7 +239,7 @@ public:
 		Key taskUID = t.getString(0);
 		Subspace taskAvailableSpace = availableSpace.get(taskUID);
 
-		Reference<Task> task(new Task());
+		auto task = makeReference<Task>();
 		task->key = taskUID;
 
 		RangeResult values = co_await tr->getRange(taskAvailableSpace.range(), CLIENT_KNOBS->TOO_MANY);
@@ -311,7 +311,7 @@ public:
 
 	static Future<bool> taskVerify(Reference<TaskBucket> tb, Database cx, Reference<Task> task) {
 		while (true) {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 			Error err;
 			try {
 				bool verified = co_await taskVerify(tb, tr, task);
@@ -353,7 +353,7 @@ public:
 	}
 
 	static Future<Void> extendTimeoutRepeatedly(Database cx, Reference<TaskBucket> taskBucket, Reference<Task> task) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		double start = now();
 		Version versionNow = co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			taskBucket->setOptions(tr);
@@ -417,7 +417,7 @@ public:
 
 				if (verifyTask) {
 					while (true) {
-						Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+						auto tr = makeReference<ReadYourWritesTransaction>(cx);
 						taskBucket->setOptions(tr);
 						Error innerErr;
 						try {
@@ -675,7 +675,7 @@ public:
 	}
 
 	static Future<bool> checkActive(Database cx, Reference<TaskBucket> taskBucket) {
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Optional<Value> startingValue;
 
 		while (true) {
@@ -1177,7 +1177,7 @@ public:
 		std::vector<Future<Void>> actions;
 
 		if (!values.empty()) {
-			Reference<Task> task(new Task());
+			auto task = makeReference<Task>();
 			Key lastTaskID;
 			for (auto& s : values) {
 				Tuple t = taskFuture->callbacks.unpack(s.key);

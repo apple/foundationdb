@@ -724,8 +724,8 @@ static Future<Void> recruitRangePartitionedBackupWorkers(Reference<ClusterRecove
 	co_await delay(SERVER_KNOBS->SECONDS_BEFORE_RECRUIT_BACKUP_WORKER);
 
 	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
-	Reference<BackupProgress> backupProgress(
-	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochRangePartitionedBackupTagsInfo()));
+	auto backupProgress =
+	    makeReference<BackupProgress>(self->dbgid, self->logSystem->getOldEpochRangePartitionedBackupTagsInfo());
 	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	std::vector<Future<InitializeRangePartitionedBackupReply>> initializationReplies;
 
@@ -813,8 +813,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 	co_await delay(SERVER_KNOBS->SECONDS_BEFORE_RECRUIT_BACKUP_WORKER);
 
 	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
-	Reference<BackupProgress> backupProgress(
-	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochLogRouterTagsInfo()));
+	auto backupProgress = makeReference<BackupProgress>(self->dbgid, self->logSystem->getOldEpochLogRouterTagsInfo());
 	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	std::vector<Future<InitializeBackupReply>> initializationReplies;
 

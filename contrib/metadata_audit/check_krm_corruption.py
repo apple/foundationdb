@@ -27,7 +27,7 @@ WORKFLOW FOR METADATA CORRUPTION DIAGNOSIS AND REPAIR:
 
 This script detects:
 1. Adjacent KRM entries with the same value (should be coalesced)
-   - Triggers ASSERT at KeyRangeMap.actor.cpp:297 / MoveKeys.actor.cpp:158
+   - Violates coalescing checks in fdbclient/KeyRangeMap.cpp:302 and fdbserver/core/MoveKeys.cpp:198
 2. Entries pointing to servers not in serverList (dead server references)
 3. wrong_shard_server scenario (THE "DD STUCK" PROBLEM):
    - keyServers says server owns a shard
@@ -2320,7 +2320,7 @@ def check_key_servers(tr, live_servers, key_prefix=None, limit=100000):
     Returns dict with issues found.
 
     Checks for issues that would trigger DD asserts:
-    - ASSERT(src.size()) - empty source servers
+    - ASSERT(!src.empty()) - empty source servers
     - ASSERT(servers.size() > 0) - no servers for range
     - ASSERT_GT(keyServers.size(), 0) - keyServers empty
     - KRM uncoalesced assertion - adjacent entries with same value
@@ -2329,7 +2329,7 @@ def check_key_servers(tr, live_servers, key_prefix=None, limit=100000):
         'uncoalesced': [],      # Adjacent entries with same value (KRM assertion)
         'dead_servers': [],      # References to servers not in serverList
         'decode_errors': [],     # Values that couldn't be decoded
-        'empty_sources': [],     # Entries with no source servers (ASSERT(src.size()))
+        'empty_sources': [],     # Entries with no source servers (ASSERT(!src.empty()))
         'keyservers_empty': False,  # keyServers has no entries (ASSERT_GT)
         'coverage_gaps': [],    # Gaps in key range coverage
         # Shard statistics
@@ -4942,7 +4942,7 @@ def main():
 
         if ks_issues['uncoalesced']:
             print(f"\n  CRITICAL: {len(ks_issues['uncoalesced'])} uncoalesced adjacent entries!")
-            print(f"            (This triggers ASSERT at KeyRangeMap.actor.cpp:297)")
+            print("            (This violates the coalescing check in fdbclient/KeyRangeMap.cpp:302)")
             total_issues += len(ks_issues['uncoalesced'])
             for issue in ks_issues['uncoalesced'][:10]:
                 print(f"    - keys: {issue['key1'][:30]!r}... -> {issue['key2'][:30]!r}...")
@@ -4971,14 +4971,14 @@ def main():
 
         if ks_issues['empty_sources']:
             print(f"\n  CRITICAL: {len(ks_issues['empty_sources'])} entries with no source servers")
-            print(f"            (This triggers ASSERT(src.size()) in DD - DDTxnProcessor.actor.cpp:72)")
+            print("            (This triggers ASSERT(!src.empty()) in fdbserver/datadistributor/DDTxnProcessor.cpp:93)")
             total_issues += len(ks_issues['empty_sources'])
             for issue in ks_issues['empty_sources'][:5]:
                 print(f"    - key: {issue['key'][:40]!r}...")
             if len(ks_issues['empty_sources']) > 5:
                 print(f"    ... and {len(ks_issues['empty_sources']) - 5} more")
         else:
-            print("  No empty source servers (ASSERT(src.size()) OK - DDTxnProcessor.actor.cpp:72)")
+            print("  No empty source servers (ASSERT(!src.empty()) OK - DDTxnProcessor.cpp:93)")
 
         if ks_issues.get('keyservers_empty'):
             print(f"\n  CRITICAL: keyServers is completely empty!")

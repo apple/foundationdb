@@ -2874,7 +2874,7 @@ Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicatedRegi
 Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> readStorageWiggleMetrics(
     Database cx,
     bool use_system_priority) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	Optional<StorageWiggleMetrics> primaryV;
 	Optional<StorageWiggleMetrics> remoteV;
 	StorageWiggleData wiggleState;
