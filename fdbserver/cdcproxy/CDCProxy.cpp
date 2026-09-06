@@ -2286,6 +2286,7 @@ class CDCPrefetchTestCursor final : public IReplayPeekCursor, public ReferenceCo
 	bool done = false;
 	bool containsMutation;
 	int fetches = 0;
+	Promise<Void> fetchStarted;
 
 public:
 	explicit CDCPrefetchTestCursor(Future<Void> ready, bool containsMutation = true, Version version = 100)
@@ -2295,6 +2296,7 @@ public:
 		payload = writer.toValue();
 	}
 	int fetchCount() const { return fetches; }
+	Future<Void> onFetchStarted() { return fetchStarted.getFuture(); }
 	void setProtocolVersion(ProtocolVersion version) override {
 		input = ArenaReader(payload.arena(), payload, AssumeVersion(version));
 	}
@@ -2310,6 +2312,9 @@ public:
 	}
 	Future<Void> getMore(TaskPriority taskID) override {
 		++fetches;
+		if (fetchStarted.canBeSet()) {
+			fetchStarted.send(Void());
+		}
 		co_await ready;
 		fetched = true;
 		if (!containsMutation) {
@@ -2372,8 +2377,10 @@ public:
 		}
 		Promise<Void> ready;
 		auto cursor = makeReference<CDCPrefetchTestCursor>(ready.getFuture());
+		auto fetchStarted = cursor->onFetchStarted();
 		auto work = test.proxy.bufferTagCursor(test.tag, 100, cursor, Never(), Prefetch::True);
-		co_await delay(0);
+		auto start = co_await race(fetchStarted, work);
+		ASSERT_EQ(start.index(), 0);
 		ASSERT_EQ(cursor->fetchCount(), 1);
 		ASSERT(stream->readAhead.claimedBy(test.tag.getPtr()));
 		if (release) {
