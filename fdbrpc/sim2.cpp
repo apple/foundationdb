@@ -371,7 +371,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		rollRandomClose();
 
 		int64_t avail = receivedBytes.get() - readBytes.get(); // SOMEDAY: random?
-		if (avail == 0 && incomingClosed.get()) {
+		if (avail == 0 && incomingClosed) {
 			throw connection_failed();
 		}
 		int toRead = std::min<int64_t>(end - begin, avail);
@@ -445,7 +445,7 @@ private:
 	Future<Void> leakedConnectionTracker;
 	// The close grace and incoming EOF are one-way latches.
 	AsyncVar<bool> stopReceive;
-	AsyncVar<bool> incomingClosed;
+	bool incomingClosed;
 	// Declared after the state they use so destruction cancels these actors first.
 	Future<Void> stopReceiveTask;
 	Future<Void> pipes;
@@ -500,9 +500,9 @@ private:
 				}
 				// Bytes already sent remain in recvBuf even if the peer process has exited.
 				auto keepAlive = Reference<Sim2Conn>::addRef(self);
-				// Make the final bytes readable before waking a reader with the close error.
-				self->receivedBytes.set(self->sentBytes.get());
-				self->incomingClosed.set(true);
+				self->incomingClosed = true;
+				// Publish the final byte count before waking a reader, even if the count did not change.
+				self->receivedBytes.setUnconditional(self->sentBytes.get());
 				co_return;
 			}
 			if (self->sentBytes.get() != self->receivedBytes.get())
@@ -561,14 +561,14 @@ private:
 					ASSERT(g_simulator->getCurrentProcess() == self->process);
 					co_return;
 				}
-				if (self->incomingClosed.get()) {
+				if (self->incomingClosed) {
 					CODE_PROBE(true,
 					           "Simulated reader observed graceful peer close",
 					           probe::context::sim2,
 					           probe::assert::simOnly);
 					throw connection_failed();
 				}
-				co_await (self->receivedBytes.onChange() || self->incomingClosed.onChange());
+				co_await self->receivedBytes.onChange();
 				self->rollRandomClose();
 			}
 		} catch (Error& e) {
@@ -783,6 +783,35 @@ TEST_CASE("Lfdbrpc/Sim2Conn/closeWithInFlightBytesAndDeadPeer") {
 		ASSERT_EQ(e.code(), error_code_connection_failed);
 	}
 	receiverConn->close();
+}
+
+static Future<Void> readAndDropOnPeerClose(Reference<Sim2Conn> conn) {
+	try {
+		co_await conn->onReadable();
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	conn->close();
+}
+
+TEST_CASE("Lfdbrpc/Sim2Conn/readerDropsLastReferenceOnPeerClose") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	auto process = g_simulator->getCurrentProcess();
+	auto senderConn = makeReference<Sim2Conn>(process);
+	auto receiverConn = makeReference<Sim2Conn>(process);
+	senderConn->connect(receiverConn, process->address);
+	receiverConn->connect(senderConn, process->address);
+	senderConn->stableConnection = receiverConn->stableConnection = true;
+
+	Future<Void> reader = readAndDropOnPeerClose(receiverConn);
+	receiverConn.clear();
+	senderConn->close();
+	senderConn.clear();
+	co_await timeoutError(reader, 3.0);
 }
 
 #include <fcntl.h>
