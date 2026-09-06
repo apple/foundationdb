@@ -114,7 +114,6 @@ Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
 	co_return manifestMetadata;
 }
 
-
 // Return true if generated the byte sampling file. Otherwise, return false.
 // TODO(BulkDump): directly read from special key space.
 Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // input file
