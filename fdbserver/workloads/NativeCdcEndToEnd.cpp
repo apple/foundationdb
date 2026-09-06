@@ -30,6 +30,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
+#include "NativeCdcInternal.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
@@ -69,6 +70,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	int rounds;
 	int assignmentPublicationChecks;
 	bool testProxyReplacement;
+	bool testProxyRebalance;
+	bool testProxyRebalanceAutomatic;
 	bool testTagOwnership;
 	bool injectUndeliveredProxyHalt;
 	bool testMemoryBound;
@@ -232,6 +235,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	Future<Void> addStream(Database cx) { return addStream(cx, randomOverlappingRange()); }
 
 	Future<Void> initializeStreams(Database cx) {
+		if (testProxyRebalance || testProxyRebalanceAutomatic) {
+			for (int i = 0; i < initialStreamCount; ++i) {
+				co_await addStream(cx, KeyRange(KeyRangeRef(keyForIndex(0), keyForIndex(keyCount))));
+			}
+			co_return;
+		}
 		for (int i = 0; i < initialStreamCount; ++i) {
 			co_await addStream(cx);
 		}
@@ -566,6 +575,239 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Version committed = co_await writeValue(cx, key, value);
 		co_await consumeThroughValue(consumer, committed, key, value);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+	}
+
+	Future<Void> validateProxyRebalance(Database cx) {
+		ASSERT_EQ(streams.size(), 3);
+		const CDCStreamId firstId = streams[0].consumer->position().streamId;
+		const CDCStreamId otherTagId = streams[1].consumer->position().streamId;
+		const CDCStreamId sharedTagId = streams[2].consumer->position().streamId;
+		const auto proxies = cx->clientInfo->get().cdcProxies;
+		ASSERT_EQ(proxies.size(), 2);
+		const NativeCdcStatus initial = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+		ASSERT(initial.metadataComplete);
+		ASSERT_EQ(initial.tagCount, 2);
+		ASSERT_EQ(initial.streams.size(), 3);
+		const auto findStream = [](NativeCdcStatus const& status, CDCStreamId id) -> NativeCdcStreamStatus const& {
+			const auto stream = std::find_if(status.streams.begin(), status.streams.end(), [&](auto const& candidate) {
+				return candidate.info.streamId == id;
+			});
+			ASSERT(stream != status.streams.end());
+			return *stream;
+		};
+		const auto& first = findStream(initial, firstId);
+		const auto& otherTag = findStream(initial, otherTagId);
+		const auto& shared = findStream(initial, sharedTagId);
+		ASSERT_EQ(first.tags.size(), 1);
+		ASSERT_EQ(otherTag.tags.size(), 1);
+		ASSERT_EQ(shared.tags.size(), 1);
+		const Tag tag = first.tags.front();
+		ASSERT_EQ(shared.tags.front(), tag);
+		ASSERT_NE(otherTag.tags.front(), tag);
+		co_await checkTagOwner(cx, tag, firstId);
+		co_await checkTagOwner(cx, otherTag.tags.front(), otherTagId);
+
+		const CDCProxyInterface source = co_await timeoutError(waitForAssignedProxy(cx, firstId), operationTimeout);
+		const CDCProxyInterface target = proxies[proxies.front().id() == source.id() ? 1 : 0];
+		ASSERT_NE(source.id(), target.id());
+		for (const auto& stream : initial.streams) {
+			ASSERT(stream.owner.present());
+			ASSERT_EQ(stream.owner.get(), source.id());
+			ASSERT(stream.ownerPublished);
+		}
+
+		const Key key = keyForIndex(keyCount / 2);
+		const Value beforeMove = "native-cdc-rebalance-before"_sr;
+		const Version beforeVersion = co_await writeValue(cx, key, beforeMove);
+		co_await consumeThroughValue(streams[0].consumer, beforeVersion, key, beforeMove);
+		co_await consumeThroughValue(streams[1].consumer, beforeVersion, key, beforeMove);
+		const auto containsValue = [](CDCConsumeReply const& reply, Version version, KeyRef key, ValueRef value) {
+			return std::any_of(reply.mutations.begin(), reply.mutations.end(), [&](auto const& versioned) {
+				return versioned.version == version &&
+				       std::any_of(versioned.mutations.begin(), versioned.mutations.end(), [&](auto const& mutation) {
+					       return mutation.type == MutationRef::SetValue && mutation.param1 == key &&
+					              mutation.param2 == value;
+				       });
+			});
+		};
+		bool primed = false;
+		const double primeDeadline = now() + operationTimeout;
+		while (streams[2].consumer->position().lastConsumedVersion < beforeVersion) {
+			CDCConsumeReply reply = co_await timeoutError(streams[2].consumer->consume(), operationTimeout);
+			primed |= containsValue(reply, beforeVersion, key, beforeMove);
+			ASSERT_LT(now(), primeDeadline);
+		}
+		ASSERT(primed);
+		// Leave this stream unacknowledged so its old tag data must remain readable by the new owner.
+		Future<CDCConsumeReply> pending;
+		co_await timeoutError(startBlockedConsume(cx, firstId, streams[0].consumer, source, &pending),
+		                      operationTimeout);
+
+		std::vector<UID> availableProxies{ proxies[0].id(), proxies[1].id() };
+		ASSERT(co_await timeoutError(rebalanceNativeCdcProxyAssignments(cx, availableProxies), operationTimeout));
+		const CDCProxyInterface moved =
+		    co_await timeoutError(waitForAssignedProxy(cx, firstId, source.id()), operationTimeout);
+		ASSERT_EQ(moved.id(), target.id());
+		const ClientDBInfo& published = cx->clientInfo->get();
+		ASSERT_EQ(published.cdcProxies, proxies);
+		ASSERT_EQ(published.streamToCDCProxyId.at(firstId), target.id());
+		ASSERT_EQ(published.streamToCDCProxyId.at(sharedTagId), target.id());
+		ASSERT_EQ(published.streamToCDCProxyId.at(otherTagId), source.id());
+		const NativeCdcStatus afterMove = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+		ASSERT(afterMove.metadataComplete);
+		for (CDCStreamId id : { firstId, sharedTagId }) {
+			const auto& stream = findStream(afterMove, id);
+			ASSERT(stream.owner.present());
+			ASSERT_EQ(stream.owner.get(), target.id());
+			ASSERT(stream.ownerPublished);
+		}
+		const auto& untouched = findStream(afterMove, otherTagId);
+		ASSERT(untouched.owner.present());
+		ASSERT_EQ(untouched.owner.get(), source.id());
+		ASSERT(untouched.ownerPublished);
+		co_await checkTagOwner(cx, tag, firstId);
+		const auto blockingTag = std::find_if(
+		    afterMove.tags.begin(), afterMove.tags.end(), [&](auto const& state) { return state.tag == tag; });
+		ASSERT(blockingTag != afterMove.tags.end());
+		ASSERT_LE(blockingTag->safePopVersion, beforeVersion);
+		ASSERT(std::find(blockingTag->blockingStreams.begin(), blockingTag->blockingStreams.end(), sharedTagId) !=
+		       blockingTag->blockingStreams.end());
+		ASSERT_EQ(afterMove.proxies.size(), 2);
+		for (const auto& proxy : afterMove.proxies) {
+			ASSERT(proxy.sample.present());
+		}
+		ASSERT(!(co_await timeoutError(rebalanceNativeCdcProxyAssignments(cx, availableProxies), operationTimeout)));
+
+		const ErrorOr<Void> staleAck =
+		    co_await timeoutError(source.ack.tryGetReply(CDCAckRequest(firstId, beforeVersion)), operationTimeout);
+		ASSERT(!staleAck.present());
+		ASSERT_EQ(staleAck.getError().code(), error_code_wrong_shard_server);
+		bool replayed = false;
+		const double replayDeadline = now() + operationTimeout;
+		do {
+			ASSERT_LT(now(), replayDeadline);
+			CDCConsumeReply replay = co_await timeoutError(streams[2].consumer->consume(), replayDeadline - now());
+			replayed |= containsValue(replay, beforeVersion, key, beforeMove);
+		} while (streams[2].consumer->position().lastConsumedVersion < beforeVersion);
+		ASSERT(replayed);
+		co_await timeoutError(streams[2].consumer->acknowledge(), operationTimeout);
+		const NativeCdcStatus afterAck = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+		const auto advancedTag = std::find_if(
+		    afterAck.tags.begin(), afterAck.tags.end(), [&](auto const& state) { return state.tag == tag; });
+		ASSERT(advancedTag != afterAck.tags.end());
+		ASSERT_GT(advancedTag->safePopVersion, beforeVersion);
+
+		const Value afterMoveValue = "native-cdc-rebalance-after"_sr;
+		const Version afterVersion = co_await writeValue(cx, key, afterMoveValue);
+		bool pendingObserved = false;
+		const double deliveryDeadline = now() + operationTimeout;
+		while (!pendingObserved) {
+			CDCConsumeReply reply = co_await timeoutError(pending, operationTimeout);
+			pendingObserved = containsValue(reply, afterVersion, key, afterMoveValue);
+			co_await timeoutError(streams[0].consumer->acknowledge(), operationTimeout);
+			ASSERT_LT(now(), deliveryDeadline);
+			if (!pendingObserved) {
+				pending = streams[0].consumer->consume();
+			}
+		}
+		co_await consumeThroughValue(streams[1].consumer, afterVersion, key, afterMoveValue);
+		co_await consumeThroughValue(streams[2].consumer, afterVersion, key, afterMoveValue);
+		for (const auto& stream : streams) {
+			co_await timeoutError(removeNativeCdcStreamClient(cx, stream.name), operationTimeout);
+		}
+		streams.clear();
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+		CODE_PROBE(true, "Native CDC rebalances a shared tag across live proxies without losing delivery");
+	}
+
+	Future<Void> validateAutomaticProxyRebalance(Database cx) {
+		ASSERT_EQ(streams.size(), 3);
+		const CDCStreamId firstId = streams[0].consumer->position().streamId;
+		const CDCStreamId otherTagId = streams[1].consumer->position().streamId;
+		const CDCStreamId sharedTagId = streams[2].consumer->position().streamId;
+		const auto proxies = cx->clientInfo->get().cdcProxies;
+		ASSERT_EQ(proxies.size(), 2);
+		const NativeCdcStatus initial = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+		ASSERT(initial.metadataComplete);
+		ASSERT_EQ(initial.tagCount, 2);
+		ASSERT_EQ(initial.streams.size(), 3);
+		const auto findStream = [](NativeCdcStatus const& status, CDCStreamId id) -> NativeCdcStreamStatus const& {
+			const auto stream = std::find_if(status.streams.begin(), status.streams.end(), [&](auto const& candidate) {
+				return candidate.info.streamId == id;
+			});
+			ASSERT(stream != status.streams.end());
+			return *stream;
+		};
+		const auto& first = findStream(initial, firstId);
+		const auto& otherTag = findStream(initial, otherTagId);
+		const auto& shared = findStream(initial, sharedTagId);
+		ASSERT_EQ(first.tags.size(), 1);
+		ASSERT_EQ(otherTag.tags.size(), 1);
+		ASSERT_EQ(shared.tags.size(), 1);
+		ASSERT_EQ(first.tags.front(), shared.tags.front());
+		ASSERT_NE(first.tags.front(), otherTag.tags.front());
+		for (const auto& stream : initial.streams) {
+			ASSERT(stream.owner.present());
+			ASSERT(std::any_of(
+			    proxies.begin(), proxies.end(), [&](auto const& proxy) { return proxy.id() == stream.owner.get(); }));
+		}
+		ASSERT_EQ(first.owner.get(), shared.owner.get());
+
+		UID groupOwner;
+		UID otherOwner;
+		const double deadline = now() + operationTimeout;
+		while (true) {
+			Future<Void> changed = cx->clientInfo->onChange();
+			const ClientDBInfo& published = cx->clientInfo->get();
+			ASSERT_EQ(published.cdcProxies, proxies);
+			const auto group = published.streamToCDCProxyId.find(firstId);
+			const auto sharedGroup = published.streamToCDCProxyId.find(sharedTagId);
+			const auto other = published.streamToCDCProxyId.find(otherTagId);
+			const auto isLiveProxy = [&](UID id) {
+				return std::any_of(proxies.begin(), proxies.end(), [&](auto const& proxy) { return proxy.id() == id; });
+			};
+			if (group != published.streamToCDCProxyId.end() && sharedGroup != published.streamToCDCProxyId.end() &&
+			    other != published.streamToCDCProxyId.end() && group->second == sharedGroup->second &&
+			    group->second != other->second && isLiveProxy(group->second) && isLiveProxy(other->second)) {
+				groupOwner = group->second;
+				otherOwner = other->second;
+				break;
+			}
+			ASSERT_LT(now(), deadline);
+			co_await timeoutError(changed, deadline - now());
+		}
+		if (first.owner.get() == otherTag.owner.get()) {
+			ASSERT_NE(groupOwner, first.owner.get());
+			ASSERT_EQ(otherOwner, otherTag.owner.get());
+		} else {
+			ASSERT_EQ(groupOwner, first.owner.get());
+			ASSERT_EQ(otherOwner, otherTag.owner.get());
+		}
+		const NativeCdcStatus afterMove = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+		ASSERT(afterMove.metadataComplete);
+		ASSERT_EQ(afterMove.streams.size(), 3);
+		for (const auto& stream : afterMove.streams) {
+			ASSERT(stream.owner.present());
+			ASSERT_EQ(stream.owner.get(), stream.info.streamId == otherTagId ? otherOwner : groupOwner);
+			ASSERT(stream.ownerPublished);
+		}
+		co_await checkTagOwner(cx, first.tags.front(), firstId);
+		co_await checkTagOwner(cx, otherTag.tags.front(), otherTagId);
+		ASSERT_EQ(afterMove.proxies.size(), 2);
+		for (const auto& proxy : afterMove.proxies) {
+			ASSERT(proxy.sample.present());
+		}
+
+		const Key key = keyForIndex(keyCount / 2);
+		const Value value = "native-cdc-automatic-rebalance"_sr;
+		const Version committed = co_await writeValue(cx, key, value);
+		for (const auto& stream : streams) {
+			co_await consumeThroughValue(stream.consumer, committed, key, value);
+			co_await timeoutError(removeNativeCdcStreamClient(cx, stream.name), operationTimeout);
+		}
+		streams.clear();
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+		CODE_PROBE(true, "Native CDC controller rebalances a whole tag without proxy replacement");
 	}
 
 	Future<Void> checkTagOwner(Database cx, Tag tag, Optional<CDCStreamId> expected) {
@@ -1866,6 +2108,14 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> run(Database cx) {
+		if (testProxyRebalanceAutomatic) {
+			co_await timeoutError(validateAutomaticProxyRebalance(cx), operationTimeout);
+			co_return;
+		}
+		if (testProxyRebalance) {
+			co_await timeoutError(validateProxyRebalance(cx), operationTimeout);
+			co_return;
+		}
 		if (testRetiredSharedTagSnapshot) {
 			co_await validateRetiredSharedTagSnapshot(cx);
 			co_return;
@@ -1961,6 +2211,8 @@ public:
 		rounds = getOption(options, "rounds"_sr, 30);
 		assignmentPublicationChecks = getOption(options, "assignmentPublicationChecks"_sr, 0);
 		testProxyReplacement = getOption(options, "testProxyReplacement"_sr, false);
+		testProxyRebalance = getOption(options, "testProxyRebalance"_sr, false);
+		testProxyRebalanceAutomatic = getOption(options, "testProxyRebalanceAutomatic"_sr, false);
 		testTagOwnership = getOption(options, "testTagOwnership"_sr, false);
 		injectUndeliveredProxyHalt = getOption(options, "injectUndeliveredProxyHalt"_sr, false);
 		testMemoryBound = getOption(options, "testMemoryBound"_sr, false);
@@ -1984,6 +2236,8 @@ public:
 		ASSERT_GE(writesPerRound, 1);
 		ASSERT_LE(writesPerRound, keyCount);
 		ASSERT_GE(assignmentPublicationChecks, 0);
+		ASSERT(!(testProxyRebalance && testProxyRebalanceAutomatic));
+		ASSERT(!(testProxyRebalance || testProxyRebalanceAutomatic) || initialStreamCount == 3);
 		ASSERT(!injectUndeliveredProxyHalt || testProxyReplacement);
 		ASSERT_GT(memoryTestValueBytes, 0);
 		ASSERT_GE(retentionValidationDelay, 0.0);

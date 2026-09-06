@@ -412,6 +412,34 @@ validation also rejects stale representatives left by older metadata writers.
 The allocator's stream-count scan remains necessary, and ownership discovery
 still scans global metadata when the representative is absent or invalid.
 
+### Balancing ownership between live CDC proxies
+
+`CDC_PROXY_REBALANCE_ENABLED` is disabled by default. When enabled, the cluster
+controller makes at most one live ownership move per
+`CDC_PROXY_REBALANCE_INTERVAL` (60 seconds by default) while fully recovered.
+It groups active streams by their current CDC tag and moves a complete group
+only when that strictly reduces the stream-count difference between two
+published proxies. A group with mixed owners is never moved. The controller
+skips a pass when the metadata exceeds 512 active streams or assignments, or
+2,048 tag-history rows, or one MiB in any of those three ranges. Each pass has
+a five-second transaction timeout and at most three attempts. It skips
+individual groups larger than 64 streams or
+with an in-progress versionstamped tag transition. These are conservative
+balancer limits, not CDC registration or cluster capacity limits.
+
+The move validates durable streams, tags, and owners in one transaction, changes
+every member's assignment, and signals the existing ownership monitor. Its
+publication wakes the old proxy to drop buffered state and the new proxy to
+reload from durable acknowledgement watermarks. Clients may replay delivered
+but unacknowledged mutations, as with proxy replacement. Tag routing, stream
+identities, acknowledgement, and safe-pop metadata do not change. Disabling the
+balancer or CDC admission stops future moves without requiring a stream drain.
+
+This policy balances the number of streams, not producer bytes, filtering cost,
+or consumer lag. One hot stream cannot be divided among proxies by moving its
+whole tag group. Throughput-aware proxy placement needs measured load and a
+separate policy; the opt-in tag-retagging controller can inform a later version.
+
 ### Metadata lifecycle example
 
 Assume a client registers stream name `orders` for range

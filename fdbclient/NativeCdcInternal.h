@@ -22,6 +22,8 @@
 #define FDBCLIENT_NATIVECDCINTERNAL_H
 #pragma once
 
+#include <functional>
+
 #include "fdbclient/NativeCdc.h"
 
 // Durable metadata operations used by CDC server roles. Registration is
@@ -33,6 +35,12 @@ Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, 
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx);
 // Atomically moves any streams assigned to a failed proxy to its replacement.
 Future<Void> reassignNativeCdcStreams(Database cx, UID oldProxyId, UID newProxyId);
+// Moves at most one complete current-tag group between live proxies when doing so reduces stream-count skew.
+// Returns false if the metadata is incomplete, too large to scan safely, or already balanced.
+Future<bool> rebalanceNativeCdcProxyAssignments(
+    Database cx,
+    std::vector<UID> availableProxies,
+    std::function<bool()> stillEligible = [] { return true; });
 // Persists the exclusive unpopped watermark after consuming through a version.
 // knownAvailableThrough permits a consumer to acknowledge log data it has
 // already received before that version is visible at a transaction read version.

@@ -2479,6 +2479,54 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData* self) {
 	}
 }
 
+Future<Void> rebalanceCDCProxyAssignments(ClusterControllerData* self) {
+	while (true) {
+		co_await delay(std::max(1.0, SERVER_KNOBS->CDC_PROXY_REBALANCE_INTERVAL));
+		if (!SERVER_KNOBS->CDC_PROXY_REBALANCE_ENABLED || !self->db.recoveryData.isValid() ||
+		    self->db.serverInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED ||
+		    !self->db.clientInfo->get().nativeCdcEnabled) {
+			continue;
+		}
+		const uint64_t expectedRecoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
+		const std::vector<CDCProxyInterface>& published = self->db.clientInfo->get().cdcProxies;
+		if (published.size() < 2 || published.size() != self->db.cdcProxies.size()) {
+			continue;
+		}
+		std::vector<UID> available;
+		available.reserve(published.size());
+		for (const auto& proxy : published) {
+			if (!containsCDCProxy(self->db.cdcProxies, proxy.id())) {
+				available.clear();
+				break;
+			}
+			available.push_back(proxy.id());
+		}
+		if (available.size() < 2) {
+			continue;
+		}
+		try {
+			const std::vector<UID> expectedProxies = available;
+			auto stillEligible = [self, expectedRecoveryCount, expectedProxies] {
+				return SERVER_KNOBS->CDC_PROXY_REBALANCE_ENABLED && self->db.recoveryData.isValid() &&
+				       self->db.recoveryData->cstate.myDBState.recoveryCount == expectedRecoveryCount &&
+				       self->db.serverInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
+				       self->db.clientInfo->get().nativeCdcEnabled &&
+				       self->db.cdcProxies.size() == expectedProxies.size() &&
+				       std::all_of(expectedProxies.begin(), expectedProxies.end(), [self](UID proxyId) {
+					       return containsCDCProxy(self->db.cdcProxies, proxyId);
+				       });
+			};
+			co_await rebalanceNativeCdcProxyAssignments(self->db.db, std::move(available), std::move(stillEligible));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			// An ambiguous commit is reconciled by the assignment monitor; the next scheduled pass may try again.
+			TraceEvent(SevWarn, "CDCProxyRebalanceError", self->id).error(e);
+		}
+	}
+}
+
 Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
 	// do not change the cluster controller until all the processes have had a chance to register
 	co_await delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
@@ -3508,6 +3556,7 @@ Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorGlobalConfig(&self.db));
 	// These actors also drain durable CDC state when new stream registration is disabled.
 	self.addActor.send(monitorCDCProxyAssignments(&self));
+	self.addActor.send(rebalanceCDCProxyAssignments(&self));
 	self.addActor.send(monitorAndRecruitCDCProxies(&self));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));

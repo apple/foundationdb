@@ -10,7 +10,8 @@ target_sources(fdbserver_workloads_test PRIVATE ../MemoryTrackerTest.cpp ../Glob
 
 configure_fdbserver_common_includes(fdbserver_workloads)
 target_include_directories(fdbserver_workloads PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR})
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/fdbclient)
 target_link_libraries(fdbserver_workloads PRIVATE
   fdbserver_consistencyscan
   fdbserver_core
