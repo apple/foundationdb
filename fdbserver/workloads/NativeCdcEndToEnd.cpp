@@ -30,7 +30,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
-#include "NativeCdcInternal.h"
+#include "fdbserver/clustercontroller/NativeCdcProxyBalancer.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
@@ -644,7 +644,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		                      operationTimeout);
 
 		std::vector<UID> availableProxies{ proxies[0].id(), proxies[1].id() };
-		ASSERT(co_await timeoutError(rebalanceNativeCdcProxyAssignments(cx, availableProxies), operationTimeout));
+		ASSERT(co_await timeoutError(rebalanceNativeCdcProxyAssignments(cx, availableProxies, [] { return true; }),
+		                             operationTimeout));
 		const CDCProxyInterface moved =
 		    co_await timeoutError(waitForAssignedProxy(cx, firstId, source.id()), operationTimeout);
 		ASSERT_EQ(moved.id(), target.id());
@@ -676,7 +677,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		for (const auto& proxy : afterMove.proxies) {
 			ASSERT(proxy.sample.present());
 		}
-		ASSERT(!(co_await timeoutError(rebalanceNativeCdcProxyAssignments(cx, availableProxies), operationTimeout)));
+		ASSERT(!(co_await timeoutError(rebalanceNativeCdcProxyAssignments(cx, availableProxies, [] { return true; }),
+		                               operationTimeout)));
 
 		const ErrorOr<Void> staleAck =
 		    co_await timeoutError(source.ack.tryGetReply(CDCAckRequest(firstId, beforeVersion)), operationTimeout);

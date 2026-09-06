@@ -45,6 +45,7 @@
 #include "fdbserver/core/CoordinatedState.h"
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/clustercontroller/ClusterController.h"
+#include "fdbserver/clustercontroller/NativeCdcProxyBalancer.h"
 #include "ClusterController.h"
 #include "ClusterRecovery.h"
 #include "fdbserver/core/DataDistributorInterface.h"
