@@ -61,16 +61,47 @@ jobs:
           CHANGED=$(git diff --name-only --diff-filter=d origin/${{github.event.pull_request.base.ref}}...)
           printf "Files changed:\n%s\n" "$CHANGED"
           echo
+          AWS_TIDY_ARGS=()
+          if printf '%s\n' "$CHANGED" | grep -Eq '^fdbclient/S3BlobStore\.cpp$'; then
+            # Its compile command includes AWS headers. Fetch and configure the pinned SDK
+            # to generate those headers without compiling its unrelated libraries.
+            timeout 25m ninja -C build_output fdbclient/awssdk_project-prefix/src/awssdk_project-stamp/awssdk_project-download
+            timeout 5m cmake -S build_output/fdbclient/awssdk-src -B build_output/awssdk-tidy-config -G Ninja \
+              -DBUILD_SHARED_LIBS=OFF -DENABLE_TESTING=OFF -DBUILD_ONLY=core -DSIMPLE_INSTALL=ON \
+              -DBYO_CRYPTO=ON -DBUILD_CURL=OFF -DBUILD_ZLIB=OFF \
+              -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_CXX_FLAGS=-stdlib=libc++
+            AWS_TIDY_ARGS=(
+              --extra-arg="-I$PWD/build_output/fdbclient/awssdk-src/src/aws-cpp-sdk-core/include"
+              --extra-arg="-I$PWD/build_output/fdbclient/awssdk-src/crt/aws-crt-cpp/include"
+            )
+            for DIR in "$PWD"/build_output/fdbclient/awssdk-src/crt/aws-crt-cpp/crt/aws-*/include \
+                       "$PWD"/build_output/awssdk-tidy-config/crt/aws-crt-cpp/generated/include \
+                       "$PWD"/build_output/awssdk-tidy-config/crt/aws-crt-cpp/crt/aws-*/generated/include; do
+              if [[ -d "$DIR" ]]; then
+                AWS_TIDY_ARGS+=(--extra-arg="-I$DIR")
+              fi
+            done
+          fi
+          if printf '%s\n' "$CHANGED" | grep -Eq '^fdbserver/(core/RocksDBCheckpointUtils\.cpp|kvstore/(RocksDBLogForwarder\.(h|cpp)|ArtMutationBuffer\.h|KeyValueStoreRocksDB\.cpp|KeyValueStoreShardedRocksDB\.cpp))$'; then
+            # The external RocksDB source supplies headers used by these compile commands.
+            ROCKSDB_DOWNLOAD=fdbserver/rocksdb-prefix/src/rocksdb-stamp/rocksdb-download
+            if ninja -C build_output -t query "$ROCKSDB_DOWNLOAD" >/dev/null 2>&1; then
+              timeout 10m ninja -C build_output "$ROCKSDB_DOWNLOAD"
+            else
+              ninja -C build_output rocksdb  # system RocksDB configuration
+            fi
+          fi
           PASSED=true
 
-          while read FILE; do
-            if [[ $FILE == contrib/* ]]; then
-              continue  # skip contrib sources
-            fi
-            if [[ $FILE == flow/include/flow/CoroutinesImpl.h ]]; then
-              continue  # internal implementation header, included only from Coroutines.h
-            fi
-            # Keep vendored external dependencies as upstream snapshots.
+          while IFS= read -r FILE; do
+            case "$FILE" in
+              contrib/debug_determinism/debug_determinism.cpp|contrib/monitoring/actor_flamegraph.cpp|contrib/folly_memcpy/folly_memcpy.h|contrib/crc32/include/crc32/crc32_wrapper.h|contrib/serialize-check/src/SourceScanner.cpp)
+                ;; # FoundationDB-owned sources with a compile context below
+              contrib/*)
+                continue # upstream and separately built contrib projects
+                ;;
+            esac
+            # Keep upstream snapshots in their original compilation environments.
             case "$FILE" in
               fdbclient/include/fdbclient/ConvertUTF.h|fdbclient/include/fdbclient/SimpleIni.h|fdbclient/include/fdbclient/json_spirit/*)
                 continue
@@ -82,35 +113,101 @@ jobs:
                 continue
                 ;;
             esac
-            # These inputs are not parseable as standalone clang-tidy translation units in this workflow:
-            # the public C headers require C consumer setup and intentionally use C typedefs, the AWS and RocksDB
-            # compile commands refer to SDK headers that are not built here, and the Flow/RPC headers depend on
-            # include order from their real consumers.
+            # The public C headers require C consumer setup and intentionally use C typedefs.
             case "$FILE" in
               bindings/c/foundationdb/fdb_c.h|bindings/c/foundationdb/fdb_c_types.h)
                 continue
                 ;;
-              fdbclient/S3BlobStore.cpp|fdbserver/kvstore/RocksDBLogForwarder.h)
-                continue
-                ;;
-              fdbserver/kvstore/ArtMutationBuffer.h)
-                continue  # included inside VersionedBTree's class definition
-                ;;
-              fdbrpc/AsyncFileKAIO.h)
-                continue
-                ;;
-              fdbserver/core/RocksDBCheckpointUtils.cpp|fdbserver/kvstore/KeyValueStoreRocksDB.cpp|fdbserver/kvstore/KeyValueStoreShardedRocksDB.cpp)
-                continue
-                ;;
-              flow/include/flow/Coroutines.h|flow/include/flow/CoroutinesImpl.h|flow/include/flow/FlowThread.h)
-                continue
-                ;;
             esac
-            # only c++ source files
+            # C and C++ sources and headers
             if [[ $FILE =~ \.[ch](pp)?$ ]] ; then
               echo "Checking $FILE ..."
-              if ! clang-tidy -p build_output --warnings-as-errors='*' "$FILE"; then
-                PASSED=false
+              if [[ "$FILE" == contrib/serialize-check/src/SourceScanner.cpp ]]; then
+                # This standalone Clang tool is not in the root compile database.
+                BOOST_JSON_INCLUDE=
+                for DIR in /opt/boost_*/include /usr/include; do
+                  if [[ -f "$DIR/boost/json.hpp" ]]; then
+                    BOOST_JSON_INCLUDE=$DIR
+                    break
+                  fi
+                done
+                CLANG_LLVM_INCLUDE=
+                for CONFIG in llvm-config llvm-config-19 llvm-config-18 llvm-config-17; do
+                  if command -v "$CONFIG" >/dev/null 2>&1; then
+                    DIR=$("$CONFIG" --includedir)
+                    if [[ -f "$DIR/clang/Tooling/Tooling.h" && -f "$DIR/llvm/Support/CommandLine.h" ]]; then
+                      CLANG_LLVM_INCLUDE=$DIR
+                      break
+                    fi
+                  fi
+                done
+                if [[ -z "$CLANG_LLVM_INCLUDE" ]]; then
+                  for DIR in /usr/local/include /usr/include /usr/lib/llvm-*/include /opt/llvm*/include; do
+                    if [[ -f "$DIR/clang/Tooling/Tooling.h" && -f "$DIR/llvm/Support/CommandLine.h" ]]; then
+                      CLANG_LLVM_INCLUDE=$DIR
+                      break
+                    fi
+                  done
+                fi
+                if [[ -z "$BOOST_JSON_INCLUDE" || -z "$CLANG_LLVM_INCLUDE" ]]; then
+                  echo "Boost.JSON and Clang/LLVM development headers are required to check $FILE"
+                  PASSED=false
+                else
+                  SCANNER_ARGS=(-std=gnu++20 "-I$BOOST_JSON_INCLUDE" "-I$CLANG_LLVM_INCLUDE")
+                  if ! timeout 5m clang++ -fsyntax-only "${SCANNER_ARGS[@]}" "$FILE" ||
+                     ! timeout 5m clang-tidy --warnings-as-errors='*' "$FILE" -- "${SCANNER_ARGS[@]}"; then
+                    PASSED=false
+                  fi
+                fi
+                continue
+              fi
+              if [[ "$FILE" == contrib/crc32/include/crc32/crc32_wrapper.h ]]; then
+                # Its sole declaration is PowerPC-only; parse that branch as a header.
+                if ! clang-tidy --warnings-as-errors='*' "$FILE" -- \
+                    -x c++ -std=c++20 -D__powerpc64__ -Wno-pragma-once-outside-header; then
+                  PASSED=false
+                fi
+                continue
+              fi
+              # Some headers are fragments or rely on include order. Parse them from a real consuming TU
+              # while reporting only diagnostics in the changed header.
+              CONSUMER=$FILE
+              case "$FILE" in
+                flow/include/flow/Coroutines.h|flow/include/flow/CoroutinesImpl.h|flow/include/flow/FlowThread.h)
+                  CONSUMER=flow/ThreadHelper.cpp
+                  ;;
+                fdbrpc/AsyncFileKAIO.h)
+                  CONSUMER=fdbrpc/Net2FileSystem.cpp
+                  ;;
+                fdbserver/kvstore/ArtMutationBuffer.h)
+                  CONSUMER=fdbserver/kvstore/VersionedBTree.cpp
+                  ;;
+                fdbserver/kvstore/RocksDBLogForwarder.h)
+                  CONSUMER=fdbserver/kvstore/RocksDBLogForwarder.cpp
+                  ;;
+                contrib/folly_memcpy/folly_memcpy.h)
+                  CONSUMER=flow/flow.cpp
+                  ;;
+              esac
+              if [[ "$CONSUMER" != "$FILE" ]]; then
+                if ! python3 .github/scripts/check_tidy_compile_input.py \
+                    build_output/compile_commands.json "$PWD/$CONSUMER" "$PWD/$FILE"; then
+                  PASSED=false
+                  continue
+                fi
+                if ! clang-tidy -p build_output --warnings-as-errors='*' \
+                    --header-filter="^$PWD/$FILE$" \
+                    --line-filter="[{\"name\":\"$PWD/$FILE\",\"lines\":[[1,999999]]}]" "$CONSUMER"; then
+                  PASSED=false
+                fi
+              else
+                FILE_TIDY_ARGS=()
+                if [[ "$FILE" == fdbclient/S3BlobStore.cpp ]]; then
+                  FILE_TIDY_ARGS=("${AWS_TIDY_ARGS[@]}")
+                fi
+                if ! clang-tidy -p build_output --warnings-as-errors='*' "${FILE_TIDY_ARGS[@]}" "$FILE"; then
+                  PASSED=false
+                fi
               fi
               echo
             fi

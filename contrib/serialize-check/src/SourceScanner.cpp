@@ -153,8 +153,8 @@ class SerializableClassMatchCallback : public clang::ast_matchers::MatchFinder::
 	}
 
 public:
-	virtual void run(const clang::ast_matchers::MatchFinder::MatchResult& result) override {
-		const clang::CXXRecordDecl* classDecl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("serializableClass");
+	void run(const clang::ast_matchers::MatchFinder::MatchResult& result) override {
+		const auto* classDecl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("serializableClass");
 		if (classDecl == nullptr) {
 			return;
 		}
