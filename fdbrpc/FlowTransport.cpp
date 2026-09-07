@@ -25,7 +25,9 @@
 #include "flow/NetworkAddress.h"
 #include "flow/network.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -85,7 +87,7 @@ constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 
 // Leave room for the length, optional checksum, and next frame length in the receive buffer.
 static constexpr int packetFramingBytes(bool isTLS) {
-	return 2 * PACKET_LEN_WIDTH + (isTLS ? 0 : sizeof(XXH64_hash_t));
+	return 2 * PACKET_LEN_WIDTH + (isTLS ? 0 : static_cast<int>(sizeof(XXH64_hash_t)));
 }
 
 static int maxPacketPayloadSize(int64_t configuredLimit, bool isTLS) {
@@ -98,6 +100,8 @@ const uint64_t TOKEN_STREAM_FLAG = 1;
 
 FDB_BOOLEAN_PARAM(InReadSocket);
 FDB_BOOLEAN_PARAM(IsStableConnection);
+FDB_BOOLEAN_PARAM(Randomize);
+FDB_BOOLEAN_PARAM(IsSimulated);
 
 class EndpointMap : NonCopyable {
 public:
@@ -2256,6 +2260,68 @@ static ReliablePacket* sendPacket(TransportData* self,
 		peer->lastDataPacketSentTime = now();
 	}
 	return rp;
+}
+
+TEST_CASE("noSim/fdbrpc/FlowTransport/PacketLimitOnSend") {
+	FlowKnobs knobs(Randomize::False, IsSimulated::False);
+	knobs.PACKET_LIMIT = 256;
+	const FlowKnobs* previousKnobs = FLOW_KNOBS;
+	auto restoreKnobs = ScopeExit([previousKnobs]() { FLOW_KNOBS = previousKnobs; });
+	FLOW_KNOBS = &knobs;
+	TransportData transport(1, WLTOKEN_FIRST_AVAILABLE, nullptr);
+	NetworkAddress address(IPAddress(0x7f000001), 45000, true, false);
+	Endpoint endpoint(NetworkAddressList{ address, {} }, UID(1, 2));
+	Reference<Peer> peer = makeReference<Peer>(&transport, address);
+	sendPacket(&transport, peer, SerializeSource<StringRef>("ok"_sr), endpoint, false);
+	PacketBuffer* const tail = peer->unsent.getWriteBuffer();
+	uint32_t acceptedLength;
+	std::memcpy(&acceptedLength, tail->data(), sizeof(acceptedLength));
+	knobs.PACKET_LIMIT = acceptedLength;
+	sendPacket(&transport, peer, SerializeSource<StringRef>("ok"_sr), endpoint, false);
+	const int previousLength = tail->bytes_written;
+	const std::string previousBytes(reinterpret_cast<const char*>(tail->data()), previousLength);
+
+	knobs.PACKET_LIMIT = acceptedLength - 1;
+	bool boundaryRejected = false;
+	try {
+		sendPacket(&transport, peer, SerializeSource<StringRef>("ok"_sr), endpoint, true);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_platform_error);
+		boundaryRejected = true;
+	}
+	ASSERT(boundaryRejected);
+	ASSERT_EQ(tail->bytes_written, previousLength);
+
+	knobs.PACKET_LIMIT = 256;
+	const std::string oversized(std::size_t{ 32 } * 1024, 'x');
+	bool oversizedRejected = false;
+	try {
+		sendPacket(&transport, peer, SerializeSource<StringRef>(StringRef(oversized)), endpoint, true);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_platform_error);
+		oversizedRejected = true;
+	}
+	ASSERT(oversizedRejected);
+	ASSERT(peer->unsent.getWriteBuffer() == tail);
+	ASSERT(tail->next == nullptr);
+	ASSERT_EQ(tail->bytes_written, previousLength);
+	ASSERT(std::memcmp(tail->data(), previousBytes.data(), previousLength) == 0);
+	ASSERT(peer->reliable.empty());
+	sendPacket(&transport, peer, SerializeSource<StringRef>("again"_sr), endpoint, false);
+	ASSERT_GT(tail->bytes_written, previousLength);
+
+	Reference<Peer> emptyPeer = makeReference<Peer>(&transport, address);
+	bool emptyRejected = false;
+	try {
+		sendPacket(&transport, emptyPeer, SerializeSource<StringRef>(StringRef(oversized)), endpoint, true);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_platform_error);
+		emptyRejected = true;
+	}
+	ASSERT(emptyRejected);
+	ASSERT(emptyPeer->unsent.getUnsent() == nullptr);
+	ASSERT(emptyPeer->reliable.empty());
+	return Void();
 }
 
 ReliablePacket* FlowTransport::sendReliable(ISerializeSource const& what, const Endpoint& destination) {
