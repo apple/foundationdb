@@ -2904,7 +2904,7 @@ static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTrans
 	RangeResult result;
 	if (verify) {
 		// if verify option is set, we try to talk to every worker and only returns those we can talk to
-		Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+		auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 		std::vector<Future<bool>> verifyInterfs;
 		for (const auto& [k_, value] : interfs) {
 			auto k = k_.withPrefix(prefix);
