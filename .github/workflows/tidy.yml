@@ -105,11 +105,9 @@ jobs:
             # only c++ source files
             if [[ $FILE =~ \.[ch](pp)?$ ]] ; then
               echo "Checking $FILE ..."
-              case "$FILE" in
-                fdbserver/core/RocksDBCheckpointUtils.cpp|fdbserver/kvstore/KeyValueStoreRocksDB.cpp|fdbserver/kvstore/KeyValueStoreShardedRocksDB.cpp)
-                  ninja -C build_output fdbserver/rocksdb-prefix/src/rocksdb-stamp/rocksdb-download
-                  ;;
-              esac
+              if [[ $FILE == fdbserver/*/*RocksDB*.cpp ]]; then
+                ninja -C build_output fdbserver/rocksdb-prefix/src/rocksdb-stamp/rocksdb-download
+              fi
               if ! clang-tidy -p build_output --warnings-as-errors='*' "$FILE"; then
                 PASSED=false
               fi
