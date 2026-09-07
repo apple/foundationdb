@@ -7187,7 +7187,7 @@ static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, boo
 	std::vector<std::string> addressesVec;
 	boost::algorithm::split(addressesVec, addr.toString(), boost::is_any_of(","));
 	// Note: reuse this knob from fdbcli, change it if necessary
-	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+	auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 	std::vector<Future<bool>> verifyInterfs;
 	for (const auto& requestedAddress : addressesVec) {
 		// step 1: check that the requested address is in the worker list provided by CC

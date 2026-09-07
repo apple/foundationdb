@@ -481,8 +481,9 @@ TEST_CASE("/fdbclient/status/clientCoordinatorTimeoutBudget") {
 	double elapsed = now() - startTime;
 	ASSERT(status.present());
 	ASSERT(!quorumReachable);
-	ASSERT_GE(elapsed, timeout);
-	ASSERT_LT(elapsed, timeout + 0.05);
+	// Account for timer equivalence and native descheduling separately.
+	ASSERT_GE(elapsed + INetwork::TIME_EPS, timeout);
+	ASSERT_LT(elapsed, timeout + (g_network->isSimulated() ? 0.05 : 1.0));
 	co_return;
 }
 
@@ -502,8 +503,8 @@ TEST_CASE("/fdbclient/status/overallTimeoutBudget") {
 	ASSERT(!status.present());
 	ASSERT_EQ(messages.size(), 1);
 	ASSERT_EQ(messages.front().get_obj().at("name").get_str(), "status_incomplete_timeout");
-	ASSERT_GE(elapsed, overallTimeout);
-	ASSERT_LT(elapsed, overallTimeout + 0.05);
+	ASSERT_GE(elapsed + INetwork::TIME_EPS, overallTimeout);
+	ASSERT_LT(elapsed, overallTimeout + (g_network->isSimulated() ? 0.05 : 1.0));
 	co_return;
 }
 

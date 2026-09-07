@@ -133,8 +133,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 	Future<Void> conflictingClient(Database cx, ReportConflictingKeysWorkload* self) {
 
-		Reference<ReadYourWritesTransaction> tr1(new ReadYourWritesTransaction(cx));
-		Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
+		auto tr1 = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr2 = makeReference<ReadYourWritesTransaction>(cx);
 		std::vector<KeyRange> readConflictRanges;
 		std::vector<KeyRange> writeConflictRanges;
 

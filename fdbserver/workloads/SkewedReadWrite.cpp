@@ -95,7 +95,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	Future<Void> updateServerShards(Database cx) {
 		RangeResult serverList;
 		RangeResult range;
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			// read in transaction to ensure two key ranges are transactionally consistent
 			Error err;
