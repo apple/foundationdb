@@ -609,20 +609,20 @@ TEST_CASE("/fdbclient/Tuple/versionstampBinaryLayout") {
 	constexpr uint16_t expectedUserVersion = 0x5678;
 
 	TupleVersionstamp constructed(expectedVersion, expectedBatchNumber, expectedUserVersion);
-	ASSERT(StringRef(constructed.begin(), constructed.size()) == encoded);
+	ASSERT_EQ(StringRef(constructed.begin(), constructed.size()), encoded);
 
 	Standalone<StringRef> storage = makeAlignedString(alignof(Version), encoded.size() + 1);
 	uint8_t* unaligned = mutateString(storage) + 1;
 	std::memcpy(unaligned, encoded.begin(), encoded.size());
 	TupleVersionstamp decoded{ StringRef(unaligned, encoded.size()) };
-	ASSERT(decoded.getVersion() == expectedVersion);
-	ASSERT(decoded.getBatchNumber() == expectedBatchNumber);
-	ASSERT(decoded.getUserVersion() == expectedUserVersion);
+	ASSERT_EQ(decoded.getVersion(), expectedVersion);
+	ASSERT_EQ(decoded.getBatchNumber(), expectedBatchNumber);
+	ASSERT_EQ(decoded.getUserVersion(), expectedUserVersion);
 
 	Versionstamp versionstamp{ Standalone<StringRef>(StringRef(unaligned, sizeof(Version) + sizeof(uint16_t)),
 		                                             storage.arena()) };
-	ASSERT(versionstamp.version == expectedVersion);
-	ASSERT(versionstamp.batchNumber == expectedBatchNumber);
+	ASSERT_EQ(versionstamp.version, expectedVersion);
+	ASSERT_EQ(versionstamp.batchNumber, expectedBatchNumber);
 
 	return Void();
 }
