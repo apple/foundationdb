@@ -100,7 +100,7 @@ public:
 
 		// Setting the dbEnd key to be cleared prevents having to treat a range clear to dbEnd as a special
 		// case in order to avoid traversing down the rightmost edge of the tree.
-		auto* rm = new (arena) RangeMutation();
+		RangeMutation* rm = new (arena) RangeMutation();
 		rm->clearBoundary();
 
 		mutations->insert(dbEnd.key, rm);
