@@ -7093,7 +7093,7 @@ SQLITE_PRIVATE int sqlite3BtreeLazyDelete(BtCursor* cursor,
                                           int* pagesDeleted) {
 	int pageNumber, cell, rc, subtree, count;
 	MemPage* page;
-	int empty;
+	int empty, reclaimedPages;
 	const void* ptr;
 	i64 tableKey = 0;
 	u32 freePagesBefore;
@@ -7169,7 +7169,8 @@ SQLITE_PRIVATE int sqlite3BtreeLazyDelete(BtCursor* cursor,
 		}
 
 		releasePage(page); // Required after getAndInitPage() above
-		*pagesDeleted += (int)(get4byte(&cursor->pBt->pPage1->aData[36]) - freePagesBefore);
+		reclaimedPages = get4byte(&cursor->pBt->pPage1->aData[36]) - freePagesBefore;
+		*pagesDeleted += reclaimedPages;
 	}
 
 	if (stackBegin[0]) {
