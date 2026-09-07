@@ -381,6 +381,10 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 
 	void coreStateWritten(DBCoreState const& newState);
 
+	// Requires the successfully committed terminal recovery state with every expected current log set.
+	// Finalizing a partial state for a coordinator change is insufficient.
+	void retireOldLogRoles(DBCoreState const& finalState);
+
 	Future<Void> onError() const;
 
 	static Future<Void> pushResetChecker(Reference<ConnectionResetInfo> self, NetworkAddress addr);
@@ -555,6 +559,7 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 private:
 	bool remoteLogPrefixRecovered() const;
 	Future<Void> remoteLogPrefixComplete;
+	bool oldLogRolesRetired = false;
 };
 
 // Recovery version calculation for version vector unicast

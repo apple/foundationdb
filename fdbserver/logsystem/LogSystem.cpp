@@ -695,6 +695,21 @@ Future<Void> LogSystem::onRemoteLogPrefixDurable() {
 	return remoteLogPrefixComplete;
 }
 
+void LogSystem::retireOldLogRoles(DBCoreState const& finalState) {
+	ASSERT(finalState.recoveryCount == epoch);
+	ASSERT(finalState.oldTLogData.empty());
+	ASSERT(expectedLogSets > 0 && finalState.tLogs.size() == static_cast<size_t>(expectedLogSets));
+	ASSERT(recoveryCompleteWrittenToCoreState.get());
+	ASSERT(remoteLogPrefixRecovered());
+	if (!oldLogRolesRetired) {
+		oldLogRolesRetired = true;
+		TraceEvent("RetireOldTLogRoles", dbgid)
+		    .detail("RecoveryCount", epoch)
+		    .detail("OldGenerations", oldLogData.size());
+		logSystemConfigChanged.trigger();
+	}
+}
+
 Future<Void> LogSystem::onError() const {
 	// Never returns normally, but throws an error if the subsystem stops working
 	while (true) {
@@ -1205,12 +1220,12 @@ LogSystemConfig LogSystem::getLogSystemConfig() const {
 		}
 	}
 
-	// ServerDBInfo uses oldTLogs to keep old-generation TLog roles from displacing
-	// themselves while this cluster controller is alive. Durable state/logsKey can
-	// drop recovered old generations earlier, but these roles may still be needed
-	// if this recovery has to run again.
-	for (const auto& oldData : oldLogData) {
-		logSystemConfig.oldTLogs.push_back(toOldTLogConf(oldData));
+	// A storage-recovered state can still need old TLog locks and history for remote recruitment/catch-up.
+	// Keep those roles alive until the terminal recovery state is durable.
+	if (!oldLogRolesRetired) {
+		for (const auto& oldData : oldLogData) {
+			logSystemConfig.oldTLogs.push_back(toOldTLogConf(oldData));
+		}
 	}
 	return logSystemConfig;
 }
