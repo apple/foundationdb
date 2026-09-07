@@ -2658,7 +2658,7 @@ Future<Void> queryBackup(const char* name,
 			}
 
 			// We only need to know all the mutation logs from `snapshotVersion` to `restoreVersion`.
-			fileSet = co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, /*logOnly=*/true, snapshotVersion);
+			fileSet = co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, /*logsOnly=*/true, snapshotVersion);
 		} else {
 			// When a snapshot version is not specified, we use the latest snapshot to restore to the `restoreVersion`.
 			fileSet = co_await bc->getRestoreSet(restoreVersion, keyRangesFilter);

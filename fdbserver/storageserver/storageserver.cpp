@@ -7585,7 +7585,7 @@ Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// A bulkload task can do file ingestion if the task range is aligned with manifests' range.
 				bool bulkloadCanIngestSSTFile = bulkLoadTaskState.canIngestFile();
 				co_await bulkLoadFetchKeyValueFileToLoad(
-				    data, bulkLoadLocalDir, bulkLoadTaskState, /*output=*/localBulkLoadFileSets);
+				    data, bulkLoadLocalDir, bulkLoadTaskState, /*localFileSets=*/localBulkLoadFileSets);
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 				    .detail("DataMoveId", dataMoveId.toString())
 				    .detail("Range", keys)
