@@ -584,6 +584,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const CDCStreamId sharedTagId = streams[2].consumer->position().streamId;
 		const auto proxies = cx->clientInfo->get().cdcProxies;
 		ASSERT_EQ(proxies.size(), 2);
+		// Registration commits durable ownership before the controller publishes each assignment.
+		for (const auto& stream : streams) {
+			co_await timeoutError(waitForAssignedProxy(cx, stream.consumer->position().streamId), operationTimeout);
+		}
 		const NativeCdcStatus initial = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
 		ASSERT(initial.metadataComplete);
 		ASSERT_EQ(initial.tagCount, 2);
