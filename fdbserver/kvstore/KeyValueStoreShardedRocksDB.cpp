@@ -701,7 +701,7 @@ void logShardEvent(StringRef name,
 	    .detail("Action", ShardOpToString(op))
 	    .detail("Begin", range.begin)
 	    .detail("End", range.end);
-	if (message != "") {
+	if (!message.empty()) {
 		e.detail("Message", message);
 	}
 }
@@ -1262,7 +1262,7 @@ public:
 		}
 
 		// Add default column family if it's a newly opened database.
-		if (descriptors.size() == 0) {
+		if (descriptors.empty()) {
 			descriptors.push_back(rocksdb::ColumnFamilyDescriptor("default", rState->getCFOptions()));
 		}
 
@@ -1353,13 +1353,13 @@ public:
 				auto it = physicalShards.find(name);
 				ASSERT(it != physicalShards.end());
 				auto shard = it->second;
-				if (shard->dataShards.size() == 0) {
+				if (shard->dataShards.empty()) {
 					shard->deleteTimeSec = now();
 					pendingDeletionShards.push_back(name);
 					TraceEvent(SevInfo, "UnusedPhysicalShard", logId).detail("ShardId", name);
 				}
 			}
-			if (unusedShards.size() > 0) {
+			if (!unusedShards.empty()) {
 				TraceEvent("ShardedRocksDB", logId).detail("CleanUpUnusedShards", unusedShards.size());
 			}
 		} else {
@@ -1595,7 +1595,7 @@ public:
 				    .detail("Range", range)
 				    .detail("RemovedRange", shardRange)
 				    .detail("ShardId", existingShard->toString());
-				if (existingShard->dataShards.size() == 0) {
+				if (existingShard->dataShards.empty()) {
 					TraceEvent(SevInfo, "ShardedRocksDBEmptyShard").detail("ShardId", existingShard->id);
 					shardIds.push_back(existingShard->id);
 					existingShard->deleteTimeSec = now();
@@ -1698,7 +1698,7 @@ public:
 		while (!pendingDeletionShards.empty()) {
 			const auto id = pendingDeletionShards.front();
 			auto it = physicalShards.find(id);
-			if (it == physicalShards.end() || it->second->dataShards.size() != 0) {
+			if (it == physicalShards.end() || !it->second->dataShards.empty()) {
 				pendingDeletionShards.pop_front();
 				continue;
 			}
@@ -2008,7 +2008,7 @@ public:
 			ASSERT(it->second.get() == shard);
 		}
 
-		for (auto [shardId, physicalShard] : physicalShards) {
+		for (const auto& [shardId, physicalShard] : physicalShards) {
 			ASSERT(physicalShard);
 			expectedDataShards += physicalShard->dataShards.size();
 		}
@@ -2799,9 +2799,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					    .detail("PersistVersion", version);
 				}
 			} else {
-				if (checkpoint != nullptr) {
-					delete checkpoint;
-				}
+				delete checkpoint;
 				a.reply.sendError(not_implemented());
 				return;
 			}
@@ -2810,9 +2808,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			res.dir = a.request.checkpointDir;
 			a.reply.send(res);
 
-			if (checkpoint != nullptr) {
-				delete checkpoint;
-			}
+			delete checkpoint;
 			TraceEvent(SevInfo, "ShardedRocksCheckpointEnd", logId).detail("Checkpoint", res.toString());
 		}
 
@@ -3744,7 +3740,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					++count;
 				}
 
-				if (shards.size() > 0) {
+				if (!shards.empty()) {
 					auto a = new CompactionWorker::CompactShardsAction(shards, shardManager->getMetaDataShard());
 					auto res = a->done.getFuture();
 					thread->post(a);
@@ -3773,7 +3769,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					break;
 				}
 				auto shards = shardManager->getPendingDeletionShards(cleanUpDelay);
-				if (shards.size() > 0) {
+				if (!shards.empty()) {
 					auto a = new Writer::RemoveShardAction(shards, shardManager->getMetaDataShard());
 					Future<Void> f = a->done.getFuture();
 					writeThread->post(a);
@@ -4419,13 +4415,13 @@ TEST_CASE("noSim/ShardedRocksDBRangeOps/RemoveSplitRange") {
 
 	std::set<std::string> originalKeys = { "a", "b", "c", "g", "h", "m" };
 	std::set<std::string> currentKeys = originalKeys;
-	for (auto key : originalKeys) {
+	for (const auto& key : originalKeys) {
 		kvStore->set(KeyValueRef(key, key));
 	}
 	co_await kvStore->commit();
 
 	std::string key;
-	for (auto key : currentKeys) {
+	for (const auto& key : currentKeys) {
 		Optional<Value> val = co_await kvStore->readValue(key);
 		ASSERT(val.present());
 		ASSERT(val.get().toString() == key);
@@ -4438,7 +4434,7 @@ TEST_CASE("noSim/ShardedRocksDBRangeOps/RemoveSplitRange") {
 		ASSERT_EQ(shardIds.size(), 0);
 
 		currentKeys.erase("b");
-		for (auto key : originalKeys) {
+		for (const auto& key : originalKeys) {
 			Optional<Value> val = co_await kvStore->readValue(key);
 			if (currentKeys.contains(key)) {
 				ASSERT(val.present());
@@ -4457,7 +4453,7 @@ TEST_CASE("noSim/ShardedRocksDBRangeOps/RemoveSplitRange") {
 		currentKeys.erase("c");
 		currentKeys.erase("g");
 		currentKeys.erase("h");
-		for (auto key : originalKeys) {
+		for (const auto& key : originalKeys) {
 			Optional<Value> val = co_await kvStore->readValue(key);
 			if (currentKeys.contains(key)) {
 				ASSERT(val.present());
