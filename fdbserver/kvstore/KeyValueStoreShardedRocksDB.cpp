@@ -3740,7 +3740,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					++count;
 				}
 
-			if (!shards.empty()) {
+				if (!shards.empty()) {
 					auto a = new CompactionWorker::CompactShardsAction(shards, shardManager->getMetaDataShard());
 					auto res = a->done.getFuture();
 					thread->post(a);
