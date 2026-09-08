@@ -31,6 +31,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <thread>
 #include <unordered_map>
 
 #ifdef WIN32
@@ -309,10 +310,10 @@ namespace keepalive_allocator {
 
 namespace detail {
 
-std::set<void*> g_allocatedSet;
-std::set<void*> g_freedSet;
-std::vector<std::pair<const uint8_t*, int>> g_wipedSet;
-bool g_active = false;
+thread_local std::set<void*> g_allocatedSet;
+thread_local std::set<void*> g_freedSet;
+thread_local std::vector<std::pair<const uint8_t*, int>> g_wipedSet;
+thread_local bool g_active = false;
 
 } // namespace detail
 
@@ -368,6 +369,33 @@ std::vector<std::pair<const uint8_t*, int>> const& getWipedAreaSet() {
 }
 
 } // namespace keepalive_allocator
+
+TEST_CASE("/flow/FastAlloc/KeepaliveScopeThreadIsolation") {
+	std::atomic<bool> start{ false };
+	std::atomic<bool> allocated{ false };
+	std::atomic<bool> release{ false };
+	std::thread otherThread([&] {
+		while (!start.load(std::memory_order_acquire)) {
+			std::this_thread::yield();
+		}
+		auto* memory = allocateAndMaybeKeepalive(64);
+		allocated.store(true, std::memory_order_release);
+		while (!release.load(std::memory_order_acquire)) {
+			std::this_thread::yield();
+		}
+		freeOrMaybeKeepalive(memory);
+	});
+	{
+		keepalive_allocator::ActiveScope scope;
+		start.store(true, std::memory_order_release);
+		while (!allocated.load(std::memory_order_acquire)) {
+			std::this_thread::yield();
+		}
+	}
+	release.store(true, std::memory_order_release);
+	otherThread.join();
+	return Void();
+}
 
 template <int Size>
 void* FastAllocator<Size>::allocate() {

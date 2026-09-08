@@ -1,12 +1,14 @@
 ---
 Checks: >
   -*,
+  bugprone-argument-comment,
   bugprone-assignment-in-if-condition,
   bugprone-chained-comparison,
   bugprone-copy-constructor-init,
   bugprone-dangling-handle,
   bugprone-implicit-widening-of-multiplication-result,
   bugprone-inaccurate-erase,
+  bugprone-infinite-loop,
   bugprone-macro-repeated-side-effects,
   bugprone-misplaced-widening-cast,
   bugprone-move-forwarding-reference,

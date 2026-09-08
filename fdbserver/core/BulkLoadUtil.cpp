@@ -607,7 +607,7 @@ Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 						BulkLoadJobManifestFileHeader header(line);
 						headerProcessed = true;
 					} else {
-						mapRange = updateManifestEntryMap(line, range, mapRange, /*output=*/manifestEntryMap);
+						mapRange = updateManifestEntryMap(line, range, mapRange, /*manifestEntryMap=*/manifestEntryMap);
 					}
 				}
 				lineStart = pos + 1;
@@ -630,7 +630,7 @@ Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 				// If we somehow only have one line and it's the header
 				BulkLoadJobManifestFileHeader header(leftover);
 			} else {
-				mapRange = updateManifestEntryMap(leftover, range, mapRange, /*output=*/manifestEntryMap);
+				mapRange = updateManifestEntryMap(leftover, range, mapRange, /*manifestEntryMap=*/manifestEntryMap);
 			}
 		}
 	} catch (Error& e) {

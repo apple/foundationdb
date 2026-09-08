@@ -186,19 +186,16 @@ void countedDelete(size_t nbytes, void* ptr);
 namespace keepalive_allocator {
 
 namespace detail {
-extern bool g_active;
+extern thread_local bool g_active;
 } // namespace detail
 
 inline bool isActive() noexcept {
 	return detail::g_active;
 }
 
-// While this scope is active, default allocate() and free() function is overridden for Arena and PacketBuffer to test
-// correct post-use memory policy: e.g. secure deletion of sensitive contents. Any (de)allocation of ArenaBlock and
-// PacketBuffer is tracked while this scope is active. To ensure correct state management, at most one instance of this
-// object may exist at any given time. Any tracked allocation during this scope must be freed BEFORE the scope
-// destructs. Any trackable (ArenaBlock, PacketBuffer) allocation before the scope must be freed AFTER the scope
-// destructs.
+// While this scope is active on the current thread, ArenaBlock and PacketBuffer allocations are kept alive to test
+// post-use memory policy, such as secure deletion of sensitive contents. At most one scope may exist per thread.
+// Tracked allocations must be freed before the scope destructs; allocations made before it must be freed afterward.
 class ActiveScope {
 public:
 	ActiveScope();
