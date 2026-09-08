@@ -147,13 +147,14 @@ function(strip_debug_symbols target)
       DEPENDS ${target}
       COMMENT "Stripping symbols from ${target}")
   endif()
-  add_custom_target(strip_only_${target} DEPENDS "${out_file}")
   if(is_exec AND NOT APPLE)
-    add_custom_target(strip_${target} DEPENDS "${out_file}.debug")
+    # Keep both outputs in one target so Makefile builds cannot run this command twice.
+    add_custom_target(strip_only_${target} DEPENDS "${out_file}" "${out_file}.debug")
   else()
-    add_custom_target(strip_${target})
-    add_dependencies(strip_${target} strip_only_${target})
+    add_custom_target(strip_only_${target} DEPENDS "${out_file}")
   endif()
+  add_custom_target(strip_${target})
+  add_dependencies(strip_${target} strip_only_${target})
   add_dependencies(strip_targets strip_${target})
 endfunction()
 
