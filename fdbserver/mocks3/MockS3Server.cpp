@@ -1666,8 +1666,10 @@ TEST_CASE("/MockS3Server/multipartCompletionMetadata") {
 	UnsentPacketQueue completeBody;
 	auto completeResponse = makeReference<HTTP::OutgoingResponse>();
 	completeResponse->data.content = &completeBody;
+	std::map<std::string, std::string> firstQueryParams;
+	firstQueryParams["uploadId"] = firstID;
 	co_await MockS3ServerImpl::handleMultipartComplete(
-	    &server, complete, completeResponse, "bucket", "object", { { "uploadId", firstID } });
+	    &server, complete, completeResponse, "bucket", "object", firstQueryParams);
 	ASSERT_EQ(completeResponse->code, 200);
 	ASSERT(storage.multipartUploads.find(firstID) == storage.multipartUploads.end());
 
@@ -1687,8 +1689,10 @@ TEST_CASE("/MockS3Server/multipartCompletionMetadata") {
 
 	// A later same-key completion must not be attributed to the first upload.
 	storage.multipartUploads[secondID].parts[1] = { "etag", "other data" };
+	std::map<std::string, std::string> secondQueryParams;
+	secondQueryParams["uploadId"] = secondID;
 	co_await MockS3ServerImpl::handleMultipartComplete(
-	    &server, complete, completeResponse, "bucket", "object", { { "uploadId", secondID } });
+	    &server, complete, completeResponse, "bucket", "object", secondQueryParams);
 	UnsentPacketQueue secondHeadBody;
 	auto secondHeadResponse = makeReference<HTTP::OutgoingResponse>();
 	secondHeadResponse->data.content = &secondHeadBody;
