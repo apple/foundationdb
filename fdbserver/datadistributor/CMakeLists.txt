@@ -13,5 +13,6 @@ target_include_directories(fdbserver_datadistributor
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
+    ${CMAKE_SOURCE_DIR}/fdbclient
     ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(fdbserver_datadistributor PRIVATE fdbserver_core)

@@ -74,7 +74,7 @@ void CDCRoutingTable::reload(IKeyValueStore* txnStateStore) {
 	}
 	const RangeResult tagHistoryRows = txnStateStore->readRange(cdcTagHistoryKeys).get();
 	for (const auto& kv : tagHistoryRows) {
-		const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(kv.key);
+		const CDCTagHistoryEntry history = decodeCDCTagHistoryEntry(kv.key, kv.value);
 		updateTag(history.streamId, history.version, history.tag);
 	}
 	rebuildRanges();

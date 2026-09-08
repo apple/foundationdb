@@ -575,7 +575,7 @@ private:
 		if (cdcStreamKeys.contains(m.param1)) {
 			cdcRouting->setRange(decodeCDCStreamKey(m.param1), decodeCDCStreamKeysValue(m.param2));
 		} else if (cdcTagHistoryKeys.contains(m.param1)) {
-			const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(m.param1);
+			const CDCTagHistoryEntry history = decodeCDCTagHistoryEntry(m.param1, m.param2);
 			cdcRouting->setTag(history.streamId, history.version, history.tag);
 		}
 	}
