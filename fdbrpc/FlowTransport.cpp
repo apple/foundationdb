@@ -25,8 +25,11 @@
 #include "flow/NetworkAddress.h"
 #include "flow/network.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -82,11 +85,23 @@ const Future<Void>* g_currentDeliveryPeerDisconnect = nullptr;
 // messages as "messages".
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 
+// Leave room for the length, optional checksum, and next frame length in the receive buffer.
+static constexpr int packetFramingBytes(bool isTLS) {
+	return 2 * PACKET_LEN_WIDTH + (isTLS ? 0 : static_cast<int>(sizeof(XXH64_hash_t)));
+}
+
+static int maxPacketPayloadSize(int64_t configuredLimit, bool isTLS) {
+	return static_cast<int>(std::max<int64_t>(
+	    0, std::min<int64_t>(configuredLimit, std::numeric_limits<int>::max() - packetFramingBytes(isTLS))));
+}
+
 // FIXME: explain what this is for
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
 FDB_BOOLEAN_PARAM(InReadSocket);
 FDB_BOOLEAN_PARAM(IsStableConnection);
+FDB_BOOLEAN_PARAM(Randomize);
+FDB_BOOLEAN_PARAM(IsSimulated);
 
 class EndpointMap : NonCopyable {
 public:
@@ -294,6 +309,16 @@ TEST_CASE("/fdbrpc/FlowTransport/WellKnownEndpointReservations") {
 	testWellKnownEndpointReservation(WLTOKEN_FIRST_AVAILABLE);
 	testWellKnownEndpointReservation(WLTOKEN_FIRST_AVAILABLE + 4);
 	testWellKnownEndpointReservation(129);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/FlowTransport/PacketLimitBounds") {
+	const int maxInt = std::numeric_limits<int>::max();
+	ASSERT_EQ(maxPacketPayloadSize(64, false), 64);
+	ASSERT_EQ(maxPacketPayloadSize(64, true), 64);
+	ASSERT_EQ(maxPacketPayloadSize(std::numeric_limits<int64_t>::max(), false), maxInt - 4 * PACKET_LEN_WIDTH);
+	ASSERT_EQ(maxPacketPayloadSize(std::numeric_limits<int64_t>::max(), true), maxInt - 2 * PACKET_LEN_WIDTH);
+	ASSERT_EQ(maxPacketPayloadSize(-1, false), 0);
 	return Void();
 }
 
@@ -1393,10 +1418,10 @@ static void scanPackets(TransportData* transport,
 			p += sizeof(packetChecksum);
 		}
 
-		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
+		if (packetLen > maxPacketPayloadSize(FLOW_KNOBS->PACKET_LIMIT, peerAddress.isTLS())) {
 			TraceEvent(SevError, "PacketLimitExceeded")
 			    .detail("FromPeer", peerAddress.toString())
-			    .detail("Length", (int)packetLen);
+			    .detail("Length", packetLen);
 			throw platform_error();
 		}
 
@@ -1515,14 +1540,24 @@ static int getNewBufferSize(const uint8_t* begin,
 		return FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES;
 	}
 	const uint32_t packetLen = *(uint32_t*)begin;
-	if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
+	if (packetLen > maxPacketPayloadSize(FLOW_KNOBS->PACKET_LIMIT, peerAddress.isTLS())) {
 		TraceEvent(SevError, "PacketLimitExceeded")
 		    .detail("FromPeer", peerAddress.toString())
-		    .detail("Length", (int)packetLen);
+		    .detail("Length", packetLen);
 		throw platform_error();
 	}
-	return std::max<uint32_t>(FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES,
-	                          packetLen + sizeof(uint32_t) * (peerAddress.isTLS() ? 2 : 3));
+	return std::max<uint32_t>(FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES, packetLen + packetFramingBytes(peerAddress.isTLS()));
+}
+
+TEST_CASE("/fdbrpc/FlowTransport/PacketBufferFraming") {
+	const uint32_t packetLen = 8192;
+	const uint8_t* begin = reinterpret_cast<const uint8_t*>(&packetLen);
+	const uint8_t* end = begin + sizeof(packetLen);
+	const NetworkAddress plain(IPAddress(0x7f000001), 45000, true, false);
+	const NetworkAddress tls(IPAddress(0x7f000001), 45000, true, true);
+	ASSERT_EQ(getNewBufferSize(begin, end, plain, g_network->protocolVersion()), int(packetLen) + 16);
+	ASSERT_EQ(getNewBufferSize(begin, end, tls, g_network->protocolVersion()), int(packetLen) + 8);
+	return Void();
 }
 
 // This actor exists whenever there is an open or opening connection, whether incoming or outgoing
@@ -2069,6 +2104,24 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	}
 }
 
+// PacketWriter appends to the peer's current tail before the frame length is known.
+static void discardUnsentPacket(PacketBuffer* firstBuffer, int initialBytesWritten, ReliablePacket* reliable) {
+	PacketBuffer* buffer = firstBuffer->nextPacketBuffer();
+	firstBuffer->next = nullptr;
+	firstBuffer->bytes_written = initialBytesWritten;
+	while (reliable) {
+		ReliablePacket* next = reliable->cont;
+		reliable->buffer->delref();
+		delete reliable;
+		reliable = next;
+	}
+	while (buffer) {
+		PacketBuffer* next = buffer->nextPacketBuffer();
+		buffer->delref();
+		buffer = next;
+	}
+}
+
 static ReliablePacket* sendPacket(TransportData* self,
                                   const Reference<Peer>& peer,
                                   ISerializeSource const& what,
@@ -2089,7 +2142,8 @@ static ReliablePacket* sendPacket(TransportData* self,
 	PacketBuffer* pb = peer->unsent.getWriteBuffer();
 	ReliablePacket* rp = reliable ? new ReliablePacket : 0;
 
-	int prevBytesWritten = pb->bytes_written;
+	const int initialBytesWritten = pb->bytes_written;
+	int prevBytesWritten = initialBytesWritten;
 	PacketBuffer* checksumPb = pb;
 
 	PacketWriter wr(pb,
@@ -2116,7 +2170,18 @@ static ReliablePacket* sendPacket(TransportData* self,
 	wr << destination.token;
 	what.serializePacketWriter(wr);
 	pb = wr.finish();
-	len = wr.size() - packetInfoSize;
+	const int64_t payloadSize = wr.size() - packetInfoSize;
+	if (payloadSize > maxPacketPayloadSize(FLOW_KNOBS->PACKET_LIMIT, destination.getPrimaryAddress().isTLS())) {
+		discardUnsentPacket(peer->unsent.getWriteBuffer(), initialBytesWritten, rp);
+		if (firstUnsent) {
+			peer->unsent.discardAll();
+		}
+		TraceEvent(SevWarnAlways, "PacketLimitExceeded")
+		    .detail("ToPeer", destination.getPrimaryAddress())
+		    .detail("Length", payloadSize);
+		throw platform_error();
+	}
+	len = payloadSize;
 
 	if (checksumEnabled) {
 		// Find the correct place to start calculating checksum
@@ -2171,12 +2236,7 @@ static ReliablePacket* sendPacket(TransportData* self,
 		packetInfoBuffer.write(&checksum, sizeof(checksum), sizeof(len));
 	}
 
-	if (len > FLOW_KNOBS->PACKET_LIMIT) {
-		TraceEvent(SevError, "PacketLimitExceeded")
-		    .detail("ToPeer", destination.getPrimaryAddress())
-		    .detail("Length", (int)len);
-		// throw platform_error();  // FIXME: How to recover from this situation?
-	} else if (len > FLOW_KNOBS->PACKET_WARNING) {
+	if (len > FLOW_KNOBS->PACKET_WARNING) {
 		TraceEvent(SevWarn, "LargePacketSent")
 		    .suppressFor(1.0)
 		    .detail("ToPeer", destination.getPrimaryAddress())
@@ -2200,6 +2260,68 @@ static ReliablePacket* sendPacket(TransportData* self,
 		peer->lastDataPacketSentTime = now();
 	}
 	return rp;
+}
+
+TEST_CASE("noSim/fdbrpc/FlowTransport/PacketLimitOnSend") {
+	FlowKnobs knobs(Randomize::False, IsSimulated::False);
+	knobs.PACKET_LIMIT = 256;
+	const FlowKnobs* previousKnobs = FLOW_KNOBS;
+	auto restoreKnobs = ScopeExit([previousKnobs]() { FLOW_KNOBS = previousKnobs; });
+	FLOW_KNOBS = &knobs;
+	TransportData transport(1, WLTOKEN_FIRST_AVAILABLE, nullptr);
+	NetworkAddress address(IPAddress(0x7f000001), 45000, true, false);
+	Endpoint endpoint(NetworkAddressList{ address, {} }, UID(1, 2));
+	Reference<Peer> peer = makeReference<Peer>(&transport, address);
+	sendPacket(&transport, peer, SerializeSource<StringRef>("ok"_sr), endpoint, false);
+	PacketBuffer* const tail = peer->unsent.getWriteBuffer();
+	uint32_t acceptedLength;
+	std::memcpy(&acceptedLength, tail->data(), sizeof(acceptedLength));
+	knobs.PACKET_LIMIT = acceptedLength;
+	sendPacket(&transport, peer, SerializeSource<StringRef>("ok"_sr), endpoint, false);
+	const int previousLength = tail->bytes_written;
+	const std::string previousBytes(reinterpret_cast<const char*>(tail->data()), previousLength);
+
+	knobs.PACKET_LIMIT = acceptedLength - 1;
+	bool boundaryRejected = false;
+	try {
+		sendPacket(&transport, peer, SerializeSource<StringRef>("ok"_sr), endpoint, true);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_platform_error);
+		boundaryRejected = true;
+	}
+	ASSERT(boundaryRejected);
+	ASSERT_EQ(tail->bytes_written, previousLength);
+
+	knobs.PACKET_LIMIT = 256;
+	const std::string oversized(std::size_t{ 32 } * 1024, 'x');
+	bool oversizedRejected = false;
+	try {
+		sendPacket(&transport, peer, SerializeSource<StringRef>(StringRef(oversized)), endpoint, true);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_platform_error);
+		oversizedRejected = true;
+	}
+	ASSERT(oversizedRejected);
+	ASSERT(peer->unsent.getWriteBuffer() == tail);
+	ASSERT(tail->next == nullptr);
+	ASSERT_EQ(tail->bytes_written, previousLength);
+	ASSERT(std::memcmp(tail->data(), previousBytes.data(), previousLength) == 0);
+	ASSERT(peer->reliable.empty());
+	sendPacket(&transport, peer, SerializeSource<StringRef>("again"_sr), endpoint, false);
+	ASSERT_GT(tail->bytes_written, previousLength);
+
+	Reference<Peer> emptyPeer = makeReference<Peer>(&transport, address);
+	bool emptyRejected = false;
+	try {
+		sendPacket(&transport, emptyPeer, SerializeSource<StringRef>(StringRef(oversized)), endpoint, true);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_platform_error);
+		emptyRejected = true;
+	}
+	ASSERT(emptyRejected);
+	ASSERT(emptyPeer->unsent.getUnsent() == nullptr);
+	ASSERT(emptyPeer->reliable.empty());
+	return Void();
 }
 
 ReliablePacket* FlowTransport::sendReliable(ISerializeSource const& what, const Endpoint& destination) {
