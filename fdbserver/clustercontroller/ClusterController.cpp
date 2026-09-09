@@ -1630,6 +1630,7 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 		// set the curr singleton if it doesn't exist or its different from the requesting one
 		if (!currSingleton.isPresent() || currSingleton.getInterface().id() != registeringID) {
 			registeringSingleton.setInterfaceToDbInfo(*self);
+			self->updateClusterHealthMonitorInputs();
 		}
 	}
 }
@@ -3036,6 +3037,7 @@ Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
 				}
 				if (!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
 					self->db.setRatekeeper(interf.get());
+					self->updateClusterHealthMonitorInputs();
 				}
 				checkOutstandingRequests(self);
 				co_return;
@@ -3066,6 +3068,7 @@ Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 				TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
 				RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
 				self->db.clearInterf(ProcessClass::RatekeeperClass);
+				self->updateClusterHealthMonitorInputs();
 			}
 		} else {
 			co_await startRatekeeper(self, recruitThrottler.newRecruitment());
@@ -3842,6 +3845,47 @@ WorkerInterface addSingletonTestWorker(ClusterControllerData& data, StringRef pr
 	    WorkerDetails(worker, ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource), false, true);
 	info.verified = true;
 	return worker;
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ratekeeperRegistrationRefreshesHealthMonitor") {
+	LocalityData controllerLocality;
+	controllerLocality.set(LocalityData::keyDcId, "primary"_sr);
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           controllerLocality,
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	WorkerInterface oldWorker = addSingletonTestWorker(data, "old-ratekeeper"_sr, "primary"_sr);
+	WorkerInterface newWorker = addSingletonTestWorker(data, "new-ratekeeper"_sr, "primary"_sr);
+	RatekeeperInterface oldRatekeeper(oldWorker.locality, UID(1, 1));
+	RatekeeperInterface newRatekeeper(newWorker.locality, UID(1, 2));
+	FutureStream<HaltRatekeeperRequest> oldHalts = oldRatekeeper.haltRatekeeper.getFuture();
+	FutureStream<EventLogRequest> oldEvents = oldWorker.eventLogRequest.getFuture();
+	FutureStream<EventLogRequest> newEvents = newWorker.eventLogRequest.getFuture();
+
+	data.db.setRatekeeper(oldRatekeeper);
+	data.updateClusterHealthMonitorInputs();
+	processRegisteredSingletons(&data, newWorker, {}, newRatekeeper, {});
+	ASSERT(data.db.serverInfo->get().ratekeeper.get().id() == newRatekeeper.id());
+
+	auto haltOrTimeout = co_await race(oldHalts, delay(2.0));
+	ASSERT_EQ(haltOrTimeout.index(), 0);
+	HaltRatekeeperRequest halt = std::get<0>(std::move(haltOrTimeout));
+	halt.reply.send(Void());
+	auto latestEvents = data.clusterHealthWorkerEventProvider->getLatestRatekeeperEvents("RkUpdate");
+	auto eventOrTimeout = co_await race(oldEvents, newEvents, delay(2.0));
+	ASSERT_EQ(eventOrTimeout.index(), 1);
+	EventLogRequest request = std::get<1>(std::move(eventOrTimeout));
+	ASSERT(request.eventName == "RkUpdate"_sr);
+	TraceEventFields fields;
+	fields.addField("ReleasedTPS", "100");
+	fields.addField("TPSLimit", "125");
+	request.reply.send(fields);
+	auto result = co_await latestEvents;
+	ASSERT(result.present());
+	ASSERT_EQ(result.get().first.size(), 1);
+	ASSERT(result.get().second.empty());
+	ASSERT_EQ(result.get().first.begin()->second.getDouble("TPSLimit"), 125.0);
 }
 
 TEST_CASE("/fdbserver/clustercontroller/deferCrossDatacenterSingletonHaltsUntilRecovery") {
