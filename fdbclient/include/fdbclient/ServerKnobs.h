@@ -235,10 +235,10 @@ public:
 	// FALLBACK for the encoding target: DD resolves its effective target from the
 	// DatabaseConfiguration shard_metadata_format option and consults this knob only
 	// when that config is UNSET (see DDEnabledState::shardEncodeLocationMetadata).
-	// This knob still DIRECTLY gates the old-format-only features that are mutually
-	// exclusive with shard encoding -- large teams (ddLargeTeamEnabled) and physical
-	// shard moves (ENABLE_DD_PHYSICAL_SHARD) read this knob, not the config; see the
-	// "known limitation" note in design/shard-encode-location-metadata.md.
+	// This knob still DIRECTLY gates large teams (ddLargeTeamEnabled), which is
+	// mutually exclusive with shard encoding and reads this knob rather than the
+	// config; see the "known limitation" note in
+	// design/shard-encode-location-metadata.md.
 	bool SHARD_ENCODE_LOCATION_METADATA;
 	int SHARD_ENCODE_REWRITE_KS_BATCH_SIZE; // keyServers entries rewritten per DD-init rollback pass (Phase 2).
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.

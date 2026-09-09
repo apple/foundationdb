@@ -356,10 +356,9 @@ class DDTxnProcessorImpl {
 		// churn (e.g. Attrition changing the server list). If we advanced
 		// beginKey before committing, the caller's retry would resume from
 		// the already-advanced cursor and permanently skip this batch's
-		// unconverted new-format entries. That is the root cause of the
-		// KeyServersNew residual / early-seal (seeds 2611177188, 1561219216):
-		// only the FIRST batch leaked, because after tr.reset() below later
-		// batches carry a small read set and rarely conflict.
+		// unconverted new-format entries. Only the FIRST batch is exposed:
+		// after the tr.reset() below, later batches carry a small read set
+		// and rarely conflict.
 		const bool atEnd = !ksEntries.more;
 		Key nextBegin = ksEntries.empty() ? beginKey : keyAfter(ksEntries.back().key);
 		if (atEnd) {
@@ -394,9 +393,8 @@ class DDTxnProcessorImpl {
 
 	// Phase 3 per-SS: rewrite one SS's serverKeys KRM from new-format
 	// entries to old-format constants. Uses ONE FRESH TRANSACTION PER
-	// krmSetRangeCoalescing CALL — same pattern natural DD moves use in
-	// MoveKeys.actor.cpp. See rewriteShardEncodedMetadata's Phase 3 comment
-	// for the correctness argument. Returns the number of ranges
+	// krmSetRangeCoalescing CALL. See rewriteShardEncodedMetadata's Phase 3
+	// comment for the correctness argument. Returns the number of ranges
 	// rewritten across the entire SS (paginates internally so callers
 	// don't need to re-invoke to finish one SS).
 	static Future<int64_t> rewriteOneServerKeysKRM(Database cx,
@@ -409,10 +407,8 @@ class DDTxnProcessorImpl {
 		int64_t rewritesForThisSS = 0;
 		double ssStart = now();
 		int scanIdx = 0;
-		// True unless we bail below with possible residue (no-progress or
-		// scan-limit break). The caller must NOT seal the completion
-		// sentinel if any SS returns fullyDrained=false, else it would
-		// report ROLLBACK COMPLETE while new-format serverKeys remain.
+		// Cleared only for residue a rescan could convert; gates DD's fast-path
+		// sentinel, not ROLLBACK COMPLETE (which audit_storage rescans for).
 		fullyDrained = true;
 
 		// Repeat full KRM scans until a complete scan finds no new-format
@@ -475,10 +471,8 @@ class DDTxnProcessorImpl {
 					try {
 						decodeServerKeysValue(v, assigned, emptyRange, dataMoveType, id, dataMoveReason);
 					} catch (Error& e) {
-						// Malformed serverKeys value from a partial upgrade
-						// or corrupted state — skip this span, don't abort
-						// DD init. The audit tool will report the residual
-						// entry via its own scan.
+						// No old-format value to derive, so a rescan
+						// can't fix it: skip without clearing fullyDrained.
 						TraceEvent(SevWarnAlways, "DDShardEncodeRollbackSkipUndecodable", distributorId)
 						    .detail("SS", ssId)
 						    .detail("Key", ranges[i].key)
@@ -622,11 +616,8 @@ class DDTxnProcessorImpl {
 		    .detail("KnobValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)
 		    .detail("PreviousSentinel", marker.present() ? marker.get() : "absent"_sr);
 
-		// Clear the sentinel so any observer during the rewrite (audit
-		// tool) sees "in progress" rather than a stale "complete"
-		// marker. This clear is committed alongside whichever phase's
-		// first commit fires (or as a standalone commit before Phase 3
-		// if 1 & 2 are no-ops).
+		// Belt-and-braces: the fast path above already returned on a sealed
+		// sentinel, so there is nothing stale left to clear here.
 		tr.clear(shardEncodeMigrationCompleteKey);
 
 		if (co_await clearShardEncodedDataMoves(tr, distributorId)) {
@@ -653,9 +644,8 @@ class DDTxnProcessorImpl {
 		// argument: krmSetRangeCoalescing uses Snapshot::True reads to
 		// compute coalescing boundaries; NativeAPI Transaction does not
 		// surface prior same-tx writes to those reads, so batching
-		// calls in one tx produces fragmentation (see
-		// KeyRangeMap.cpp assertion; observed in v4/v5/v6-fix
-		// pre-sentinel iterations). One-tx-per-span sidesteps the RYW
+		// calls in one tx produces fragmentation and trips the
+		// KeyRangeMap.cpp assertion. One-tx-per-span sidesteps the RYW
 		// dependency entirely.
 		//
 		// Loop until the serverList is stable across a full Phase 3
@@ -837,7 +827,9 @@ class DDTxnProcessorImpl {
 		CODE_PROBE((bool)skipDDModeCheck, "DD Mode won't prevent read initial data distribution.");
 		// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 		// causing entries to be duplicated
-		// Phase 1: Single transaction to read server list and all persisted data moves
+		// Phase 1: read server list and all persisted data moves. The rollback
+		// rewrite below commits and resets tr, so the data move read may use a
+		// later read version than the server list.
 		state double serverListAndDataMoveReadStart = now();
 		loop {
 			numDataMoves = 0;

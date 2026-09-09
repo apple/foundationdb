@@ -239,6 +239,8 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 //	after dropping its planning transaction in order to detect concurrent reassignment, so a
 //	one-sided serverKeys writer would be invisible to it and its revocation would be resurrected.
 //	See the tr.reset() comments in finishMoveKeys/finishMoveShards for which window depends on this.
+//	DD's rollback rewrite (rewriteOneServerKeysKRM) writes serverKeys alone, but only re-encodes the
+//	value while reproducing the assigned/emptyRange bits exactly, so it changes no ownership.
 //	auditLocationMetadataPreCheck/PostCheck cross-validate the two maps.
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;

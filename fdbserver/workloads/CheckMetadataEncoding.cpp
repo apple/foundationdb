@@ -122,19 +122,17 @@ struct CheckMetadataEncodingWorkload : TestWorkload {
 		// finished the instant this workload starts scanning. Poll until the
 		// required terminal condition holds or a deadline elapses, then
 		// assert on the final observation. This removes the false failure
-		// where the audit scanned a few seconds before the DD rewrite sealed
-		// (observed at T=249 while the rewrite completed at T=253 — see
-		// journal 2026-07-18). Only poll when the requested terminal mode
-		// matches the knob direction; a mismatched request is a test
-		// misconfiguration and should fail loudly and immediately below.
+		// where the audit scanned a few seconds before the DD rewrite sealed.
+		// Only poll when the requested terminal mode matches the knob
+		// direction; a mismatched request is a test misconfiguration and
+		// should fail loudly and immediately below.
 		const bool pollForConvergence = (self->requireRollbackComplete && !self->shardEncodeExpected) ||
 		                                (self->requireForwardComplete && self->shardEncodeExpected);
 		// Deadline is generous: under BUGGIFY the DD rollback rewrite can be
 		// throttled hard (tiny SHARD_ENCODE_REWRITE_KS_BATCH_SIZE and
 		// KRM_GET_RANGE_LIMIT), making Phase 2/3 legitimately take a few
 		// minutes of sim time to drain a large shard set. Too short a
-		// deadline produces a false timeout while DD is still correctly
-		// converging (observed at ~182s with both knobs pinned small).
+		// deadline produces a false timeout while DD is still correctly converging.
 		const double pollDeadline = now() + 400.0;
 		const double pollInterval = 2.0;
 

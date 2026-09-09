@@ -145,7 +145,7 @@ Two related configuration options that control migration of the cluster's
 shard-location metadata (``\xff/keyServers/`` and ``\xff/serverKeys/``)
 between the legacy tag-based encoding and the newer UID+dataMoveId
 encoding introduced with ``SHARD_ENCODE_LOCATION_METADATA``. The pair
-mirrors the ``storage_engine`` + ``perpetual_storage_wiggle`` pattern.
+mirrors the ``storage_engine`` + ``storage_migration_type`` pattern.
 
 ``shard_metadata_format={original|encoded}`` — target encoding
 Data Distributor should converge existing metadata entries toward. When
@@ -250,23 +250,22 @@ that moment — no live knob change on the running cluster is needed. If you
 skip it, the old binary boots with ``knob=true`` and resumes new-format
 writes, re-corrupting the metadata the rollback just drained.
 
-Old-format-only features after a config-only rollback (known limitation):
-per-range replication ("large teams", ``DD_MAX_SHARDS_ON_LARGE_TEAMS``) and
-physical shard moves (``ENABLE_DD_PHYSICAL_SHARD``) are mutually exclusive
-with shard-encoded metadata and still read the
-``SHARD_ENCODE_LOCATION_METADATA`` knob directly, not ``shard_metadata_format``.
-Consequences: after a config-only rollback (knob still true) they stay
-disabled even once ``ROLLBACK COMPLETE`` is reached; and a contradictory
+Large teams after a config-only rollback (known limitation): per-range
+replication (``DD_MAX_SHARDS_ON_LARGE_TEAMS``) is mutually exclusive with
+shard-encoded metadata and still reads the ``SHARD_ENCODE_LOCATION_METADATA``
+knob directly, not ``shard_metadata_format``. Consequences: after a
+config-only rollback (knob still true) it stays disabled even once
+``ROLLBACK COMPLETE`` is reached; and a contradictory
 ``SHARD_ENCODE_LOCATION_METADATA=false`` flip while
-``shard_metadata_format=encoded`` would wrongly enable them on encoded
-metadata. Gating them on ``shard_metadata_format`` instead would be worse
+``shard_metadata_format=encoded`` would wrongly enable it on encoded
+metadata. Gating it on ``shard_metadata_format`` instead would be worse
 (the config flips instantly while metadata drains asynchronously, enabling
-them mid-rollback while encoded entries still exist), so they are left on the
-knob; impact is low (large teams is rarely used, physical shard is
-experimental). Rule: once you set ``shard_metadata_format``, do not move the
-knob except as part of a downgrade. To re-enable these features on a
-rolled-back cluster, redeploy with ``SHARD_ENCODE_LOCATION_METADATA=false``
-(the same knob=false deploy a binary downgrade requires).
+it mid-rollback while encoded entries still exist), so it is left on the
+knob; impact is low, since large teams is rarely used. Rule: once you set
+``shard_metadata_format``, do not move the knob except as part of a
+downgrade. To re-enable large teams on a rolled-back cluster, redeploy with
+``SHARD_ENCODE_LOCATION_METADATA=false`` (the same knob=false deploy a binary
+downgrade requires).
 
 Re-forward flow (after a rollback), also config-driven (no knob flip):
 
