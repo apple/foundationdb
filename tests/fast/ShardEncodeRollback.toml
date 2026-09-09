@@ -88,17 +88,18 @@ testTitle = 'ShardEncodeRollbackVerify'
     # contending with DD for the lock. During the knob flip, one of those
     # direct moves can sample shard_encode_location_metadata=true and
     # commit a new-format keyServers entry in the window between DD's
-    # Phase 2 sweep and its seal (DD does not hold the lock across that
-    # gap) — DD then seals sentinel=old and the fast-path skip never
-    # reconverts it, so the audit never reaches ROLLBACK COMPLETE. This is
-    # NOT a production scenario: in production DD is the sole moveKeysLock
-    # holder during its init (its queue is off), prior-gen moves are
-    # lock-fenced, and under knob=false every dispatch path writes
-    # old-format, so the seal is safe. RandomMoveKeys runs in the Setup
-    # phase (knob=true) above to build the new-format state we roll back;
-    # Cycle + Attrition + Rollback below still stress the rewrite with
-    # traffic, DD restarts, and TLog recovery (all correctly old-format
-    # under knob=false).
+    # Phase 2 sweep and its seal. DD checks the lock in every rewrite
+    # transaction, the seal included, so an interloper that takes the lock
+    # aborts the rewrite with movekeys_conflict rather than letting it seal
+    # over that entry. What is left is churn — DD restarting on each
+    # conflict and making no forward progress for as long as the workload
+    # runs, so the sentinel never seals and the final phase's
+    # requireRollbackComplete fails — which is not what this phase is for.
+    # RandomMoveKeys runs in the Setup phase (knob=true) above to build the
+    # new-format state we roll back; Cycle + Attrition + Rollback below
+    # still stress the rewrite with traffic, DD restarts, and TLog recovery
+    # (all correctly old-format under knob=false), and Attrition is what
+    # exercises the lock fence, by landing recoveries mid-rewrite.
 
     [[test.workload]]
     testName = 'Attrition'
