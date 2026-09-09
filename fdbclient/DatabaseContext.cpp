@@ -875,8 +875,8 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 			evt.detail(k.c_str(), proxies[i].id());
 		}
 	};
-	traceProxies(oldProxies, std::string{"OldProxy"});
-	traceProxies(newProxies, std::string{"NewProxy"});
+	traceProxies(oldProxies, std::string{ "OldProxy" });
+	traceProxies(newProxies, std::string{ "NewProxy" });
 	evt.log();
 	for (auto& i : oldProxies) {
 		req.reply = ReplyPromise<GetReadVersionReply>();
