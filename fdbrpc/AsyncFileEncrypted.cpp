@@ -77,12 +77,19 @@ public:
 		}
 		uint32_t firstBlock = offset / self->encryptionBlockSize;
 		uint32_t lastBlock = (offset + length - 1) / self->encryptionBlockSize;
-		uint32_t block{ 0 };
 		auto* output = reinterpret_cast<unsigned char*>(data);
 		int bytesRead = 0;
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::READ_ONLY);
-		for (block = firstBlock; block <= lastBlock; ++block) {
-			Standalone<StringRef> plaintext = co_await readBlock(self.getPtr(), block);
+
+		std::vector<Future<Standalone<StringRef>>> blockReads;
+		blockReads.reserve(lastBlock - firstBlock + 1);
+		for (uint32_t block = firstBlock; block <= lastBlock; ++block) {
+			blockReads.push_back(readBlock(self.getPtr(), block));
+		}
+		co_await waitForAll(blockReads);
+
+		for (uint32_t block = firstBlock; block <= lastBlock; ++block) {
+			Standalone<StringRef> plaintext = blockReads[block - firstBlock].get();
 			auto start =
 			    (block == firstBlock) ? plaintext.begin() + (offset % self->encryptionBlockSize) : plaintext.begin();
 			auto end = (block == lastBlock) ? plaintext.begin() + ((offset + length) % self->encryptionBlockSize)
