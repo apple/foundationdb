@@ -4021,21 +4021,6 @@ void* checkThread(void* arg) {
 #endif
 }
 
-#if defined(DTRACE_PROBES)
-void fdb_probe_actor_create(const char* name, unsigned long id) {
-	FDB_TRACE_PROBE(actor_create, name, id);
-}
-void fdb_probe_actor_destroy(const char* name, unsigned long id) {
-	FDB_TRACE_PROBE(actor_destroy, name, id);
-}
-void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {
-	FDB_TRACE_PROBE(actor_enter, name, id, index);
-}
-void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {
-	FDB_TRACE_PROBE(actor_exit, name, id, index);
-}
-#endif
-
 void throwExecPathError(Error e, char path[]) {
 	Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
 	TraceEvent(sev, "GetPathError").error(e).detail("Path", path);

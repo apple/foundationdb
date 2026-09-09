@@ -12,30 +12,6 @@ macros.
 Probes
 ======
 
-
-Legacy actor probes
--------------------
-
-These probes are emitted by the legacy source translator. The C++ coroutine runtime does
-not emit them.
-
-.. code-block:: c
-
-   FDB_TRACE_PROBE(actor_create, "actorname", id)
-   FDB_TRACE_PROBE(actor_destroy, "actorname", id)
-
-These record creation and destruction of a generated actor. Their arguments are the actor's
-name and an ``unsigned long`` instance identifier.
-
-.. code-block:: c
-
-   FDB_TRACE_PROBE(actor_enter, "name", id, index)
-   FDB_TRACE_PROBE(actor_exit, "name", id, index)
-
-These record entry to and exit from generated actor code. The arguments are the actor's name,
-instance identifier, and an integer index. ``-1`` identifies the initial function invocation;
-other indices identify generated callbacks.
-
 Main-Loop
 ---------
 

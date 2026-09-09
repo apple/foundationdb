@@ -46,7 +46,6 @@
 #include "fdbrpc/MultiInterface.h"
 
 #include "fdbclient/ActorLineageProfiler.h"
-#include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClientOptionValidation.h"
 #include "fdbclient/ClusterInterface.h"
