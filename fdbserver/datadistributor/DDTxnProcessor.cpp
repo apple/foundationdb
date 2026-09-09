@@ -437,7 +437,7 @@ class DDTxnProcessorImpl {
 		// no-progress break under a small KRM_GET_RANGE_LIMIT, a partial
 		// page, or coalescing shifting boundaries mid-pass), so we must not
 		// return "drained" until a whole scan rewrote nothing.
-		loop {
+		while (true) {
 			scanIdx++;
 			int64_t rewritesThisScan = 0;
 			bool noProgress = false;
@@ -509,7 +509,7 @@ class DDTxnProcessorImpl {
 
 					// One transaction per span. Retry on transient errors
 					// via the standard idiom.
-					loop {
+					while (true) {
 						Transaction spanTr(cx);
 						spanTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						spanTr.setOption(FDBTransactionOptions::LOCK_AWARE);
