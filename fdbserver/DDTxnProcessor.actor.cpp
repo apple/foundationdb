@@ -399,7 +399,12 @@ class DDTxnProcessorImpl {
 	// for the correctness argument. Returns the number of ranges
 	// rewritten across the entire SS (paginates internally so callers
 	// don't need to re-invoke to finish one SS).
-	static Future<int64_t> rewriteOneServerKeysKRM(Database cx, UID ssId, UID distributorId, bool& fullyDrained) {
+	static Future<int64_t> rewriteOneServerKeysKRM(Database cx,
+	                                               UID ssId,
+	                                               UID distributorId,
+	                                               MoveKeysLock moveKeysLock,
+	                                               const DDEnabledState* ddEnabledState,
+	                                               bool& fullyDrained) {
 		Key mapPrefix = serverKeysPrefixFor(ssId);
 		int64_t rewritesForThisSS = 0;
 		double ssStart = now();
@@ -493,11 +498,20 @@ class DDTxnProcessorImpl {
 						spanTr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						Error err;
 						try {
+							// Runs for hours inside DD init, before pollMoveKeysLock
+							// starts: a superseded DD would otherwise write spans the
+							// new one has already reassigned.
+							co_await checkMoveKeysLock(&spanTr, moveKeysLock, ddEnabledState);
 							co_await krmSetRangeCoalescing(&spanTr, mapPrefix, span, allKeys, oldValue);
 							co_await spanTr.commit();
 							break;
 						} catch (Error& e) {
 							err = e;
+						}
+						// Superseded generation, not retryable. onError would rethrow,
+						// but don't leave that to its classification.
+						if (err.code() == error_code_movekeys_conflict) {
+							throw err;
 						}
 						co_await spanTr.onError(err);
 					}
@@ -509,6 +523,8 @@ class DDTxnProcessorImpl {
 				}
 				if (ranges.empty()) {
 					// morePages with size==0 shouldn't happen; guard against infinite loop.
+					// Reached only with morePages set, so the map is half-walked.
+					noProgress = true;
 					break;
 				}
 				Key nextBegin = ranges.back().key;
@@ -532,12 +548,14 @@ class DDTxnProcessorImpl {
 			}
 
 			rewritesForThisSS += rewritesThisScan;
-			if (rewritesThisScan == 0) {
-				break; // a complete scan found nothing new-format → SS drained
-			}
+			// "Rewrote nothing" only implies drained for a scan that walked the
+			// whole map, so the bail flag has to be tested first.
 			if (noProgress) {
 				fullyDrained = false; // bailed with possible residue; caller must not seal
 				break;
+			}
+			if (rewritesThisScan == 0) {
+				break; // a complete scan found nothing new-format → SS drained
 			}
 			if (scanIdx >= 8) {
 				fullyDrained = false; // bailed with possible residue; caller must not seal
@@ -560,16 +578,27 @@ class DDTxnProcessorImpl {
 	// transaction, retrying on transient errors. Load-bearing commit —
 	// audit tools and future DD inits read this key as the authoritative
 	// migration-complete signal.
-	static Future<Void> commitShardEncodeMigrationSentinel(Database cx, Value value) {
-		co_await runRYWTransactionVoid(cx, [value](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->set(shardEncodeMigrationCompleteKey, value);
-			return Void();
-		});
+	static Future<Void> commitShardEncodeMigrationSentinel(Database cx,
+	                                                       Value value,
+	                                                       MoveKeysLock moveKeysLock,
+	                                                       const DDEnabledState* ddEnabledState) {
+		co_await runRYWTransactionVoid(
+		    cx, [value, moveKeysLock, ddEnabledState](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			    // The seal makes the fast-path skip permanent, so it must not land
+			    // from a superseded generation.
+			    Future<Void> locked = checkMoveKeysLock(&(tr->getTransaction()), moveKeysLock, ddEnabledState);
+			    tr->set(shardEncodeMigrationCompleteKey, value);
+			    return locked;
+		    });
 	}
 
-	static Future<bool> rewriteShardEncodedMetadata(Transaction& tr, UID distributorId, Key& phase2Cursor) {
+	static Future<bool> rewriteShardEncodedMetadata(Transaction& tr,
+	                                                UID distributorId,
+	                                                MoveKeysLock moveKeysLock,
+	                                                const DDEnabledState* ddEnabledState,
+	                                                Key& phase2Cursor) {
 		Database cx = tr.getDatabase();
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -584,6 +613,10 @@ class DDTxnProcessorImpl {
 			    .detail("Reason", "SentinelSaysOld");
 			co_return false;
 		}
+		// Covers Phase 1, Phase 2 and the sentinel clear, which all commit on tr.
+		// After the fast-path return so a settled migration still costs one read.
+		co_await checkMoveKeysLock(&tr, moveKeysLock, ddEnabledState);
+
 		TraceEvent(SevInfo, "DDShardEncodeRewriteBegin", distributorId)
 		    .detail("Direction", "rollback")
 		    .detail("KnobValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)
@@ -656,7 +689,8 @@ class DDTxnProcessorImpl {
 				}
 				newSSCount++;
 				bool ssDrained = true;
-				passRewrites += co_await rewriteOneServerKeysKRM(cx, ssId, distributorId, ssDrained);
+				passRewrites +=
+				    co_await rewriteOneServerKeysKRM(cx, ssId, distributorId, moveKeysLock, ddEnabledState, ssDrained);
 				if (!ssDrained) {
 					allDrained = false;
 				}
@@ -700,7 +734,7 @@ class DDTxnProcessorImpl {
 
 		// All phases drained. Set sentinel = "old" so subsequent DD
 		// inits fast-path skip.
-		co_await commitShardEncodeMigrationSentinel(cx, shardEncodeMigrationValueOld);
+		co_await commitShardEncodeMigrationSentinel(cx, shardEncodeMigrationValueOld, moveKeysLock, ddEnabledState);
 		TraceEvent(SevInfo, "DDShardEncodeRewriteComplete", distributorId)
 		    .detail("Direction", "rollback")
 		    .detail("Phase3Rewrites", totalPhase3Rewrites)
@@ -906,7 +940,8 @@ class DDTxnProcessorImpl {
 					// Rollback direction: the active rewrite is opt-in via
 					// shard_metadata_migration.
 					if (migrationEnabled) {
-						bool rewrote = wait(rewriteShardEncodedMetadata(tr, distributorId, phase2Cursor));
+						bool rewrote = wait(
+						    rewriteShardEncodedMetadata(tr, distributorId, moveKeysLock, ddEnabledState, phase2Cursor));
 						if (rewrote) {
 							continue; // Committed a rewrite — re-read from the top
 						}
