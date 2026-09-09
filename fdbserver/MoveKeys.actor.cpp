@@ -265,11 +265,21 @@ ACTOR Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointId
 }
 } // namespace
 
+DDEnabledState::DDEnabledState() : shardMetadataFormatIsNew_(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {}
+
 bool DDEnabledState::sameId(const UID& id) const {
 	return ddEnabledStatusUID == id;
 }
 bool DDEnabledState::isEnabled() const {
 	return stateValue == ENABLED;
+}
+
+bool DDEnabledState::shardEncodeLocationMetadata() const {
+	return shardMetadataFormatIsNew_;
+}
+
+void DDEnabledState::setShardEncodeLocationMetadata(bool isNewFormat) {
+	shardMetadataFormatIsNew_ = isNewFormat;
 }
 
 bool DDEnabledState::isBlobRestorePreparing() const {
@@ -557,7 +567,12 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
                                                  KeyRange range,
                                                  std::vector<UID> servers,
                                                  std::string context,
-                                                 UID dataMoveId) {
+                                                 UID dataMoveId,
+                                                 const DDEnabledState* ddEnabledState) {
+	if (!ddEnabledState->shardEncodeLocationMetadata()) {
+		throw dd_config_changed();
+	}
+	ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 	if (range.empty()) {
 		TraceEvent(SevWarn, "CheckLocationMetadataEmptyInputRange").detail("By", "PreCheck").detail("Range", range);
 		return Void();
@@ -623,7 +638,15 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 	return Void();
 }
 
-ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::string context, UID dataMoveId) {
+ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ,
+                                                  KeyRange range,
+                                                  std::string context,
+                                                  UID dataMoveId,
+                                                  const DDEnabledState* ddEnabledState) {
+	if (!ddEnabledState->shardEncodeLocationMetadata()) {
+		throw dd_config_changed();
+	}
+	ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 	if (range.empty()) {
 		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "CheckLocationMetadataEmptyInputRange")
 		    .detail("By", "PostCheck")
@@ -765,7 +788,10 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
                                               FlowLock* cleanUpDataMoveParallelismLock,
                                               UID dataMoveId,
                                               const DDEnabledState* ddEnabledState) {
-	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	if (!ddEnabledState->shardEncodeLocationMetadata()) {
+		throw dd_config_changed();
+	}
+	ASSERT(ddEnabledState->shardEncodeLocationMetadata());
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
 	state SimpleCounter<int64_t>* txnStarted = counterCleanUpSingleShardDataMoveStarted();
 	state SimpleCounter<int64_t>* txnCommitted = counterCleanUpSingleShardDataMoveCommitted();
@@ -787,7 +813,18 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 			                                                    keys,
 			                                                    SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
 			                                                    SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
-			ASSERT(!currentShards.empty() && !currentShards.more);
+			if (currentShards.more) {
+				// The data-move range has been subdivided into more shards than fit in
+				// one krmGetRanges page since this cleanup was scheduled. The caller's
+				// view is stale; let DD re-discover the current shard layout.
+				throw operation_cancelled();
+			}
+			if (currentShards.empty()) {
+				if (!ddEnabledState->shardEncodeLocationMetadata()) {
+					throw dd_config_changed();
+				}
+				ASSERT(!currentShards.empty());
+			}
 
 			state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
@@ -811,7 +848,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 				std::vector<UID> servers(src.size() + dest.size());
 				std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 				wait(auditLocationMetadataPreCheck(
-				    occ, &tr, keys, servers, "cleanUpSingleShardDataMove_precheck", dataMoveId));
+				    occ, &tr, keys, servers, "cleanUpSingleShardDataMove_precheck", dataMoveId, ddEnabledState));
 			}
 
 			TraceEvent(SevInfo, "CleanUpSingleShardDataMove", dataMoveId)
@@ -840,7 +877,8 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 
 			// Post validate consistency of update of keyServers and serverKeys
 			if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-				wait(auditLocationMetadataPostCheck(occ, keys, "cleanUpSingleShardDataMove_postcheck", dataMoveId));
+				wait(auditLocationMetadataPostCheck(
+				    occ, keys, "cleanUpSingleShardDataMove_postcheck", dataMoveId, ddEnabledState));
 			}
 			break;
 		} catch (Error& e) {
@@ -2044,7 +2082,17 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						    .detail("BackgroundCleanUp", dataMove.ranges.empty());
 						throw data_move_cancelled();
 					}
-					ASSERT(!dataMove.ranges.empty() && dataMove.ranges.front().begin == keys.begin);
+					if (dataMove.ranges.empty() || dataMove.ranges.front().begin != keys.begin) {
+						// DataMoveMetaData unexpectedly empty or mismatched. During knob
+						// rollback, a concurrent DD instance may have cleared it via
+						// clearShardEncodedDataMoves(). We can't assert here because the
+						// old DD still has knob=true (shared process in simulation) — the
+						// knob guard doesn't help. Throwing dd_config_changed restarts this
+						// DD instance, which then picks up the new knob value. In production
+						// (no concurrent DDs), this condition shouldn't occur; if it does,
+						// a restart is still safer than a crash.
+						throw dd_config_changed();
+					}
 					if (cancelDataMove) {
 						dataMove.setPhase(DataMoveMetaData::Deleting);
 						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
@@ -2148,8 +2196,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 							std::vector<UID> servers(src.size() + dest.size());
 							std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-							wait(auditLocationMetadataPreCheck(
-							    occ, &tr, rangeIntersectKeys, servers, "startMoveShards_precheck", dataMoveId));
+							wait(auditLocationMetadataPreCheck(occ,
+							                                   &tr,
+							                                   rangeIntersectKeys,
+							                                   servers,
+							                                   "startMoveShards_precheck",
+							                                   dataMoveId,
+							                                   ddEnabledState));
 						}
 
 						if (destId.isValid()) {
@@ -2318,7 +2371,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (currentKeys.end == keys.end) {
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-						wait(auditLocationMetadataPostCheck(occ, keys, "startMoveShards_postcheck", dataMoveId));
+						wait(auditLocationMetadataPostCheck(
+						    occ, keys, "startMoveShards_postcheck", dataMoveId, ddEnabledState));
 					}
 					break;
 				}
@@ -2581,7 +2635,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						std::vector<UID> servers(src.size() + dest.size());
 						std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 						wait(auditLocationMetadataPreCheck(
-						    occ, &tr, currentRange, servers, "finishMoveShards_precheck", dataMoveId));
+						    occ, &tr, currentRange, servers, "finishMoveShards_precheck", dataMoveId, ddEnabledState));
 					}
 
 					std::sort(dest.begin(), dest.end());
@@ -2895,7 +2949,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							wait(auditLocationMetadataPostCheck(occ,
 							                                    postWaitDataMove.ranges.front(),
 							                                    "finishMoveShards_postcheck",
-							                                    relocationIntervalId));
+							                                    relocationIntervalId,
+							                                    ddEnabledState));
 						}
 						break;
 					}
@@ -3470,7 +3525,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						                                  DataMovementReason::ASSIGN_EMPTY_RANGE);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
-						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+						if (ddEnabledState->shardEncodeLocationMetadata()) {
 							tr.set(keyServersKey(it.key), keyServersValue(teamForDroppedRange, {}, shardId, UID()));
 						} else {
 							tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange));
@@ -3489,7 +3544,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						// Note, there could be data loss.
 						std::vector<Future<Void>> emptyRangeActors;
 						for (const UID& id : teamForDroppedRange) {
-							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (ddEnabledState->shardEncodeLocationMetadata()) {
 								emptyRangeActors.push_back(krmSetRangeCoalescing(
 								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysValue(shardId)));
 							} else {
@@ -3512,7 +3567,13 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						    .detail("Key", it.key)
 						    .detail("ValueSrc", describe(src))
 						    .detail("ValueDest", describe(dest));
-						if (srcId != anonymousShardId) {
+						// Only preserve new-format (shardId-encoded) keyServers when the
+						// cluster is writing new format. During a rollback (target
+						// original) this failed-server cleanup must not re-introduce a
+						// new-format entry behind the DD-init rewrite — write old
+						// (tag-based) format. Mirrors the gated drop-all-replicas branch
+						// above.
+						if (srcId != anonymousShardId && ddEnabledState->shardEncodeLocationMetadata()) {
 							if (dest.empty())
 								destId = UID();
 							tr.set(keyServersKey(it.key), keyServersValue(src, dest, srcId, destId));
@@ -3732,8 +3793,13 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 						std::vector<UID> servers(src.size() + dest.size());
 						std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-						wait(auditLocationMetadataPreCheck(
-						    occ, &tr, rangeIntersectKeys, servers, "cleanUpDataMoveCore_precheck", dataMoveId));
+						wait(auditLocationMetadataPreCheck(occ,
+						                                   &tr,
+						                                   rangeIntersectKeys,
+						                                   servers,
+						                                   "cleanUpDataMoveCore_precheck",
+						                                   dataMoveId,
+						                                   ddEnabledState));
 					}
 
 					for (const auto& uid : src) {
@@ -3768,11 +3834,15 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 						oldDests.insert(uid);
 					}
 
-					krmSetPreviouslyEmptyRange(&tr,
-					                           keyServersPrefix,
-					                           rangeIntersectKeys,
-					                           keyServersValue(src, {}, srcId, UID()),
-					                           currentShards[i + 1].value);
+					// During a rollback (target original) this physical-datamove
+					// cleanup must not re-introduce a new-format (shardId-encoded)
+					// keyServers entry behind the DD-init rewrite — write old
+					// (tag-based) format.
+					Value cleanupKsValue = ddEnabledState->shardEncodeLocationMetadata()
+					                           ? keyServersValue(src, {}, srcId, UID())
+					                           : keyServersValue(UIDtoTagMap, src, {});
+					krmSetPreviouslyEmptyRange(
+					    &tr, keyServersPrefix, rangeIntersectKeys, cleanupKsValue, currentShards[i + 1].value);
 				}
 
 				if (range.end == dataMove.ranges.front().end) {
@@ -3808,7 +3878,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 						wait(auditLocationMetadataPostCheck(
-						    occ, dataMove.ranges.front(), "cleanUpDataMoveCore_postcheck", dataMoveId));
+						    occ, dataMove.ranges.front(), "cleanUpDataMoveCore_postcheck", dataMoveId, ddEnabledState));
 					}
 					break;
 				}
@@ -3873,7 +3943,13 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 Future<Void> rawStartMovement(Database occ,
                               const MoveKeysParams& params,
                               std::map<UID, StorageServerInterface>& tssMapping) {
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (params.ddEnabledState->shardEncodeLocationMetadata()) {
+		// A relocation launched before the target format changed can still carry the old-path
+		// sentinel. Never persist it as a shard-encoded data move; restart DD with the new
+		// configuration.
+		if (!params.ranges.present() || params.dataMoveId == anonymousShardId) {
+			throw dd_config_changed();
+		}
 		ASSERT(params.ranges.present());
 		return startMoveShards(std::move(occ),
 		                       params.dataMoveId,
@@ -3887,7 +3963,9 @@ Future<Void> rawStartMovement(Database occ,
 		                       params.cancelConflictingDataMoves,
 		                       params.bulkLoadTaskState);
 	}
-	ASSERT(params.keys.present());
+	if (!params.keys.present()) {
+		throw dd_config_changed();
+	}
 	return startMoveKeys(std::move(occ),
 	                     params.keys.get(),
 	                     params.destinationTeam,
@@ -3901,7 +3979,10 @@ Future<Void> rawStartMovement(Database occ,
 Future<Void> rawCheckFetchingState(const Database& cx,
                                    const MoveKeysParams& params,
                                    const std::map<UID, StorageServerInterface>& tssMapping) {
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (params.ddEnabledState->shardEncodeLocationMetadata()) {
+		if (!params.ranges.present()) {
+			throw dd_config_changed();
+		}
 		ASSERT(params.ranges.present());
 		// TODO: make startMoveShards work with multiple ranges.
 		ASSERT(params.ranges.get().size() == 1);
@@ -3912,7 +3993,9 @@ Future<Void> rawCheckFetchingState(const Database& cx,
 		                          params.relocationIntervalId,
 		                          tssMapping);
 	}
-	ASSERT(params.keys.present());
+	if (!params.keys.present()) {
+		throw dd_config_changed();
+	}
 	return checkFetchingState(cx,
 	                          params.healthyDestinations,
 	                          params.keys.get(),
@@ -3924,8 +4007,10 @@ Future<Void> rawCheckFetchingState(const Database& cx,
 Future<Void> rawFinishMovement(Database occ,
                                const MoveKeysParams& params,
                                const std::map<UID, StorageServerInterface>& tssMapping) {
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		ASSERT(params.ranges.present());
+	if (params.ddEnabledState->shardEncodeLocationMetadata()) {
+		if (!params.ranges.present()) {
+			throw dd_config_changed();
+		}
 		return finishMoveShards(std::move(occ),
 		                        params.dataMoveId,
 		                        params.ranges.get(),
@@ -3938,7 +4023,9 @@ Future<Void> rawFinishMovement(Database occ,
 		                        params.ddEnabledState,
 		                        params.bulkLoadTaskState);
 	}
-	ASSERT(params.keys.present());
+	if (!params.keys.present()) {
+		throw dd_config_changed();
+	}
 	return finishMoveKeys(std::move(occ),
 	                      params.keys.get(),
 	                      params.destinationTeam,
@@ -3984,7 +4071,10 @@ ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params) {
 
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
-void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<StorageServerInterface> servers) {
+void seedShardServers(Arena& arena,
+                      CommitTransactionRef& tr,
+                      std::vector<StorageServerInterface> servers,
+                      bool shardEncodeLocationMetadata) {
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
 	int8_t nextLocality = 0;
@@ -4035,7 +4125,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a change
 	// to a specific
 	//   key (keyServersKeyServersKey)
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (shardEncodeLocationMetadata) {
 		const UID shardId = newDataMoveId(deterministicRandom()->randomUInt64(),
 		                                  AssignEmptyRange(false),
 		                                  DataMoveType::LOGICAL,
