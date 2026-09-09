@@ -1630,6 +1630,7 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 		// set the curr singleton if it doesn't exist or its different from the requesting one
 		if (!currSingleton.isPresent() || currSingleton.getInterface().id() != registeringID) {
 			registeringSingleton.setInterfaceToDbInfo(*self);
+			self->updateClusterHealthMonitorInputs();
 		}
 	}
 }
@@ -3036,6 +3037,7 @@ Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
 				}
 				if (!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
 					self->db.setRatekeeper(interf.get());
+					self->updateClusterHealthMonitorInputs();
 				}
 				checkOutstandingRequests(self);
 				co_return;
@@ -3058,14 +3060,19 @@ Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 
 	while (true) {
 		if (self->db.serverInfo->get().ratekeeper.present() && !self->recruitRatekeeper.get()) {
+			const UID monitoredRatekeeperID = self->db.serverInfo->get().ratekeeper.get().id();
 			auto res = co_await race(waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure,
 			                                           SERVER_KNOBS->RATEKEEPER_FAILURE_TIME),
 			                         self->recruitRatekeeper.onChange());
 			if (res.index() == 0) {
 				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+				if (!ratekeeper.present() || ratekeeper.get().id() != monitoredRatekeeperID) {
+					continue;
+				}
 				TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
 				RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
 				self->db.clearInterf(ProcessClass::RatekeeperClass);
+				self->updateClusterHealthMonitorInputs();
 			}
 		} else {
 			co_await startRatekeeper(self, recruitThrottler.newRecruitment());
@@ -3842,6 +3849,48 @@ WorkerInterface addSingletonTestWorker(ClusterControllerData& data, StringRef pr
 	    WorkerDetails(worker, ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource), false, true);
 	info.verified = true;
 	return worker;
+}
+
+TEST_CASE("/fdbserver/clustercontroller/replacedRatekeeperSurvivesPreviousFailure") {
+	LocalityData controllerLocality;
+	controllerLocality.set(LocalityData::keyDcId, "primary"_sr);
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           controllerLocality,
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	WorkerInterface oldWorker = addSingletonTestWorker(data, "old-ratekeeper"_sr, "primary"_sr);
+	WorkerInterface newWorker = addSingletonTestWorker(data, "new-ratekeeper"_sr, "primary"_sr);
+	RatekeeperInterface oldRatekeeper(oldWorker.locality, UID(1, 1));
+	RatekeeperInterface newRatekeeper(newWorker.locality, UID(1, 2));
+	FutureStream<ReplyPromise<Void>> oldFailures = oldRatekeeper.waitFailure.getFuture();
+	FutureStream<ReplyPromise<Void>> newFailures = newRatekeeper.waitFailure.getFuture();
+	FutureStream<HaltRatekeeperRequest> oldHalts = oldRatekeeper.haltRatekeeper.getFuture();
+	FutureStream<HaltRatekeeperRequest> newHalts = newRatekeeper.haltRatekeeper.getFuture();
+
+	auto serverInfo = data.db.serverInfo->get();
+	serverInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	serverInfo.id = UID(3, 1);
+	data.db.serverInfo->set(serverInfo);
+	data.db.setRatekeeper(oldRatekeeper);
+	Future<Void> monitor = monitorRatekeeper(&data);
+	auto oldWaitOrTimeout = co_await race(oldFailures, delay(2.0));
+	ASSERT_EQ(oldWaitOrTimeout.index(), 0);
+	ReplyPromise<Void> oldFailure = std::get<0>(std::move(oldWaitOrTimeout));
+
+	processRegisteredSingletons(&data, newWorker, {}, newRatekeeper, {});
+	ASSERT(data.db.serverInfo->get().ratekeeper.get().id() == newRatekeeper.id());
+	auto oldHaltOrTimeout = co_await race(oldHalts, delay(2.0));
+	ASSERT_EQ(oldHaltOrTimeout.index(), 0);
+	HaltRatekeeperRequest oldHalt = std::get<0>(std::move(oldHaltOrTimeout));
+	oldHalt.reply.send(Void());
+	oldFailure.sendError(connection_failed());
+
+	auto newWaitOrTimeout = co_await race(newFailures, delay(2.0));
+	ASSERT_EQ(newWaitOrTimeout.index(), 0);
+	ASSERT(data.db.serverInfo->get().ratekeeper.get().id() == newRatekeeper.id());
+	ASSERT(!newHalts.isReady());
+	monitor.cancel();
 }
 
 TEST_CASE("/fdbserver/clustercontroller/deferCrossDatacenterSingletonHaltsUntilRecovery") {
