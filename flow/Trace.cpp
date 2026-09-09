@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ActorContext.h"
 #include "flow/Trace.h"
 #include "FileTraceLogWriter.h"
 #include "flow/Knobs.h"
@@ -1353,9 +1352,6 @@ void BaseTraceEvent::writeEvent() {
 				if (this->severity == SevError) {
 					severity = SevInfo;
 					backtrace();
-#ifdef WITH_ACAC
-					detail("ActorStack", encodeActorContext(ActorContextDumpType::CURRENT_CALL_BACKTRACE));
-#endif // WITH_ACAC
 					severity = SevError;
 					if (errorKindIndex != -1) {
 						fields.mutate(errorKindIndex).second = toString(errorKind);

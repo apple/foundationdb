@@ -26,7 +26,6 @@
 #include <map>
 #include <boost/preprocessor/facilities/is_empty.hpp>
 #include <boost/preprocessor/control/if.hpp>
-#include "flow/ActorContext.h"
 #include "flow/Platform.h"
 #include "flow/Knobs.h"
 #include "flow/FileIdentifier.h"
