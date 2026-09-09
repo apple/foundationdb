@@ -4893,6 +4893,67 @@ TEST_CASE("/fdbserver/clustercontroller/proxyRecruitmentSpansFitnessLevels") {
 	return Void();
 }
 
+// Regression test for NonDeterministicRecruitment: findWorkersForConfiguration() recruits the
+// configuration twice in simulation and requires both recruitments to have equal RoleFitness
+// (which includes the worst usage of the recruited workers). When the candidate filter ignored
+// usage entirely, the two recruitments could pick equal-fitness processes with different usage
+// (e.g. GrvProxy fitness "2 2 2 0 2" vs "2 3 2 0 2"), failing the check. Candidates are now
+// compared against the usage snapshot taken when the first worker was selected, so repeated
+// recruitments admit the same candidate set even as the live id_used counter keeps advancing.
+TEST_CASE("/fdbserver/clustercontroller/proxyRecruitmentDeterministicUsage") {
+	const Key dcId = "dc1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+
+	constexpr int kCount = 3;
+	auto stateless = addRecruitmentTestWorkers(data, dcId, ProcessClass::StatelessClass, "sl"_sr, kCount);
+
+	// Two of the three stateless processes already host the master and cluster controller.
+	data.masterProcessId = stateless[0].locality.processId();
+	data.clusterControllerProcessId = stateless[1].locality.processId();
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+
+	ClusterControllerData::RoleFitness firstFit;
+	ClusterControllerData::RoleFitness secondFit;
+	for (int pass = 0; pass < 2; pass++) {
+		// Each pass re-recruits from scratch with the same initial id_used, mimicking the
+		// two-pass determinism check in findWorkersForConfiguration.
+		std::map<Optional<Standalone<StringRef>>, int> id_used;
+		data.updateKnownIds(&id_used);
+
+		auto first =
+		    data.getWorkerForRoleInDatacenter(dcId, recruitment::GrvProxy, recruitment::ExcludeFit, config, id_used);
+		auto proxies =
+		    data.getWorkersForRoleInDatacenter(dcId, recruitment::GrvProxy, kCount, config, id_used, {}, first);
+
+		// The pool is not artificially cut: every proxy lands on a distinct stateless process.
+		ASSERT_EQ(proxies.size(), kCount);
+		std::set<Optional<Standalone<StringRef>>> pids;
+		for (const auto& w : proxies) {
+			pids.insert(w.interf.locality.processId());
+		}
+		ASSERT_EQ(pids.size(), kCount);
+
+		// Mimic findWorkersForConfiguration's comparison accounting: usage of the recruited
+		// workers is added on top of the initial id_used before computing the fitness.
+		std::map<Optional<Standalone<StringRef>>, int> compareUsed;
+		data.updateKnownIds(&compareUsed);
+		for (const auto& w : proxies) {
+			compareUsed[w.interf.locality.processId()]++;
+		}
+		ClusterControllerData::RoleFitness fit(proxies, recruitment::GrvProxy, compareUsed);
+		if (pass == 0) {
+			firstFit = fit;
+		} else {
+			secondFit = fit;
+		}
+	}
+
+	ASSERT(firstFit == secondFit);
+	return Void();
+}
+
 // Without a minWorker there is no fitness ceiling, so recruitment fills across fitness levels
 // from the best available. This locks in that the fix (which gates on the minWorker's fitness)
 // does not change the no-minWorker path used by log-router recruitment.
