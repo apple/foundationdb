@@ -65,6 +65,8 @@ public:
 	bool truePercent(const int percent) override;
 	uint64_t peek() const override;
 	void resetSeed(uint64_t seed) override; // Reset the random number generator with a new seed
+	std::vector<uint8_t> saveState() const override;
+	void restoreState(std::vector<uint8_t> const& state) override;
 	void addref() override;
 	void delref() override;
 };

@@ -34,6 +34,7 @@
 #endif
 #include <functional>
 #include <utility>
+#include <vector>
 
 // Until we move to C++20, we'll need something to take the place of operator<=>.
 // This is as good a place as any, I guess.
@@ -167,6 +168,14 @@ public:
 
 	// Reset the random number generator with a new seed (only supported by deterministic generators)
 	virtual void resetSeed(uint64_t seed) {}
+
+	// Opaque snapshot of the generator's full internal state. Callers use it to replay a code
+	// path from a known point (for example, a simulation determinism check that runs the same
+	// recruitment twice) without perturbing the global random stream by consuming it twice.
+	// Only deterministic generators implement this; the default reports an empty state, and
+	// restoreState() on such a generator is a no-op.
+	virtual std::vector<uint8_t> saveState() const { return {}; }
+	virtual void restoreState(std::vector<uint8_t> const& state) {}
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
