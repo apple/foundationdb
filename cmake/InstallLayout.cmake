@@ -261,6 +261,12 @@ set(CPACK_RPM_SERVER-VERSIONED_PACKAGE_REQUIRES            "${CPACK_COMPONENT_CL
 set(CPACK_RPM_SERVER-VERSIONED_POST_INSTALL_SCRIPT_FILE    ${CMAKE_BINARY_DIR}/packaging/multiversion/server/postinst-rpm)
 set(CPACK_RPM_SERVER-VERSIONED_PRE_UNINSTALL_SCRIPT_FILE   ${CMAKE_BINARY_DIR}/packaging/multiversion/server/prerm)
 
+# Versioned packages must not own RPM's global build-id links. Two otherwise
+# independent client packages can contain identical binaries, and those links
+# would make the packages conflict outside their versioned install tree.
+set(CPACK_RPM_SPEC_MORE_DEFINE
+    "%if \\\"%{name}\\\" == \\\"${CPACK_RPM_CLIENTS-VERSIONED_PACKAGE_NAME}\\\"\n%define _build_id_links none\n%endif")
+
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir")
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION data COMPONENT server)
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION log COMPONENT server)
