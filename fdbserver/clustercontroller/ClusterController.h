@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <compare>
 #include <utility>
+#include <vector>
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ProcessClass.h"
@@ -106,11 +107,6 @@ struct WorkerFitnessInfo {
 	WorkerDetails worker;
 	recruitment::Fitness fitness;
 	int used;
-	// Snapshot of the id_used map taken when this worker was selected. Callers that accept a
-	// minWorker compare candidates against this snapshot rather than the live id_used map, so
-	// that repeated recruitments of the same configuration compare against the same reference
-	// point instead of a counter that keeps advancing between selections.
-	std::map<Optional<Standalone<StringRef>>, int> idUsedSnapshot;
 
 	WorkerFitnessInfo() : fitness(recruitment::NeverAssign), used(0) {}
 	WorkerFitnessInfo(WorkerDetails worker, recruitment::Fitness fitness, int used)
@@ -1513,11 +1509,9 @@ public:
 		if (!fitness_workers.empty()) {
 			auto worker = deterministicRandom()->randomChoice(fitness_workers.begin()->second);
 			id_used[worker.interf.locality.processId()]++;
-			WorkerFitnessInfo result(worker,
+			return WorkerFitnessInfo(worker,
 			                         std::max(recruitment::GoodFit, std::get<0>(fitness_workers.begin()->first)),
 			                         std::get<1>(fitness_workers.begin()->first));
-			result.idUsedSnapshot = id_used;
-			return result;
 		}
 
 		throw no_more_servers();
@@ -1551,38 +1545,20 @@ public:
 			return results;
 		}
 
-		// minWorker's usage is taken at its selection time (before its own increment), so it is
-		// the usage level of the least-loaded equal-fitness processes. Candidates may be one role
-		// more loaded than that, which keeps processes that already host the master or cluster
-		// controller eligible without letting usage grow unboundedly.
-		Optional<int> minWorkerSnapshotUsed;
-		if (minWorker.present() && !minWorker.get().idUsedSnapshot.empty()) {
-			minWorkerSnapshotUsed = minWorker.get().used + 1;
-		}
-
 		for (auto& it : id_worker) {
 			auto fitness = recruitment::machineClassFitness(it.second.details.processClass, role);
-			// Candidates must not be worse than the already-accepted minWorker. "Worse" means a
-			// worse fitness class or a higher usage than the minWorker had when it was selected.
-			// Usage is compared against the snapshot taken at minWorker selection time, not the
-			// live id_used counter, because the live counter keeps advancing as earlier roles and
-			// datacenters are recruited. Comparing against it would admit different candidate
-			// sets in repeated recruitments of the same configuration (breaking recruitment
-			// determinism), while comparing against minWorker.used alone empties the pool
-			// whenever the desired count exceeds the least-used equal-fitness processes (e.g.
-			// every stateless process when some already host master/cluster controller).
-			// Spreading across processes is still provided by the bucket ordering on `used` in
-			// the fill loop below.
+			// Candidates must not be worse than the already-accepted minWorker. Usage is
+			// deliberately not part of this check: gating on it empties the pool whenever the
+			// desired count exceeds the number of least-used equal-fitness processes (e.g.
+			// every stateless process, when some of them already host the master or cluster
+			// controller). Spreading across processes is instead provided by the bucket
+			// ordering on `used` in the fill loop below.
 			if (workerAvailable(it.second, checkStable) &&
 			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    it.second.details.interf.locality.dcId() == dcId &&
-			    (!minWorker.present() ||
-			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
-			      (fitness < minWorker.get().fitness ||
-			       (fitness == minWorker.get().fitness &&
-			        (!minWorkerSnapshotUsed.present() ||
-			         minWorker.get().idUsedSnapshot[it.first] <= minWorkerSnapshotUsed.get())))))) {
+			    (!minWorker.present() || (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
+			                              fitness <= minWorker.get().fitness))) {
 				auto sharing = preferredSharing.find(it.first);
 				fitness_workers[{ fitness,
 				                  id_used[it.first],
@@ -2312,9 +2288,12 @@ public:
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
-		// Capture the RNG state so the second determinism-check pass below can replay the
-		// recruitment from the same starting point.
-		uint64_t randomState = deterministicRandom()->peek();
+		// Snapshot the RNG state before the first pass so the determinism-check pass below can
+		// replay the recruitment from the same starting point. Only the simulation check needs
+		// it, so production runs avoid the snapshot cost entirely.
+		Optional<std::vector<uint8_t>> savedRandomState;
+		if (g_network->isSimulated())
+			savedRandomState = deterministicRandom()->saveState();
 		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, true);
 		if (g_network->isSimulated()) {
 			try {
@@ -2333,10 +2312,12 @@ public:
 					}
 				}
 				if (!remoteDCUsedAsSatellite) {
-					// Replay the recruitment from the same RNG state so both passes of the
-					// determinism check consume an identical random sequence and any divergence
-					// is attributable to non-deterministic logic rather than RNG drift.
-					deterministicRandom()->resetSeed(randomState);
+					// Replay the recruitment from the identical RNG state captured before the
+					// first pass, so both passes consume the same random sequence. Recruitment
+					// randomizes deliberately (e.g. among equal-fitness candidates), so without
+					// this the two passes would diverge on RNG drift alone; with it, any
+					// divergence is attributable to non-deterministic logic.
+					deterministicRandom()->restoreState(savedRandomState.get());
 					RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req, false);
 
 					std::map<Optional<Standalone<StringRef>>, int> firstUsed;

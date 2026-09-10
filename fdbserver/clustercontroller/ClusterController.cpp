@@ -4894,12 +4894,12 @@ TEST_CASE("/fdbserver/clustercontroller/proxyRecruitmentSpansFitnessLevels") {
 }
 
 // Regression test for NonDeterministicRecruitment: findWorkersForConfiguration() recruits the
-// configuration twice in simulation and requires both recruitments to have equal RoleFitness
-// (which includes the worst usage of the recruited workers). When the candidate filter ignored
-// usage entirely, the two recruitments could pick equal-fitness processes with different usage
-// (e.g. GrvProxy fitness "2 2 2 0 2" vs "2 3 2 0 2"), failing the check. Candidates are now
-// compared against the usage snapshot taken when the first worker was selected, so repeated
-// recruitments admit the same candidate set even as the live id_used counter keeps advancing.
+// configuration twice in simulation and requires both recruitments to produce equal RoleFitness
+// (which includes the worst usage of the recruited workers). The determinism check replays the
+// random sequence of the first pass, so equal fitness here additionally means the candidate
+// filter did not starve the pool: with the master and cluster controller occupying two of the
+// three stateless processes, every proxy must still land on a distinct process, and both passes
+// must agree on the worst usage that results.
 TEST_CASE("/fdbserver/clustercontroller/proxyRecruitmentDeterministicUsage") {
 	const Key dcId = "dc1"_sr;
 	ClusterControllerData data = makeRecruitmentTestData(dcId);
