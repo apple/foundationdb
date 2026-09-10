@@ -1213,11 +1213,12 @@ static bool parseRemoteRegionLogsMissing(const TraceEventFields& remoteRegionSta
 	return remoteRegionStallEvent.getInt("RemoteRegionLogsMissing") != 0;
 }
 
-// Parse the duration (in seconds) for which the remote-region-stall signal has been active. The recovery
-// side carries the duration in the event itself ("StallSeconds") because the event is (re)emitted on every
-// core-state change; deriving the duration from the latest emission time would reset the stall counter
-// while the stall is still ongoing. An absent event, an event reporting that the logs are not missing, or
-// any malformed value conservatively reports 0, which keeps the cluster from being flagged as degraded.
+// Parse how long (in seconds) the remote-region-stall signal has been active. The recovery side carries
+// the absolute time the stall began ("RemoteRegionStallStartSeconds") rather than a pre-computed duration:
+// the event is (re)emitted on core-state changes, so a duration field would go stale between emissions,
+// whereas the start timestamp lets status compute the elapsed time from this event on every request. An
+// absent event, an event reporting that the logs are not missing, or any malformed value conservatively
+// reports 0, which keeps the cluster from being flagged as degraded.
 static double parseRemoteRegionStallSeconds(const TraceEventFields& remoteRegionStallEvent) {
 	try {
 		if (remoteRegionStallEvent.size() == 0) {
@@ -1226,8 +1227,8 @@ static double parseRemoteRegionStallSeconds(const TraceEventFields& remoteRegion
 		if (remoteRegionStallEvent.getInt("RemoteRegionLogsMissing") == 0) {
 			return 0.0;
 		}
-		double stallSeconds = std::stod(remoteRegionStallEvent.getValue("StallSeconds"));
-		return stallSeconds > 0.0 ? stallSeconds : 0.0;
+		double stallStartSeconds = remoteRegionStallEvent.getDouble("RemoteRegionStallStartSeconds");
+		return stallStartSeconds > 0.0 ? std::max(0.0, now() - stallStartSeconds) : 0.0;
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
@@ -4073,10 +4074,10 @@ TEST_CASE("/fdbserver/clustercontroller/degradedMultiRegionComputation") {
 		ASSERT(parseRemoteRegionLogsMissing(remoteRegionStallEvent));
 	}
 
-	// parseRemoteRegionStallSeconds: logs not missing -> no active stall, regardless of the carried duration.
+	// parseRemoteRegionStallSeconds: logs not missing -> no active stall, regardless of the carried start.
 	{
 		TraceEventFields remoteRegionStallEvent;
-		remoteRegionStallEvent.addField("StallSeconds", "3600.0");
+		remoteRegionStallEvent.addField("RemoteRegionStallStartSeconds", format("%.6f", now() - 3600.0));
 		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "0");
 		ASSERT_EQ(parseRemoteRegionStallSeconds(remoteRegionStallEvent), 0.0);
 	}
@@ -4085,31 +4086,32 @@ TEST_CASE("/fdbserver/clustercontroller/degradedMultiRegionComputation") {
 		TraceEventFields remoteRegionStallEvent;
 		ASSERT_EQ(parseRemoteRegionStallSeconds(remoteRegionStallEvent), 0.0);
 	}
-	// parseRemoteRegionStallSeconds: sustained stall carries the monotonic duration reported by recovery.
+	// parseRemoteRegionStallSeconds: sustained stall -> elapsed time since the reported start exceeds the
+	// threshold, so status computes a duration that keeps growing without the event being re-emitted.
 	{
 		const double threshold = SERVER_KNOBS->DEGRADED_MULTI_REGION_MIN_STALL_SECONDS;
 		TraceEventFields remoteRegionStallEvent;
-		remoteRegionStallEvent.addField("StallSeconds", format("%.6f", threshold + 5.0));
+		remoteRegionStallEvent.addField("RemoteRegionStallStartSeconds", format("%.6f", now() - (threshold + 5.0)));
 		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "1");
 		ASSERT_GE(parseRemoteRegionStallSeconds(remoteRegionStallEvent), threshold);
 	}
 	{
 		const double threshold = SERVER_KNOBS->DEGRADED_MULTI_REGION_MIN_STALL_SECONDS;
 		TraceEventFields remoteRegionStallEvent;
-		remoteRegionStallEvent.addField("StallSeconds", "0.1");
+		remoteRegionStallEvent.addField("RemoteRegionStallStartSeconds", format("%.6f", now() - 0.1));
 		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "1");
 		ASSERT_LT(parseRemoteRegionStallSeconds(remoteRegionStallEvent), threshold);
 	}
-	// parseRemoteRegionStallSeconds: malformed or negative StallSeconds fails safe to 0 (not degraded).
+	// parseRemoteRegionStallSeconds: malformed or non-positive start fails safe to 0 (not degraded).
 	{
 		TraceEventFields remoteRegionStallEvent;
-		remoteRegionStallEvent.addField("StallSeconds", "garbage");
+		remoteRegionStallEvent.addField("RemoteRegionStallStartSeconds", "garbage");
 		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "1");
 		ASSERT_EQ(parseRemoteRegionStallSeconds(remoteRegionStallEvent), 0.0);
 	}
 	{
 		TraceEventFields remoteRegionStallEvent;
-		remoteRegionStallEvent.addField("StallSeconds", "-5.0");
+		remoteRegionStallEvent.addField("RemoteRegionStallStartSeconds", "-5.0");
 		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "1");
 		ASSERT_EQ(parseRemoteRegionStallSeconds(remoteRegionStallEvent), 0.0);
 	}

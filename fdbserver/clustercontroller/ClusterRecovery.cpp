@@ -506,65 +506,17 @@ Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 	}
 }
 
-// Snapshot of the remote-region stall state shared between trackTlogRecovery (which updates it on
-// every core-state change) and remoteRegionStallEventRefresher (which re-emits the trackLatest event
-// on a fixed cadence while the stall persists).
-struct RemoteRegionStallState : ReferenceCounted<RemoteRegionStallState> {
-	bool remoteRegionLogsMissing = false;
-	bool allLogs = false;
-	int oldTLogDataSize = 0;
-	int usableRegions = 1;
-	double missingSince = 0; // now() at stall start; valid when remoteRegionLogsMissing
-	std::string eventName; // stall event name, resolved once by trackTlogRecovery
-};
-
-// Emits the remote-region stall trackLatest event from the given snapshot. Called on core-state
-// changes (where the signal can also be cleared) and on the refresher's cadence.
-static void traceRemoteRegionStall(Reference<ClusterRecoveryData> self,
-                                   const RemoteRegionStallState* state,
-                                   bool remoteRegionLogsMissing,
-                                   double stallSeconds) {
-	TraceEvent(state->eventName.c_str(), self->dbgid)
-	    .detail("RemoteRegionLogsMissing", remoteRegionLogsMissing)
-	    .detail("AllLogs", state->allLogs)
-	    .detail("OldTLogDataSize", state->oldTLogDataSize)
-	    .detail("UsableRegions", state->usableRegions)
-	    .detail("StallSeconds", stallSeconds)
-	    .trackLatest(self->clusterRecoveryRemoteRegionStallEventHolder->trackingKey);
-}
-
-// Re-emits the remote-region stall trackLatest event on a fixed cadence while the stall persists,
-// keeping StallSeconds advancing on an otherwise idle cluster. Started lazily by trackTlogRecovery
-// on the first observed stall; returns once the shared state says the stall is over.
-Future<Void> remoteRegionStallEventRefresher(Reference<ClusterRecoveryData> self,
-                                             Reference<RemoteRegionStallState> state) {
-	while (state->remoteRegionLogsMissing) {
-		co_await delay(SERVER_KNOBS->DEGRADED_MULTI_REGION_REFRESH_SECONDS);
-		// trackTlogRecovery may have cleared the stall while the delay was pending.
-		if (!state->remoteRegionLogsMissing) {
-			co_return;
-		}
-		traceRemoteRegionStall(self, state.getPtr(), true, std::max(0.0, now() - state->missingSince));
-	}
-}
-
 // Keeps the coordinated state (cstate) updated as the set of recruited tlogs change through recovery.
 Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
                                Reference<AsyncVar<Reference<LogSystem>>> oldLogSystems,
                                Future<Void> minRecoveryDuration) {
-	// Shared with the refresher, which runs as a local future while a stall is active: when this
-	// function returns (final update), the refresher is cancelled automatically.
-	Reference<RemoteRegionStallState> stallState = makeReference<RemoteRegionStallState>();
-	stallState->eventName =
-	    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME);
-	Future<Void> refresher;
 	Future<Void> rejoinRequests = Never();
 	DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
 	DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	// Start of the current remote-region stall, if any. Kept across loop iterations so that
-	// re-emissions of the event on unrelated core-state changes do not reset the reported
-	// stall duration; it grows monotonically until the log set is complete.
+	// re-emissions of the event on unrelated core-state changes do not reset the reported stall
+	// start; status derives the elapsed duration from this timestamp.
 	Optional<double> remoteLogsMissingSince;
 	while (true) {
 		DBCoreState newState;
@@ -639,7 +591,7 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		// so oldTLogData stays non-empty precisely in this stalled state.
 		//
 		// Gate on ACCEPTING_COMMITS: a missing remote log set is a transient recruiting artifact
-		// during normal recovery, so StallSeconds must not start accumulating before the cluster
+		// during normal recovery, so the stall must not start accumulating before the cluster
 		// accepts commits, or a slow-but-healthy recovery trips degraded_multi_region.
 		bool remoteRegionLogsMissing =
 		    configuration.usableRegions > 1 && !allLogs && self->recoveryState >= RecoveryState::ACCEPTING_COMMITS;
@@ -648,29 +600,21 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		} else if (!remoteRegionLogsMissing) {
 			remoteLogsMissingSince = Optional<double>();
 		}
-		// Publish the current snapshot for the refresher actor before starting it: the refresher reads
-		// remoteRegionLogsMissing synchronously on creation (before its first co_await), so publishing
-		// first lets it enter its loop immediately instead of deferring the first re-emission by a full
-		// loop iteration.
-		stallState->remoteRegionLogsMissing = remoteRegionLogsMissing;
-		stallState->allLogs = allLogs;
-		stallState->oldTLogDataSize = newState.oldTLogData.size();
-		stallState->usableRegions = configuration.usableRegions;
-		if (remoteLogsMissingSince.present()) {
-			stallState->missingSince = remoteLogsMissingSince.get();
-		}
-		if (remoteRegionLogsMissing) {
-			if (!refresher.isValid() || refresher.isReady()) {
-				refresher = remoteRegionStallEventRefresher(self, stallState);
-			}
-		}
-		// StallSeconds is carried in the event itself rather than derived from the event's
-		// emission Time by status: the event is re-emitted on every core-state change, and
-		// deriving the duration from the latest emission would reset the stall counter while
-		// the stall is still ongoing.
-		double remoteRegionStallSeconds =
-		    remoteLogsMissingSince.present() ? std::max(0.0, now() - remoteLogsMissingSince.get()) : 0.0;
-		traceRemoteRegionStall(self, stallState.getPtr(), remoteRegionLogsMissing, remoteRegionStallSeconds);
+		// Carry the absolute time the stall began rather than a pre-computed duration: status derives
+		// how long the stall has lasted when it reads this event, so the event does not have to be
+		// re-emitted periodically just to keep a duration field fresh. Format as a string because
+		// numeric trace fields are emitted with "%g" (six significant digits), which is far too coarse
+		// for an absolute timestamp.
+		double remoteRegionStallStartSeconds = remoteLogsMissingSince.present() ? remoteLogsMissingSince.get() : 0.0;
+		TraceEvent(
+		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME).c_str(),
+		    self->dbgid)
+		    .detail("RemoteRegionLogsMissing", remoteRegionLogsMissing)
+		    .detail("AllLogs", allLogs)
+		    .detail("OldTLogDataSize", newState.oldTLogData.size())
+		    .detail("UsableRegions", configuration.usableRegions)
+		    .detail("RemoteRegionStallStartSeconds", format("%.6f", remoteRegionStallStartSeconds))
+		    .trackLatest(self->clusterRecoveryRemoteRegionStallEventHolder->trackingKey);
 
 		self->registrationTrigger.trigger();
 
