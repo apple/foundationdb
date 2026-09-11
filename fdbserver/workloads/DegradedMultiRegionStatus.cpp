@@ -279,9 +279,9 @@ struct DegradedMultiRegionStatusWorkload : TestWorkload {
 								    .detail("Degraded", degraded)
 								    .detail("DataStateDesc", dataStateDesc);
 								printf("\n=== Degraded Multi-Region Status Found ===\n");
-								printf(
-								    "Warning: one region is unavailable; committed data is expected to remain safe in the surviving "
-								    "region.\n");
+								printf("Warning: one region is unavailable; committed data is expected to remain safe "
+								       "in the surviving "
+								       "region.\n");
 								printf(
 								    "Please restart following tlog interfaces, otherwise storage servers may never be "
 								    "able to catch up.\n");
