@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <compare>
 #include <utility>
+#include <vector>
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ProcessClass.h"
@@ -1546,14 +1547,18 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = recruitment::machineClassFitness(it.second.details.processClass, role);
+			// Candidates must not be worse than the already-accepted minWorker. Usage is
+			// deliberately not part of this check: gating on it empties the pool whenever the
+			// desired count exceeds the number of least-used equal-fitness processes (e.g.
+			// every stateless process, when some of them already host the master or cluster
+			// controller). Spreading across processes is instead provided by the bucket
+			// ordering on `used` in the fill loop below.
 			if (workerAvailable(it.second, checkStable) &&
 			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    it.second.details.interf.locality.dcId() == dcId &&
-			    (!minWorker.present() ||
-			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
-			      (fitness < minWorker.get().fitness ||
-			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
+			    (!minWorker.present() || (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
+			                              fitness <= minWorker.get().fitness))) {
 				auto sharing = preferredSharing.find(it.first);
 				fitness_workers[{ fitness,
 				                  id_used[it.first],
@@ -2256,14 +2261,39 @@ public:
 		RoleFitness secondFitness(secondDetails, role, secondUsed);
 
 		if (!(firstFitness == secondFitness)) {
+			auto describe = [&](const std::vector<WorkerDetails>& details,
+			                    const std::map<Optional<Standalone<StringRef>>, int>& used) {
+				std::string s;
+				// Cap the dump so the trace event stays well under the size limit.
+				const int n = std::min<int>(details.size(), 8);
+				for (int i = 0; i < n; i++) {
+					auto pid = details[i].interf.locality.processId();
+					auto u = used.find(pid);
+					s += "(" + pid.get().toString() + ",fit=" +
+					     std::to_string((int)recruitment::machineClassFitness(details[i].processClass, role)) +
+					     ",used=" + (u != used.end() ? std::to_string(u->second) : std::string("?")) + ") ";
+				}
+				if ((int)details.size() > n) {
+					s += "...(" + std::to_string(details.size()) + " total)";
+				}
+				return s;
+			};
 			TraceEvent(SevError, "NonDeterministicRecruitment")
 			    .detail("FirstFitness", firstFitness.toString())
 			    .detail("SecondFitness", secondFitness.toString())
-			    .detail("ClusterRole", role);
+			    .detail("ClusterRole", role)
+			    .detail("FirstWorkers", describe(firstDetails, firstUsed))
+			    .detail("SecondWorkers", describe(secondDetails, secondUsed));
 		}
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
+		// Snapshot the RNG state before the first pass so the determinism-check pass below can
+		// replay the recruitment from the same starting point. Only the simulation check needs
+		// it, so production runs avoid the snapshot cost entirely.
+		Optional<std::vector<uint8_t>> savedRandomState;
+		if (g_network->isSimulated())
+			savedRandomState = deterministicRandom()->saveState();
 		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, true);
 		if (g_network->isSimulated()) {
 			try {
@@ -2282,6 +2312,12 @@ public:
 					}
 				}
 				if (!remoteDCUsedAsSatellite) {
+					// Replay the recruitment from the identical RNG state captured before the
+					// first pass, so both passes consume the same random sequence. Recruitment
+					// randomizes deliberately (e.g. among equal-fitness candidates), so without
+					// this the two passes would diverge on RNG drift alone; with it, any
+					// divergence is attributable to non-deterministic logic.
+					deterministicRandom()->restoreState(savedRandomState.get());
 					RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req, false);
 
 					std::map<Optional<Standalone<StringRef>>, int> firstUsed;

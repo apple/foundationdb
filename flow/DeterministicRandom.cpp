@@ -24,6 +24,7 @@
 #include "flow/UnitTest.h"
 
 #include <cstring>
+#include <sstream>
 
 uint64_t DeterministicRandom::gen64() {
 	uint64_t curr = next;
@@ -158,6 +159,22 @@ void DeterministicRandom::resetSeed(uint64_t seed) {
 	next = rng();
 }
 
+std::vector<uint8_t> DeterministicRandom::saveState() const {
+	// `next` must be captured along with the engine: gen64() returns the previously drawn
+	// value and prefetches the next one, so the engine leads the observable stream by one step.
+	std::ostringstream ss;
+	ss << rng << " " << next;
+	const std::string s = ss.str();
+	return std::vector<uint8_t>(s.begin(), s.end());
+}
+
+void DeterministicRandom::restoreState(std::vector<uint8_t> const& state) {
+	if (state.empty())
+		return;
+	std::istringstream ss(std::string(state.begin(), state.end()));
+	ss >> rng >> next;
+}
+
 void DeterministicRandom::addref() {
 	ReferenceCounted<DeterministicRandom>::addref();
 }
@@ -262,6 +279,42 @@ TEST_CASE("/flow/DeterministicRandom/truePercent") {
 		ASSERT(count30 < count70);
 		ASSERT(count70 < count90);
 	}
+
+	return Void();
+}
+
+TEST_CASE("/flow/DeterministicRandom/saveRestoreState") {
+	DeterministicRandom rng(1234567);
+	// Move off the freshly seeded state so the snapshot covers a mid-stream engine state.
+	for (int i = 0; i < 100; ++i)
+		rng.randomUInt64();
+
+	auto const saved = rng.saveState();
+	ASSERT(!saved.empty());
+
+	std::vector<uint64_t> expected(64);
+	for (int i = 0; i < 64; ++i)
+		expected[i] = rng.randomUInt64();
+
+	// Restoring in place must replay the same stream.
+	rng.restoreState(saved);
+	for (int i = 0; i < 64; ++i)
+		ASSERT_EQ(expected[i], rng.randomUInt64());
+
+	// The snapshot must fully determine the stream, so restoring it into an unrelated
+	// generator must yield the same values.
+	DeterministicRandom other(987654321);
+	other.restoreState(saved);
+	for (int i = 0; i < 64; ++i)
+		ASSERT_EQ(expected[i], other.randomUInt64());
+
+	// An empty snapshot is a no-op and must leave the generator's stream untouched.
+	DeterministicRandom untouched(42);
+	untouched.randomUInt64();
+	untouched.restoreState(std::vector<uint8_t>());
+	DeterministicRandom reference(42);
+	reference.randomUInt64();
+	ASSERT_EQ(reference.randomUInt64(), untouched.randomUInt64());
 
 	return Void();
 }

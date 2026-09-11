@@ -5067,4 +5067,275 @@ TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
 	return Void();
 }
 
+// Adds `count` verified workers of the given process class to `data.id_worker`, each in its
+// own zone within datacenter `dcId`, and returns their interfaces. `classType` is honored so
+// that per-role recruitment fitness differs across the workers.
+static std::vector<WorkerInterface> addRecruitmentTestWorkers(ClusterControllerData& data,
+                                                              Key const& dcId,
+                                                              ProcessClass::ClassType classType,
+                                                              StringRef prefix,
+                                                              int count) {
+	std::vector<WorkerInterface> workers;
+	for (int i = 0; i < count; i++) {
+		std::string pid = prefix.toString() + std::to_string(i);
+		LocalityData locality;
+		locality.set(LocalityData::keyProcessId, Standalone<StringRef>(pid));
+		locality.set(LocalityData::keyZoneId, Standalone<StringRef>(pid + "_zone"));
+		locality.set(LocalityData::keyDcId, dcId);
+		WorkerInterface worker(locality);
+		worker.initEndpoints();
+		auto& info = data.id_worker[locality.processId()];
+		info.verified = true;
+		info.details.interf = worker;
+		info.details.processClass = ProcessClass(classType, ProcessClass::CommandLineSource);
+		info.details.recoveredDiskFiles = true;
+		workers.push_back(worker);
+	}
+	return workers;
+}
+
+static ClusterControllerData makeRecruitmentTestData(Key const& dcId) {
+	LocalityData locality;
+	locality.set(LocalityData::keyDcId, dcId);
+	return ClusterControllerData(ClusterControllerFullInterface(),
+	                             locality,
+	                             ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                                 new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                             makeReference<AsyncVar<Optional<UID>>>());
+}
+
+// Regression test for the original bug: in a small cluster where the desired commit-proxy
+// count equals the number of stateless processes, only one proxy was recruited. The candidate
+// filter compared each candidate's usage against the first-selected worker's usage and so
+// rejected every equally-fit process that already hosted the master or cluster controller.
+// All equally-fit processes must now remain eligible.
+TEST_CASE("/fdbserver/clustercontroller/proxyRecruitmentFillsEqualFitnessProcesses") {
+	const Key dcId = "dc1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+
+	constexpr int kCount = 3;
+	auto stateless = addRecruitmentTestWorkers(data, dcId, ProcessClass::StatelessClass, "sl"_sr, kCount);
+
+	// Two of the three stateless processes already host the master and cluster controller,
+	// so they start with higher usage than the third.
+	data.masterProcessId = stateless[0].locality.processId();
+	data.clusterControllerProcessId = stateless[1].locality.processId();
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+
+	std::map<Optional<Standalone<StringRef>>, int> id_used;
+	data.updateKnownIds(&id_used);
+
+	auto first =
+	    data.getWorkerForRoleInDatacenter(dcId, recruitment::CommitProxy, recruitment::ExcludeFit, config, id_used);
+	auto proxies =
+	    data.getWorkersForRoleInDatacenter(dcId, recruitment::CommitProxy, kCount, config, id_used, {}, first);
+
+	ASSERT_EQ(proxies.size(), kCount);
+	std::set<Optional<Standalone<StringRef>>> pids;
+	for (const auto& w : proxies) {
+		pids.insert(w.interf.locality.processId());
+	}
+	ASSERT_EQ(pids.size(), kCount); // every proxy on a distinct process
+	return Void();
+}
+
+// Recruitment must still span fitness levels: dedicated commit-proxy processes (BestFit) are
+// preferred, but stateless processes (GoodFit) fill the remainder so the desired count is
+// reached instead of stopping at the best-fit class.
+TEST_CASE("/fdbserver/clustercontroller/proxyRecruitmentSpansFitnessLevels") {
+	const Key dcId = "dc1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+
+	auto dedicated = addRecruitmentTestWorkers(data, dcId, ProcessClass::CommitProxyClass, "cp"_sr, 2);
+	auto stateless = addRecruitmentTestWorkers(data, dcId, ProcessClass::StatelessClass, "sl"_sr, 3);
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+
+	std::map<Optional<Standalone<StringRef>>, int> id_used;
+	auto first =
+	    data.getWorkerForRoleInDatacenter(dcId, recruitment::CommitProxy, recruitment::ExcludeFit, config, id_used);
+	auto proxies = data.getWorkersForRoleInDatacenter(dcId, recruitment::CommitProxy, 3, config, id_used, {}, first);
+
+	ASSERT_EQ(proxies.size(), 3);
+	std::set<Optional<Standalone<StringRef>>> dedicatedPids, statelessPids;
+	for (const auto& w : dedicated) {
+		dedicatedPids.insert(w.locality.processId());
+	}
+	for (const auto& w : stateless) {
+		statelessPids.insert(w.locality.processId());
+	}
+	int dedicatedCount = 0, statelessCount = 0;
+	std::set<Optional<Standalone<StringRef>>> usedPids;
+	for (const auto& w : proxies) {
+		auto pid = w.interf.locality.processId();
+		usedPids.insert(pid);
+		if (dedicatedPids.count(pid) == 1) {
+			dedicatedCount++;
+		} else if (statelessPids.count(pid) == 1) {
+			statelessCount++;
+		}
+	}
+	ASSERT_EQ(usedPids.size(), 3); // all on distinct processes
+	ASSERT_EQ(dedicatedCount, 2); // both dedicated processes used first
+	ASSERT_EQ(statelessCount, 1); // remainder filled from stateless
+	return Void();
+}
+
+// Regression test for NonDeterministicRecruitment: findWorkersForConfiguration() recruits the
+// configuration twice in simulation and requires both recruitments to produce equal RoleFitness
+// (which includes the worst usage of the recruited workers). The determinism check replays the
+// random sequence of the first pass, so equal fitness here additionally means the candidate
+// filter did not starve the pool: with the master and cluster controller occupying two of the
+// three stateless processes, every proxy must still land on a distinct process, and both passes
+// must agree on the worst usage that results.
+TEST_CASE("/fdbserver/clustercontroller/proxyRecruitmentDeterministicUsage") {
+	const Key dcId = "dc1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+
+	constexpr int kCount = 3;
+	auto stateless = addRecruitmentTestWorkers(data, dcId, ProcessClass::StatelessClass, "sl"_sr, kCount);
+
+	// Two of the three stateless processes already host the master and cluster controller.
+	data.masterProcessId = stateless[0].locality.processId();
+	data.clusterControllerProcessId = stateless[1].locality.processId();
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+
+	ClusterControllerData::RoleFitness firstFit;
+	ClusterControllerData::RoleFitness secondFit;
+	for (int pass = 0; pass < 2; pass++) {
+		// Each pass re-recruits from scratch with the same initial id_used, mimicking the
+		// two-pass determinism check in findWorkersForConfiguration.
+		std::map<Optional<Standalone<StringRef>>, int> id_used;
+		data.updateKnownIds(&id_used);
+
+		auto first =
+		    data.getWorkerForRoleInDatacenter(dcId, recruitment::GrvProxy, recruitment::ExcludeFit, config, id_used);
+		auto proxies =
+		    data.getWorkersForRoleInDatacenter(dcId, recruitment::GrvProxy, kCount, config, id_used, {}, first);
+
+		// The pool is not artificially cut: every proxy lands on a distinct stateless process.
+		ASSERT_EQ(proxies.size(), kCount);
+		std::set<Optional<Standalone<StringRef>>> pids;
+		for (const auto& w : proxies) {
+			pids.insert(w.interf.locality.processId());
+		}
+		ASSERT_EQ(pids.size(), kCount);
+
+		// Mimic findWorkersForConfiguration's comparison accounting: usage of the recruited
+		// workers is added on top of the initial id_used before computing the fitness.
+		std::map<Optional<Standalone<StringRef>>, int> compareUsed;
+		data.updateKnownIds(&compareUsed);
+		for (const auto& w : proxies) {
+			compareUsed[w.interf.locality.processId()]++;
+		}
+		ClusterControllerData::RoleFitness fit(proxies, recruitment::GrvProxy, compareUsed);
+		if (pass == 0) {
+			firstFit = fit;
+		} else {
+			secondFit = fit;
+		}
+	}
+
+	ASSERT(firstFit == secondFit);
+	return Void();
+}
+
+// Without a minWorker there is no fitness ceiling, so recruitment fills across fitness levels
+// from the best available. This locks in that the fix (which gates on the minWorker's fitness)
+// does not change the no-minWorker path used by log-router recruitment.
+TEST_CASE("/fdbserver/clustercontroller/logRouterRecruitmentWithoutMinWorker") {
+	const Key dcId = "dc1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+
+	auto stateless = addRecruitmentTestWorkers(data, dcId, ProcessClass::StatelessClass, "sl"_sr, 2);
+	auto transaction = addRecruitmentTestWorkers(data, dcId, ProcessClass::TransactionClass, "tx"_sr, 2);
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+
+	std::map<Optional<Standalone<StringRef>>, int> id_used;
+	auto routers = data.getWorkersForRoleInDatacenter(dcId, recruitment::LogRouter, 4, config, id_used);
+
+	ASSERT_EQ(routers.size(), 4);
+	std::set<Optional<Standalone<StringRef>>> pids;
+	for (const auto& w : routers) {
+		pids.insert(w.interf.locality.processId());
+	}
+	ASSERT_EQ(pids.size(), 4); // all distinct, spanning both fitness levels
+	return Void();
+}
+
+// End-to-end regression test for the original bug through the production recruitment path
+// (findWorkersForConfigurationDispatch). In a small cluster whose desired proxy counts equal
+// the number of stateless processes, every commit proxy, GRV proxy and resolver must be
+// recruited (previously only one commit proxy was), each on a distinct stateless process.
+// Process classes are honored: TLogs land on transaction processes, proxies on stateless ones.
+TEST_CASE("/fdbserver/clustercontroller/proxyColocationOnStateless") {
+	const Key dcId = "dc1"_sr;
+	ClusterControllerData data = makeRecruitmentTestData(dcId);
+	// Make the good-recruitment gate pass so we assert on the recruitment result itself.
+	data.goodRecruitmentTime = Void();
+
+	constexpr int kCount = 3;
+	auto stateless = addRecruitmentTestWorkers(data, dcId, ProcessClass::StatelessClass, "sl"_sr, kCount);
+	auto transaction = addRecruitmentTestWorkers(data, dcId, ProcessClass::TransactionClass, "tx"_sr, kCount);
+	auto storage = addRecruitmentTestWorkers(data, dcId, ProcessClass::StorageClass, "ss"_sr, kCount);
+
+	// Two of the stateless processes already host the master and cluster controller.
+	data.masterProcessId = stateless[0].locality.processId();
+	data.clusterControllerProcessId = stateless[1].locality.processId();
+
+	DatabaseConfiguration config;
+	config.initialized = true;
+	config.usableRegions = 1;
+	RegionInfo region;
+	region.dcId = dcId;
+	config.regions.push_back(region);
+	config.tLogReplicationFactor = kCount;
+	config.desiredTLogCount = kCount;
+	config.commitProxyCount = kCount;
+	config.grvProxyCount = kCount;
+	config.resolverCount = kCount;
+	config.tLogPolicy = makeReference<PolicyOne>();
+	data.db.config = config;
+	data.db.fullyRecoveredConfig = config;
+
+	RecruitFromConfigurationRequest req(config, /*recruitSeedServers=*/false, /*maxOldLogRouters=*/0);
+	auto result = data.findWorkersForConfigurationDispatch(req, /*checkGoodRecruitment=*/true);
+
+	std::set<Optional<Standalone<StringRef>>> statelessPids, transactionPids;
+	for (const auto& w : stateless) {
+		statelessPids.insert(w.locality.processId());
+	}
+	for (const auto& w : transaction) {
+		transactionPids.insert(w.locality.processId());
+	}
+
+	// TLogs are recruited on the transaction processes.
+	ASSERT_EQ(result.tLogs.size(), kCount);
+	for (const auto& interf : result.tLogs) {
+		ASSERT(transactionPids.count(interf.locality.processId()) == 1);
+	}
+
+	// Each proxy/resolver set is fully recruited onto distinct stateless processes.
+	auto assertDistinctStateless = [&statelessPids, kCount](const std::vector<WorkerInterface>& interfaces) {
+		ASSERT_EQ(interfaces.size(), kCount);
+		std::set<Optional<Standalone<StringRef>>> pids;
+		for (const auto& interf : interfaces) {
+			pids.insert(interf.locality.processId());
+			ASSERT(statelessPids.count(interf.locality.processId()) == 1);
+		}
+		ASSERT_EQ(pids.size(), kCount);
+	};
+	assertDistinctStateless(result.commitProxies);
+	assertDistinctStateless(result.grvProxies);
+	assertDistinctStateless(result.resolvers);
+	return Void();
+}
+
 } // namespace
