@@ -2436,6 +2436,9 @@ int statsProcessMain(Arguments const& args,
 		while (stopcount.load() < args.num_threads * args.num_processes) {
 			usleep(10000); /* 10ms */
 		}
+		if (args.mode == MODE_RUN) {
+			printNativeLatency(args, worker_stats, toDoubleSeconds(steady_clock::now() - time_start));
+		}
 		printReport(args, worker_stats, thread_stats, process_stats, run_duration_sec, warmup_snapshot, pid_main, fp);
 	}
 
