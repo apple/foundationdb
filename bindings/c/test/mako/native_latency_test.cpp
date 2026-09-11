@@ -42,8 +42,12 @@ int main() {
 	NativeLatencyHistogram edges;
 	NativeLatencySnapshot empty;
 	check(!empty.percentile(0, 0.999), "empty histogram must not report a percentile");
-	for (const auto value : { uint64_t{ 0 }, uint64_t{ 1 }, uint64_t{ 2 }, uint64_t{ 1 } << 31,
-	                          uint64_t{ 1 } << 32, std::numeric_limits<uint64_t>::max() }) {
+	for (const auto value : { uint64_t{ 0 },
+	                          uint64_t{ 1 },
+	                          uint64_t{ 2 },
+	                          uint64_t{ 1 } << 31,
+	                          uint64_t{ 1 } << 32,
+	                          std::numeric_limits<uint64_t>::max() }) {
 		edges.add(0, value);
 	}
 	NativeLatencySnapshot edge_snapshot;
@@ -88,8 +92,7 @@ int main() {
 	NativeLatencySnapshot combined;
 	combined.merge(histograms[0]);
 	combined.merge(histograms[1]);
-	check(combined.samples(0) == 3000 && combined.samples(1) == 3000,
-	      "adjacent worker histograms must not overlap");
+	check(combined.samples(0) == 3000 && combined.samples(1) == 3000, "adjacent worker histograms must not overlap");
 	for (const auto quantile : { 0.5, 0.9, 0.99, 0.999 }) {
 		const auto get = *combined.percentile(0, quantile);
 		const auto commit = *combined.percentile(1, quantile);

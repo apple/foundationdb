@@ -49,9 +49,8 @@ public:
 		if (operation < 0 || operation >= operationCount) {
 			return;
 		}
-		const auto index = microseconds == 0
-		                       ? 0
-		                       : std::min(bucketCount - 1, 1 + static_cast<int>(std::log2(microseconds) * 64));
+		const auto index =
+		    microseconds == 0 ? 0 : std::min(bucketCount - 1, 1 + static_cast<int>(std::log2(microseconds) * 64));
 		buckets[operation][index].fetch_add(1, std::memory_order_relaxed);
 	}
 

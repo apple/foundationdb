@@ -2278,9 +2278,10 @@ void printNativeLatency(Arguments const& args, WorkflowStatistics const* worker_
 		const auto samples = snapshot.samples(op);
 		writer.Key("samples");
 		writer.Uint64(samples);
-		for (const auto& [name, quantile] :
-		     { std::pair{ "p50_us", 0.5 }, std::pair{ "p90_us", 0.9 }, std::pair{ "p99_us", 0.99 },
-		       std::pair{ "p999_us", 0.999 } }) {
+		for (const auto& [name, quantile] : { std::pair{ "p50_us", 0.5 },
+		                                      std::pair{ "p90_us", 0.9 },
+		                                      std::pair{ "p99_us", 0.99 },
+		                                      std::pair{ "p999_us", 0.999 } }) {
 			writer.Key(name);
 			if (samples == 0 || (quantile == 0.999 && samples < 1000)) {
 				writer.Null();

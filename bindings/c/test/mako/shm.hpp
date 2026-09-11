@@ -104,11 +104,10 @@ class Access {
 	                                                           int num_workers,
 	                                                           int process_idx,
 	                                                           int worker_idx) noexcept {
-		auto* latency_base =
-		    reinterpret_cast<NativeLatencyHistogram*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
-		                                              sizeof(WorkflowStatistics) * (num_processes * num_workers - 1) +
-		                                              sizeof(ThreadStatistics) * num_processes * num_threads +
-		                                              sizeof(ProcessStatistics) * num_processes);
+		auto* latency_base = reinterpret_cast<NativeLatencyHistogram*>(
+		    static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
+		    sizeof(WorkflowStatistics) * (num_processes * num_workers - 1) +
+		    sizeof(ThreadStatistics) * num_processes * num_threads + sizeof(ProcessStatistics) * num_processes);
 		return latency_base[process_idx * num_workers + worker_idx];
 	}
 
@@ -128,7 +127,8 @@ public:
 		new (&header()) Header{};
 		for (auto i = 0; i < num_processes; i++) {
 			for (auto j = 0; j < num_workers; j++) {
-				new (&latencyHistogramSlot(base, num_processes, num_threads, num_workers, i, j)) NativeLatencyHistogram();
+				new (&latencyHistogramSlot(base, num_processes, num_threads, num_workers, i, j))
+				    NativeLatencyHistogram();
 				new (&workerStatsSlot(i, j))
 				    WorkflowStatistics(&latencyHistogramSlot(base, num_processes, num_threads, num_workers, i, j));
 			}
