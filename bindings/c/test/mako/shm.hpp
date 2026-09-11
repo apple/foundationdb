@@ -49,12 +49,14 @@ struct LayoutHelper {
 inline size_t storageSize(int num_processes, int num_threads, int num_workers) noexcept {
 	assert(num_processes >= 1 && num_threads >= 1);
 	return sizeof(LayoutHelper) + sizeof(WorkflowStatistics) * ((num_processes * num_workers) - 1) +
-	       sizeof(ThreadStatistics) * (num_threads * num_processes) + sizeof(ProcessStatistics) * num_processes;
+	       sizeof(ThreadStatistics) * (num_threads * num_processes) + sizeof(ProcessStatistics) * num_processes +
+	       sizeof(NativeLatencyHistogram) * (num_processes * num_workers);
 }
 
 // class Access memory layout:
 // Header | WorkflowStatistics | WorkflowStatistics * (num_processes * num_workers - 1) | ThreadStatistics *
-// (num_processes * num_threads) | ProcessStatistics * (num_processes)
+// (num_processes * num_threads) | ProcessStatistics * (num_processes) | NativeLatencyHistogram *
+// (num_processes * num_workers)
 // all Statistics classes have alignas(64)
 
 class Access {
@@ -78,7 +80,7 @@ class Access {
 	                                                int thread_idx) noexcept {
 		auto* thread_stat_base =
 		    reinterpret_cast<ThreadStatistics*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
-		                                        sizeof(WorkflowStatistics) * num_processes * num_workers);
+		                                        sizeof(WorkflowStatistics) * (num_processes * num_workers - 1));
 
 		return thread_stat_base[process_idx * num_threads + thread_idx];
 	}
@@ -91,9 +93,23 @@ class Access {
 
 		auto* proc_stat_base =
 		    reinterpret_cast<ProcessStatistics*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
-		                                         sizeof(WorkflowStatistics) * num_processes * num_workers +
+		                                         sizeof(WorkflowStatistics) * (num_processes * num_workers - 1) +
 		                                         sizeof(ThreadStatistics) * num_processes * num_threads);
 		return proc_stat_base[process_idx];
+	}
+
+	static inline NativeLatencyHistogram& latencyHistogramSlot(void* shm_base,
+	                                                           int num_processes,
+	                                                           int num_threads,
+	                                                           int num_workers,
+	                                                           int process_idx,
+	                                                           int worker_idx) noexcept {
+		auto* latency_base =
+		    reinterpret_cast<NativeLatencyHistogram*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
+		                                              sizeof(WorkflowStatistics) * (num_processes * num_workers - 1) +
+		                                              sizeof(ThreadStatistics) * num_processes * num_threads +
+		                                              sizeof(ProcessStatistics) * num_processes);
+		return latency_base[process_idx * num_workers + worker_idx];
 	}
 
 public:
@@ -112,7 +128,9 @@ public:
 		new (&header()) Header{};
 		for (auto i = 0; i < num_processes; i++) {
 			for (auto j = 0; j < num_workers; j++) {
-				new (&workerStatsSlot(i, j)) WorkflowStatistics();
+				new (&latencyHistogramSlot(base, num_processes, num_threads, num_workers, i, j)) NativeLatencyHistogram();
+				new (&workerStatsSlot(i, j))
+				    WorkflowStatistics(&latencyHistogramSlot(base, num_processes, num_threads, num_workers, i, j));
 			}
 		}
 		for (auto i = 0; i < num_processes; i++) {

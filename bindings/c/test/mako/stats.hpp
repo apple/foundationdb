@@ -34,6 +34,7 @@
 #include <utility>
 #include "flow/Platform.h"
 #include "mako/mako.hpp"
+#include "native_latency.hpp"
 #include "operations.hpp"
 #include "time.hpp"
 #include "ddsketch.hpp"
@@ -100,9 +101,10 @@ class alignas(64) WorkflowStatistics {
 	std::array<uint64_t, MAX_OP> latency_samples;
 	std::array<uint64_t, MAX_OP> latency_us_total;
 	std::vector<DDSketchMako> sketches;
+	NativeLatencyHistogram* live_latency;
 
 public:
-	WorkflowStatistics() noexcept {
+	WorkflowStatistics(NativeLatencyHistogram* live_latency = nullptr) noexcept : live_latency(live_latency) {
 		std::fill(ops.begin(), ops.end(), 0);
 		std::fill(errors.begin(), errors.end(), 0);
 		std::fill(timeouts.begin(), timeouts.end(), 0);
@@ -137,6 +139,7 @@ public:
 	uint64_t percentile(int op, double quantile) { return sketches[op].percentile(quantile); }
 
 	uint64_t mean(int op) const noexcept { return sketches[op].mean(); }
+	NativeLatencyHistogram const* liveLatency() const noexcept { return live_latency; }
 
 	// with 'this' as final aggregation, factor in 'other'
 	void combine(const WorkflowStatistics& other) {
@@ -173,6 +176,9 @@ public:
 		latency_samples[op]++;
 		sketches[op].addSample(latency_us);
 		latency_us_total[op] += latency_us;
+		if (live_latency && (op == OP_GET || op == OP_COMMIT)) {
+			live_latency->add(op == OP_GET ? 0 : 1, latency_us);
+		}
 	}
 
 	void subtractCounters(const WorkflowStatistics& baseline) noexcept {

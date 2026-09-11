@@ -119,6 +119,7 @@ if(NOT WIN32)
     test/mako/logger.hpp
     test/mako/mako.cpp
     test/mako/mako.hpp
+    test/mako/native_latency.hpp
     test/mako/operations.hpp
     test/mako/operations.cpp
     test/mako/process.hpp

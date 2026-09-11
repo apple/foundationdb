@@ -2258,6 +2258,43 @@ void printReport(Arguments const& args,
 	}
 }
 
+void printNativeLatency(Arguments const& args, WorkflowStatistics const* worker_stats, double elapsed_seconds) {
+	NativeLatencySnapshot snapshot;
+	const auto num_workers = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
+	for (auto i = 0; i < args.num_processes * num_workers; ++i) {
+		snapshot.merge(*worker_stats[i].liveLatency());
+	}
+
+	rapidjson::StringBuffer buffer;
+	rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+	writer.StartObject();
+	writer.Key("elapsed_seconds");
+	writer.Double(elapsed_seconds);
+	writer.Key("sampling_rate");
+	writer.Int(args.sampling);
+	for (auto op = 0; op < NativeLatencyHistogram::operationCount; ++op) {
+		writer.Key(op == 0 ? "GET" : "COMMIT");
+		writer.StartObject();
+		const auto samples = snapshot.samples(op);
+		writer.Key("samples");
+		writer.Uint64(samples);
+		for (const auto& [name, quantile] :
+		     { std::pair{ "p50_us", 0.5 }, std::pair{ "p90_us", 0.9 }, std::pair{ "p99_us", 0.99 },
+		       std::pair{ "p999_us", 0.999 } }) {
+			writer.Key(name);
+			if (samples == 0 || (quantile == 0.999 && samples < 1000)) {
+				writer.Null();
+			} else {
+				writer.Uint64(*snapshot.percentile(op, quantile));
+			}
+		}
+		writer.EndObject();
+	}
+	writer.EndObject();
+	fmt::print("MAKO_LATENCY {}\n", buffer.GetString());
+	std::fflush(stdout);
+}
+
 int statsProcessMain(Arguments const& args,
                      WorkflowStatistics const* worker_stats,
                      ThreadStatistics const* thread_stats,
@@ -2376,6 +2413,9 @@ int statsProcessMain(Arguments const& args,
 						fmt::fprintf(fp, ",");
 				}
 				printStats(args, worker_stats, toDoubleSeconds(time_now - time_prev), fp);
+				if (args.mode == MODE_RUN) {
+					printNativeLatency(args, worker_stats, toDoubleSeconds(time_now - time_start));
+				}
 			}
 			time_prev = time_now;
 		}
