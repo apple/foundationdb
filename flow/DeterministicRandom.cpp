@@ -292,9 +292,9 @@ TEST_CASE("/flow/DeterministicRandom/saveRestoreState") {
 	auto const saved = rng.saveState();
 	ASSERT(!saved.empty());
 
-	std::vector<uint64_t> expected;
+	std::vector<uint64_t> expected(64);
 	for (int i = 0; i < 64; ++i)
-		expected.push_back(rng.randomUInt64());
+		expected[i] = rng.randomUInt64();
 
 	// Restoring in place must replay the same stream.
 	rng.restoreState(saved);
