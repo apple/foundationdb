@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +30,7 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <new>
 #include <numeric>
 #include <optional>
@@ -62,6 +64,8 @@
 #include "mako.hpp"
 #include "operations.hpp"
 #include "process.hpp"
+#include "prometheus.hpp"
+#include "prometheus_server.hpp"
 #include "utils.hpp"
 #include "shm.hpp"
 #include "stats.hpp"
@@ -267,6 +271,7 @@ int runOneTransaction(Transaction& tx,
 	auto op_iter = getOpBegin(args);
 	auto needs_commit = false;
 transaction_begin:
+	stats.incrTransactionAttempt();
 	while (op_iter != OpEnd) {
 		const auto& [op, count, step] = op_iter;
 		const auto step_kind = opTable[op].stepKind(step);
@@ -297,6 +302,7 @@ transaction_begin:
 				tx.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, *token);
 			// retry from first op
 			op_iter = getOpBegin(args);
+			stats.incrTransactionAttempt();
 			needs_commit = false;
 			continue;
 		}
@@ -800,6 +806,7 @@ Arguments::Arguments() {
 	tpsinterval = 10;
 	tpschange = TPS_SIN;
 	sampling = 1000;
+	prometheus_port = 0;
 	key_length = 32;
 	value_length = 16;
 	zipf = 0;
@@ -1108,6 +1115,7 @@ void usage() {
 	printf("%-24s %s\n", "    --tpsinterval=SEC", "Specify the TPS change interval (Default: 10 seconds)");
 	printf("%-24s %s\n", "    --tpschange=<sin|square|pulse>", "Specify the TPS change type (Default: sin)");
 	printf("%-24s %s\n", "    --sampling=RATE", "Specify the sampling rate for latency stats");
+	printf("%-24s %s\n", "    --prometheus_port=PORT", "Serve native Mako metrics on /metrics (disabled by default)");
 	printf("%-24s %s\n", "-m, --mode=MODE", "Specify the mode (build, run, clean, report)");
 	printf("%-24s %s\n", "-z, --zipf", "Use zipfian distribution instead of uniform distribution");
 	printf("%-24s %s\n", "    --commitget", "Commit GETs");
@@ -1184,6 +1192,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "tpsinterval", required_argument, nullptr, ARG_TPSINTERVAL },
 			{ "tpschange", required_argument, nullptr, ARG_TPSCHANGE },
 			{ "sampling", required_argument, nullptr, ARG_SAMPLING },
+			{ "prometheus_port", required_argument, nullptr, ARG_PROMETHEUS_PORT },
 			{ "verbose", required_argument, nullptr, 'v' },
 			{ "mode", required_argument, nullptr, 'm' },
 			{ "knobs", required_argument, nullptr, ARG_KNOBS },
@@ -1241,6 +1250,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		}
 		switch (c) {
 		case '?':
+			return -2;
 		case 'h':
 			usage();
 			return -1;
@@ -1344,6 +1354,17 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_SAMPLING:
 			args.sampling = atoi(optarg);
 			break;
+		case ARG_PROMETHEUS_PORT: {
+			char* end = nullptr;
+			errno = 0;
+			const auto port = std::strtol(optarg, &end, 10);
+			if (errno || end == optarg || *end != '\0' || port < 0 || port > 65535) {
+				logr.error("--prometheus_port must be between 0 and 65535");
+				return -2;
+			}
+			args.prometheus_port = static_cast<int>(port);
+			break;
+		}
 		case ARG_VERSION:
 			logr.error("Version: {}", FDB_API_VERSION);
 			_exit(0);
@@ -1610,6 +1631,10 @@ int Arguments::validate() {
 	}
 	if (mode != MODE_RUN && warmup_seconds != 0) {
 		logr.error("--warmup_seconds only supported in run mode");
+		return -1;
+	}
+	if (mode != MODE_RUN && prometheus_port != 0) {
+		logr.error("--prometheus_port is only supported in run mode");
 		return -1;
 	}
 
@@ -2263,11 +2288,45 @@ int statsProcessMain(Arguments const& args,
                      ThreadStatistics const* thread_stats,
                      ProcessStatistics const* process_stats,
                      std::atomic<double>& throttle_factor,
+                     std::atomic<int>& metrics_status,
                      std::atomic<int> const& signal,
                      std::atomic<int> const& stopcount,
                      pid_t pid_main) {
 	bool first_stats = true;
 	auto warmup_snapshot = std::optional<WarmupSnapshot>{};
+	auto metrics_server = std::unique_ptr<NativeMetricsServer>{};
+	if (args.prometheus_port != 0) {
+		const auto job = prometheusWorkloadName(std::getenv("MAKO_JOB_NAME"));
+		const auto workload = prometheusWorkloadName(std::getenv("MAKO_WORKLOAD_NAME"));
+		const auto run_start_seconds =
+		    std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+		const auto num_workers = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
+		try {
+			metrics_server = std::make_unique<NativeMetricsServer>(args.prometheus_port, [=, &args]() {
+				auto counters = NativeCountersSnapshot{};
+				auto latency = NativeLatencySnapshot{};
+				for (auto i = 0; i < args.num_processes * num_workers; ++i) {
+					counters.merge(*worker_stats[i].liveCounters());
+					latency.merge(*worker_stats[i].liveLatency());
+				}
+				return renderPrometheusMetrics(counters,
+				                               latency,
+				                               job,
+				                               workload,
+				                               args.key_length,
+				                               args.value_length,
+				                               args.num_processes,
+				                               args.num_threads,
+				                               args.sampling,
+				                               run_start_seconds);
+			});
+		} catch (const std::exception& error) {
+			logr.error("Mako metrics could not listen on port {}: {}", args.prometheus_port, error.what());
+			metrics_status.store(-1);
+			return -1;
+		}
+	}
+	metrics_status.store(1);
 
 	/* wait until the signal turn on */
 	while (signal.load() == SIGNAL_OFF) {
@@ -2426,7 +2485,7 @@ int main(int argc, char* argv[]) {
 	rc = parseArguments(argc, argv, args);
 	if (rc < 0) {
 		/* usage printed */
-		return 0;
+		return rc == -2 ? 1 : 0;
 	}
 
 	// set --seconds in case no ending condition has been set
@@ -2482,7 +2541,8 @@ int main(int argc, char* argv[]) {
 	const auto async_mode = args.async_xacts > 0;
 	const auto num_workers = async_mode ? args.async_xacts : args.num_threads;
 	/* allocate */
-	const auto shmsize = shared_memory::storageSize(args.num_processes, args.num_threads, num_workers);
+	const auto shmsize =
+	    shared_memory::storageSize(args.num_processes, args.num_threads, num_workers, args.prometheus_port != 0);
 
 	auto shm = std::add_pointer_t<void>{};
 	if (ftruncate(shmfd, shmsize) < 0) {
@@ -2499,7 +2559,8 @@ int main(int argc, char* argv[]) {
 	}
 	auto munmap_guard = ExitGuard([=]() { munmap(shm, shmsize); });
 
-	auto shm_access = shared_memory::Access(shm, args.num_processes, args.num_threads, num_workers);
+	auto shm_access =
+	    shared_memory::Access(shm, args.num_processes, args.num_threads, num_workers, args.prometheus_port != 0);
 
 	/* initialize the shared memory */
 	shm_access.initMemory();
@@ -2509,6 +2570,7 @@ int main(int argc, char* argv[]) {
 	shm_hdr.signal = SIGNAL_OFF;
 	shm_hdr.readycount = 0;
 	shm_hdr.stopcount = 0;
+	shm_hdr.metrics_status = 0;
 	shm_hdr.throttle_factor = 1.0;
 
 	auto proc_type = ProcKind::MAIN;
@@ -2553,29 +2615,47 @@ int main(int argc, char* argv[]) {
 	if (proc_type == ProcKind::WORKER) {
 		/* worker process */
 
-		workerProcessMain(args, process_idx, shm_access, pid_main);
+		const auto result = workerProcessMain(args, process_idx, shm_access, pid_main);
 
-		_exit(0);
+		_exit(result == 0 ? 0 : 1);
 	} else if (proc_type == ProcKind::STATS) {
 		/* stats */
 		if (args.mode == MODE_CLEAN) {
 			/* no stats needed for clean mode */
 			_exit(0);
 		}
-		statsProcessMain(args,
-		                 shm_access.workerStatsConstArray(),
-		                 shm_access.threadStatsConstArray(),
-		                 shm_access.processStatsConstArray(),
-		                 shm_hdr.throttle_factor,
-		                 shm_hdr.signal,
-		                 shm_hdr.stopcount,
-		                 pid_main);
-		_exit(0);
+		const auto result = statsProcessMain(args,
+		                                     shm_access.workerStatsConstArray(),
+		                                     shm_access.threadStatsConstArray(),
+		                                     shm_access.processStatsConstArray(),
+		                                     shm_hdr.throttle_factor,
+		                                     shm_hdr.metrics_status,
+		                                     shm_hdr.signal,
+		                                     shm_hdr.stopcount,
+		                                     pid_main);
+		_exit(result == 0 ? 0 : 1);
 	}
 
 	/* master */
 	/* wait for everyone to be ready */
-	while (shm_hdr.readycount.load() < (args.num_processes * args.num_threads)) {
+	while (shm_hdr.readycount.load() < (args.num_processes * args.num_threads) ||
+	       (args.prometheus_port != 0 && shm_hdr.metrics_status.load() == 0)) {
+		const bool exporter_failed = args.prometheus_port != 0 && shm_hdr.metrics_status.load() < 0;
+		const bool stats_exited = args.prometheus_port != 0 && shm_hdr.metrics_status.load() == 0 &&
+		                          waitpid(worker_pids[args.num_processes], nullptr, WNOHANG) > 0;
+		if (exporter_failed || stats_exited) {
+			logr.error("Mako metrics could not start");
+			for (auto p = 0; p < args.num_processes; ++p) {
+				kill(worker_pids[p], SIGTERM);
+			}
+			for (auto p = 0; p < args.num_processes; ++p) {
+				waitpid(worker_pids[p], nullptr, 0);
+			}
+			if (!stats_exited) {
+				waitpid(worker_pids[args.num_processes], nullptr, 0);
+			}
+			return -1;
+		}
 		usleep(1000);
 	}
 	shm_hdr.signal.store(SIGNAL_GREEN);
@@ -2605,12 +2685,16 @@ int main(int argc, char* argv[]) {
 	}
 
 	auto status = int{};
+	auto failed = false;
 	/* wait for worker processes to exit */
 	for (auto p = 0; p < args.num_processes; p++) {
 		logr.debug("waiting for worker process {} (PID:{}) to exit", p + 1, worker_pids[p]);
 		auto pid = waitpid(worker_pids[p], &status, 0 /* or what? */);
 		if (pid < 0) {
 			logr.error("waitpid failed for worker process PID {}", worker_pids[p]);
+			failed = true;
+		} else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+			failed = true;
 		}
 		logr.debug("worker {} (PID:{}) exited", p + 1, worker_pids[p]);
 	}
@@ -2624,7 +2708,11 @@ int main(int argc, char* argv[]) {
 	auto pid = waitpid(worker_pids[args.num_processes], &status, 0 /* or what? */);
 	if (pid < 0) {
 		logr.error("waitpid failed for stats process PID {}", worker_pids[args.num_processes]);
+		failed = true;
+	} else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		logr.error("stats process exited abnormally");
+		failed = true;
 	}
 
-	return 0;
+	return failed ? -1 : 0;
 }

@@ -119,9 +119,12 @@ if(NOT WIN32)
     test/mako/logger.hpp
     test/mako/mako.cpp
     test/mako/mako.hpp
+    test/mako/native_latency.hpp
     test/mako/operations.hpp
     test/mako/operations.cpp
     test/mako/process.hpp
+    test/mako/prometheus.hpp
+    test/mako/prometheus_server.hpp
     test/mako/shm.hpp
     test/mako/stats.hpp
     test/mako/time.hpp
@@ -193,6 +196,9 @@ if(NOT WIN32)
     add_executable(fdb_c_client_memory_test test/client_memory_test.cpp test/unit/fdb_api.cpp test/unit/fdb_api.hpp)
     if(BUILD_MAKO)
       add_executable(mako ${MAKO_SRCS})
+      add_executable(mako_native_latency_test test/mako/native_latency_test.cpp)
+      target_link_libraries(mako_native_latency_test PRIVATE fmt::fmt boost_target Threads::Threads)
+      add_test(NAME mako_native_latency_test COMMAND $<TARGET_FILE:mako_native_latency_test>)
     endif()
     add_executable(fdb_c_setup_tests test/unit/setup_tests.cpp)
     add_executable(fdb_c_unit_tests)

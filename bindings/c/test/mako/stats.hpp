@@ -34,6 +34,7 @@
 #include <utility>
 #include "flow/Platform.h"
 #include "mako/mako.hpp"
+#include "native_latency.hpp"
 #include "operations.hpp"
 #include "time.hpp"
 #include "ddsketch.hpp"
@@ -100,9 +101,12 @@ class alignas(64) WorkflowStatistics {
 	std::array<uint64_t, MAX_OP> latency_samples;
 	std::array<uint64_t, MAX_OP> latency_us_total;
 	std::vector<DDSketchMako> sketches;
+	NativeLatencyHistogram* live_latency;
+	NativeCounters* live_counters;
 
 public:
-	WorkflowStatistics() noexcept {
+	WorkflowStatistics(NativeLatencyHistogram* live_latency = nullptr, NativeCounters* live_counters = nullptr) noexcept
+	  : live_latency(live_latency), live_counters(live_counters) {
 		std::fill(ops.begin(), ops.end(), 0);
 		std::fill(errors.begin(), errors.end(), 0);
 		std::fill(timeouts.begin(), timeouts.end(), 0);
@@ -137,6 +141,8 @@ public:
 	uint64_t percentile(int op, double quantile) { return sketches[op].percentile(quantile); }
 
 	uint64_t mean(int op) const noexcept { return sketches[op].mean(); }
+	NativeLatencyHistogram const* liveLatency() const noexcept { return live_latency; }
+	NativeCounters const* liveCounters() const noexcept { return live_counters; }
 
 	// with 'this' as final aggregation, factor in 'other'
 	void combine(const WorkflowStatistics& other) {
@@ -153,19 +159,57 @@ public:
 		}
 	}
 
-	void incrConflictCount() noexcept { conflicts++; }
+	void incrConflictCount() noexcept {
+		conflicts++;
+		if (live_counters) {
+			live_counters->conflicts.fetch_add(1, std::memory_order_relaxed);
+		}
+	}
 
 	// non-commit write operations aren't measured for time.
-	void incrOpCount(int op) noexcept { ops[op]++; }
+	void incrOpCount(int op) noexcept {
+		ops[op]++;
+		if (live_counters) {
+			switch (op) {
+			case OP_TRANSACTION:
+				live_counters->completed_transactions.fetch_add(1, std::memory_order_relaxed);
+				break;
+			case OP_GET:
+				live_counters->reads.fetch_add(1, std::memory_order_relaxed);
+				break;
+			case OP_UPDATE:
+				live_counters->reads.fetch_add(1, std::memory_order_relaxed);
+				live_counters->writes.fetch_add(1, std::memory_order_relaxed);
+				break;
+			case OP_COMMIT:
+				live_counters->commits.fetch_add(1, std::memory_order_relaxed);
+				break;
+			default:
+				break;
+			}
+		}
+	}
+
+	void incrTransactionAttempt() noexcept {
+		if (live_counters) {
+			live_counters->attempted_transactions.fetch_add(1, std::memory_order_relaxed);
+		}
+	}
 
 	void incrErrorCount(int op) noexcept {
 		total_errors++;
 		errors[op]++;
+		if (live_counters) {
+			live_counters->errors.fetch_add(1, std::memory_order_relaxed);
+		}
 	}
 
 	void incrTimeoutCount(int op) noexcept {
 		total_timeouts++;
 		timeouts[op]++;
+		if (live_counters) {
+			live_counters->timeouts.fetch_add(1, std::memory_order_relaxed);
+		}
 	}
 
 	void addLatency(int op, timediff_t diff) noexcept {
@@ -173,6 +217,9 @@ public:
 		latency_samples[op]++;
 		sketches[op].addSample(latency_us);
 		latency_us_total[op] += latency_us;
+		if (live_latency && (op == OP_GET || op == OP_COMMIT)) {
+			live_latency->add(op == OP_GET ? 0 : 1, latency_us);
+		}
 	}
 
 	void subtractCounters(const WorkflowStatistics& baseline) noexcept {
