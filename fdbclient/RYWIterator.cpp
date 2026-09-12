@@ -21,6 +21,7 @@
 #include "RYWIterator.h"
 #include "fdbclient/RandomTestUtils.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/Knobs.h"
 #include "flow/UnitTest.h"
 
 const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = {
@@ -628,6 +629,46 @@ TEST_CASE("/fdbclient/WriteMap/addValue") {
 
 	writes.mutate("apple123"_sr, MutationRef::AddValue, "1"_sr, true);
 	ASSERT(getWriteMapCount(&writes) == 3);
+
+	return Void();
+}
+
+// AppendIfFits is not associative under truncation. Two equal-sized appends must stay
+// on the OperationStack and be applied sequentially against the base value; coalescing
+// the operands first can reject work that would have succeeded one-at-a-time (#13828).
+TEST_CASE("/fdbclient/WriteMap/appendIfFitsNonAssociative") {
+	Arena arena = Arena();
+	const int baseSize = 70000;
+	const int appendSize = 20000;
+	ASSERT(baseSize + appendSize <= CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+	ASSERT(baseSize + 2 * appendSize > CLIENT_KNOBS->VALUE_SIZE_LIMIT);
+
+	ValueRef firstAppend = StringRef(arena, std::string(appendSize, 'b'));
+	ValueRef secondAppend = StringRef(arena, std::string(appendSize, 'b'));
+	ValueRef base = StringRef(arena, std::string(baseSize, 'a'));
+
+	OperationStack stack(RYWMutation(firstAppend, MutationRef::AppendIfFits));
+	WriteMap::coalesceOver(stack, RYWMutation(secondAppend, MutationRef::AppendIfFits), arena);
+	ASSERT(stack.size() == 2);
+	ASSERT(stack.at(0).type == MutationRef::AppendIfFits);
+	ASSERT(stack.at(1).type == MutationRef::AppendIfFits);
+
+	RYWMutation under = WriteMap::coalesceUnder(stack, base, arena);
+	ASSERT(under.type == MutationRef::SetValue);
+	ASSERT(under.value.present());
+	ASSERT(under.value.get().size() == baseSize + appendSize);
+
+	// Dependent writes (no prior SetValue in the transaction): RYW must still yield 90KB.
+	WriteMap writes = WriteMap(&arena);
+	writes.mutate("k"_sr, MutationRef::AppendIfFits, firstAppend, true);
+	writes.mutate("k"_sr, MutationRef::AppendIfFits, secondAppend, true);
+	WriteMap::iterator it(&writes);
+	it.skip("k"_sr);
+	ASSERT(it.is_operation());
+	ASSERT(it.op().size() == 2);
+	RYWMutation visible = WriteMap::coalesceUnder(it.op(), base, arena);
+	ASSERT(visible.value.present());
+	ASSERT(visible.value.get().size() == baseSize + appendSize);
 
 	return Void();
 }
