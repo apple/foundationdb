@@ -1,0 +1,44 @@
+[configuration]
+storageEngineExcludeTypes = [3, 4, 5]
+logAntiQuorum = 0
+buggify = false
+
+[[knobs]]
+enable_read_lock_on_range = false
+max_storage_snapshot_fault_tolerance = 0
+
+[[test]]
+testTitle = 'SnapshotDuplicateRequestsPre'
+clearAfterTest = false
+runFailureWorkloads = false
+connectionFailuresDisableDuration = 1000000
+
+    [[test.workload]]
+    testName = 'SnapTest'
+    numSnaps = 1
+    testID = 0
+
+[[test]]
+testTitle = 'SnapshotDuplicateRequests'
+clearAfterTest = false
+runFailureWorkloads = false
+connectionFailuresDisableDuration = 1000000
+
+    [[test.workload]]
+    testName = 'SnapTest'
+    numSnaps = 1
+    maxSnapDelay = 1.0
+    testID = 1
+    duplicateSnapshotProbability = 1.0
+    duplicateSnapshotDelay = 1.0
+    requireDuplicateSnapshot = true
+    checkFinishedDuplicateSnapshot = true
+    retryLimit = 2
+
+[[test]]
+testTitle = 'SnapshotDuplicateRequestsPost'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 250.0
+    testDuration = 10.0
