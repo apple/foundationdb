@@ -730,6 +730,8 @@ rocksdb::DBOptions getOptions() {
 	options.max_open_files = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_OPEN_FILES;
 	options.delete_obsolete_files_period_micros = SERVER_KNOBS->ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD * 1000000;
 	options.max_total_wal_size = SERVER_KNOBS->ROCKSDB_MAX_TOTAL_WAL_SIZE;
+	// Preallocating WAL space for many simulated databases can exhaust the test tmpfs before the data is written.
+	options.allow_fallocate = !g_network->isSimulated();
 	options.max_subcompactions = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS;
 	options.max_background_jobs = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 
