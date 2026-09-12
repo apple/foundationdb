@@ -3995,7 +3995,7 @@ void profileHandler(int sig) {
 	size_t size = 0;
 #else
 	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
-	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
+	size_t size = platform::raw_backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
 #endif
 
 	ps->length = size;
