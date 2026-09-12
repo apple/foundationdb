@@ -258,8 +258,8 @@ bool rewindUnacknowledgedCursorAfterProxyReplacement(CDCCursor* currentPosition,
 	return true;
 }
 
-// TODO: Have the cluster controller rebalance stream ownership using aggregate CDC proxy throughput and
-// update cdcProxyKeys and ClientDBInfo assignments; registration currently chooses any available proxy.
+// TODO: Use measured aggregate CDC proxy throughput instead of stream counts when balancing ownership;
+// registration currently chooses any available proxy before the controller's opt-in balancing pass.
 Optional<CDCProxyInterface> selectAvailableNativeCdcProxy(ClientDBInfo const& clientInfo, Optional<UID> previousProxy) {
 	for (const auto& proxy : clientInfo.cdcProxies) {
 		if (!previousProxy.present() || proxy.id() != previousProxy.get()) {
