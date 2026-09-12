@@ -1250,6 +1250,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		}
 		switch (c) {
 		case '?':
+			usage();
 			return -2;
 		case 'h':
 			usage();
