@@ -147,7 +147,7 @@ struct Profiler {
 		if (flowProfilingEnabled) {
 			double t = timer();
 			output_buffer->push(*(void**)&t);
-			size_t n = platform::raw_backtrace(addresses, 256);
+			size_t n = platform::signalSafeBacktrace(addresses, 256);
 			for (int i = 0; i < n; i++)
 				output_buffer->push(addresses[i]);
 			output_buffer->push((void*)-1LL);
@@ -186,9 +186,7 @@ struct Profiler {
 			co_return;
 		}
 
-		// According to folk wisdom, calling this once before setting up the signal handler makes
-		// it async signal safe in practice :-/
-		platform::raw_backtrace(self->addresses, MAX_STACK_DEPTH);
+		platform::initializeSignalSafeBacktrace();
 
 		// Write environment information header
 		// At the moment this consists of the output of dl_iterate_phdr, the locations of

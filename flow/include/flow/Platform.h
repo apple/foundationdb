@@ -478,6 +478,11 @@ ImageInfo getImageInfo();
 
 // Places the frame pointers in a string formatted as parameters for addr2line.
 size_t raw_backtrace(void** addresses, int maxStackDepth);
+// Records the current thread's stack bounds. Must be called before signalSafeBacktrace() from outside a signal handler.
+void initializeSignalSafeBacktrace();
+// Walks frame pointers without invoking the platform unwinder. Requires -fno-omit-frame-pointer and returns no frames
+// on unsupported platforms or if initializeSignalSafeBacktrace() has not initialized the calling thread.
+size_t signalSafeBacktrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void** addresses, int numAddresses);
 
