@@ -101,6 +101,9 @@ void ResumableStateForRunWorkload::postNextTick() {
 
 void ResumableStateForRunWorkload::runOneTick() {
 	assert(iter != OpEnd);
+	if (iter == getOpBegin(args)) {
+		stats.incrTransactionAttempt();
+	}
 	if (iter.step == 0 /* first step */)
 		prepareKeys(iter.op, key1, key2, args);
 	watch_step.start();
