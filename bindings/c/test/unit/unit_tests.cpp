@@ -48,6 +48,7 @@
 #include "flow/config.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IRandom.h"
+#include "flow/ScopeExit.h"
 
 #include "fdb_api.hpp"
 
@@ -1970,6 +1971,224 @@ TEST_CASE("fdb_database_get_server_protocol") {
 	fdb_check(fdb_future_block_until_ready(protocolFuture));
 	fdb_check(fdb_future_get_uint64(protocolFuture, &out));
 	fdb_future_destroy(protocolFuture);
+}
+
+TEST_CASE("Range lock C binding lifecycle") {
+	using FuturePtr = std::unique_ptr<FDBFuture, decltype(&fdb_future_destroy)>;
+	auto ownFuture = [](FDBFuture* future) { return FuturePtr(future, &fdb_future_destroy); };
+	auto bytes = [](std::string const& value) { return reinterpret_cast<uint8_t const*>(value.data()); };
+	auto waitForSuccess = [](FDBFuture* future) {
+		fdb_check(fdb_future_block_until_ready(future));
+		fdb_check(fdb_future_get_error(future));
+	};
+	auto operationError = [&](FDBFuture* future) {
+		auto owned = ownFuture(future);
+		fdb_check(fdb_future_block_until_ready(owned.get()));
+		return fdb_future_get_error(owned.get());
+	};
+	auto take = [&](std::string const& begin, std::string const& end, std::string const& owner) {
+		return operationError(fdb_database_take_exclusive_read_lock(
+		    db, bytes(begin), begin.size(), bytes(end), end.size(), bytes(owner), owner.size()));
+	};
+	auto release = [&](std::string const& begin, std::string const& end, std::string const& owner) {
+		return operationError(fdb_database_release_exclusive_read_lock(
+		    db, bytes(begin), begin.size(), bytes(end), end.size(), bytes(owner), owner.size()));
+	};
+	auto checkRange = [](FDBKeyRange const& range, std::string const& begin, std::string const& end) {
+		CHECK(std::string(reinterpret_cast<char const*>(range.begin_key), range.begin_key_length) == begin);
+		CHECK(std::string(reinterpret_cast<char const*>(range.end_key), range.end_key_length) == end);
+	};
+	auto commitValue = [](std::string const& writeKey) {
+		fdb::Transaction tr(db);
+		while (true) {
+			tr.set(writeKey, "value");
+			fdb::EmptyFuture commit = tr.commit();
+			fdb_error_t err = wait_future(commit);
+			if (!err || err == 1242) { // transaction_rejected_range_locked
+				return err;
+			}
+			fdb::EmptyFuture retry = tr.on_error(err);
+			fdb_check(wait_future(retry));
+		}
+	};
+
+	const std::string owner = key("range-lock-owner/") + '\0' + "first";
+	const std::string otherOwner = key("range-lock-owner/") + '\0' + "second";
+	const std::string description = std::string("C binding") + '\0' + "owner";
+	const std::string updatedDescription = description + " updated";
+	const std::string rangePrefix = key("range-lock-data/") + '\0';
+	const std::string begin = rangePrefix + "a";
+	const std::string end = rangePrefix + "b";
+	const std::string queryBegin = begin + "m";
+	const std::string queryEnd = begin + "n";
+	const std::string secondBegin = rangePrefix + "c";
+	const std::string secondEnd = rangePrefix + "d";
+	const std::string otherBegin = rangePrefix + "e";
+	const std::string otherEnd = rangePrefix + "f";
+
+	ScopeExit cleanup([&] {
+		for (auto const& ownerId : { owner, otherOwner }) {
+			fdb_check(
+			    operationError(fdb_database_release_all_exclusive_read_locks(db, bytes(ownerId), ownerId.size())));
+			fdb_check(operationError(fdb_database_remove_range_lock_owner(db, bytes(ownerId), ownerId.size())));
+		}
+	});
+	insert_data(db, {});
+
+	// The asynchronous registration must retain embedded NULs and its caller's input bytes.
+	std::string ownerInput = owner;
+	std::string descriptionInput = description;
+	auto registered = ownFuture(fdb_database_register_range_lock_owner(
+	    db, bytes(ownerInput), ownerInput.size(), bytes(descriptionInput), descriptionInput.size()));
+	std::fill(ownerInput.begin(), ownerInput.end(), 'x');
+	std::fill(descriptionInput.begin(), descriptionInput.end(), 'x');
+	waitForSuccess(registered.get());
+	registered.reset();
+	fdb_check(operationError(fdb_database_register_range_lock_owner(
+	    db, bytes(otherOwner), otherOwner.size(), bytes(description), description.size())));
+
+	auto ownersFuture = ownFuture(fdb_database_list_range_lock_owners(db));
+	waitForSuccess(ownersFuture.get());
+	FDBRangeLockOwner const* owners = nullptr;
+	int ownerCount = -1;
+	fdb_check(fdb_future_get_range_lock_owner_array(ownersFuture.get(), &owners, &ownerCount));
+	bool foundOwner = false;
+	for (int i = 0; i < ownerCount; ++i) {
+		if (extractString(owners[i].owner_id) == owner) {
+			foundOwner = true;
+			CHECK(extractString(owners[i].description) == description);
+		}
+	}
+	REQUIRE(foundOwner);
+	fdb_future_release_memory(ownersFuture.get());
+	CHECK(fdb_future_get_range_lock_owner_array(ownersFuture.get(), &owners, &ownerCount) == 1102); // future_released
+
+	fdb_check(operationError(fdb_database_register_range_lock_owner(
+	    db, bytes(owner), owner.size(), bytes(updatedDescription), updatedDescription.size())));
+	auto updatedOwnersFuture = ownFuture(fdb_database_list_range_lock_owners(db));
+	waitForSuccess(updatedOwnersFuture.get());
+	fdb_check(fdb_future_get_range_lock_owner_array(updatedOwnersFuture.get(), &owners, &ownerCount));
+	foundOwner = false;
+	for (int i = 0; i < ownerCount; ++i) {
+		if (extractString(owners[i].owner_id) == owner) {
+			foundOwner = true;
+			CHECK(extractString(owners[i].description) == updatedDescription);
+		}
+	}
+	REQUIRE(foundOwner);
+
+	CHECK(take(begin, end, key("unregistered-range-lock-owner")) == 1241); // range_lock_failed
+	std::string beginInput = begin;
+	std::string endInput = end;
+	ownerInput = owner;
+	auto taken = ownFuture(fdb_database_take_exclusive_read_lock(db,
+	                                                             bytes(beginInput),
+	                                                             beginInput.size(),
+	                                                             bytes(endInput),
+	                                                             endInput.size(),
+	                                                             bytes(ownerInput),
+	                                                             ownerInput.size()));
+	std::fill(beginInput.begin(), beginInput.end(), 'x');
+	std::fill(endInput.begin(), endInput.end(), 'x');
+	std::fill(ownerInput.begin(), ownerInput.end(), 'x');
+	waitForSuccess(taken.get());
+	taken.reset();
+	fdb_check(take(begin, end, owner)); // Retrying the same logical acquisition is idempotent.
+	CHECK(take(begin, end, otherOwner) == 1247); // range_lock_reject
+	CHECK(take(queryBegin, queryEnd, owner) == 1247);
+	CHECK(release(begin, end, otherOwner) == 1248); // range_unlock_reject
+	CHECK(release(queryBegin, queryEnd, owner) == 1248);
+
+	auto locksFuture = ownFuture(fdb_database_list_exclusive_read_locks(
+	    db, bytes(queryBegin), queryBegin.size(), bytes(queryEnd), queryEnd.size()));
+	waitForSuccess(locksFuture.get());
+	FDBRangeLock const* locks = nullptr;
+	int lockCount = -1;
+	fdb_check(fdb_future_get_range_lock_array(locksFuture.get(), &locks, &lockCount));
+	REQUIRE(lockCount == 1);
+	checkRange(locks[0].key_range, queryBegin, queryEnd);
+	checkRange(locks[0].locked_range, begin, end);
+	CHECK(extractString(locks[0].owner_id) == owner);
+	fdb_future_release_memory(locksFuture.get());
+	CHECK(fdb_future_get_range_lock_array(locksFuture.get(), &locks, &lockCount) == 1102); // future_released
+	CHECK(commitValue(begin) == 1242); // transaction_rejected_range_locked
+	fdb_check(commitValue(end)); // The end key is outside the half-open lock range.
+
+	fdb_check(release(begin, end, owner));
+	fdb_check(release(begin, end, owner));
+	fdb_check(commitValue(begin));
+	fdb_check(take(begin, end, owner));
+	fdb_check(take(secondBegin, secondEnd, owner));
+	fdb_check(take(otherBegin, otherEnd, otherOwner));
+	fdb_check(operationError(fdb_database_release_all_exclusive_read_locks(db, bytes(owner), owner.size())));
+
+	auto remainingFuture = ownFuture(
+	    fdb_database_list_exclusive_read_locks(db, bytes(begin), begin.size(), bytes(otherEnd), otherEnd.size()));
+	waitForSuccess(remainingFuture.get());
+	fdb_check(fdb_future_get_range_lock_array(remainingFuture.get(), &locks, &lockCount));
+	REQUIRE(lockCount == 1);
+	checkRange(locks[0].key_range, otherBegin, otherEnd);
+	checkRange(locks[0].locked_range, otherBegin, otherEnd);
+	CHECK(extractString(locks[0].owner_id) == otherOwner);
+	fdb_check(commitValue(begin));
+	fdb_check(commitValue(secondBegin));
+	CHECK(commitValue(otherBegin) == 1242);
+	fdb_check(release(otherBegin, otherEnd, otherOwner));
+	fdb_check(commitValue(otherBegin));
+	const uint8_t normalKeysEnd = 0xff;
+	auto emptyLocksFuture = ownFuture(fdb_database_list_exclusive_read_locks(db, nullptr, 0, &normalKeysEnd, 1));
+	waitForSuccess(emptyLocksFuture.get());
+	fdb_check(fdb_future_get_range_lock_array(emptyLocksFuture.get(), &locks, &lockCount));
+	CHECK(lockCount == 0);
+
+	for (auto const& ownerId : { owner, otherOwner }) {
+		fdb_check(operationError(fdb_database_remove_range_lock_owner(db, bytes(ownerId), ownerId.size())));
+	}
+	auto removedOwnersFuture = ownFuture(fdb_database_list_range_lock_owners(db));
+	waitForSuccess(removedOwnersFuture.get());
+	fdb_check(fdb_future_get_range_lock_owner_array(removedOwnersFuture.get(), &owners, &ownerCount));
+	for (int i = 0; i < ownerCount; ++i) {
+		CHECK(extractString(owners[i].owner_id) != owner);
+		CHECK(extractString(owners[i].owner_id) != otherOwner);
+	}
+}
+
+TEST_CASE("Range lock C binding invalid arguments") {
+	using FuturePtr = std::unique_ptr<FDBFuture, decltype(&fdb_future_destroy)>;
+	auto checkRejected = [](FDBFuture* future) {
+		FuturePtr owned(future, &fdb_future_destroy);
+		fdb_check(fdb_future_block_until_ready(owned.get()));
+		CHECK(fdb_future_get_error(owned.get()) == 1241); // range_lock_failed
+	};
+	const auto* owner = reinterpret_cast<uint8_t const*>("owner");
+	const auto* description = reinterpret_cast<uint8_t const*>("description");
+	const auto* begin = reinterpret_cast<uint8_t const*>("a");
+	const auto* end = reinterpret_cast<uint8_t const*>("b");
+	const uint8_t systemEnd[] = { 0xff, 0xff };
+
+	checkRejected(fdb_database_register_range_lock_owner(db, nullptr, 1, description, 11));
+	checkRejected(fdb_database_register_range_lock_owner(db, owner, -1, description, 11));
+	checkRejected(fdb_database_register_range_lock_owner(db, owner, 0, description, 11));
+	checkRejected(fdb_database_register_range_lock_owner(db, owner, 5, nullptr, 1));
+	checkRejected(fdb_database_register_range_lock_owner(db, owner, 5, description, -1));
+	checkRejected(fdb_database_register_range_lock_owner(db, owner, 5, description, 0));
+	checkRejected(fdb_database_remove_range_lock_owner(db, nullptr, 1));
+	checkRejected(fdb_database_release_all_exclusive_read_locks(db, owner, 0));
+
+	for (auto operation : { &fdb_database_take_exclusive_read_lock, &fdb_database_release_exclusive_read_lock }) {
+		checkRejected(operation(db, begin, 1, end, 1, nullptr, 1));
+		checkRejected(operation(db, begin, 1, end, 1, owner, 0));
+		checkRejected(operation(db, nullptr, 1, end, 1, owner, 5));
+		checkRejected(operation(db, begin, 1, end, -1, owner, 5));
+		checkRejected(operation(db, end, 1, begin, 1, owner, 5));
+		checkRejected(operation(db, begin, 1, begin, 1, owner, 5));
+		checkRejected(operation(db, begin, 1, systemEnd, 2, owner, 5));
+	}
+	checkRejected(fdb_database_list_exclusive_read_locks(db, nullptr, 1, end, 1));
+	checkRejected(fdb_database_list_exclusive_read_locks(db, begin, -1, end, 1));
+	checkRejected(fdb_database_list_exclusive_read_locks(db, end, 1, begin, 1));
+	checkRejected(fdb_database_list_exclusive_read_locks(db, begin, 1, begin, 1));
+	checkRejected(fdb_database_list_exclusive_read_locks(db, begin, 1, systemEnd, 2));
 }
 
 TEST_CASE("CDC C binding end-to-end") {

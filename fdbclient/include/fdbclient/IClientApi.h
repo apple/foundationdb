@@ -31,6 +31,17 @@
 
 struct VersionVector;
 
+struct RangeLockOwnerInfo {
+	Key ownerId;
+	Value description;
+};
+
+struct RangeLockInfo {
+	KeyRange keys; // Matching segment of the query range.
+	KeyRange lockedRange; // Original range identifying the lock.
+	Key ownerId;
+};
+
 // An interface that represents a transaction created by a client
 class ITransaction {
 public:
@@ -153,6 +164,14 @@ public:
 	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
+
+	virtual ThreadFuture<Void> registerRangeLockOwner(const KeyRef& ownerId, const StringRef& description) = 0;
+	virtual ThreadFuture<Void> removeRangeLockOwner(const KeyRef& ownerId) = 0;
+	virtual ThreadFuture<std::vector<RangeLockOwnerInfo>> listRangeLockOwners() = 0;
+	virtual ThreadFuture<Void> takeExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) = 0;
+	virtual ThreadFuture<Void> releaseExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) = 0;
+	virtual ThreadFuture<std::vector<RangeLockInfo>> listExclusiveReadLocks(const KeyRangeRef& keys) = 0;
+	virtual ThreadFuture<Void> releaseAllExclusiveReadLocks(const KeyRef& ownerId) = 0;
 
 	// Native CDC operations. These values are intentionally independent from
 	// NativeAPI so multi-version client wrappers can forward them without
