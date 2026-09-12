@@ -3503,6 +3503,67 @@ size_t raw_backtrace(void** addresses, int maxStackDepth) {
 #endif
 }
 
+#ifdef __linux__
+namespace {
+thread_local uintptr_t signalSafeStackLow = 0;
+thread_local uintptr_t signalSafeStackHigh = 0;
+} // namespace
+#endif
+
+void initializeSignalSafeBacktrace() {
+#ifdef __linux__
+	pthread_attr_t attr;
+	if (pthread_getattr_np(pthread_self(), &attr) != 0) {
+		return;
+	}
+
+	void* stackBase = nullptr;
+	size_t stackSize = 0;
+	if (pthread_attr_getstack(&attr, &stackBase, &stackSize) == 0) {
+		signalSafeStackLow = reinterpret_cast<uintptr_t>(stackBase);
+		signalSafeStackHigh = signalSafeStackLow + stackSize;
+	}
+	pthread_attr_destroy(&attr);
+#endif
+}
+
+__attribute__((no_instrument_function, noinline)) size_t signalSafeBacktrace(void** addresses, int maxStackDepth) {
+#ifdef __linux__
+	if (!signalSafeStackLow || !signalSafeStackHigh || maxStackDepth <= 0) {
+		return 0;
+	}
+
+	void** frame = static_cast<void**>(__builtin_frame_address(0));
+	size_t size = 0;
+	// Stop before dereferencing a frame outside this thread's stack. This also terminates the walk when an
+	// external library compiled without frame pointers breaks the chain.
+	while (frame && size < maxStackDepth) {
+		uintptr_t frameAddress = reinterpret_cast<uintptr_t>(frame);
+		if (frameAddress < signalSafeStackLow || frameAddress > signalSafeStackHigh - 2 * sizeof(void*) ||
+		    frameAddress % alignof(void*) != 0) {
+			break;
+		}
+
+		void* returnAddress = frame[1];
+		if (!returnAddress) {
+			break;
+		}
+		addresses[size++] = returnAddress;
+
+		void** nextFrame = static_cast<void**>(frame[0]);
+		if (nextFrame <= frame) {
+			break;
+		}
+		frame = nextFrame;
+	}
+	return size;
+#else
+	(void)addresses;
+	(void)maxStackDepth;
+	return 0;
+#endif
+}
+
 std::string get_backtrace() {
 	void* addresses[50];
 	size_t size = raw_backtrace(addresses, 50);
@@ -3903,14 +3964,8 @@ void profileHandler(int sig) {
 	ps->timestamp = 0;
 #endif /* WITH_SWIFT */
 
-#if defined(USE_SANITIZER)
-	// In sanitizer builds the workaround implemented in SignalSafeUnwind.cpp is disabled
-	// so calling backtrace may cause a deadlock
-	size_t size = 0;
-#else
-	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
-	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
-#endif
+	// The platform unwinders are not async-signal-safe and can deadlock if this signal interrupts exception unwinding.
+	size_t size = platform::signalSafeBacktrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
 
 	ps->length = size;
 
@@ -4072,6 +4127,7 @@ void setupRunLoopProfiler() {
 		}
 
 		initProfiling();
+		platform::initializeSignalSafeBacktrace();
 
 		struct sigaction action;
 		action.sa_handler = profileHandler;
@@ -4110,8 +4166,32 @@ void stopRunLoopProfiler() {
 #endif
 }
 
-// UnitTest for getMemoryInfo
 #ifdef __linux__
+namespace {
+volatile sig_atomic_t signalSafeBacktraceTestFrames = 0;
+
+void signalSafeBacktraceTestHandler(int) {
+	void* addresses[16];
+	signalSafeBacktraceTestFrames = platform::signalSafeBacktrace(addresses, 16);
+}
+} // namespace
+
+TEST_CASE("/flow/Platform/signalSafeBacktrace") {
+	platform::initializeSignalSafeBacktrace();
+
+	struct sigaction action;
+	action.sa_handler = signalSafeBacktraceTestHandler;
+	sigfillset(&action.sa_mask);
+	action.sa_flags = 0;
+	struct sigaction previousAction;
+	ASSERT(sigaction(SIGPROF, &action, &previousAction) == 0);
+	ASSERT(raise(SIGPROF) == 0);
+	ASSERT(sigaction(SIGPROF, &previousAction, nullptr) == 0);
+	ASSERT(signalSafeBacktraceTestFrames > 1);
+	return Void();
+}
+
+// UnitTest for getMemoryInfo
 TEST_CASE("/flow/Platform/getMemoryInfo") {
 
 	printf("UnitTest flow/Platform/getMemoryInfo 1\n");
