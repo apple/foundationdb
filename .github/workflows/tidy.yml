@@ -83,9 +83,8 @@ jobs:
                 ;;
             esac
             # These inputs are not parseable as standalone clang-tidy translation units in this workflow:
-            # the public C headers require C consumer setup and intentionally use C typedefs, the AWS and RocksDB
-            # compile commands refer to SDK headers that are not built here, and the Flow/RPC headers depend on
-            # include order from their real consumers.
+            # the public C headers require C consumer setup and intentionally use C typedefs, AWS headers are
+            # not generated here, and the Flow/RPC/RocksDB headers depend on their real consumers.
             case "$FILE" in
               bindings/c/foundationdb/fdb_c.h|bindings/c/foundationdb/fdb_c_types.h)
                 continue
@@ -99,9 +98,6 @@ jobs:
               fdbrpc/AsyncFileKAIO.h)
                 continue
                 ;;
-              fdbserver/checkpoint/RocksDBCheckpointUtils.cpp|fdbserver/kvstore/KeyValueStoreRocksDB.cpp|fdbserver/kvstore/KeyValueStoreShardedRocksDB.cpp)
-                continue
-                ;;
               flow/include/flow/Coroutines.h|flow/include/flow/CoroutinesImpl.h|flow/include/flow/FlowThread.h)
                 continue
                 ;;
@@ -109,6 +105,9 @@ jobs:
             # only c++ source files
             if [[ $FILE =~ \.[ch](pp)?$ ]] ; then
               echo "Checking $FILE ..."
+              if [[ $FILE == fdbserver/*/*RocksDB*.cpp ]]; then
+                ninja -C build_output fdbserver/rocksdb-prefix/src/rocksdb-stamp/rocksdb-download
+              fi
               if ! clang-tidy -p build_output --warnings-as-errors='*' "$FILE"; then
                 PASSED=false
               fi

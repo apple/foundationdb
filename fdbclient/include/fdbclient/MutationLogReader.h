@@ -106,8 +106,8 @@ public:
 	                                                   Version ev,
 	                                                   Key uid,
 	                                                   Key beginKey,
-	                                                   unsigned pd) {
-		Reference<MutationLogReader> self(new MutationLogReader(cx, bv, ev, uid, beginKey, pd));
+	                                                   unsigned pipelineDepth) {
+		Reference<MutationLogReader> self(new MutationLogReader(cx, bv, ev, uid, beginKey, pipelineDepth));
 		co_await self->initializePQ();
 		co_return self;
 	}

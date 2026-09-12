@@ -255,6 +255,12 @@ static std::string serializeObjectMeta(const MockS3GlobalStorage::ObjectData& ob
 
 	doc.AddMember("etag", Value(obj.etag.c_str(), allocator), allocator);
 	doc.AddMember("lastModified", obj.lastModified, allocator);
+	Value headersObj(kObjectType);
+	for (const auto& header : obj.headers) {
+		headersObj.AddMember(
+		    Value(header.first.c_str(), allocator), Value(header.second.c_str(), allocator), allocator);
+	}
+	doc.AddMember("headers", headersObj, allocator);
 
 	Value tagsObj(kObjectType);
 	for (const auto& tag : obj.tags) {
@@ -278,6 +284,12 @@ static void deserializeObjectMeta(const std::string& jsonStr, MockS3GlobalStorag
 		obj.etag = doc["etag"].GetString();
 	if (doc.HasMember("lastModified") && doc["lastModified"].IsNumber())
 		obj.lastModified = doc["lastModified"].GetDouble();
+	if (doc.HasMember("headers") && doc["headers"].IsObject()) {
+		for (auto& h : doc["headers"].GetObject()) {
+			if (h.value.IsString())
+				obj.headers[h.name.GetString()] = h.value.GetString();
+		}
+	}
 	if (doc.HasMember("tags") && doc["tags"].IsObject()) {
 		for (auto& m : doc["tags"].GetObject()) {
 			if (m.value.IsString())
@@ -296,6 +308,12 @@ static std::string serializeMultipartState(const MockS3GlobalStorage::MultipartU
 	doc.AddMember("bucket", Value(upload.bucket.c_str(), allocator), allocator);
 	doc.AddMember("object", Value(upload.object.c_str(), allocator), allocator);
 	doc.AddMember("initiated", upload.initiated, allocator);
+	Value metadataObj(kObjectType);
+	for (const auto& header : upload.metadata) {
+		metadataObj.AddMember(
+		    Value(header.first.c_str(), allocator), Value(header.second.c_str(), allocator), allocator);
+	}
+	doc.AddMember("metadata", metadataObj, allocator);
 
 	Value partsArray(kArrayType);
 	for (const auto& part : upload.parts) {
@@ -325,6 +343,12 @@ static void deserializeMultipartState(const std::string& jsonStr, MockS3GlobalSt
 		upload.object = doc["object"].GetString();
 	if (doc.HasMember("initiated") && doc["initiated"].IsNumber())
 		upload.initiated = doc["initiated"].GetDouble();
+	if (doc.HasMember("metadata") && doc["metadata"].IsObject()) {
+		for (auto& h : doc["metadata"].GetObject()) {
+			if (h.value.IsString())
+				upload.metadata[h.name.GetString()] = h.value.GetString();
+		}
+	}
 	if (doc.HasMember("parts") && doc["parts"].IsArray()) {
 		for (auto& partVal : doc["parts"].GetArray()) {
 			if (partVal.HasMember("partNum") && partVal["partNum"].IsInt() && partVal.HasMember("etag") &&
@@ -755,12 +779,14 @@ public:
 
 		TraceEvent("MockS3MultipartStart").detail("Bucket", bucket).detail("Object", object);
 
-		// Check if there's already an in-progress upload for this bucket/object
-		// This makes multipart initiation idempotent - retries return the same upload ID
-		// This matches real S3 behavior where you can have multiple concurrent uploads for the same object
+		// A retry of the same initiation can reuse its upload ID. A different token must
+		// create a separate upload, even when the object key is the same.
+		auto token = req->data.headers.find("x-amz-meta-fdb-multipart-upload-token");
 		std::string existingUploadId;
 		for (const auto& pair : getGlobalStorage().multipartUploads) {
-			if (pair.second.bucket == bucket && pair.second.object == object) {
+			if (pair.second.bucket == bucket && pair.second.object == object &&
+			    (token == req->data.headers.end() || (pair.second.metadata.contains(token->first) &&
+			                                          pair.second.metadata.at(token->first) == token->second))) {
 				existingUploadId = pair.first;
 				TraceEvent("MockS3MultipartStartIdempotent")
 				    .detail("Bucket", bucket)
@@ -776,6 +802,9 @@ public:
 			// No need to persist - already exists and was persisted on first creation
 		} else {
 			MultipartUpload upload(bucket, object);
+			if (token != req->data.headers.end()) {
+				upload.metadata[token->first] = token->second;
+			}
 			uploadId = upload.uploadId;
 			getGlobalStorage().multipartUploads[uploadId] = std::move(upload);
 			TraceEvent("MockS3MultipartStarted").detail("UploadId", uploadId);
@@ -880,6 +909,7 @@ public:
 
 		// Create final object
 		ObjectData obj(combinedContent);
+		obj.headers = uploadIter->second.metadata;
 		getGlobalStorage().buckets[bucket][object] = std::move(obj);
 
 		TraceEvent("MockS3MultipartFinalObject")
@@ -1218,6 +1248,9 @@ public:
 		response->data.headers["ETag"] = etag;
 		response->data.headers["Content-Length"] = std::to_string(contentSize);
 		response->data.headers["Content-Type"] = "binary/octet-stream";
+		for (const auto& header : obj.headers) {
+			response->data.headers[header.first] = header.second;
+		}
 		// HEAD requests need contentLen set to actual size for headers
 		response->data.contentLen = contentSize; // This controls ResponseContentSize in HTTP logs
 
@@ -1587,6 +1620,88 @@ Future<Void> startMockS3Server(NetworkAddress listenAddress) {
 		TraceEvent(SevError, "MockS3ServerStartError").error(e).detail("ListenAddress", listenAddress.toString());
 		throw;
 	}
+}
+
+TEST_CASE("/MockS3Server/multipartCompletionMetadata") {
+	auto& storage = getGlobalStorage();
+	storage.clearStorage();
+	bool persistenceEnabled = storage.persistenceEnabled;
+	storage.persistenceEnabled = false;
+	MockS3ServerImpl server;
+	const std::string header = "x-amz-meta-fdb-multipart-upload-token";
+	storage.buckets["bucket"]["object"] = MockS3GlobalStorage::ObjectData("old object");
+	ASSERT(!storage.buckets.at("bucket").at("object").headers.contains(header));
+
+	auto start = makeReference<HTTP::IncomingRequest>();
+	start->data.headers[header] = "first-token";
+	UnsentPacketQueue startBody;
+	auto startResponse = makeReference<HTTP::OutgoingResponse>();
+	startResponse->data.content = &startBody;
+	co_await MockS3ServerImpl::handleMultipartStart(&server, start, startResponse, "bucket", "object");
+	ASSERT_EQ(storage.multipartUploads.size(), 1);
+	std::string firstID = storage.multipartUploads.begin()->first;
+
+	// A lost initiation response returns the same upload, but an independent upload
+	// for the same key must retain a different identity.
+	co_await MockS3ServerImpl::handleMultipartStart(&server, start, startResponse, "bucket", "object");
+	ASSERT_EQ(storage.multipartUploads.size(), 1);
+	start->data.headers[header] = "second-token";
+	co_await MockS3ServerImpl::handleMultipartStart(&server, start, startResponse, "bucket", "object");
+	ASSERT_EQ(storage.multipartUploads.size(), 2);
+	std::string secondID;
+	for (const auto& upload : storage.multipartUploads) {
+		if (upload.first != firstID) {
+			secondID = upload.first;
+		}
+	}
+	ASSERT(!secondID.empty());
+
+	MockS3GlobalStorage::MultipartUpload restored;
+	deserializeMultipartState(serializeMultipartState(storage.multipartUploads.at(firstID)), restored);
+	ASSERT_EQ(restored.metadata.at(header), "first-token");
+	restored.parts[1] = { "etag", "new object" };
+	storage.multipartUploads[firstID] = std::move(restored);
+
+	auto complete = makeReference<HTTP::IncomingRequest>();
+	UnsentPacketQueue completeBody;
+	auto completeResponse = makeReference<HTTP::OutgoingResponse>();
+	completeResponse->data.content = &completeBody;
+	std::map<std::string, std::string> firstQueryParams;
+	firstQueryParams["uploadId"] = firstID;
+	co_await MockS3ServerImpl::handleMultipartComplete(
+	    &server, complete, completeResponse, "bucket", "object", firstQueryParams);
+	ASSERT_EQ(completeResponse->code, 200);
+	ASSERT(storage.multipartUploads.find(firstID) == storage.multipartUploads.end());
+
+	MockS3GlobalStorage::ObjectData restoredObject("new object");
+	deserializeObjectMeta(serializeObjectMeta(storage.buckets.at("bucket").at("object")), restoredObject);
+	ASSERT_EQ(restoredObject.headers.at(header), "first-token");
+	storage.buckets["bucket"]["object"] = std::move(restoredObject);
+
+	auto head = makeReference<HTTP::IncomingRequest>();
+	UnsentPacketQueue headBody;
+	auto headResponse = makeReference<HTTP::OutgoingResponse>();
+	headResponse->data.content = &headBody;
+	co_await MockS3ServerImpl::handleHeadObject(&server, head, headResponse, "bucket", "object");
+	ASSERT_EQ(headResponse->code, 200);
+	ASSERT_EQ(headResponse->data.headers.at(header), "first-token");
+	ASSERT_EQ(headResponse->data.contentLen, 10);
+
+	// A later same-key completion must not be attributed to the first upload.
+	storage.multipartUploads[secondID].parts[1] = { "etag", "other data" };
+	std::map<std::string, std::string> secondQueryParams;
+	secondQueryParams["uploadId"] = secondID;
+	co_await MockS3ServerImpl::handleMultipartComplete(
+	    &server, complete, completeResponse, "bucket", "object", secondQueryParams);
+	UnsentPacketQueue secondHeadBody;
+	auto secondHeadResponse = makeReference<HTTP::OutgoingResponse>();
+	secondHeadResponse->data.content = &secondHeadBody;
+	co_await MockS3ServerImpl::handleHeadObject(&server, head, secondHeadResponse, "bucket", "object");
+	ASSERT_EQ(secondHeadResponse->data.headers.at(header), "second-token");
+	ASSERT_EQ(secondHeadResponse->data.contentLen, 10);
+	storage.clearStorage();
+	storage.persistenceEnabled = persistenceEnabled;
+	co_return;
 }
 
 // Clear all MockS3 global storage - called at the start of each simulation test

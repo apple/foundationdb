@@ -1026,7 +1026,7 @@ Future<Void> LogSystem::confirmEpochLive_internal(Reference<LogSet> logSet, Opti
 	while (true) {
 		for (int i = 0; i < alive.size(); i++) {
 			if (!responded[i] && alive[i].isReady() && !alive[i].isError()) {
-				aliveEntries.push_back(logSet->logEntryArray[i]);
+				aliveEntries.push_back(logSet->getLogEntry(i));
 				responded[i] = true;
 			}
 		}

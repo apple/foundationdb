@@ -887,7 +887,7 @@ void MergedPeekCursor::updateMessage(bool usePolicy) {
 
 			locations.clear();
 			for (auto sortedVersion : versions) {
-				locations.push_back(logSet->logEntryArray[sortedVersion.second]);
+				locations.push_back(logSet->getLogEntry(sortedVersion.second));
 				if (locations.size() >= tLogReplicationFactor && logSet->satisfiesPolicy(locations)) {
 					selectedVersion = sortedVersion.first;
 					break;
@@ -1207,7 +1207,7 @@ void SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 			std::sort(versions.begin(), versions.end());
 			locations.clear();
 			for (auto sortedVersion : versions) {
-				locations.push_back(logSets[logIdx]->logEntryArray[sortedVersion.second]);
+				locations.push_back(logSets[logIdx]->getLogEntry(sortedVersion.second));
 				if (locations.size() >= logSets[logIdx]->tLogReplicationFactor &&
 				    logSets[logIdx]->satisfiesPolicy(locations)) {
 					selectedVersion = sortedVersion.first;
@@ -1305,7 +1305,7 @@ Future<Void> setPeekGetMore(SetPeekCursor* self, LogMessageVersion startVersion,
 				for (int i = 0; i < self->serverCursors[self->bestSet].size(); i++) {
 					if (!self->serverCursors[self->bestSet][i]->isActive() &&
 					    self->serverCursors[self->bestSet][i]->version() <= self->messageVersion) {
-						self->locations.push_back(self->logSets[self->bestSet]->logEntryArray[i]);
+						self->locations.push_back(self->logSets[self->bestSet]->getLogEntry(i));
 					}
 				}
 				bestSetValid = self->locations.size() < self->logSets[self->bestSet]->tLogReplicationFactor ||

@@ -77,6 +77,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	bool testDurableAckScan;
 	bool testDelayedRetention;
 	bool testRetiredRecovery;
+	bool blockRetiredPopWithLiveStream;
 	bool testRetiredSharedTagSnapshot;
 	bool prepareRestartDrain;
 	bool drainAfterRestart;
@@ -1694,21 +1695,36 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 	Future<Void> validateRetiredCleanupAcrossRecovery(Database cx) {
 		ASSERT_EQ(streams.size(), 1);
+		co_await timeoutError(waitForTransactionSystemAvailable(), operationTimeout);
+		if (blockRetiredPopWithLiveStream) {
+			ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 1);
+			// Another region's proxy can finish a retired pop while the locally published proxy is paused.
+			// Keep the original stream on the shared tag until after recovery so that pop remains pending.
+			const Key key = keyForIndex(keyCount / 2);
+			co_await addStream(cx, KeyRange(KeyRangeRef(key, keyAfter(key))));
+		}
 		const Key name = streams.back().name;
 		const CDCStreamId streamId = streams.back().consumer->position().streamId;
-		co_await timeoutError(waitForTransactionSystemAvailable(), operationTimeout);
 		co_await setAllProxyPopsPaused(cx, true);
 		const NativeCdcRemoveResult removed =
 		    co_await timeoutError(removeNativeCdcStreamGuarded(cx, name, streamId), operationTimeout);
 		ASSERT(removed == NativeCdcRemoveResult::Removed);
-		streams.clear();
+		streams.pop_back();
 		co_await timeoutError(waitForRetiredTagState(cx, true), operationTimeout);
 		const NativeCdcRemoveResult repeated =
 		    co_await timeoutError(removeNativeCdcStreamGuarded(cx, name, streamId), operationTimeout);
 		ASSERT(repeated == NativeCdcRemoveResult::AlreadyAbsent);
 		const NativeCdcStatus pendingStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
 		ASSERT(pendingStatus.metadataComplete);
-		ASSERT(pendingStatus.streams.empty());
+		ASSERT_EQ(pendingStatus.streams.size(), streams.size());
+		if (blockRetiredPopWithLiveStream) {
+			ASSERT_EQ(pendingStatus.streams.front().info.streamId, streams.front().consumer->position().streamId);
+			ASSERT_EQ(pendingStatus.tags.size(), 1);
+			const NativeCdcTagStatus& tag = pendingStatus.tags.front();
+			ASSERT_EQ(tag.blockingStreams.size(), 1);
+			ASSERT_EQ(tag.blockingStreams.front(), streams.front().consumer->position().streamId);
+			ASSERT_LT(tag.safePopVersion, tag.retiredPopVersion);
+		}
 		ASSERT(std::any_of(pendingStatus.tags.begin(), pendingStatus.tags.end(), [](NativeCdcTagStatus const& tag) {
 			return tag.pendingRetiredPop;
 		}));
@@ -1716,6 +1732,16 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 		co_await forceTransactionSystemRecovery();
 		TraceEvent("NativeCdcRetiredRecoveryComplete").log();
+		if (blockRetiredPopWithLiveStream) {
+			const NativeCdcStatus recoveredStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+			ASSERT(recoveredStatus.metadataComplete);
+			ASSERT_EQ(recoveredStatus.streams.size(), 1);
+			ASSERT(std::any_of(recoveredStatus.tags.begin(),
+			                   recoveredStatus.tags.end(),
+			                   [](NativeCdcTagStatus const& tag) { return tag.pendingRetiredPop; }));
+			co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
+			streams.clear();
+		}
 		co_await setAllProxyPopsPaused(cx, false);
 		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 		TraceEvent("NativeCdcRetiredCleanupComplete").log();
@@ -1969,6 +1995,7 @@ public:
 		testDurableAckScan = getOption(options, "testDurableAckScan"_sr, false);
 		testDelayedRetention = getOption(options, "testDelayedRetention"_sr, false);
 		testRetiredRecovery = getOption(options, "testRetiredRecovery"_sr, false);
+		blockRetiredPopWithLiveStream = getOption(options, "blockRetiredPopWithLiveStream"_sr, false);
 		testRetiredSharedTagSnapshot = getOption(options, "testRetiredSharedTagSnapshot"_sr, false);
 		prepareRestartDrain = getOption(options, "prepareRestartDrain"_sr, false);
 		drainAfterRestart = getOption(options, "drainAfterRestart"_sr, false);
@@ -1991,6 +2018,7 @@ public:
 		ASSERT(!(testReplyChunking && (testOversizedPeek || testDurableAckScan)));
 		ASSERT(!(testOversizedPeek && testDurableAckScan));
 		ASSERT(!(testRetiredSharedTagSnapshot && testRetiredRecovery));
+		ASSERT(!blockRetiredPopWithLiveStream || testRetiredRecovery);
 	}
 
 	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.

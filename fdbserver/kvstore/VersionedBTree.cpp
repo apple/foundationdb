@@ -10414,7 +10414,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
 
-	auto* btree = new VersionedBTree(pager, file, UID(), /*ServerDBInfo blah */ {});
+	auto* btree = new VersionedBTree(pager, file, UID(), /*db=*/{});
 	co_await btree->init();
 
 	DecodeBoundaryVerifier* pBoundaries = DecodeBoundaryVerifier::getVerifier(file);
@@ -10651,7 +10651,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				IPager2* pager = new DWALPager(
 				    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
 
-				btree = new VersionedBTree(pager, file, UID(), /* something blah = */ {});
+				btree = new VersionedBTree(pager, file, UID(), /*db=*/{});
 
 				co_await btree->init();
 
@@ -10701,7 +10701,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 		                                         pagerMemoryOnly),
 		                           file,
 		                           UID(),
-		                           /* blah = */ {});
+		                           /*db=*/{});
 
 		co_await btree->init();
 	}

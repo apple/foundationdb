@@ -22,11 +22,14 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "fdbrpc/simulator.h"
+
+#include <memory>
+
 Future<Void> callbackHandler(Reference<IConnection> conn,
                              Future<Void> readRequestDone,
                              Reference<HTTP::IRequestHandler> requestHandler,
                              Reference<HTTP::IncomingRequest> req,
-                             FlowMutex* mutex) {
+                             std::shared_ptr<FlowMutex> mutex) {
 	auto response = makeReference<HTTP::OutgoingResponse>();
 	UnsentPacketQueue content;
 	response->data.content = &content;
@@ -78,7 +81,8 @@ Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
                                Reference<HTTP::IRequestHandler> requestHandler) {
 	try {
 		// TODO do we actually have multiple requests on a connection? how does this work
-		FlowMutex responseMutex;
+		// Request callbacks in server->actors can outlive this connection handler.
+		auto responseMutex = std::make_shared<FlowMutex>();
 		Future<Void> readPrevRequest = Future<Void>(Void());
 		co_await conn->acceptHandshake();
 		while (true) {
@@ -87,7 +91,7 @@ Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
 			co_await conn->onReadable();
 			auto req = makeReference<HTTP::IncomingRequest>();
 			readPrevRequest = req->read(conn, false);
-			server->actors.add(callbackHandler(conn, readPrevRequest, requestHandler, req, &responseMutex));
+			server->actors.add(callbackHandler(conn, readPrevRequest, requestHandler, req, responseMutex));
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
