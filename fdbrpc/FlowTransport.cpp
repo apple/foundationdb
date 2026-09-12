@@ -1980,7 +1980,7 @@ const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAll
 	return self->peers;
 }
 
-std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompatiblePeers() {
+std::vector<NetworkAddress> FlowTransport::consumeReportableIncompatiblePeers() {
 	for (auto it = self->incompatiblePeers.begin(); it != self->incompatiblePeers.end();) {
 		if (self->multiVersionConnections.contains(it->second.first)) {
 			it = self->incompatiblePeers.erase(it);
@@ -1988,7 +1988,16 @@ std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompa
 			it++;
 		}
 	}
-	return &self->incompatiblePeers;
+	std::vector<NetworkAddress> reportable;
+	for (auto it = self->incompatiblePeers.begin(); it != self->incompatiblePeers.end();) {
+		if (now() - it->second.second > FLOW_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING) {
+			reportable.push_back(it->first);
+			it = self->incompatiblePeers.erase(it);
+		} else {
+			it++;
+		}
+	}
+	return reportable;
 }
 
 Future<Void> FlowTransport::onIncompatibleChanged() {

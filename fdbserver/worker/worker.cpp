@@ -638,15 +638,7 @@ Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFul
 			    .detail("StoredConnectionString", storedConnectionString.toString())
 			    .detail("CurrentConnectionString", connectionString);
 		}
-		auto peers = FlowTransport::transport().getIncompatiblePeers();
-		for (auto it = peers->begin(); it != peers->end();) {
-			if (now() - it->second.second > FLOW_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING) {
-				request.incompatiblePeers.push_back(it->first);
-				it = peers->erase(it);
-			} else {
-				it++;
-			}
-		}
+		request.incompatiblePeers = FlowTransport::transport().consumeReportableIncompatiblePeers();
 
 		bool ccInterfacePresent = ccInterface->get().present();
 		if (ccInterfacePresent) {

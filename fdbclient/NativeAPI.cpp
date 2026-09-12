@@ -3170,7 +3170,7 @@ Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>> maybeDuplicateTSSStr
 			ReplyPromiseStream<REPLYSTREAM_TYPE(Request)> tssReplyStream = tssRequestStream.getReplyStream(req);
 			PromiseStream<REPLYSTREAM_TYPE(Request)> ssDuplicateReplyStream;
 			TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)> streamData(ssDuplicateReplyStream);
-			model->addActor.send(tssStreamComparison(req, streamData, tssReplyStream, tssData.get()));
+			model->addBackgroundActor(tssStreamComparison(req, streamData, tssReplyStream, tssData.get()));
 			return Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>>(streamData);
 		}
 	}
