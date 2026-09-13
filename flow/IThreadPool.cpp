@@ -41,6 +41,11 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 		ThreadPool* pool;
 		IThreadPoolReceiver* userObject;
 		THREAD_HANDLE handle; // Owned by main thread
+		// Set by stop() when it is called reentrantly from inside this very thread
+		// (see the comment in stop() below). This thread has not returned from
+		// run() yet at that point, so stop() cannot join or delete it there; it
+		// asks the thread to clean itself up instead, once it does return.
+		bool selfDestruct = false;
 		static thread_local IThreadPoolReceiver* threadUserObject;
 		explicit Thread(ThreadPool* pool, IThreadPoolReceiver* userObject) : pool(pool), userObject(userObject) {}
 		~Thread() { ASSERT_ABORT(!userObject); }
@@ -57,6 +62,14 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 			}
 			delete userObject;
 			userObject = nullptr;
+			if (selfDestruct) {
+				TraceEvent(SevInfo, "ThreadPoolReentrantSelfDestruct");
+				// Nobody will ever waitThread() this handle (stop() skipped it, see
+				// below), so release its OS-level resources directly instead of
+				// leaving them until process exit.
+				detachThread(handle);
+				delete this; // userObject is null now, so ~Thread()'s assertion holds; nothing after this touches `this`.
+			}
 		}
 		static void dispatch(PThreadAction action) { (*action)(threadUserObject); }
 	};
@@ -101,6 +114,23 @@ public:
 		ios.stop(); // doesn't work?
 		mode = Shutdown;
 		for (int i = 0; i < threads.size(); i++) {
+			if (threads[i]->userObject == Thread::threadUserObject) {
+				// "Reentrant" here means: this call to ThreadPool::stop() is
+				// executing on one of this pool's own worker threads (identified by
+				// comparing that thread's Thread::threadUserObject against
+				// threads[i]->userObject), instead of on the main thread that
+				// normally owns and destroys the pool. Concretely: a
+				// ThreadReturnPromise::send() completing an action right as the
+				// network was told to stop, whose g_network->onMainThread() call
+				// silently dropped the hand-off (Net2::onMainThread() no-ops once
+				// stopped), causing the caller's abandoned signal promise to
+				// synthesize a broken_promise() inline on this thread and cascade
+				// into code that closed this IThreadPool - all still on this same
+				// worker thread's call stack. We cannot join or delete ourselves
+				// here; mark for self-cleanup instead (see Thread::run()).
+				threads[i]->selfDestruct = true;
+				continue;
+			}
 			waitThread(threads[i]->handle);
 			delete threads[i];
 		}
