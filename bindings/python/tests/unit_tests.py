@@ -183,7 +183,8 @@ def test_watches(db):
 @fdb.transactional
 def test_locality(tr):
     tr.options.set_timeout(60 * 1000)
-    tr.options.set_read_system_keys()  # We do this because the last shard (for now, someday the last N shards) is in the /FF/ keyspace
+    # We do this because the last shard (for now, someday the last N shards) is in the /FF/ keyspace
+    tr.options.set_read_system_keys()
 
     # This isn't strictly transactional, thought we expect it to be given the size of our database
     boundary_keys = list(fdb.locality.get_boundary_keys(tr, b"", b"\xff\xff")) + [

@@ -33,7 +33,7 @@
 #include "fdbclient/IdempotencyId.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tracing.h"
 #include "fdbclient/TransactionLineage.h"
@@ -290,7 +290,11 @@ Future<Void> commitBatcher(ProxyCommitData* commitData,
 				commitData->stats.uniqueClients.insert(req.reply.getEndpoint().getPrimaryAddress());
 
 				if (req.debugID.present()) {
-					g_traceBatch.addEvent("CommitDebug", req.debugID.get().first(), "CommitProxyServer.batcher");
+					g_traceBatch.addEvent("CommitDebug",
+					                      req.debugID.get().first(),
+					                      "CommitProxyServer.batcher",
+					                      req.spanContext.traceID,
+					                      req.spanContext.spanID);
 				}
 
 				if (batch.empty()) {
@@ -474,8 +478,8 @@ Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> releaseDe
 	return releaseResolvingAfterImpl(self, releaseDelay, localBatchNumber);
 }
 
-static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Reference<Histogram> dist,
-                                                                   Future<ResolveTransactionBatchReply> in) {
+static AsyncResult<ResolveTransactionBatchReply> trackResolutionMetrics(Reference<Histogram> dist,
+                                                                        Future<ResolveTransactionBatchReply> in) {
 	double startTime = g_network->timer_monotonic();
 	ResolveTransactionBatchReply reply = co_await in;
 	dist->sampleSeconds(g_network->timer_monotonic() - startTime);
@@ -501,11 +505,12 @@ struct CommitBatchContext {
 	const int currentBatchMemBytesCount;
 
 	double startTime;
+	double timerStartTime;
 
 	// The current stage of batch commit
 	std::string_view stage = UNSET;
 
-	Optional<UID> debugID;
+	Optional<BatchDebugIDs> debugIDs;
 
 	bool forceRecovery = false;
 	bool rejected = false; // If rejected due to long queue length
@@ -582,6 +587,8 @@ struct CommitBatchContext {
 	IdempotencyIdKVBuilder idempotencyKVBuilder;
 
 	CommitBatchContext(ProxyCommitData*, const std::vector<CommitTransactionRequest>*, const int);
+
+	Optional<UID> getDebugID() const;
 
 	void setupTraceBatch();
 
@@ -740,7 +747,7 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
                                        const int currentBatchMemBytesCount)
   : pProxyCommitData(pProxyCommitData_), trs(std::move(*const_cast<std::vector<CommitTransactionRequest>*>(trs_))),
     currentBatchMemBytesCount(currentBatchMemBytesCount), startTime(g_network->now()),
-    localBatchNumber(++pProxyCommitData->localCommitBatchesStarted),
+    timerStartTime(g_network->timer()), localBatchNumber(++pProxyCommitData->localCommitBatchesStarted),
     toCommit(pProxyCommitData->logSystem, pProxyCommitData->localTLogCount), span("MP:commitBatch"_loc),
     committed(trs.size()), lastShardMove(invalidVersion) {
 
@@ -760,18 +767,34 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
 void CommitBatchContext::setupTraceBatch() {
 	for (const auto& tr : trs) {
 		if (tr.debugID.present()) {
-			if (!debugID.present()) {
-				debugID = nondeterministicRandom()->randomUniqueID();
+			if (!debugIDs.present()) {
+				debugIDs = BatchDebugIDs{ nondeterministicRandom()->randomUniqueID(),
+					                      tr.spanContext.traceID,
+					                      tr.spanContext.spanID };
 			}
 
-			g_traceBatch.addAttach("CommitAttachID", tr.debugID.get().first(), debugID.get().first());
+			Optional<UID> debugID = getDebugID();
+			g_traceBatch.addAttach("CommitAttachID",
+			                       tr.debugID.get().first(),
+			                       debugID.get().first(),
+			                       tr.spanContext.traceID,
+			                       tr.spanContext.spanID);
 		}
 		span.addLink(tr.spanContext);
 	}
 
-	if (debugID.present()) {
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.Before");
+	if (debugIDs.present()) {
+		Optional<UID> debugID = getDebugID();
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.Before",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
+}
+
+Optional<UID> CommitBatchContext::getDebugID() const {
+	return debugIDs.present() ? Optional<UID>(debugIDs.get().debugID) : Optional<UID>();
 }
 
 void CommitBatchContext::evaluateBatchSize() {
@@ -807,7 +830,8 @@ Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	const int64_t localBatchNumber = self->localBatchNumber;
 	const int latencyBucket = self->latencyBucket;
-	const Optional<UID>& debugID = self->debugID;
+	Optional<BatchDebugIDs> debugIDs = self->debugIDs;
+	Optional<UID> debugID = self->getDebugID();
 	Span span("MP:preresolutionProcessing"_loc, self->span.context);
 	double startTime = g_network->timer_monotonic();
 
@@ -856,8 +880,11 @@ Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	self->releaseDelay = delay(computeReleaseDelay(self, latencyBucket), TaskPriority::ProxyMasterVersionReply);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent(
-		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.GettingCommitVersion");
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.GettingCommitVersion",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
@@ -894,10 +921,15 @@ Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 			r->value().emplace_back(versionReply.resolverChangesVersion, it.dest);
 	}
 
+	pProxyCommitData->stats.commitPreresolutionLatency.addMeasurement(g_network->timer_monotonic() - startTime);
 	//TraceEvent("ProxyGotVer", pProxyContext->dbgid).detail("Commit", commitVersion).detail("Prev", prevVersion);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.GotCommitVersion");
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.GotCommitVersion",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 }
 
@@ -932,18 +964,18 @@ Future<Void> getResolution(CommitBatchContext* self) {
 		ASSERT(requests.requests[r].txnStateTransactions.size() == requests.requests[0].txnStateTransactions.size());
 
 	pProxyCommitData->stats.txnCommitResolving += trs.size();
-	std::vector<Future<ResolveTransactionBatchReply>> replies;
+	std::vector<AsyncResult<ResolveTransactionBatchReply>> replies;
 	Future<ResolveTransactionBatchReply> singleResolverReply;
 	double singleResolverStart = 0;
 	if (pProxyCommitData->resolvers.size() == 1) {
-		requests.requests[0].debugID = self->debugID;
+		requests.requests[0].debugID = self->getDebugID();
 		requests.requests[0].writtenTags = self->writtenTagsPreResolution;
 		singleResolverStart = g_network->timer_monotonic();
 		singleResolverReply = brokenPromiseToNever(
 		    pProxyCommitData->resolvers[0].resolve.getReply(requests.requests[0], TaskPriority::ProxyResolverReply));
 	} else {
 		for (int r = 0; r < pProxyCommitData->resolvers.size(); r++) {
-			requests.requests[r].debugID = self->debugID;
+			requests.requests[r].debugID = self->getDebugID();
 			requests.requests[r].writtenTags = self->writtenTagsPreResolution;
 			replies.push_back(
 			    trackResolutionMetrics(pProxyCommitData->stats.resolverDist[r],
@@ -979,14 +1011,21 @@ Future<Void> getResolution(CommitBatchContext* self) {
 		self->resolution.clear();
 		self->resolution.push_back(std::move(resolutionResp));
 	} else {
-		std::vector<ResolveTransactionBatchReply> resolutionResp = co_await getAll(replies);
+		std::vector<ResolveTransactionBatchReply> resolutionResp = co_await getAllAsync(std::move(replies));
 		self->resolution = std::move(resolutionResp);
 	}
 
-	self->pProxyCommitData->stats.resolutionDist->sampleSeconds(g_network->timer_monotonic() - resolutionStart);
-	if (self->debugID.present()) {
-		g_traceBatch.addEvent(
-		    "CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterResolution");
+	double resolutionDuration = g_network->timer_monotonic() - resolutionStart;
+
+	self->pProxyCommitData->stats.commitResolutionLatency.addMeasurement(resolutionDuration);
+	self->pProxyCommitData->stats.resolutionDist->sampleSeconds(resolutionDuration);
+	if (self->debugIDs.present()) {
+		Optional<UID> debugID = self->getDebugID();
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.AfterResolution",
+		                      self->debugIDs.get().debugTraceID,
+		                      self->debugIDs.get().debugSpanID);
 	}
 }
 
@@ -1546,7 +1585,8 @@ Future<Void> postResolution(CommitBatchContext* self) {
 	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	const int64_t localBatchNumber = self->localBatchNumber;
-	const Optional<UID>& debugID = self->debugID;
+	Optional<BatchDebugIDs> debugIDs = self->debugIDs;
+	Optional<UID> debugID = self->getDebugID();
 	Span span("MP:postResolution"_loc, self->span.context);
 
 	bool queuedCommits = pProxyCommitData->latestLocalCommitBatchLogging.get() < localBatchNumber - 1;
@@ -1561,8 +1601,11 @@ Future<Void> postResolution(CommitBatchContext* self) {
 	pProxyCommitData->stats.txnCommitResolved += trs.size();
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent(
-		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ProcessingMutations");
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.ProcessingMutations",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 
 	self->isMyFirstBatch = !pProxyCommitData->version.get();
@@ -1573,15 +1616,21 @@ Future<Void> postResolution(CommitBatchContext* self) {
 	applyMetadataEffect(self);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent(
-		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadataEffect");
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.ApplyMetadataEffect",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 
 	determineCommittedTransactions(self);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent(
-		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.DetermineCommittedTransactions");
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.DetermineCommittedTransactions",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 
 	if (self->forceRecovery) {
@@ -1592,8 +1641,11 @@ Future<Void> postResolution(CommitBatchContext* self) {
 	co_await applyMetadataToCommittedTransactions(self);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent(
-		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadataToCommittedTxn");
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.ApplyMetadataToCommittedTxn",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 
 	// After applyed metadata change, this commit proxy has the latest view of locked ranges.
@@ -1607,7 +1659,11 @@ Future<Void> postResolution(CommitBatchContext* self) {
 	co_await assignMutationsToStorageServers(self);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AssignMutationToSS");
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.AssignMutationToSS",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 
 	// Serialize and backup the mutations as a single mutation
@@ -1730,9 +1786,13 @@ Future<Void> postResolution(CommitBatchContext* self) {
 
 	self->msg = self->storeCommits.back().first.get();
 
-	if (self->debugID.present())
-		g_traceBatch.addEvent(
-		    "CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterStoreCommits");
+	if (self->debugIDs.present()) {
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.AfterStoreCommits",
+		                      self->debugIDs.get().debugTraceID,
+		                      self->debugIDs.get().debugSpanID);
+	}
 
 	// txnState (transaction subsystem state) tag: message extracted from log adapter
 	bool firstMessage = true;
@@ -1774,7 +1834,7 @@ Future<Void> postResolution(CommitBatchContext* self) {
 		                                       pProxyCommitData->committedVersion.get(),
 		                                       pProxyCommitData->minKnownCommittedVersion };
 	self->loggingComplete =
-	    pProxyCommitData->logSystem->push(versionSet, self->toCommit, span.context, self->debugID, tpcvMap);
+	    pProxyCommitData->logSystem->push(versionSet, self->toCommit, span.context, self->getDebugID(), tpcvMap);
 
 	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
@@ -1820,7 +1880,10 @@ Future<Void> postResolution(CommitBatchContext* self) {
 		}
 	}
 
-	pProxyCommitData->stats.processingMutationDist->sampleSeconds(g_network->timer_monotonic() - postResolutionQueuing);
+	double postResolutionEnd = g_network->timer_monotonic();
+
+	pProxyCommitData->stats.commitPostresolutionLatency.addMeasurement(postResolutionEnd - postResolutionStart);
+	pProxyCommitData->stats.processingMutationDist->sampleSeconds(postResolutionEnd - postResolutionQueuing);
 }
 
 Future<Void> transactionLogging(CommitBatchContext* self) {
@@ -1860,7 +1923,11 @@ Future<Void> transactionLogging(CommitBatchContext* self) {
 		pProxyCommitData->txsPopVersions.emplace_back(self->commitVersion, self->msg.popTo);
 	}
 	pProxyCommitData->logSystemConsumer->popTxs(self->msg.popTo);
-	pProxyCommitData->stats.tlogLoggingDist->sampleSeconds(g_network->timer_monotonic() - tLoggingStart);
+
+	double tLoggingDuration = g_network->timer_monotonic() - tLoggingStart;
+
+	pProxyCommitData->stats.commitTLogLoggingLatency.addMeasurement(tLoggingDuration);
+	pProxyCommitData->stats.tlogLoggingDist->sampleSeconds(tLoggingDuration);
 }
 
 Future<Void> reply(CommitBatchContext* self) {
@@ -1868,7 +1935,8 @@ Future<Void> reply(CommitBatchContext* self) {
 	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	Span span("MP:reply"_loc, self->span.context);
 
-	const Optional<UID>& debugID = self->debugID;
+	Optional<BatchDebugIDs> debugIDs = self->debugIDs;
+	Optional<UID> debugID = self->getDebugID();
 
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		// Version vector/unicast is disabled: Logging completed, so the current version (and all versions prior to
@@ -1887,8 +1955,13 @@ Future<Void> reply(CommitBatchContext* self) {
 	// TraceEvent("ProxyPushed", pProxyCommitData->dbgid)
 	//     .detail("PrevVersion", self->prevVersion)
 	//     .detail("Version", self->commitVersion);
-	if (debugID.present())
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AfterLogPush");
+	if (debugID.present()) {
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.AfterLogPush",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
+	}
 
 	// After logging finishes, we report the commit version to master so that every other proxy can get the most
 	// up-to-date live committed version. We also maintain the invariant that master's committed version >=
@@ -1915,8 +1988,11 @@ Future<Void> reply(CommitBatchContext* self) {
 	}
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent(
-		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AfterReportRawCommittedVersion");
+		g_traceBatch.addEvent("CommitDebug",
+		                      debugID.get().first(),
+		                      "CommitProxyServer.commitBatch.AfterReportRawCommittedVersion",
+		                      debugIDs.get().debugTraceID,
+		                      debugIDs.get().debugSpanID);
 	}
 
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
@@ -2002,6 +2078,7 @@ Future<Void> reply(CommitBatchContext* self) {
 		// TODO: filter if pipelined with large commit
 		const double duration = endTime - tr.requestTime();
 		pProxyCommitData->stats.commitLatencySample.addMeasurement(duration);
+		pProxyCommitData->stats.commitBatchingWaiting.addMeasurement(self->timerStartTime - tr.requestTime());
 		if (pProxyCommitData->latencyBandConfig.present()) {
 			bool filter = self->maxTransactionBytes >
 			              pProxyCommitData->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(
@@ -2062,7 +2139,10 @@ Future<Void> reply(CommitBatchContext* self) {
 	pProxyCommitData->commitBatchesMemBytesCount -= self->currentBatchMemBytesCount;
 	ASSERT_ABORT(pProxyCommitData->commitBatchesMemBytesCount >= 0);
 	co_await self->releaseFuture;
-	pProxyCommitData->stats.replyCommitDist->sampleSeconds(g_network->timer_monotonic() - replyStart);
+	double replyDuration = g_network->timer_monotonic() - replyStart;
+
+	pProxyCommitData->stats.commitReplyLatency.addMeasurement(replyDuration);
+	pProxyCommitData->stats.replyCommitDist->sampleSeconds(replyDuration);
 }
 
 // Commit one batch of transactions trs
@@ -2080,6 +2160,8 @@ Future<Void> commitBatchImpl(CommitBatchContext* pContext) {
 	pContext->pProxyCommitData->lastVersionTime = pContext->startTime;
 	++pContext->pProxyCommitData->stats.commitBatchIn;
 	pContext->setupTraceBatch();
+	pContext->pProxyCommitData->stats.commitBatchBytes.addMeasurement(pContext->currentBatchMemBytesCount);
+	pContext->pProxyCommitData->stats.commitBatchTransactions.addMeasurement(pContext->trs.size());
 
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined
 	/// and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)

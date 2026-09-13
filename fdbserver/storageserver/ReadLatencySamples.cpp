@@ -58,3 +58,11 @@ void ReadLatencySamples::sample(double latency, SampleType sampleType, Optional<
 		perType[readType.get()].samples[sampleType]->addMeasurement(latency);
 	}
 }
+
+void ReadLatencySamples::samplePair(double latency, SampleType first, SampleType second, Optional<ReadType> readType) {
+	aggregate.samples[first]->addMeasurementPair(latency, *aggregate.samples[second]);
+	if (readType.present()) {
+		auto& samples = perType[readType.get()].samples;
+		samples[first]->addMeasurementPair(latency, *samples[second]);
+	}
+}

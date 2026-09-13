@@ -1,5 +1,23 @@
 include(AddFdbTest)
 
+# Test for setting up Python venv for client tests.
+# Adding this test as a fixture to another test allows the use of non-native Python packages within client test scripts
+# by installing dependencies from requirements.txt
+set(test_venv_cmd "")
+string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
+string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
+string(APPEND test_venv_cmd "&& pip install --retries 9 -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt ")
+string(APPEND test_venv_cmd "&& pip install ${CMAKE_SOURCE_DIR}/tests/TestRunner ")
+string(APPEND test_venv_cmd "&& pip install ${CMAKE_BINARY_DIR}/bindings/python ")
+
+# The module is also included by fdbcli; register this shared fixture only once.
+add_test(
+  NAME test_venv_setup
+  COMMAND bash -c ${test_venv_cmd}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(test_venv_setup PROPERTIES FIXTURES_SETUP test_virtual_env_setup TIMEOUT 120)
+set_tests_properties(test_venv_setup PROPERTIES RESOURCE_LOCK TEST_VENV_SETUP)
+
 # We need some variables to configure the test setup
 set(ENABLE_BUGGIFY ON CACHE BOOL "Enable buggify for tests")
 set(ENABLE_SIMULATION_TESTS OFF CACHE BOOL "Enable simulation tests (useful if you can't run Joshua)")
@@ -150,6 +168,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/RestoreValidation.toml)
+  add_fdb_test(TEST_FILES fast/RangeDigestValidation.toml)
 
   add_fdb_test(TEST_FILES fast/BulkDumping.toml)
   add_fdb_test(TEST_FILES slow/BulkDumpingS3.toml)
@@ -157,7 +176,11 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestore.toml)
   add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestoreWithChaos.toml)
   add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestoreMultiRange.toml)
+  add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestoreNarrowFleet.toml)
+  add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestoreJobIncomplete.toml)
   add_fdb_test(TEST_FILES fast/BulkLoading.toml)
+  add_fdb_test(TEST_FILES fast/BulkLoadingDestTeamFailure.toml)
+  add_fdb_test(TEST_FILES fast/BulkLoadingDestTeamFailureExhausted.toml)
   add_fdb_test(TEST_FILES slow/S3Client.toml)
   add_fdb_test(TEST_FILES slow/S3ClientWorkloadWithChaos.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
@@ -207,6 +230,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/NativeCdcRetiredSharedTagSnapshot.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcMemoryBound.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcReplyChunking.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcLargeVersionBatching.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcOversizedPeek.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcDurableAckScan.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcRetiredRecovery.toml)
@@ -225,6 +249,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/SidebandSingle.toml)
   add_fdb_test(TEST_FILES fast/SidebandWithStatus.toml)
   add_fdb_test(TEST_FILES fast/StatusDuringOutage.toml)
+  add_fdb_test(TEST_FILES fast/Sim2ConnPeerClose.toml)
   add_fdb_test(TEST_FILES fast/SimpleAtomicAdd.toml)
   add_fdb_test(TEST_FILES fast/SpecialKeySpaceCorrectness.toml)
   add_fdb_test(TEST_FILES fast/SpecialKeySpaceRobustness.toml)
@@ -466,19 +491,6 @@ if(WITH_PYTHON)
 
   if(NOT OPEN_FOR_IDE)
     add_test(
-      NAME multiversion_client/unit_tests
-      COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
-    )
-    set_tests_properties("multiversion_client/unit_tests" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
-    add_test(
-      NAME threadsafe_threadfuture_to_future/unit_tests
-      COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
-    )
-    set_tests_properties("threadsafe_threadfuture_to_future/unit_tests" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
-  endif()
-
-  if(NOT OPEN_FOR_IDE)
-    add_test(
       NAME command_line_argument_test
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
     )
@@ -501,9 +513,4 @@ if(WITH_PYTHON)
 
 else()
   message(WARNING "Python not found, won't configure ctest")
-endif()
-
-# Add all unit tests as ctests
-if (AUTO_DISCOVER_UNIT_TESTS)
-  collect_unit_tests(${CMAKE_SOURCE_DIR})
 endif()

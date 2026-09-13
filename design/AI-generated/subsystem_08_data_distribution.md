@@ -35,7 +35,7 @@ Plus optional bulk load/dump cores.
 
 ---
 
-## DDTeamCollection -- [`DDTeamCollection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDTeamCollection.actor.cpp)
+## DDTeamCollection -- [`DDTeamCollection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDTeamCollection.cpp)
 
 ### What is a Team?
 
@@ -262,7 +262,7 @@ MoveKeys protocol:
 | File | Purpose |
 |------|---------|
 | [`fdbserver/datadistributor/DataDistribution.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DataDistribution.cpp) | Main DD actor, initialization |
-| [`fdbserver/datadistributor/DDTeamCollection.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDTeamCollection.actor.cpp) | Team building, health monitoring, SS recruitment |
+| [`fdbserver/datadistributor/DDTeamCollection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDTeamCollection.cpp) | Team building, health monitoring, SS recruitment |
 | [`fdbserver/datadistributor/DDShardTracker.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDShardTracker.cpp) | Shard metrics, split/merge decisions |
 | [`fdbserver/datadistributor/DDRelocationQueue.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/datadistributor/DDRelocationQueue.cpp) | Relocation queue, prioritization, execution |
 | [`fdbserver/core/MoveKeys.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/MoveKeys.cpp) | Atomic shard transfer protocol |

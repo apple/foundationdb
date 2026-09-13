@@ -26,6 +26,7 @@
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "fdbrpc/DDSketch.h"
 #include "flow/genericactors.h"
@@ -38,8 +39,14 @@
 
 class IConnection;
 
-// WL: Well-known
-enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_UNAUTHORIZED_ENDPOINT, WLTOKEN_FIRST_AVAILABLE };
+// Applications own IDs starting at WLTOKEN_FIRST_AVAILABLE and reserve their
+// exclusive upper bound when creating a transport.
+enum {
+	WLTOKEN_ENDPOINT_NOT_FOUND = 0,
+	WLTOKEN_PING_PACKET = 1,
+	WLTOKEN_UNAUTHORIZED_ENDPOINT = 2,
+	WLTOKEN_FIRST_AVAILABLE = 3
+};
 
 class Endpoint {
 public:
@@ -231,10 +238,11 @@ public:
 	// Returns all peers that the FlowTransport is monitoring.
 	const std::unordered_map<NetworkAddress, Reference<Peer>>& getAllPeers() const;
 
-	// Returns the set of all peers that have attempted to connect, but have incompatible protocol versions
-	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
+	// Returns and removes peers whose incompatible protocol versions have persisted long enough to report.
+	// Peers later recognized as multi-version connections are discarded without reporting.
+	std::vector<NetworkAddress> consumeReportableIncompatiblePeers();
 
-	// Returns when getIncompatiblePeers has at least one peer which is incompatible.
+	// Returns when an incompatible peer has persisted long enough to report.
 	Future<Void> onIncompatibleChanged();
 
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer

@@ -19,7 +19,7 @@
  */
 
 #include "fdbrpc/DDSketch.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"

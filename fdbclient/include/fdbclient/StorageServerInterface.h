@@ -22,6 +22,8 @@
 #define FDBCLIENT_STORAGESERVERINTERFACE_H
 #pragma once
 
+#include <utility>
+
 #include "fdbclient/Audit.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/FDBTypes.h"
@@ -31,10 +33,10 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/LoadBalance.actor.h"
+#include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
-#include "fdbrpc/TSSComparison.h"
+#include "fdbclient/TSSComparison.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tracing.h"
@@ -204,7 +206,7 @@ struct GetValueReply : public LoadBalancedReply {
 	bool cached;
 
 	GetValueReply() : cached(false) {}
-	GetValueReply(Optional<Value> value, bool cached) : value(value), cached(cached) {}
+	GetValueReply(Optional<Value> value, bool cached) : value(std::move(value)), cached(cached) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -233,8 +235,8 @@ struct GetValueRequest : TimedRequest {
 	                Optional<TagSet> tags,
 	                Optional<ReadOptions> options,
 	                VersionVector latestCommitVersions)
-	  : spanContext(spanContext), key(key), version(ver), tags(tags), options(options),
-	    ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(spanContext), key(key), version(ver), tags(std::move(tags)), options(options),
+	    ssLatestCommitVersions(std::move(latestCommitVersions)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -496,8 +498,8 @@ struct GetKeyRequest : TimedRequest {
 	              Optional<TagSet> tags,
 	              Optional<ReadOptions> options,
 	              VersionVector latestCommitVersions)
-	  : spanContext(spanContext), sel(sel), version(version), tags(tags), options(options),
-	    ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(spanContext), sel(sel), version(version), tags(std::move(tags)), options(options),
+	    ssLatestCommitVersions(std::move(latestCommitVersions)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1268,5 +1270,7 @@ inline int mvccStorageBytes(int mutationBytes) {
 	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
 	       (mutationBytes + MutationRef::OVERHEAD_BYTES) * 2;
 }
+
+#include "fdbclient/StorageServerLoadBalance.h"
 
 #endif

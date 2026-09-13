@@ -4,6 +4,9 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_tester SRCS ${FDBSERVER_TESTER_SRC
 add_fdbserver_link_test(fdbserver_testerlinktest
   fdbserver_tester
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_tester_test tester
+  fdbserver_tester
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_tester)
 target_include_directories(fdbserver_tester

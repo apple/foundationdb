@@ -25,8 +25,12 @@ function create_cluster_file() {
     mkdir -p "$(dirname $FDB_CLUSTER_FILE)"
 
     if [[ -n $FDB_COORDINATOR ]]; then
-        coordinator_ip=$(dig +short "$FDB_COORDINATOR")
-        if [[ -z "$coordinator_ip" ]]; then
+        if [[ "$FDB_IP_VERSION" == '4' ]]; then
+            coordinator_ip="$(getent ahostsv4 "$FDB_COORDINATOR" | awk '{ print $1; exit }')"
+        elif [[ "$FDB_IP_VERSION" == '6' ]]; then
+            coordinator_ip="[$(getent ahostsv6 "$FDB_COORDINATOR" | awk '{ print $1; exit }')]"
+        fi
+        if [[ -z "$coordinator_ip" ]] || [[ "$coordinator_ip" == "[]" ]]; then
             echo "Failed to look up coordinator address for $FDB_COORDINATOR" 1>&2
             exit 1
         fi
@@ -39,6 +43,10 @@ function create_cluster_file() {
             echo "Overwriting existing clusterfile." 1>&2
         fi
         echo "$FDB_CLUSTER_FILE_CONTENTS" > "$FDB_CLUSTER_FILE"
+        if [[ $? != 0 ]]; then
+            echo "Unable to write to FDB_CLUSTER_FILE." 1>&2
+            exit 1
+        fi
     elif [[ ! -w "$FDB_CLUSTER_FILE" ]]; then
         # fdbserver requires write permissions to clusterfile, or it may *eventually* fail due to cluster migrations.
         # https://apple.github.io/foundationdb/administration.html#required-permissions
@@ -47,26 +55,51 @@ function create_cluster_file() {
     else
         echo "Using existing clusterfile at \"$FDB_CLUSTER_FILE\"." 1>&2
     fi
+}
 
-    if (( $? != 0 )); then
-        echo "Unable to write to FDB_CLUSTER_FILE." 1>&2
-        exit 1
-    fi
+function first_hostname_with_str() {
+    for addr in $(hostname -I); do
+        if [[ $addr == *"$1"* ]]; then
+            echo "$addr"
+            return 0
+        fi
+    done
+    return 1
 }
 
 function create_server_environment() {
-    env_file=/var/fdb/.fdbenv
+    FDB_IP_VERSION=${FDB_IP_VERSION:-4}
 
+    if [[ "$FDB_IP_VERSION" == '4' ]]; then
+        FDB_LISTEN_IP="${FDB_LISTEN_IP:-0.0.0.0}"
+    elif [[ "$FDB_IP_VERSION" == '6' ]]; then
+        FDB_LISTEN_IP="[${FDB_LISTEN_IP:-::}]"
+    else
+        echo "Unknown FDB_IP_VERSION \"$FDB_IP_VERSION\"" 1>&2
+        exit 1
+    fi
     if [[ "$FDB_NETWORKING_MODE" == "host" ]]; then
-        public_ip=127.0.0.1
+        if [[ "$FDB_IP_VERSION" == '4' ]]; then
+            public_ip='127.0.0.1'
+        elif [[ "$FDB_IP_VERSION" == '6' ]]; then
+            public_ip='[::1]'
+        fi
     elif [[ "$FDB_NETWORKING_MODE" == "container" ]]; then
-        public_ip=$(hostname -i | awk '{print $1}')
+        if [[ "$FDB_IP_VERSION" == '4' ]]; then
+            public_ip="${FDB_PUBLIC_IP:-$(first_hostname_with_str '.')}"
+        elif [[ "$FDB_IP_VERSION" == '6' ]]; then
+            public_ip="[${FDB_PUBLIC_IP:-$(first_hostname_with_str ':')}]"
+        fi
+        if [[ $? != 0 ]]; then
+            echo "No valid IPv${FDB_IP_VERSION} address" 1>&2
+            exit 1
+        fi
     else
         echo "Unknown FDB Networking mode \"$FDB_NETWORKING_MODE\"" 1>&2
         exit 1
     fi
+    export PUBLIC_IP="$public_ip"
 
-    echo "export PUBLIC_IP=$public_ip" > $env_file
     # Set default cluster file contents only if no other configuration is specified.
     if [[ (! -s "$FDB_CLUSTER_FILE") && -z "$FDB_CLUSTER_FILE_CONTENTS" && -z "$FDB_COORDINATOR" ]]; then
         echo "Warning: No configuration available, falling back to self-coordinated." 1>&2
@@ -77,9 +110,8 @@ function create_server_environment() {
 }
 
 create_server_environment
-source /var/fdb/.fdbenv
-echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT"
-fdbserver --listen-address 0.0.0.0:"$FDB_PORT" --public-address "$PUBLIC_IP:$FDB_PORT" \
+echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT, listening on $FDB_LISTEN_IP:$FDB_PORT"
+fdbserver --listen-address "$FDB_LISTEN_IP:$FDB_PORT" --public-address "$PUBLIC_IP:$FDB_PORT" \
     --datadir /var/fdb/data --logdir /var/fdb/logs \
     --locality-zoneid="$(hostname)" --locality-machineid="$(hostname)" --class "$FDB_PROCESS_CLASS" --knob_disable_posix_kernel_aio=1 \
     "$@"

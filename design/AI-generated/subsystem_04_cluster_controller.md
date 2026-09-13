@@ -174,7 +174,7 @@ struct WorkerHealth {
 
 ---
 
-## Worker Registration -- [`ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp)`:1252-1434`
+## Worker Registration -- [`ClusterController.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.cpp)`:1252-1434`
 
 ### RegisterWorkerRequest
 
@@ -310,7 +310,7 @@ RPCs exposed by every worker process:
 
 | File | Purpose |
 |------|---------|
-| [`fdbserver/clustercontroller/ClusterController.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.actor.cpp) | CC main loop, worker registration, event handling |
+| [`fdbserver/clustercontroller/ClusterController.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/clustercontroller/ClusterController.cpp) | CC main loop, worker registration, event handling |
 | `fdbserver/clustercontroller/ClusterController.h` | ClusterControllerData, fitness calculation, recruitment |
 | [`fdbserver/coordinator/Coordination.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/coordinator/Coordination.cpp) | leaderRegister, generation register, coordination |
 | [`fdbserver/core/LeaderElection.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/LeaderElection.cpp) | tryBecomeLeaderInternal, candidacy, heartbeat |

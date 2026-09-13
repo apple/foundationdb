@@ -30,7 +30,6 @@ __version__ = fdb.apiversion.FDB_VERSION
 LATEST_API_VERSION = fdb.apiversion.LATEST_API_VERSION
 
 
-
 def open(*args, **kwargs):
     raise RuntimeError("You must call api_version() before using any fdb methods")
 

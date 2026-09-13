@@ -47,13 +47,13 @@
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/versions.h"
 #include "flow/IRandom.h"
 #include "flow/MkCert.h"
 #include "flow/ProcessEvents.h"
-#include "fdbrpc/WellKnownEndpoints.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
 #include "flow/network.h"
@@ -103,6 +103,14 @@ constexpr bool hasRocksDB =
     false
 #endif
     ;
+
+bool isDisabledLegacyMode(std::string_view key, const toml::value& value) {
+	if ((key != "tenantModes" && key != "encryptModes") || !value.is_array()) {
+		return false;
+	}
+	const auto& modes = value.as_array();
+	return modes.size() == 1 && modes.front().is_string() && modes.front().as_string() == "disabled";
+}
 
 } // anonymous namespace
 
@@ -328,6 +336,10 @@ class TestConfig : public BasicTestConfig {
 		void set(std::string_view key, const value_type& value) {
 			auto iter = confMap.find(key);
 			if (iter == confMap.end()) {
+				// Restart inputs shared with older binaries must keep these retired modes disabled.
+				if (isDisabledLegacyMode(key, value)) {
+					return;
+				}
 				std::cerr << "Unknown configuration attribute " << key << std::endl;
 				TraceEvent("UnknownConfigurationAttribute").detail("Name", std::string(key));
 				throw unknown_error();
@@ -2919,34 +2931,4 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 	destructed = true;
 	co_await Future<Void>(Never());
 	ASSERT(false);
-}
-
-// Helper function to calculate the maximum satellite_logs based on available machines per datacenter
-// We count the minimum number of machines in any satellite datacenter to ensure we don't over-provision
-int getMaxSatelliteLogs() {
-	if (!g_network->isSimulated()) {
-		return 6; // Conservative default for non-simulated environments
-	}
-
-	// Count machines per datacenter
-	std::map<Optional<Standalone<StringRef>>, int> machinesPerDC;
-	for (auto& process : g_simulator->getAllProcesses()) {
-		if (process->locality.dcId().present()) {
-			machinesPerDC[process->locality.dcId()]++;
-		}
-	}
-
-	// Find the minimum machines in satellite DCs (0, 1, 2, 3, 4, 5).
-	// Note normal DCs can be selected as satellites, see usage of useNormalDCsAsSatellites.
-	int minSatelliteMachines = 6; // Start with max possible
-	for (int dcId = 0; dcId <= 5; dcId++) {
-		auto dcIdStr = Standalone<StringRef>(std::to_string(dcId));
-		int count = machinesPerDC[dcIdStr];
-		if (count > 0) {
-			minSatelliteMachines = std::min(minSatelliteMachines, count);
-		}
-	}
-
-	// Cap at 6 (the original max) and ensure at least 1
-	return std::max(1, std::min(6, minSatelliteMachines));
 }

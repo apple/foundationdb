@@ -30,20 +30,6 @@ function(is_prefix out prefix str)
   set(${out} ${res} PARENT_SCOPE)
 endfunction()
 
-function(create_build_dirs)
-  foreach(src IN LISTS ARGV)
-    get_filename_component(d "${src}" DIRECTORY)
-    if(IS_ABSOLUTE "${d}")
-      file(RELATIVE_PATH d "${CMAKE_CURRENT_SOURCE_DIR}" "${src}")
-    endif()
-    list(APPEND dirs "${d}")
-  endforeach()
-  list(REMOVE_DUPLICATES dirs)
-  foreach(dir IN LISTS dirs)
-    make_directory("${CMAKE_CURRENT_BINARY_DIR}/${dir}")
-  endforeach()
-endfunction()
-
 function(fdb_find_sources out)
   file(GLOB res
     LIST_DIRECTORIES false

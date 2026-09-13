@@ -74,7 +74,7 @@
 //
 // EXAMPLES:
 //   See tests/slow/S3ClientWorkloadWithChaos.toml for comprehensive test configurations
-//   See fdbserver/workloads/S3ClientWorkload.actor.cpp for usage example
+//   See fdbserver/workloads/S3ClientWorkload.cpp for usage example
 
 // S3 Operation Types for targeted chaos
 enum class S3Operation {

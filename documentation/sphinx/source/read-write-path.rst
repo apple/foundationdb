@@ -382,19 +382,19 @@ Read write path of a transaction
 
 This section uses an example transaction to describe how a transaction with both read and write operation works in FDB.
 
-Suppose application creates the following transaction, where *Future<int>* is an object that holds an asynchronous call and
-becomes ready when the async call returns, and *wait()* is a synchronous point when the code waits for futures to be ready.
-The following code reads key k1 and k2 from database,  increases k1’s value by 1 and write back k1’s new value into database.
+Suppose an application creates the following transaction. In this pseudocode, ``Future<int>`` represents an asynchronous
+read result, and ``co_await`` suspends the coroutine until that result is ready without blocking other work.
+The example reads integer values from keys k1 and k2 and writes their sum back to k1.
 
 **Example Transaction** ::
 
     Line1: Transaction tr;
     Line2: Future<int> fv1 = tr.get(k1);
     Line3: Future<int> fv2 = tr.get(k2);
-    Line4: v1 = wait(fv1);
-    Line5: v2 = wait(fv2);
-    Line6: tr.set(v1+v2);
-    Line7: tr.commit();
+    Line4: v1 = co_await fv1;
+    Line5: v2 = co_await fv2;
+    Line6: tr.set(k1, v1+v2);
+    Line7: co_await tr.commit();
 
 The transaction starts with the read path:
 

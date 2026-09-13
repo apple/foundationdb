@@ -115,7 +115,7 @@ Future<bool> checkMetadataEncodingCommandActor(Database cx, std::vector<StringRe
 	}
 
 	// Count dataMoves
-	loop {
+	while (true) {
 		Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);

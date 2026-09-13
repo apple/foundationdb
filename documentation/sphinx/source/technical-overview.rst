@@ -24,7 +24,7 @@ These documents explain the engineering design of FoundationDB, with detailed in
 
 * :doc:`fault-tolerance`: FoundationDB provides fault tolerance by intelligently replicating data across a distributed cluster of machines. Our architecture is designed to minimize service interruption and data loss in the event of machine failures.
 
-* :doc:`flow`: FoundationDB faces rigorous engineering challenges for high performance and scalability. To meet these challenges, we implemented Flow, an extension to C++ that supports actor-based concurrency with new keywords and control-flow primitives while retaining speed and I/O efficiency.
+* :doc:`flow`: FoundationDB faces rigorous engineering challenges for high performance and scalability. To meet these challenges, we implemented Flow, an asynchronous runtime that combines standard C++ coroutines with futures, message streams, and cooperative scheduling while retaining speed and I/O efficiency.
 
 * :doc:`testing`: FoundationDB uses a combined regime of robust simulation, live performance testing, and hardware-based failure testing to meet exacting standards of correctness and performance.
 

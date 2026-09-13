@@ -43,9 +43,7 @@ struct ResolutionBalancer {
 
 	explicit(false) ResolutionBalancer(Version* version) : pVersion(version) {}
 
-	Future<Void> resolutionBalancing() { return resolutionBalancing_impl(this); }
-
-	static Future<Void> resolutionBalancing_impl(ResolutionBalancer* self);
+	Future<Void> resolutionBalancing();
 
 	// Sets resolver interfaces. Trigger resolutionBalancing() actor if more
 	// than one resolvers are present.

@@ -129,7 +129,6 @@ public class LocalityUtil {
 
 		AsyncIterator<KeyValue> block;
 		private CompletableFuture<Boolean> nextFuture;
-		private boolean closed;
 
 		BoundaryIterator(Transaction tr, byte[] begin, byte[] end) {
 			this.tr = tr;
@@ -144,8 +143,6 @@ public class LocalityUtil {
 			firstGet = tr.getRange(keyServersForKey(begin), keyServersForKey(end));
 			block = firstGet.iterator();
 			nextFuture = AsyncUtil.composeHandleAsync(block.onHasNext(), handler, tr.getExecutor());
-
-			closed = false;
 		}
 
 		@Override
@@ -219,22 +216,6 @@ public class LocalityUtil {
 		@Override
 		public void close() {
 			BoundaryIterator.this.tr.close();
-			closed = true;
-		}
-
-		@Override
-		protected void finalize() throws Throwable {
-			try {
-				if(FDB.instance().warnOnUnclosed && !closed) {
-					System.err.println("CloseableAsyncIterator not closed (getBoundaryKeys)");
-				}
-				if(!closed) {
-					close();
-				}
-			}
-			finally {
-				super.finalize();
-			}
 		}
 	}
 

@@ -54,4 +54,5 @@ public:
 	explicit ReadLatencySamples(UID serverId);
 
 	void sample(double latency, SampleType, Optional<ReadType> = {});
+	void samplePair(double latency, SampleType first, SampleType second, Optional<ReadType> = {});
 };

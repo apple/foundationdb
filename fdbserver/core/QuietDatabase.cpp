@@ -32,7 +32,7 @@
 #include "flow/ProcessEvents.h"
 #include "flow/Trace.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/core/Knobs.h"

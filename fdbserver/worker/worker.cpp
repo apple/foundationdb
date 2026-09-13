@@ -25,6 +25,7 @@
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "flow/ApiVersion.h"
 #include "flow/Buggify.h"
 #include "flow/CodeProbe.h"
@@ -50,7 +51,7 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "MetricLogger.h"
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/backupworker/RangePartitionedBackupWorker.h"
@@ -641,15 +642,7 @@ Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFul
 			    .detail("StoredConnectionString", storedConnectionString.toString())
 			    .detail("CurrentConnectionString", connectionString);
 		}
-		auto peers = FlowTransport::transport().getIncompatiblePeers();
-		for (auto it = peers->begin(); it != peers->end();) {
-			if (now() - it->second.second > FLOW_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING) {
-				request.incompatiblePeers.push_back(it->first);
-				it = peers->erase(it);
-			} else {
-				it++;
-			}
-		}
+		request.incompatiblePeers = FlowTransport::transport().consumeReportableIncompatiblePeers();
 
 		bool ccInterfacePresent = ccInterface->get().present();
 		if (ccInterfacePresent) {

@@ -25,6 +25,7 @@ void forceLinkIndexedSetTests();
 void forceLinkDequeTests();
 void forceLinkFlowTests();
 void forceLinkCoroTests();
+void forceLinkCoroFlowTests();
 void forceLinkMemcpyTests();
 void forceLinkStreamCipherTests();
 void forceLinkSimExternalConnectionTests();
@@ -44,7 +45,6 @@ void forceLinkDDSketchTests();
 void forceLinkCommitProxyTests();
 void forceLinkWipedStringTests();
 void forceLinkRandomKeyValueUtilsTests();
-void forceLinkActorFuzzUnitTests();
 void forceLinkGrpcTests();
 void forceLinkGrpcTests2();
 void forceLinkSimpleCounterTests();
@@ -59,6 +59,7 @@ void forceLinkGrvProxyStarvationTests();
 // TODO akanksha: Remove once a production caller of rangePartitionedBackupWorker() is wired up;
 // this only exists to keep TEST_CASEs in RangePartitionedBackupWorker.cpp from being dead-stripped.
 void forceLinkRangePartitionedBackupWorkerTests();
+void forceLinkCountedSectionTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -106,6 +107,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkDequeTests();
 		forceLinkFlowTests();
 		forceLinkCoroTests();
+		forceLinkCoroFlowTests();
 		forceLinkMemcpyTests();
 		forceLinkStreamCipherTests();
 		forceLinkSimExternalConnectionTests();
@@ -124,7 +126,6 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkDDSketchTests();
 		forceLinkWipedStringTests();
 		forceLinkRandomKeyValueUtilsTests();
-		forceLinkActorFuzzUnitTests();
 		forceLinkSimpleCounterTests();
 		forceLinkLogSystemRecoveryTests();
 		forceLinkIPagerTests();
@@ -137,6 +138,7 @@ struct UnitTestWorkload : TestWorkload {
 		// TODO akanksha: Remove once a production caller of rangePartitionedBackupWorker() is wired up;
 		// this only exists to keep TEST_CASEs in RangePartitionedBackupWorker.cpp from being dead-stripped.
 		forceLinkRangePartitionedBackupWorkerTests();
+		forceLinkCountedSectionTests();
 
 #ifdef FLOW_GRPC_ENABLED
 		forceLinkGrpcTests();

@@ -22,6 +22,7 @@
 // FIXME: actually it should be renamed "ReplyComparison" because TSS vs SS
 // is just one use case.  This code is agnostic to the specific use cases.
 // Fundamentally it is just about comparing replies. Where they came from is incidental.
+#include "fdbclient/ProxyLoadBalanceMetrics.h"
 #include "fdbclient/StorageServerInterface.h"
 
 #include "crc32/crc32c.h" // for crc32c_append, to checksum values in tss trace events
@@ -517,6 +518,78 @@ template <>
 void TSSMetrics::recordLatency(const OverlappingChangeFeedsRequest& req, double ssLatency, double tssLatency) {}
 
 // -------------------
+
+namespace {
+class LoadBalanceTestInterface {
+public:
+	PublicRequestStream<WaitMetricsRequest> waitMetrics;
+
+	UID id() const { return waitMetrics.getEndpoint().token; }
+	std::string toString() const { return id().shortString(); }
+};
+
+Future<Void> replyToWaitMetricsRequest(FutureStream<WaitMetricsRequest> requests) {
+	ReplyPromise<StorageMetrics> reply;
+	{
+		WaitMetricsRequest request = co_await requests;
+		reply = std::move(request.reply);
+	}
+	reply.send(StorageMetrics());
+	co_return;
+}
+} // namespace
+
+TEST_CASE("/fdbclient/LoadBalance/releasesCompletedRequest") {
+	StorageServerInterface storageServer;
+	FutureStream<WaitMetricsRequest> requests = storageServer.waitMetrics.getFuture();
+	IFailureMonitor::failureMonitor().setStatus(storageServer.waitMetrics.getEndpoint().getPrimaryAddress(),
+	                                            FailureStatus(false));
+	auto server = makeReference<ReferencedInterface<StorageServerInterface>>(storageServer);
+	auto alternatives = makeReference<MultiInterface<ReferencedInterface<StorageServerInterface>>>(
+	    std::vector<Reference<ReferencedInterface<StorageServerInterface>>>{ server });
+
+	WaitMetricsRequest request(
+	    0, KeyRangeRef("load-balance-begin"_sr, "load-balance-end"_sr), StorageMetrics(), StorageMetrics());
+	ReplyPromise<StorageMetrics> reply = request.reply;
+	Future<StorageMetrics> result = loadBalance(alternatives, &StorageServerInterface::waitMetrics, std::move(request));
+
+	ASSERT(!result.isReady());
+	ASSERT(alternatives->debugGetReferenceCount() > 1);
+	ASSERT(reply.getPromiseReferenceCount() > 1);
+	co_await replyToWaitMetricsRequest(requests);
+
+	ASSERT(result.isReady());
+	ASSERT(!result.isError());
+	ASSERT(alternatives->debugGetReferenceCount() == 1);
+	ASSERT(reply.getPromiseReferenceCount() == 1);
+	co_return;
+}
+
+TEST_CASE("/fdbclient/BasicLoadBalance/releasesCompletedRequest") {
+	LoadBalanceTestInterface server;
+	FutureStream<WaitMetricsRequest> requests = server.waitMetrics.getFuture();
+	IFailureMonitor::failureMonitor().setStatus(server.waitMetrics.getEndpoint().getPrimaryAddress(),
+	                                            FailureStatus(false));
+	auto alternatives = makeReference<ModelInterface<LoadBalanceTestInterface, ProxyCpuMetric>>(
+	    std::vector<LoadBalanceTestInterface>{ server });
+
+	WaitMetricsRequest request(
+	    0, KeyRangeRef("load-balance-begin"_sr, "load-balance-end"_sr), StorageMetrics(), StorageMetrics());
+	ReplyPromise<StorageMetrics> reply = request.reply;
+	Future<StorageMetrics> result =
+	    basicLoadBalance(alternatives, &LoadBalanceTestInterface::waitMetrics, std::move(request));
+
+	ASSERT(!result.isReady());
+	ASSERT(alternatives->debugGetReferenceCount() > 1);
+	ASSERT(reply.getPromiseReferenceCount() > 1);
+	co_await replyToWaitMetricsRequest(requests);
+
+	ASSERT(result.isReady());
+	ASSERT(!result.isError());
+	ASSERT(alternatives->debugGetReferenceCount() == 1);
+	ASSERT(reply.getPromiseReferenceCount() == 1);
+	co_return;
+}
 
 TEST_CASE("/StorageServerInterface/TSSCompare/TestComparison") {
 	printf("testing tss comparisons\n");

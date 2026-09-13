@@ -21,6 +21,8 @@
 #include "fdbclient/Tuple.h"
 #include "flow/UnitTest.h"
 
+#include <cstring>
+
 const uint8_t VERSIONSTAMP_96_CODE = 0x33;
 const uint8_t USER_TYPE_START = 0x40;
 const uint8_t USER_TYPE_END = 0x4f;
@@ -596,6 +598,31 @@ TEST_CASE("/fdbclient/Tuple/unpack") {
 			throw e;
 		}
 	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/Tuple/versionstampBinaryLayout") {
+	const StringRef encoded = "\x01\x23\x45\x67\x89\xab\xcd\xef\x12\x34\x56\x78"_sr;
+	constexpr Version expectedVersion = 0x0123456789abcdef;
+	constexpr uint16_t expectedBatchNumber = 0x1234;
+	constexpr uint16_t expectedUserVersion = 0x5678;
+
+	TupleVersionstamp constructed(expectedVersion, expectedBatchNumber, expectedUserVersion);
+	ASSERT_EQ(StringRef(constructed.begin(), constructed.size()), encoded);
+
+	Standalone<StringRef> storage = makeAlignedString(alignof(Version), encoded.size() + 1);
+	uint8_t* unaligned = mutateString(storage) + 1;
+	std::memcpy(unaligned, encoded.begin(), encoded.size());
+	TupleVersionstamp decoded{ StringRef(unaligned, encoded.size()) };
+	ASSERT_EQ(decoded.getVersion(), expectedVersion);
+	ASSERT_EQ(decoded.getBatchNumber(), expectedBatchNumber);
+	ASSERT_EQ(decoded.getUserVersion(), expectedUserVersion);
+
+	Versionstamp versionstamp{ Standalone<StringRef>(StringRef(unaligned, sizeof(Version) + sizeof(uint16_t)),
+		                                             storage.arena()) };
+	ASSERT_EQ(versionstamp.version, expectedVersion);
+	ASSERT_EQ(versionstamp.batchNumber, expectedBatchNumber);
 
 	return Void();
 }

@@ -135,7 +135,7 @@ struct LogPushData : NonCopyable {
 	void addTag(Tag tag) { next_message_tags.push_back(tag); }
 
 	template <class T>
-	void addTags(T tags) {
+	void addTags(T const& tags) {
 		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
 	}
 

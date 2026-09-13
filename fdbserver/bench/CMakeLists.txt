@@ -26,3 +26,5 @@ target_include_directories(
           "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 target_link_libraries(fdbserver_bench PRIVATE Threads::Threads fdb_google_benchmark flow)
+
+add_subdirectory(coroflow)

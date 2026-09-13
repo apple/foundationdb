@@ -120,7 +120,7 @@ public:
 	                                              Version fileVersion,
 	                                              int blockSize) override;
 
-	Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
+	AsyncResult<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
 	    KeyspaceSnapshotFile snapshot);
 
 	Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,

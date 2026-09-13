@@ -21,7 +21,6 @@
 #include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbrpc/simulator.h"
 #include "flow/BooleanParam.h"
 #include "flow/Knobs.h"
@@ -34,7 +33,7 @@ FDB_BOOLEAN_PARAM(Randomize);
 namespace {
 Future<Void> initializeSimulation() {
 	resetFlowKnobs(Randomize::True, IsSimulated::True);
-	return startUnitTestSimulator();
+	return startUnitTestSimulator(WLTOKEN_FIRST_AVAILABLE);
 }
 
 void initializeNetwork() {
@@ -42,7 +41,7 @@ void initializeNetwork() {
 	g_network = newNet2(TLSConfig());
 	g_network->addStopCallback(Net2FileSystem::stop);
 	Net2FileSystem::newFileSystem();
-	FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(false, 1, WLTOKEN_FIRST_AVAILABLE);
 	const NetworkAddress address = NetworkAddress::parse("127.0.0.1:0");
 	FlowTransport::transport().bind(address, address);
 }

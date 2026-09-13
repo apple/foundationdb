@@ -20,7 +20,7 @@
 
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
@@ -33,9 +33,7 @@
 #include "flow/IConnection.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
-#undef state
 #include "fdbclient/SimpleIni.h"
-#define state
 #undef max
 #undef min
 

@@ -20,7 +20,7 @@
 
 #include <vector>
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/genericactors.h"
 

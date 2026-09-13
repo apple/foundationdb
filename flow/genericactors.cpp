@@ -542,6 +542,40 @@ TEST_CASE("/flow/genericactors/HoldWhileReleasesCapturedState") {
 	ASSERT_EQ(lock.available(), 1);
 }
 
+TEST_CASE("/flow/genericactors/ActiveCounterReleaserMove") {
+	class CopyTrackedCallback {
+		int& copies;
+		int& calls;
+
+	public:
+		CopyTrackedCallback(int& copies, int& calls) : copies(copies), calls(calls) {}
+		// Keep copies potentially throwing so moving std::function cannot copy its target.
+		CopyTrackedCallback(const CopyTrackedCallback& other) noexcept(false)
+		  : copies(other.copies), calls(other.calls) {
+			++copies;
+		}
+		void operator()() const { ++calls; }
+	};
+
+	int callbackCopies = 0;
+	int callbackCalls = 0;
+	int copiesBeforeMove = 0;
+	ActiveCounter<int> counter(0);
+	{
+		auto moved = [&]() {
+			auto source = counter.take(2, CopyTrackedCallback(callbackCopies, callbackCalls));
+			copiesBeforeMove = callbackCopies;
+			return ActiveCounter<int>::Releaser(std::move(source));
+		}();
+		ASSERT_EQ(callbackCopies, copiesBeforeMove);
+		ASSERT_EQ(counter.getValue(), 2);
+		ASSERT_EQ(callbackCalls, 0);
+	}
+	ASSERT_EQ(counter.getValue(), 0);
+	ASSERT_EQ(callbackCalls, 1);
+	return Void();
+}
+
 TEST_CASE("/flow/genericactors/ThrowErrorOr") {
 	int value = co_await throwErrorOr<int>(Future<ErrorOr<int>>(ErrorOr<int>(7)));
 	ASSERT_EQ(value, 7);

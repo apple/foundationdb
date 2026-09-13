@@ -48,12 +48,6 @@ jobs:
             fdb_c_generated             \
             fdb-java
 
-          # all flow actors, for generated headers
-          ACTORS=$(
-            ninja -t targets all | grep -v /build_output/ | grep '_actors:' | cut -d: -f1
-          )
-          ninja -v $ACTORS
-
           # all protobuf headers
           PB_HEADERS=$(
             ninja -t targets all | grep -v /build_output/ | grep '\.pb\.h:' | cut -d: -f1
@@ -73,9 +67,6 @@ jobs:
             if [[ $FILE == contrib/* ]]; then
               continue  # skip contrib sources
             fi
-            if [[ $FILE == *.actor.* ]]; then
-              continue  # actor syntax is not plain c++
-            fi
             if [[ $FILE == flow/include/flow/CoroutinesImpl.h ]]; then
               continue  # internal implementation header, included only from Coroutines.h
             fi
@@ -92,9 +83,8 @@ jobs:
                 ;;
             esac
             # These inputs are not parseable as standalone clang-tidy translation units in this workflow:
-            # the public C headers require C consumer setup and intentionally use C typedefs, the AWS and RocksDB
-            # compile commands refer to SDK headers that are not built here, and the Flow/RPC headers depend on
-            # include order from their real consumers.
+            # the public C headers require C consumer setup and intentionally use C typedefs, AWS headers are
+            # not generated here, and the Flow/RPC/RocksDB headers depend on their real consumers.
             case "$FILE" in
               bindings/c/foundationdb/fdb_c.h|bindings/c/foundationdb/fdb_c_types.h)
                 continue
@@ -102,10 +92,10 @@ jobs:
               fdbclient/S3BlobStore.cpp|fdbserver/kvstore/RocksDBLogForwarder.h)
                 continue
                 ;;
-              fdbrpc/AsyncFileKAIO.h)
-                continue
+              fdbserver/kvstore/ArtMutationBuffer.h)
+                continue  # included inside VersionedBTree's class definition
                 ;;
-              fdbserver/core/RocksDBCheckpointUtils.cpp|fdbserver/kvstore/KeyValueStoreRocksDB.cpp|fdbserver/kvstore/KeyValueStoreShardedRocksDB.cpp)
+              fdbrpc/AsyncFileKAIO.h)
                 continue
                 ;;
               flow/include/flow/Coroutines.h|flow/include/flow/CoroutinesImpl.h|flow/include/flow/FlowThread.h)
@@ -115,6 +105,9 @@ jobs:
             # only c++ source files
             if [[ $FILE =~ \.[ch](pp)?$ ]] ; then
               echo "Checking $FILE ..."
+              if [[ $FILE == fdbserver/*/*RocksDB*.cpp ]]; then
+                ninja -C build_output fdbserver/rocksdb-prefix/src/rocksdb-stamp/rocksdb-download
+              fi
               if ! clang-tidy -p build_output --warnings-as-errors='*' "$FILE"; then
                 PASSED=false
               fi

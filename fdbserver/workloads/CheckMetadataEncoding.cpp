@@ -22,7 +22,7 @@
 // SHARD_ENCODE_LOCATION_METADATA knob. Used to validate forward migration and
 // rollback of the shard-encoded metadata feature.
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.h"

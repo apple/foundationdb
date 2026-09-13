@@ -78,9 +78,7 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 		explicit ActionWrapper(PThreadAction action) : action(action) {}
 		// HACK: Boost won't use move constructors, so we just assume the last copy made is the one that will be called
 		// or cancelled
-		explicit(false) ActionWrapper(ActionWrapper const& r) : action(r.action) {
-			const_cast<ActionWrapper&>(r).action = nullptr;
-		}
+		ActionWrapper(ActionWrapper const& r) : action(r.action) { const_cast<ActionWrapper&>(r).action = nullptr; }
 		void operator()() {
 			Thread::dispatch(action);
 			action = nullptr;

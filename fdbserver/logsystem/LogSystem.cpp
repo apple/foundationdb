@@ -877,6 +877,7 @@ Version LogSystem::getKnownCommittedVersion() {
 
 Future<Void> LogSystem::onKnownCommittedVersionChange() {
 	std::vector<Future<Void>> result;
+	result.reserve(lockResults.size());
 	for (auto& it : lockResults) {
 		result.push_back(LogSystem::getDurableVersionChanged(it));
 	}
@@ -1025,7 +1026,7 @@ Future<Void> LogSystem::confirmEpochLive_internal(Reference<LogSet> logSet, Opti
 	while (true) {
 		for (int i = 0; i < alive.size(); i++) {
 			if (!responded[i] && alive[i].isReady() && !alive[i].isError()) {
-				aliveEntries.push_back(logSet->logEntryArray[i]);
+				aliveEntries.push_back(logSet->getLogEntry(i));
 				responded[i] = true;
 			}
 		}

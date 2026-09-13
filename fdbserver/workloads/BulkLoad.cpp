@@ -19,7 +19,7 @@
  */
 
 #include "fdbrpc/DDSketch.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/tester/workloads.h"
 
 struct BulkLoadWorkload : TestWorkload {

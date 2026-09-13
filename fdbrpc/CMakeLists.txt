@@ -15,24 +15,15 @@ if(NOT WIN32)
   endif()
 endif()
 
-set(FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS
-  ActorFuzz.actor.cpp
-  FlowTests.actor.cpp
-  dsltest.actor.cpp)
-
-add_flow_target(STATIC_LIBRARY NAME fdbrpc
-  SRCS ${FDBRPC_SRCS}
-  DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
-add_flow_target(STATIC_LIBRARY NAME fdbrpc_sampling
-  SRCS ${FDBRPC_SRCS}
-  DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
+add_flow_target(STATIC_LIBRARY NAME fdbrpc SRCS ${FDBRPC_SRCS})
+add_flow_target(STATIC_LIBRARY NAME fdbrpc_sampling SRCS ${FDBRPC_SRCS})
 
 add_flow_target(LINK_TEST NAME fdbrpclinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbrpclinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbrpc>" rapidjson)
 target_include_directories(fdbrpclinktest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 
 add_flow_target(EXECUTABLE NAME fdbrpc_test SRCS fdbrpc_test.cpp)
-set_target_properties(fdbrpc_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+register_fdb_unit_tests(fdbrpc_test SIMULATION)
 target_link_libraries(fdbrpc_test PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbrpc>" rapidjson)
 
 if(COMPILE_EIO)
@@ -109,9 +100,6 @@ if(COMPILE_EIO)
 endif()
 
 target_compile_definitions(fdbrpc_sampling PRIVATE -DENABLE_SAMPLING)
-if(WIN32)
-  add_dependencies(fdbrpc_sampling_actors fdbrpc_actors)
-endif()
 
 if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
                                      # x-compiling.

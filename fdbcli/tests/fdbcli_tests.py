@@ -897,6 +897,46 @@ def integer_options():
     assert error_output == b""
 
 
+def cdc_operator_commands():
+    status = json.loads(run_fdbcli_command("cdc status json"))
+    assert isinstance(status["read_version"], int)
+    assert isinstance(status["admission_enabled"], bool)
+    assert status["metadata_complete"] is True
+    assert status["metadata_drained"] is True
+    assert status["streams"] == []
+    assert status["tags"] == []
+    assert isinstance(status["proxies"], list)
+
+    invalid_commands = [
+        "cdc",
+        "cdc list",
+        "cdc status json extra",
+        "cdc remove missing 1",
+        'cdc remove "" 1 CONFIRM-DATA-LOSS',
+        "cdc remove missing 0 CONFIRM-DATA-LOSS",
+        "cdc remove missing -1 CONFIRM-DATA-LOSS",
+        "cdc remove missing +1 CONFIRM-DATA-LOSS",
+        "cdc remove missing 1x CONFIRM-DATA-LOSS",
+        "cdc remove missing 18446744073709551616 CONFIRM-DATA-LOSS",
+        "cdc remove missing 1 no",
+    ]
+    for command in invalid_commands:
+        result = subprocess.run(
+            command_template + [command], capture_output=True, env=fdbcli_env
+        )
+        assert result.returncode != 0, (command, result.stdout, result.stderr)
+
+    result = subprocess.run(
+        command_template
+        + ["cdc remove missing 18446744073709551615 CONFIRM-DATA-LOSS"],
+        capture_output=True,
+        env=fdbcli_env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert b"already absent" in result.stdout, result.stdout
+    assert b"Retired cleanup may still be pending" in result.stdout, result.stdout
+
+
 def client_threads_per_version_env_ignored():
     test_env = fdbcli_env.copy()
     test_env["FDB_NETWORK_OPTION_CLIENT_THREADS_PER_VERSION"] = "not_an_integer"
@@ -1014,6 +1054,7 @@ if __name__ == "__main__":
         tls_address_suffix()
         status_json_file_region_failover_message()
         idempotency_ids()
+        cdc_operator_commands()
         client_threads_per_version_env_ignored()
     else:
         assert args.process_number > 1, "Process number should be positive"

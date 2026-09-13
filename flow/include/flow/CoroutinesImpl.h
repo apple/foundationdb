@@ -231,9 +231,12 @@ struct NoThrowOnCancelCoroActor final : Actor<std::conditional_t<std::is_void_v<
 	}
 
 	void cancel() override {
-		if (!SAV<ValType>::canBeSet()) {
+		if (!SAV<ValType>::canBeSet() || actorWaitStateIsCancelled(Actor<ValType>::actor_wait_state)) {
 			return;
 		}
+
+		// Detaching a waiter or destroying the frame can synchronously reenter cancellation.
+		Actor<ValType>::actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
 
 		if (cancelHandler) {
 			// The handler object is stored in the coroutine frame, so unregister
@@ -672,6 +675,9 @@ struct AwaitableFuture
 	[[no_unique_address]] std::conditional_t<IsStream, AwaitableFutureStore<FutureValue>, Empty> store;
 
 	AwaitableFuture(const FutureType& f, PromiseType* pt) : future(f), pt(pt) {}
+	AwaitableFuture(FutureStream<FutureValue>&& f, PromiseType* pt)
+	    requires(IsStream)
+	  : future(std::move(f)), pt(pt) {}
 
 	void fire(FutureValue const& value) override {
 		if constexpr (IsStream) {
@@ -693,9 +699,9 @@ struct AwaitableFuture
 		pt->resume();
 	}
 
-	auto getCallbackFuture() const {
+	auto getCallbackFuture() {
 		if constexpr (IsStream) {
-			return future;
+			return std::move(future);
 		} else {
 			return StrictFuture<FutureValue>(future);
 		}
@@ -981,6 +987,11 @@ struct CoroPromiseBase : CoroReturn<T, Derived, ReturnsExplicitVoid> {
 	}
 
 	template <class U>
+	auto await_transform(FutureStream<U>&& futureStream) {
+		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ std::move(futureStream), self() };
+	}
+
+	template <class U>
 	auto await_transform(const FutureStream<U>& futureStream) {
 		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, self() };
 	}
@@ -1188,6 +1199,11 @@ struct AsyncResultPromise
 	}
 
 	template <class U>
+	auto await_transform(FutureStream<U>&& futureStream) {
+		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ std::move(futureStream), this };
+	}
+
+	template <class U>
 	auto await_transform(const FutureStream<U>& futureStream) {
 		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ futureStream, this };
 	}
@@ -1295,6 +1311,11 @@ struct AsyncGeneratorPromise {
 	template <class U>
 	auto await_transform(const Future<U>& future) {
 		return coro::AwaitableFuture<promise_type, U, false, ReturnsExplicitVoid>{ future, this };
+	}
+
+	template <class U>
+	auto await_transform(FutureStream<U>&& futureStream) {
+		return coro::AwaitableFuture<promise_type, U, true, ReturnsExplicitVoid>{ std::move(futureStream), this };
 	}
 
 	template <class U>

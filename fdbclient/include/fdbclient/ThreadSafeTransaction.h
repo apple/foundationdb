@@ -163,7 +163,7 @@ public:
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(nullptr), initialized(std::make_shared<std::atomic_bool>(false)) {}
 	void operator=(ThreadSafeTransaction&& r) noexcept;
-	explicit(false) ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept;
+	ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept;
 
 	void reset() override;
 

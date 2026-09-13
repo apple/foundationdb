@@ -56,7 +56,7 @@ public:
 	int32_t debugGetReferenceCount() const { return referenceCount.load(); }
 
 private:
-	explicit(false) ThreadSafeReferenceCounted(const ThreadSafeReferenceCounted&) /* = delete*/;
+	ThreadSafeReferenceCounted(const ThreadSafeReferenceCounted&) /* = delete*/;
 	void operator=(const ThreadSafeReferenceCounted&) /* = delete*/;
 	mutable std::atomic<int32_t> referenceCount;
 };
@@ -76,7 +76,7 @@ public:
 	bool isSoleOwner() const { return referenceCount == 1; }
 
 private:
-	explicit(false) ThreadUnsafeReferenceCounted(const ThreadUnsafeReferenceCounted&) /* = delete*/;
+	ThreadUnsafeReferenceCounted(const ThreadUnsafeReferenceCounted&) /* = delete*/;
 	void operator=(const ThreadUnsafeReferenceCounted&) /* = delete*/;
 	mutable int32_t referenceCount;
 };
@@ -107,11 +107,11 @@ public:
 		return Reference(ptr);
 	}
 
-	explicit(false) Reference(const Reference& r) : ptr(r.getPtr()) {
+	Reference(const Reference& r) : ptr(r.getPtr()) {
 		if (ptr)
 			addref(ptr);
 	}
-	explicit(false) Reference(Reference&& r) noexcept : ptr(r.getPtr()) { r.ptr = nullptr; }
+	Reference(Reference&& r) noexcept : ptr(r.getPtr()) { r.ptr = nullptr; }
 
 	template <class Q>
 	explicit(false) Reference(const Reference<Q>& r) : ptr(r.getPtr()) {

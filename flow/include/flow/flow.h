@@ -656,9 +656,8 @@ class LineageReference : public Reference<ActorLineage> {
 public:
 	LineageReference() : Reference<ActorLineage>(nullptr), actorName_(""), allocated_(false) {}
 	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
-	explicit(false) LineageReference(const LineageReference& r)
-	  : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
-	explicit(false) LineageReference(LineageReference&& r)
+	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
+	LineageReference(LineageReference&& r)
 	  : Reference<ActorLineage>(r.getPtr()), actorName_(r.actorName_), allocated_(r.allocated_) {
 		r.setPtrUnsafe(nullptr);
 		r.actorName_ = "";
@@ -1008,12 +1007,6 @@ public:
 	Future(T&& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
 	Future(Never) : sav(new SAV<T>(1, 0)) { sav->send(Never()); }
 	Future(const Error& error) : sav(new SAV<T>(1, 0)) { sav->sendError(error); }
-
-#ifndef NO_INTELLISENSE
-	template <class U>
-	    requires(std::is_assignable_v<T, U>)
-	Future(const U&) {}
-#endif
 
 	~Future() {
 		if (sav)

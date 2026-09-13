@@ -12,28 +12,6 @@ macros.
 Probes
 ======
 
-
-Actors
-------
-
-.. code-block:: c
-
-   FDB_TRACE_PROBE(actor_create, "actorname")
-   FDB_TRACE_PROBE(actor_destroy, "actorname")
-
-Gets called whenever an actor is created or gets destroyed. It provides one argument which is a
-string and it is the name of the actor.
-
-.. code-block:: c
-
-   FDB_TRACE_PROBE(actor_enter, "name", index)
-   FDB_TRACE_PROBE(actor_exit, "name", index)
-
-Whenever we call into an actor (either directly through a function call or indirectly through a callback)
-we call ``actor_enter``. Whenever we leave an actor (either because it returns or because it calls into
-wait) we call ``actor_exit``. The first argument is a string of the name of the actor and the second is an
-index. ``-1`` means that we entered/exited through in a main function call, otherwise it is a generated index.
-
 Main-Loop
 ---------
 

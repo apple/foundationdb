@@ -75,9 +75,10 @@ const int bulkLoadManifestFormatVersion = 1;
 // TODO(BulkDump): use this everywhere
 std::string appendToPath(const std::string& path, const std::string& append);
 
-// Constructs a URL with the path modified to include "data/" prefix.
+// Constructs a direct object URL with the path modified to include the backup container's data tree.
 // This is used for BulkDump/BulkLoad to write under the backup container's data directory,
-// consistent with where BackupContainerS3BlobStore stores other backup files.
+// consistent with where BackupContainerBlobStore stores other backup files.  Any object key prefix
+// is materialized in the path and removed from the returned URL's query.
 // Input:  blobstore://creds@host/backup_container?bucket=... , "bulkdump_data"
 // Output: blobstore://creds@host/data/backup_container/bulkdump_data?bucket=...
 std::string getBackupDataPath(const std::string& url, const std::string& suffix);

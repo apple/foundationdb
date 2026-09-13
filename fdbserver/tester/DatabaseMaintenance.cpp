@@ -28,7 +28,7 @@
 #include "flow/Trace.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "DatabaseMaintenance.h"

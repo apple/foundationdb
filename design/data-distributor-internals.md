@@ -666,8 +666,8 @@ Knobs: `AVAILABLE_SPACE_PIVOT_RATIO` (0.5), `MIN_AVAILABLE_SPACE_RATIO` (0.05),
 `AVAILABLE_SPACE_RATIO_CUTOFF` (0.05), `MIN_AVAILABLE_SPACE` (100 MB). Sources:
 `TCTeamInfo::getLoadBytes` / `getLoadAverage` / `getMinAvailableSpaceRatio` /
 `hasHealthyAvailableSpace` in `datadistributor/TCInfo.cpp`; `updateAvailableSpacePivots` /
-`updateTeamEligibility` / `getBestTeam` in `datadistributor/DDTeamCollection.actor.cpp`;
-the rebalance threshold in `datadistributor/DDRelocationQueue.actor.cpp`.
+`updateTeamEligibility` / `getBestTeam` in `datadistributor/DDTeamCollection.cpp`;
+the rebalance threshold in `datadistributor/DDRelocationQueue.cpp`.
 
 
 ## 9. Team Building
@@ -866,12 +866,14 @@ invariant that every key in the database is assigned to a team.
 ### 14.3 The moveKeys Protocol in Detail
 
 The data transfer protocol is implemented in [`MoveKeys.actor.cpp`](https://github.com/apple/foundationdb/blob/release-7.3/fdbserver/MoveKeys.actor.cpp) and consists of three
-coordinated phases. The [`moveKeys()`](https://github.com/apple/foundationdb/blob/release-7.3/fdbserver/MoveKeys.actor.cpp#L3180) function orchestrates them:
+coordinated phases. The [`moveKeys()`](https://github.com/apple/foundationdb/blob/release-7.3/fdbserver/MoveKeys.actor.cpp#L3180) function orchestrates them. The sketch below uses the current coroutine syntax from [`MoveKeys.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/core/MoveKeys.cpp):
 
 ```cpp
-wait(rawStartMovement(occ, params, tssMapping));   // Phase 1: startMoveKeys
-wait(rawCheckFetchingState(occ, params, ...));      // Phase 2: monitor data copy
-wait(rawFinishMovement(occ, params, tssMapping));   // Phase 3: finishMoveKeys
+co_await rawStartMovement(occ, params, tssMapping); // Phase 1: startMoveKeys
+Future<Void> completionSignaller =
+    rawCheckFetchingState(occ, params, tssMapping); // Phase 2: monitor data copy concurrently
+co_await rawFinishMovement(occ, params, tssMapping); // Phase 3: finishMoveKeys
+completionSignaller.cancel();
 ```
 
 #### Phase 1: `startMoveKeys` ([`MoveKeys.actor.cpp:924`](https://github.com/apple/foundationdb/blob/release-7.3/fdbserver/MoveKeys.actor.cpp#L924))
@@ -1041,18 +1043,22 @@ gap that we address in the recommendations document.
 ## 15. The High-Level moveKeys Orchestration
 
 Wrapping the protocol above, [`moveKeys()`](https://github.com/apple/foundationdb/blob/release-7.3/fdbserver/MoveKeys.actor.cpp#L3180) orchestrates
-the three phases:
+the three phases. Its [current implementation](https://github.com/apple/foundationdb/blob/main/fdbserver/core/MoveKeys.cpp) uses C++ coroutines:
 
 ```cpp
-ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params) {
-    wait(rawStartMovement(occ, params, tssMapping));       // startMoveKeys
-    state Future<Void> completionSignaller =
+Future<Void> moveKeys(Database occ, MoveKeysParams params) {
+    ASSERT(!params.destinationTeam.empty());
+    std::sort(params.destinationTeam.begin(), params.destinationTeam.end());
+    std::map<UID, StorageServerInterface> tssMapping;
+
+    co_await rawStartMovement(occ, params, tssMapping);     // startMoveKeys
+    Future<Void> completionSignaller =
         rawCheckFetchingState(occ, params, tssMapping);    // monitor fetch progress
-    wait(rawFinishMovement(occ, params, tssMapping));      // finishMoveKeys
+    co_await rawFinishMovement(occ, params, tssMapping);    // finishMoveKeys
     completionSignaller.cancel();
     if (!params.dataMovementComplete.isSet())
         params.dataMovementComplete.send(Void());
-    return Void();
+    co_return;
 }
 ```
 

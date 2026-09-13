@@ -23,7 +23,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/tester/WorkloadUtils.h"
 
 enum class AuditType : uint8_t;

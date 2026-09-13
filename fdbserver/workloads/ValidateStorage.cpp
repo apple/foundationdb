@@ -21,7 +21,7 @@
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
@@ -116,7 +116,7 @@ struct ValidateStorage : TestWorkload {
 				                                     auditRange,
 				                                     type,
 				                                     storageEngine,
-				                                     /*timeoutSecond=*/300);
+				                                     /*timeoutSeconds=*/300);
 				auditId = auditId_;
 				TraceEvent("TestAuditStorageTriggered")
 				    .detail("Context", context)
@@ -257,7 +257,7 @@ struct ValidateStorage : TestWorkload {
 				UID auditId_ = co_await cancelAuditStorage(cx->getConnectionRecord(),
 				                                           type,
 				                                           auditId,
-				                                           /*timeoutSecond=*/300);
+				                                           /*timeoutSeconds=*/300);
 				ASSERT(auditId == auditId_);
 				TraceEvent("TestAuditStorageWaitCancelAuditStorageUntilComplete")
 				    .detail("AuditID", auditId)

@@ -56,11 +56,12 @@
 #include "fdbrpc/FlowTransport.h"
 #include "AsyncFileWriteChecker.h"
 #include "fdbrpc/genericactors.h"
-#include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/FaultInjection.h"
 #include "flow/TaskQueue.h"
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
+#include "flow/Net2Packet.h"
+#include "flow/UnitTest.h"
 
 ISimulator* g_simulator = nullptr;
 thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
@@ -293,7 +294,7 @@ SimClogging g_clogging;
 struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	explicit Sim2Conn(ISimulator::ProcessInfo* process)
 	  : opened(false), closedByCaller(false), stableConnection(false), trustedPeer(true), process(process),
-	    dbgid(deterministicRandom()->randomUniqueID()), stopReceive(Never()) {
+	    dbgid(deterministicRandom()->randomUniqueID()), stopReceive(false), incomingClosed(false) {
 		pipes = sender(this) && receiver(this);
 	}
 
@@ -351,6 +352,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 
 	Future<Void> onWritable() override { return whenWritable(this); }
 	Future<Void> onReadable() override { return whenReadable(this); }
+	Future<Void> onSentBytesForTest() const { return sentBytes.onChange(); }
 
 	bool isPeerGone() const { return !peer || peerProcess->failed; }
 
@@ -360,7 +362,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 
 	void peerClosed() {
 		leakedConnectionTracker = trackLeakedConnection(this);
-		stopReceive = delay(1.0);
+		armStopReceive();
 	}
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might
@@ -369,6 +371,9 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		rollRandomClose();
 
 		int64_t avail = receivedBytes.get() - readBytes.get(); // SOMEDAY: random?
+		if (avail == 0 && incomingClosed) {
+			throw connection_failed();
+		}
 		int toRead = std::min<int64_t>(end - begin, avail);
 		ASSERT(toRead >= 0 && toRead <= recvBuf.size() && toRead <= end - begin);
 		for (int i = 0; i < toRead; i++)
@@ -438,18 +443,36 @@ private:
 	int sendBufSize;
 
 	Future<Void> leakedConnectionTracker;
-
+	// The close grace and incoming EOF are one-way latches.
+	AsyncVar<bool> stopReceive;
+	bool incomingClosed;
+	// Declared after the state they use so destruction cancels these actors first.
+	Future<Void> stopReceiveTask;
 	Future<Void> pipes;
-	Future<Void> stopReceive;
 
 	int availableSendBufferForPeer() const {
 		return sendBufSize - (writtenBytes.get() - receivedBytes.get());
 	} // SOMEDAY: acknowledgedBytes instead of receivedBytes
+	static Future<Void> stopReceiving(Sim2Conn* self) {
+		// The closing peer may terminate before the grace period expires.
+		if (g_simulator->getCurrentProcess() != self->process) {
+			co_await g_simulator->onProcess(self->process);
+		}
+		co_await delay(1.0);
+		self->stopReceive.set(true);
+	}
+
+	void armStopReceive() {
+		// A later close must not extend the grace period started by the first close.
+		if (!stopReceiveTask.isValid()) {
+			stopReceiveTask = stopReceiving(this);
+		}
+	}
 
 	void closeInternal() {
 		if (peer) {
 			peer->peerClosed();
-			stopReceive = delay(1.0);
+			armStopReceive();
 		}
 		leakedConnectionTracker.cancel();
 		peer.clear();
@@ -457,18 +480,45 @@ private:
 
 	static Future<Void> sender(Sim2Conn* self) {
 		while (true) {
-			co_await self->writtenBytes.onChange(); // takes place on peer!
+			co_await (self->writtenBytes.onChange() || self->stopReceive.onChange());
+			if (self->stopReceive.get()) {
+				co_return;
+			}
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 			co_await delay(.002 * deterministicRandom()->random01());
+			if (self->stopReceive.get()) {
+				co_return;
+			}
 			self->sentBytes.set(self->writtenBytes.get()); // or possibly just some sometimes...
 		}
 	}
 	static Future<Void> receiver(Sim2Conn* self) {
 		while (true) {
+			if (self->stopReceive.get()) {
+				if (g_simulator->getCurrentProcess() != self->process) {
+					co_await g_simulator->onProcess(self->process);
+				}
+				// Bytes already sent remain in recvBuf even if the peer process has exited.
+				auto keepAlive = Reference<Sim2Conn>::addRef(self);
+				self->incomingClosed = true;
+				// Publish the final byte count before waking a reader, even if the count did not change.
+				self->receivedBytes.setUnconditional(self->sentBytes.get());
+				co_return;
+			}
 			if (self->sentBytes.get() != self->receivedBytes.get())
-				co_await g_simulator->onProcess(self->peerProcess);
-			while (self->sentBytes.get() == self->receivedBytes.get())
-				co_await self->sentBytes.onChange();
+				co_await (g_simulator->onProcess(self->peerProcess) || self->stopReceive.onChange());
+			while (self->sentBytes.get() == self->receivedBytes.get() && !self->stopReceive.get()) {
+				co_await (self->sentBytes.onChange() || self->stopReceive.onChange());
+			}
+			if (self->stopReceive.get()) {
+				continue;
+			}
+			if (g_simulator->getCurrentProcess() != self->peerProcess) {
+				co_await (g_simulator->onProcess(self->peerProcess) || self->stopReceive.onChange());
+			}
+			if (self->stopReceive.get()) {
+				continue;
+			}
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 
 			// Simulated network disconnection. Make sure to only throw connection_failed() on the sender process.
@@ -484,16 +534,21 @@ private:
 			    deterministicRandom()->random01() < .5
 			        ? self->sentBytes.get()
 			        : deterministicRandom()->randomInt64(self->receivedBytes.get(), self->sentBytes.get() + 1);
-			co_await delay(g_clogging.getSendDelay(
-			    self->peerProcess->address, self->process->address, self->isStableConnection()));
+			co_await (delay(g_clogging.getSendDelay(
+			              self->peerProcess->address, self->process->address, self->isStableConnection())) ||
+			          self->stopReceive.onChange());
+			if (self->stopReceive.get()) {
+				continue;
+			}
 			co_await g_simulator->onProcess(self->process);
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
-			co_await delay(g_clogging.getRecvDelay(
-			    self->peerProcess->address, self->process->address, self->isStableConnection()));
-			ASSERT(g_simulator->getCurrentProcess() == self->process);
-			if (self->stopReceive.isReady()) {
-				co_await Future<Void>(Never());
+			co_await (delay(g_clogging.getRecvDelay(
+			              self->peerProcess->address, self->process->address, self->isStableConnection())) ||
+			          self->stopReceive.onChange());
+			if (self->stopReceive.get()) {
+				continue;
 			}
+			ASSERT(g_simulator->getCurrentProcess() == self->process);
 			self->receivedBytes.set(pos);
 			co_await Future<Void>(Void()); // Prior notification can delete self and cancel this actor
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
@@ -505,6 +560,13 @@ private:
 				if (self->readBytes.get() != self->receivedBytes.get()) {
 					ASSERT(g_simulator->getCurrentProcess() == self->process);
 					co_return;
+				}
+				if (self->incomingClosed) {
+					CODE_PROBE(true,
+					           "Simulated reader observed graceful peer close",
+					           probe::context::sim2,
+					           probe::assert::simOnly);
+					throw connection_failed();
 				}
 				co_await self->receivedBytes.onChange();
 				self->rollRandomClose();
@@ -589,6 +651,168 @@ private:
 		co_return;
 	}
 };
+
+TEST_CASE("Lfdbrpc/Sim2Conn/readAfterPeerClose") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	auto receiverProcess = g_simulator->getCurrentProcess();
+	ISimulator::ProcessInfo* senderProcess = nullptr;
+	for (auto candidate : g_simulator->getAllProcesses()) {
+		if (candidate != receiverProcess && candidate->isReliable() &&
+		    !g_clogging.disconnected(candidate->address.ip, receiverProcess->address.ip) &&
+		    !g_clogging.disconnected(receiverProcess->address.ip, candidate->address.ip)) {
+			senderProcess = candidate;
+			break;
+		}
+	}
+	if (!senderProcess) {
+		TraceEvent("Sim2ConnPeerCloseTestSkipped").detail("Reason", "No connected reliable peer");
+		co_return;
+	}
+	auto senderConn = makeReference<Sim2Conn>(senderProcess);
+	auto receiverConn = makeReference<Sim2Conn>(receiverProcess);
+	senderConn->connect(receiverConn, receiverProcess->address);
+	receiverConn->connect(senderConn, senderProcess->address);
+	senderConn->stableConnection = receiverConn->stableConnection = true;
+
+	uint8_t byte;
+	ASSERT_EQ(receiverConn->read(&byte, &byte + 1), 0);
+	Future<Void> readable = receiverConn->onReadable();
+	ASSERT(!readable.isReady());
+	co_await g_simulator->onProcess(senderProcess);
+	senderConn->close();
+	co_await g_simulator->onProcess(receiverProcess);
+	try {
+		co_await timeoutError(readable, 3.0);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	try {
+		(void)receiverConn->read(&byte, &byte + 1);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	receiverConn->close();
+}
+
+TEST_CASE("Lfdbrpc/Sim2Conn/drainBeforePeerCloseError") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	auto process = g_simulator->getCurrentProcess();
+	auto senderConn = makeReference<Sim2Conn>(process);
+	auto receiverConn = makeReference<Sim2Conn>(process);
+	senderConn->connect(receiverConn, process->address);
+	receiverConn->connect(senderConn, process->address);
+	senderConn->stableConnection = receiverConn->stableConnection = true;
+
+	UnsentPacketQueue packet;
+	auto buffer = packet.getWriteBuffer(1);
+	buffer->data()[0] = 'x';
+	buffer->bytes_written = 1;
+	ASSERT_EQ(senderConn->write(packet.getUnsent(), 1), 1);
+	packet.sent(1);
+	senderConn->close();
+	co_await timeoutError(receiverConn->onReadable(), 3.0);
+	uint8_t byte;
+	ASSERT_EQ(receiverConn->read(&byte, &byte + 1), 1);
+	ASSERT_EQ(byte, static_cast<uint8_t>('x'));
+	try {
+		co_await timeoutError(receiverConn->onReadable(), 3.0);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	receiverConn->close();
+}
+
+TEST_CASE("Lfdbrpc/Sim2Conn/closeWithInFlightBytesAndDeadPeer") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	auto receiverProcess = g_simulator->getCurrentProcess();
+	auto port = g_simulator->getMachineById(receiverProcess->locality.machineId())->getRandomPort();
+	auto senderProcess = g_simulator->newProcess("Sim2ConnTestPeer",
+	                                             receiverProcess->address.ip,
+	                                             port,
+	                                             false,
+	                                             1,
+	                                             receiverProcess->locality,
+	                                             receiverProcess->metadata,
+	                                             "",
+	                                             "",
+	                                             receiverProcess->protocolVersion,
+	                                             false);
+	senderProcess->excludeFromRestarts = true;
+	auto senderConn = makeReference<Sim2Conn>(senderProcess);
+	auto receiverConn = makeReference<Sim2Conn>(receiverProcess);
+	senderConn->connect(receiverConn, receiverProcess->address);
+	receiverConn->connect(senderConn, senderProcess->address);
+	senderConn->stableConnection = receiverConn->stableConnection = true;
+
+	uint8_t byte;
+	ASSERT_EQ(receiverConn->read(&byte, &byte + 1), 0);
+	Future<Void> readable = receiverConn->onReadable();
+	Future<Void> sent = receiverConn->onSentBytesForTest();
+	co_await g_simulator->onProcess(senderProcess);
+	UnsentPacketQueue packet;
+	auto buffer = packet.getWriteBuffer(1);
+	buffer->data()[0] = 'x';
+	buffer->bytes_written = 1;
+	ASSERT_EQ(senderConn->write(packet.getUnsent(), 1), 1);
+	packet.sent(1);
+	co_await timeoutError(sent, 1.0);
+	senderConn->close();
+	g_simulator->killProcess(senderProcess, ISimulator::KillType::KillInstantly);
+	co_await g_simulator->onProcess(receiverProcess);
+	g_simulator->destroyProcess(senderProcess);
+	ASSERT(!readable.isReady());
+	co_await timeoutError(readable, 3.0);
+	ASSERT_EQ(receiverConn->read(&byte, &byte + 1), 1);
+	ASSERT_EQ(byte, static_cast<uint8_t>('x'));
+	try {
+		co_await timeoutError(receiverConn->onReadable(), 3.0);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	receiverConn->close();
+}
+
+static Future<Void> readAndDropOnPeerClose(Reference<Sim2Conn> conn) {
+	try {
+		co_await conn->onReadable();
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	conn->close();
+}
+
+TEST_CASE("Lfdbrpc/Sim2Conn/readerDropsLastReferenceOnPeerClose") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	auto process = g_simulator->getCurrentProcess();
+	auto senderConn = makeReference<Sim2Conn>(process);
+	auto receiverConn = makeReference<Sim2Conn>(process);
+	senderConn->connect(receiverConn, process->address);
+	receiverConn->connect(senderConn, process->address);
+	senderConn->stableConnection = receiverConn->stableConnection = true;
+
+	Future<Void> reader = readAndDropOnPeerClose(receiverConn);
+	receiverConn.clear();
+	senderConn->close();
+	senderConn.clear();
+	co_await timeoutError(reader, 3.0);
+}
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -688,17 +912,180 @@ public:
 
 	int64_t debugFD() const override { return (int64_t)h; }
 
-	Future<int> read(void* data, int length, int64_t offset) override { return read_impl(this, data, length, offset); }
+	Future<int> read(void* data, int length, int64_t offset) override {
+		ASSERT((this->flags & IAsyncFile::OPEN_NO_AIO) != 0 ||
+		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
+		UID opId = deterministicRandom()->randomUniqueID();
+		if (randLog) {
+			fmt::print(randLog,
+			           "SFR1 {0} {1} {2} {3} {4}\n",
+			           this->dbgId.shortString(),
+			           this->filename,
+			           opId.shortString(),
+			           length,
+			           offset);
+		}
 
-	Future<Void> write(void const* data, int length, int64_t offset) override {
-		return write_impl(this, StringRef((const uint8_t*)data, length), offset);
+		co_await waitUntilDiskReady(this->diskParameters, length);
+
+		if (_lseeki64(this->h, offset, SEEK_SET) == -1) {
+			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 1);
+			throw io_error();
+		}
+
+		unsigned int read_bytes = _read(this->h, data, (unsigned int)length);
+		if (read_bytes == -1) {
+			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 2);
+			throw io_error();
+		}
+
+		if (randLog) {
+			uint32_t a = crc32c_append(0, (const uint8_t*)data, read_bytes);
+			fprintf(randLog,
+			        "SFR2 %s %s %s %d %d\n",
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
+			        opId.shortString().c_str(),
+			        read_bytes,
+			        a);
+		}
+
+		debugFileCheck("SimpleFileRead", this->filename, data, offset, length);
+
+		INJECT_FAULT(io_timeout, "SimpleFile::read"); // SimpleFile::read io_timeout injected
+		INJECT_FAULT(io_error, "SimpleFile::read"); // SimpleFile::read io_error injected
+
+		co_return read_bytes;
 	}
 
-	Future<Void> truncate(int64_t size) override { return truncate_impl(this, size); }
+	Future<Void> write(void const* data, int length, int64_t offset) override {
+		return write_impl(StringRef((const uint8_t*)data, length), offset);
+	}
 
-	Future<Void> sync() override { return sync_impl(this); }
+	Future<Void> truncate(int64_t size) override {
+		UID opId = deterministicRandom()->randomUniqueID();
+		if (randLog)
+			fmt::print(
+			    randLog, "SFT1 {0} {1} {2} {3}\n", this->dbgId.shortString(), this->filename, opId.shortString(), size);
 
-	Future<int64_t> size() const override { return size_impl(this); }
+		// KAIO will return EINVAL, as len==0 is an error.
+		if ((this->flags & IAsyncFile::OPEN_NO_AIO) == 0 && size == 0) {
+			throw io_error();
+		}
+
+		if (this->delayOnWrite)
+			co_await waitUntilDiskReady(this->diskParameters, 0);
+
+		if (_chsize(this->h, (long)size) == -1) {
+			TraceEvent(SevWarn, "SimpleFileIOError")
+			    .detail("Location", 6)
+			    .detail("Filename", this->filename)
+			    .detail("Size", size)
+			    .detail("Fd", this->h)
+			    .GetLastError();
+			throw io_error();
+		}
+
+		if (randLog) {
+			fprintf(randLog,
+			        "SFT2 %s %s %s\n",
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
+			        opId.shortString().c_str());
+		}
+
+		INJECT_FAULT(io_timeout, "SimpleFile::truncate"); // SimpleFile::truncate inject io_timeout
+		INJECT_FAULT(io_error, "SimpleFile::truncate"); // SimpleFile::truncate inject io_error
+
+		co_return;
+	}
+
+	// Simulated sync does not actually do anything besides wait a random amount of time
+	Future<Void> sync() override {
+		UID opId = deterministicRandom()->randomUniqueID();
+		if (randLog) {
+			fprintf(randLog,
+			        "SFC1 %s %s %s\n",
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
+			        opId.shortString().c_str());
+		}
+
+		if (this->delayOnWrite)
+			co_await waitUntilDiskReady(this->diskParameters, 0, true);
+
+		if (this->flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
+			this->flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
+			auto& machineCache = g_simulator->getCurrentProcess()->machine->openFiles;
+			std::string sourceFilename = this->filename + ".part";
+
+			if (machineCache.contains(sourceFilename)) {
+				// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
+				using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
+				TraceEvent("SimpleFileRename")
+				    .detail("From", sourceFilename)
+				    .detail("To", this->filename)
+				    .detail("SourceCount", machineCache.count(sourceFilename))
+				    .detail("FileCount", machineCache.count(this->filename));
+				auto maxBlockValue = std::numeric_limits<block_value_type>::max();
+				g_simulator->corruptedBlocks.erase(
+				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
+				    g_simulator->corruptedBlocks.upper_bound(std::make_pair(this->filename, maxBlockValue)));
+				// next we need to rename all files. In practice, the number of corruptions for a given file should be
+				// very small
+				auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
+				     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(sourceFilename, maxBlockValue));
+				for (auto iter = begin; iter != end; ++iter) {
+					g_simulator->corruptedBlocks.emplace(this->filename, iter->second);
+				}
+				g_simulator->corruptedBlocks.erase(begin, end);
+				renameFile(sourceFilename.c_str(), this->filename.c_str());
+
+				machineCache[this->filename] = machineCache[sourceFilename];
+				machineCache.erase(sourceFilename);
+				this->actualFilename = this->filename;
+			}
+		}
+
+		if (randLog) {
+			fprintf(randLog,
+			        "SFC2 %s %s %s\n",
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
+			        opId.shortString().c_str());
+		}
+
+		INJECT_FAULT(io_timeout, "SimpleFile::sync"); // SimpleFile::sync inject io_timeout
+		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_errot
+
+		co_return;
+	}
+
+	Future<int64_t> size() const override {
+		UID opId = deterministicRandom()->randomUniqueID();
+		if (randLog) {
+			fprintf(randLog,
+			        "SFS1 %s %s %s\n",
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
+			        opId.shortString().c_str());
+		}
+
+		co_await waitUntilDiskReady(this->diskParameters, 0);
+
+		int64_t pos = _lseeki64(this->h, 0L, SEEK_END);
+		if (pos == -1) {
+			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 8);
+			throw io_error();
+		}
+
+		if (randLog)
+			fmt::print(
+			    randLog, "SFS2 {0} {1} {2} {3}\n", this->dbgId.shortString(), this->filename, opId.shortString(), pos);
+		INJECT_FAULT(io_error, "SimpleFile::size"); // SimpleFile::size inject io_error
+
+		co_return pos;
+	}
 
 	std::string getFilename() const override { return actualFilename; }
 
@@ -746,76 +1133,30 @@ private:
 		return outFlags;
 	}
 
-	static Future<int> read_impl(SimpleFile* self, void* data, int length, int64_t offset) {
-		ASSERT((self->flags & IAsyncFile::OPEN_NO_AIO) != 0 ||
-		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
-		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog) {
-			fmt::print(randLog,
-			           "SFR1 {0} {1} {2} {3} {4}\n",
-			           self->dbgId.shortString(),
-			           self->filename,
-			           opId.shortString(),
-			           length,
-			           offset);
-		}
-
-		co_await waitUntilDiskReady(self->diskParameters, length);
-
-		if (_lseeki64(self->h, offset, SEEK_SET) == -1) {
-			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 1);
-			throw io_error();
-		}
-
-		unsigned int read_bytes = 0;
-		if ((read_bytes = _read(self->h, data, (unsigned int)length)) == -1) {
-			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 2);
-			throw io_error();
-		}
-
-		if (randLog) {
-			uint32_t a = crc32c_append(0, (const uint8_t*)data, read_bytes);
-			fprintf(randLog,
-			        "SFR2 %s %s %s %d %d\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str(),
-			        read_bytes,
-			        a);
-		}
-
-		debugFileCheck("SimpleFileRead", self->filename, data, offset, length);
-
-		INJECT_FAULT(io_timeout, "SimpleFile::read"); // SimpleFile::read io_timeout injected
-		INJECT_FAULT(io_error, "SimpleFile::read"); // SimpleFile::read io_error injected
-
-		co_return read_bytes;
-	}
-
-	static Future<Void> write_impl(SimpleFile* self, StringRef data, int64_t offset) {
+	Future<Void> write_impl(StringRef data, int64_t offset) {
 		UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog) {
 			uint32_t a = crc32c_append(0, data.begin(), data.size());
 			fmt::print(randLog,
 			           "SFW1 {0} {1} {2} {3} {4} {5}\n",
-			           self->dbgId.shortString(),
-			           self->filename,
+			           this->dbgId.shortString(),
+			           this->filename,
 			           opId.shortString(),
 			           a,
 			           data.size(),
 			           offset);
 		}
 
-		if (self->delayOnWrite)
-			co_await waitUntilDiskReady(self->diskParameters, data.size());
+		if (this->delayOnWrite)
+			co_await waitUntilDiskReady(this->diskParameters, data.size());
 
-		if (_lseeki64(self->h, offset, SEEK_SET) == -1) {
+		if (_lseeki64(this->h, offset, SEEK_SET) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 3);
 			throw io_error();
 		}
 
-		unsigned int write_bytes = 0;
-		if ((write_bytes = _write(self->h, (void*)data.begin(), data.size())) == -1) {
+		unsigned int write_bytes = _write(this->h, (void*)data.begin(), data.size());
+		if (write_bytes == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 4);
 			throw io_error();
 		}
@@ -828,142 +1169,17 @@ private:
 		if (randLog) {
 			fprintf(randLog,
 			        "SFW2 %s %s %s\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
+			        this->dbgId.shortString().c_str(),
+			        this->filename.c_str(),
 			        opId.shortString().c_str());
 		}
 
-		debugFileCheck("SimpleFileWrite", self->filename, (void*)data.begin(), offset, data.size());
+		debugFileCheck("SimpleFileWrite", this->filename, (void*)data.begin(), offset, data.size());
 
 		INJECT_FAULT(io_timeout, "SimpleFile::write"); // SimpleFile::write inject io_timeout
 		INJECT_FAULT(io_error, "SimpleFile::write"); // SimpleFile::write inject io_error
 
 		co_return;
-	}
-
-	static Future<Void> truncate_impl(SimpleFile* self, int64_t size) {
-		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog)
-			fmt::print(
-			    randLog, "SFT1 {0} {1} {2} {3}\n", self->dbgId.shortString(), self->filename, opId.shortString(), size);
-
-		// KAIO will return EINVAL, as len==0 is an error.
-		if ((self->flags & IAsyncFile::OPEN_NO_AIO) == 0 && size == 0) {
-			throw io_error();
-		}
-
-		if (self->delayOnWrite)
-			co_await waitUntilDiskReady(self->diskParameters, 0);
-
-		if (_chsize(self->h, (long)size) == -1) {
-			TraceEvent(SevWarn, "SimpleFileIOError")
-			    .detail("Location", 6)
-			    .detail("Filename", self->filename)
-			    .detail("Size", size)
-			    .detail("Fd", self->h)
-			    .GetLastError();
-			throw io_error();
-		}
-
-		if (randLog) {
-			fprintf(randLog,
-			        "SFT2 %s %s %s\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str());
-		}
-
-		INJECT_FAULT(io_timeout, "SimpleFile::truncate"); // SimpleFile::truncate inject io_timeout
-		INJECT_FAULT(io_error, "SimpleFile::truncate"); // SimpleFile::truncate inject io_error
-
-		co_return;
-	}
-
-	// Simulated sync does not actually do anything besides wait a random amount of time
-	static Future<Void> sync_impl(SimpleFile* self) {
-		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog) {
-			fprintf(randLog,
-			        "SFC1 %s %s %s\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str());
-		}
-
-		if (self->delayOnWrite)
-			co_await waitUntilDiskReady(self->diskParameters, 0, true);
-
-		if (self->flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
-			self->flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
-			auto& machineCache = g_simulator->getCurrentProcess()->machine->openFiles;
-			std::string sourceFilename = self->filename + ".part";
-
-			if (machineCache.contains(sourceFilename)) {
-				// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
-				using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
-				TraceEvent("SimpleFileRename")
-				    .detail("From", sourceFilename)
-				    .detail("To", self->filename)
-				    .detail("SourceCount", machineCache.count(sourceFilename))
-				    .detail("FileCount", machineCache.count(self->filename));
-				auto maxBlockValue = std::numeric_limits<block_value_type>::max();
-				g_simulator->corruptedBlocks.erase(
-				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
-				    g_simulator->corruptedBlocks.upper_bound(std::make_pair(self->filename, maxBlockValue)));
-				// next we need to rename all files. In practice, the number of corruptions for a given file should be
-				// very small
-				auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
-				     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(sourceFilename, maxBlockValue));
-				for (auto iter = begin; iter != end; ++iter) {
-					g_simulator->corruptedBlocks.emplace(self->filename, iter->second);
-				}
-				g_simulator->corruptedBlocks.erase(begin, end);
-				renameFile(sourceFilename.c_str(), self->filename.c_str());
-
-				machineCache[self->filename] = machineCache[sourceFilename];
-				machineCache.erase(sourceFilename);
-				self->actualFilename = self->filename;
-			}
-		}
-
-		if (randLog) {
-			fprintf(randLog,
-			        "SFC2 %s %s %s\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str());
-		}
-
-		INJECT_FAULT(io_timeout, "SimpleFile::sync"); // SimpleFile::sync inject io_timeout
-		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_errot
-
-		co_return;
-	}
-
-	static Future<int64_t> size_impl(SimpleFile const* self) {
-		UID opId = deterministicRandom()->randomUniqueID();
-		if (randLog) {
-			fprintf(randLog,
-			        "SFS1 %s %s %s\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str());
-		}
-
-		co_await waitUntilDiskReady(self->diskParameters, 0);
-
-		int64_t pos = _lseeki64(self->h, 0L, SEEK_END);
-		if (pos == -1) {
-			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 8);
-			throw io_error();
-		}
-
-		if (randLog)
-			fmt::print(
-			    randLog, "SFS2 {0} {1} {2} {3}\n", self->dbgId.shortString(), self->filename, opId.shortString(), pos);
-		INJECT_FAULT(io_error, "SimpleFile::size"); // SimpleFile::size inject io_error
-
-		co_return pos;
 	}
 };
 
@@ -1089,7 +1305,7 @@ public:
 			return delay(getCurrentProcess()->rebooting ? 0 : .001, taskID) || checkShutdown(this, taskID);
 		}
 		setCurrentTask(taskID);
-		return Void();
+		return readyYield;
 	}
 	bool check_yield(TaskPriority taskID) override {
 		if (yielded)
@@ -2402,6 +2618,7 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
+	Future<Void> readyYield = Void();
 	bool printSimTime;
 
 private:
@@ -2619,7 +2836,7 @@ void startNewSimulator(bool printSimTime) {
 	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;
 }
 
-Future<Void> startUnitTestSimulator() {
+Future<Void> startUnitTestSimulator(int wellKnownEndpointCount) {
 	startNewSimulator(false);
 	Standalone<StringRef> processId(deterministicRandom()->randomUniqueID().toString());
 	auto* process = g_simulator->newProcess(
@@ -2653,13 +2870,13 @@ Future<Void> startUnitTestSimulator() {
 	httpProcess->excludeFromRestarts = true;
 	co_await g_simulator->onProcess(httpProcess, TaskPriority::DefaultYield);
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(true, 1, wellKnownEndpointCount);
 	(void)FlowTransport::transport().bind(httpProcess->address, httpProcess->address);
 	g_simulator->addSimHTTPProcess(makeReference<HTTP::SimServerContext>());
 
 	co_await g_simulator->onProcess(process, TaskPriority::DefaultYield);
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(true, 1, wellKnownEndpointCount);
 	(void)FlowTransport::transport().bind(process->address, process->address);
 }
 
@@ -2937,4 +3154,34 @@ ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
 
 void Sim2FileSystem::newFileSystem() {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Sim2FileSystem());
+}
+
+// Helper function to calculate the maximum satellite_logs based on available machines per datacenter
+// We count the minimum number of machines in any satellite datacenter to ensure we don't over-provision
+int getMaxSatelliteLogs() {
+	if (!g_network->isSimulated()) {
+		return 6; // Conservative default for non-simulated environments
+	}
+
+	// Count machines per datacenter
+	std::map<Optional<Standalone<StringRef>>, int> machinesPerDC;
+	for (auto& process : g_simulator->getAllProcesses()) {
+		if (process->locality.dcId().present()) {
+			machinesPerDC[process->locality.dcId()]++;
+		}
+	}
+
+	// Find the minimum machines in satellite DCs (0, 1, 2, 3, 4, 5).
+	// Note normal DCs can be selected as satellites, see usage of useNormalDCsAsSatellites.
+	int minSatelliteMachines = 6; // Start with max possible
+	for (int dcId = 0; dcId <= 5; dcId++) {
+		auto dcIdStr = Standalone<StringRef>(std::to_string(dcId));
+		int count = machinesPerDC[dcIdStr];
+		if (count > 0) {
+			minSatelliteMachines = std::min(minSatelliteMachines, count);
+		}
+	}
+
+	// Cap at 6 (the original max) and ensure at least 1
+	return std::max(1, std::min(6, minSatelliteMachines));
 }

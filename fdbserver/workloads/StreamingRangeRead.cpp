@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 #include "BulkSetup.h"
@@ -28,6 +28,8 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/serialize.h"
+
+#include <algorithm>
 
 Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
 	KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
@@ -92,10 +94,88 @@ struct StreamingRangeReadWorkload : KVWorkload {
 
 	Future<bool> check(Database const& cx) override {
 		client = Void();
-		return true;
+		co_await checkSelectorBoundaries(cx->clone());
+		co_return true;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	Future<Void> checkSelectorRange(Database cx,
+	                                KeySelector begin,
+	                                KeySelector end,
+	                                uint64_t expectedBegin,
+	                                uint64_t expectedEnd,
+	                                bool expectImmediateEnd = false) {
+		Transaction tr(cx);
+		while (true) {
+			PromiseStream<RangeResult> results;
+			Future<Void> stream;
+			Error err;
+			try {
+				stream = tr.getRangeStream(results, begin, end, GetRangeLimits(), Snapshot::True);
+				if (expectImmediateEnd) {
+					ASSERT(stream.isReady());
+					ASSERT(!stream.isError());
+					FutureStream<RangeResult> result = results.getFuture();
+					ASSERT(result.isReady());
+					ASSERT(result.isError());
+					ASSERT_EQ(result.getError().code(), error_code_end_of_stream);
+				}
+				RangeResult expected = co_await tr.getRange(begin, end, 100, Snapshot::True);
+				ASSERT_EQ(expected.size(), expectedEnd - expectedBegin);
+				for (uint64_t i = expectedBegin; i < expectedEnd; ++i) {
+					ASSERT(expected[i - expectedBegin].key == keyForIndex(i, false));
+				}
+
+				uint64_t index = expectedBegin;
+				while (true) {
+					Optional<RangeResult> batch;
+					try {
+						batch = co_await results.getFuture();
+					} catch (Error& e) {
+						if (e.code() != error_code_end_of_stream) {
+							throw;
+						}
+						break;
+					}
+					for (auto const& kv : batch.get()) {
+						ASSERT(index < expectedEnd);
+						ASSERT(kv == expected[index - expectedBegin]);
+						++index;
+					}
+				}
+				co_await stream;
+				ASSERT_EQ(index, expectedEnd);
+				co_return;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				err = e;
+			}
+			stream.cancel();
+			co_await tr.onError(err);
+		}
+	}
+
+	Future<Void> checkSelectorBoundaries(Database cx) {
+		const uint64_t endIndex = nodeCount == 0 ? 0 : std::min<uint64_t>(20, nodeCount - 1);
+		const uint64_t beginIndex = endIndex == 0 ? 0 : std::min<uint64_t>(10, endIndex - 1);
+		Key begin = keyForIndex(beginIndex, false);
+		Key end = keyForIndex(endIndex, false);
+		co_await checkSelectorRange(cx,
+		                            KeySelector(firstGreaterThan(begin), begin.arena()),
+		                            KeySelector(firstGreaterThan(end), end.arena()),
+		                            std::min(beginIndex + 1, nodeCount),
+		                            std::min(endIndex + 1, nodeCount));
+		co_await checkSelectorRange(cx,
+		                            KeySelector(firstGreaterThan(end), end.arena()),
+		                            KeySelector(firstGreaterOrEqual(begin), begin.arena()),
+		                            0,
+		                            0,
+		                            true);
+		co_return;
+	}
 
 	// Reads the database using both the normal get range API and the streaming API and compares the results
 	Future<Void> streamingClient(Database cx) {

@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/ServerCheckpoint.h"
 #include "flow/flow.h"
 

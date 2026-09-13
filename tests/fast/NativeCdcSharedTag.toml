@@ -1,6 +1,10 @@
 [configuration]
-config = 'single'
+config = 'single commit_proxies=1 grv_proxies=2'
 singleRegion = true
+# Two proxies distinguish the persisted tag owner from the proxy receiving registration.
+datacenters = 1
+machineCount = 12
+statelessProcessClassesPerDC = 3
 buggify = false
 faultInjection = false
 
@@ -22,6 +26,7 @@ connectionFailuresDisableDuration = 1000000
     keyCount = 6
     writesPerRound = 3
     rounds = 6
+    testTagOwnership = true
     drainProbability = 1.0
     delayBetweenRounds = 0.1
     operationTimeout = 120.0

@@ -1,9 +1,6 @@
 /*
  * BenchNet2.cpp
  *
- * C++20 coroutine versions of the ACTOR benchmarks in BenchNet2.actor.cpp.
- * Used to compare coroutine vs ACTOR performance for delay, yield, and net2 patterns.
- *
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
@@ -23,6 +20,9 @@
 
 #include "benchmark/benchmark.h"
 
+#include <cstdint>
+#include <vector>
+
 #include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
@@ -38,43 +38,45 @@ static inline TaskPriority getRandomTaskPriority(DeterministicRandom& rand) {
 	return static_cast<TaskPriority>(rand.randomInt(0, 100));
 }
 
-static Future<Void> benchNet2Actor(benchmark::State* benchState) {
-	size_t actorCount = benchState->range(0);
-	uint32_t sum;
+static Future<Void> runNet2Benchmark(benchmark::State* benchState) {
+	size_t taskCount = benchState->range(0);
+	uint32_t sum{ 0 };
 	uint64_t seed = platform::getRandomSeed();
 	while (benchState->KeepRunning()) {
 		sum = 0;
 		std::vector<Future<Void>> futures;
-		futures.reserve(actorCount);
+		futures.reserve(taskCount);
 		DeterministicRandom rand(seed);
-		for (int i = 0; i < actorCount; ++i) {
+		for (int i = 0; i < taskCount; ++i) {
 			futures.push_back(increment(getRandomTaskPriority(rand), &sum));
 		}
 		co_await waitForAll(futures);
 		benchmark::DoNotOptimize(sum);
 	}
-	benchState->SetItemsProcessed(actorCount * static_cast<long>(benchState->iterations()));
+	benchState->SetItemsProcessed(taskCount * static_cast<long>(benchState->iterations()));
 }
 
-static void coroutine_net2(benchmark::State& benchState) {
-	onMainThread([&benchState] { return benchNet2Actor(&benchState); }).blockUntilReady();
+static void bench_net2(benchmark::State& benchState) {
+	onMainThread([&benchState] { return runNet2Benchmark(&benchState); }).blockUntilReady();
 }
 
-BENCHMARK(coroutine_net2)->Range(1, 1 << 16)->ReportAggregatesOnly(true);
+BENCHMARK(bench_net2)->Range(1, 1 << 16)->ReportAggregatesOnly(true);
 
-// Populate the run loop priority queue with random timers, then benchmark
-// delay(0) or yield() in a tight loop.
-// Separate functions instead of a template to work around a GCC coroutine bug
-// where co_await inside a function template triggers a spurious double
-// await_transform call.
+static constexpr bool DELAY = false;
+static constexpr bool YIELD = true;
 
-static Future<Void> benchDelayLoop(benchmark::State* benchState) {
-	int64_t timerCount = benchState->range(0);
+static std::vector<Future<Void>> populateTimers(int64_t timerCount) {
+	// Populate the run loop priority queue before measuring delay or yield.
 	std::vector<Future<Void>> futures;
 	DeterministicRandom rand(platform::getRandomSeed());
 	while (--timerCount > 0) {
 		futures.push_back(delay(1.0 + rand.random01(), getRandomTaskPriority(rand)));
 	}
+	return futures;
+}
+
+static Future<Void> benchDelayLoop(benchmark::State* benchState) {
+	std::vector<Future<Void>> futures = populateTimers(benchState->range(0));
 
 	while (benchState->KeepRunning()) {
 		co_await delay(0);
@@ -83,12 +85,7 @@ static Future<Void> benchDelayLoop(benchmark::State* benchState) {
 }
 
 static Future<Void> benchYieldLoop(benchmark::State* benchState) {
-	int64_t timerCount = benchState->range(0);
-	std::vector<Future<Void>> futures;
-	DeterministicRandom rand(platform::getRandomSeed());
-	while (--timerCount > 0) {
-		futures.push_back(delay(1.0 + rand.random01(), getRandomTaskPriority(rand)));
-	}
+	std::vector<Future<Void>> futures = populateTimers(benchState->range(0));
 
 	while (benchState->KeepRunning()) {
 		co_await yield();
@@ -96,13 +93,16 @@ static Future<Void> benchYieldLoop(benchmark::State* benchState) {
 	benchState->SetItemsProcessed(static_cast<long>(benchState->iterations()));
 }
 
-static void coroutine_delay_bench(benchmark::State& benchState) {
-	onMainThread([&benchState] { return benchDelayLoop(&benchState); }).blockUntilReady();
+template <bool useYield>
+static void bench_delay(benchmark::State& benchState) {
+	onMainThread([&benchState] {
+		if constexpr (useYield) {
+			return benchYieldLoop(&benchState);
+		} else {
+			return benchDelayLoop(&benchState);
+		}
+	}).blockUntilReady();
 }
 
-static void coroutine_yield_bench(benchmark::State& benchState) {
-	onMainThread([&benchState] { return benchYieldLoop(&benchState); }).blockUntilReady();
-}
-
-BENCHMARK(coroutine_delay_bench)->Range(0, 1 << 16)->ReportAggregatesOnly(true);
-BENCHMARK(coroutine_yield_bench)->Range(0, 1 << 16)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_delay, DELAY)->Range(0, 1 << 16)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_delay, YIELD)->Range(0, 1 << 16)->ReportAggregatesOnly(true);

@@ -87,7 +87,6 @@ foundationdb.VC.db
 foundationdb.VC.VC.opendb
 ipch/
 compile_commands.json
-flow/actorcompiler/obj
 flow/coveragetool/obj
 *.code-workspace
 

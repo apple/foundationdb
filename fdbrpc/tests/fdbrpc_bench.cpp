@@ -29,6 +29,9 @@
 
 namespace fdbrpc_bench {
 NetworkAddress serverAddress;
+TaskPriority echoEndpointPriority = TaskPriority::DefaultEndpoint;
+
+constexpr int MAX_CLIENT_CONCURRENCY = 4096;
 
 enum FdbRpcBenchWellKnownEndpoints {
 	WLTOKEN_ECHO_SERVER = WLTOKEN_FIRST_AVAILABLE,
@@ -155,7 +158,10 @@ class EchoServer {
 	StatCounter counter;
 
 public:
-	EchoServer() { interf.getInterface.makeWellKnownEndpoint(WLTOKEN_ECHO_SERVER, TaskPriority::DefaultEndpoint); }
+	EchoServer() {
+		interf.getInterface.makeWellKnownEndpoint(WLTOKEN_ECHO_SERVER, TaskPriority::DefaultEndpoint);
+		interf.echo.getEndpoint(echoEndpointPriority);
+	}
 
 	Future<Void> run() { co_await race(serveGetInterfaceReqs(), serveEchoReqs(), printThroughput()); }
 };
@@ -224,7 +230,9 @@ int main(int argc, char* argv[]) {
 	desc.add_options()
 		("help,h","show help message")
 		("mode,m", po::value<std::string>(), "process mode [server/client]")
-		("payload_size,s", po::value<int>(), "size of payload sent by client (bytes)");
+		("payload_size,s", po::value<int>(), "size of payload sent by client (bytes)")
+		("endpoint_priority", po::value<std::string>()->default_value("default"), "server echo endpoint priority [default/loadbalanced]")
+		("concurrency,c", po::value<int>()->default_value(1), "number of client actors [1/4096]");
 	// clang-format on
 
 	po::variables_map vm;
@@ -244,7 +252,13 @@ int main(int argc, char* argv[]) {
 	}
 
 	auto mode = vm["mode"].as<std::string>();
-	if ((mode != "client" && mode != "server") || (mode == "server" && vm.count("payload_size") > 0)) {
+	auto endpointPriority = vm["endpoint_priority"].as<std::string>();
+	auto concurrency = vm["concurrency"].as<int>();
+	if ((mode != "client" && mode != "server") ||
+	    (endpointPriority != "default" && endpointPriority != "loadbalanced") || concurrency < 1 ||
+	    concurrency > MAX_CLIENT_CONCURRENCY || (vm.count("payload_size") > 0 && vm["payload_size"].as<int>() < 0) ||
+	    (mode == "server" && (vm.count("payload_size") > 0 || concurrency != 1)) ||
+	    (mode == "client" && endpointPriority != "default")) {
 		std::cerr << errMsg << desc << std::endl;
 		return -1;
 	}
@@ -252,11 +266,13 @@ int main(int argc, char* argv[]) {
 	if (vm.count("payload_size") > 0) {
 		payload_size_bytes = vm["payload_size"].as<int>();
 	}
+	echoEndpointPriority =
+	    endpointPriority == "loadbalanced" ? TaskPriority::LoadBalancedEndpoint : TaskPriority::DefaultEndpoint;
 
 	bool isServer = (mode == "server");
 	std::vector<std::function<Future<Void>()>> toRun;
 	auto actor = actors.find(mode);
-	toRun.push_back(actor->second);
+	toRun.resize(isServer ? 1 : concurrency, actor->second);
 
 	platformInit();
 	g_network = newNet2(TLSConfig(), false, true);

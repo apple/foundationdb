@@ -34,7 +34,7 @@ Future<grpc::Status> getCoordinators(Reference<IDatabase> db,
                                      GetCoordinatorsReply* rep) {
 	Reference<ITransaction> tr = db->createTransaction();
 
-	loop {
+	while (true) {
 		Error err;
 		try {
 			ThreadFuture<Optional<Value>> processesF = tr->get(special_keys::coordinatorsProcessSpecialKey);
@@ -70,7 +70,7 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 	// TODO: Reject request if intersection(new coordinators, old coordinators) = {}.
 	Reference<ITransaction> tr = db->createTransaction();
 	Error err;
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
 			if (req->has_cluster_description() && !req->cluster_description().empty()) {
@@ -183,7 +183,7 @@ Reference<ITransaction> getTransaction(Reference<IDatabase> db, Reference<ITrans
 Future<grpc::Status> getStatus(Reference<IDatabase> db, const GetStatusRequest* req, GetStatusReply* rep) {
 	Reference<ITransaction> tr = db->createTransaction();
 
-	loop {
+	while (true) {
 		Error err;
 		try {
 			ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
@@ -312,7 +312,7 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 	}
 
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
@@ -461,7 +461,7 @@ Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr
 Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                         std::map<std::string, StorageServerInterface>* interfaces) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		interfaces->clear();
 		try {
@@ -494,7 +494,7 @@ Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 
 Future<bool> getWorkersProcessData(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);

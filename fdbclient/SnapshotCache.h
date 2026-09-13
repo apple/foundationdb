@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "flow/IndexedSet.h"
 
@@ -315,7 +315,7 @@ public:
 		entries.insert(Entry(allKeys.end, afterAllKeys, VectorRef<KeyValueRef>()), NoMetric(), true);
 	}
 	// Visual Studio refuses to generate these, apparently despite the standard
-	explicit(false) SnapshotCache(SnapshotCache&& r) noexcept : arena(r.arena), entries(std::move(r.entries)) {}
+	SnapshotCache(SnapshotCache&& r) noexcept : arena(r.arena), entries(std::move(r.entries)) {}
 	SnapshotCache& operator=(SnapshotCache&& r) noexcept {
 		entries = std::move(r.entries);
 		arena = r.arena;

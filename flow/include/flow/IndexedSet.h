@@ -151,7 +151,7 @@ public:
 
 	IndexedSet() : root(nullptr) {};
 	~IndexedSet() { delete root; }
-	explicit(false) IndexedSet(IndexedSet&& r) noexcept : root(r.root) { r.root = nullptr; }
+	IndexedSet(IndexedSet&& r) noexcept : root(r.root) { r.root = nullptr; }
 	IndexedSet& operator=(IndexedSet&& r) noexcept {
 		delete root;
 		root = r.root;
@@ -311,7 +311,7 @@ public:
 
 private:
 	// Copy operations unimplemented.  SOMEDAY: Implement and make public.
-	explicit(false) IndexedSet(const IndexedSet&);
+	IndexedSet(const IndexedSet&);
 	IndexedSet& operator=(const IndexedSet&);
 
 	Node* root;
@@ -376,9 +376,9 @@ public:
 		key = rhs.key;
 		value = rhs.value;
 	}
-	explicit(false) MapPair(MapPair const& rhs) : key(rhs.key), value(rhs.value) {}
+	MapPair(MapPair const& rhs) : key(rhs.key), value(rhs.value) {}
 
-	explicit(false) MapPair(MapPair&& r) noexcept : key(std::move(r.key)), value(std::move(r.value)) {}
+	MapPair(MapPair&& r) noexcept : key(std::move(r.key)), value(std::move(r.value)) {}
 	void operator=(MapPair&& r) noexcept {
 		key = std::move(r.key);
 		value = std::move(r.value);
@@ -531,7 +531,7 @@ public:
 
 	static int getElementBytes() { return IndexedSet<Pair, Metric>::getElementBytes(); }
 
-	explicit(false) Map(Map&& r) noexcept : set(std::move(r.set)) {}
+	Map(Map&& r) noexcept : set(std::move(r.set)) {}
 	void operator=(Map&& r) noexcept { set = std::move(r.set); }
 
 	Future<Void> clearAsync();
