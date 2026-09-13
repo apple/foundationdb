@@ -40,6 +40,7 @@
 #include "flow/Buggify.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"
 #include "flow/genericactors.h"
@@ -713,9 +714,10 @@ Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spa
 	double grvStart = now();
 	Optional<UID> debugID = getDebugID(debugIDs);
 	Future<GetRawCommittedVersionReply> replyFromMasterFuture;
+	// Receive master replies at socket priority so incoming GRVs cannot starve an already-arrived reply.
 	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
 	    GetRawCommittedVersionRequest(span.context, debugID, grvProxyData->ssVersionVectorCache.getMaxVersion()),
-	    TaskPriority::GetLiveCommittedVersionReply);
+	    TaskPriority::ReadSocket);
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
 		co_await transformError(updateLastCommit(grvProxyData, debugID), broken_promise(), tlog_failed());
@@ -1285,4 +1287,35 @@ Future<Void> grvProxyServer(GrvProxyInterface proxy,
 			throw;
 		}
 	}
+}
+
+TEST_CASE("noSim/fdbserver/grvproxy/masterReplyProgressAtSocketPriority") {
+	if (g_network->isSimulated()) {
+		co_return;
+	}
+
+	auto db = makeReference<AsyncVar<ServerDBInfo>>();
+	MasterInterface master;
+	GrvProxyInterface proxy;
+	GrvProxyData data(deterministicRandom()->randomUniqueID(), master, proxy.getConsistentReadVersion, db);
+	// A fresh epoch confirmation isolates master-reply scheduling from TLog liveness.
+	data.lastCommitTime = now();
+	Future<GetReadVersionReply> pending = getLiveCommittedVersion(
+	    {}, &data, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY, Optional<BatchDebugIDs>(), 1, 0, 1, 0);
+	GetRawCommittedVersionRequest request = co_await master.getLiveCommittedVersion.getFuture();
+
+	// Serialize the reply through transport so delivery uses the endpoint priority selected by the proxy.
+	ReplyPromise<GetRawCommittedVersionReply> sender;
+	sender.loadRemoteEndpoint(
+	    Endpoint(FlowTransport::transport().getLocalAddresses(), request.reply.getEndpoint().token));
+	GetRawCommittedVersionReply reply;
+	reply.version = 123;
+	reply.minKnownCommittedVersion = 123;
+	sender.send(reply);
+
+	co_await delay(0, TaskPriority::ReadSocket);
+	bool completedBeforeNextSocketTask = pending.isReady();
+	GetReadVersionReply result = co_await pending;
+	ASSERT(completedBeforeNextSocketTask);
+	ASSERT_EQ(result.version, reply.version);
 }
