@@ -713,9 +713,10 @@ Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spa
 	double grvStart = now();
 	Optional<UID> debugID = getDebugID(debugIDs);
 	Future<GetRawCommittedVersionReply> replyFromMasterFuture;
+	// Receive master replies at socket priority so incoming GRVs cannot starve an already-arrived reply.
 	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
 	    GetRawCommittedVersionRequest(span.context, debugID, grvProxyData->ssVersionVectorCache.getMaxVersion()),
-	    TaskPriority::GetLiveCommittedVersionReply);
+	    TaskPriority::ReadSocket);
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
 		co_await transformError(updateLastCommit(grvProxyData, debugID), broken_promise(), tlog_failed());
