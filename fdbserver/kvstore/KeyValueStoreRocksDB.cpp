@@ -68,7 +68,7 @@
 
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
+#include "fdbserver/checkpoint/RocksDBCheckpointUtils.h"
 #include "RocksDBCommon.h"
 
 #include "flow/CoroUtils.h"

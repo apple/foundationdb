@@ -24,8 +24,6 @@
 #include "fdbclient/S3Client.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
-#include "fdbserver/core/StorageMetrics.h"
 #include "flow/genericactors.h"
 #include "flow/UnitTest.h"
 
@@ -180,71 +178,6 @@ Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
 		}
 		co_await tr.onError(err);
 	}
-}
-
-// Return true if generated the byte sampling file. Otherwise, return false.
-// TODO(BulkDump): directly read from special key space.
-Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // input file
-                                       std::string byteSampleFileFullPath, // output file
-                                       UID logId) {
-	int counter = 0;
-	bool res = false;
-	int retryCount = 0;
-	double startTime = now();
-	while (true) {
-		Error err;
-		try {
-			std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
-			sstWriter->open(abspath(byteSampleFileFullPath));
-			bool anySampled = false;
-			std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
-			reader->open(abspath(dataFileFullPath));
-			while (reader->hasNext()) {
-				KeyValue kv = reader->next();
-				ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
-				if (sampleInfo.inSample) {
-					sstWriter->write(kv.key, BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned()));
-					anySampled = true;
-					counter++;
-					if (counter > SERVER_KNOBS->BULKLOAD_BYTE_SAMPLE_BATCH_KEY_COUNT) {
-						co_await yield();
-						counter = 0;
-					}
-				}
-			}
-			// It is possible that no key is sampled
-			// This can happen when the data to sample is small
-			// In this case, no SST sample byte file is generated
-			if (anySampled) {
-				ASSERT(sstWriter->finish());
-				res = true;
-			} else {
-				ASSERT(!sstWriter->finish());
-				deleteFile(abspath(byteSampleFileFullPath));
-			}
-			break;
-		} catch (Error& e) {
-			err = e;
-		}
-		if (err.code() == error_code_actor_cancelled) {
-			throw err;
-		}
-		TraceEvent(SevWarn, "SSBulkLoadTaskSamplingError", logId)
-		    .errorUnsuppressed(err)
-		    .detail("DataFileFullPath", dataFileFullPath)
-		    .detail("ByteSampleFileFullPath", byteSampleFileFullPath)
-		    .detail("Duration", now() - startTime)
-		    .detail("RetryCount", retryCount);
-		co_await delay(5.0);
-		deleteFile(abspath(byteSampleFileFullPath));
-		retryCount++;
-	}
-	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskSamplingComplete", logId)
-	    .detail("DataFileFullPath", dataFileFullPath)
-	    .detail("ByteSampleFileFullPath", byteSampleFileFullPath)
-	    .detail("Duration", now() - startTime)
-	    .detail("RetryCount", retryCount);
-	co_return res;
 }
 
 // TODO(BulkLoad): slow task
