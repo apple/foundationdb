@@ -264,7 +264,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BACKUP_SIMULATED_LIMIT_BYTES,            1e6 ); if( randomize && buggify() ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
 	init( BACKUP_GET_RANGE_LIMIT_BYTES,            1e6 );
 	init( BACKUP_LOCK_BYTES,                       1e8 );
-	init( BACKUP_RANGE_TIMEOUT, TASKBUCKET_TIMEOUT_VERSIONS/CORE_VERSIONSPERSECOND/2.0 );
+	init( BACKUP_RANGE_TIMEOUT, double(TASKBUCKET_TIMEOUT_VERSIONS)/CORE_VERSIONSPERSECOND/2.0 );
 	init( BACKUP_RANGE_MINWAIT, std::max(1.0, BACKUP_RANGE_TIMEOUT/2.0));
 	init( BULKDUMP_JOB_TIMEOUT,              3600 * 24 ); // 24 hours - large DBs may take days
 	init( BULKLOAD_JOB_TIMEOUT,              3600 * 24 ); // 24 hours - large DBs may take days
@@ -455,5 +455,15 @@ TEST_CASE("/fdbclient/knobs/initialize") {
 	clientKnobs.initialize(Randomize::False, IsSimulated::False);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions * 2);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/knobs/backupRangeFractionalTimeout") {
+	ClientKnobs clientKnobs(Randomize::False, IsSimulated::False);
+	clientKnobs.setKnob("core_versionspersecond", int64_t(1000000));
+	clientKnobs.setKnob("taskbucket_timeout_versions", 1500000);
+	clientKnobs.initialize(Randomize::False, IsSimulated::False);
+	ASSERT_EQ(clientKnobs.BACKUP_RANGE_TIMEOUT, 0.75);
+	ASSERT_EQ(clientKnobs.BACKUP_RANGE_MINWAIT, 1.0);
 	return Void();
 }

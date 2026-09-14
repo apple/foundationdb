@@ -1739,7 +1739,7 @@ loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>
 					} else if (healthyZone.second > tr.getReadVersion().get()) {
 						res.healthyZone = healthyZone.first;
 						res.healthyZoneSeconds =
-						    (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+						    double(healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 					}
 				}
 				res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
