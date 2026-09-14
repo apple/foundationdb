@@ -21,6 +21,7 @@
 #pragma once
 
 #include "fdbclient/ConsistencyScanInterface.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "flow/flow.h"
 
 struct ServerDBInfo;
@@ -42,6 +43,41 @@ Future<bool> getKeyLocations(Database cx,
                              Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise,
                              bool performQuiescentChecks,
                              bool* success);
+// Shared by callers (currently ConsistencyCheckUrgent) that need to read a range from a fixed
+// set of storage servers and compare the replies themselves, outside of the checkDataConsistency/
+// consistencyCheckReadData path above that consistencyScanCore also uses.
+struct RangeConsistencyResult {
+	int firstValidServer;
+	std::vector<int64_t> uniqueRefKeys;
+	std::vector<int64_t> uniqueCmpKeys;
+	std::vector<int64_t> mismatchedValues;
+	Optional<KeyRef> nextKey;
+	Optional<KeyRef> lastReadKey;
+	int64_t totalReadAmount;
+	bool success;
+
+	explicit RangeConsistencyResult(const size_t serverCount)
+	  : firstValidServer(-1), uniqueRefKeys(serverCount), uniqueCmpKeys(serverCount),
+		mismatchedValues(serverCount), totalReadAmount(0), success(true) {}
+
+	explicit RangeConsistencyResult() : RangeConsistencyResult(0) {}
+};
+
+inline bool isSuccessReply(const ErrorOr<GetKeyValuesReply>& reply) {
+	return reply.present() && !reply.get().error.present();
+}
+
+Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
+	Database cx,
+	std::vector<StorageServerInterface> storageServerInterfaces,
+	KeyRangeRef range,
+	KeySelector begin);
+
+RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterface>& storageServerInterfaces,
+										 const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,
+										 KeyRangeRef range,
+										 KeySelector begin,
+										 bool performQuiescentChecks);
 Future<Void> checkDataConsistency(Database cx,
                                   VectorRef<KeyValueRef> keyLocations,
                                   DatabaseConfiguration configuration,
