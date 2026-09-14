@@ -202,6 +202,121 @@ Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<ReadYo
 	co_return storageServerInterfaces;
 }
 
+// The result of diffing two GetKeyValuesReply's against each other. Shared by consistencyCheckReadData()
+// (used by the always-on background ConsistencyScan) and checkRangeReplies() below (used by the
+// checkDataConsistency/ConsistencyCheckUrgent one-shot verification workloads) -- they have different
+// needs around reporting/failure handling, but the same underlying merge-diff algorithm.
+struct ReplyDiff {
+	// The number of keys unique to `current`, i.e. not present in `reference`.
+	int64_t currentUniques = 0;
+	// The number of keys unique to `reference`, i.e. not present in `current`.
+	int64_t referenceUniques = 0;
+	// The number of keys present in both replies but with different values.
+	int64_t valueMismatches = 0;
+	// The number of keys present in both replies with matching values.
+	int64_t matchingKVPairs = 0;
+	// The last-seen key unique to `current` (only meaningful if currentUniques > 0).
+	KeyRef currentUniqueKey;
+	// The last-seen key unique to `reference` (only meaningful if referenceUniques > 0).
+	KeyRef referenceUniqueKey;
+	// The last-seen key with mismatched values (only meaningful if valueMismatches > 0).
+	KeyRef valueMismatchKey;
+};
+
+// Merges `current` and `reference` (both sorted by key), counting keys unique to either side and value
+// mismatches on keys present in both. If `boundKey` is present, keys beyond it are ignored on both sides
+// -- this is what lets two replies that were paginated to different cutoff points (e.g. because one
+// storage server's reply happened to fill up a few keys earlier than another's) be compared without
+// treating that misalignment as spurious missing/unique keys.
+ReplyDiff diffReplies(const GetKeyValuesReply& current, const GetKeyValuesReply& reference, Optional<KeyRef> boundKey) {
+	ReplyDiff diff;
+	int currentI = 0;
+	int referenceI = 0;
+	while (currentI < current.data.size() && referenceI < reference.data.size()) {
+		KeyValueRef currentKV = current.data[currentI];
+		KeyValueRef referenceKV = reference.data[referenceI];
+		if (boundKey.present() && (currentKV.key > boundKey.get() || referenceKV.key > boundKey.get())) {
+			// We have exceeded the minimum key reached across all servers. Stop checking
+			break;
+		}
+		if (currentKV.key == referenceKV.key) {
+			if (currentKV.value == referenceKV.value) {
+				diff.matchingKVPairs++;
+			} else {
+				diff.valueMismatchKey = currentKV.key;
+				diff.valueMismatches++;
+			}
+			currentI++;
+			referenceI++;
+		} else if (currentKV.key < referenceKV.key) {
+			diff.currentUniqueKey = currentKV.key;
+			diff.currentUniques++;
+			currentI++;
+		} else {
+			diff.referenceUniqueKey = referenceKV.key;
+			diff.referenceUniques++;
+			referenceI++;
+		}
+	}
+
+	// At this point, we've consumed all of either the current or reference reply through boundKey (if
+	// set) or the end (if boundKey is not set). Any remaining data (through boundKey) in either array is
+	// unique to that server.
+	while (referenceI < reference.data.size() &&
+	       (!boundKey.present() || reference.data[referenceI].key <= boundKey.get())) {
+		diff.referenceUniqueKey = reference.data[referenceI].key;
+		diff.referenceUniques++;
+		referenceI++;
+	}
+	while (currentI < current.data.size() && (!boundKey.present() || current.data[currentI].key <= boundKey.get())) {
+		diff.currentUniqueKey = current.data[currentI].key;
+		diff.currentUniques++;
+		currentI++;
+	}
+
+	return diff;
+}
+
+// Dumps both replies to stdout for debugging when running in simulation.
+void printReplyMismatchDebug(int currentIdx,
+                             const StorageServerInterface& currentSSI,
+                             const GetKeyValuesReply& current,
+                             int referenceIdx,
+                             const StorageServerInterface& referenceSSI,
+                             const GetKeyValuesReply& reference,
+                             KeyRef beginKey,
+                             KeyRef endKey) {
+	int invalidIndex = -1;
+	printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+	       "",
+	       currentIdx,
+	       currentSSI.address().toString().c_str(),
+	       printable(beginKey).c_str(),
+	       printable(endKey).c_str());
+	for (int k = 0; k < current.data.size(); k++) {
+		printf("%d. %s => %s\n", k, printable(current.data[k].key).c_str(), printable(current.data[k].value).c_str());
+		if (invalidIndex < 0 && (k >= reference.data.size() || current.data[k].key != reference.data[k].key ||
+		                         current.data[k].value != reference.data[k].value))
+			invalidIndex = k;
+	}
+
+	printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+	       "",
+	       referenceIdx,
+	       referenceSSI.address().toString().c_str(),
+	       printable(beginKey).c_str(),
+	       printable(endKey).c_str());
+	for (int k = 0; k < reference.data.size(); k++) {
+		printf(
+		    "%d. %s => %s\n", k, printable(reference.data[k].key).c_str(), printable(reference.data[k].value).c_str());
+		if (invalidIndex < 0 && (k >= current.data.size() || reference.data[k].key != current.data[k].key ||
+		                         reference.data[k].value != current.data[k].value))
+			invalidIndex = k;
+	}
+
+	printf("\nMISMATCH AT %d\n\n", invalidIndex);
+}
+
 // returns error count
 Future<int> consistencyCheckReadData(UID myId,
                                      Database cx,
@@ -275,244 +390,202 @@ Future<int> consistencyCheckReadData(UID myId,
 		            consistencyCheckStartVersion.present() ? consistencyCheckStartVersion.get() : invalidVersion);
 	}
 
-	// Read the resulting entries
+	// Read the resulting entries. Determine the first valid server and the correct stopping point, which is
+	// the minimum key across all replies still reporting more data. Mirrors checkRangeReplies() below (see
+	// the comment there for why this bound matters): without it, a reply that happened to paginate a few
+	// keys further than another's before hitting its own page limit would be reported as containing
+	// spurious missing/extra keys. Kept as a separate pass (rather than sharing code with
+	// checkRangeReplies()) since it also drives this function's own DisabledTraceEvent/myId
+	// trace-correlation conventions.
 	bool allSucceeded = true;
-	bool foundInjected = false;
+	Optional<KeyRef> boundKey;
 	for (int j = 0; j < storageServerInterfaces->size(); j++) {
 		ErrorOr<GetKeyValuesReply> rangeResult = (*keyValueFutures)[j].get();
-
-		// Compare the results with other storage servers
 		if (rangeResult.present() && !rangeResult.get().error.present()) {
-			GetKeyValuesReply current = rangeResult.get();
+			GetKeyValuesReply reply = rangeResult.get();
 			DisabledTraceEvent("ConsistencyCheck_GetKeyValuesStream", myId)
-			    .detail("DataSize", current.data.size())
+			    .detail("DataSize", reply.data.size())
 			    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id());
-			*totalReadAmount += current.data.expectedSize();
+			*totalReadAmount += reply.data.expectedSize();
+
+			Optional<KeyRef> lastKeyInReply;
+			if (!reply.data.empty()) {
+				lastKeyInReply = reply.data.back().key;
+			}
 			// If we haven't encountered a valid storage server yet, then mark this as the baseline
 			// to compare against
 			if (!firstValidServer->present()) {
 				DisabledTraceEvent("ConsistencyCheck_FirstValidServer", myId).detail("Iter", j);
 				*firstValidServer = j;
-				// Compare this shard against the first
-			} else {
-				GetKeyValuesReply reference = (*keyValueFutures)[firstValidServer->get()].get().get();
-
-				if (current.data != reference.data || current.more != reference.more) {
-					// Be especially verbose if in simulation
-					if (g_network->isSimulated()) {
-						int invalidIndex = -1;
-						fmt::print("MISMATCH AT VERSION {0}\n", req.version);
-						printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-						       "",
-						       j,
-						       (*storageServerInterfaces)[j].address().toString().c_str(),
-						       printable(req.begin.getKey()).c_str(),
-						       printable(req.end.getKey()).c_str());
-						for (int k = 0; k < current.data.size(); k++) {
-							printf("%d. %s => %s\n",
-							       k,
-							       printable(current.data[k].key).c_str(),
-							       printable(current.data[k].value).c_str());
-							if (invalidIndex < 0 &&
-							    (k >= reference.data.size() || current.data[k].key != reference.data[k].key ||
-							     current.data[k].value != reference.data[k].value))
-								invalidIndex = k;
-						}
-
-						printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-						       "",
-						       firstValidServer->get(),
-						       (*storageServerInterfaces)[firstValidServer->get()].address().toString().c_str(),
-						       printable(req.begin.getKey()).c_str(),
-						       printable(req.end.getKey()).c_str());
-						for (int k = 0; k < reference.data.size(); k++) {
-							printf("%d. %s => %s\n",
-							       k,
-							       printable(reference.data[k].key).c_str(),
-							       printable(reference.data[k].value).c_str());
-							if (invalidIndex < 0 &&
-							    (k >= current.data.size() || reference.data[k].key != current.data[k].key ||
-							     reference.data[k].value != current.data[k].value))
-								invalidIndex = k;
-						}
-
-						printf("\nMISMATCH AT %d\n\n", invalidIndex);
-					}
-
-					// Data for trace event
-					// The number of keys unique to the current shard
-					int currentUniques = 0;
-					// The number of keys unique to the reference shard
-					int referenceUniques = 0;
-					// The number of keys in both shards with conflicting values
-					int valueMismatches = 0;
-					// The number of keys in both shards with matching values
-					int matchingKVPairs = 0;
-					// Last unique key on the current shard
-					KeyRef currentUniqueKey;
-					// Last unique key on the reference shard
-					KeyRef referenceUniqueKey;
-					// Last value mismatch
-					KeyRef valueMismatchKey;
-
-					// Loop indexes
-					int currentI = 0;
-					int referenceI = 0;
-					while (currentI < current.data.size() || referenceI < reference.data.size()) {
-						if (currentI >= current.data.size()) {
-							referenceUniqueKey = reference.data[referenceI].key;
-							referenceUniques++;
-							referenceI++;
-						} else if (referenceI >= reference.data.size()) {
-							currentUniqueKey = current.data[currentI].key;
-							currentUniques++;
-							currentI++;
-						} else {
-							KeyValueRef currentKV = current.data[currentI];
-							KeyValueRef referenceKV = reference.data[referenceI];
-
-							if (currentKV.key == referenceKV.key) {
-								if (currentKV.value == referenceKV.value)
-									matchingKVPairs++;
-								else {
-									valueMismatchKey = currentKV.key;
-									valueMismatches++;
-								}
-
-								currentI++;
-								referenceI++;
-							} else if (currentKV.key < referenceKV.key) {
-								currentUniqueKey = currentKV.key;
-								currentUniques++;
-								currentI++;
-							} else {
-								referenceUniqueKey = referenceKV.key;
-								referenceUniques++;
-								referenceI++;
-							}
-						}
-					}
-
-					bool isTss = (*storageServerInterfaces)[j].isTss() ||
-					             (*storageServerInterfaces)[firstValidServer->get()].isTss();
-					bool isExpectedTSSMismatch =
-					    g_network->isSimulated() &&
-					    fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch) && isTss;
-					// It's possible that the storage servers are inconsistent in KillRegion
-					// workload where a forced recovery is performed. The killed storage server
-					// in the killed region returned first with a higher version, and a later
-					// response from a different region returned with a lower version (because
-					// of the rollback of the forced recovery). In this case, we should not fail
-					// the test. So we double check both process are live.
-					bool isFailed =
-					    g_network->isSimulated() &&
-					    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())->failed ||
-					     g_simulator->getProcessByAddress((*storageServerInterfaces)[firstValidServer->get()].address())
-					         ->failed) &&
-					    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())->locality.dcId() !=
-					     g_simulator->getProcessByAddress((*storageServerInterfaces)[firstValidServer->get()].address())
-					         ->locality.dcId());
-
-					if (!isTss && !isFailed && expectInjected) {
-						// Ensure the only corruption we see is the one that was expected to be injected
-						ASSERT(fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.present());
-						if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
-						    FDBSimConsistencyScanCorruptionType::FlipMoreFlag) {
-							// only more flag should be different
-							expectInjected = (current.more != reference.more && currentUniques == 0 &&
-							                  referenceUniques == 0 && valueMismatches == 0);
-						} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
-						           FDBSimConsistencyScanCorruptionType::AddToEmpty) {
-							expectInjected =
-							    (current.more == reference.more && current.data.size() + reference.data.size() == 1);
-							if (expectInjected) {
-								KeyValueRef& kv = current.data.empty() ? reference.data[0] : current.data[0];
-								expectInjected =
-								    kv.key == fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get() &&
-								    kv.value == "consistencyCheckCorruptValue"_sr;
-							}
-						} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
-						           FDBSimConsistencyScanCorruptionType::RemoveLastRow) {
-							expectInjected = (current.more == reference.more && valueMismatches == 0 &&
-							                  currentUniques + referenceUniques == 1 &&
-							                  std::abs(current.data.size() - reference.data.size()) == 1);
-							if (expectInjected) {
-								// make sure the unique was the last key
-								for (int i = 0; i < current.data.size() && i < reference.data.size(); i++) {
-									if (current.data[i] != reference.data[i]) {
-										expectInjected = false;
-										break;
-									}
-								}
-							}
-						} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
-						           FDBSimConsistencyScanCorruptionType::ChangeFirstValue) {
-							expectInjected =
-							    (current.more == reference.more && valueMismatches == 1 && currentUniques == 0 &&
-							     referenceUniques == 0 && valueMismatchKey == current.data[0].key &&
-							     std::abs(current.data[0].value.size() - reference.data[0].value.size()) == 1);
-							if (expectInjected) {
-								// make sure the value difference was just truncating the last byte
-								Value shorter = current.data[0].value < reference.data[0].value
-								                    ? current.data[0].value
-								                    : reference.data[0].value;
-								Value longer = current.data[0].value < reference.data[0].value ? reference.data[0].value
-								                                                               : current.data[0].value;
-								expectInjected = (shorter == longer.substr(0, shorter.size()));
-							}
-						} else {
-							ASSERT(false);
-						}
-					}
-
-					TraceEvent(isExpectedTSSMismatch || isFailed || expectInjected ? SevWarn : SevError,
-					           "ConsistencyCheck_DataInconsistent",
-					           myId)
-					    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id())
-					    .detail(format("StorageServer%d", firstValidServer->get()).c_str(),
-					            (*storageServerInterfaces)[firstValidServer->get()].id())
-					    .detail("ShardBegin", req.begin.getKey())
-					    .detail("ShardEnd", req.end.getKey())
-					    .detail("VersionNumber", req.version)
-					    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-					    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
-					    .detail(format("Server%dUniques", firstValidServer->get()).c_str(), referenceUniques)
-					    .detail(format("Server%dUniqueKey", firstValidServer->get()).c_str(), referenceUniqueKey)
-					    .detail("ValueMismatches", valueMismatches)
-					    .detail("ValueMismatchKey", valueMismatchKey)
-					    .detail("MatchingKVPairs", matchingKVPairs)
-					    .detail(format("Server%dHasMore", j).c_str(), current.more)
-					    .detail(format("Server%dHasMore", firstValidServer->get()).c_str(), reference.more)
-					    .detail("IsTSS", isTss)
-					    .detail("IsInjected", expectInjected);
-
-					if (expectInjected) {
-						foundInjected = true;
-						CODE_PROBE(true, "consistency check detected injected corruption");
-						// we found the injected corruption, clear the state
-						TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption", myId)
-						    .detail("CorruptionType",
-						            fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get())
-						    .detail("Version", req.version);
-						fdbSimulationPolicyState().updateConsistencyScanState(
-						    FDBSimConsistencyScanState::Enabled_InjectCorruption,
-						    FDBSimConsistencyScanState::Enabled_FoundCorruption);
-					}
-
-					if (!isExpectedTSSMismatch) {
-						int issues = currentUniques + referenceUniques + valueMismatches +
-						             ((current.more == reference.more) ? 0 : 1);
-						ASSERT(issues > 0);
-						co_return issues;
-					}
-
-					if (isFailed) {
-						throw wrong_shard_server();
-					}
+				if (reply.more) {
+					ASSERT(lastKeyInReply.present());
+					boundKey = lastKeyInReply;
+				}
+			} else if (reply.more) {
+				ASSERT(lastKeyInReply.present());
+				if (!boundKey.present() || lastKeyInReply.get() < boundKey.get()) {
+					boundKey = lastKeyInReply;
 				}
 			}
 		} else {
 			allSucceeded = false;
+		}
+	}
+
+	bool foundInjected = false;
+	if (firstValidServer->present()) {
+		GetKeyValuesReply reference = (*keyValueFutures)[firstValidServer->get()].get().get();
+		for (int j = 0; j < storageServerInterfaces->size(); j++) {
+			if (j == firstValidServer->get()) {
+				continue;
+			}
+			ErrorOr<GetKeyValuesReply> rangeResult = (*keyValueFutures)[j].get();
+			if (!rangeResult.present() || rangeResult.get().error.present()) {
+				continue;
+			}
+			GetKeyValuesReply current = rangeResult.get();
+
+			if (current.data != reference.data || current.more != reference.more) {
+				ReplyDiff diff = diffReplies(current, reference, boundKey);
+
+				// As in checkRangeReplies() above, the raw current.data != reference.data check can trip
+				// merely because the two replies were paginated to different cutoff points, even though
+				// both servers fully agree on every key either of them actually read through boundKey.
+				if (diff.currentUniques == 0 && diff.referenceUniques == 0 && diff.valueMismatches == 0) {
+					continue;
+				}
+
+				// Be especially verbose if in simulation
+				if (g_network->isSimulated()) {
+					fmt::print("MISMATCH AT VERSION {0}\n", req.version);
+					printReplyMismatchDebug(j,
+					                        (*storageServerInterfaces)[j],
+					                        current,
+					                        firstValidServer->get(),
+					                        (*storageServerInterfaces)[firstValidServer->get()],
+					                        reference,
+					                        req.begin.getKey(),
+					                        req.end.getKey());
+				}
+
+				bool isTss = (*storageServerInterfaces)[j].isTss() ||
+				             (*storageServerInterfaces)[firstValidServer->get()].isTss();
+				bool isExpectedTSSMismatch =
+				    g_network->isSimulated() &&
+				    fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch) && isTss;
+				// It's possible that the storage servers are inconsistent in KillRegion
+				// workload where a forced recovery is performed. The killed storage server
+				// in the killed region returned first with a higher version, and a later
+				// response from a different region returned with a lower version (because
+				// of the rollback of the forced recovery). In this case, we should not fail
+				// the test. So we double check both process are live.
+				bool isFailed =
+				    g_network->isSimulated() &&
+				    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())->failed ||
+				     g_simulator->getProcessByAddress((*storageServerInterfaces)[firstValidServer->get()].address())
+				         ->failed) &&
+				    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())->locality.dcId() !=
+				     g_simulator->getProcessByAddress((*storageServerInterfaces)[firstValidServer->get()].address())
+				         ->locality.dcId());
+
+				if (!isTss && !isFailed && expectInjected) {
+					// Ensure the only corruption we see is the one that was expected to be injected
+					ASSERT(fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.present());
+					if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+					    FDBSimConsistencyScanCorruptionType::FlipMoreFlag) {
+						// only more flag should be different
+						expectInjected = (current.more != reference.more && diff.currentUniques == 0 &&
+						                  diff.referenceUniques == 0 && diff.valueMismatches == 0);
+					} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+					           FDBSimConsistencyScanCorruptionType::AddToEmpty) {
+						expectInjected =
+						    (current.more == reference.more && current.data.size() + reference.data.size() == 1);
+						if (expectInjected) {
+							KeyValueRef& kv = current.data.empty() ? reference.data[0] : current.data[0];
+							expectInjected =
+							    kv.key == fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get() &&
+							    kv.value == "consistencyCheckCorruptValue"_sr;
+						}
+					} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+					           FDBSimConsistencyScanCorruptionType::RemoveLastRow) {
+						expectInjected = (current.more == reference.more && diff.valueMismatches == 0 &&
+						                  diff.currentUniques + diff.referenceUniques == 1 &&
+						                  std::abs(current.data.size() - reference.data.size()) == 1);
+						if (expectInjected) {
+							// make sure the unique was the last key
+							for (int i = 0; i < current.data.size() && i < reference.data.size(); i++) {
+								if (current.data[i] != reference.data[i]) {
+									expectInjected = false;
+									break;
+								}
+							}
+						}
+					} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+					           FDBSimConsistencyScanCorruptionType::ChangeFirstValue) {
+						expectInjected =
+						    (current.more == reference.more && diff.valueMismatches == 1 && diff.currentUniques == 0 &&
+						     diff.referenceUniques == 0 && diff.valueMismatchKey == current.data[0].key &&
+						     std::abs(current.data[0].value.size() - reference.data[0].value.size()) == 1);
+						if (expectInjected) {
+							// make sure the value difference was just truncating the last byte
+							Value shorter = current.data[0].value < reference.data[0].value ? current.data[0].value
+							                                                                : reference.data[0].value;
+							Value longer = current.data[0].value < reference.data[0].value ? reference.data[0].value
+							                                                               : current.data[0].value;
+							expectInjected = (shorter == longer.substr(0, shorter.size()));
+						}
+					} else {
+						ASSERT(false);
+					}
+				}
+
+				TraceEvent(isExpectedTSSMismatch || isFailed || expectInjected ? SevWarn : SevError,
+				           "ConsistencyCheck_DataInconsistent",
+				           myId)
+				    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id())
+				    .detail(format("StorageServer%d", firstValidServer->get()).c_str(),
+				            (*storageServerInterfaces)[firstValidServer->get()].id())
+				    .detail("ShardBegin", req.begin.getKey())
+				    .detail("ShardEnd", req.end.getKey())
+				    .detail("VersionNumber", req.version)
+				    .detail(format("Server%dUniques", j).c_str(), diff.currentUniques)
+				    .detail(format("Server%dUniqueKey", j).c_str(), diff.currentUniqueKey)
+				    .detail(format("Server%dUniques", firstValidServer->get()).c_str(), diff.referenceUniques)
+				    .detail(format("Server%dUniqueKey", firstValidServer->get()).c_str(), diff.referenceUniqueKey)
+				    .detail("ValueMismatches", diff.valueMismatches)
+				    .detail("ValueMismatchKey", diff.valueMismatchKey)
+				    .detail("MatchingKVPairs", diff.matchingKVPairs)
+				    .detail(format("Server%dHasMore", j).c_str(), current.more)
+				    .detail(format("Server%dHasMore", firstValidServer->get()).c_str(), reference.more)
+				    .detail("IsTSS", isTss)
+				    .detail("IsInjected", expectInjected);
+
+				if (expectInjected) {
+					foundInjected = true;
+					CODE_PROBE(true, "consistency check detected injected corruption");
+					// we found the injected corruption, clear the state
+					TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption", myId)
+					    .detail("CorruptionType",
+					            fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get())
+					    .detail("Version", req.version);
+					fdbSimulationPolicyState().updateConsistencyScanState(
+					    FDBSimConsistencyScanState::Enabled_InjectCorruption,
+					    FDBSimConsistencyScanState::Enabled_FoundCorruption);
+				}
+
+				// Unlike the original unmerged version of this loop, isFailed is checked as an "else if" here
+				// (matching checkRangeReplies() above) so that a genuinely dead/rolled-back storage server is
+				// always retried via wrong_shard_server(), rather than being reported as an ordinary data
+				// inconsistency whenever it happens not to also be a TSS mismatch.
+				if (!isExpectedTSSMismatch && !isFailed) {
+					int issues = diff.currentUniques + diff.referenceUniques + diff.valueMismatches +
+					             ((current.more == reference.more) ? 0 : 1);
+					ASSERT(issues > 0);
+					co_return issues;
+				} else if (isFailed) {
+					throw wrong_shard_server();
+				}
+			}
 		}
 	}
 
@@ -1486,124 +1559,32 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 			GetKeyValuesReply current = rangeResult.get();
 
 			if (current.data != reference.data || current.more != reference.more) {
-				// Data for trace event
-				// The number of keys unique to the current shard
-				int currentUniques = 0;
-				// The number of keys unique to the reference shard
-				int referenceUniques = 0;
-				// The number of keys in both shards with conflicting values
-				int valueMismatches = 0;
-				// The number of keys in both shards with matching values
-				int matchingKVPairs = 0;
-				// Last unique key on the current shard
-				KeyRef currentUniqueKey;
-				// Last unique key on the reference shard
-				KeyRef referenceUniqueKey;
-				// Last value mismatch
-				KeyRef valueMismatchKey;
-
-				// Loop through both replies using a merge strategy, always advancing
-				// the minimum cursor. Keep going until we've exhausted one reply or
-				// hit the minimum across all non-exhausted replies
-				int currentI = 0;
-				int referenceI = 0;
-				while (currentI < current.data.size() && referenceI < reference.data.size()) {
-					KeyValueRef currentKV = current.data[currentI];
-					KeyValueRef referenceKV = reference.data[referenceI];
-					if (result.nextKey.present() &&
-					    (currentKV.key > result.nextKey.get() || referenceKV.key > result.nextKey.get())) {
-						// We have exceeded the minimum key reached across all servers. Stop checking
-						break;
-					}
-					if (currentKV.key == referenceKV.key) {
-						if (currentKV.value == referenceKV.value)
-							matchingKVPairs++;
-						else {
-							valueMismatchKey = currentKV.key;
-							valueMismatches++;
-						}
-						currentI++;
-						referenceI++;
-					} else if (currentKV.key < referenceKV.key) {
-						currentUniqueKey = currentKV.key;
-						currentUniques++;
-						currentI++;
-					} else {
-						referenceUniqueKey = referenceKV.key;
-						referenceUniques++;
-						referenceI++;
-					}
-				}
-
-				// At this point, we've consumed all of either the current or reference implementation
-				// through result.nextKey (if set) or the end (if result.nextKey is not set). Any remaining
-				// data (through result.nextKey) in either array is unique to that server
-
-				while (referenceI < reference.data.size() &&
-				       (!result.nextKey.present() || reference.data[referenceI].key <= result.nextKey.get())) {
-					referenceUniqueKey = reference.data[referenceI].key;
-					referenceUniques++;
-					referenceI++;
-				}
-				while (currentI < current.data.size() &&
-				       (!result.nextKey.present() || current.data[currentI].key <= result.nextKey.get())) {
-					currentUniqueKey = current.data[currentI].key;
-					currentUniques++;
-					currentI++;
-				}
+				ReplyDiff diff = diffReplies(current, reference, result.nextKey);
 
 				// Record the mismatches in the result
-				result.uniqueRefKeys[j] = referenceUniques;
-				result.uniqueCmpKeys[j] = currentUniques;
-				result.mismatchedValues[j] = valueMismatches;
+				result.uniqueRefKeys[j] = diff.referenceUniques;
+				result.uniqueCmpKeys[j] = diff.currentUniques;
+				result.mismatchedValues[j] = diff.valueMismatches;
 
 				// The raw current.data != reference.data check above can trip merely because the two
 				// replies were paginated to different cutoff points (see result.nextKey above), even
 				// though both servers fully agree on every key either of them actually read. That's not
 				// a real inconsistency, so don't report/fail on it unless the bounded merge above found
 				// an actual discrepancy within the range every server got to.
-				if (currentUniques == 0 && referenceUniques == 0 && valueMismatches == 0) {
+				if (diff.currentUniques == 0 && diff.referenceUniques == 0 && diff.valueMismatches == 0) {
 					continue;
 				}
 
 				// Be especially verbose if in simulation
 				if (g_network->isSimulated()) {
-					int invalidIndex = -1;
-					printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-					       "",
-					       j,
-					       storageServerInterfaces[j].address().toString().c_str(),
-					       printable(begin.getKey()).c_str(),
-					       printable(range.end).c_str());
-					for (int k = 0; k < current.data.size(); k++) {
-						printf("%d. %s => %s\n",
-						       k,
-						       printable(current.data[k].key).c_str(),
-						       printable(current.data[k].value).c_str());
-						if (invalidIndex < 0 &&
-						    (k >= reference.data.size() || current.data[k].key != reference.data[k].key ||
-						     current.data[k].value != reference.data[k].value))
-							invalidIndex = k;
-					}
-
-					printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-					       "",
-					       result.firstValidServer,
-					       storageServerInterfaces[result.firstValidServer].address().toString().c_str(),
-					       printable(begin.getKey()).c_str(),
-					       printable(range.end).c_str());
-					for (int k = 0; k < reference.data.size(); k++) {
-						printf("%d. %s => %s\n",
-						       k,
-						       printable(reference.data[k].key).c_str(),
-						       printable(reference.data[k].value).c_str());
-						if (invalidIndex < 0 &&
-						    (k >= current.data.size() || reference.data[k].key != current.data[k].key ||
-						     reference.data[k].value != current.data[k].value))
-							invalidIndex = k;
-					}
-
-					printf("\nMISMATCH AT %d\n\n", invalidIndex);
+					printReplyMismatchDebug(j,
+					                        storageServerInterfaces[j],
+					                        current,
+					                        result.firstValidServer,
+					                        storageServerInterfaces[result.firstValidServer],
+					                        reference,
+					                        begin.getKey(),
+					                        range.end);
 				}
 
 				bool isTss =
@@ -1633,13 +1614,13 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 				    .detail("ShardBegin", begin.getKey())
 				    .detail("ShardEnd", range.end)
 				    .detail("VersionNumber", version)
-				    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-				    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
-				    .detail(format("Server%dUniques", result.firstValidServer).c_str(), referenceUniques)
-				    .detail(format("Server%dUniqueKey", result.firstValidServer).c_str(), referenceUniqueKey)
-				    .detail("ValueMismatches", valueMismatches)
-				    .detail("ValueMismatchKey", valueMismatchKey)
-				    .detail("MatchingKVPairs", matchingKVPairs)
+				    .detail(format("Server%dUniques", j).c_str(), diff.currentUniques)
+				    .detail(format("Server%dUniqueKey", j).c_str(), diff.currentUniqueKey)
+				    .detail(format("Server%dUniques", result.firstValidServer).c_str(), diff.referenceUniques)
+				    .detail(format("Server%dUniqueKey", result.firstValidServer).c_str(), diff.referenceUniqueKey)
+				    .detail("ValueMismatches", diff.valueMismatches)
+				    .detail("ValueMismatchKey", diff.valueMismatchKey)
+				    .detail("MatchingKVPairs", diff.matchingKVPairs)
 				    .detail("IsTSS",
 				            storageServerInterfaces[j].isTss() ||
 				                    storageServerInterfaces[result.firstValidServer].isTss()
@@ -1648,8 +1629,11 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 
 				if (!isExpectedTSSMismatch && !isFailed) {
 					if (g_network->isSimulated()) {
-						// Only log the test failure in simulation
-						testFailure("Data inconsistent", performQuiescentChecks, &result.success, true);
+						// Report the inconsistency; leave it to the caller to decide whether/how to fail
+						// the test (e.g. via testFailure()) based on result.success. Callers like
+						// consistencyCheckReadData() below want to count this as an error without failing
+						// the (background, always-running) consistency scan itself.
+						result.success = false;
 					}
 				} else if (isFailed) {
 					// If the storage servers are not live, we should retry.
