@@ -72,6 +72,30 @@ struct CDCTagInterval {
 	  : tag(tag), begin(begin), end(end), bufferedThrough(begin - 1) {}
 };
 
+// A transport retry supersedes only requests from the same logical consumer.
+class CDCConsumeLease : public ReferenceCounted<CDCConsumeLease> {
+	Optional<UID> consumerId;
+	Promise<Void> superseded;
+
+public:
+	explicit CDCConsumeLease(Optional<UID> consumerId) : consumerId(consumerId) {}
+
+	bool belongsTo(Optional<UID> other) const {
+		return consumerId.present() && consumerId.get().isValid() && consumerId == other;
+	}
+	void supersede() { superseded.send(Void()); }
+
+	Future<CDCConsumeReply> waitForReply(Future<CDCConsumeReply> reply) {
+		// Coroutine parameters can outlive completion while the caller retains its result future.
+		ScopeExit cancelReply([&reply]() { reply.cancel(); });
+		auto result = co_await race(reply, superseded.getFuture());
+		if (result.index() == 1) {
+			throw request_maybe_delivered();
+		}
+		co_return std::get<0>(std::move(result));
+	}
+};
+
 // Proxy-owned state for one assigned stream. In-flight actors may retain it after active becomes false.
 struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	CDCStreamId streamId;
@@ -85,7 +109,7 @@ struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	Version bufferedThrough = invalidVersion;
 	int64_t bufferedBytes = 0;
 	int readDemand = 0;
-	int activeConsumes = 0;
+	Reference<CDCConsumeLease> activeConsume;
 	std::vector<CDCTagInterval> tagIntervals;
 	std::deque<Standalone<VersionedMutationsRef>> mutations;
 	AsyncTrigger changed;
@@ -454,6 +478,7 @@ class CDCProxy {
 	Future<Void> monitorAcknowledgedDataPops();
 	void reconcileStreams();
 	Future<Void> consume(CDCConsumeRequest request);
+	Future<CDCConsumeReply> consumeReply(Reference<CDCBufferedStream> stream, CDCCursor cursor);
 	Future<Void> acknowledge(CDCAckRequest request);
 	Future<Void> registerStream(CDCRegisterStreamRequest request);
 	Future<Void> removeStream(CDCRemoveStreamRequest request);
@@ -1589,88 +1614,23 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 		if (!stream->active) {
 			throw wrong_shard_server();
 		}
-		if (stream->activeConsumes > 0) {
-			// A stream has one durable acknowledgement frontier, so concurrent logical consumers cannot be
-			// isolated. Reject overlapping server requests rather than duplicating an entire reply arena.
-			CODE_PROBE(true, "CDC proxy rejects concurrent consumers for one stream");
-			throw client_invalid_operation();
+		if (stream->activeConsume.isValid()) {
+			if (!stream->activeConsume->belongsTo(request.consumerId)) {
+				CODE_PROBE(true, "CDC proxy rejects concurrent consumers for one stream");
+				throw client_invalid_operation();
+			}
+			CODE_PROBE(true, "CDC proxy supersedes a consume after transport retry");
+			auto previous = stream->activeConsume;
+			previous->supersede();
 		}
-		++stream->activeConsumes;
-		ScopeExit releaseStreamConsume([stream]() {
-			ASSERT_GT(stream->activeConsumes, 0);
-			--stream->activeConsumes;
+		auto lease = makeReference<CDCConsumeLease>(request.consumerId);
+		stream->activeConsume = lease;
+		ScopeExit releaseStreamConsume([stream, lease]() {
+			if (stream->activeConsume == lease) {
+				stream->activeConsume.clear();
+			}
 		});
-		const CDCStreamReadState metadata =
-		    co_await readCDCStreamState(cx, request.cursor.streamId, id, true, PrioritizeConsume::True);
-		CODE_PROBE(stream->minVersion < metadata.minVersion, "Native CDC consume reconciles a durable acknowledgement");
-		reconcileStreamMinVersion(stream, metadata.minVersion);
-		if (request.cursor.lastConsumedVersion > stream->bufferedThrough) {
-			// A cursor is trusted only when this owner has delivered through it or when it is covered by the durable
-			// acknowledgement watermark used to initialize bufferedThrough. This prevents a fabricated cursor from
-			// making the proxy retain every intervening tagged mutation while trying to reach an unproven position.
-			if (request.cursor.lastConsumedVersion > metadata.readVersion) {
-				CODE_PROBE(true, "CDC proxy rejects a consume cursor beyond its transaction read version");
-			} else {
-				CODE_PROBE(true, "CDC proxy rejects an unproven consume cursor");
-			}
-			throw client_invalid_operation();
-		}
-
-		Version begin = request.cursor.lastConsumedVersion == invalidVersion ? stream->minVersion
-		                                                                     : request.cursor.lastConsumedVersion + 1;
-		if (begin < stream->minVersion) {
-			throw transaction_too_old();
-		}
-
-		auto buffered =
-		    co_await race(waitForBufferedVersion(stream, begin), delay(SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT));
-		if (buffered.index() == 1) {
-			CODE_PROBE(true, "CDC proxy expires an idle consume lease");
-			CDCConsumeReply reply;
-			reply.lastConsumedVersion = request.cursor.lastConsumedVersion;
-			request.reply.send(reply);
-			co_return;
-		}
-		if (stream->tooOld) {
-			throw transaction_too_old();
-		}
-		if (stream->bufferLimitExceeded) {
-			throw server_overloaded();
-		}
-		if (!stream->active) {
-			throw wrong_shard_server();
-		}
-
-		CDCConsumeReply reply;
-		CDCConsumeReplySelection selection;
-		for (const auto& versioned : stream->mutations) {
-			if (versioned.version < begin) {
-				continue;
-			}
-			if (versioned.version > stream->bufferedThrough) {
-				break;
-			}
-			if (!selectCDCConsumeReplyVersion(&selection,
-			                                  begin,
-			                                  versioned.version,
-			                                  estimatedCDCConsumeVersionBytes(versioned),
-			                                  SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES)) {
-				break;
-			}
-			// Retain the already-accounted stream arena instead of copying mutation payloads for every reply.
-			reply.arena.dependsOn(versioned.arena());
-			reply.mutations.push_back(reply.arena, VersionedMutationsRef(versioned.version, versioned.mutations));
-		}
-		if (selection.firstVersionTooLarge) {
-			CODE_PROBE(
-			    true, "CDC proxy rejects one consume version larger than its reply budget", probe::decoration::rare);
-			TraceEvent(SevWarn, "CDCProxyConsumeVersionExceedsReplyLimit", id)
-			    .detail("StreamId", stream->streamId)
-			    .detail("Version", begin)
-			    .detail("ReplyLimit", SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES);
-			throw server_overloaded();
-		}
-		reply.lastConsumedVersion = selectedCDCConsumeReplyThrough(selection, stream->bufferedThrough);
+		CDCConsumeReply reply = co_await lease->waitForReply(consumeReply(stream, request.cursor));
 		request.reply.send(reply);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -1678,6 +1638,78 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 		}
 		request.reply.sendError(e);
 	}
+}
+
+Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stream, CDCCursor cursor) {
+	const CDCStreamReadState metadata =
+	    co_await readCDCStreamState(cx, cursor.streamId, id, true, PrioritizeConsume::True);
+	CODE_PROBE(stream->minVersion < metadata.minVersion, "Native CDC consume reconciles a durable acknowledgement");
+	reconcileStreamMinVersion(stream, metadata.minVersion);
+	if (cursor.lastConsumedVersion > stream->bufferedThrough) {
+		// A cursor is trusted only when this owner has delivered through it or when it is covered by the durable
+		// acknowledgement watermark used to initialize bufferedThrough. This prevents a fabricated cursor from
+		// making the proxy retain every intervening tagged mutation while trying to reach an unproven position.
+		if (cursor.lastConsumedVersion > metadata.readVersion) {
+			CODE_PROBE(true, "CDC proxy rejects a consume cursor beyond its transaction read version");
+		} else {
+			CODE_PROBE(true, "CDC proxy rejects an unproven consume cursor");
+		}
+		throw client_invalid_operation();
+	}
+
+	Version begin = cursor.lastConsumedVersion == invalidVersion ? stream->minVersion : cursor.lastConsumedVersion + 1;
+	if (begin < stream->minVersion) {
+		throw transaction_too_old();
+	}
+
+	auto buffered =
+	    co_await race(waitForBufferedVersion(stream, begin), delay(SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT));
+	if (buffered.index() == 1) {
+		CODE_PROBE(true, "CDC proxy expires an idle consume lease");
+		CDCConsumeReply reply;
+		reply.lastConsumedVersion = cursor.lastConsumedVersion;
+		co_return reply;
+	}
+	if (stream->tooOld) {
+		throw transaction_too_old();
+	}
+	if (stream->bufferLimitExceeded) {
+		throw server_overloaded();
+	}
+	if (!stream->active) {
+		throw wrong_shard_server();
+	}
+
+	CDCConsumeReply reply;
+	CDCConsumeReplySelection selection;
+	for (const auto& versioned : stream->mutations) {
+		if (versioned.version < begin) {
+			continue;
+		}
+		if (versioned.version > stream->bufferedThrough) {
+			break;
+		}
+		if (!selectCDCConsumeReplyVersion(&selection,
+		                                  begin,
+		                                  versioned.version,
+		                                  estimatedCDCConsumeVersionBytes(versioned),
+		                                  SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES)) {
+			break;
+		}
+		// Retain the already-accounted stream arena instead of copying mutation payloads for every reply.
+		reply.arena.dependsOn(versioned.arena());
+		reply.mutations.push_back(reply.arena, VersionedMutationsRef(versioned.version, versioned.mutations));
+	}
+	if (selection.firstVersionTooLarge) {
+		CODE_PROBE(true, "CDC proxy rejects one consume version larger than its reply budget", probe::decoration::rare);
+		TraceEvent(SevWarn, "CDCProxyConsumeVersionExceedsReplyLimit", id)
+		    .detail("StreamId", stream->streamId)
+		    .detail("Version", begin)
+		    .detail("ReplyLimit", SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES);
+		throw server_overloaded();
+	}
+	reply.lastConsumedVersion = selectedCDCConsumeReplyThrough(selection, stream->bufferedThrough);
+	co_return reply;
 }
 
 Future<Void> CDCProxy::acknowledge(CDCAckRequest request) {
@@ -1809,7 +1841,7 @@ Future<Void> CDCProxy::serveStatusRequests(FutureStream<GetCDCProxyStatusRequest
 				streamStatus.bufferedThrough = stream->bufferedThrough;
 				streamStatus.bufferedBytes = stream->bufferedBytes;
 				streamStatus.readDemand = stream->readDemand;
-				streamStatus.activeConsumeRequests = stream->activeConsumes;
+				streamStatus.activeConsumeRequests = stream->activeConsume.isValid() ? 1 : 0;
 				streamStatus.tooOld = stream->tooOld;
 				streamStatus.bufferLimitExceeded = stream->bufferLimitExceeded;
 			}
@@ -2019,6 +2051,50 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 			throw;
 		}
 	}
+}
+
+namespace {
+Future<CDCConsumeReply> blockedConsumeReply(int* active) {
+	++*active;
+	ScopeExit release([active]() { --*active; });
+	co_await Future<Void>(Never());
+	co_return CDCConsumeReply();
+}
+} // namespace
+
+TEST_CASE("/NativeCDC/ConsumeRetryLease") {
+	const UID consumer(1, 2);
+	auto lease = makeReference<CDCConsumeLease>(consumer);
+	ASSERT(lease->belongsTo(consumer));
+	ASSERT(!lease->belongsTo(UID(3, 4)));
+	ASSERT(!lease->belongsTo({}));
+	ASSERT(!makeReference<CDCConsumeLease>(Optional<UID>())->belongsTo({}));
+	ASSERT(!makeReference<CDCConsumeLease>(UID())->belongsTo(UID()));
+
+	int active = 0;
+	Future<CDCConsumeReply> first = lease->waitForReply(blockedConsumeReply(&active));
+	ASSERT_EQ(active, 1);
+	ASSERT(!first.isReady());
+	lease->supersede();
+	ASSERT(first.isReady() && first.isError());
+	ASSERT_EQ(first.getError().code(), error_code_request_maybe_delivered);
+	ASSERT_EQ(active, 0);
+
+	auto replacement = makeReference<CDCConsumeLease>(consumer);
+	Promise<CDCConsumeReply> delivered;
+	Future<CDCConsumeReply> second = replacement->waitForReply(delivered.getFuture());
+	CDCConsumeReply reply;
+	reply.lastConsumedVersion = 123;
+	delivered.send(reply);
+	ASSERT(second.isReady() && !second.isError());
+	ASSERT_EQ(second.get().lastConsumedVersion, 123);
+
+	auto cancelled = makeReference<CDCConsumeLease>(consumer);
+	Future<CDCConsumeReply> pending = cancelled->waitForReply(blockedConsumeReply(&active));
+	ASSERT_EQ(active, 1);
+	pending.cancel();
+	ASSERT_EQ(active, 0);
+	return Void();
 }
 
 TEST_CASE("/NativeCDC/ProxyMutationFiltering") {

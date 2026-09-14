@@ -568,7 +568,11 @@ consumer must resume from its last acknowledged checkpoint. An existing native
 consumer detects the replacement and automatically rewinds an unacknowledged
 later position to that durable checkpoint. Only one consume RPC may be active
 for a stream because all consumers would share the same durable acknowledgement
-frontier; overlapping logical consumers are rejected.
+frontier; overlapping logical consumers are rejected. Native consumers attach a
+stable identity to consume RPCs. A transport retry with that identity cancels
+the preceding server request before starting another, so a lost connection
+does not turn one consumer into two. The identity is an optional trailing RPC
+field; requests from older clients retain the strict overlap rejection.
 
 When no later version is available, `consume()` is intentionally a client-side
 long poll. Each server request has a bounded
