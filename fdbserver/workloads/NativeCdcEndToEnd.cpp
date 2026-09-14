@@ -1142,14 +1142,18 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		auto initialProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
 		bool followedProxyReplacement = proxy->id() != initialProxyStatus.first.id();
 		updateObservedProxy(*proxy, initialProxyStatus.first);
-		const CDCProxyBufferStatus initial = initialProxyStatus.second;
+		CDCProxyBufferStatus initial = initialProxyStatus.second;
 		auto stopped = makeReference<AsyncVar<bool>>(false);
 		Future<Void> requester = requestPopsUntilStopped(cx, stopped);
 		const double deadline = now() + operationTimeout;
 		while (true) {
 			const UID previousProxy = proxy->id();
 			const CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, proxy);
-			followedProxyReplacement |= previousProxy != proxy->id();
+			if (previousProxy != proxy->id()) {
+				// Pop counters belong to one proxy instance; require fresh progress after replacement.
+				initial = status;
+				followedProxyReplacement = true;
+			}
 			if (status.popCompletions > initial.popCompletions) {
 				ASSERT_GT(status.popRequests, initial.popRequests);
 				break;
