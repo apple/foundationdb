@@ -92,7 +92,7 @@ struct StalePeerTestWorkload : TestWorkload {
 			"tlog", "ss",          "commit_proxy", "grv_proxy",         "master", "resolver", "dd",
 			"rk",   "coordinator", "log_router",   "cluster_controller"
 		};
-		if (!validRoles.count(dstKillRole)) {
+		if (!validRoles.contains(dstKillRole)) {
 			TraceEvent(SevError, "StalePeerTestInvalidDstKillRole")
 			    .detail("DstKillRole", dstKillRole)
 			    .detail("ValidOptions",
@@ -101,7 +101,7 @@ struct StalePeerTestWorkload : TestWorkload {
 			ASSERT(false);
 		}
 		static const std::set<std::string> validSrcChecks = { "any", "tester_client" };
-		if (!validSrcChecks.count(srcCheckRole)) {
+		if (!validSrcChecks.contains(srcCheckRole)) {
 			TraceEvent(SevError, "StalePeerTestInvalidSrcCheckRole")
 			    .detail("SrcCheckRole", srcCheckRole)
 			    .detail("ValidOptions", "any, tester_client");
