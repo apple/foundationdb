@@ -1408,7 +1408,7 @@ Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
 
 	std::vector<ErrorOr<GetKeyValuesReply>> readReplies;
 	readReplies.reserve(storageServerInterfaces.size());
-for (int j = 0; j < storageServerInterfaces.size(); j++) {
+	for (int j = 0; j < storageServerInterfaces.size(); j++) {
 		readReplies.push_back(keyValueFutures[j].get());
 	}
 	co_return readReplies;
@@ -1599,9 +1599,9 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 
 				bool isTss =
 				    storageServerInterfaces[j].isTss() || storageServerInterfaces[result.firstValidServer].isTss();
-				bool isExpectedTSSMismatch = g_network->isSimulated() &&
-					fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch) &&
-					isTss;
+				bool isExpectedTSSMismatch =
+				    g_network->isSimulated() &&
+				    fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch) && isTss;
 
 				// It's possible that the storage servers are inconsistent in KillRegion
 				// workload where a forced recovery is performed. The killed storage server

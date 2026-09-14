@@ -78,10 +78,10 @@ Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
     KeySelector begin);
 
 RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterface>& storageServerInterfaces,
-										 const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,
-										 KeyRangeRef range,
-										 KeySelector begin,
-										 bool performQuiescentChecks);
+                                         const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,
+                                         KeyRangeRef range,
+                                         KeySelector begin,
+                                         bool performQuiescentChecks);
 Future<Void> checkDataConsistency(Database cx,
                                   VectorRef<KeyValueRef> keyLocations,
                                   DatabaseConfiguration configuration,
