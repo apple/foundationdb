@@ -47,6 +47,7 @@
 #include "FileBackupAgentFileFormat.h"
 #include "flow/network.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/Util.h"
 
 #include <cinttypes>
@@ -5032,6 +5033,10 @@ void AccumulatedMutations::addChunk(int chunkNumber, const KeyValueRef& kv) {
 }
 
 bool AccumulatedMutations::isComplete() const {
+	return getCompleteMutations().present();
+}
+
+Optional<StringRef> AccumulatedMutations::getCompleteMutations() const {
 	if (lastChunkNumber >= 0) {
 		StringRefReader reader(serializedMutations, restore_corrupted_data());
 
@@ -5041,10 +5046,12 @@ bool AccumulatedMutations::isComplete() const {
 		}
 
 		uint32_t vLen = reader.consume<uint32_t>();
-		return vLen == reader.remainder().size();
+		if (vLen == reader.remainder().size()) {
+			return StringRef(serializedMutations);
+		}
 	}
 
-	return false;
+	return {};
 }
 
 // Returns true if a complete chunk contains any MutationRefs which intersect with any
@@ -5060,6 +5067,77 @@ bool AccumulatedMutations::matchesAnyRange(const RangeMapFilters& filters) const
 	}
 
 	return false;
+}
+
+TEST_CASE("/backup/AccumulatedMutations") {
+	BinaryWriter writer(Unversioned());
+	writer << uint64_t(0x0FDB00A200090002) << uint32_t(MutationRef::OVERHEAD_BYTES + 8);
+	writer << uint32_t(MutationRef::SetValue) << uint32_t(3) << uint32_t(5);
+	writer.serializeBytes("keyvalue"_sr);
+	Value serialized = writer.toValue();
+	const int split = sizeof(uint64_t) + sizeof(uint32_t) + 1;
+	KeyValueRef firstChunk("chunk0"_sr, serialized.substr(0, split));
+	KeyValueRef secondChunk("chunk1"_sr, serialized.substr(split));
+
+	AccumulatedMutations mutations;
+	ASSERT(!mutations.getCompleteMutations().present());
+	ASSERT(mutations.getChunks().empty());
+	mutations.addChunk(0, firstChunk);
+	ASSERT(!mutations.isComplete());
+	ASSERT(!mutations.getCompleteMutations().present());
+	ASSERT(mutations.getChunks().size() == 1);
+	ASSERT(mutations.getChunks().front() == firstChunk);
+
+	mutations.addChunk(1, secondChunk);
+	Optional<StringRef> complete = mutations.getCompleteMutations();
+	ASSERT(complete.present());
+	ASSERT(complete.get() == serialized);
+	ASSERT(mutations.isComplete());
+	ASSERT(mutations.getChunks().size() == 2);
+	ASSERT(mutations.getChunks().back() == secondChunk);
+	std::vector<MutationRef> decoded = decodeMutationLogValue(complete.get());
+	ASSERT(decoded.size() == 1);
+	ASSERT(decoded.front().type == MutationRef::SetValue);
+	ASSERT(decoded.front().param1 == "key"_sr);
+	ASSERT(decoded.front().param2 == "value"_sr);
+	ASSERT(mutations.matchesAnyRange(RangeMapFilters({ singleKeyRange("key"_sr) })));
+	ASSERT(!mutations.matchesAnyRange(RangeMapFilters({ singleKeyRange("other"_sr) })));
+
+	mutations.addChunk(1, secondChunk);
+	ASSERT(!mutations.getCompleteMutations().present());
+	ASSERT(mutations.getChunks().size() == 3);
+	ASSERT(mutations.getChunks().back() == secondChunk);
+
+	AccumulatedMutations outOfOrder;
+	outOfOrder.addChunk(1, secondChunk);
+	outOfOrder.addChunk(0, firstChunk);
+	outOfOrder.addChunk(1, secondChunk);
+	ASSERT(!outOfOrder.getCompleteMutations().present());
+	ASSERT(outOfOrder.getChunks().size() == 3);
+	ASSERT(outOfOrder.getChunks().front() == secondChunk);
+	ASSERT(outOfOrder.getChunks()[1] == firstChunk);
+
+	return Void();
+}
+
+TEST_CASE("/backup/AccumulatedMutations/invalidHeader") {
+	auto expectError = [](StringRef payload, int errorCode) {
+		AccumulatedMutations mutations;
+		mutations.addChunk(0, KeyValueRef("chunk0"_sr, payload));
+		bool caughtError = false;
+		try {
+			mutations.getCompleteMutations();
+		} catch (Error& e) {
+			ASSERT(e.code() == errorCode);
+			caughtError = true;
+		}
+		ASSERT(caughtError);
+	};
+	expectError("short"_sr, error_code_restore_corrupted_data);
+	BinaryWriter writer(Unversioned());
+	writer << uint64_t(0x0FDB00A200090001) << uint32_t(0);
+	expectError(writer.toValue(), error_code_incompatible_protocol_version);
+	return Void();
 }
 
 bool RangeMapFilters::match(const MutationRef& m) const {
@@ -5112,7 +5190,8 @@ std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, c
 
 		// If the mutations are incomplete or match one of the ranges, include in results.
 		if (!m.isComplete() || m.matchesAnyRange(filters)) {
-			output.insert(output.end(), m.kvs.begin(), m.kvs.end());
+			const auto& chunks = m.getChunks();
+			output.insert(output.end(), chunks.begin(), chunks.end());
 		}
 	}
 
