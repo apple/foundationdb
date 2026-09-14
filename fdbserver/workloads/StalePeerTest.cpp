@@ -164,8 +164,8 @@ struct StalePeerTestWorkload : TestWorkload {
 	bool isInspectedSource(ISimulator::ProcessInfo* proc) const {
 		if (proc->failed || proc->rebooting)
 			return false;
-		if (srcCheckRole == "tester_client" &&
-		    (getSimulatorProcessClass(proc) != ProcessClass::TesterClass || proc->address.ip == IPAddress(0x01010101))) {
+		if (srcCheckRole == "tester_client" && (getSimulatorProcessClass(proc) != ProcessClass::TesterClass ||
+		                                        proc->address.ip == IPAddress(0x01010101))) {
 			return false;
 		}
 		return proc->global(INetwork::enFlowTransport) != nullptr;

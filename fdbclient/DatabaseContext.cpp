@@ -1137,8 +1137,7 @@ void DatabaseContext::initializeSpecialCounters() {
 
 // Evicts cached ranges mapping to any server address in the input addresses set
 // Yields every LOCATION_CACHE_PEER_EVICTOR_SCAN_CHUNK ranges
-static Future<Void> invalidateCacheByAddresses(DatabaseContext* self,
-                                               std::unordered_set<NetworkAddress> addresses) {
+static Future<Void> invalidateCacheByAddresses(DatabaseContext* self, std::unordered_set<NetworkAddress> addresses) {
 	// Initial checks
 	if (addresses.empty()) {
 		co_return;
@@ -1329,7 +1328,6 @@ static Future<Void> locationCachePeerEvictorActor(DatabaseContext* cx) {
 		}
 	}
 }
-
 
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo,
