@@ -57,6 +57,7 @@ enum ArgKind {
 	ARG_ASYNC,
 	ARG_COMMITGET,
 	ARG_SAMPLING,
+	ARG_PROMETHEUS_PORT,
 	ARG_VERSION,
 	ARG_KNOBS,
 	ARG_FLATBUFFERS,
@@ -169,6 +170,7 @@ struct Arguments {
 	int tpsinterval;
 	int tpschange;
 	int sampling;
+	int prometheus_port;
 	int key_length;
 	int value_length;
 	int zipf;

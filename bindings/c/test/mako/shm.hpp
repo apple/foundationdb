@@ -39,6 +39,7 @@ struct Header {
 	std::atomic<int> readycount = ATOMIC_VAR_INIT(0);
 	std::atomic<double> throttle_factor = ATOMIC_VAR_INIT(1.0);
 	std::atomic<int> stopcount = ATOMIC_VAR_INIT(0);
+	std::atomic<int> metrics_status = ATOMIC_VAR_INIT(0);
 };
 
 struct LayoutHelper {
@@ -46,15 +47,18 @@ struct LayoutHelper {
 	WorkflowStatistics stats;
 };
 
-inline size_t storageSize(int num_processes, int num_threads, int num_workers) noexcept {
+inline size_t storageSize(int num_processes, int num_threads, int num_workers, bool native_metrics = false) noexcept {
 	assert(num_processes >= 1 && num_threads >= 1);
 	return sizeof(LayoutHelper) + sizeof(WorkflowStatistics) * ((num_processes * num_workers) - 1) +
-	       sizeof(ThreadStatistics) * (num_threads * num_processes) + sizeof(ProcessStatistics) * num_processes;
+	       sizeof(ThreadStatistics) * (num_threads * num_processes) + sizeof(ProcessStatistics) * num_processes +
+	       (native_metrics ? (sizeof(NativeLatencyHistogram) + sizeof(NativeCounters)) * num_processes * num_workers
+	                       : 0);
 }
 
 // class Access memory layout:
 // Header | WorkflowStatistics | WorkflowStatistics * (num_processes * num_workers - 1) | ThreadStatistics *
-// (num_processes * num_threads) | ProcessStatistics * (num_processes)
+// (num_processes * num_threads) | ProcessStatistics * (num_processes) | NativeLatencyHistogram *
+// (num_processes * num_workers) | NativeCounters * (num_processes * num_workers), when enabled
 // all Statistics classes have alignas(64)
 
 class Access {
@@ -62,6 +66,7 @@ class Access {
 	int num_processes;
 	int num_threads;
 	int num_workers;
+	bool native_metrics;
 
 	static inline WorkflowStatistics& workerStatsSlot(void* shm_base,
 	                                                  int num_workers,
@@ -78,7 +83,7 @@ class Access {
 	                                                int thread_idx) noexcept {
 		auto* thread_stat_base =
 		    reinterpret_cast<ThreadStatistics*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
-		                                        sizeof(WorkflowStatistics) * num_processes * num_workers);
+		                                        sizeof(WorkflowStatistics) * (num_processes * num_workers - 1));
 
 		return thread_stat_base[process_idx * num_threads + thread_idx];
 	}
@@ -91,28 +96,64 @@ class Access {
 
 		auto* proc_stat_base =
 		    reinterpret_cast<ProcessStatistics*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
-		                                         sizeof(WorkflowStatistics) * num_processes * num_workers +
+		                                         sizeof(WorkflowStatistics) * (num_processes * num_workers - 1) +
 		                                         sizeof(ThreadStatistics) * num_processes * num_threads);
 		return proc_stat_base[process_idx];
 	}
 
-public:
-	Access(void* shm, int num_processes, int num_threads, int num_workers) noexcept
-	  : base(shm), num_processes(num_processes), num_threads(num_threads), num_workers(num_workers) {}
+	static inline NativeLatencyHistogram& latencyHistogramSlot(void* shm_base,
+	                                                           int num_processes,
+	                                                           int num_threads,
+	                                                           int num_workers,
+	                                                           int process_idx,
+	                                                           int worker_idx) noexcept {
+		auto* latency_base = reinterpret_cast<NativeLatencyHistogram*>(
+		    static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
+		    sizeof(WorkflowStatistics) * (num_processes * num_workers - 1) +
+		    sizeof(ThreadStatistics) * num_processes * num_threads + sizeof(ProcessStatistics) * num_processes);
+		return latency_base[process_idx * num_workers + worker_idx];
+	}
 
-	Access() noexcept : Access(nullptr, 0, 0, 0) {}
+	static inline NativeCounters& countersSlot(void* shm_base,
+	                                           int num_processes,
+	                                           int num_threads,
+	                                           int num_workers,
+	                                           int process_idx,
+	                                           int worker_idx) noexcept {
+		auto* counters_base = reinterpret_cast<NativeCounters*>(
+		    static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
+		    sizeof(WorkflowStatistics) * (num_processes * num_workers - 1) +
+		    sizeof(ThreadStatistics) * num_processes * num_threads + sizeof(ProcessStatistics) * num_processes +
+		    sizeof(NativeLatencyHistogram) * num_processes * num_workers);
+		return counters_base[process_idx * num_workers + worker_idx];
+	}
+
+public:
+	Access(void* shm, int num_processes, int num_threads, int num_workers, bool native_metrics = false) noexcept
+	  : base(shm), num_processes(num_processes), num_threads(num_threads), num_workers(num_workers),
+	    native_metrics(native_metrics) {}
+
+	Access() noexcept : Access(nullptr, 0, 0, 0, false) {}
 
 	Access(const Access&) noexcept = default;
 
 	Access& operator=(const Access&) noexcept = default;
 
-	size_t size() const noexcept { return storageSize(num_processes, num_threads, num_workers); }
+	size_t size() const noexcept { return storageSize(num_processes, num_threads, num_workers, native_metrics); }
 
 	void initMemory() noexcept {
 		new (&header()) Header{};
 		for (auto i = 0; i < num_processes; i++) {
 			for (auto j = 0; j < num_workers; j++) {
-				new (&workerStatsSlot(i, j)) WorkflowStatistics();
+				NativeLatencyHistogram* latency = nullptr;
+				NativeCounters* counters = nullptr;
+				if (native_metrics) {
+					latency = &latencyHistogramSlot(base, num_processes, num_threads, num_workers, i, j);
+					counters = &countersSlot(base, num_processes, num_threads, num_workers, i, j);
+					new (latency) NativeLatencyHistogram();
+					new (counters) NativeCounters();
+				}
+				new (&workerStatsSlot(i, j)) WorkflowStatistics(latency, counters);
 			}
 		}
 		for (auto i = 0; i < num_processes; i++) {
