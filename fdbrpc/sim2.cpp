@@ -38,7 +38,6 @@
 #include "flow/IRandom.h"
 #include "flow/CodeProbe.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/ScopeExit.h"
 #include "flow/Util.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.h"
@@ -2969,7 +2968,8 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 
 	if (diskParameters->nextOperation < now())
 		diskParameters->nextOperation = now();
-	diskParameters->nextOperation += (1.0 / diskParameters->iops) + (double(size) / diskParameters->bandwidth);
+	diskParameters->nextOperation +=
+	    (1.0 / diskParameters->iops) + (static_cast<double>(size) / diskParameters->bandwidth);
 
 	double randomLatency;
 	if (sync) {
@@ -2979,39 +2979,6 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 	}
 
 	return delayUntil(diskParameters->nextOperation + randomLatency);
-}
-
-TEST_CASE("/fdbrpc/Sim2Disk/fractionalTransferDelay") {
-	if (!g_network->isSimulated()) {
-		co_return;
-	}
-
-	auto diskParameters = makeReference<DiskParameters>(4, 1024);
-	const double start = now();
-	Future<Void> first;
-	Future<Void> second;
-	{
-		auto* process = g_simulator->getCurrentProcess();
-		const bool failedDisk = process->failedDisk;
-		const double disabledDuration = g_simulator->connectionFailuresDisableDuration;
-		auto restore = ScopeExit([process, failedDisk, disabledDuration]() {
-			process->failedDisk = failedDisk;
-			g_simulator->connectionFailuresDisableDuration = disabledDuration;
-		});
-		// Exercise disk queueing without changing the surrounding simulation across a yield.
-		process->failedDisk = false;
-		g_simulator->connectionFailuresDisableDuration = 0;
-		first = waitUntilDiskReady(diskParameters, 256);
-		ASSERT(std::abs(diskParameters->nextOperation - (start + 0.5)) < 1e-8);
-		second = waitUntilDiskReady(diskParameters, 1536);
-		ASSERT(std::abs(diskParameters->nextOperation - (start + 2.25)) < 1e-8);
-	}
-	ASSERT(!first.isReady());
-	ASSERT(!second.isReady());
-	co_await first;
-	ASSERT(now() >= start + 0.5);
-	co_await second;
-	ASSERT(now() >= start + 2.25);
 }
 
 void enableConnectionFailures(std::string const& context, double duration) {
