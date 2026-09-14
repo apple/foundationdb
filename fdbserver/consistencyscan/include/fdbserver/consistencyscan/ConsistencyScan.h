@@ -55,10 +55,14 @@ struct RangeConsistencyResult {
 	Optional<KeyRef> lastReadKey;
 	int64_t totalReadAmount;
 	bool success;
+	// Set (along with success = false) when the disagreement looks like it's due to a storage server that
+	// isn't actually alive (e.g. mid forced-recovery), rather than a genuine data inconsistency. Callers
+	// should treat this as a signal to retry rather than as a real consistency failure.
+	bool isFailed;
 
 	explicit RangeConsistencyResult(const size_t serverCount)
-	  : firstValidServer(-1), uniqueRefKeys(serverCount), uniqueCmpKeys(serverCount),
-		mismatchedValues(serverCount), totalReadAmount(0), success(true) {}
+	  : firstValidServer(-1), uniqueRefKeys(serverCount), uniqueCmpKeys(serverCount), mismatchedValues(serverCount),
+	    totalReadAmount(0), success(true), isFailed(false) {}
 
 	explicit RangeConsistencyResult() : RangeConsistencyResult(0) {}
 };
@@ -68,10 +72,10 @@ inline bool isSuccessReply(const ErrorOr<GetKeyValuesReply>& reply) {
 }
 
 Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
-	Database cx,
-	std::vector<StorageServerInterface> storageServerInterfaces,
-	KeyRangeRef range,
-	KeySelector begin);
+    Database cx,
+    std::vector<StorageServerInterface> storageServerInterfaces,
+    KeyRangeRef range,
+    KeySelector begin);
 
 RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterface>& storageServerInterfaces,
 										 const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,

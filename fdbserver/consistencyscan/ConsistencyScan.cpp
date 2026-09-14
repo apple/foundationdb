@@ -1407,7 +1407,8 @@ Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
 	co_await waitForAll(keyValueFutures);
 
 	std::vector<ErrorOr<GetKeyValuesReply>> readReplies;
-	for (int j = 0; j < storageServerInterfaces.size(); j++) {
+	readReplies.reserve(storageServerInterfaces.size());
+for (int j = 0; j < storageServerInterfaces.size(); j++) {
 		readReplies.push_back(keyValueFutures[j].get());
 	}
 	co_return readReplies;
@@ -1599,8 +1600,8 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 				bool isTss =
 				    storageServerInterfaces[j].isTss() || storageServerInterfaces[result.firstValidServer].isTss();
 				bool isExpectedTSSMismatch = g_network->isSimulated() &&
-					                         fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch) &&
-				                             isTss;
+					fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch) &&
+					isTss;
 
 				// It's possible that the storage servers are inconsistent in KillRegion
 				// workload where a forced recovery is performed. The killed storage server
@@ -1649,6 +1650,7 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 					    .detail("ShardBegin", printable(range.begin))
 					    .detail("ShardEnd", printable(range.end));
 					result.success = false;
+					result.isFailed = true;
 					return result;
 				}
 			}
@@ -2226,6 +2228,7 @@ Future<Void> checkDataConsistency(Database cx,
 			Key lastStartSampleKey;
 			int64_t totalReadAmount = 0;
 			KeyRange readRange = range;
+			KeySelector begin = firstGreaterOrEqual(range.begin);
 			Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 			// Read a limited number of entries at a time, repeating until all keys in the shard have been read
@@ -2234,31 +2237,14 @@ Future<Void> checkDataConsistency(Database cx,
 				try {
 					lastSampleKey = lastStartSampleKey;
 
-					// Get the min version of the storage servers
-					Version version = co_await getStorageServerReadVersion(cx);
-
-					std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
-					Optional<int> firstValidServer;
 					double dataConsistencyCheckBeginTime = now();
 
-					totalReadAmount = 0;
-					int failures = co_await consistencyCheckReadData(UID(),
-					                                                 cx,
-					                                                 readRange,
-					                                                 version,
-					                                                 &storageServerInterfaces,
-					                                                 &keyValueFutures,
-					                                                 &firstValidServer,
-					                                                 &totalReadAmount,
-					                                                 {});
-					if (failures > 0) {
-						testFailure("Data inconsistent", performQuiescentChecks, success, true);
-					}
-					dataConsistencyCheckTimeForThisShard += (now() - dataConsistencyCheckBeginTime);
+					std::vector<ErrorOr<GetKeyValuesReply>> readReplies =
+					    co_await readFromAllStorageServers(cx, storageServerInterfaces, range, begin);
 
 					// If the data is not available and we aren't relocating this shard
 					for (int i = 0; i < storageServerInterfaces.size(); i++) {
-						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[i].get();
+						ErrorOr<GetKeyValuesReply> rangeResult = readReplies[i];
 						if (!isRelocating && (!rangeResult.present() || rangeResult.get().error.present())) {
 							Error e = rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
 
@@ -2291,8 +2277,29 @@ Future<Void> checkDataConsistency(Database cx,
 						}
 					}
 
-					if (firstValidServer.present()) {
-						VectorRef<KeyValueRef> data = keyValueFutures[firstValidServer.get()].get().get().data;
+					// checkRangeReplies() only compares each server's reply up through the minimum key that
+					// every server (which reported more data remaining) actually reached. This avoids treating
+					// a misaligned pagination boundary between replies -- e.g. one server's reply happening to
+					// stop a few keys earlier than another's, even though both are otherwise consistent -- as a
+					// spurious set of "missing"/unique keys.
+					RangeConsistencyResult rangeConsistencyResult =
+					    checkRangeReplies(storageServerInterfaces, readReplies, range, begin, performQuiescentChecks);
+					if (!rangeConsistencyResult.success) {
+						if (rangeConsistencyResult.isFailed) {
+							// A storage server looks dead (e.g. mid forced-recovery). Retry this same batch
+							// rather than failing the check, mirroring the old wrong_shard_server()-triggered
+							// retry below.
+							co_await delay(1.0);
+							continue;
+						}
+						testFailure("Data inconsistent", performQuiescentChecks, success, true);
+					}
+					dataConsistencyCheckTimeForThisShard += (now() - dataConsistencyCheckBeginTime);
+
+					totalReadAmount = rangeConsistencyResult.totalReadAmount;
+
+					if (rangeConsistencyResult.firstValidServer >= 0) {
+						VectorRef<KeyValueRef> data = readReplies[rangeConsistencyResult.firstValidServer].get().data;
 
 						// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 						// shard size estimate
@@ -2370,12 +2377,14 @@ Future<Void> checkDataConsistency(Database cx,
 					    .detail("BytesReadInRange", bytesReadInRange)
 					    .detail("BytesReadInthisRound", bytesReadInthisRound);
 
-					// Advance to the next set of entries
-					if (firstValidServer.present() && keyValueFutures[firstValidServer.get()].get().get().more) {
-						VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer.get()].get().get().data;
-						ASSERT(!result.empty());
-						ASSERT(result[result.size() - 1].key != allKeys.end);
-						readRange = KeyRangeRef(keyAfter(result[result.size() - 1].key), range.end);
+					// Advance to the next set of entries. rangeConsistencyResult.nextKey is the minimum last key
+					// reported by any server that still had more data, i.e. the point through which every
+					// server's reply was actually compared -- not just where the first valid server happened
+					// to stop -- so the next read can't skip over data other replicas hadn't gotten to yet.
+					if (rangeConsistencyResult.nextKey.present()) {
+						ASSERT(rangeConsistencyResult.nextKey.get() != allKeys.end);
+						begin = firstGreaterThan(rangeConsistencyResult.nextKey.get());
+						readRange = KeyRangeRef(keyAfter(rangeConsistencyResult.nextKey.get()), range.end);
 						lastStartSampleKey = lastSampleKey;
 						if (readRange.empty()) {
 							break;
@@ -2390,7 +2399,7 @@ Future<Void> checkDataConsistency(Database cx,
 				}
 
 				if (err.code() == error_code_wrong_shard_server) {
-					// consistencyCheckReadData throws this error when a storage server is dead in simulation.
+					// A storage server is dead in simulation.
 					co_await delay(1.0);
 				} else {
 					co_await onErrorTr.onError(err);
