@@ -66,17 +66,14 @@ struct RangeConsistencyResult {
 
 	explicit RangeConsistencyResult() : RangeConsistencyResult(0) {}
 };
-
 inline bool isSuccessReply(const ErrorOr<GetKeyValuesReply>& reply) {
 	return reply.present() && !reply.get().error.present();
 }
-
 Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
     Database cx,
     std::vector<StorageServerInterface> storageServerInterfaces,
     KeyRangeRef range,
     KeySelector begin);
-
 RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterface>& storageServerInterfaces,
                                          const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,
                                          KeyRangeRef range,

@@ -1486,46 +1486,6 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 			GetKeyValuesReply current = rangeResult.get();
 
 			if (current.data != reference.data || current.more != reference.more) {
-				// Be especially verbose if in simulation
-				if (g_network->isSimulated()) {
-					int invalidIndex = -1;
-					printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-					       "",
-					       j,
-					       storageServerInterfaces[j].address().toString().c_str(),
-					       printable(begin.getKey()).c_str(),
-					       printable(range.end).c_str());
-					for (int k = 0; k < current.data.size(); k++) {
-						printf("%d. %s => %s\n",
-						       k,
-						       printable(current.data[k].key).c_str(),
-						       printable(current.data[k].value).c_str());
-						if (invalidIndex < 0 &&
-						    (k >= reference.data.size() || current.data[k].key != reference.data[k].key ||
-						     current.data[k].value != reference.data[k].value))
-							invalidIndex = k;
-					}
-
-					printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-					       "",
-					       result.firstValidServer,
-					       storageServerInterfaces[result.firstValidServer].address().toString().c_str(),
-					       printable(begin.getKey()).c_str(),
-					       printable(range.end).c_str());
-					for (int k = 0; k < reference.data.size(); k++) {
-						printf("%d. %s => %s\n",
-						       k,
-						       printable(reference.data[k].key).c_str(),
-						       printable(reference.data[k].value).c_str());
-						if (invalidIndex < 0 &&
-						    (k >= current.data.size() || reference.data[k].key != current.data[k].key ||
-						     reference.data[k].value != current.data[k].value))
-							invalidIndex = k;
-					}
-
-					printf("\nMISMATCH AT %d\n\n", invalidIndex);
-				}
-
 				// Data for trace event
 				// The number of keys unique to the current shard
 				int currentUniques = 0;
@@ -1596,6 +1556,55 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 				result.uniqueRefKeys[j] = referenceUniques;
 				result.uniqueCmpKeys[j] = currentUniques;
 				result.mismatchedValues[j] = valueMismatches;
+
+				// The raw current.data != reference.data check above can trip merely because the two
+				// replies were paginated to different cutoff points (see result.nextKey above), even
+				// though both servers fully agree on every key either of them actually read. That's not
+				// a real inconsistency, so don't report/fail on it unless the bounded merge above found
+				// an actual discrepancy within the range every server got to.
+				if (currentUniques == 0 && referenceUniques == 0 && valueMismatches == 0) {
+					continue;
+				}
+
+				// Be especially verbose if in simulation
+				if (g_network->isSimulated()) {
+					int invalidIndex = -1;
+					printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+					       "",
+					       j,
+					       storageServerInterfaces[j].address().toString().c_str(),
+					       printable(begin.getKey()).c_str(),
+					       printable(range.end).c_str());
+					for (int k = 0; k < current.data.size(); k++) {
+						printf("%d. %s => %s\n",
+						       k,
+						       printable(current.data[k].key).c_str(),
+						       printable(current.data[k].value).c_str());
+						if (invalidIndex < 0 &&
+						    (k >= reference.data.size() || current.data[k].key != reference.data[k].key ||
+						     current.data[k].value != reference.data[k].value))
+							invalidIndex = k;
+					}
+
+					printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+					       "",
+					       result.firstValidServer,
+					       storageServerInterfaces[result.firstValidServer].address().toString().c_str(),
+					       printable(begin.getKey()).c_str(),
+					       printable(range.end).c_str());
+					for (int k = 0; k < reference.data.size(); k++) {
+						printf("%d. %s => %s\n",
+						       k,
+						       printable(reference.data[k].key).c_str(),
+						       printable(reference.data[k].value).c_str());
+						if (invalidIndex < 0 &&
+						    (k >= current.data.size() || reference.data[k].key != current.data[k].key ||
+						     reference.data[k].value != current.data[k].value))
+							invalidIndex = k;
+					}
+
+					printf("\nMISMATCH AT %d\n\n", invalidIndex);
+				}
 
 				bool isTss =
 				    storageServerInterfaces[j].isTss() || storageServerInterfaces[result.firstValidServer].isTss();
