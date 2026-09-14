@@ -11215,9 +11215,10 @@ Future<Void> updateStorage(StorageServer* data) {
 		++data->counters.kvCommits;
 		recentCommitStats.back().seqId = data->counters.kvCommits.getValue();
 
-		// If the mutation bytes budget was not fully used then wait some time before the next commit
-		durableDelay =
-		    (bytesLeft > 0) ? delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage) : Void();
+		// Batch only while both budgets have capacity; otherwise keep draining pending mutations.
+		durableDelay = (bytesLeft > 0 && clearRangesLeft > 0)
+		                   ? delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage)
+		                   : Void();
 
 		recentCommitStats.back().whenCommit = now();
 		try {
