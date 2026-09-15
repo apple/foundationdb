@@ -2431,7 +2431,10 @@ public:
 		second->tagIntervals.back().bufferedThrough = next - 1;
 		Promise<Void> ready;
 		auto cursor = makeReference<CDCPrefetchTestCursor>(ready.getFuture());
+		auto fetchStarted = cursor->onFetchStarted();
 		auto work = test.proxy.bufferTagCursor(test.tag, 100, cursor, Never(), Prefetch::True);
+		auto start = co_await race(fetchStarted, work);
+		ASSERT_EQ(start.index(), 0);
 		co_await delay(0);
 		ASSERT_EQ(cursor->fetchCount(), 1);
 		auto waiter = test.proxy.waitForBufferedVersion(second, next);
@@ -2481,7 +2484,10 @@ public:
 		auto waiter = test.proxy.waitForBufferedVersion(stream, 100);
 		ASSERT(awakened.isReady()); // No interest -> real demand still wakes a dormant tag.
 		auto cursor = makeReference<CDCPrefetchTestCursor>(Never());
+		auto fetchStarted = cursor->onFetchStarted();
 		auto work = test.proxy.bufferTagCursor(test.tag, 100, cursor, Never(), Prefetch::False);
+		auto start = co_await race(fetchStarted, work);
+		ASSERT_EQ(start.index(), 0);
 		co_await delay(0);
 		ASSERT_EQ(cursor->fetchCount(), 1);
 		ASSERT(!work.isReady());
@@ -2681,7 +2687,10 @@ public:
 		Promise<Void> ready;
 		Promise<Void> generationChanged;
 		auto cursor = makeReference<CDCPrefetchTestCursor>(ready.getFuture());
+		auto fetchStarted = cursor->onFetchStarted();
 		auto work = test.proxy.bufferTagCursor(test.tag, 100, cursor, generationChanged.getFuture(), Prefetch::True);
+		auto start = co_await race(fetchStarted, work);
+		ASSERT_EQ(start.index(), 0);
 		co_await delay(0);
 		ASSERT_EQ(cursor->fetchCount(), 1);
 		ASSERT(stream->readAhead.claimedBy(test.tag.getPtr()));
