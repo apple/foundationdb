@@ -160,12 +160,27 @@ class SmokeTest:
                 "p2p",
                 "--test_listenerAddresses=" + address,
                 "--test_remoteAddresses=" + address,
-                "--test_connectionsOut=1",
-                "--test_requests=1",
+                "--test_connectionsOut=2",
+                "--test_requestBytes=32:48",
+                "--test_replyBytes=96:64",
+                "--test_requests=2:3",
+                "--test_idleMilliseconds=1:0",
+                "--test_waitReadMilliseconds=1:2",
+                "--test_waitWriteMilliseconds=0:1",
                 "--test_targetDuration=2",
             ],
         ) as (process, output):
             text = self.finish(process, output)
+            for expected in (
+                "2 outgoing connections",
+                "Request size: 32:48",
+                "Response size: 64:96",
+                "Requests per outgoing session: 2:3",
+                "Delay before socket read: 1:2",
+                "Delay before socket write: 0:1",
+                "Delay before session close: 0:1",
+            ):
+                assert expected in text, text
             for direction in ("in", "out"):
                 rates = re.findall(r"([0-9.]+)/s completed sessions " + direction, text)
                 assert any(float(rate) > 0 for rate in rates), text
@@ -192,8 +207,16 @@ class SmokeTest:
 
     def invalid_arguments(self):
         server = ["--mode", "server", "-p", self.address(unused_port())]
+        p2p = ["--mode", "p2p", "--test_listenerAddresses=" + self.address(unused_port())]
         cases = [
             [],
+            ["--mode", "p2p"],
+            p2p + ["--test_unknown=1"],
+            p2p + ["--test_connectionsOut=-1"],
+            p2p + ["--test_connectionsOut=invalid"],
+            p2p + ["--test_requestBytes=1::2"],
+            p2p + ["--test_replyBytes=2147483647"],
+            p2p + ["--test_targetDuration=nan"],
             server + ["--knob_network_test_script_mode=invalid"],
             server + ["--knob_not_a_network_test_knob=1"],
             server + ["--not-a-network-test-option"],
@@ -203,7 +226,8 @@ class SmokeTest:
                 process,
                 output,
             ):
-                self.finish(process, output, seconds=5, success=False)
+                text = self.finish(process, output, seconds=5, success=False)
+                assert "ERROR:" in text, text
 
 
 def main():

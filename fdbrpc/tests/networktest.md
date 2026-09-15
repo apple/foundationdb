@@ -1,7 +1,7 @@
 # Network diagnostics
 
-`fdbrpc_network_test` runs RPC and socket diagnostics using Flow and fdbrpc,
-without linking the database client or server. Build it with:
+`fdbrpc_network_test` runs RPC and socket diagnostics using Flow and fdbrpc.
+Build it with:
 
 ```sh
 cmake --build build --target fdbrpc_network_test
@@ -20,8 +20,8 @@ build/bin/fdbrpc_network_test --mode client --testservers 127.0.0.1:4500 \
   --knob_network_test_script_mode=true
 ```
 
-The client supports comma-separated server addresses. Flow knobs retain their
-existing names, including `network_test_request_size`, `network_test_reply_size`,
+The client supports comma-separated server addresses. Flow knobs include
+`network_test_request_size`, `network_test_reply_size`,
 `network_test_client_count`, and `network_test_request_count`. Script mode reports
 one measurement after a warmup interval and then finishes. Without a request
 limit or script mode, the client runs until stopped. The server runs until stopped.
@@ -40,7 +40,7 @@ build/bin/fdbrpc_network_test --mode p2p \
   --test_connectionsOut=2 --test_targetDuration=5
 ```
 
-The existing `--test_*` parameters control payload size ranges, requests per
+The `--test_*` options control payload size ranges, requests per
 connection, and delays before reads, writes, and connection close. A duration
 of zero means run until stopped. `--mode p2p-oneshot` tests one connection and
 handshake without sending the traffic workload; run its listener and connector
@@ -51,15 +51,17 @@ Append `:tls` to addresses to enable TLS and supply `--tls_certificate_file`,
 [`contrib/mtlsbenchmark`](../../contrib/mtlsbenchmark/readme.md) for a two-process
 TLS example with handshake knobs.
 
-## Migration from fdbserver
+## Smoke test
 
-| Previous invocation | Standalone invocation |
-| --- | --- |
-| `fdbserver -r networktestserver` | `fdbrpc_network_test --mode server` |
-| `fdbserver -r networktestclient` | `fdbrpc_network_test --mode client` |
-| `fdbserver -r unittests -f :/network/p2ptest` | `fdbrpc_network_test --mode p2p` |
-| `fdbserver -r unittests -f :/network/p2poneshottest` | `fdbrpc_network_test --mode p2p-oneshot` |
+The target's CTest entry runs bounded loopback checks for RPC traffic, P2P
+sessions, handshake-only mode, and invalid options:
 
-The networking options above retain their names. The old server roles and P2P
-unit-test registrations are removed. The standalone target's CTest entry runs a
-bounded loopback smoke test; it does not start an indefinite benchmark.
+```sh
+ctest --test-dir build -R '^unit/fdbrpc_network_test/native$' --output-on-failure
+```
+
+To run the same checks with temporary TLS certificates (requires OpenSSL):
+
+```sh
+python3 fdbrpc/tests/networktest_smoke.py build/bin/fdbrpc_network_test --tls
+```

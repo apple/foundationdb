@@ -24,7 +24,6 @@
 
 #include "fdbrpc/fdbrpc.h"
 #include "flow/FileIdentifier.h"
-#include "flow/UnitTest.h"
 
 constexpr int WLTOKEN_NETWORKTEST = WLTOKEN_FIRST_AVAILABLE;
 
@@ -63,6 +62,33 @@ Future<Void> networkTestServer();
 
 Future<Void> networkTestClient(std::string const& testServers);
 
-Future<Void> networkTestP2P(const UnitTestParameters& params, bool oneshot);
+class NetworkTestIntRange {
+public:
+	NetworkTestIntRange() = default;
+	NetworkTestIntRange(int low, int high);
+
+	int get() const;
+	int maximum() const { return max; }
+	std::string toString() const;
+
+private:
+	int min = 0;
+	int max = 0;
+};
+
+struct P2PNetworkTestOptions {
+	std::vector<NetworkAddress> listenerAddresses;
+	std::vector<NetworkAddress> remoteAddresses;
+	int connectionsOut = 1;
+	NetworkTestIntRange requestBytes{ 50, 100 };
+	NetworkTestIntRange replyBytes{ 500, 1000 };
+	NetworkTestIntRange requests{ 10, 10000 };
+	NetworkTestIntRange idleMilliseconds;
+	NetworkTestIntRange waitReadMilliseconds;
+	NetworkTestIntRange waitWriteMilliseconds;
+	double targetDuration = 0.0;
+};
+
+Future<Void> networkTestP2P(P2PNetworkTestOptions options, bool oneshot);
 
 #endif

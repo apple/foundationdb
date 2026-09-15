@@ -28,7 +28,6 @@
 #include "flow/Platform.h"
 #include "flow/TLSConfig.h"
 #include "flow/Trace.h"
-#include "flow/UnitTest.h"
 
 #include <algorithm>
 #include <charconv>
@@ -39,6 +38,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 FDB_BOOLEAN_PARAM(Randomize);
@@ -52,7 +52,7 @@ enum Option {
 	OPT_TESTSERVERS,
 	OPT_PUBLIC_ADDRESS,
 	OPT_LISTEN_ADDRESS,
-	OPT_TEST_PARAM,
+	OPT_P2P_OPTION,
 	OPT_KNOB,
 	OPT_TRACE_DIR,
 };
@@ -66,7 +66,7 @@ CSimpleOpt::SOption options[] = { { OPT_HELP, "-h", SO_NONE },
 	                              { OPT_PUBLIC_ADDRESS, "--public-address", SO_REQ_SEP },
 	                              { OPT_LISTEN_ADDRESS, "-l", SO_REQ_SEP },
 	                              { OPT_LISTEN_ADDRESS, "--listen-address", SO_REQ_SEP },
-	                              { OPT_TEST_PARAM, "--test-", SO_REQ_SEP },
+	                              { OPT_P2P_OPTION, "--test-", SO_REQ_SEP },
 	                              { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	                              { OPT_TRACE_DIR, "--trace-dir", SO_REQ_SEP },
 	                              { OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
@@ -78,7 +78,8 @@ struct Options {
 	std::string testServers;
 	std::vector<std::string> publicAddresses;
 	std::vector<std::string> listenAddresses;
-	UnitTestParameters testParams;
+	P2PNetworkTestOptions p2pOptions;
+	bool hasP2POptions = false;
 	TLSConfig tlsConfig{ TLSEndpointType::SERVER };
 	std::string traceDir = ".";
 	bool showHelp = false;
@@ -123,50 +124,80 @@ void appendAddresses(std::vector<std::string>& addresses, const char* text) {
 	}
 }
 
-bool validNonnegativeInt(std::string_view text, int maximum = std::numeric_limits<int>::max()) {
+Optional<int> parseNonnegativeInt(std::string_view text, int maximum = std::numeric_limits<int>::max()) {
 	int value;
 	const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-	return error == std::errc() && end == text.data() + text.size() && value >= 0 && value <= maximum;
+	if (error != std::errc() || end != text.data() + text.size() || value < 0 || value > maximum) {
+		return {};
+	}
+	return value;
 }
 
-bool validateP2PParams(const UnitTestParameters& params) {
-	for (const auto& [name, value] : params.params) {
-		bool valid = false;
-		if (name == "listenerAddresses" || name == "remoteAddresses") {
-			valid = value.empty();
-			if (!value.empty()) {
-				const auto addresses = NetworkAddress::parseList(value);
-				valid = !addresses.empty() && std::all_of(addresses.begin(), addresses.end(), [](const auto& address) {
-					return address.isValid();
-				});
+Optional<NetworkTestIntRange> parseRange(std::string_view text) {
+	const auto colon = text.find(':');
+	const auto low = parseNonnegativeInt(text.substr(0, colon), std::numeric_limits<int>::max() - 1);
+	const auto high = colon == std::string_view::npos
+	                      ? low
+	                      : parseNonnegativeInt(text.substr(colon + 1), std::numeric_limits<int>::max() - 1);
+	if (!low.present() || !high.present()) {
+		return {};
+	}
+	return NetworkTestIntRange(low.get(), high.get());
+}
+
+bool parseP2POption(P2PNetworkTestOptions& options, const std::string& name, const std::string& value) {
+	if (name == "listenerAddresses" || name == "remoteAddresses") {
+		std::vector<NetworkAddress> addresses;
+		if (!value.empty()) {
+			addresses = NetworkAddress::parseList(value);
+			if (addresses.empty() || !std::all_of(addresses.begin(), addresses.end(), [](const auto& address) {
+				    return address.isValid();
+			    })) {
+				return false;
 			}
-		} else if (name == "connectionsOut") {
-			valid = validNonnegativeInt(value);
-		} else if (name == "targetDuration") {
-			try {
-				size_t end;
-				const auto duration = std::stod(value, &end);
-				valid = end == value.size() && std::isfinite(duration) && duration >= 0;
-			} catch (const std::exception&) {
-			}
-		} else if (name == "requestBytes" || name == "replyBytes" || name == "requests" || name == "idleMilliseconds" ||
-		           name == "waitReadMilliseconds" || name == "waitWriteMilliseconds") {
-			const auto colon = value.find(':');
-			// RandomIntRange samples an inclusive upper bound by adding one.
-			constexpr int maximum = std::numeric_limits<int>::max() - 1;
-			valid = validNonnegativeInt(value.substr(0, colon), maximum) &&
-			        (colon == std::string::npos || validNonnegativeInt(value.substr(colon + 1), maximum));
 		}
-		if (!valid) {
-			fprintf(stderr, "ERROR: Invalid P2P parameter --test_%s=%s\n", name.c_str(), value.c_str());
+		(name == "listenerAddresses" ? options.listenerAddresses : options.remoteAddresses) = std::move(addresses);
+		return true;
+	}
+	if (name == "connectionsOut") {
+		const auto count = parseNonnegativeInt(value);
+		if (!count.present()) {
 			return false;
 		}
+		options.connectionsOut = count.get();
+		return true;
 	}
-	if (params.get("listenerAddresses").orDefault("").empty() &&
-	    (params.get("remoteAddresses").orDefault("").empty() || params.getInt("connectionsOut").orDefault(1) == 0)) {
-		fprintf(stderr, "ERROR: P2P mode requires a listener or a remote with positive connectionsOut\n");
+	if (name == "targetDuration") {
+		try {
+			size_t end;
+			const auto duration = std::stod(value, &end);
+			if (end == value.size() && std::isfinite(duration) && duration >= 0) {
+				options.targetDuration = duration;
+				return true;
+			}
+		} catch (const std::exception&) {
+		}
 		return false;
 	}
+	NetworkTestIntRange* range = nullptr;
+	if (name == "requestBytes") {
+		range = &options.requestBytes;
+	} else if (name == "replyBytes") {
+		range = &options.replyBytes;
+	} else if (name == "requests") {
+		range = &options.requests;
+	} else if (name == "idleMilliseconds") {
+		range = &options.idleMilliseconds;
+	} else if (name == "waitReadMilliseconds") {
+		range = &options.waitReadMilliseconds;
+	} else if (name == "waitWriteMilliseconds") {
+		range = &options.waitWriteMilliseconds;
+	}
+	const auto parsed = parseRange(value);
+	if (!range || !parsed.present()) {
+		return false;
+	}
+	*range = parsed.get();
 	return true;
 }
 
@@ -193,12 +224,16 @@ bool parseArgs(int argc, char** argv, Options& result, FlowKnobs& knobs) {
 		case OPT_LISTEN_ADDRESS:
 			appendAddresses(result.listenAddresses, args.OptionArg());
 			break;
-		case OPT_TEST_PARAM: {
+		case OPT_P2P_OPTION: {
 			auto name = extractPrefixedArgument("--test", args.OptionSyntax());
 			if (!name.present() || name.get().empty()) {
 				return false;
 			}
-			result.testParams.set(name.get(), args.OptionArg());
+			if (!parseP2POption(result.p2pOptions, name.get(), args.OptionArg())) {
+				fprintf(stderr, "ERROR: Invalid P2P option --test_%s=%s\n", name.get().c_str(), args.OptionArg());
+				return false;
+			}
+			result.hasP2POptions = true;
 			break;
 		}
 		case OPT_KNOB: {
@@ -268,9 +303,14 @@ bool parseArgs(int argc, char** argv, Options& result, FlowKnobs& knobs) {
 		return false;
 	}
 	if (result.mode == "p2p" || result.mode == "p2p-oneshot") {
-		return validateP2PParams(result.testParams);
+		if (result.p2pOptions.listenerAddresses.empty() &&
+		    (result.p2pOptions.remoteAddresses.empty() || result.p2pOptions.connectionsOut == 0)) {
+			fprintf(stderr, "ERROR: P2P mode requires a listener or a remote with positive connectionsOut\n");
+			return false;
+		}
+		return true;
 	}
-	if (!result.testParams.params.empty()) {
+	if (result.hasP2POptions) {
 		fprintf(stderr, "ERROR: --test_NAME parameters require a P2P mode\n");
 		return false;
 	}
@@ -342,7 +382,7 @@ int main(int argc, char** argv) {
 		} else if (opts.mode == "client") {
 			work.push_back(networkTestClient(opts.testServers));
 		} else {
-			work.push_back(networkTestP2P(opts.testParams, opts.mode == "p2p-oneshot"));
+			work.push_back(networkTestP2P(opts.p2pOptions, opts.mode == "p2p-oneshot"));
 		}
 		Future<Void> done = stopNetworkAfter(waitForAny(work));
 		g_network->run();
