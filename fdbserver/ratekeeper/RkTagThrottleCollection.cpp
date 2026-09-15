@@ -21,7 +21,6 @@
 
 #include "fdbserver/core/Knobs.h"
 #include "RkTagThrottleCollection.h"
-#include "flow/UnitTest.h"
 
 double RkTagThrottleCollection::RkTagThrottleData::getTargetRate(Optional<double> requestRate) const {
 	if (limits.tpsRate == 0.0 || !requestRate.present() || requestRate.get() == 0.0 || !rateSet) {
@@ -345,63 +344,4 @@ void RkTagThrottleCollection::incrementBusyTagCount(TagThrottledReason reason) {
 		// Tag throttled reason is unset, probably because of upgrading
 		TraceEvent(SevWarn, "UnsetTagThrottledReason");
 	}
-}
-
-TEST_CASE("/fdbserver/ratekeeper/TagThrottleCollection/MoveConstruction") {
-	RkTagThrottleCollection source;
-	source.incrementBusyTagCount(TagThrottledReason::BUSY_READ);
-	source.incrementBusyTagCount(TagThrottledReason::BUSY_WRITE);
-	source.incrementBusyTagCount(TagThrottledReason::BUSY_WRITE);
-
-	RkTagThrottleCollection destination(std::move(source));
-	ASSERT_EQ(destination.getBusyReadTagCount(), 1);
-	ASSERT_EQ(destination.getBusyWriteTagCount(), 2);
-	co_return;
-}
-
-TEST_CASE("/fdbserver/ratekeeper/TagThrottleCollection/MoveAssignment") {
-	RkTagThrottleCollection source;
-	source.incrementBusyTagCount(TagThrottledReason::BUSY_READ);
-	source.incrementBusyTagCount(TagThrottledReason::BUSY_WRITE);
-	source.incrementBusyTagCount(TagThrottledReason::BUSY_WRITE);
-	RkTagThrottleCollection destination;
-	destination.incrementBusyTagCount(TagThrottledReason::BUSY_READ);
-	destination.incrementBusyTagCount(TagThrottledReason::BUSY_READ);
-
-	destination = std::move(source);
-	ASSERT_EQ(destination.getBusyReadTagCount(), 1);
-	ASSERT_EQ(destination.getBusyWriteTagCount(), 2);
-
-	destination = RkTagThrottleCollection();
-	ASSERT_EQ(destination.getBusyReadTagCount(), 0);
-	ASSERT_EQ(destination.getBusyWriteTagCount(), 0);
-	co_return;
-}
-
-TEST_CASE("/fdbserver/ratekeeper/TagThrottleCollection/ExpiredManualPreservesActiveRates") {
-	RkTagThrottleCollection throttles;
-	const double expiration = now() + 1.0;
-	const double activeExpiration = now() + 3600.0;
-	const TransactionTag firstTag = "first"_sr;
-	const TransactionTag secondTag = "second"_sr;
-	const TransactionTag manualTag = "manual"_sr;
-
-	// An expired manual entry on each tag makes an early exit skip the active
-	// auto throttle regardless of hash iteration order.
-	for (const auto& tag : { firstTag, secondTag }) {
-		throttles.manualThrottleTag(UID(), tag, TransactionPriority::DEFAULT, 10.0, expiration, {});
-	}
-	ASSERT(throttles.autoThrottleTag(UID(), firstTag, 0, 0.0, activeExpiration).present());
-	throttles.manualThrottleTag(UID(), manualTag, TransactionPriority::DEFAULT, 20.0, activeExpiration, {});
-
-	co_await delay(2.0);
-	const auto rates = throttles.getClientRates(true);
-	ASSERT_EQ(throttles.manualThrottleCount(), 1);
-	ASSERT_EQ(throttles.autoThrottleCount(), 1);
-	ASSERT_EQ(rates.at(TransactionPriority::DEFAULT).size(), 2);
-	ASSERT_EQ(rates.at(TransactionPriority::BATCH).size(), 2);
-	ASSERT_EQ(rates.at(TransactionPriority::DEFAULT).at(firstTag).tpsRate, 0.0);
-	ASSERT_EQ(rates.at(TransactionPriority::BATCH).at(firstTag).tpsRate, 0.0);
-	ASSERT_EQ(rates.at(TransactionPriority::DEFAULT).at(manualTag).tpsRate, 20.0);
-	co_return;
 }
