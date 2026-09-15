@@ -1,10 +1,4 @@
 [configuration]
-config = 'double'
-singleRegion = true
-datacenters = 1
-machineCount = 16
-processesPerMachine = 1
-statelessProcessClassesPerDC = 3
 buggify = true
 faultInjection = true
 

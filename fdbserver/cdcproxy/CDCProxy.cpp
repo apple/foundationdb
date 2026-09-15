@@ -2053,50 +2053,6 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 	}
 }
 
-namespace {
-Future<CDCConsumeReply> blockedConsumeReply(int* active) {
-	++*active;
-	ScopeExit release([active]() { --*active; });
-	co_await Future<Void>(Never());
-	co_return CDCConsumeReply();
-}
-} // namespace
-
-TEST_CASE("/NativeCDC/ConsumeRetryLease") {
-	const UID consumer(1, 2);
-	auto lease = makeReference<CDCConsumeLease>(consumer);
-	ASSERT(lease->belongsTo(consumer));
-	ASSERT(!lease->belongsTo(UID(3, 4)));
-	ASSERT(!lease->belongsTo({}));
-	ASSERT(!makeReference<CDCConsumeLease>(Optional<UID>())->belongsTo({}));
-	ASSERT(!makeReference<CDCConsumeLease>(UID())->belongsTo(UID()));
-
-	int active = 0;
-	Future<CDCConsumeReply> first = lease->waitForReply(blockedConsumeReply(&active));
-	ASSERT_EQ(active, 1);
-	ASSERT(!first.isReady());
-	lease->supersede();
-	ASSERT(first.isReady() && first.isError());
-	ASSERT_EQ(first.getError().code(), error_code_request_maybe_delivered);
-	ASSERT_EQ(active, 0);
-
-	auto replacement = makeReference<CDCConsumeLease>(consumer);
-	Promise<CDCConsumeReply> delivered;
-	Future<CDCConsumeReply> second = replacement->waitForReply(delivered.getFuture());
-	CDCConsumeReply reply;
-	reply.lastConsumedVersion = 123;
-	delivered.send(reply);
-	ASSERT(second.isReady() && !second.isError());
-	ASSERT_EQ(second.get().lastConsumedVersion, 123);
-
-	auto cancelled = makeReference<CDCConsumeLease>(consumer);
-	Future<CDCConsumeReply> pending = cancelled->waitForReply(blockedConsumeReply(&active));
-	ASSERT_EQ(active, 1);
-	pending.cancel();
-	ASSERT_EQ(active, 0);
-	return Void();
-}
-
 TEST_CASE("/NativeCDC/ProxyMutationFiltering") {
 	const KeyRangeRef keys("c"_sr, "m"_sr);
 

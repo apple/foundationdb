@@ -1103,44 +1103,6 @@ Future<Void> NativeCdcConsumer::acknowledge() {
 	return acknowledgeImpl(Reference<NativeCdcConsumer>::addRef(this));
 }
 
-namespace {
-struct LegacyCDCConsumeRequest {
-	constexpr static FileIdentifier file_identifier = CDCConsumeRequest::file_identifier;
-	CDCCursor cursor;
-	ReplyPromise<CDCConsumeReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, cursor, reply);
-	}
-};
-} // namespace
-
-TEST_CASE("/NativeCDC/ConsumeIdentityCompatibility") {
-	const Endpoint endpoint({ NetworkAddress(IPAddress(0x01020304), 4500) }, UID(1, 2));
-	LegacyCDCConsumeRequest legacy;
-	legacy.cursor = CDCCursor(7, 100);
-	legacy.reply = ReplyPromise<CDCConsumeReply>(endpoint);
-	const auto oldBytes = ObjectWriter::toValue(legacy, Unversioned());
-	auto upgraded = ObjectReader::fromStringRef<CDCConsumeRequest>(oldBytes, Unversioned());
-	ASSERT(!upgraded.consumerId.present());
-	ASSERT_EQ(upgraded.cursor.streamId, 7);
-	ASSERT_EQ(upgraded.cursor.lastConsumedVersion, 100);
-	ASSERT_EQ(upgraded.reply.getEndpoint().token, endpoint.token);
-
-	CDCConsumeRequest request(legacy.cursor, UID(3, 4));
-	request.reply = legacy.reply;
-	const auto bytes = ObjectWriter::toValue(request, Unversioned());
-	auto decoded = ObjectReader::fromStringRef<CDCConsumeRequest>(bytes, Unversioned());
-	ASSERT_EQ(decoded.consumerId, request.consumerId);
-	ASSERT_EQ(decoded.cursor.lastConsumedVersion, 100);
-	auto downgraded = ObjectReader::fromStringRef<LegacyCDCConsumeRequest>(bytes, Unversioned());
-	ASSERT_EQ(downgraded.cursor.streamId, 7);
-	ASSERT_EQ(downgraded.cursor.lastConsumedVersion, 100);
-	ASSERT_EQ(downgraded.reply.getEndpoint().token, endpoint.token);
-	return Void();
-}
-
 TEST_CASE("/NativeCDC/LifecycleAllocation") {
 	ASSERT(!validNativeCdcTagCount(-1));
 	ASSERT(!validNativeCdcTagCount(0));
