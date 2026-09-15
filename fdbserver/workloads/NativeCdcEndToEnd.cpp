@@ -1127,6 +1127,19 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await expectConcurrentConsumeRejected(*proxy, currentCursor);
 		first.cancel();
 		co_await waitForNoActiveConsumes(cx, streamId, proxy);
+
+		// Reproduce the server-side overlap without relying on the timing of a socket reset: both requests belong
+		// to one consumer, so the retry must supersede the pending metadata read instead of failing exclusivity.
+		const UID consumerId = deterministicRandom()->randomUniqueID();
+		Future<ErrorOr<CDCConsumeReply>> original =
+		    proxy->consume.tryGetReply(CDCConsumeRequest(currentCursor, consumerId));
+		Future<ErrorOr<CDCConsumeReply>> retry =
+		    proxy->consume.tryGetReply(CDCConsumeRequest(currentCursor, consumerId));
+		const ErrorOr<CDCConsumeReply> superseded = co_await timeoutError(original, operationTimeout);
+		ASSERT(superseded.isError());
+		ASSERT_EQ(superseded.getError().code(), error_code_request_maybe_delivered);
+		co_await timeoutError(throwErrorOr(retry), operationTimeout);
+		co_await waitForNoActiveConsumes(cx, streamId, proxy);
 	}
 
 	Future<Void> requestPopsUntilStopped(Database cx, Reference<AsyncVar<bool>> stopped) {

@@ -35,6 +35,7 @@ class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
 	Version knownAvailableThrough = invalidVersion;
 	Version lastAcknowledgedVersion;
 	Optional<UID> deliveryProxyId;
+	UID consumerId = deterministicRandom()->randomUniqueID();
 	bool operationOutstanding = false;
 
 public:

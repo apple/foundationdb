@@ -1021,8 +1021,8 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 				CODE_PROBE(true, "Native CDC consumer rewinds unacknowledged cursor after proxy replacement");
 			}
 			try {
-				CDCConsumeReply reply =
-				    co_await throwErrorOr(proxy.consume.tryGetReply(CDCConsumeRequest(self->currentPosition)));
+				CDCConsumeReply reply = co_await throwErrorOr(
+				    proxy.consume.tryGetReply(CDCConsumeRequest(self->currentPosition, self->consumerId)));
 				if (reply.lastConsumedVersion == self->currentPosition.lastConsumedVersion && reply.mutations.empty()) {
 					// The server lease bounds abandoned long polls. Renew it transparently so the public consume
 					// operation remains a long poll without accumulating server actors after client cancellation.
