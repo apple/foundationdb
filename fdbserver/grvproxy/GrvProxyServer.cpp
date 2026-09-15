@@ -411,13 +411,15 @@ Future<Void> getRate(UID myID,
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 
+			// Receive ratekeeper replies at socket priority so incoming GRVs cannot starve rate-lease updates.
 			reply = brokenPromiseToNever(
 			    db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID,
 			                                                                       *inTransactionCount,
 			                                                                       *inBatchTransactionCount,
 			                                                                       proxyData->version,
 			                                                                       *transactionTagCounter,
-			                                                                       detailed)));
+			                                                                       detailed),
+			                                                    TaskPriority::ReadSocket));
 			transactionTagCounter->clear();
 			expectingDetailedReply = detailed;
 		} else if (res.index() == 2) {
