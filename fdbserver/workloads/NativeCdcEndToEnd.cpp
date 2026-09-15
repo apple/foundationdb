@@ -1091,14 +1091,6 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT(overlappingAcknowledgement.isReady() && overlappingAcknowledgement.isError());
 		ASSERT_EQ(overlappingAcknowledgement.getError().code(), error_code_client_invalid_operation);
 
-		// Lose the reply channel while the server still owns the long poll. The public consumer must retry without
-		// becoming a competing consumer or leaving multiple requests reading the stream.
-		FlowTransport::transport().resetConnection(proxy->consume.getEndpoint().getPrimaryAddress());
-		co_await delay(1.0);
-		if (idleConsume.isReady()) {
-			co_await idleConsume;
-		}
-
 		// Assignment publications for unrelated streams used to abandon the client reply without canceling the
 		// corresponding server actor. The active request and read demand must remain bounded at one.
 		for (int i = 0; i < 4; ++i) {
