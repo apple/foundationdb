@@ -396,8 +396,11 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 							// nextKey is the smallest key that every server still reporting more data has
 							// actually read so far; resume just below it (excluding it, since it was already
 							// compared this round), mirroring the forward case's firstGreaterThan() below.
+							// Unlike the forward case, there's no sentinel value to assert against here:
+							// allKeys.end ("\xff\xff") can never be a real stored key, but allKeys.begin ("")
+							// is an ordinary, legal one -- nextKey (always sourced from an actual returned row)
+							// can legitimately equal it if a real key happens to live there.
 							begin = firstGreaterOrEqual(rangeConsistencyResult.nextKey.get());
-							ASSERT(begin.getKey() != allKeys.begin);
 						} else {
 							begin = firstGreaterThan(rangeConsistencyResult.nextKey.get());
 							ASSERT(begin.getKey() != allKeys.end);
