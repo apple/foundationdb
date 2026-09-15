@@ -2519,7 +2519,7 @@ Future<Void> rebalanceCDCProxyAssignments(ClusterControllerData* self) {
 			};
 			co_await rebalanceNativeCdcProxyAssignments(self->db.db, std::move(available), std::move(stillEligible));
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
+			if (e.code() == error_code_actor_cancelled || e.code() == error_code_broken_promise) {
 				throw;
 			}
 			// An ambiguous commit is reconciled by the assignment monitor; the next scheduled pass may try again.
