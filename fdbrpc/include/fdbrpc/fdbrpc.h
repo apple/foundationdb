@@ -181,6 +181,8 @@ public:
 		networkSender(Uncancellable(), getFuture(), &sav->getRawEndpoint());
 	}
 
+	// Acquiring each incoming reference before releasing its old reference preserves self-assignment.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const ReplyPromise& rhs) {
 		if (rhs.sav)
 			rhs.sav->addPromiseRef();
@@ -618,6 +620,8 @@ public:
 	// client
 	void setByteLimit(int64_t byteLimit) const { queue->acknowledgements.bytesLimit = byteLimit; }
 
+	// Acquiring each incoming reference before releasing its old reference preserves self-assignment.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const ReplyPromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)
@@ -920,6 +924,8 @@ public:
 	}
 	RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
 	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	// Acquiring each incoming reference before releasing its old reference preserves self-assignment.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const RequestStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)

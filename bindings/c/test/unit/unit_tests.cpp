@@ -23,6 +23,7 @@
 #include "fdb_c_options.g.h"
 #define FDB_USE_LATEST_API_VERSION
 #include <foundationdb/fdb_c.h>
+#include <foundationdb/CppWorkload.h>
 #include <assert.h>
 #include <string.h>
 
@@ -50,6 +51,38 @@
 #include "flow/IRandom.h"
 
 #include "fdb_api.hpp"
+
+TEST_CASE("GenericPromise copy and move") {
+	class RecordingPromise : public FDBPromise {
+	public:
+		explicit RecordingPromise(int& value) : value(value) {}
+		void send(void* source) override { value = *static_cast<int*>(source); }
+
+	private:
+		int& value;
+	};
+
+	int value = 0;
+	auto state = std::make_shared<RecordingPromise>(value);
+	GenericPromise<int> original(state);
+	GenericPromise<int> copy(original);
+	const GenericPromise<int>& constSource = original;
+	GenericPromise<int> constCopy(constSource);
+	GenericPromise<int> moved(std::move(copy));
+	constCopy.send(17);
+	CHECK(value == 17);
+	moved.send(23);
+	CHECK(value == 23);
+	original.send(31);
+	CHECK(value == 31);
+	CHECK(state.use_count() == 4);
+	GenericPromise<int> raw(new RecordingPromise(value));
+	raw.send(41);
+	CHECK(value == 41);
+	GenericPromise<int> unique(std::make_unique<RecordingPromise>(value));
+	unique.send(43);
+	CHECK(value == 43);
+}
 
 void fdb_check(fdb_error_t e) {
 	if (e) {

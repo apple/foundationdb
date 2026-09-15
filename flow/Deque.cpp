@@ -53,6 +53,44 @@ TEST_CASE("/flow/Deque/queue") {
 	return Void();
 }
 
+TEST_CASE("/flow/Deque/self_assignment") {
+	auto copyAssignToSelf = [](Deque<int>& q) {
+		const auto& source = q;
+		q = source;
+	};
+	auto moveAssignToSelf = [](Deque<int>& q) {
+		auto& source = q;
+		q = std::move(source);
+	};
+	Deque<int> q;
+	copyAssignToSelf(q);
+	moveAssignToSelf(q);
+	ASSERT(q.empty());
+	for (int i = 0; i < 6; ++i) {
+		q.push_back(i);
+	}
+	for (int i = 0; i < 4; ++i) {
+		q.pop_front();
+	}
+	for (int i = 6; i < 10; ++i) {
+		q.push_back(i);
+	}
+	const int* front = &q.front();
+	copyAssignToSelf(q);
+	ASSERT(&q.front() == front);
+	ASSERT(q.size() == 6);
+	for (int i = 0; i < q.size(); ++i) {
+		ASSERT(q[i] == i + 4);
+	}
+	moveAssignToSelf(q);
+	ASSERT(&q.front() == front);
+	ASSERT(q.size() == 6);
+	for (int i = 0; i < q.size(); ++i) {
+		ASSERT(q[i] == i + 4);
+	}
+	return Void();
+}
+
 TEST_CASE("/flow/Deque/max_size") {
 	Deque<uint8_t> q;
 	for (int i = 0; i < 10; i++)

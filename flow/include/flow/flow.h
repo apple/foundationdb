@@ -1012,6 +1012,8 @@ public:
 		if (sav)
 			sav->delFutureRef();
 	}
+	// Acquiring the incoming reference first keeps the shared state alive during self-assignment.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const Future<T>& rhs) {
 		if (rhs.sav)
 			rhs.sav->addFutureRef();
@@ -1117,6 +1119,8 @@ public:
 			sav->delPromiseRef();
 	}
 
+	// Acquiring the incoming reference first keeps the shared state alive during self-assignment.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const Promise& rhs) {
 		if (rhs.sav)
 			rhs.sav->addPromiseRef();
@@ -1303,6 +1307,9 @@ public:
 			queue->delFutureRef();
 	}
 	void operator=(const FutureStream& rhs) {
+		if (this == &rhs) {
+			return;
+		}
 		rhs.queue->addFutureRef();
 		if (queue)
 			queue->delFutureRef();
@@ -1410,6 +1417,8 @@ public:
 	PromiseStream() : queue(new NotifiedQueue<T>(0, 1)) {}
 	PromiseStream(const PromiseStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
 	PromiseStream(PromiseStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
+	// Acquiring the incoming reference first keeps the shared state alive during self-assignment.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const PromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)
