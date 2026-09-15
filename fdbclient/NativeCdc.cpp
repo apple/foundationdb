@@ -912,8 +912,8 @@ Future<NativeCdcStatus> getNativeCdcStatus(Database cx) {
 				stream.info.streamId = streamId;
 				std::sort(stream.tags.begin(), stream.tags.end());
 				stream.tags.erase(std::unique(stream.tags.begin(), stream.tags.end()), stream.tags.end());
-				if (stream.info.name.empty() || stream.info.ranges.empty() || stream.info.minVersion == invalidVersion ||
-				    stream.tags.empty()) {
+				if (stream.info.name.empty() || stream.info.ranges.empty() ||
+				    stream.info.minVersion == invalidVersion || stream.tags.empty()) {
 					result.metadataComplete = false;
 				}
 				for (const Tag& tag : stream.tags) {

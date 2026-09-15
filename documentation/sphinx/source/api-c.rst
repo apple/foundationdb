@@ -564,8 +564,8 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 CDC
 ---
 
-CDC exposes durable, named streams of committed mutations for one half-open
-user-key range. New stream registration requires CDC admission
+CDC exposes durable, named streams of committed mutations for an immutable union of
+half-open user-key ranges. New stream registration requires CDC admission
 to be enabled on the cluster. Listing, removal, consumer creation, resume,
 consume, and acknowledgement remain available for already durable streams while
 new admission is disabled so that callers can drain or remove them.
