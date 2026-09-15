@@ -422,13 +422,15 @@ ACTOR Future<Void> getRate(UID myID,
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 
+			// Receive ratekeeper replies at socket priority so incoming GRVs cannot starve rate-lease updates.
 			reply = brokenPromiseToNever(
 			    db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID,
 			                                                                       *inTransactionCount,
 			                                                                       *inBatchTransactionCount,
 			                                                                       proxyData->version,
 			                                                                       *transactionTagCounter,
-			                                                                       detailed)));
+			                                                                       detailed),
+			                                                    TaskPriority::ReadSocket));
 			transactionTagCounter->clear();
 			expectingDetailedReply = detailed;
 		}
@@ -660,9 +662,10 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContex
 
 	state double grvStart = now();
 	state Future<GetRawCommittedVersionReply> replyFromMasterFuture;
+	// Receive master replies at socket priority so incoming GRVs cannot starve an already-arrived reply.
 	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
 	    GetRawCommittedVersionRequest(span.context, debugID, grvProxyData->ssVersionVectorCache.getMaxVersion()),
-	    TaskPriority::GetLiveCommittedVersionReply);
+	    TaskPriority::ReadSocket);
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
 		wait(transformError(updateLastCommit(grvProxyData, debugID), broken_promise(), tlog_failed()));
