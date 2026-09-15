@@ -4,6 +4,8 @@ faultInjection = true
 
 [[knobs]]
 enable_native_cdc = true
+# Keep injected lost initialization replies within the workload's operation deadline.
+cc_recovery_init_req_max_timeout = 30.0
 # More active streams than tags exercise retention shared with a lagging consumer.
 native_cdc_tag_count = 2
 # Up to six TLog replies plus filtered mutations must fit the buggified 10 KB proxy buffer.
