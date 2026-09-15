@@ -597,7 +597,7 @@ public:
 	// Must be called on the server before sending results on the stream to ratelimit the amount of data outstanding to
 	// the client
 	Future<Void> onReady() const {
-		ASSERT(queue->acknowledgements.bytesLimit > 0);
+		ASSERT_GT(queue->acknowledgements.bytesLimit, 0);
 		if (queue->acknowledgements.failures.isError()) {
 			return queue->acknowledgements.failures.getError();
 		}

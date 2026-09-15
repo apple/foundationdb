@@ -218,7 +218,7 @@ public:
 
 	flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
 	void setGlobal(size_t id, flowGlobalType v) override {
-		ASSERT(id < globals.size());
+		ASSERT_LT(id, globals.size());
 		globals[id] = v;
 	}
 
@@ -525,7 +525,7 @@ public:
 		if (err) {
 			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is
 			// positive so check explicitly.
-			ASSERT(limit > 0);
+			ASSERT_GT(limit, 0);
 			bool notEmpty = false;
 			for (auto p = data; p; p = p->next) {
 				if (p->bytes_written - p->bytes_sent > 0) {
@@ -1230,7 +1230,7 @@ public:
 		if (err) {
 			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is
 			// positive so check explicitly.
-			ASSERT(limit > 0);
+			ASSERT_GT(limit, 0);
 			bool notEmpty = false;
 			for (auto p = data; p; p = p->next) {
 				if (p->bytes_written - p->bytes_sent > 0) {
@@ -2252,7 +2252,7 @@ void ASIOReactor::wake() {
 } // namespace N2
 
 SendBufferIterator::SendBufferIterator(SendBuffer const* p, int limit) : p(p), limit(limit) {
-	ASSERT(limit > 0);
+	ASSERT_GT(limit, 0);
 }
 
 void SendBufferIterator::operator++() {
