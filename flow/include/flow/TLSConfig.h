@@ -188,7 +188,7 @@ public:
 	// Load all specified certificates into memory, and return an object that
 	// allows access to them.
 	// If self has any certificates by path, they will be *asynchronously* loaded from disk.
-	Future<LoadedTLSConfig> loadAsync() const { return loadAsync(this); } // FIXME: swift
+	Future<LoadedTLSConfig> loadAsync() const;
 
 	// Return the explicitly set path.
 	// If one was not set, return the path from the environment.
@@ -207,8 +207,6 @@ public:
 #ifndef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
 private:
 #endif
-	static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self); // FIXME
-
 	std::string tlsCertPath, tlsKeyPath, tlsCAPath;
 	std::string tlsCertBytes, tlsKeyBytes, tlsCABytes;
 	std::string tlsPassword;

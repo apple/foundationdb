@@ -597,6 +597,7 @@ TEST_CASE("/flow/coro/yieldedFuture/progress") {
 	Future<Void> i = success(u);
 
 	std::vector<Future<Void>> v;
+	v.reserve(5);
 	for (int j = 0; j < 5; j++)
 		v.push_back(yieldedFuture(u));
 	auto numReady = [&v]() { return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); }); };
@@ -628,6 +629,7 @@ TEST_CASE("/flow/coro/yieldedFuture/random") {
 		Future<Void> i = success(u);
 
 		std::vector<Future<Void>> v;
+		v.reserve(25);
 		for (int j = 0; j < 25; j++)
 			v.push_back(yieldedFuture(u));
 		auto numReady = [&v]() {
@@ -676,6 +678,7 @@ TEST_CASE("/flow/coro/perf/yieldedFuture") {
 	std::vector<Future<Void>> ys;
 
 	start = timer();
+	ys.reserve(N);
 	for (int i = 0; i < N; i++)
 		ys.push_back(yieldedFuture(f));
 	printf("yieldedFuture(f) create: %0.1f M/sec\n", N / 1e6 / (timer() - start));
@@ -1615,6 +1618,7 @@ TEST_CASE("/flow/coro/quorumAsyncResultReady") {
 TEST_CASE("/flow/coro/quorumAsyncResultSuccess") {
 	std::vector<Promise<Void>> signals(3);
 	std::vector<AsyncResult<int>> results;
+	results.reserve(signals.size());
 	for (int i = 0; i < signals.size(); ++i) {
 		results.push_back(delayedAsyncResultInt(signals[i].getFuture(), i));
 	}
@@ -1671,6 +1675,7 @@ TEST_CASE("/flow/coro/quorumAsyncResultCancelsRemainingProducers") {
 	int completedCount = 0;
 	std::vector<Promise<Void>> signals(3);
 	std::vector<AsyncResult<int>> results;
+	results.reserve(signals.size());
 	for (int i = 0; i < signals.size(); ++i) {
 		results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
 	}
@@ -1692,6 +1697,7 @@ TEST_CASE("/flow/coro/quorumAsyncResultDropCancelsProducers") {
 	std::vector<Promise<Void>> signals(2);
 	{
 		std::vector<AsyncResult<int>> results;
+		results.reserve(signals.size());
 		for (int i = 0; i < signals.size(); ++i) {
 			results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
 		}
@@ -1881,6 +1887,7 @@ TEST_CASE("/flow/coro/getAllAsyncResultDropCancelsProducers") {
 	std::vector<Promise<Void>> signals(2);
 	{
 		std::vector<AsyncResult<int>> results;
+		results.reserve(signals.size());
 		for (int i = 0; i < signals.size(); ++i) {
 			results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
 		}
@@ -1903,6 +1910,7 @@ TEST_CASE("/flow/coro/getAllAsyncResultMoveDropCancelsProducers") {
 	std::vector<Promise<Void>> signals(2);
 	{
 		std::vector<AsyncResult<int>> results;
+		results.reserve(signals.size());
 		for (int i = 0; i < signals.size(); ++i) {
 			results.push_back(trackedAsyncResultInt(signals[i].getFuture(), i, &cancelledCount, &completedCount));
 		}

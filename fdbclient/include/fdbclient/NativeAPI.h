@@ -559,7 +559,7 @@ Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
 // Gets checkpoint metadata for `ranges` at the specific version, with the particular format.
 // Returns a list of [range, checkpoint], where the `checkpoint` has data over `range`.
 // checkpoint_not_found() error will be returned if the specific checkpoint cannot be found.
-Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
+AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
     Database cx,
     std::vector<KeyRange> ranges,
     Version version,
@@ -576,8 +576,8 @@ inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	if (bytes == 0) {
 		return CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 	} else {
-		return CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
-		       ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1);
+		const uint64_t pages = (bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1;
+		return CLIENT_KNOBS->TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE * pages;
 	}
 }
 

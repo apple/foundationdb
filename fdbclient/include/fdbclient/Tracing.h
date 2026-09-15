@@ -126,7 +126,7 @@ public:
 	// N.B. While this constructor receives a parentContext it does not overwrite the traceId of the Span's context.
 	// Therefore it is the responsibility of the caller to ensure the traceID and m_Flags of both the context and
 	// parentContext are identical if the caller wishes to establish a parent/child relationship between these spans. We
-	// do this to avoid needless comparisons or copies as this constructor is only called once in NativeAPI.actor.cpp
+	// do this to avoid needless comparisons or copies as this constructor is only called once in NativeAPI.cpp
 	// and from below in the by the Span(location, parent, links) constructor. The Span(location, parent, links)
 	// constructor is used broadly and performs the copy of the parent's traceID and m_Flags.
 	Span(const SpanContext& context,

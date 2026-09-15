@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <cinttypes>
+#include <cstring>
 #include <regex>
 #include <set>
 #include <string>
@@ -1711,8 +1712,12 @@ struct Versionstamp {
 	Versionstamp(Version version, uint16_t batchNumber) : version(version), batchNumber(batchNumber) {}
 	explicit Versionstamp(Standalone<StringRef> str) {
 		ASSERT(str.size() == sizeof(Version) + sizeof(batchNumber));
-		version = bigEndian64(*reinterpret_cast<const Version*>(str.begin()));
-		batchNumber = bigEndian16(*reinterpret_cast<const uint16_t*>(str.begin() + sizeof(Version)));
+		Version encodedVersion;
+		uint16_t encodedBatchNumber;
+		std::memcpy(&encodedVersion, str.begin(), sizeof(encodedVersion));
+		std::memcpy(&encodedBatchNumber, str.begin() + sizeof(encodedVersion), sizeof(encodedBatchNumber));
+		version = bigEndian64(encodedVersion);
+		batchNumber = bigEndian16(encodedBatchNumber);
 	}
 
 	std::string toString() const { return fmt::format("{}.{}", version, batchNumber); }

@@ -670,6 +670,7 @@ TEST_CASE("/flow/flow/quorum") {
 	std::vector<Promise<int>> ps(5);
 	std::vector<Future<int>> fs;
 	std::vector<Future<Void>> qs;
+	fs.reserve(ps.size());
 	for (auto& p : ps)
 		fs.push_back(p.getFuture());
 
@@ -912,6 +913,7 @@ TEST_CASE("/flow/flow/yieldedFuture/progress") {
 	Future<Void> i = success(u);
 
 	std::vector<Future<Void>> v;
+	v.reserve(5);
 	for (int i = 0; i < 5; i++)
 		v.push_back(yieldedFuture(u));
 	auto numReady = [&v]() { return std::count_if(v.begin(), v.end(), [](Future<Void> v) { return v.isReady(); }); };
@@ -943,6 +945,7 @@ TEST_CASE("/flow/flow/yieldedFuture/random") {
 		Future<Void> i = success(u);
 
 		std::vector<Future<Void>> v;
+		v.reserve(25);
 		for (int i = 0; i < 25; i++)
 			v.push_back(yieldedFuture(u));
 		auto numReady = [&v]() {
@@ -991,6 +994,7 @@ TEST_CASE("/flow/perf/yieldedFuture") {
 	std::vector<Future<Void>> ys;
 
 	start = timer();
+	ys.reserve(N);
 	for (int i = 0; i < N; i++)
 		ys.push_back(yieldedFuture(f));
 	printf("yieldedFuture(f) create: %0.1f M/sec\n", N / 1e6 / (timer() - start));
@@ -1378,6 +1382,36 @@ TEST_CASE("/flow/flow/AsyncMap/randomized") {
 	}
 }
 
+TEST_CASE("/flow/flow/AsyncMap/basic") {
+	Future<Void> pending;
+	{
+		AsyncMap<int, int> map;
+		map.set(10, 1);
+		ASSERT(map.get(10) == 1);
+		ASSERT(map.get(20) == 0);
+
+		Future<Void> first = map.onChange(10);
+		Future<Void> second = map.onChange(20);
+		pending = map.onChange(30);
+		ASSERT(!first.isReady() && !second.isReady() && !pending.isReady());
+
+		map.set(10, 0);
+		ASSERT(first.isReady() && !first.isError());
+		ASSERT(!second.isReady() && map.get(10) == 0);
+		map.set(20, 5);
+		ASSERT(second.isReady() && !second.isError() && map.get(20) == 5);
+
+		first = map.onChange(10);
+		second = map.onChange(20);
+		map.triggerRange(15, 25);
+		ASSERT(!first.isReady() && second.isReady() && !second.isError());
+		ASSERT(map.get(20) == 5);
+	}
+	ASSERT(pending.isReady() && pending.isError());
+	ASSERT(pending.getError().code() == error_code_broken_promise);
+	return Void();
+}
+
 TEST_CASE("/flow/flow/YieldedAsyncMap/basic") {
 	YieldedAsyncMap<int, int> yam;
 	Future<Void> y0 = yam.onChange(1);
@@ -1690,7 +1724,7 @@ TEST_CASE("/flow/flow/FlowMutex") {
 					if (verbose) {
 						printf("Final wait in case error was injected by the last actor to finish\n");
 					}
-					co_await success(mutex.take());
+					co_await mutex.take();
 				}
 			} catch (Error& e) {
 				if (verbose) {
@@ -1834,7 +1868,7 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/peerDisconnect") {
 	// peer->disconnect, and PeerHolder only touches outstandingReplies. Note that Peer construction
 	// also updates the global failure monitor status for fakeAddr.
 	NetworkAddress fakeAddr = NetworkAddress::parse("1.2.3.4:1234");
-	Reference<Peer> peer = makeReference<Peer>(nullptr, fakeAddr);
+	auto peer = makeReference<Peer>(nullptr, fakeAddr);
 
 	// Create a value future that never resolves (simulating a stuck RPC to unreachable storage server)
 	Promise<Void> neverReply;
@@ -1963,8 +1997,8 @@ TEST_CASE("/fdbrpc/waitValueOrSignal/retryOnDisconnect") {
 
 	NetworkAddress addr1 = NetworkAddress::parse("1.2.3.4:1234");
 	NetworkAddress addr2 = NetworkAddress::parse("1.2.3.5:1234");
-	Reference<Peer> peer1 = makeReference<Peer>(nullptr, addr1);
-	Reference<Peer> peer2 = makeReference<Peer>(nullptr, addr2);
+	auto peer1 = makeReference<Peer>(nullptr, addr1);
+	auto peer2 = makeReference<Peer>(nullptr, addr2);
 
 	int numAttempts = 0;
 

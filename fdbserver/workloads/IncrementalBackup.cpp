@@ -242,7 +242,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 
 			if (checkBeginVersion) {
 				TraceEvent("IBackupReadSystemKeys").log();
-				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 				while (true) {
 					Error err;
 					try {

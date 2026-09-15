@@ -46,7 +46,6 @@
 #include "fdbrpc/MultiInterface.h"
 
 #include "fdbclient/ActorLineageProfiler.h"
-#include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClientOptionValidation.h"
 #include "fdbclient/ClusterInterface.h"
@@ -73,7 +72,7 @@
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbclient/versions.h"
-#include "fdbrpc/WellKnownEndpoints.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
@@ -1388,14 +1387,15 @@ void DatabaseContext::updateBackoff(const Error& err) {
 	}
 }
 
-Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database cx,
-                                                                        KeyRange keys,
-                                                                        int limit,
-                                                                        Reverse reverse,
-                                                                        SpanContext spanContext,
-                                                                        Optional<UID> debugID,
-                                                                        UseProvisionalProxies useProvisionalProxies,
-                                                                        Version version) {
+AsyncResult<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
+    Database cx,
+    KeyRange keys,
+    int limit,
+    Reverse reverse,
+    SpanContext spanContext,
+    Optional<UID> debugID,
+    UseProvisionalProxies useProvisionalProxies,
+    Version version) {
 	Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug",
@@ -1452,6 +1452,12 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database
 	}
 }
 
+// Complete cache hits synchronously without adding a wrapper coroutine around cache misses.
+static AsyncResult<std::vector<KeyRangeLocationInfo>> readyKeyRangeLocations(
+    std::vector<KeyRangeLocationInfo> locations) {
+	co_return locations;
+}
+
 // Get the SS locations for each shard in the 'keys' key-range;
 // Returned vector size is the number of shards in the input keys key-range.
 // Returned vector element is <ShardRange, storage server location info> pairs, where
@@ -1459,15 +1465,15 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(Database
 // Example: If query the function with  key range (b, d), the returned list of pairs could be something like:
 // [([a, b1), locationInfo), ([b1, c), locationInfo), ([c, d1), locationInfo)].
 template <class F>
-Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& cx,
-                                                               KeyRange const& keys,
-                                                               int limit,
-                                                               Reverse reverse,
-                                                               F StorageServerInterface::* member,
-                                                               SpanContext const& spanContext,
-                                                               Optional<UID> const& debugID,
-                                                               UseProvisionalProxies useProvisionalProxies,
-                                                               Version version) {
+AsyncResult<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& cx,
+                                                                    KeyRange const& keys,
+                                                                    int limit,
+                                                                    Reverse reverse,
+                                                                    F StorageServerInterface::* member,
+                                                                    SpanContext const& spanContext,
+                                                                    Optional<UID> const& debugID,
+                                                                    UseProvisionalProxies useProvisionalProxies,
+                                                                    Version version) {
 
 	ASSERT(!keys.empty());
 
@@ -1498,15 +1504,15 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& c
 		    cx, keys, limit, reverse, spanContext, debugID, useProvisionalProxies, version);
 	}
 
-	return locations;
+	return readyKeyRangeLocations(std::move(locations));
 }
 
 template <class F>
-Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<TransactionState> trState,
-                                                               KeyRange const& keys,
-                                                               int limit,
-                                                               Reverse reverse,
-                                                               F StorageServerInterface::* member) {
+AsyncResult<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<TransactionState> trState,
+                                                                    KeyRange const& keys,
+                                                                    int limit,
+                                                                    Reverse reverse,
+                                                                    F StorageServerInterface::* member) {
 	return getKeyRangeLocations(trState->cx,
 	                            keys,
 	                            limit,
@@ -1607,7 +1613,7 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 
 Future<Void> startTransaction(Reference<TransactionState> trStateInput) {
 	Reference<TransactionState> trState(std::move(trStateInput));
-	co_await success(trState->readVersionFuture);
+	co_await trState->readVersionFuture;
 }
 
 TEST_CASE("/fdbclient/NativeAPI/startTransaction/releasesStateOnCompletion") {
@@ -2368,7 +2374,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trStateInput
 			req.arena.dependsOn(locations[shard].range.arena());
 
 			transformRangeLimits(limits, reverse, req);
-			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && (req.limit < 0) == reverse);
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
@@ -2765,7 +2771,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trStateInput,
 			}
 
 			transformRangeLimits(limits, reverse, req);
-			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && (req.limit < 0) == reverse);
 
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
 			req.spanContext = span.context;
@@ -3164,7 +3170,7 @@ Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>> maybeDuplicateTSSStr
 			ReplyPromiseStream<REPLYSTREAM_TYPE(Request)> tssReplyStream = tssRequestStream.getReplyStream(req);
 			PromiseStream<REPLYSTREAM_TYPE(Request)> ssDuplicateReplyStream;
 			TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)> streamData(ssDuplicateReplyStream);
-			model->addActor.send(tssStreamComparison(req, streamData, tssReplyStream, tssData.get()));
+			model->addBackgroundActor(tssStreamComparison(req, streamData, tssReplyStream, tssData.get()));
 			return Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>>(streamData);
 		}
 	}
@@ -3211,7 +3217,7 @@ Future<Void> getRangeStreamImpl(Reference<TransactionState> trStateInput,
 			// keep shard's arena around in case of async tss comparison
 			req.arena.dependsOn(range.arena());
 
-			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && (req.limit < 0) == reverse);
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
@@ -6960,7 +6966,7 @@ static Future<CheckpointMetaData> getCheckpointMetaDataInternal(KeyRange range,
 	throw error.get();
 }
 
-static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDataForRange(
+static AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDataForRange(
     Database cxInput,
     KeyRange rangeInput,
     Version version,
@@ -7037,26 +7043,28 @@ static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpoin
 	co_return res;
 }
 
-Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(Database cx,
-                                                                                   std::vector<KeyRange> ranges,
-                                                                                   Version version,
-                                                                                   CheckpointFormat format,
-                                                                                   Optional<UID> actionId,
-                                                                                   double timeout) {
-	std::vector<Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>>> futures;
+AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(Database cx,
+                                                                                        std::vector<KeyRange> ranges,
+                                                                                        Version version,
+                                                                                        CheckpointFormat format,
+                                                                                        Optional<UID> actionId,
+                                                                                        double timeout) {
+	std::vector<AsyncResult<std::vector<std::pair<KeyRange, CheckpointMetaData>>>> futures;
+	futures.reserve(ranges.size());
 
 	// TODO(heliu): Avoid send requests to the same shard.
 	for (const auto& range : ranges) {
 		futures.push_back(getCheckpointMetaDataForRange(cx, range, version, format, actionId, timeout));
 	}
 
-	std::vector<std::vector<std::pair<KeyRange, CheckpointMetaData>>> results = co_await getAll(futures);
+	std::vector<std::vector<std::pair<KeyRange, CheckpointMetaData>>> results =
+	    co_await getAllAsync(std::move(futures));
 
 	std::vector<std::pair<KeyRange, CheckpointMetaData>> res;
 
-	for (const auto& r : results) {
+	for (auto& r : results) {
 		ASSERT(!r.empty());
-		res.insert(res.end(), r.begin(), r.end());
+		res.insert(res.end(), std::make_move_iterator(r.begin()), std::make_move_iterator(r.end()));
 	}
 
 	co_return res;
@@ -7178,7 +7186,7 @@ static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, boo
 	std::vector<std::string> addressesVec;
 	boost::algorithm::split(addressesVec, addr.toString(), boost::is_any_of(","));
 	// Note: reuse this knob from fdbcli, change it if necessary
-	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+	auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 	std::vector<Future<bool>> verifyInterfs;
 	for (const auto& requestedAddress : addressesVec) {
 		// step 1: check that the requested address is in the worker list provided by CC

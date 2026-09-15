@@ -648,43 +648,43 @@ public:
 		}
 
 		// Write item to the next position in the current page or, if it won't fit, add a new page and write it there.
-		static Future<Void> write_impl(Cursor* self, T item) {
-			ASSERT(self->mode == WRITE);
+		Future<Void> write_impl(T item) {
+			ASSERT(this->mode == WRITE);
 
 			FlowMutex::Lock lock;
-			bool mustWait = self->isBusy();
+			bool mustWait = this->isBusy();
 			int bytesNeeded = Codec::bytesNeeded(item);
 			bool needNewPage =
-			    self->pageID == invalidPhysicalPageID || self->offset + bytesNeeded > self->header()->itemSpace;
+			    this->pageID == invalidPhysicalPageID || this->offset + bytesNeeded > this->header()->itemSpace;
 
 			if (g_network->isSimulated()) {
 				// Sometimes (1% probability) decide a new page is needed as long as at least 1 item has been
 				// written (indicated by non-zero offset) to the current page.
-				if ((self->offset > 0) && deterministicRandom()->random01() < 0.01) {
+				if ((this->offset > 0) && deterministicRandom()->random01() < 0.01) {
 					needNewPage = true;
 				}
 			}
 
 			debug_printf("FIFOQueue::Cursor(%s) write(%s) mustWait=%d needNewPage=%d\n",
-			             self->toString().c_str(),
+			             this->toString().c_str(),
 			             ::toString(item).c_str(),
 			             mustWait,
 			             needNewPage);
 
 			// If we have to wait for the mutex because it's busy, or we need a new page, then wait for the mutex.
 			if (mustWait || needNewPage) {
-				lock = co_await self->mutex.take();
+				lock = co_await this->mutex.take();
 
 				// If we had to wait because the mutex was busy, then update needNewPage as another writer
 				// would have changed the cursor state
 				// Otherwise, taking the mutex would be immediate so no other writer could have run
 				if (mustWait) {
 					needNewPage =
-					    self->pageID == invalidPhysicalPageID || self->offset + bytesNeeded > self->header()->itemSpace;
+					    this->pageID == invalidPhysicalPageID || this->offset + bytesNeeded > this->header()->itemSpace;
 					if (g_network->isSimulated()) {
 						// Sometimes (1% probability) decide a new page is needed as long as at least 1 item has been
 						// written (indicated by non-zero offset) to the current page.
-						if ((self->offset > 0) && deterministicRandom()->random01() < 0.01) {
+						if ((this->offset > 0) && deterministicRandom()->random01() < 0.01) {
 							needNewPage = true;
 						}
 					}
@@ -694,14 +694,14 @@ public:
 			// If we need a new page, add one.
 			if (needNewPage) {
 				debug_printf("FIFOQueue::Cursor(%s) write(%s) page is full, adding new page\n",
-				             self->toString().c_str(),
+				             this->toString().c_str(),
 				             ::toString(item).c_str());
 				PhysicalPageID newPageID;
 				// If this is an extent based queue, check if there is an available page in current extent
-				if (self->queue->usesExtents) {
+				if (this->queue->usesExtents) {
 					bool allocateNewExtent = false;
-					if (self->pageID != invalidPhysicalPageID) {
-						auto praw = self->header();
+					if (this->pageID != invalidPhysicalPageID) {
+						auto praw = this->header();
 						if (praw->extentCurPageID < praw->extentEndPageID) {
 							newPageID = praw->extentCurPageID + 1;
 						} else {
@@ -711,25 +711,25 @@ public:
 						allocateNewExtent = true;
 					}
 					if (allocateNewExtent) {
-						PhysicalPageID newPID = co_await self->queue->pager->newExtentPageID(self->queue->queueID);
+						PhysicalPageID newPID = co_await this->queue->pager->newExtentPageID(this->queue->queueID);
 						newPageID = newPID;
 					}
 				} else {
-					PhysicalPageID newPID = co_await self->queue->pager->newPageID();
+					PhysicalPageID newPID = co_await this->queue->pager->newPageID();
 					newPageID = newPID;
 				}
-				self->addNewPage(newPageID, 0, true, true);
+				this->addNewPage(newPageID, 0, true, true);
 
-				++self->queue->numPages;
+				++this->queue->numPages;
 			}
 
 			debug_printf(
-			    "FIFOQueue::Cursor(%s) write(%s) writing\n", self->toString().c_str(), ::toString(item).c_str());
-			auto p = self->header();
-			Codec::writeToBytes(p->begin() + self->offset, item);
-			self->offset += bytesNeeded;
-			p->endOffset = self->offset;
-			++self->queue->numEntries;
+			    "FIFOQueue::Cursor(%s) write(%s) writing\n", this->toString().c_str(), ::toString(item).c_str());
+			auto p = this->header();
+			Codec::writeToBytes(p->begin() + this->offset, item);
+			this->offset += bytesNeeded;
+			p->endOffset = this->offset;
+			++this->queue->numEntries;
 
 			if (mustWait || needNewPage) {
 				// Prevent possible stack overflow if too many waiters which require no IO are queued up
@@ -746,7 +746,7 @@ public:
 
 		void write(const T& item) {
 			// Start the write.  It may complete immediately if no IO was being waited on
-			Future<Void> w = write_impl(this, item);
+			Future<Void> w = write_impl(item);
 			// If it didn't complete immediately, then store the future in operation
 			if (!w.isReady()) {
 				writeOperations = writeOperations && w;
@@ -754,32 +754,29 @@ public:
 		}
 
 		// If readNext() cannot complete immediately because it must wait for IO, it will route to here.
-		// The purpose of this function is to serialize simultaneous readers on self while letting the
+		// The purpose of this function is to serialize simultaneous readers on the cursor while letting the
 		// common case (>99.8% of the time) be handled with low overhead by the non-actor readNext() function.
 		//
 		// The mutex will be taken if locked is false.
 		// The next page will be waited for if load is true.
 		// Only mutex holders will wait on the page read.
-		static Future<Optional<T>> waitThenReadNext(Cursor* self,
-		                                            Optional<T> inclusiveMaximum,
-		                                            FlowMutex::Lock* lock,
-		                                            bool load) {
+		Future<Optional<T>> waitThenReadNext(Optional<T> inclusiveMaximum, FlowMutex::Lock* lock, bool load) {
 			FlowMutex::Lock localLock;
 
 			// Lock the mutex if it wasn't already locked, so we didn't get a lock pointer
 			if (lock == nullptr) {
-				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext locking mutex\n", self->toString().c_str());
-				FlowMutex::Lock newLock = co_await self->mutex.take();
+				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext locking mutex\n", this->toString().c_str());
+				FlowMutex::Lock newLock = co_await this->mutex.take();
 				localLock = newLock;
 			}
 
 			if (load) {
 				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext waiting for page load\n",
-				             self->toString().c_str());
-				co_await self->nextPageReader;
+				             this->toString().c_str());
+				co_await this->nextPageReader;
 			}
 
-			Optional<T> result = co_await self->readNext(inclusiveMaximum, &localLock);
+			Optional<T> result = co_await this->readNext(inclusiveMaximum, &localLock);
 
 			// If a lock was not passed in, so this actor locked the mutex above, then unlock it
 			if (lock == nullptr) {
@@ -791,7 +788,7 @@ public:
 					co_await delay(0);
 				}
 
-				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext unlocking mutex\n", self->toString().c_str());
+				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext unlocking mutex\n", this->toString().c_str());
 				localLock.release();
 			}
 
@@ -811,7 +808,7 @@ public:
 
 			// If we don't have a lock and the mutex isn't available then acquire it
 			if (lock == nullptr && isBusy()) {
-				return waitThenReadNext(this, inclusiveMaximum, lock, false);
+				return waitThenReadNext(inclusiveMaximum, lock, false);
 			}
 
 			// We now know pageID is valid and should be used, but page might not point to it yet
@@ -827,7 +824,7 @@ public:
 				}
 
 				if (!nextPageReader.isReady()) {
-					return waitThenReadNext(this, inclusiveMaximum, lock, true);
+					return waitThenReadNext(inclusiveMaximum, lock, true);
 				}
 
 				page = nextPageReader.get();
@@ -986,9 +983,9 @@ public:
 	// Fast path extent peekAll (this zooms through the queue reading extents at a time)
 	// Output interface is a promise stream and one vector of results per extent found is sent to the promise stream
 	// Once we are finished reading all the extents of the queue, end_of_stream() is sent to mark completion
-	static Future<Void> peekAll_ext(FIFOQueue* self, PromiseStream<Standalone<VectorRef<T>>> res) {
+	Future<Void> peekAllExt(PromiseStream<Standalone<VectorRef<T>>> res) {
 		Cursor c;
-		c.initReadOnly(self->headReader, true);
+		c.initReadOnly(this->headReader, true);
 
 		debug_printf("FIFOQueue::Cursor(%s) peekAllExt begin\n", c.toString().c_str());
 		if (c.pageID == invalidPhysicalPageID || c.pageID == c.endPageID) {
@@ -1011,18 +1008,18 @@ public:
 
 			Standalone<VectorRef<T>> results;
 			results.reserve(results.arena(),
-			                static_cast<size_t>(self->pagesPerExtent) * self->pager->getPhysicalPageSize() / sizeof(T));
+			                static_cast<size_t>(this->pagesPerExtent) * this->pager->getPhysicalPageSize() / sizeof(T));
 
 			// Loop over all the pages in this extent
 			int pageIdx = 0;
 			while (true) {
 				// Position the page pointer to current page in the extent
-				Reference<ArenaPage> page = c.page->getSubPage(pageIdx++ * self->pager->getPhysicalPageSize(),
-				                                               self->pager->getLogicalPageSize());
+				Reference<ArenaPage> page = c.page->getSubPage(pageIdx++ * this->pager->getPhysicalPageSize(),
+				                                               this->pager->getLogicalPageSize());
 				debug_printf("FIFOQueue::Cursor(%s) peekALLExt %s. Offset %d\n",
 				             c.toString().c_str(),
 				             toString(c.pageID).c_str(),
-				             c.pageID * self->pager->getPhysicalPageSize());
+				             c.pageID * this->pager->getPhysicalPageSize());
 
 				try {
 					page->postReadHeader(c.pageID);
@@ -1030,26 +1027,26 @@ public:
 				} catch (Error& e) {
 					bool isInjected = false;
 					if (g_network->isSimulated()) {
-						auto num4kBlocks = std::max(self->pager->getPhysicalPageSize() / 4096, 1);
-						auto startBlock = (c.pageID * self->pager->getPhysicalPageSize()) / 4096;
+						auto num4kBlocks = std::max(this->pager->getPhysicalPageSize() / 4096, 1);
+						auto startBlock = (c.pageID * this->pager->getPhysicalPageSize()) / 4096;
 						auto iter = g_simulator->corruptedBlocks.lower_bound(
-						    std::make_pair(self->pager->getName(), startBlock));
-						if (iter->first == self->pager->getName() && iter->second < startBlock + num4kBlocks) {
+						    std::make_pair(this->pager->getName(), startBlock));
+						if (iter->first == this->pager->getName() && iter->second < startBlock + num4kBlocks) {
 							isInjected = true;
 						}
 					}
 					TraceEvent(isInjected ? SevWarnAlways : SevError, "RedwoodChecksumFailed")
 					    .error(e)
 					    .detail("PageID", c.pageID)
-					    .detail("PageSize", self->pager->getPhysicalPageSize())
-					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize())
-					    .detail("Filename", self->pager->getName());
+					    .detail("PageSize", this->pager->getPhysicalPageSize())
+					    .detail("Offset", c.pageID * this->pager->getPhysicalPageSize())
+					    .detail("Filename", this->pager->getName());
 
 					debug_printf("FIFOQueue::Cursor(%s) peekALLExt getSubPage error=%s for %s. Offset %d ",
 					             c.toString().c_str(),
 					             e.what(),
 					             toString(c.pageID).c_str(),
-					             c.pageID * self->pager->getPhysicalPageSize());
+					             c.pageID * this->pager->getPhysicalPageSize());
 					if (isInjected) {
 						throw e.asInjectedFault();
 					}
@@ -1091,12 +1088,12 @@ public:
 
 					// Since we have reached the end of the queue, verify that the number of entries read matches
 					// the queue metadata. If it does, send end_of_stream() to mark completion, else throw an error
-					if (entriesRead != self->numEntries) {
+					if (entriesRead != this->numEntries) {
 						Error e = internal_error(); // TODO:  Something better?
 						TraceEvent(SevError, "RedwoodQueueNumEntriesMisMatch")
 						    .error(e)
 						    .detail("EntriesRead", entriesRead)
-						    .detail("ExpectedEntries", self->numEntries);
+						    .detail("ExpectedEntries", this->numEntries);
 						throw e;
 					}
 					res.sendError(end_of_stream());
@@ -1111,20 +1108,18 @@ public:
 
 					// send an extent worth of entries to the promise stream
 					res.send(results);
-					self->pager->releaseExtentReadLock();
+					this->pager->releaseExtentReadLock();
 					break;
 				}
 			} // End of Extent
 		} // End of Queue
 	}
 
-	Future<Void> peekAllExt(PromiseStream<Standalone<VectorRef<T>>> resStream) { return peekAll_ext(this, resStream); }
-
-	static Future<Standalone<VectorRef<T>>> peekAll_impl(FIFOQueue* self) {
+	Future<Standalone<VectorRef<T>>> peekAll() {
 		Standalone<VectorRef<T>> results;
 		Cursor c;
-		c.initReadOnly(self->headReader);
-		results.reserve(results.arena(), self->numEntries);
+		c.initReadOnly(this->headReader);
+		results.reserve(results.arena(), this->numEntries);
 
 		int sinceYield = 0;
 		while (true) {
@@ -1144,16 +1139,12 @@ public:
 		co_return results;
 	}
 
-	Future<Standalone<VectorRef<T>>> peekAll() { return peekAll_impl(this); }
-
-	static Future<Optional<T>> peek_impl(FIFOQueue* self) {
+	Future<Optional<T>> peek() {
 		Cursor c;
-		c.initReadOnly(self->headReader);
+		c.initReadOnly(this->headReader);
 		Optional<T> x = co_await c.readNext();
 		co_return x;
 	}
-
-	Future<Optional<T>> peek() { return peek_impl(this); }
 
 	// Pop the next item on front of queue if it is <= inclusiveMaximum or if inclusiveMaximum is not present
 	Future<Optional<T>> pop(Optional<T> inclusiveMaximum = {}) { return headReader.readNext(inclusiveMaximum); }
@@ -1208,13 +1199,13 @@ public:
 	//   - queue push() can call pager->newPageID() which can call pop() on the same or another queue
 	// This creates a circular dependency with 1 or more queues when those queues are used by the pager
 	// to manage free page IDs.
-	static Future<bool> preFlush_impl(FIFOQueue* self) {
-		debug_printf("FIFOQueue(%s) preFlush begin\n", self->name.c_str());
-		co_await self->notBusy();
+	Future<bool> preFlush() {
+		debug_printf("FIFOQueue(%s) preFlush begin\n", this->name.c_str());
+		co_await this->notBusy();
 
 		// Completion of the pending operations as of the start of notBusy() could have began new operations,
 		// so see if any work is pending now.
-		bool workPending = self->isBusy();
+		bool workPending = this->isBusy();
 
 		if (!workPending) {
 			// A newly created or flushed queue starts out in a state where its tail page to be written to is empty.
@@ -1226,63 +1217,61 @@ public:
 			//
 			// If the newTailPage future is ready but it's an invalid page and the tail page we are currently pointed to
 			// has had items added to it, then get a new tail page ID.
-			if (self->newTailPage.isReady() && self->newTailPage.get() == invalidPhysicalPageID) {
-				if (self->tailWriter.pendingTailWrites()) {
-					debug_printf("FIFOQueue(%s) preFlush starting to get new page ID\n", self->name.c_str());
-					if (self->usesExtents) {
-						if (self->tailWriter.pageID == invalidPhysicalPageID) {
-							self->newTailPage = self->pager->newExtentPageID(self->queueID);
-							self->tailPageNewExtent = true;
-							self->prevExtentEndPageID = invalidPhysicalPageID;
+			if (this->newTailPage.isReady() && this->newTailPage.get() == invalidPhysicalPageID) {
+				if (this->tailWriter.pendingTailWrites()) {
+					debug_printf("FIFOQueue(%s) preFlush starting to get new page ID\n", this->name.c_str());
+					if (this->usesExtents) {
+						if (this->tailWriter.pageID == invalidPhysicalPageID) {
+							this->newTailPage = this->pager->newExtentPageID(this->queueID);
+							this->tailPageNewExtent = true;
+							this->prevExtentEndPageID = invalidPhysicalPageID;
 						} else {
-							auto p = self->tailWriter.header();
+							auto p = this->tailWriter.header();
 							debug_printf(
 							    "FIFOQueue(%s) newTailPage tailWriterPage %u extentCurPageID %u, extentEndPageID %u\n",
-							    self->name.c_str(),
-							    self->tailWriter.pageID,
+							    this->name.c_str(),
+							    this->tailWriter.pageID,
 							    p->extentCurPageID,
 							    p->extentEndPageID);
 							if (p->extentCurPageID < p->extentEndPageID) {
-								self->newTailPage = p->extentCurPageID + 1;
-								self->tailPageNewExtent = false;
-								self->prevExtentEndPageID = p->extentEndPageID;
+								this->newTailPage = p->extentCurPageID + 1;
+								this->tailPageNewExtent = false;
+								this->prevExtentEndPageID = p->extentEndPageID;
 							} else {
-								self->newTailPage = self->pager->newExtentPageID(self->queueID);
-								self->tailPageNewExtent = true;
-								self->prevExtentEndPageID = invalidPhysicalPageID;
+								this->newTailPage = this->pager->newExtentPageID(this->queueID);
+								this->tailPageNewExtent = true;
+								this->prevExtentEndPageID = invalidPhysicalPageID;
 							}
 						}
 						debug_printf("FIFOQueue(%s) newTailPage tailPageNewExtent:%d prevExtentEndPageID: %u "
 						             "tailWriterPage %u\n",
-						             self->name.c_str(),
-						             self->tailPageNewExtent,
-						             self->prevExtentEndPageID,
-						             self->tailWriter.pageID);
+						             this->name.c_str(),
+						             this->tailPageNewExtent,
+						             this->prevExtentEndPageID,
+						             this->tailWriter.pageID);
 					} else {
-						self->newTailPage = self->pager->newPageID();
+						this->newTailPage = this->pager->newPageID();
 					}
 					workPending = true;
 				} else {
-					if (self->usesExtents) {
-						auto p = self->tailWriter.header();
-						self->prevExtentEndPageID = p->extentEndPageID;
-						self->tailPageNewExtent = false;
+					if (this->usesExtents) {
+						auto p = this->tailWriter.header();
+						this->prevExtentEndPageID = p->extentEndPageID;
+						this->tailPageNewExtent = false;
 						debug_printf("FIFOQueue(%s) newTailPage tailPageNewExtent: %d prevExtentEndPageID: %u "
 						             "tailWriterPage %u\n",
-						             self->name.c_str(),
-						             self->tailPageNewExtent,
-						             self->prevExtentEndPageID,
-						             self->tailWriter.pageID);
+						             this->name.c_str(),
+						             this->tailPageNewExtent,
+						             this->prevExtentEndPageID,
+						             this->tailWriter.pageID);
 					}
 				}
 			}
 		}
 
-		debug_printf("FIFOQueue(%s) preFlush returning %d\n", self->name.c_str(), workPending);
+		debug_printf("FIFOQueue(%s) preFlush returning %d\n", this->name.c_str(), workPending);
 		co_return workPending;
 	}
-
-	Future<bool> preFlush() { return preFlush_impl(this); }
 
 	void finishFlush() {
 		debug_printf("FIFOQueue(%s) finishFlush start\n", name.c_str());
@@ -1329,17 +1318,15 @@ public:
 		debug_printf("FIFOQueue(%s) finishFlush end\n", name.c_str());
 	}
 
-	static Future<Void> flush_impl(FIFOQueue* self) {
+	Future<Void> flush() {
 		while (true) {
-			bool notDone = co_await self->preFlush();
+			bool notDone = co_await this->preFlush();
 			if (!notDone) {
 				break;
 			}
 		}
-		self->finishFlush();
+		this->finishFlush();
 	}
-
-	Future<Void> flush() { return flush_impl(this); }
 
 	IPager2* pager;
 	QueueID queueID;
@@ -1869,25 +1856,23 @@ public:
 	}
 
 	// Clears the cache, saving the entries to second cache, then waits for each item to be evictable and evicts it.
-	static Future<Void> clear_impl(ObjectCache* self, bool waitForSafeEviction) {
+	Future<Void> clear(bool waitForSafeEviction = false) {
 		// Claim ownership of all of our cached items, removing them from the evictor's control and quota.
-		for (auto& ie : self->cache) {
-			self->pEvictor->reclaim(ie.second);
+		for (auto& ie : this->cache) {
+			this->pEvictor->reclaim(ie.second);
 		}
 
 		// All items are in the cache so we don't need the prioritized eviction order anymore, and the cache is about
 		// to be destroyed so the prioritizedEvictions head/tail will become invalid.
-		self->prioritizedEvictions.clear();
+		this->prioritizedEvictions.clear();
 
-		auto i = self->cache.begin();
-		while (i != self->cache.end()) {
+		auto i = this->cache.begin();
+		while (i != this->cache.end()) {
 			co_await (waitForSafeEviction ? i->second.item.onEvictable() : i->second.item.cancel());
 			++i;
 		}
-		self->cache.clear();
+		this->cache.clear();
 	}
-
-	Future<Void> clear(bool waitForSafeEviction = false) { return clear_impl(this, waitForSafeEviction); }
 
 	// Move the prioritized evictions queued to the front of the eviction order
 	void flushPrioritizedEvictions() { pEvictor->moveIn(prioritizedEvictions); }
@@ -2989,6 +2974,7 @@ public:
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
 		int blockSize = self->physicalPageSize;
 		std::vector<Future<int>> reads;
+		reads.reserve(pageIDs.size());
 		for (int i = 0; i < pageIDs.size(); ++i) {
 			reads.push_back(
 			    readPhysicalBlock(self, page, i * blockSize, blockSize, ((int64_t)pageIDs[i]) * blockSize, priority));
@@ -7581,21 +7567,21 @@ public:
 		//     If there is a record in the tree > query then moveNext() will move to it.
 		// If non-zero is returned then the cursor is valid and the return value is logically equivalent
 		// to query.compare(cursor.get())
-		Future<int> seek_impl(BTreeCursor* self, RedwoodRecordRef query) {
+		Future<int> seek_impl(RedwoodRecordRef query) {
 			RedwoodRecordRef internalPageQuery = query.withMaxPageID();
-			self->path.resize(1);
-			debug_printf("seek(%s) start cursor = %s\n", query.toString().c_str(), self->toString().c_str());
+			this->path.resize(1);
+			debug_printf("seek(%s) start cursor = %s\n", query.toString().c_str(), this->toString().c_str());
 
 			while (true) {
-				auto& entry = self->path.back();
+				auto& entry = this->path.back();
 				if (entry.btPage()->isLeaf()) {
 					int cmp = entry.cursor.seek(query);
-					self->valid = entry.cursor.valid() && !entry.cursor.isErased();
+					this->valid = entry.cursor.valid() && !entry.cursor.isErased();
 					debug_printf("seek(%s) loop exit cmp=%d cursor=%s\n",
 					             query.toString().c_str(),
 					             cmp,
-					             self->toString().c_str());
-					co_return self->valid ? cmp : 0;
+					             this->toString().c_str());
+					co_return this->valid ? cmp : 0;
 				}
 
 				// Internal page, so seek to the branch where query must be
@@ -7604,29 +7590,27 @@ public:
 				// or it finds an entry with a null child page then query does not exist in the BTree.
 				if (entry.cursor.seekLessThan(internalPageQuery) && entry.cursor.get().value.present()) {
 					debug_printf(
-					    "seek(%s) loop seek success cursor=%s\n", query.toString().c_str(), self->toString().c_str());
-					Future<Void> f = self->pushPage(entry.cursor);
+					    "seek(%s) loop seek success cursor=%s\n", query.toString().c_str(), this->toString().c_str());
+					Future<Void> f = this->pushPage(entry.cursor);
 					co_await f;
 				} else {
-					self->valid = false;
+					this->valid = false;
 					debug_printf(
-					    "seek(%s) loop exit cmp=0 cursor=%s\n", query.toString().c_str(), self->toString().c_str());
+					    "seek(%s) loop exit cmp=0 cursor=%s\n", query.toString().c_str(), this->toString().c_str());
 					co_return 0;
 				}
 			}
 		}
 
-		Future<int> seek(RedwoodRecordRef query) { return path.empty() ? 0 : seek_impl(this, query); }
+		Future<int> seek(RedwoodRecordRef query) { return path.empty() ? 0 : seek_impl(query); }
 
-		Future<Void> seekGTE_impl(BTreeCursor* self, RedwoodRecordRef query) {
+		Future<Void> seekGTE(RedwoodRecordRef query) {
 			debug_printf("seekGTE(%s) start\n", query.toString().c_str());
-			int cmp = co_await self->seek(query);
-			if (cmp > 0 || (cmp == 0 && !self->isValid())) {
-				co_await self->moveNext();
+			int cmp = co_await this->seek(query);
+			if (cmp > 0 || (cmp == 0 && !this->isValid())) {
+				co_await this->moveNext();
 			}
 		}
-
-		Future<Void> seekGTE(RedwoodRecordRef query) { return seekGTE_impl(this, query); }
 
 		Future<Void> seekExactKeySlow(Key key, Future<Void> pageFuture) {
 			co_await pageFuture;
@@ -7724,22 +7708,20 @@ public:
 			}
 		}
 
-		Future<Void> seekLT_impl(BTreeCursor* self, RedwoodRecordRef query) {
+		Future<Void> seekLT(RedwoodRecordRef query) {
 			debug_printf("seekLT(%s) start\n", query.toString().c_str());
-			int cmp = co_await self->seek(query);
+			int cmp = co_await this->seek(query);
 			if (cmp <= 0) {
-				co_await self->movePrev();
+				co_await this->movePrev();
 			}
 		}
 
-		Future<Void> seekLT(RedwoodRecordRef query) { return seekLT_impl(this, query); }
-
-		Future<Void> move_impl(BTreeCursor* self, bool forward) {
+		Future<Void> move_impl(bool forward) {
 			// Try to the move cursor at the end of the path in the correct direction
-			debug_printf("move%s() start cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
+			debug_printf("move%s() start cursor=%s\n", forward ? "Next" : "Prev", this->toString().c_str());
 			while (1) {
-				debug_printf("move%s() first loop cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
-				auto& entry = self->path.back();
+				debug_printf("move%s() first loop cursor=%s\n", forward ? "Next" : "Prev", this->toString().c_str());
+				auto& entry = this->path.back();
 				bool success;
 				if (entry.cursor.valid()) {
 					success = forward ? entry.cursor.moveNext() : entry.cursor.movePrev();
@@ -7758,20 +7740,20 @@ public:
 					break;
 				}
 
-				if (self->path.size() == 1) {
-					self->valid = false;
-					debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", self->toString(1).c_str());
+				if (this->path.size() == 1) {
+					this->valid = false;
+					debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", this->toString(1).c_str());
 					co_return;
 				}
 
 				// Move to parent
-				self->path.pop_back();
+				this->path.pop_back();
 			}
 
 			// While not on a leaf page, move down to get to one.
 			while (1) {
-				debug_printf("move%s() second loop cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
-				auto& entry = self->path.back();
+				debug_printf("move%s() second loop cursor=%s\n", forward ? "Next" : "Prev", this->toString().c_str());
+				auto& entry = this->path.back();
 				if (entry.btPage()->isLeaf()) {
 					break;
 				}
@@ -7782,18 +7764,18 @@ public:
 					UNSTOPPABLE_ASSERT(entry.cursor.get().value.present());
 				}
 
-				co_await self->pushPage(entry.cursor);
-				auto& newEntry = self->path.back();
+				co_await this->pushPage(entry.cursor);
+				auto& newEntry = this->path.back();
 				UNSTOPPABLE_ASSERT(forward ? newEntry.cursor.moveFirst() : newEntry.cursor.moveLast());
 			}
 
-			self->valid = true;
+			this->valid = true;
 
-			debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", self->toString(1).c_str());
+			debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", this->toString(1).c_str());
 		}
 
-		Future<Void> moveNext() { return path.empty() ? Void() : move_impl(this, true); }
-		Future<Void> movePrev() { return path.empty() ? Void() : move_impl(this, false); }
+		Future<Void> moveNext() { return path.empty() ? Void() : move_impl(true); }
+		Future<Void> movePrev() { return path.empty() ? Void() : move_impl(false); }
 	};
 
 	Future<Void> initBTreeCursor(BTreeCursor* cursor,
@@ -9997,7 +9979,7 @@ TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
 	Future<Reference<const ArenaPage>> survivingRead;
 	{
 		DWALPager::PageCacheEntry entry;
-		Reference<ArenaPage> firstPage = makeReference<ArenaPage>(4096, 4096);
+		auto firstPage = makeReference<ArenaPage>(4096, 4096);
 		ArenaPage* firstPagePtr = firstPage.getPtr();
 		entry.setReadFuture(firstPage);
 
@@ -10007,7 +9989,7 @@ TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
 		ASSERT(firstRead == entry.getReadFuture<true>());
 		ASSERT(entry.getReadFuture<false>().get().getPtr() == firstPagePtr);
 
-		Reference<ArenaPage> updatedPage = makeReference<ArenaPage>(4096, 4096);
+		auto updatedPage = makeReference<ArenaPage>(4096, 4096);
 		updatedPage->init(EncodingType::XXHash64, PageType::BTreeNode, 1);
 		memcpy(updatedPage->mutateData(), expectedPageContents.begin(), expectedPageContents.size());
 		ArenaPage* updatedPagePtr = updatedPage.getPtr();
@@ -10026,7 +10008,7 @@ TEST_CASE("/redwood/correctness/unit/readOnlyPageFuture") {
 		ASSERT(pendingRead.isReady() && pendingRead.isError());
 		ASSERT_EQ(pendingRead.getError().code(), error_code_actor_cancelled);
 		ASSERT(!secondPendingRead.isReady());
-		Reference<ArenaPage> pendingPage = makeReference<ArenaPage>(4096, 4096);
+		auto pendingPage = makeReference<ArenaPage>(4096, 4096);
 		ArenaPage* pendingPagePtr = pendingPage.getPtr();
 		pendingPromise.send(pendingPage);
 		ASSERT(secondPendingRead.isReady() && !secondPendingRead.isError());
@@ -10303,7 +10285,9 @@ TEST_CASE("Lredwood/correctness/seekExactKey") {
 	          Optional<Value>(StringRef(format("value-%04d-%s", 150, std::string(512, 'v').c_str()))));
 	ASSERT_EQ(emptyValue, Optional<Value>(""_sr));
 
-	kvStore = keyValueStoreRedwoodV1(kvFile, UID(), {}, 65536);
+	// Keep the large leaf, its ancestors, and pager metadata cached even with buggified page sizes.
+	// The earlier reads exercise eviction with a small cache; this phase requires a cache hit.
+	kvStore = keyValueStoreRedwoodV1(kvFile, UID(), {}, FLOW_KNOBS->PAGE_CACHE_4K);
 	co_await kvStore->init();
 	unsigned int cacheHitsBefore = g_redwoodMetrics.metric.pagerCacheHit;
 	co_await checkExactKVStoreKey(kvStore, largeKey.toString(), largeValue.toString());
@@ -10430,7 +10414,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
 
-	auto* btree = new VersionedBTree(pager, file, UID(), /*ServerDBInfo blah */ {});
+	auto* btree = new VersionedBTree(pager, file, UID(), /*db=*/{});
 	co_await btree->init();
 
 	DecodeBoundaryVerifier* pBoundaries = DecodeBoundaryVerifier::getVerifier(file);
@@ -10667,7 +10651,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				IPager2* pager = new DWALPager(
 				    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
 
-				btree = new VersionedBTree(pager, file, UID(), /* something blah = */ {});
+				btree = new VersionedBTree(pager, file, UID(), /*db=*/{});
 
 				co_await btree->init();
 
@@ -10717,7 +10701,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 		                                         pagerMemoryOnly),
 		                           file,
 		                           UID(),
-		                           /* blah = */ {});
+		                           /*db=*/{});
 
 		co_await btree->init();
 	}

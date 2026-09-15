@@ -155,7 +155,7 @@ public:
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
-			return waitAndCommit(this, sequential);
+			return waitAndCommit(sequential);
 
 		if (!disableSnapshot && replaceContent && !firstCommitWithSnapshot) {
 			transactionSize += SERVER_KNOBS->REPLACE_CONTENTS_BYTES;
@@ -197,7 +197,7 @@ public:
 		transactionIsLarge = false;
 		firstCommitWithSnapshot = false;
 
-		addActor.send(commitAndUpdateVersions(this, c, previousSnapshotEnd));
+		addActor.send(commitAndUpdateVersions(c, previousSnapshotEnd));
 		return c;
 	}
 
@@ -205,7 +205,7 @@ public:
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
-			return waitAndReadValue(this, key, options);
+			return waitAndReadValue(key, options);
 
 		auto it = data.find(key);
 		if (it == data.end())
@@ -217,7 +217,7 @@ public:
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
-			return waitAndReadValuePrefix(this, key, maxLength, options);
+			return waitAndReadValuePrefix(key, maxLength, options);
 
 		auto it = data.find(key);
 		if (it == data.end())
@@ -239,7 +239,7 @@ public:
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
-			return waitAndReadRange(this, keys, rowLimit, byteLimit, options);
+			return waitAndReadRange(keys, rowLimit, byteLimit, options);
 
 		RangeResult result;
 		if (rowLimit == 0) {
@@ -465,12 +465,9 @@ private:
 		return loc;
 	}
 
-	static Future<Standalone<StringRef>> readOpData(KeyValueStoreMemory* self,
-	                                                OpHeader h,
-	                                                bool* isZeroFilled,
-	                                                int* zeroFillSize) {
+	Future<Standalone<StringRef>> readOpData(OpHeader h, bool* isZeroFilled, int* zeroFillSize) {
 		int remainingBytes = h.len1 + h.len2 + 1;
-		Standalone<StringRef> data = co_await self->log->readNext(remainingBytes);
+		Standalone<StringRef> data = co_await this->log->readNext(remainingBytes);
 		ASSERT(data.size() <= remainingBytes);
 		*zeroFillSize = remainingBytes - data.size();
 		if (*zeroFillSize == 0) {
@@ -479,16 +476,16 @@ private:
 		co_return data;
 	}
 
-	static Future<Void> recover(KeyValueStoreMemory* self, bool exactRecovery) {
+	Future<Void> recover(bool exactRecovery) {
 		while (true) {
 			// 'uncommitted' variables track something that might be rolled back by an OpRollback, and are copied into
-			// permanent variables (in self) in OpCommit.  OpRollback does the reverse (copying the permanent versions
+			// permanent variables in OpCommit.  OpRollback does the reverse (copying the permanent versions
 			// over the uncommitted versions) the uncommitted and committed variables should be equal initially (to
 			// whatever makes sense if there are no committed transactions recovered)
-			Key uncommittedNextKey = self->recoveredSnapshotKey;
-			IDiskQueue::location uncommittedPrevSnapshotEnd = self->previousSnapshotEnd =
-			    self->log->getNextReadLocation(); // not really, but popping up to here does nothing
-			IDiskQueue::location uncommittedSnapshotEnd = self->currentSnapshotEnd = uncommittedPrevSnapshotEnd;
+			Key uncommittedNextKey = this->recoveredSnapshotKey;
+			IDiskQueue::location uncommittedPrevSnapshotEnd = this->previousSnapshotEnd =
+			    this->log->getNextReadLocation(); // not really, but popping up to here does nothing
+			IDiskQueue::location uncommittedSnapshotEnd = this->currentSnapshotEnd = uncommittedPrevSnapshotEnd;
 
 			int zeroFillSize = 0;
 			int dbgSnapshotItemCount = 0;
@@ -496,7 +493,7 @@ private:
 			int dbgMutationCount = 0;
 			int dbgCommitCount = 0;
 			double startt = now();
-			UID dbgid = self->id;
+			UID dbgid = this->id;
 
 			Future<Void> loggingDelay = delay(1.0);
 
@@ -505,12 +502,12 @@ private:
 			Standalone<StringRef> lastSnapshotKey;
 			bool isZeroFilled{ false };
 
-			TraceEvent("KVSMemRecoveryStarted", self->id).detail("SnapshotEndLocation", uncommittedSnapshotEnd);
+			TraceEvent("KVSMemRecoveryStarted", this->id).detail("SnapshotEndLocation", uncommittedSnapshotEnd);
 
 			try {
 				while (true) {
 					{
-						Standalone<StringRef> data = co_await self->log->readNext(sizeof(OpHeader));
+						Standalone<StringRef> data = co_await this->log->readNext(sizeof(OpHeader));
 						if (data.size() != sizeof(OpHeader)) {
 							if (!data.empty()) {
 								CODE_PROBE(
@@ -519,26 +516,26 @@ private:
 								memcpy(&h, data.begin(), data.size());
 								zeroFillSize = sizeof(OpHeader) - data.size() + h.len1 + h.len2 + 1;
 							}
-							TraceEvent("KVSMemRecoveryComplete", self->id)
+							TraceEvent("KVSMemRecoveryComplete", this->id)
 							    .detail("Reason", "Non-header sized data read")
 							    .detail("DataSize", data.size())
 							    .detail("ZeroFillSize", zeroFillSize)
 							    .detail("SnapshotEndLocation", uncommittedSnapshotEnd)
-							    .detail("NextReadLoc", self->log->getNextReadLocation());
+							    .detail("NextReadLoc", this->log->getNextReadLocation());
 							break;
 						}
 						h = *(OpHeader*)data.begin();
 						ASSERT(h.op != OpEncrypted_Deprecated);
 					}
-					Standalone<StringRef> data = co_await readOpData(self, h, &isZeroFilled, &zeroFillSize);
+					Standalone<StringRef> data = co_await readOpData(h, &isZeroFilled, &zeroFillSize);
 					if (zeroFillSize > 0) {
-						TraceEvent("KVSMemRecoveryComplete", self->id)
+						TraceEvent("KVSMemRecoveryComplete", this->id)
 						    .detail("Reason", "data specified by header does not exist")
 						    .detail("DataSize", data.size())
 						    .detail("ZeroFillSize", zeroFillSize)
 						    .detail("SnapshotEndLocation", uncommittedSnapshotEnd)
 						    .detail("OpCode", h.op)
-						    .detail("NextReadLoc", self->log->getNextReadLocation());
+						    .detail("NextReadLoc", this->log->getNextReadLocation());
 						break;
 					}
 
@@ -546,14 +543,14 @@ private:
 						StringRef p1 = data.substr(0, h.len1);
 						StringRef p2 = data.substr(h.len1, h.len2);
 
-						DEBUG_TRANSACTION_STATE_STORE("Recover", p1, self->id);
+						DEBUG_TRANSACTION_STATE_STORE("Recover", p1, this->id);
 
 						if (h.op == OpSnapshotItem || h.op == OpSnapshotItemDelta) { // snapshot data item
 							/*if (p1 < uncommittedNextKey) {
-							    TraceEvent(SevError, "RecSnapshotBack", self->id)
+							    TraceEvent(SevError, "RecSnapshotBack", this->id)
 							        .detail("NextKey", uncommittedNextKey)
 							        .detail("P1", p1)
-							        .detail("Nextlocation", self->log->getNextReadLocation());
+							        .detail("Nextlocation", this->log->getNextReadLocation());
 							}
 							ASSERT( p1 >= uncommittedNextKey );*/
 							if (h.op == OpSnapshotItemDelta) {
@@ -582,14 +579,14 @@ private:
 							++dbgSnapshotItemCount;
 							lastSnapshotKey = Key(p1, data.arena());
 						} else if (h.op == OpSnapshotEnd || h.op == OpSnapshotAbort) { // snapshot complete
-							TraceEvent("RecSnapshotEnd", self->id)
+							TraceEvent("RecSnapshotEnd", this->id)
 							    .detail("NextKey", uncommittedNextKey)
-							    .detail("Nextlocation", self->log->getNextReadLocation())
+							    .detail("Nextlocation", this->log->getNextReadLocation())
 							    .detail("IsSnapshotEnd", h.op == OpSnapshotEnd);
 
 							if (h.op == OpSnapshotEnd) {
 								uncommittedPrevSnapshotEnd = uncommittedSnapshotEnd;
-								uncommittedSnapshotEnd = self->log->getNextReadLocation();
+								uncommittedSnapshotEnd = this->log->getNextReadLocation();
 								recoveryQueue.clear_to_end(uncommittedNextKey, &uncommittedNextKey.arena());
 							}
 
@@ -605,35 +602,35 @@ private:
 						} else if (h.op == OpClearToEnd) { // clear all data from begin key to end
 							recoveryQueue.clear_to_end(p1, &data.arena());
 						} else if (h.op == OpCommit) { // commit previous transaction
-							self->commit_queue(recoveryQueue, false);
+							this->commit_queue(recoveryQueue, false);
 							++dbgCommitCount;
-							self->recoveredSnapshotKey = uncommittedNextKey;
-							self->previousSnapshotEnd = uncommittedPrevSnapshotEnd;
-							self->currentSnapshotEnd = uncommittedSnapshotEnd;
+							this->recoveredSnapshotKey = uncommittedNextKey;
+							this->previousSnapshotEnd = uncommittedPrevSnapshotEnd;
+							this->currentSnapshotEnd = uncommittedSnapshotEnd;
 						} else if (h.op == OpRollback) { // rollback previous transaction
 							recoveryQueue.rollback();
-							TraceEvent("KVSMemRecSnapshotRollback", self->id).detail("NextKey", uncommittedNextKey);
-							uncommittedNextKey = self->recoveredSnapshotKey;
-							uncommittedPrevSnapshotEnd = self->previousSnapshotEnd;
-							uncommittedSnapshotEnd = self->currentSnapshotEnd;
+							TraceEvent("KVSMemRecSnapshotRollback", this->id).detail("NextKey", uncommittedNextKey);
+							uncommittedNextKey = this->recoveredSnapshotKey;
+							uncommittedPrevSnapshotEnd = this->previousSnapshotEnd;
+							uncommittedSnapshotEnd = this->currentSnapshotEnd;
 						} else {
 							ASSERT(false);
 						}
 					} else {
-						TraceEvent("KVSMemRecoverySkippedZeroFill", self->id)
+						TraceEvent("KVSMemRecoverySkippedZeroFill", this->id)
 						    .detail("PayloadSize", data.size())
 						    .detail("ExpectedSize", h.len1 + h.len2 + 1)
 						    .detail("OpCode", h.op)
-						    .detail("EndsAt", self->log->getNextReadLocation());
+						    .detail("EndsAt", this->log->getNextReadLocation());
 					}
 
 					if (loggingDelay.isReady()) {
-						TraceEvent("KVSMemRecoveryLogSnap", self->id)
+						TraceEvent("KVSMemRecoveryLogSnap", this->id)
 						    .detail("SnapshotItems", dbgSnapshotItemCount)
 						    .detail("SnapshotEnd", dbgSnapshotEndCount)
 						    .detail("Mutations", dbgMutationCount)
 						    .detail("Commits", dbgCommitCount)
-						    .detail("EndsAt", self->log->getNextReadLocation());
+						    .detail("EndsAt", this->log->getNextReadLocation());
 						loggingDelay = delay(1.0);
 					}
 
@@ -642,30 +639,30 @@ private:
 
 				if (zeroFillSize) {
 					if (exactRecovery) {
-						TraceEvent(SevError, "KVSMemExpectedExact", self->id).log();
+						TraceEvent(SevError, "KVSMemExpectedExact", this->id).log();
 						ASSERT(false);
 					}
 
 					CODE_PROBE(true, "Fixing a partial commit at the end of the KeyValueStoreMemory log");
 					for (int i = 0; i < zeroFillSize; i++)
-						self->log->push(StringRef((const uint8_t*)"", 1));
+						this->log->push(StringRef((const uint8_t*)"", 1));
 				}
-				// self->rollback(); not needed, since we are about to discard anything left in the recoveryQueue
-				//TraceEvent("KVSMemRecRollback", self->id).detail("QueueEmpty", data.size() == 0);
+				// this->rollback(); not needed, since we are about to discard anything left in the recoveryQueue
+				//TraceEvent("KVSMemRecRollback", this->id).detail("QueueEmpty", data.size() == 0);
 				// make sure that before any new operations are added to the log that all uncommitted operations are
 				// "rolled back"
-				self->log_op(OpRollback, StringRef(), StringRef()); // rollback previous transaction
+				this->log_op(OpRollback, StringRef(), StringRef()); // rollback previous transaction
 
-				self->committedDataSize = self->data.sumTo(self->data.end());
+				this->committedDataSize = this->data.sumTo(this->data.end());
 
-				TraceEvent("KVSMemRecovered", self->id)
+				TraceEvent("KVSMemRecovered", this->id)
 				    .detail("SnapshotItems", dbgSnapshotItemCount)
 				    .detail("SnapshotEnd", dbgSnapshotEndCount)
 				    .detail("Mutations", dbgMutationCount)
 				    .detail("Commits", dbgCommitCount)
 				    .detail("TimeTaken", now() - startt);
 
-				self->semiCommit();
+				this->semiCommit();
 
 				co_return;
 			} catch (Error& e) {
@@ -675,8 +672,8 @@ private:
 				if (e.code() != error_code_disk_adapter_reset) {
 					throw e;
 				}
-				self->data.clear();
-				self->dataSets.clear();
+				this->data.clear();
+				this->dataSets.clear();
 			}
 		}
 	}
@@ -707,10 +704,10 @@ private:
 		currentSnapshotEnd = log_op(OpSnapshotEnd, StringRef(), StringRef());
 	}
 
-	static Future<Void> snapshot(KeyValueStoreMemory* self) {
-		co_await self->recovering;
+	Future<Void> snapshot() {
+		co_await this->recovering;
 
-		Key nextKey = self->recoveredSnapshotKey;
+		Key nextKey = this->recoveredSnapshotKey;
 		bool nextKeyAfter = false; // setting this to true is equilvent to setting nextKey = keyAfter(nextKey)
 		uint64_t snapshotTotalWrittenBytes = 0;
 		int lastDiff = 0;
@@ -724,24 +721,24 @@ private:
 		Key lastSnapshotKeyB = makeString(CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 		bool lastSnapshotKeyUsingA = true;
 
-		TraceEvent("KVSMemStartingSnapshot", self->id).detail("StartKey", nextKey);
+		TraceEvent("KVSMemStartingSnapshot", this->id).detail("StartKey", nextKey);
 
 		while (true) {
-			co_await self->notifiedCommittedWriteBytes.whenAtLeast(snapshotTotalWrittenBytes + 1);
+			co_await this->notifiedCommittedWriteBytes.whenAtLeast(snapshotTotalWrittenBytes + 1);
 
-			if (self->resetSnapshot) {
+			if (this->resetSnapshot) {
 				nextKey = Key();
 				nextKeyAfter = false;
 				snapItems = 0;
 				snapshotBytes = 0;
-				self->resetSnapshot = false;
+				this->resetSnapshot = false;
 			}
 
-			auto next = nextKeyAfter ? self->data.upper_bound(nextKey) : self->data.lower_bound(nextKey);
-			int diff = self->notifiedCommittedWriteBytes.get() - snapshotTotalWrittenBytes;
+			auto next = nextKeyAfter ? this->data.upper_bound(nextKey) : this->data.lower_bound(nextKey);
+			int diff = this->notifiedCommittedWriteBytes.get() - snapshotTotalWrittenBytes;
 			if (diff > lastDiff && diff > 5e7) {
-				TraceEvent(SevWarnAlways, "ManyWritesAtOnce", self->id)
-				    .detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
+				TraceEvent(SevWarnAlways, "ManyWritesAtOnce", this->id)
+				    .detail("CommittedWrites", this->notifiedCommittedWriteBytes.get())
 				    .detail("SnapshotWrites", snapshotTotalWrittenBytes)
 				    .detail("Diff", diff)
 				    .detail("LastOperationWasASnapshot", nextKey.empty() && !nextKeyAfter);
@@ -756,26 +753,26 @@ private:
 			// Write snapshot items until the wait above would block because we've used up all of the byte budget
 			while (true) {
 
-				if (next == self->data.end()) {
+				if (next == this->data.end()) {
 					// After a snapshot end is logged, recovery may not see the last snapshot item logged before it so
 					// the next snapshot item logged cannot be a delta.
 					useDelta = false;
 
-					auto thisSnapshotEnd = self->log_op(OpSnapshotEnd, StringRef(), StringRef());
-					DisabledTraceEvent("SnapshotEnd", self->id)
-					    .detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
-					    .detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
+					auto thisSnapshotEnd = this->log_op(OpSnapshotEnd, StringRef(), StringRef());
+					DisabledTraceEvent("SnapshotEnd", this->id)
+					    .detail("CurrentSnapshotEndLoc", this->currentSnapshotEnd)
+					    .detail("PreviousSnapshotEndLoc", this->previousSnapshotEnd)
 					    .detail("ThisSnapshotEnd", thisSnapshotEnd)
 					    .detail("Items", snapItems)
-					    .detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
+					    .detail("CommittedWrites", this->notifiedCommittedWriteBytes.get())
 					    .detail("SnapshotSize", snapshotBytes);
 
-					ASSERT(thisSnapshotEnd >= self->currentSnapshotEnd);
-					self->previousSnapshotEnd = self->currentSnapshotEnd;
-					self->currentSnapshotEnd = thisSnapshotEnd;
+					ASSERT(thisSnapshotEnd >= this->currentSnapshotEnd);
+					this->previousSnapshotEnd = this->currentSnapshotEnd;
+					this->currentSnapshotEnd = thisSnapshotEnd;
 
-					if (++self->snapshotCount == 2) {
-						self->replaceContent = false;
+					if (++this->snapshotCount == 2) {
+						this->replaceContent = false;
 					}
 
 					snapItems = 0;
@@ -783,8 +780,8 @@ private:
 					snapshotTotalWrittenBytes += OP_DISK_OVERHEAD;
 
 					// If we're not stopping now, reset next
-					if (snapshotTotalWrittenBytes < self->notifiedCommittedWriteBytes.get()) {
-						next = self->data.begin();
+					if (snapshotTotalWrittenBytes < this->notifiedCommittedWriteBytes.get()) {
+						next = this->data.begin();
 					} else {
 						// Otherwise, save state for continuing after the next wait and stop
 						nextKey = Key();
@@ -812,7 +809,7 @@ private:
 					// anything into it.
 					destKey.contents() = KeyRef(destKey.begin(), tempKey.size());
 
-					DEBUG_TRANSACTION_STATE_STORE("SnapshotItem", destKey.toString(), self->id);
+					DEBUG_TRANSACTION_STATE_STORE("SnapshotItem", destKey.toString(), this->id);
 
 					// Get the common prefix between this key and the previous one, or 0 if there was no previous one.
 					int commonPrefix;
@@ -837,12 +834,12 @@ private:
 
 						opKeySize = opKeySize - commonPrefix + 1;
 						KeyRef opKey(&prefixLength, opKeySize);
-						self->log_op(OpSnapshotItemDelta, opKey, next.getValue());
+						this->log_op(OpSnapshotItemDelta, opKey, next.getValue());
 
 						// Restore the overwritten byte
 						prefixLength = backupByte;
 					} else {
-						self->log_op(OpSnapshotItem, tempKey, next.getValue());
+						this->log_op(OpSnapshotItem, tempKey, next.getValue());
 					}
 
 					snapItems++;
@@ -852,7 +849,7 @@ private:
 					lastSnapshotKeyUsingA = !lastSnapshotKeyUsingA;
 
 					// If we're not stopping now, increment next
-					if (snapshotTotalWrittenBytes < self->notifiedCommittedWriteBytes.get()) {
+					if (snapshotTotalWrittenBytes < this->notifiedCommittedWriteBytes.get()) {
 						++next;
 					} else {
 						// Otherwise, save state for continuing after the next wait and stop
@@ -865,34 +862,25 @@ private:
 		}
 	}
 
-	static Future<Optional<Value>> waitAndReadValue(KeyValueStoreMemory* self, Key key, Optional<ReadOptions> options) {
-		co_await self->recovering;
-		co_return static_cast<IKeyValueStore*>(self)->readValue(key, options).get();
+	Future<Optional<Value>> waitAndReadValue(Key key, Optional<ReadOptions> options) {
+		co_await this->recovering;
+		co_return static_cast<IKeyValueStore*>(this)->readValue(key, options).get();
 	}
-	static Future<Optional<Value>> waitAndReadValuePrefix(KeyValueStoreMemory* self,
-	                                                      Key key,
-	                                                      int maxLength,
-	                                                      Optional<ReadOptions> options) {
-		co_await self->recovering;
-		co_return static_cast<IKeyValueStore*>(self)->readValuePrefix(key, maxLength, options).get();
+	Future<Optional<Value>> waitAndReadValuePrefix(Key key, int maxLength, Optional<ReadOptions> options) {
+		co_await this->recovering;
+		co_return static_cast<IKeyValueStore*>(this)->readValuePrefix(key, maxLength, options).get();
 	}
-	static Future<RangeResult> waitAndReadRange(KeyValueStoreMemory* self,
-	                                            KeyRange keys,
-	                                            int rowLimit,
-	                                            int byteLimit,
-	                                            Optional<ReadOptions> options) {
-		co_await self->recovering;
-		co_return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit, options).get();
+	Future<RangeResult> waitAndReadRange(KeyRange keys, int rowLimit, int byteLimit, Optional<ReadOptions> options) {
+		co_await this->recovering;
+		co_return static_cast<IKeyValueStore*>(this)->readRange(keys, rowLimit, byteLimit, options).get();
 	}
-	static Future<Void> waitAndCommit(KeyValueStoreMemory* self, bool sequential) {
-		co_await self->recovering;
-		co_await self->commit(sequential);
+	Future<Void> waitAndCommit(bool sequential) {
+		co_await this->recovering;
+		co_await this->commit(sequential);
 	}
-	static Future<Void> commitAndUpdateVersions(KeyValueStoreMemory* self,
-	                                            Future<Void> commit,
-	                                            IDiskQueue::location location) {
+	Future<Void> commitAndUpdateVersions(Future<Void> commit, IDiskQueue::location location) {
 		co_await commit;
-		self->log->pop(location);
+		this->log->pop(location);
 	}
 };
 
@@ -915,8 +903,8 @@ KeyValueStoreMemory<Container>::KeyValueStoreMemory(IDiskQueue* log,
 	if (this->reserved_buffer != nullptr)
 		memset(this->reserved_buffer, 0, CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 
-	recovering = recover(this, exactRecovery);
-	snapshotting = snapshot(this);
+	recovering = recover(exactRecovery);
+	snapshotting = snapshot();
 	commitActors = actorCollection(addActor.getFuture());
 }
 

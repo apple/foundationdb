@@ -42,6 +42,76 @@ The ``begin`` command begins a new transaction. By default, ``fdbcli`` operates 
 
 To commit the transaction, use the ``commit`` command. To discard the transaction, use the ``reset`` command.
 
+.. _cli-cdc:
+
+cdc
+---
+
+Inspect native CDC retention or deliberately remove a stream::
+
+    cdc status [json]
+    cdc remove <NAME> <EXPECTED_STREAM_ID> CONFIRM-DATA-LOSS
+
+These are cluster administration commands, independent of the current interactive
+transaction. Use the cluster's trusted administrative connection and existing
+network/TLS access controls. ``status`` requires access to system metadata;
+proxy samples use a trusted management endpoint, not the public consume endpoint.
+
+``cdc status`` joins stream names, ranges, durable minimum required versions,
+owners, and shared-tag retention requirements. It distinguishes admission from
+active streams and pending retired-tag cleanup. ``metadata_drained`` in JSON is
+true only when the complete metadata snapshot contains neither active streams
+nor pending cleanup; it is null when metadata is incomplete. Admission can be
+disabled while existing streams still retain history.
+
+The durable metadata shares ``read_version``. Admission and owner publication
+are separately sampled controller state. Proxy samples are advisory, can lag
+metadata or each other, and become null with an error if unavailable. An older
+CDC-capable proxy without the status endpoint can still serve CDC while its
+sample is unavailable. Stream IDs are decimal strings in JSON to preserve all
+64 bits. Names and range boundaries use the same printable escaping as other
+``fdbcli`` key output.
+
+``acknowledgement_lag_versions`` is distance from the snapshot's read version,
+not elapsed seconds. A tag's ``blocking_stream_ids`` identifies the stream or
+streams with its lowest durable watermark. ``safe_pop_version`` is the allowed
+exclusive pop frontier, not proof that a TLog has popped or reclaimed disk.
+Proxy ``buffered_memory_bytes`` measures memory, not retained TLog bytes. Recovery and
+old-generation samples describe the transaction system and do not establish
+that CDC is its only recovery blocker.
+
+``cdc remove`` requires the stream ID from a recent status result and the exact
+confirmation token. A same-name replacement is not removed. An absent name is
+reported separately. Successful removal relinquishes the selected stream's
+unread CDC history; it does not remove user keys or prove retired cleanup has
+finished. Recheck ``cdc status`` and normal cluster health afterward. Start the
+destructive session with CLI logging enabled and retain its output and logs with
+the operator's change record, for example::
+
+    fdbcli -C /path/to/fdb.cluster --log --log-dir /path/to/incident-logs \
+        --exec 'cdc remove orders 7 CONFIRM-DATA-LOSS'
+
+The CLI attempt/result and successful server-side metadata removal emit trace
+events. CLI tracing is off unless ``--log`` is supplied. These logs are
+operational audit evidence, not a transactional, exactly-once audit log.
+If removal is interrupted or fails, inspect status before deciding what happened;
+cancellation does not prove that the server did not commit the removal.
+
+.. warning::
+
+   Never remove a stream merely to silence a lag alert unless losing its unread
+   history is acceptable. Repair and resume the consumer when history must be
+   preserved. Do not advance acknowledgements past durably processed data.
+
+After deliberate history loss, rebuild downstream state from a supported
+consistent snapshot. Register the replacement stream **before** establishing
+the snapshot version, preserve its CDC history throughout the rebuild, and then
+apply mutations after that version. Use idempotent application or a durable
+output/checkpoint protocol before acknowledging. A paginated scan at unrelated
+read versions followed by registration is not a consistent rebuild. If the
+downstream system cannot coordinate a snapshot and CDC checkpoint, quiesce
+writes for the rebuild instead.
+
 clear
 -----
 

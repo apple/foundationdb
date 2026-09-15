@@ -142,6 +142,7 @@ struct TxnTimeout : TestWorkload {
 	// Runs database population concurrently across actors and clients
 	Future<Void> populateDatabaseAllActors(Database db) {
 		std::vector<Future<Void>> populationActors;
+		populationActors.reserve(actorsPerClient > 0 ? actorsPerClient : 0);
 		for (int actorIdx = 0; actorIdx < actorsPerClient; ++actorIdx) {
 			populationActors.push_back(populateDatabase(db, actorIdx));
 		}
@@ -308,6 +309,7 @@ struct TxnTimeout : TestWorkload {
 
 		// Phase 2: Run transaction clients that test timeout behavior
 		std::vector<Future<Void>> txnClients;
+		txnClients.reserve(self->actorsPerClient > 0 ? self->actorsPerClient : 0);
 		for (int actorIdx = 0; actorIdx < self->actorsPerClient; ++actorIdx) {
 			txnClients.emplace_back(txnClient(db, actorIdx));
 		}

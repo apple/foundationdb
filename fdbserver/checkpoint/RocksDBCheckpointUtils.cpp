@@ -1,5 +1,5 @@
 /*
- *RocksDBCheckpointUtils.cpp
+ * RocksDBCheckpointUtils.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
+#include "fdbserver/checkpoint/RocksDBCheckpointUtils.h"
 
 #ifdef WITH_ROCKSDB
 #include <rocksdb/db.h>
@@ -571,6 +571,7 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::tryOpenForRead(const std::str
 
 	const rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
 	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+	descriptors.reserve(columnFamilies.size());
 	for (const std::string& name : columnFamilies) {
 		descriptors.emplace_back(name, cfOptions);
 	}
@@ -633,6 +634,7 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::importCheckpoint(const std::s
 
 	const rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
 	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+	descriptors.reserve(columnFamilies.size());
 	for (const std::string& name : columnFamilies) {
 		descriptors.emplace_back(name, cfOptions);
 	}

@@ -56,11 +56,12 @@ struct MetricNameRef {
 	int expectedSize() const { return type.expectedSize() + name.expectedSize(); }
 
 	inline int compare(MetricNameRef const& r) const {
-		int cmp;
-		if ((cmp = type.compare(r.type))) {
+		int cmp = type.compare(r.type);
+		if (cmp) {
 			return cmp;
 		}
-		if ((cmp = name.compare(r.name))) {
+		cmp = name.compare(r.name);
+		if (cmp) {
 			return cmp;
 		}
 		return id.compare(r.id);

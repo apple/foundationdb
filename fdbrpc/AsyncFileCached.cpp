@@ -84,34 +84,33 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl(std::string filename, i
 }
 
 template <bool writing>
-Future<Void> AsyncFileCached::read_write_impl(AsyncFileCached* self,
-                                              typename std::conditional_t<writing, const uint8_t*, uint8_t*> data,
+Future<Void> AsyncFileCached::read_write_impl(typename std::conditional_t<writing, const uint8_t*, uint8_t*> data,
                                               int length,
                                               int64_t offset) {
 	if constexpr (writing) {
-		if (offset + length > self->length)
-			self->length = offset + length;
+		if (offset + length > this->length)
+			this->length = offset + length;
 	}
 
 	std::vector<Future<Void>> actors;
 
-	int offsetInPage = offset % self->pageCache->pageSize;
+	int offsetInPage = offset % pageCache->pageSize;
 	int64_t pageOffset = offset - offsetInPage;
 
 	int remaining = length;
 
 	while (remaining) {
-		++self->countFileCacheFinds;
-		++self->countCacheFinds;
-		auto p = self->pages.find(pageOffset);
-		if (p == self->pages.end()) {
-			AFCPage* page = new AFCPage(self, pageOffset);
-			p = self->pages.insert(std::make_pair(pageOffset, page)).first;
+		++countFileCacheFinds;
+		++countCacheFinds;
+		auto p = pages.find(pageOffset);
+		if (p == pages.end()) {
+			AFCPage* page = new AFCPage(this, pageOffset);
+			p = pages.insert(std::make_pair(pageOffset, page)).first;
 		} else {
-			self->pageCache->updateHit(p->second);
+			pageCache->updateHit(p->second);
 		}
 
-		int bytesInPage = std::min(self->pageCache->pageSize - offsetInPage, remaining);
+		int bytesInPage = std::min(pageCache->pageSize - offsetInPage, remaining);
 
 		Future<Void> w;
 		if constexpr (writing) {
@@ -123,7 +122,7 @@ Future<Void> AsyncFileCached::read_write_impl(AsyncFileCached* self,
 			actors.push_back(w);
 
 		data += bytesInPage;
-		pageOffset += self->pageCache->pageSize;
+		pageOffset += pageCache->pageSize;
 		offsetInPage = 0;
 
 		remaining -= bytesInPage;
@@ -131,7 +130,7 @@ Future<Void> AsyncFileCached::read_write_impl(AsyncFileCached* self,
 
 	// This is susceptible to the introduction of waits on the read/write path: no wait can occur prior to
 	// AFCPage::readThrough or prevLength will be set prematurely
-	self->prevLength = self->length;
+	prevLength = this->length;
 
 	return waitForAll(actors);
 }

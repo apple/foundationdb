@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "fdbclient/BulkDumping.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -2273,6 +2274,7 @@ Future<Void> waitForFullReplication(Database cx) {
 			config.fromKeyValues((VectorRef<KeyValueRef>)confResults);
 
 			std::vector<Future<Optional<Value>>> replicasFutures;
+			replicasFutures.reserve(config.regions.size());
 			for (auto& region : config.regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}

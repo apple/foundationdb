@@ -327,6 +327,7 @@ Future<Void> bulkSetup(Database cx,
 		keySaveIncrement = 0;
 	}
 
+	fs.reserve(BULK_SETUP_WORKERS);
 	for (int j = 0; j < BULK_SETUP_WORKERS; j++) {
 		fs.push_back(setupRangeWorker(cx, workload, &jobs, maxWorkerInsertRate, keySaveIncrement, j));
 	}

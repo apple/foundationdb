@@ -154,6 +154,7 @@ public:
 
 	std::vector<RangeLockState> getAllLockStats() const {
 		std::vector<RangeLockState> res;
+		res.reserve(locks.size());
 		for (const auto& [name, lock] : locks) {
 			res.push_back(lock);
 		}

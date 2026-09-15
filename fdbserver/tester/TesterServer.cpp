@@ -117,6 +117,7 @@ Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	wcx.rangesToCheck = work.rangesToCheck;
 	// FIXME: Other stuff not filled in; why isn't this constructed here and passed down to the other
 	// getWorkloadIface()?
+	ifaces.reserve(work.options.size());
 	for (int i = 0; i < work.options.size(); i++) {
 		ifaces.push_back(getWorkloadIface(work, ccr, work.options[i], dbInfo));
 	}

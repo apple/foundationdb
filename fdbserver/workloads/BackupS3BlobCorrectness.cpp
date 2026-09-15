@@ -84,6 +84,7 @@
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
@@ -136,6 +137,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	// performValidation: if true, validates backup by restoring with prefix and running audit_storage validate_restore
 	// This must happen BEFORE clearing the database so we can compare original vs restored data
 	bool performValidation;
+	// expectRestoreFailure: the bulkload restore is expected NOT to complete, so the workload asserts the
+	// failure is reported and recovered from rather than that the data arrived.
+	bool expectRestoreFailure;
 
 	// Chaos testing options
 	bool enableChaos;
@@ -194,6 +198,10 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		// performValidation: Validates backup by comparing original data vs restored data
 		// Uses audit_storage validate_restore - must happen BEFORE clearing database
 		performValidation = getOption(options, "performValidation"_sr, false);
+		// Mutually exclusive with performValidation, whose audit compares restored contents that by
+		// definition do not exist when the restore is expected to fail.
+		expectRestoreFailure = getOption(options, "expectRestoreFailure"_sr, false);
+		ASSERT(!(expectRestoreFailure && performValidation));
 
 		// Chaos testing options
 		enableChaos = getOption(options, "enableChaos"_sr, false);
@@ -755,25 +763,70 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					Standalone<StringRef> restoreTag(backupTag.toString() + "_restore");
 					// Pass lockDB=False since we already locked, unlockDB=True to release when done,
 					// and our lockUID so restore uses the same lock for checkDatabaseLock calls
-					Version v = co_await backupAgent.restore(cx,
-					                                         cx,
-					                                         restoreTag,
-					                                         KeyRef(lastBackupContainer->getURL()),
-					                                         lastBackupContainer->getProxy(),
-					                                         restoreRanges,
-					                                         WaitForComplete::True,
-					                                         ::invalidVersion,
-					                                         Verbose::True,
-					                                         Key(),
-					                                         Key(),
-					                                         LockDB::False,
-					                                         UnlockDB::True,
-					                                         OnlyApplyMutationLogs::False,
-					                                         InconsistentSnapshotOnly::False,
-					                                         ::invalidVersion,
-					                                         lastBackupContainer->getEncryptionKeyFileName(),
-					                                         lockUID,
-					                                         useRangeFileRestore);
+					Version v = ::invalidVersion;
+					Error restoreError;
+					try {
+						v = co_await backupAgent.restore(cx,
+						                                 cx,
+						                                 restoreTag,
+						                                 KeyRef(lastBackupContainer->getURL()),
+						                                 lastBackupContainer->getProxy(),
+						                                 restoreRanges,
+						                                 WaitForComplete::True,
+						                                 ::invalidVersion,
+						                                 Verbose::True,
+						                                 Key(),
+						                                 Key(),
+						                                 LockDB::False,
+						                                 UnlockDB::True,
+						                                 OnlyApplyMutationLogs::False,
+						                                 InconsistentSnapshotOnly::False,
+						                                 ::invalidVersion,
+						                                 lastBackupContainer->getEncryptionKeyFileName(),
+						                                 lockUID,
+						                                 useRangeFileRestore);
+					} catch (Error& e) {
+						if (e.code() == error_code_actor_cancelled || !expectRestoreFailure) {
+							throw;
+						}
+						restoreError = e;
+					}
+
+					if (expectRestoreFailure) {
+						// A restore that cannot confirm every task was ingested must fail rather than report
+						// success; that silent success is the data loss this guard exists to catch. The client
+						// sees restore_error because FileBackupAgentImpl::restore turns any non-COMPLETED
+						// final state into it, so restore_bulkload_failed reaches only the restore's own
+						// lastErrorPerType.
+						TraceEvent("BS3BCW_RestoreFailedAsExpected")
+						    .error(restoreError)
+						    .detail("BackupTag", printable(backupTag));
+						ASSERT(restoreError.code() == error_code_restore_error);
+						FileBackupAgent::ERestoreState finalState =
+						    co_await backupAgent.waitRestore(cx, restoreTag, Verbose::False);
+						ASSERT(finalState == FileBackupAgent::ERestoreState::ABORTED);
+
+						// The failure must leave the database usable. ABORTED puts the restore outside
+						// isRunnable(), so abortRestore() returns before its own unlockDatabase() and the abort
+						// path has to release the lock itself. Assert on the lock key: unlockDatabase() returns
+						// silently when the key is already absent, so calling it would prove nothing.
+						Transaction lockTr(cx);
+						while (true) {
+							Error lockErr;
+							try {
+								lockTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+								lockTr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+								Optional<Value> lockVal = co_await lockTr.get(databaseLockedKey);
+								TraceEvent("BS3BCW_LockStateAfterFailedRestore").detail("Locked", lockVal.present());
+								ASSERT(!lockVal.present());
+								break;
+							} catch (Error& e) {
+								lockErr = e;
+							}
+							co_await lockTr.onError(lockErr);
+						}
+						co_return;
+					}
 
 					TraceEvent("BS3BCW_RestoreComplete")
 					    .detail("BackupTag", printable(backupTag))

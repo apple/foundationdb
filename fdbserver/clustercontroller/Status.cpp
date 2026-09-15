@@ -1738,8 +1738,8 @@ loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>
 						res.healthyZone = healthyZone.first;
 					} else if (healthyZone.second > tr.getReadVersion().get()) {
 						res.healthyZone = healthyZone.first;
-						res.healthyZoneSeconds =
-						    (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+						res.healthyZoneSeconds = static_cast<double>(healthyZone.second - tr.getReadVersion().get()) /
+						                         CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 					}
 				}
 				res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
@@ -2740,6 +2740,7 @@ AsyncResult<JsonBuilderObject> layerStatusFetcher(Database cx,
 				// TODO:  Also fetch other linked subtrees of meta keys
 
 				std::vector<Future<RangeResult>> docFutures;
+				docFutures.reserve(jsonLayers.size());
 				for (int i = 0; i < jsonLayers.size(); ++i) {
 					docFutures.push_back(
 					    tr.getRange(KeyRangeRef(jsonLayers[i].value, strinc(jsonLayers[i].value)), 1000));
@@ -2873,7 +2874,7 @@ Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicatedRegi
 Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> readStorageWiggleMetrics(
     Database cx,
     bool use_system_priority) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	Optional<StorageWiggleMetrics> primaryV;
 	Optional<StorageWiggleMetrics> remoteV;
 	StorageWiggleData wiggleState;

@@ -116,7 +116,7 @@ struct ValidateStorage : TestWorkload {
 				                                     auditRange,
 				                                     type,
 				                                     storageEngine,
-				                                     /*timeoutSecond=*/300);
+				                                     /*timeoutSeconds=*/300);
 				auditId = auditId_;
 				TraceEvent("TestAuditStorageTriggered")
 				    .detail("Context", context)
@@ -257,7 +257,7 @@ struct ValidateStorage : TestWorkload {
 				UID auditId_ = co_await cancelAuditStorage(cx->getConnectionRecord(),
 				                                           type,
 				                                           auditId,
-				                                           /*timeoutSecond=*/300);
+				                                           /*timeoutSeconds=*/300);
 				ASSERT(auditId == auditId_);
 				TraceEvent("TestAuditStorageWaitCancelAuditStorageUntilComplete")
 				    .detail("AuditID", auditId)
