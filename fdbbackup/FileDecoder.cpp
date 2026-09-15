@@ -545,10 +545,11 @@ public:
 	// version batch data that are in the next file.
 	Optional<VersionedMutations> getNextBatch() {
 		for (auto& [version, m] : mutationBlocksByVersion) {
-			if (m.isComplete()) {
+			Optional<StringRef> completeMutations = m.getCompleteMutations();
+			if (completeMutations.present()) {
 				VersionedMutations vms;
 				vms.version = version;
-				vms.serializedMutations = m.serializedMutations;
+				vms.serializedMutations = completeMutations.get().toString();
 				vms.mutations = fileBackup::decodeMutationLogValue(vms.serializedMutations);
 				TraceEvent("Decode").detail("Version", vms.version).detail("N", vms.mutations.size());
 				mutationBlocksByVersion.erase(version);

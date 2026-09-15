@@ -3202,7 +3202,7 @@ public:
 							    .detail("NumExistingSS", numExistingSS);
 						}
 
-						if (hasHealthyTeam && !tssState->active && tssToRecruit > 0) {
+						if (hasHealthyTeam && !tssState->isActive() && tssToRecruit > 0) {
 							TraceEvent("TSS_Recruit", self->distributorId)
 							    .detail("Stage", "HoldTSS")
 							    .detail("Addr", candidateSSAddr.toString())
@@ -3218,7 +3218,7 @@ public:
 							    initializeStorage(self, candidateWorker, ddEnabledState, true, tssState));
 							checkTss = self->initialFailureReactionDelay;
 						} else {
-							if (tssState->active && tssState->inDataZone(candidateWorker.worker.locality)) {
+							if (tssState->isActive() && tssState->inDataZone(candidateWorker.worker.locality)) {
 								CODE_PROBE(true, "TSS recruits pair in same dc/datahall");
 								self->isTssRecruiting = false;
 								TraceEvent("TSS_Recruit", self->distributorId)
@@ -3232,7 +3232,7 @@ public:
 								tssState = makeReference<TSSPairState>();
 							} else {
 								CODE_PROBE(
-								    tssState->active,
+								    tssState->isActive(),
 								    "TSS recruitment skipped potential pair because it's in a different dc/datahall");
 								self->addActor.send(initializeStorage(
 								    self, candidateWorker, ddEnabledState, false, makeReference<TSSPairState>()));
@@ -6430,7 +6430,7 @@ bool DDTeamCollection::exclusionSafetyCheck(std::vector<UID>& excludeServerIDs) 
 
 std::pair<StorageWiggler::State, double> DDTeamCollection::getStorageWigglerState() const {
 	if (storageWiggler) {
-		return { storageWiggler->getWiggleState(), storageWiggler->lastStateChangeTs };
+		return storageWiggler->getWiggleStateSnapshot();
 	}
 	return { StorageWiggler::INVALID, 0.0 };
 }

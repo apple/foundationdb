@@ -54,7 +54,7 @@ class TCMachineInfo;
 class TCMachineTeamInfo;
 
 // All state that represents an ongoing tss pair recruitment
-struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
+class TSSPairState : public ReferenceCounted<TSSPairState>, NonCopyable {
 	Promise<Optional<std::pair<UID, Version>>>
 	    ssPairInfo; // if set, for ss to pass its id to tss pair once it is successfully recruited
 	Promise<bool> tssPairDone; // if set, for tss to pass ss that it was successfully recruited
@@ -65,10 +65,13 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 
 	bool active;
 
+public:
 	TSSPairState() : active(false) {}
 
 	explicit TSSPairState(const LocalityData& locality)
 	  : dcId(locality.dcId()), dataHallId(locality.dataHallId()), active(true) {}
+
+	bool isActive() const { return active; }
 
 	bool inDataZone(const LocalityData& locality) const {
 		return locality.dcId() == dcId && locality.dataHallId() == dataHallId;
