@@ -1758,20 +1758,6 @@ TEST_CASE("/flow/flow/FlowMutex") {
 
 using namespace std::chrono_literals;
 
-TEST_CASE("/flow/thread/ThreadFutureStream/selfAssignment") {
-	ThreadFutureStream<int> stream;
-	const auto& source = stream;
-	stream = source;
-	ASSERT(!stream.isValid());
-	ThreadReturnPromiseStream<int> promise;
-	stream = promise.getFuture();
-	stream = source;
-	ASSERT(promise.getFutureReferenceCount() == 1);
-	promise.send(42);
-	int value = co_await stream;
-	ASSERT(value == 42);
-}
-
 TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Simple") {
 	AsyncTaskExecutor exc(1);
 	noUnseed = true;

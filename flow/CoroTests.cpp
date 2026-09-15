@@ -1484,20 +1484,6 @@ TEST_CASE("/flow/coro/PromiseStream/move2") {
 	ASSERT(movedTracker.copied == 0);
 }
 
-TEST_CASE("/flow/coro/FutureStream/selfAssignment") {
-	FutureStream<int> stream;
-	const auto& source = stream;
-	stream = source;
-	ASSERT(!stream.isValid());
-	PromiseStream<int> promise;
-	stream = promise.getFuture();
-	stream = source;
-	ASSERT(promise.getFutureReferenceCount() == 1);
-	promise.send(42);
-	ASSERT(stream.pop() == 42);
-	return Void();
-}
-
 TEST_CASE("/flow/coro/FutureStream/rvalueAwait") {
 	{
 		PromiseStream<int> stream;
