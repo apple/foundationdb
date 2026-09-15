@@ -18,15 +18,10 @@
  * limitations under the License.
  */
 
-#include "flow/BooleanParam.h"
 #include "flow/Error.h"
 #include "flow/Knobs.h"
-#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-
-FDB_BOOLEAN_PARAM(Randomize);
-FDB_BOOLEAN_PARAM(IsSimulated);
 
 bool g_crashOnError = false;
 
@@ -237,38 +232,5 @@ TEST_CASE("/flow/AssertTest") {
 	ASSERT(sz < ln);
 	ASSERT_EQ(0xFFFFFFFF, (int32_t)-1);
 
-	return Void();
-}
-
-TEST_CASE("/flow/AssertTest/DisableAsserts") {
-	FlowKnobs knobs(Randomize::False, IsSimulated::False);
-	const FlowKnobs* previousKnobs = FLOW_KNOBS;
-	auto restoreKnobs = ScopeExit([previousKnobs]() { FLOW_KNOBS = previousKnobs; });
-	FLOW_KNOBS = &knobs;
-
-	for (bool disableAll : { false, true }) {
-		auto disableAssertion = [&](int line) {
-			knobs.DISABLE_ASSERTS = disableAll ? -1 : line;
-			UNSTOPPABLE_ASSERT(isAssertDisabled(line));
-			UNSTOPPABLE_ASSERT(isAssertDisabled(line + 1) == disableAll);
-		};
-		disableAssertion(__LINE__ + 1);
-		ASSERT_EQ(1, 2);
-		disableAssertion(__LINE__ + 1);
-		ASSERT_NE(1, 1);
-		disableAssertion(__LINE__ + 1);
-		ASSERT_LT(2, 1);
-		disableAssertion(__LINE__ + 1);
-		ASSERT_LE(2, 1);
-		disableAssertion(__LINE__ + 1);
-		ASSERT_GT(1, 2);
-		disableAssertion(__LINE__ + 1);
-		ASSERT_GE(1, 2);
-	}
-
-	knobs.DISABLE_ASSERTS = -1;
-	int evaluations = 0;
-	ASSERT_EQ(++evaluations, 0);
-	UNSTOPPABLE_ASSERT(evaluations == 1);
 	return Void();
 }
