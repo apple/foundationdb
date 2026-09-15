@@ -607,6 +607,14 @@ ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
 		state std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
 		state std::map<UID, Version> savedLogVersions;
 		if (tagVersions.size() != self->totalTags) {
+			// A tag missing progress pins oldestBackupEpoch forever, so this retry can be a permanent wedge.
+			// Suppressed well above the 2.5s retry: a wedge holds this condition for the rest of the run.
+			TraceEvent(SevWarnAlways, "BackupWorkerEpochProgressIncomplete", self->myId)
+			    .suppressFor(60.0)
+			    .detail("RecruitedEpoch", self->recruitedEpoch)
+			    .detail("OldestBackupEpoch", self->oldestBackupEpoch)
+			    .detail("TagsWithProgress", tagVersions.size())
+			    .detail("TotalTags", self->totalTags);
 			wait(interval);
 			continue;
 		}
@@ -862,6 +870,10 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 // Uploads self->messages to cloud storage and updates savedVersion.
 ACTOR Future<Void> uploadData(BackupData* self) {
 	state Version popVersion = invalidVersion;
+
+	// A worker displaced before its first upload must still leave a record, or its epoch pins
+	// oldestBackupEpoch forever. savedVersion is startVersion - 1, so this advertises no data.
+	wait(saveProgress(self, self->savedVersion));
 
 	loop {
 		// Too large uploadDelay will delay popping tLog data for too long.
