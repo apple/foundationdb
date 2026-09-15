@@ -19,7 +19,7 @@
  */
 
 #include "fmt/format.h"
-#include "fdbserver/NetworkTest.h"
+#include "NetworkTest.h"
 #include "flow/ActorCollection.h"
 #include "flow/CoroUtils.h"
 #include "flow/Knobs.h"
@@ -27,8 +27,6 @@
 #include <inttypes.h>
 
 #include "flow/IConnection.h"
-
-constexpr int WLTOKEN_NETWORKTEST = WLTOKEN_FIRST_AVAILABLE;
 
 struct LatencyStats {
 	using sample = double;
@@ -75,7 +73,7 @@ private:
 		while (true) {
 			NetworkTestRequest req = co_await interf.test.getFuture();
 			LatencyStats::sample sample = latency.tick();
-			req.reply.send(NetworkTestReply(Value(std::string(req.replySize, '.'))));
+			req.reply.send(NetworkTestReply(Standalone<StringRef>(std::string(req.replySize, '.'))));
 			latency.tock(sample);
 			sent++;
 		}
@@ -631,7 +629,7 @@ struct P2PNetworkTest {
 //   - wait for a random replyBytes sized response.
 // The client will close the connection after a random idleMilliseconds.
 // Reads and writes can optionally preceded by random delays, waitReadMilliseconds and waitWriteMilliseconds.
-TEST_CASE(":/network/p2ptest") {
+Future<Void> networkTestP2P(const UnitTestParameters& params, bool oneshot) {
 	P2PNetworkTest p2p(params.get("listenerAddresses").orDefault(""),
 	                   params.get("remoteAddresses").orDefault(""),
 	                   params.getInt("connectionsOut").orDefault(1),
@@ -642,23 +640,7 @@ TEST_CASE(":/network/p2ptest") {
 	                   params.get("waitReadMilliseconds").orDefault("0"),
 	                   params.get("waitWriteMilliseconds").orDefault("0"),
 	                   params.getDouble("targetDuration").orDefault(0.0),
-	                   false);
-
-	co_await p2p.run();
-}
-
-TEST_CASE(":/network/p2poneshottest") {
-	P2PNetworkTest p2p(params.get("listenerAddresses").orDefault(""),
-	                   params.get("remoteAddresses").orDefault(""),
-	                   params.getInt("connectionsOut").orDefault(1),
-	                   params.get("requestBytes").orDefault("50:100"),
-	                   params.get("replyBytes").orDefault("500:1000"),
-	                   params.get("requests").orDefault("10:10000"),
-	                   params.get("idleMilliseconds").orDefault("0"),
-	                   params.get("waitReadMilliseconds").orDefault("0"),
-	                   params.get("waitWriteMilliseconds").orDefault("0"),
-	                   params.getDouble("targetDuration").orDefault(0.0),
-	                   true);
+	                   oneshot);
 
 	co_await p2p.run();
 }
