@@ -311,12 +311,16 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			int64_t shardReadAmount = 0;
 			int64_t shardKeyCompared = 0;
 			bool valueAvailableToCheck = true;
-			KeySelector begin = firstGreaterOrEqual(range.begin);
+			// Occasionally page through the shard backward (descending) instead of forward, so this checker
+			// also exercises the reverse-read path storage servers use for real reverse getRange() calls,
+			// which has its own (independent) opportunities to disagree across replicas.
+			Reverse reverse(g_network->isSimulated() && SERVER_KNOBS->CONSISTENCY_CHECK_BACKWARD_READ);
+			KeySelector begin = reverse ? firstGreaterOrEqual(range.end) : firstGreaterOrEqual(range.begin);
 			while (true) {
 				Error err;
 				try {
 					std::vector<ErrorOr<GetKeyValuesReply>> readReplies =
-					    co_await readFromAllStorageServers(cx, storageServerInterfaces, range, begin);
+					    co_await readFromAllStorageServers(cx, storageServerInterfaces, range, begin, reverse);
 
 					for (int j = 0; j < readReplies.size(); j++) {
 						ErrorOr<GetKeyValuesReply> rangeResult = readReplies[j];
@@ -345,12 +349,16 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					RangeConsistencyResult rangeConsistencyResult;
 					if (valueAvailableToCheck) {
 						rangeConsistencyResult =
-						    checkRangeReplies(storageServerInterfaces, readReplies, range, begin, false);
+						    checkRangeReplies(storageServerInterfaces, readReplies, range, begin, false, reverse);
 						if (!rangeConsistencyResult.success) {
-							// checkRangeReplies() sets success = false instead of reporting a mismatch
-							// when it looks like the disagreement is due to a dead storage server (e.g.
-							// during a forced recovery). Treat the shard like any other unavailable-data
-							// case above and let it be retried rather than treating it as a hard failure.
+							// checkRangeReplies() sets success = false both when it detects a dead storage
+							// server (e.g. during a forced recovery) and when it detects a genuine data
+							// mismatch -- rangeConsistencyResult.isFailed distinguishes the two, but this
+							// workload doesn't currently check it, so both cases are treated alike: retried
+							// like any other unavailable-data case above rather than failed outright. A
+							// genuine mismatch will keep failing on retry until
+							// CONSISTENCY_CHECK_URGENT_RETRY_DEPTH_MAX is exhausted, at which point
+							// consistency_check_urgent_task_failed() is raised.
 							valueAvailableToCheck = false;
 						} else {
 							totalReadAmount = rangeConsistencyResult.totalReadAmount;
@@ -384,8 +392,16 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					// Advance to the next set of entries
 					ASSERT(rangeConsistencyResult.firstValidServer >= 0);
 					if (rangeConsistencyResult.nextKey.present()) {
-						begin = firstGreaterThan(rangeConsistencyResult.nextKey.get());
-						ASSERT(begin.getKey() != allKeys.end);
+						if (reverse) {
+							// nextKey is the smallest key that every server still reporting more data has
+							// actually read so far; resume just below it (excluding it, since it was already
+							// compared this round), mirroring the forward case's firstGreaterThan() below.
+							begin = firstGreaterOrEqual(rangeConsistencyResult.nextKey.get());
+							ASSERT(begin.getKey() != allKeys.begin);
+						} else {
+							begin = firstGreaterThan(rangeConsistencyResult.nextKey.get());
+							ASSERT(begin.getKey() != allKeys.end);
+						}
 					} else {
 						break;
 					}

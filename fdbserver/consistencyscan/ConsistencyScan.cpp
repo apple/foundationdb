@@ -223,19 +223,29 @@ struct ReplyDiff {
 	KeyRef valueMismatchKey;
 };
 
-// Merges `current` and `reference` (both sorted by key), counting keys unique to either side and value
-// mismatches on keys present in both. If `boundKey` is present, keys beyond it are ignored on both sides
-// -- this is what lets two replies that were paginated to different cutoff points (e.g. because one
+// Merges `current` and `reference`, counting keys unique to either side and value mismatches on keys
+// present in both. Both replies must be sorted the same way: ascending if `reverse` is False (the normal
+// case), descending if `reverse` is True (as storage servers return data for a negative-limit/backward
+// read -- see readFromAllStorageServers()). If `boundKey` is present, keys beyond it are ignored on both
+// sides -- this is what lets two replies that were paginated to different cutoff points (e.g. because one
 // storage server's reply happened to fill up a few keys earlier than another's) be compared without
-// treating that misalignment as spurious missing/unique keys.
-ReplyDiff diffReplies(const GetKeyValuesReply& current, const GetKeyValuesReply& reference, Optional<KeyRef> boundKey) {
+// treating that misalignment as spurious missing/unique keys. "Beyond" means past boundKey in the
+// direction of iteration, i.e. greater than it when ascending, less than it when descending.
+ReplyDiff diffReplies(const GetKeyValuesReply& current,
+                      const GetKeyValuesReply& reference,
+                      Optional<KeyRef> boundKey,
+                      Reverse reverse = Reverse::False) {
 	ReplyDiff diff;
 	int currentI = 0;
 	int referenceI = 0;
 	while (currentI < current.data.size() && referenceI < reference.data.size()) {
 		KeyValueRef currentKV = current.data[currentI];
 		KeyValueRef referenceKV = reference.data[referenceI];
-		if (boundKey.present() && (currentKV.key > boundKey.get() || referenceKV.key > boundKey.get())) {
+		bool currentBeyondBound =
+		    boundKey.present() && (reverse ? currentKV.key < boundKey.get() : currentKV.key > boundKey.get());
+		bool referenceBeyondBound =
+		    boundKey.present() && (reverse ? referenceKV.key < boundKey.get() : referenceKV.key > boundKey.get());
+		if (currentBeyondBound || referenceBeyondBound) {
 			// We have exceeded the minimum key reached across all servers. Stop checking
 			break;
 		}
@@ -248,7 +258,7 @@ ReplyDiff diffReplies(const GetKeyValuesReply& current, const GetKeyValuesReply&
 			}
 			currentI++;
 			referenceI++;
-		} else if (currentKV.key < referenceKV.key) {
+		} else if (reverse ? currentKV.key > referenceKV.key : currentKV.key < referenceKV.key) {
 			diff.currentUniqueKey = currentKV.key;
 			diff.currentUniques++;
 			currentI++;
@@ -263,12 +273,15 @@ ReplyDiff diffReplies(const GetKeyValuesReply& current, const GetKeyValuesReply&
 	// set) or the end (if boundKey is not set). Any remaining data (through boundKey) in either array is
 	// unique to that server.
 	while (referenceI < reference.data.size() &&
-	       (!boundKey.present() || reference.data[referenceI].key <= boundKey.get())) {
+	       (!boundKey.present() || (reverse ? reference.data[referenceI].key >= boundKey.get()
+	                                        : reference.data[referenceI].key <= boundKey.get()))) {
 		diff.referenceUniqueKey = reference.data[referenceI].key;
 		diff.referenceUniques++;
 		referenceI++;
 	}
-	while (currentI < current.data.size() && (!boundKey.present() || current.data[currentI].key <= boundKey.get())) {
+	while (currentI < current.data.size() &&
+	       (!boundKey.present() ||
+	        (reverse ? current.data[currentI].key >= boundKey.get() : current.data[currentI].key <= boundKey.get()))) {
 		diff.currentUniqueKey = current.data[currentI].key;
 		diff.currentUniques++;
 		currentI++;
@@ -287,8 +300,7 @@ void printReplyMismatchDebug(int currentIdx,
                              KeyRef beginKey,
                              KeyRef endKey) {
 	int invalidIndex = -1;
-	printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-	       "",
+	printf("\nSERVER %d (%s); shard = %s - %s:\n",
 	       currentIdx,
 	       currentSSI.address().toString().c_str(),
 	       printable(beginKey).c_str(),
@@ -300,8 +312,7 @@ void printReplyMismatchDebug(int currentIdx,
 			invalidIndex = k;
 	}
 
-	printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-	       "",
+	printf("\nSERVER %d (%s); shard = %s - %s:\n",
 	       referenceIdx,
 	       referenceSSI.address().toString().c_str(),
 	       printable(beginKey).c_str(),
@@ -326,6 +337,7 @@ Future<int> consistencyCheckReadData(UID myId,
                                      std::vector<Future<ErrorOr<GetKeyValuesReply>>>* keyValueFutures,
                                      Optional<int>* firstValidServer,
                                      int64_t* totalReadAmount,
+                                     Optional<KeyRef>* nextKey,
                                      Optional<Version> consistencyCheckStartVersion) {
 	ASSERT(!range.empty());
 	GetKeyValuesRequest req;
@@ -396,9 +408,10 @@ Future<int> consistencyCheckReadData(UID myId,
 	// keys further than another's before hitting its own page limit would be reported as containing
 	// spurious missing/extra keys. Kept as a separate pass (rather than sharing code with
 	// checkRangeReplies()) since it also drives this function's own DisabledTraceEvent/myId
-	// trace-correlation conventions.
+	// trace-correlation conventions. The caller uses *nextKey (rather than the reference server's own last
+	// key) to resume the scan, so it never skips over the region between the bound and whatever the
+	// reference server happened to read past it.
 	bool allSucceeded = true;
-	Optional<KeyRef> boundKey;
 	for (int j = 0; j < storageServerInterfaces->size(); j++) {
 		ErrorOr<GetKeyValuesReply> rangeResult = (*keyValueFutures)[j].get();
 		if (rangeResult.present() && !rangeResult.get().error.present()) {
@@ -417,14 +430,16 @@ Future<int> consistencyCheckReadData(UID myId,
 			if (!firstValidServer->present()) {
 				DisabledTraceEvent("ConsistencyCheck_FirstValidServer", myId).detail("Iter", j);
 				*firstValidServer = j;
-				if (reply.more) {
-					ASSERT(lastKeyInReply.present());
-					boundKey = lastKeyInReply;
+				// A reply reporting more data ought to always have at least one key (that's what a
+				// resumption cursor would be based on), but tolerate the combination defensively --
+				// as is already done elsewhere in this file -- rather than asserting/crashing the
+				// always-on background scan over what should be an SS-side contract violation.
+				if (reply.more && lastKeyInReply.present()) {
+					*nextKey = lastKeyInReply;
 				}
-			} else if (reply.more) {
-				ASSERT(lastKeyInReply.present());
-				if (!boundKey.present() || lastKeyInReply.get() < boundKey.get()) {
-					boundKey = lastKeyInReply;
+			} else if (reply.more && lastKeyInReply.present()) {
+				if (!nextKey->present() || lastKeyInReply.get() < nextKey->get()) {
+					*nextKey = lastKeyInReply;
 				}
 			}
 		} else {
@@ -446,12 +461,18 @@ Future<int> consistencyCheckReadData(UID myId,
 			GetKeyValuesReply current = rangeResult.get();
 
 			if (current.data != reference.data || current.more != reference.more) {
-				ReplyDiff diff = diffReplies(current, reference, boundKey);
+				ReplyDiff diff = diffReplies(current, reference, *nextKey);
 
-				// As in checkRangeReplies() above, the raw current.data != reference.data check can trip
+				// As in checkRangeReplies() below, the raw current.data != reference.data check can trip
 				// merely because the two replies were paginated to different cutoff points, even though
-				// both servers fully agree on every key either of them actually read through boundKey.
-				if (diff.currentUniques == 0 && diff.referenceUniques == 0 && diff.valueMismatches == 0) {
+				// both servers fully agree on every key either of them actually read through *nextKey.
+				// A `more` mismatch is not covered by that bound the same way -- it's not an artifact of
+				// pagination depth, it's the servers disagreeing about whether the range is exhausted at
+				// all (which is exactly the shape of the FlipMoreFlag corruption injected below for the
+				// scan's own self-test) -- so it must not be swallowed here alongside the pagination
+				// artifact case.
+				if (current.more == reference.more && diff.currentUniques == 0 && diff.referenceUniques == 0 &&
+				    diff.valueMismatches == 0) {
 					continue;
 				}
 
@@ -946,6 +967,7 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 						while (true) {
 							std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
 							Optional<int> firstValidServer;
+							Optional<KeyRef> consistencyCheckNextKey;
 							memState->stats.requests += storageServerInterfaces.size();
 							int64_t replicatedBytesReadThisLoop = 0;
 							int newErrors = co_await consistencyCheckReadData(memState->csId,
@@ -956,6 +978,7 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 							                                                  &keyValueFutures,
 							                                                  &firstValidServer,
 							                                                  &replicatedBytesReadThisLoop,
+							                                                  &consistencyCheckNextKey,
 							                                                  statsCurrentRound.startVersion);
 							errors += newErrors;
 							memState->stats.inconsistencies += newErrors;
@@ -983,11 +1006,23 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 									statsCurrentRound.lastEndKey = targetRange.end;
 									noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
 									break;
+								} else if (!consistencyCheckNextKey.present()) {
+									// Shouldn't happen per the storage server contract (more=true implies at
+									// least one row was returned), but avoid crashing the always-on background
+									// scan over it -- treat it the way a more=true-with-no-data reply is already
+									// treated in the newErrors branch below: there's nothing usable to resume
+									// from, so consider this range read to its end.
+									statsCurrentRound.lastEndKey = targetRange.end;
+									noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
+									break;
 								} else {
-									VectorRef<KeyValueRef> result =
-									    keyValueFutures[firstValidServer.get()].get().get().data;
-									ASSERT(!result.empty());
-									statsCurrentRound.lastEndKey = keyAfter(result.back().key);
+									// Resume from consistencyCheckNextKey (the minimum last key among replies
+									// still reporting more data), not the reference server's own raw last key --
+									// otherwise, if the reference server happened to page further than another
+									// replica before the two were compared, the region between the bound and the
+									// reference server's own last key would never be read by any future round,
+									// silently skipping a comparison rather than just deferring it.
+									statsCurrentRound.lastEndKey = keyAfter(consistencyCheckNextKey.get());
 									targetRange = KeyRangeRef(statsCurrentRound.lastEndKey, targetRange.end);
 									if (targetRange.empty()) {
 										noMoreRecords = targetRange.end == allKeys.end;
@@ -1449,19 +1484,31 @@ void testFailure(std::string message, bool performQuiescentChecks, bool* success
 }
 
 // Reads a single range from every storage server in storageServerInterfaces at the same (current) read
-// version. Used by callers that need to compare replies themselves via checkRangeReplies() below.
+// version. Used by callers that need to compare replies themselves via checkRangeReplies() below. `cursor`
+// is the resumption point from a prior round: for a forward read it's a lower-bound KeySelector (advances
+// upward, terminates at range.end); for a backward (reverse) read it's an upper-bound KeySelector (shrinks
+// downward, terminates at range.begin), matching how NativeAPI's own reverse getRange() pages. In reverse
+// mode, the storage servers return data sorted descending (see storageserver.cpp's readRange()), so
+// callers must pass `reverse` through to diffReplies()/checkRangeReplies() as well.
 Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
     Database cx,
     std::vector<StorageServerInterface> storageServerInterfaces,
     KeyRangeRef range,
-    KeySelector begin) {
+    KeySelector cursor,
+    Reverse reverse) {
 	// Get the min version of the storage servers
 	Version version = co_await getStorageServerReadVersion(cx);
 
 	GetKeyValuesRequest req;
-	req.begin = begin;
-	req.end = firstGreaterOrEqual(range.end);
-	req.limit = 1e4;
+	if (reverse) {
+		req.begin = firstGreaterOrEqual(range.begin);
+		req.end = cursor;
+		req.limit = -1e4;
+	} else {
+		req.begin = cursor;
+		req.end = firstGreaterOrEqual(range.end);
+		req.limit = 1e4;
+	}
 	req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	req.version = version;
 	req.tags = TagSet();
@@ -1489,18 +1536,24 @@ Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
 
 // Compares the replies collected by readFromAllStorageServers() above against each other, reporting any
 // mismatch via ConsistencyCheck_DataInconsistent. Returns the range up to which all servers agree
-// (result.nextKey/result.lastReadKey) so the caller can page through the rest of the shard.
+// (result.nextKey/result.lastReadKey) so the caller can page through the rest of the shard. `reverse` must
+// match whatever was passed to readFromAllStorageServers() for these replies -- see its comment for what
+// that changes about the replies' sort order.
 RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterface>& storageServerInterfaces,
                                          const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,
                                          KeyRangeRef range,
                                          KeySelector begin,
-                                         bool performQuiescentChecks) {
+                                         bool performQuiescentChecks,
+                                         Reverse reverse) {
 	RangeConsistencyResult result(readReplies.size());
 
 	// Determine the first valid server and the correct stopping point, which is the minimum key of all
-	// ranges with more data. We will compare all the other ranges to the reference one, and we will read
-	// each range until we hit this minimum stopping point. The next range read will begin from that point,
-	// so that comparison ensures that every call reads a unique subsection of the key range
+	// ranges with more data (the maximum when reverse, since replies are sorted descending and each
+	// reply's last key is then its smallest -- the server that has made the least progress towards
+	// range.begin is the one with the largest such "smallest key so far"). We will compare all the other
+	// ranges to the reference one, and we will read each range until we hit this stopping point. The next
+	// range read will begin from that point, so that comparison ensures that every call reads a unique
+	// subsection of the key range
 	bool allNoMore = true;
 	Optional<KeyRef> maxReadKey;
 	Version version = invalidVersion;
@@ -1518,7 +1571,10 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 			if (!rangeReply.data.empty()) {
 				lastKeyInRange = rangeReply.data[rangeReply.data.size() - 1].key;
 			}
-			if (!maxReadKey.present() || (lastKeyInRange.present() && lastKeyInRange.get() > maxReadKey.get())) {
+			bool extendsFurther =
+			    maxReadKey.present() && lastKeyInRange.present() &&
+			    (reverse ? lastKeyInRange.get() < maxReadKey.get() : lastKeyInRange.get() > maxReadKey.get());
+			if (!maxReadKey.present() || extendsFurther) {
 				maxReadKey = lastKeyInRange;
 			}
 
@@ -1527,13 +1583,17 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 				TraceEvent("ConsistencyCheck_FirstValidServer").detail("Iter", j);
 				result.firstValidServer = j;
 				version = rangeReply.version;
-				if (rangeReply.more) {
-					ASSERT(lastKeyInRange.present());
+				// A reply reporting more data ought to always have at least one key (that's what a
+				// resumption cursor would be based on), but tolerate the combination defensively rather
+				// than asserting/crashing over what should be an SS-side contract violation.
+				if (rangeReply.more && lastKeyInRange.present()) {
 					result.nextKey = lastKeyInRange;
 				}
-			} else if (rangeReply.more) {
-				ASSERT(lastKeyInRange.present());
-				if (!result.nextKey.present() || lastKeyInRange.get() < result.nextKey.get()) {
+			} else if (rangeReply.more && lastKeyInRange.present()) {
+				bool leastProgress =
+				    result.nextKey.present() && (reverse ? lastKeyInRange.get() > result.nextKey.get()
+				                                         : lastKeyInRange.get() < result.nextKey.get());
+				if (!result.nextKey.present() || leastProgress) {
 					result.nextKey = lastKeyInRange;
 				}
 			}
@@ -1559,7 +1619,7 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 			GetKeyValuesReply current = rangeResult.get();
 
 			if (current.data != reference.data || current.more != reference.more) {
-				ReplyDiff diff = diffReplies(current, reference, result.nextKey);
+				ReplyDiff diff = diffReplies(current, reference, result.nextKey, reverse);
 
 				// Record the mismatches in the result
 				result.uniqueRefKeys[j] = diff.referenceUniques;
@@ -1570,8 +1630,12 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 				// replies were paginated to different cutoff points (see result.nextKey above), even
 				// though both servers fully agree on every key either of them actually read. That's not
 				// a real inconsistency, so don't report/fail on it unless the bounded merge above found
-				// an actual discrepancy within the range every server got to.
-				if (diff.currentUniques == 0 && diff.referenceUniques == 0 && diff.valueMismatches == 0) {
+				// an actual discrepancy within the range every server got to. A `more` mismatch is not
+				// covered by that bound the same way -- it's not an artifact of pagination depth, it's the
+				// servers disagreeing about whether the range is exhausted at all -- so it must not be
+				// swallowed here alongside the pagination-artifact case.
+				if (current.more == reference.more && diff.currentUniques == 0 && diff.referenceUniques == 0 &&
+				    diff.valueMismatches == 0) {
 					continue;
 				}
 
@@ -1628,13 +1692,13 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 				                : "False");
 
 				if (!isExpectedTSSMismatch && !isFailed) {
-					if (g_network->isSimulated()) {
-						// Report the inconsistency; leave it to the caller to decide whether/how to fail
-						// the test (e.g. via testFailure()) based on result.success. Callers like
-						// consistencyCheckReadData() below want to count this as an error without failing
-						// the (background, always-running) consistency scan itself.
-						result.success = false;
-					}
+					// Report the inconsistency; leave it to the caller to decide whether/how to fail the
+					// test (e.g. via testFailure()) based on result.success. Callers like
+					// checkDataConsistency() and ConsistencyCheckUrgent decide what to do with a failed
+					// result -- e.g. whether to fail outright or retry -- so this must be set
+					// unconditionally, not just in simulation, or real clusters would stop failing on
+					// genuine data inconsistencies detected here.
+					result.success = false;
 				} else if (isFailed) {
 					// If the storage servers are not live, we should retry.
 					TraceEvent("ConsistencyCheck_StorageServerUnavailable")

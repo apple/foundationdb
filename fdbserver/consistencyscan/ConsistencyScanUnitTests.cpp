@@ -65,6 +65,28 @@ GetKeyValuesReply pageFrom(std::vector<KeyValueRef> const& data, Optional<KeyRef
 	return reply;
 }
 
+// Reverse counterpart of pageFrom() above: `cursor`, if present, is an exclusive upper bound (only keys
+// strictly less than it are eligible), matching how readFromAllStorageServers() resumes a backward read.
+// Entries are returned in descending order, as a real storage server does for a negative-limit read.
+GetKeyValuesReply pageFromReverse(std::vector<KeyValueRef> const& data,
+                                  Optional<KeyRef> const& cursor,
+                                  size_t pageSize) {
+	size_t endIdx = data.size(); // exclusive
+	if (cursor.present()) {
+		while (endIdx > 0 && data[endIdx - 1].key >= cursor.get()) {
+			endIdx--;
+		}
+	}
+	size_t startIdx = endIdx >= pageSize ? endIdx - pageSize : 0;
+	GetKeyValuesReply reply;
+	for (size_t i = endIdx; i > startIdx; i--) {
+		reply.data.push_back(reply.arena, data[i - 1]);
+	}
+	reply.more = startIdx > 0;
+	reply.version = 1;
+	return reply;
+}
+
 } // namespace
 
 // Two servers agree on every key they both actually read ("b" and "c"), but server 0's reply happened to
@@ -190,12 +212,70 @@ TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/MultiRoundPaginationMatc
 	for (; round < 20; round++) {
 		KeySelector begin = cursor.present() ? firstGreaterThan(cursor.get()) : firstGreaterOrEqual(range.begin);
 		std::vector<ErrorOr<GetKeyValuesReply>> replies;
+		replies.reserve(serverData.size());
 		for (auto const& data : serverData) {
 			replies.push_back(ErrorOr<GetKeyValuesReply>(pageFrom(data, cursor, pageSize)));
 		}
 
 		RangeConsistencyResult result =
 		    checkRangeReplies(servers, replies, range, begin, /*performQuiescentChecks=*/false);
+		for (int i = 0; i < result.uniqueRefKeys.size(); i++) {
+			totalUniqueRefKeys[i] += result.uniqueRefKeys[i];
+			totalUniqueCmpKeys[i] += result.uniqueCmpKeys[i];
+			totalMismatchedValues[i] += result.mismatchedValues[i];
+		}
+
+		if (!result.nextKey.present()) {
+			break;
+		}
+		cursor = result.nextKey;
+	}
+	ASSERT(round < 20); // otherwise pagination never converged -- likely a bug in the test, or a real regression
+
+	ASSERT_EQ(totalUniqueRefKeys[1], 1); // "d"
+	ASSERT_EQ(totalUniqueCmpKeys[1], 1); // "ee"
+	ASSERT_EQ(totalMismatchedValues[1], 1); // "h"
+
+	co_return;
+}
+
+// Reverse counterpart of the test above: same planted errors, but paginated backward (descending), the way
+// readFromAllStorageServers()/checkRangeReplies() page when called with Reverse::True -- e.g. by
+// ConsistencyCheckUrgent when CONSISTENCY_CHECK_BACKWARD_READ is set. Validates that the cumulative
+// unique/mismatch counts land exactly on the planted errors when merging descending-sorted replies, which
+// exercises the reverse-specific comparisons in diffReplies()/checkRangeReplies() (bound direction, "least
+// progress" server selection, etc.) that the forward test above can't reach.
+TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/ReverseMultiRoundPaginationMatchesPlantedErrors") {
+	std::vector<StorageServerInterface> servers = { makeTestSSI(), makeTestSSI() };
+	std::vector<KeyValueRef> serverAData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr }, { "c"_sr, "v"_sr },
+		                                     { "d"_sr, "v"_sr }, { "e"_sr, "v"_sr }, { "f"_sr, "v"_sr },
+		                                     { "g"_sr, "v"_sr }, { "h"_sr, "v"_sr }, { "i"_sr, "v"_sr },
+		                                     { "j"_sr, "v"_sr } };
+	// Same planted errors as the forward test: B is missing "d", has an extra "ee", and disagrees on "h".
+	std::vector<KeyValueRef> serverBData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr },  { "c"_sr, "v"_sr },
+		                                     { "e"_sr, "v"_sr }, { "ee"_sr, "v"_sr }, { "f"_sr, "v"_sr },
+		                                     { "g"_sr, "v"_sr }, { "h"_sr, "X"_sr },  { "i"_sr, "v"_sr },
+		                                     { "j"_sr, "v"_sr } };
+	std::vector<std::vector<KeyValueRef>> serverData = { serverAData, serverBData };
+	KeyRangeRef range("a"_sr, "z"_sr);
+	constexpr size_t pageSize = 3;
+
+	std::vector<int64_t> totalUniqueRefKeys(servers.size(), 0);
+	std::vector<int64_t> totalUniqueCmpKeys(servers.size(), 0);
+	std::vector<int64_t> totalMismatchedValues(servers.size(), 0);
+
+	Optional<KeyRef> cursor; // exclusive upper bound; absent means "start from range.end"
+	int round = 0;
+	for (; round < 20; round++) {
+		KeySelector begin = cursor.present() ? firstGreaterOrEqual(cursor.get()) : firstGreaterOrEqual(range.end);
+		std::vector<ErrorOr<GetKeyValuesReply>> replies;
+		replies.reserve(serverData.size());
+		for (auto const& data : serverData) {
+			replies.push_back(ErrorOr<GetKeyValuesReply>(pageFromReverse(data, cursor, pageSize)));
+		}
+
+		RangeConsistencyResult result =
+		    checkRangeReplies(servers, replies, range, begin, /*performQuiescentChecks=*/false, Reverse::True);
 		for (int i = 0; i < result.uniqueRefKeys.size(); i++) {
 			totalUniqueRefKeys[i] += result.uniqueRefKeys[i];
 			totalUniqueCmpKeys[i] += result.uniqueCmpKeys[i];
