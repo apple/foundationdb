@@ -29,17 +29,21 @@ static std::map<NetworkAddress, std::pair<Reference<EvictablePageCache>, Referen
 
 EvictablePage::~EvictablePage() {
 	if (data) {
-		freeFast4kAligned(pageCache->pageSize, data);
+		freeFast4kAligned(pageCache->getPageSize(), data);
 	}
-	if (EvictablePageCache::RANDOM == pageCache->cacheEvictionType) {
-		if (index > -1) {
-			pageCache->pages[index] = pageCache->pages.back();
-			pageCache->pages[index]->index = index;
-			pageCache->pages.pop_back();
+	pageCache->remove(this);
+}
+
+void EvictablePageCache::remove(EvictablePage* page) {
+	if (RANDOM == cacheEvictionType) {
+		if (page->index > -1) {
+			pages[page->index] = pages.back();
+			pages[page->index]->index = page->index;
+			pages.pop_back();
 		}
 	} else {
 		// remove it from the LRU
-		pageCache->lruPages.erase(EvictablePageCache::List::s_iterator_to(*this));
+		lruPages.erase(List::s_iterator_to(*page));
 	}
 }
 
@@ -94,7 +98,7 @@ Future<Void> AsyncFileCached::read_write_impl(typename std::conditional_t<writin
 
 	std::vector<Future<Void>> actors;
 
-	int offsetInPage = offset % pageCache->pageSize;
+	int offsetInPage = offset % pageCache->getPageSize();
 	int64_t pageOffset = offset - offsetInPage;
 
 	int remaining = length;
@@ -110,7 +114,7 @@ Future<Void> AsyncFileCached::read_write_impl(typename std::conditional_t<writin
 			pageCache->updateHit(p->second);
 		}
 
-		int bytesInPage = std::min(pageCache->pageSize - offsetInPage, remaining);
+		int bytesInPage = std::min(pageCache->getPageSize() - offsetInPage, remaining);
 
 		Future<Void> w;
 		if constexpr (writing) {
@@ -122,7 +126,7 @@ Future<Void> AsyncFileCached::read_write_impl(typename std::conditional_t<writin
 			actors.push_back(w);
 
 		data += bytesInPage;
-		pageOffset += pageCache->pageSize;
+		pageOffset += pageCache->getPageSize();
 		offsetInPage = 0;
 
 		remaining -= bytesInPage;
@@ -140,7 +144,8 @@ Future<Void> AsyncFileCached::readZeroCopy(void** data, int* length, int64_t off
 	++countCacheReads;
 
 	// Only aligned page reads are zero-copy
-	if (*length != pageCache->pageSize || (offset & (pageCache->pageSize - 1)) || offset + *length > this->length)
+	if (*length != pageCache->getPageSize() || (offset & (pageCache->getPageSize() - 1)) ||
+	    offset + *length > this->length)
 		return io_error();
 
 	auto p = pages.find(offset);
@@ -148,7 +153,7 @@ Future<Void> AsyncFileCached::readZeroCopy(void** data, int* length, int64_t off
 		AFCPage* page = new AFCPage(this, offset);
 		p = pages.insert(std::make_pair(offset, page)).first;
 	} else {
-		p->second->pageCache->updateHit(p->second);
+		pageCache->updateHit(p->second);
 	}
 
 	*data = p->second->data;
@@ -156,7 +161,8 @@ Future<Void> AsyncFileCached::readZeroCopy(void** data, int* length, int64_t off
 	return p->second->readZeroCopy();
 }
 void AsyncFileCached::releaseZeroCopy(void* data, int length, int64_t offset) {
-	ASSERT(length == pageCache->pageSize && !(offset & (pageCache->pageSize - 1)) && offset + length <= this->length);
+	ASSERT(length == pageCache->getPageSize() && !(offset & (pageCache->getPageSize() - 1)) &&
+	       offset + length <= this->length);
 	auto p = pages.find(offset);
 	// If the page is in the cache and the data pointer matches then release the page
 	if (p != pages.end() && p->second->data == data) {
@@ -183,7 +189,7 @@ Future<Void> AsyncFileCached::changeFileSize(int64_t size) {
 	std::vector<Future<Void>> actors;
 	int64_t oldLength = length;
 
-	int offsetInPage = size % pageCache->pageSize;
+	int offsetInPage = size % pageCache->getPageSize();
 	int64_t pageOffset = size - offsetInPage;
 
 	if (offsetInPage == 0 && size == length) {
@@ -204,7 +210,7 @@ Future<Void> AsyncFileCached::changeFileSize(int64_t size) {
 			CODE_PROBE(true, "Truncating to the middle of a page that isn't in cache");
 		}
 
-		pageOffset += pageCache->pageSize;
+		pageOffset += pageCache->getPageSize();
 	}
 
 	// if this call to truncate results in a larger file, there is no
@@ -215,9 +221,9 @@ Future<Void> AsyncFileCached::changeFileSize(int64_t size) {
 		// to truncate a small portion of data, looking up pages one by one should
 		// be faster. So for now we do single key lookup for each page if it results
 		// in less than a fixed percentage of the unordered map being accessed.
-		int64_t numLookups = (oldLength + (pageCache->pageSize - 1) - pageOffset) / pageCache->pageSize;
+		int64_t numLookups = (oldLength + (pageCache->getPageSize() - 1) - pageOffset) / pageCache->getPageSize();
 		if (numLookups < pages.size() * FLOW_KNOBS->PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION) {
-			for (int64_t offset = pageOffset; offset < oldLength; offset += pageCache->pageSize) {
+			for (int64_t offset = pageOffset; offset < oldLength; offset += pageCache->getPageSize()) {
 				auto iter = pages.find(offset);
 				if (iter != pages.end()) {
 					auto f = iter->second->truncate();

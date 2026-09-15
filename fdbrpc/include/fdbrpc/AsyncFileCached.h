@@ -30,22 +30,35 @@
 #include "flow/network.h"
 
 namespace bi = boost::intrusive;
-struct EvictablePage {
+class EvictablePageCache;
+
+class EvictablePage {
+	friend class EvictablePageCache;
+
+public:
 	void* data;
-	int index;
-	class Reference<struct EvictablePageCache> pageCache;
-	bi::list_member_hook<> member_hook;
 
 	virtual bool evict() = 0; // true if page was evicted, false if it isn't immediately evictable (but will be evicted
 	                          // regardless if possible)
 
-	explicit EvictablePage(Reference<EvictablePageCache> pageCache) : data(0), index(-1), pageCache(pageCache) {}
+	explicit EvictablePage(Reference<EvictablePageCache> pageCache) : data(0), pageCache(pageCache), index(-1) {}
 	virtual ~EvictablePage();
+
+protected:
+	const Reference<EvictablePageCache> pageCache;
+
+private:
+	int index;
+	bi::list_member_hook<> member_hook;
 };
 
-struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
+class EvictablePageCache : public ReferenceCounted<EvictablePageCache> {
+	friend EvictablePage::~EvictablePage();
+
 	using List =
 	    bi::list<EvictablePage, bi::member_hook<EvictablePage, bi::list_member_hook<>, &EvictablePage::member_hook>>;
+
+public:
 	enum CacheEvictionType { RANDOM = 0, LRU = 1 };
 
 	static CacheEvictionType evictionPolicyStringToEnum(const std::string& policy) {
@@ -66,6 +79,8 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	    cacheEvictionType(evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY)) {
 		cacheEvictions.init("EvictablePageCache.CacheEvictions"_sr);
 	}
+
+	int getPageSize() const { return pageSize; }
 
 	void allocate(EvictablePage* page) {
 		try_evict();
@@ -116,6 +131,9 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 			}
 		}
 	}
+
+private:
+	void remove(EvictablePage* page);
 
 	std::vector<EvictablePage*> pages;
 	List lruPages;
@@ -378,13 +396,13 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		owner->orphanedPages[data] = zeroCopyRefCount;
 		zeroCopyRefCount = 0;
 		notReading = Void();
-		data = allocateFast4kAligned(pageCache->pageSize);
+		data = allocateFast4kAligned(pageCache->getPageSize());
 	}
 
 	Future<Void> write(void const* data, int length, int offset) {
 		// If zero-copy reads are in progress, allow whole page writes to a new page buffer so the effects
 		// are not seen by the prior readers who still hold zeroCopyRead pointers
-		bool fullPage = offset == 0 && length == pageCache->pageSize;
+		bool fullPage = offset == 0 && length == pageCache->getPageSize();
 		ASSERT(zeroCopyRefCount == 0 || fullPage);
 
 		if (zeroCopyRefCount != 0) {
@@ -485,11 +503,11 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		void* dst = data;
 		if (pageOffset < owner->prevLength) {
 			try {
-				int _ = co_await owner->uncached->read(dst, pageCache->pageSize, pageOffset);
-				if (_ != pageCache->pageSize) {
+				int _ = co_await owner->uncached->read(dst, pageCache->getPageSize(), pageOffset);
+				if (_ != pageCache->getPageSize()) {
 					TraceEvent("ReadThroughShortRead")
 					    .detail("ReadAmount", _)
-					    .detail("PageSize", pageCache->pageSize)
+					    .detail("PageSize", pageCache->getPageSize())
 					    .detail("PageOffset", pageOffset);
 				}
 			} catch (Error& e) {
@@ -520,21 +538,21 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 					int allowance = 1;
 					// If I/O size is defined, wait for the calculated I/O quota
 					if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE > 0) {
-						allowance = (pageCache->pageSize + FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE - 1) /
+						allowance = (pageCache->getPageSize() + FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE - 1) /
 						            FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE; // round up
 						ASSERT(allowance > 0);
 					}
 					co_await owner->getRateControl()->getAllowance(allowance);
 				}
 
-				if (pageOffset + pageCache->pageSize > owner->length) {
+				if (pageOffset + pageCache->getPageSize() > owner->length) {
 					ASSERT(pageOffset < owner->length);
 					memset(static_cast<uint8_t*>(data) + owner->length - pageOffset,
 					       0,
-					       pageCache->pageSize - (owner->length - pageOffset));
+					       pageCache->getPageSize() - (owner->length - pageOffset));
 				}
 
-				auto f = owner->uncached->write(data, pageCache->pageSize, pageOffset);
+				auto f = owner->uncached->write(data, pageCache->getPageSize(), pageOffset);
 
 				co_await f;
 			}
