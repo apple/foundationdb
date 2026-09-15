@@ -1479,7 +1479,14 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	}
 
 	if (req.recoveryState == RecoveryState::FULLY_RECOVERED) {
-		ASSERT(req.logSystemConfig.oldTLogs.empty());
+		// Retaining old role advertisements must not interrupt an otherwise completed recovery.
+		if (!req.logSystemConfig.oldTLogs.empty()) {
+			TraceEvent(SevError, "FullyRecoveredWithOldTLogs", self->id)
+			    .detail("MasterId", req.id)
+			    .detail("RecoveryCount", req.recoveryCount)
+			    .detail("OldLogGenerations", req.logSystemConfig.oldTLogs.size());
+		}
+		ASSERT_WE_THINK(req.logSystemConfig.oldTLogs.empty());
 		self->db.unfinishedRecoveries = 0;
 	}
 
