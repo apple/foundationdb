@@ -428,7 +428,7 @@ class CDCProxy {
 	void clearBufferedMutations(Reference<CDCBufferedStream> stream);
 	void addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBufferedBatch batch);
 	void reconcileStreamMinVersion(Reference<CDCBufferedStream> stream, Version minVersion);
-	void markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin);
+	void markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin, int replyByteLimit);
 	void markTagStreamsRawReplyBudgetExceeded(Reference<CDCBufferedTag> tag, Version begin, int64_t retainedReplyCount);
 	void detachStreamFromTags(Reference<CDCBufferedStream> stream);
 	void deactivateStream(Reference<CDCBufferedStream> stream);
@@ -702,7 +702,7 @@ void CDCProxy::addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBuffered
 	totalBufferedMutationBytes += batch.bufferedBytes;
 }
 
-void CDCProxy::markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin) {
+void CDCProxy::markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin, int replyByteLimit) {
 	for (const CDCStreamId streamId : tag->streamIds) {
 		auto stream = streams.find(streamId);
 		if (stream == streams.end() || !stream->second->active) {
@@ -717,7 +717,7 @@ void CDCProxy::markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, 
 		    .detail("Tag", tag->tag)
 		    .detail("StreamId", streamId)
 		    .detail("BeginVersion", begin)
-		    .detail("RawPeekLimit", SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
+		    .detail("RawPeekLimit", replyByteLimit);
 		stream->second->bufferLimitExceeded = true;
 		stream->second->changed.trigger();
 	}
@@ -1146,14 +1146,19 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 	// CDC ReplayMultiCursor instances disable constructor prefetch, so constructing this cursor cannot issue a peek
 	// before the proxy has reserved memory for every reply arena that its replicated read may retain.
 	Reference<IReplayPeekCursor> cursor = consumer->peekSingle(id, begin, tag->tag, {});
-	cursor->setReplyByteLimit(SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
 	const int64_t retainedReplyCount = cursor->getMaxRetainedReplyCount();
-	Optional<CDCBufferPassLimits> limits =
-	    calculateBufferPassLimits(bufferLimit, SERVER_KNOBS->MAXIMUM_PEEK_BYTES, retainedReplyCount);
+	// Leave one reply-sized window for filtered mutations instead of rejecting a topology whose maximum-sized
+	// replies would consume the entire buffer. Every retained raw arena remains covered by the reservation.
+	const int replyByteLimit =
+	    std::min<int64_t>(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, bufferLimit / (retainedReplyCount + 1));
+	Optional<CDCBufferPassLimits> limits = calculateBufferPassLimits(bufferLimit, replyByteLimit, retainedReplyCount);
 	if (!limits.present()) {
 		markTagStreamsRawReplyBudgetExceeded(tag, begin, retainedReplyCount);
 		co_return CDCBufferTagPassResult::RETRY;
 	}
+	cursor->setReplyByteLimit(replyByteLimit);
+	CODE_PROBE(replyByteLimit < SERVER_KNOBS->MAXIMUM_PEEK_BYTES,
+	           "CDC proxy sizes raw replies to fit replicated reads within its buffer");
 	const int64_t rawPeekReservation = limits.get().rawReplyBytes;
 	const int64_t hardBufferedBatchLimit = limits.get().hardBufferedBytes;
 	const int64_t preferredBufferedBatch = limits.get().preferredBufferedBytes;
@@ -1197,7 +1202,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 			if (e.code() != error_code_cdc_tlog_peek_reply_too_large) {
 				throw;
 			}
-			markTagStreamsBufferLimitExceeded(tag, begin);
+			markTagStreamsBufferLimitExceeded(tag, begin, replyByteLimit);
 			co_return CDCBufferTagPassResult::RETRY;
 		}
 	}

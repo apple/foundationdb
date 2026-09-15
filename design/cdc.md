@@ -511,12 +511,13 @@ All raw peek windows and stream buffers owned by one CDC proxy share a
 retain one separately capped reply arena from every candidate TLog it consults.
 CDC history cursors therefore disable cross-generation constructor prefetch,
 report the maximum number of reply arenas one active generation can retain,
-and reserve that count times `MAXIMUM_PEEK_BYTES` before issuing a peek. The
-proxy marks these delivery cursors with the same per-reply limit; recovery
+and cap each reply at the smaller of `MAXIMUM_PEEK_BYTES` and
+`CDC_PROXY_BUFFER_BYTES / (retainedReplyCount + 1)`. The proxy reserves the aggregate raw reply
+budget plus one reply-sized materialization window before issuing a peek.
+It marks these delivery cursors with the same per-reply limit; recovery
 cursors remain uncapped so that transaction-system replay is not constrained
-by a delivery memory knob. The pass also reserves a bounded materialization
-window. It retains the aggregate
-raw reservation while filtering and copying, then releases it and transfers
+by a delivery memory knob. The pass retains the aggregate raw reservation
+while filtering and copying, then releases it and transfers
 only accepted filtered bytes to the stream buffers. Acknowledgement or stream
 removal releases those retained permits. The usable retained-batch capacity is
 the configured CDC budget minus this topology-dependent raw reservation; a
@@ -539,7 +540,7 @@ that consume fails with `server_overloaded`; operators must configure the
 budget to hold both the largest raw peek and the largest supported filtered
 transaction for one stream.
 
-The TLog applies `MAXIMUM_PEEK_BYTES` at complete commit-version boundaries.
+The TLog applies the requested reply limit at complete commit-version boundaries.
 When several individually valid versions would exceed one raw reply, it
 returns the prefix and leaves the next version for a later peek. It reports an
 oversized CDC peek only when one complete version cannot fit by itself; a
