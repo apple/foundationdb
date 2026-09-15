@@ -155,7 +155,7 @@ public:
 		co_return etag;
 	}
 
-	Future<Void> doFinishUpload() {
+	Future<Void> doFinishUpload(int64_t totalSize) {
 		// If there is only 1 part then it has not yet been uploaded so just write the whole file at once.
 		if (m_parts.size() == 1) {
 			Reference<Part> part = m_parts.back();
@@ -183,7 +183,7 @@ public:
 		// No need to wait for the upload ID here because the above loop waited for all the parts and each part required
 		// the upload ID so it is ready
 		Optional<std::string> checksumSHA256 =
-		    co_await m_bstore->finishMultiPartUpload(m_bucket, m_object, m_upload_id.get(), partSet, m_cursor);
+		    co_await m_bstore->finishMultiPartUpload(m_bucket, m_object, m_upload_id.get(), partSet, totalSize);
 
 		// Log the checksum if present - this is just a hash of the multipart structure, not the object content
 		if (checksumSHA256.present()) {
@@ -199,7 +199,7 @@ public:
 	Future<Void> sync() override {
 		// Only initiate the finish operation once, and also prevent further writing.
 		if (!m_finished.isValid()) {
-			m_finished = doFinishUpload();
+			m_finished = doFinishUpload(m_cursor);
 			m_cursor = -1; // Cause future write attempts to fail
 		}
 

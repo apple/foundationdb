@@ -26,6 +26,7 @@ if(WITH_ROCKSDB)
 endif()
 
 add_subdirectory(core)
+add_subdirectory(checkpoint)
 add_subdirectory(kvstore)
 add_subdirectory(logsystem)
 add_subdirectory(mocks3)
@@ -193,6 +194,7 @@ target_link_libraries(fdbserver PRIVATE
   fdbserver_storageserver
   fdbserver_tester
   fdbserver_tlog
+  fdbserver_checkpoint
   fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)

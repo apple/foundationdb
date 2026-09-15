@@ -34,7 +34,8 @@
 
 class DDTeamCollection;
 
-struct StorageWiggler : ReferenceCounted<StorageWiggler> {
+class StorageWiggler : public ReferenceCounted<StorageWiggler> {
+public:
 	static constexpr double MIN_ON_CHECK_DELAY_SEC = 5.0;
 	using State = StorageWigglerState::Value;
 	static constexpr State INVALID = StorageWigglerState::INVALID;
@@ -46,6 +47,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 
 	StorageWiggleMetrics metrics;
 	AsyncVar<bool> stopWiggleSignal;
+
+private:
 	// data structures
 	using MetadataUIDP = std::pair<StorageMetadataType, UID>;
 	// min-heap
@@ -56,6 +59,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	State wiggleState = INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
+public:
 	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), stopWiggleSignal(true) {};
 	// wiggle related actors will quit when this signal is set to true
 	void setStopSignal(bool value) { stopWiggleSignal.set(value); }
@@ -76,7 +80,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	Optional<UID> getNextServerId(bool necessaryOnly = true);
 	// next check time to avoid busy loop
 	Future<Void> onCheck() const;
-	State getWiggleState() const { return wiggleState; }
+	std::pair<State, double> getWiggleStateSnapshot() const { return { wiggleState, lastStateChangeTs }; }
 	void setWiggleState(State s) {
 		if (wiggleState != s) {
 			wiggleState = s;

@@ -1,5 +1,7 @@
 #include "fdbclient/TupleVersionstamp.h"
 
+#include <cstring>
+
 TupleVersionstamp::TupleVersionstamp(StringRef str) {
 	if (str.size() != VERSIONSTAMP_TUPLE_SIZE) {
 		throw invalid_versionstamp_size();
@@ -10,23 +12,25 @@ TupleVersionstamp::TupleVersionstamp(StringRef str) {
 TupleVersionstamp::TupleVersionstamp(int64_t version, uint16_t batchNumber, uint16_t userVersion) {
 	data = makeString(VERSIONSTAMP_TUPLE_SIZE);
 	uint8_t* buf = mutateString(data);
-	*reinterpret_cast<int64_t*>(buf) = bigEndian64(version);
-	*reinterpret_cast<uint16_t*>(buf + sizeof(int64_t)) = bigEndian16(batchNumber);
-	*reinterpret_cast<uint16_t*>(buf + sizeof(int64_t) + sizeof(uint16_t)) = bigEndian16(userVersion);
+	const int64_t encodedVersion = bigEndian64(version);
+	const uint16_t encodedBatchNumber = bigEndian16(batchNumber);
+	const uint16_t encodedUserVersion = bigEndian16(userVersion);
+	std::memcpy(buf, &encodedVersion, sizeof(encodedVersion));
+	std::memcpy(buf + sizeof(encodedVersion), &encodedBatchNumber, sizeof(encodedBatchNumber));
+	std::memcpy(
+	    buf + sizeof(encodedVersion) + sizeof(encodedBatchNumber), &encodedUserVersion, sizeof(encodedUserVersion));
 }
 
 int16_t TupleVersionstamp::getBatchNumber() const {
-	const uint8_t* begin = data.begin();
-	begin += 8;
-	int16_t batchNumber = *(int16_t*)(begin);
+	int16_t batchNumber;
+	std::memcpy(&batchNumber, data.begin() + sizeof(int64_t), sizeof(batchNumber));
 	batchNumber = bigEndian16(batchNumber);
 	return batchNumber;
 }
 
 int16_t TupleVersionstamp::getUserVersion() const {
-	const uint8_t* begin = data.begin();
-	begin += 10;
-	int16_t userVersion = *(int16_t*)(begin);
+	int16_t userVersion;
+	std::memcpy(&userVersion, data.begin() + sizeof(int64_t) + sizeof(uint16_t), sizeof(userVersion));
 	userVersion = bigEndian16(userVersion);
 	return userVersion;
 }
@@ -36,8 +40,8 @@ const uint8_t* TupleVersionstamp::begin() const {
 }
 
 int64_t TupleVersionstamp::getVersion() const {
-	const uint8_t* begin = data.begin();
-	int64_t version = *(int64_t*)begin;
+	int64_t version;
+	std::memcpy(&version, data.begin(), sizeof(version));
 	version = bigEndian64(version);
 	return version;
 }

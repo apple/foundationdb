@@ -54,7 +54,7 @@ class TCMachineInfo;
 class TCMachineTeamInfo;
 
 // All state that represents an ongoing tss pair recruitment
-struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
+class TSSPairState : public ReferenceCounted<TSSPairState>, NonCopyable {
 	Promise<Optional<std::pair<UID, Version>>>
 	    ssPairInfo; // if set, for ss to pass its id to tss pair once it is successfully recruited
 	Promise<bool> tssPairDone; // if set, for tss to pass ss that it was successfully recruited
@@ -65,10 +65,13 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 
 	bool active;
 
+public:
 	TSSPairState() : active(false) {}
 
 	explicit TSSPairState(const LocalityData& locality)
 	  : dcId(locality.dcId()), dataHallId(locality.dataHallId()), active(true) {}
+
+	bool isActive() const { return active; }
 
 	bool inDataZone(const LocalityData& locality) const {
 		return locality.dcId() == dcId && locality.dataHallId() == dataHallId;
@@ -691,13 +694,12 @@ public:
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // all machine teams
 
-	// IMPORTANT: teams and teamsByServerIDs MUST be consistent, so any time we
-	// mutate teams, we must also mutate teamsByServerIDs
+private:
+	// These must be updated together when adding or removing a team.
 	std::vector<Reference<TCTeamInfo>> teams;
-	// O(1) hash map from server ID string to team information
-	// Currently used by getTeamByServers
 	std::unordered_map<std::string, Reference<TCTeamInfo>> teamsByServerIDs;
 
+public:
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncTrigger printDetailedTeamsInfo;
 	Reference<LocalitySet> storageServerSet;
@@ -705,6 +707,7 @@ public:
 	explicit DDTeamCollection(DDTeamCollectionInitParams const& params);
 
 	~DDTeamCollection();
+	size_t teamCount() const { return teams.size(); }
 
 	void addLaggingStorageServer(Key zoneId);
 

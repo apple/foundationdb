@@ -24,7 +24,7 @@
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/BulkLoadUtil.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
+#include "fdbserver/checkpoint/RocksDBCheckpointUtils.h"
 #include "fdbserver/core/StorageMetrics.h"
 #include "fdbserver/tester/workloads.h"
 

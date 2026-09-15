@@ -46,6 +46,7 @@ jobs:
             fdboptions                  \
             ProtocolVersion             \
             fdb_c_generated             \
+            fdb_c_options               \
             fdb-java
 
           # all protobuf headers

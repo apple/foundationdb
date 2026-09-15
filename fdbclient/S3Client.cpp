@@ -492,7 +492,7 @@ static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			}
 
 			Optional<std::string> s3Checksum =
-			    co_await endpoint->finishMultiPartUpload(bucket, objectName, uploadID, etagMap);
+			    co_await endpoint->finishMultiPartUpload(bucket, objectName, uploadID, etagMap, size);
 
 			// Log the S3 checksum if present
 			if (s3Checksum.present()) {

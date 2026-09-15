@@ -249,7 +249,7 @@ function(stage_correctness_package)
 
   add_custom_command(
     OUTPUT ${package_files}
-    DEPENDS ${package_dependencies}
+    DEPENDS strip_only_fdbserver ${package_dependencies}
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/CMakeCache.txt ${STAGE_OUT_DIR}
     COMMAND ${CMAKE_COMMAND} -E copy ${copy_sources} ${STAGE_OUT_DIR}/bin
     COMMENT "Copying files for ${STAGE_CONTEXT} package"

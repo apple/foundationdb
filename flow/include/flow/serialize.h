@@ -890,7 +890,7 @@ struct PacketWriter {
 	PacketBuffer* buffer;
 	struct ReliablePacket*
 	    reliable; // nullptr if this is unreliable; otherwise the last entry in the ReliablePacket::cont chain
-	int length;
+	int64_t length;
 	ProtocolVersion m_protocolVersion;
 
 	// reliable is nullptr if this is an unreliable packet, or points to a ReliablePacket.  PacketWriter is responsible
@@ -914,7 +914,7 @@ struct PacketWriter {
 	}
 	void writeAhead(int bytes, struct SplitBuffer*);
 	PacketBuffer* finish();
-	int size() const { return length; }
+	int64_t size() const { return length; }
 
 	void serializeBytes(StringRef bytes) { serializeBytes(bytes.begin(), bytes.size()); }
 	template <class T>
