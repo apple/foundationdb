@@ -721,14 +721,13 @@ void printStatus(StatusObjectReader statusObj,
 								bool degradedMultiRegion = false;
 								statusObjCluster.get("degraded_multi_region", degradedMultiRegion);
 
-								const std::string header =
-								    !degradedMultiRegion
-								        ? "\n\n  Warning: the database may have data loss and availability loss. "
-								        : "\n\n  Warning: one region is unavailable; committed data is expected to "
-								          "remain safe in "
-								          "the surviving region. ";
-
-								outputString += header + baseMessage;
+								outputString +=
+								    "\n\n  Warning: the database may have data loss and availability loss. ";
+								if (degradedMultiRegion) {
+									outputString += "One region is unavailable; committed data is expected to remain "
+									                "safe in the surviving region. ";
+								}
+								outputString += baseMessage;
 							} else {
 								outputString += format(
 								    "\n\n  Warning: the database may have availability loss. The current log state "
