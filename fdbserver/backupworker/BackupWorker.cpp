@@ -1072,8 +1072,11 @@ Future<Void> backupWorker(BackupInterface interf,
 		if (req.recruitedEpoch == req.backupEpoch && req.tag.id == 0) {
 			addActor.send(monitorBackupProgress(&self));
 		}
-		addActor.send(
-		    monitorBackupPause(self.cx, self.myId, &self.paused, "BackupWorkerPaused", "BackupWorkerResumed"));
+		addActor.send(monitorBackupPause(self.cx,
+		                                 self.myId,
+		                                 &self.paused,
+		                                 /*pausedEvent=*/"BackupWorkerPaused",
+		                                 /*resumedEvent=*/"BackupWorkerResumed"));
 
 		// If the worker is on an old epoch and all backups starts a version >= the endVersion
 		bool exitEarly = co_await shouldBackupWorkerExitEarly(&self);

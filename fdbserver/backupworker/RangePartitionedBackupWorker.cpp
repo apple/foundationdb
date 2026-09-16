@@ -1284,8 +1284,11 @@ Future<Void> rangePartitionedBackupWorker(BackupInterface interf,
 			addActor.send(monitorRangePartitionedBackupProgress(&self));
 		}
 
-		addActor.send(monitorBackupPause(
-		    self.cx, self.myId, &self.paused, "RangePartitionedBWPaused", "RangePartitionedBWResumed"));
+		addActor.send(monitorBackupPause(self.cx,
+		                                 self.myId,
+		                                 &self.paused,
+		                                 /*pausedEvent=*/"RangePartitionedBWPaused",
+		                                 /*resumedEvent=*/"RangePartitionedBWResumed"));
 		// Must be sent before processPartitionMap so logSystem is populated before the partition-map peek.
 		addActor.send(monitorLogSystemFromDbInfo(db, &self));
 
