@@ -2662,6 +2662,8 @@ public:
 		ASSERT(second->readAhead.armedFor(199));
 		ASSERT_EQ(test.proxy.nextTagPrefetchVersion(test.tag).get(), 200);
 
+		// The next speculative pass can require the entire buffer under buggified limits.
+		test.proxy.clearBufferedMutations(first);
 		auto secondCursor = makeReference<CDCPrefetchTestCursor>(Void(), true, 200);
 		co_await test.proxy.bufferTagCursor(test.tag, 200, secondCursor, Never(), Prefetch::True);
 		ASSERT_EQ(secondCursor->fetchCount(), 1);
@@ -2670,7 +2672,6 @@ public:
 		ASSERT(!second->readAhead.provesCursor(200, second->minVersion));
 		ASSERT(!test.proxy.nextTagPrefetchVersion(test.tag).present());
 		ASSERT_EQ(test.proxy.bufferLock.activePermits(), test.proxy.bufferedBytes);
-		test.proxy.clearBufferedMutations(first);
 		test.proxy.clearBufferedMutations(second);
 		ASSERT_EQ(test.proxy.bufferLock.activePermits(), 0);
 		co_return;
