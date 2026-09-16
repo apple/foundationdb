@@ -1630,6 +1630,7 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 		// set the curr singleton if it doesn't exist or its different from the requesting one
 		if (!currSingleton.isPresent() || currSingleton.getInterface().id() != registeringID) {
 			registeringSingleton.setInterfaceToDbInfo(*self);
+			self->updateClusterHealthMonitorInputs();
 		}
 	}
 }
@@ -2217,6 +2218,13 @@ Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 	}
 }
 
+VersionHistory globalConfigHistoryForProtocolChange(ValueRef globalConfigVersion) {
+	BinaryReader versionReader(globalConfigVersion, Unversioned());
+	Version committedVersion;
+	versionReader >> committedVersion;
+	return VersionHistory(bigEndian64(committedVersion));
+}
+
 // Monitors the global configuration version key for changes. When changes are
 // made, the global configuration history is read and any updates are sent to
 // all processes in the system by updating the ClientDBInfo object. The
@@ -2251,12 +2259,12 @@ Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 							// If the protocol version has changed, the
 							// GlobalConfig actor should refresh its view by
 							// reading the entire global configuration key
-							// range.  Setting the version to the max int64_t
-							// will always cause the global configuration
-							// updater to refresh its view of the configuration
-							// keyspace.
+							// range. Preserve the actual committed version so
+							// refresh waits for a GRV proxy that has observed
+							// this configuration change.
 							clientInfo.history.clear();
-							clientInfo.history.emplace_back(std::numeric_limits<Version>::max());
+							clientInfo.history.push_back(
+							    globalConfigHistoryForProtocolChange(globalConfigVersion.get()));
 							break;
 						}
 
@@ -3029,6 +3037,7 @@ Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
 				}
 				if (!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
 					self->db.setRatekeeper(interf.get());
+					self->updateClusterHealthMonitorInputs();
 				}
 				checkOutstandingRequests(self);
 				co_return;
@@ -3051,14 +3060,20 @@ Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 
 	while (true) {
 		if (self->db.serverInfo->get().ratekeeper.present() && !self->recruitRatekeeper.get()) {
+			const UID monitoredRatekeeperID = self->db.serverInfo->get().ratekeeper.get().id();
 			auto res = co_await race(waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure,
 			                                           SERVER_KNOBS->RATEKEEPER_FAILURE_TIME),
-			                         self->recruitRatekeeper.onChange());
+			                         self->recruitRatekeeper.onChange(),
+			                         self->db.serverInfo->onChange());
 			if (res.index() == 0) {
 				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+				if (!ratekeeper.present() || ratekeeper.get().id() != monitoredRatekeeperID) {
+					continue;
+				}
 				TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
 				RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
 				self->db.clearInterf(ProcessClass::RatekeeperClass);
+				self->updateClusterHealthMonitorInputs();
 			}
 		} else {
 			co_await startRatekeeper(self, recruitThrottler.newRecruitment());
@@ -3649,6 +3664,17 @@ Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
 
 namespace {
 
+TEST_CASE("/fdbserver/clustercontroller/globalConfigProtocolChangeUsesCommittedVersion") {
+	constexpr Version committedVersion = 0x0102030405060708;
+	BinaryWriter encodedVersion(Unversioned());
+	encodedVersion << bigEndian64(committedVersion) << uint16_t(7);
+
+	const VersionHistory history = globalConfigHistoryForProtocolChange(encodedVersion.toValue());
+	ASSERT_EQ(history.version, committedVersion);
+	ASSERT_EQ(history.mutations.size(), 0);
+	return Void();
+}
+
 void addProcessesToSameDC(ClusterControllerData& self, const std::vector<NetworkAddress>&& processes) {
 	LocalityData locality;
 	locality.set(LocalityData::keyDcId, Standalone<StringRef>(std::string{ "1" }));
@@ -3824,6 +3850,114 @@ WorkerInterface addSingletonTestWorker(ClusterControllerData& data, StringRef pr
 	    WorkerDetails(worker, ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource), false, true);
 	info.verified = true;
 	return worker;
+}
+
+TEST_CASE("/fdbserver/clustercontroller/replacedRatekeeperSurvivesPreviousFailure") {
+	LocalityData controllerLocality;
+	controllerLocality.set(LocalityData::keyDcId, "primary"_sr);
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           controllerLocality,
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	WorkerInterface oldWorker = addSingletonTestWorker(data, "old-ratekeeper"_sr, "primary"_sr);
+	WorkerInterface newWorker = addSingletonTestWorker(data, "new-ratekeeper"_sr, "primary"_sr);
+	RatekeeperInterface oldRatekeeper(oldWorker.locality, UID(1, 1));
+	RatekeeperInterface newRatekeeper(newWorker.locality, UID(1, 2));
+	FutureStream<ReplyPromise<Void>> oldFailures = oldRatekeeper.waitFailure.getFuture();
+	FutureStream<ReplyPromise<Void>> newFailures = newRatekeeper.waitFailure.getFuture();
+	FutureStream<HaltRatekeeperRequest> oldHalts = oldRatekeeper.haltRatekeeper.getFuture();
+	FutureStream<HaltRatekeeperRequest> newHalts = newRatekeeper.haltRatekeeper.getFuture();
+
+	auto serverInfo = data.db.serverInfo->get();
+	serverInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	serverInfo.id = UID(3, 1);
+	data.db.serverInfo->set(serverInfo);
+	data.db.setRatekeeper(oldRatekeeper);
+	Future<Void> monitor = monitorRatekeeper(&data);
+	auto oldWaitOrTimeout = co_await race(oldFailures, delay(2.0));
+	ASSERT_EQ(oldWaitOrTimeout.index(), 0);
+	ReplyPromise<Void> oldFailure = std::get<0>(std::move(oldWaitOrTimeout));
+
+	processRegisteredSingletons(&data, newWorker, {}, newRatekeeper, {});
+	ASSERT(data.db.serverInfo->get().ratekeeper.get().id() == newRatekeeper.id());
+	auto oldHaltOrTimeout = co_await race(oldHalts, delay(2.0));
+	ASSERT_EQ(oldHaltOrTimeout.index(), 0);
+	HaltRatekeeperRequest oldHalt = std::get<0>(std::move(oldHaltOrTimeout));
+	oldHalt.reply.send(Void());
+	oldFailure.sendError(connection_failed());
+
+	auto newWaitOrTimeout = co_await race(newFailures, delay(2.0));
+	ASSERT_EQ(newWaitOrTimeout.index(), 0);
+	ASSERT(data.db.serverInfo->get().ratekeeper.get().id() == newRatekeeper.id());
+	ASSERT(!newHalts.isReady());
+	monitor.cancel();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ratekeeperReplacementRefreshesMonitors") {
+	LocalityData controllerLocality;
+	controllerLocality.set(LocalityData::keyDcId, "primary"_sr);
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           controllerLocality,
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	WorkerInterface oldWorker = addSingletonTestWorker(data, "old-ratekeeper"_sr, "primary"_sr);
+	WorkerInterface newWorker = addSingletonTestWorker(data, "new-ratekeeper"_sr, "primary"_sr);
+	RatekeeperInterface oldRatekeeper(oldWorker.locality, UID(1, 1));
+	RatekeeperInterface newRatekeeper(newWorker.locality, UID(1, 2));
+	FutureStream<ReplyPromise<Void>> oldFailures = oldRatekeeper.waitFailure.getFuture();
+	FutureStream<ReplyPromise<Void>> newFailures = newRatekeeper.waitFailure.getFuture();
+	FutureStream<HaltRatekeeperRequest> oldHalts = oldRatekeeper.haltRatekeeper.getFuture();
+	FutureStream<HaltRatekeeperRequest> newHalts = newRatekeeper.haltRatekeeper.getFuture();
+	FutureStream<EventLogRequest> oldEvents = oldWorker.eventLogRequest.getFuture();
+	FutureStream<EventLogRequest> newEvents = newWorker.eventLogRequest.getFuture();
+
+	auto serverInfo = data.db.serverInfo->get();
+	serverInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	serverInfo.id = UID(3, 1);
+	data.db.serverInfo->set(serverInfo);
+	data.db.setRatekeeper(oldRatekeeper);
+	Future<Void> monitor = monitorRatekeeper(&data);
+	auto oldWaitOrTimeout = co_await race(oldFailures, delay(2.0));
+	ASSERT_EQ(oldWaitOrTimeout.index(), 0);
+	ReplyPromise<Void> oldFailure = std::get<0>(std::move(oldWaitOrTimeout));
+
+	processRegisteredSingletons(&data, newWorker, {}, newRatekeeper, {});
+	ASSERT(data.db.serverInfo->get().ratekeeper.get().id() == newRatekeeper.id());
+	auto oldHaltOrTimeout = co_await race(oldHalts, delay(2.0));
+	ASSERT_EQ(oldHaltOrTimeout.index(), 0);
+	HaltRatekeeperRequest oldHalt = std::get<0>(std::move(oldHaltOrTimeout));
+	auto newWaitOrTimeout = co_await race(newFailures, delay(2.0));
+	ASSERT_EQ(newWaitOrTimeout.index(), 0);
+	ReplyPromise<Void> newFailure = std::get<0>(std::move(newWaitOrTimeout));
+
+	auto latestEvents = data.clusterHealthWorkerEventProvider->getLatestRatekeeperEvents("RkUpdate");
+	auto eventOrTimeout = co_await race(oldEvents, newEvents, delay(2.0));
+	ASSERT_EQ(eventOrTimeout.index(), 1);
+	EventLogRequest request = std::get<1>(std::move(eventOrTimeout));
+	ASSERT(request.eventName == "RkUpdate"_sr);
+	TraceEventFields fields;
+	fields.addField("ReleasedTPS", "100");
+	fields.addField("TPSLimit", "125");
+	request.reply.send(fields);
+	auto events = co_await latestEvents;
+	ASSERT(events.present());
+	ASSERT_EQ(events.get().first.size(), 1);
+	ASSERT(events.get().second.empty());
+	ASSERT_EQ(events.get().first.begin()->second.getDouble("TPSLimit"), 125.0);
+
+	newFailure.sendError(connection_failed());
+	auto newHaltOrTimeout = co_await race(newHalts, delay(2.0));
+	ASSERT_EQ(newHaltOrTimeout.index(), 0);
+	HaltRatekeeperRequest newHalt = std::get<0>(std::move(newHaltOrTimeout));
+	newHalt.reply.send(Void());
+	ASSERT(!data.db.serverInfo->get().ratekeeper.present());
+	auto clearedEvents = co_await data.clusterHealthWorkerEventProvider->getLatestRatekeeperEvents("RkUpdate");
+	ASSERT(!clearedEvents.present());
+	oldHalt.reply.send(Void());
+	oldFailure.sendError(connection_failed());
+	monitor.cancel();
 }
 
 TEST_CASE("/fdbserver/clustercontroller/deferCrossDatacenterSingletonHaltsUntilRecovery") {

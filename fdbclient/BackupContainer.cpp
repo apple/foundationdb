@@ -365,8 +365,8 @@ Future<std::vector<std::string>> listContainers_impl(std::string baseURL, Option
 			                               "dummy",
 			                               backupParams,
 			                               /*encryptionKeyFileName=*/{},
-			                               /*isBackup=*/true,
-			                               /*encryptionBlockSize=*/0);
+			                               /*encryptionBlockSize=*/0,
+			                               /*isBackup=*/true);
 
 			std::vector<std::string> results =
 			    co_await BackupContainerBlobStore::listURLs(bstore, dummy.getBucket(), dummy.getPrefix());

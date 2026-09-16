@@ -1639,6 +1639,14 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "cdc")) {
+					bool _result = co_await makeInterruptable(cdcCommandActor(localDb, tokens));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
 					bool _result = co_await makeInterruptable(forceRecoveryWithDataLossCommandActor(db, tokens));
 					if (!_result)

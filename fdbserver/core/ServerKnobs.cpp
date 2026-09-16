@@ -176,6 +176,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DESIRED_UPDATE_BYTES,                2*DESIRED_TOTAL_BYTES );
 	init( UPDATE_DELAY,                                        0.001 );
 	init( MAXIMUM_PEEK_BYTES,                                   10e6 );
+	init( NATIVE_CDC_BATCH_TARGET_BYTES,                   512 << 10 );
 	init( CDC_PROXY_CONSUME_REPLY_BYTES,                         10e6 );
 	init( CDC_PROXY_BUFFER_BYTES,                                1e9 );
 	if (randomize && buggify()) {
@@ -448,6 +449,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TSS_RECRUITMENT_TIMEOUT,       3*STORAGE_RECRUITMENT_DELAY ); if (randomize && buggify() ) TSS_RECRUITMENT_TIMEOUT = 1.0; // Super low timeout should cause tss recruitments to fail
 	init( TSS_DD_CHECK_INTERVAL,                                60.0 ); if (randomize && buggify() ) TSS_DD_CHECK_INTERVAL = 1.0;    // May kill all TSS quickly
 	init( DATA_DISTRIBUTION_LOGGING_INTERVAL,                    5.0 );
+	init( DD_SERVER_ELIGIBILITY_LOGGING_INTERVAL,              300.0 );
 	init( DD_ENABLED_CHECK_DELAY,                                1.0 );
 	init( DD_STALL_CHECK_DELAY,                                  0.4 ); //Must be larger than 2*MAX_BUGGIFIED_DELAY
 	init( DD_LOW_BANDWIDTH_DELAY,         isSimulated ? 15.0 : 240.0 ); if( randomize && buggify() ) DD_LOW_BANDWIDTH_DELAY = 0; //Because of delayJitter, this should be less than 0.9 * DD_MERGE_COALESCE_DELAY
@@ -1180,7 +1182,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// An audit divides its range into TASKS; each task is handled by one storage server, which walks it in
 	// BATCHES of reads. The knobs below bound those two units independently:
 	//   AUDIT_TASK_MAX_BYTES     -- how much keyspace one task covers
-	//   AUDIT_RESTORE_BATCH_*    -- how much one read inside a task fetches (validate_restore only)
+	//   AUDIT_RESTORE_BATCH_*    -- how much one read inside a task fetches (validate_restore, RangeDigest)
 
 	// Max bytes one comparison batch fetches from each side. This is an upper bound, not the size used:
 	// the actual budget moves between AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN and this value, halving whenever a
@@ -1197,8 +1199,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// crawling through tiny batches.
 	init( AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN,                  256e3 ); if( randomize && buggify() ) AUDIT_RESTORE_BATCH_BYTE_LIMIT_MIN = 1000;
 	// Max bytes of keyspace one audit task covers, for every audit type (ValidateHA, ValidateReplica,
-	// ValidateRestore). Tasks default to one keyServers shard, and a shard bigger than this is subdivided
-	// so that no single task dominates.
+	// ValidateRestore, RangeDigest). Tasks default to one keyServers shard, and a shard bigger than this
+	// is subdivided so that no single task dominates.
 	//
 	// This bounds the audit phase's wall-clock: a task is scanned start to finish by one storage server,
 	// so the phase cannot end before its largest task does, and making individual tasks faster cannot help.

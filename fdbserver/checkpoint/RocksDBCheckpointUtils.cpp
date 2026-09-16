@@ -1,5 +1,5 @@
 /*
- *RocksDBCheckpointUtils.cpp
+ * RocksDBCheckpointUtils.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
+#include "fdbserver/checkpoint/RocksDBCheckpointUtils.h"
 
 #ifdef WITH_ROCKSDB
 #include <rocksdb/db.h>

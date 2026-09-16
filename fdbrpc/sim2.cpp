@@ -56,11 +56,12 @@
 #include "fdbrpc/FlowTransport.h"
 #include "AsyncFileWriteChecker.h"
 #include "fdbrpc/genericactors.h"
-#include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/FaultInjection.h"
 #include "flow/TaskQueue.h"
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
+#include "flow/Net2Packet.h"
+#include "flow/UnitTest.h"
 
 ISimulator* g_simulator = nullptr;
 thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
@@ -293,7 +294,7 @@ SimClogging g_clogging;
 struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	explicit Sim2Conn(ISimulator::ProcessInfo* process)
 	  : opened(false), closedByCaller(false), stableConnection(false), trustedPeer(true), process(process),
-	    dbgid(deterministicRandom()->randomUniqueID()), stopReceive(Never()) {
+	    dbgid(deterministicRandom()->randomUniqueID()), stopReceive(false), incomingClosed(false) {
 		pipes = sender(this) && receiver(this);
 	}
 
@@ -351,6 +352,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 
 	Future<Void> onWritable() override { return whenWritable(this); }
 	Future<Void> onReadable() override { return whenReadable(this); }
+	Future<Void> onSentBytesForTest() const { return sentBytes.onChange(); }
 
 	bool isPeerGone() const { return !peer || peerProcess->failed; }
 
@@ -360,7 +362,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 
 	void peerClosed() {
 		leakedConnectionTracker = trackLeakedConnection(this);
-		stopReceive = delay(1.0);
+		armStopReceive();
 	}
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might
@@ -369,6 +371,9 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		rollRandomClose();
 
 		int64_t avail = receivedBytes.get() - readBytes.get(); // SOMEDAY: random?
+		if (avail == 0 && incomingClosed) {
+			throw connection_failed();
+		}
 		int toRead = std::min<int64_t>(end - begin, avail);
 		ASSERT(toRead >= 0 && toRead <= recvBuf.size() && toRead <= end - begin);
 		for (int i = 0; i < toRead; i++)
@@ -438,18 +443,36 @@ private:
 	int sendBufSize;
 
 	Future<Void> leakedConnectionTracker;
-
+	// The close grace and incoming EOF are one-way latches.
+	AsyncVar<bool> stopReceive;
+	bool incomingClosed;
+	// Declared after the state they use so destruction cancels these actors first.
+	Future<Void> stopReceiveTask;
 	Future<Void> pipes;
-	Future<Void> stopReceive;
 
 	int availableSendBufferForPeer() const {
 		return sendBufSize - (writtenBytes.get() - receivedBytes.get());
 	} // SOMEDAY: acknowledgedBytes instead of receivedBytes
+	static Future<Void> stopReceiving(Sim2Conn* self) {
+		// The closing peer may terminate before the grace period expires.
+		if (g_simulator->getCurrentProcess() != self->process) {
+			co_await g_simulator->onProcess(self->process);
+		}
+		co_await delay(1.0);
+		self->stopReceive.set(true);
+	}
+
+	void armStopReceive() {
+		// A later close must not extend the grace period started by the first close.
+		if (!stopReceiveTask.isValid()) {
+			stopReceiveTask = stopReceiving(this);
+		}
+	}
 
 	void closeInternal() {
 		if (peer) {
 			peer->peerClosed();
-			stopReceive = delay(1.0);
+			armStopReceive();
 		}
 		leakedConnectionTracker.cancel();
 		peer.clear();
@@ -457,18 +480,45 @@ private:
 
 	static Future<Void> sender(Sim2Conn* self) {
 		while (true) {
-			co_await self->writtenBytes.onChange(); // takes place on peer!
+			co_await (self->writtenBytes.onChange() || self->stopReceive.onChange());
+			if (self->stopReceive.get()) {
+				co_return;
+			}
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 			co_await delay(.002 * deterministicRandom()->random01());
+			if (self->stopReceive.get()) {
+				co_return;
+			}
 			self->sentBytes.set(self->writtenBytes.get()); // or possibly just some sometimes...
 		}
 	}
 	static Future<Void> receiver(Sim2Conn* self) {
 		while (true) {
+			if (self->stopReceive.get()) {
+				if (g_simulator->getCurrentProcess() != self->process) {
+					co_await g_simulator->onProcess(self->process);
+				}
+				// Bytes already sent remain in recvBuf even if the peer process has exited.
+				auto keepAlive = Reference<Sim2Conn>::addRef(self);
+				self->incomingClosed = true;
+				// Publish the final byte count before waking a reader, even if the count did not change.
+				self->receivedBytes.setUnconditional(self->sentBytes.get());
+				co_return;
+			}
 			if (self->sentBytes.get() != self->receivedBytes.get())
-				co_await g_simulator->onProcess(self->peerProcess);
-			while (self->sentBytes.get() == self->receivedBytes.get())
-				co_await self->sentBytes.onChange();
+				co_await (g_simulator->onProcess(self->peerProcess) || self->stopReceive.onChange());
+			while (self->sentBytes.get() == self->receivedBytes.get() && !self->stopReceive.get()) {
+				co_await (self->sentBytes.onChange() || self->stopReceive.onChange());
+			}
+			if (self->stopReceive.get()) {
+				continue;
+			}
+			if (g_simulator->getCurrentProcess() != self->peerProcess) {
+				co_await (g_simulator->onProcess(self->peerProcess) || self->stopReceive.onChange());
+			}
+			if (self->stopReceive.get()) {
+				continue;
+			}
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 
 			// Simulated network disconnection. Make sure to only throw connection_failed() on the sender process.
@@ -484,16 +534,21 @@ private:
 			    deterministicRandom()->random01() < .5
 			        ? self->sentBytes.get()
 			        : deterministicRandom()->randomInt64(self->receivedBytes.get(), self->sentBytes.get() + 1);
-			co_await delay(g_clogging.getSendDelay(
-			    self->peerProcess->address, self->process->address, self->isStableConnection()));
+			co_await (delay(g_clogging.getSendDelay(
+			              self->peerProcess->address, self->process->address, self->isStableConnection())) ||
+			          self->stopReceive.onChange());
+			if (self->stopReceive.get()) {
+				continue;
+			}
 			co_await g_simulator->onProcess(self->process);
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
-			co_await delay(g_clogging.getRecvDelay(
-			    self->peerProcess->address, self->process->address, self->isStableConnection()));
-			ASSERT(g_simulator->getCurrentProcess() == self->process);
-			if (self->stopReceive.isReady()) {
-				co_await Future<Void>(Never());
+			co_await (delay(g_clogging.getRecvDelay(
+			              self->peerProcess->address, self->process->address, self->isStableConnection())) ||
+			          self->stopReceive.onChange());
+			if (self->stopReceive.get()) {
+				continue;
 			}
+			ASSERT(g_simulator->getCurrentProcess() == self->process);
 			self->receivedBytes.set(pos);
 			co_await Future<Void>(Void()); // Prior notification can delete self and cancel this actor
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
@@ -505,6 +560,13 @@ private:
 				if (self->readBytes.get() != self->receivedBytes.get()) {
 					ASSERT(g_simulator->getCurrentProcess() == self->process);
 					co_return;
+				}
+				if (self->incomingClosed) {
+					CODE_PROBE(true,
+					           "Simulated reader observed graceful peer close",
+					           probe::context::sim2,
+					           probe::assert::simOnly);
+					throw connection_failed();
 				}
 				co_await self->receivedBytes.onChange();
 				self->rollRandomClose();
@@ -589,6 +651,168 @@ private:
 		co_return;
 	}
 };
+
+TEST_CASE("Lfdbrpc/Sim2Conn/readAfterPeerClose") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	auto receiverProcess = g_simulator->getCurrentProcess();
+	ISimulator::ProcessInfo* senderProcess = nullptr;
+	for (auto candidate : g_simulator->getAllProcesses()) {
+		if (candidate != receiverProcess && candidate->isReliable() &&
+		    !g_clogging.disconnected(candidate->address.ip, receiverProcess->address.ip) &&
+		    !g_clogging.disconnected(receiverProcess->address.ip, candidate->address.ip)) {
+			senderProcess = candidate;
+			break;
+		}
+	}
+	if (!senderProcess) {
+		TraceEvent("Sim2ConnPeerCloseTestSkipped").detail("Reason", "No connected reliable peer");
+		co_return;
+	}
+	auto senderConn = makeReference<Sim2Conn>(senderProcess);
+	auto receiverConn = makeReference<Sim2Conn>(receiverProcess);
+	senderConn->connect(receiverConn, receiverProcess->address);
+	receiverConn->connect(senderConn, senderProcess->address);
+	senderConn->stableConnection = receiverConn->stableConnection = true;
+
+	uint8_t byte;
+	ASSERT_EQ(receiverConn->read(&byte, &byte + 1), 0);
+	Future<Void> readable = receiverConn->onReadable();
+	ASSERT(!readable.isReady());
+	co_await g_simulator->onProcess(senderProcess);
+	senderConn->close();
+	co_await g_simulator->onProcess(receiverProcess);
+	try {
+		co_await timeoutError(readable, 3.0);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	try {
+		(void)receiverConn->read(&byte, &byte + 1);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	receiverConn->close();
+}
+
+TEST_CASE("Lfdbrpc/Sim2Conn/drainBeforePeerCloseError") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	auto process = g_simulator->getCurrentProcess();
+	auto senderConn = makeReference<Sim2Conn>(process);
+	auto receiverConn = makeReference<Sim2Conn>(process);
+	senderConn->connect(receiverConn, process->address);
+	receiverConn->connect(senderConn, process->address);
+	senderConn->stableConnection = receiverConn->stableConnection = true;
+
+	UnsentPacketQueue packet;
+	auto buffer = packet.getWriteBuffer(1);
+	buffer->data()[0] = 'x';
+	buffer->bytes_written = 1;
+	ASSERT_EQ(senderConn->write(packet.getUnsent(), 1), 1);
+	packet.sent(1);
+	senderConn->close();
+	co_await timeoutError(receiverConn->onReadable(), 3.0);
+	uint8_t byte;
+	ASSERT_EQ(receiverConn->read(&byte, &byte + 1), 1);
+	ASSERT_EQ(byte, static_cast<uint8_t>('x'));
+	try {
+		co_await timeoutError(receiverConn->onReadable(), 3.0);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	receiverConn->close();
+}
+
+TEST_CASE("Lfdbrpc/Sim2Conn/closeWithInFlightBytesAndDeadPeer") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	auto receiverProcess = g_simulator->getCurrentProcess();
+	auto port = g_simulator->getMachineById(receiverProcess->locality.machineId())->getRandomPort();
+	auto senderProcess = g_simulator->newProcess("Sim2ConnTestPeer",
+	                                             receiverProcess->address.ip,
+	                                             port,
+	                                             false,
+	                                             1,
+	                                             receiverProcess->locality,
+	                                             receiverProcess->metadata,
+	                                             "",
+	                                             "",
+	                                             receiverProcess->protocolVersion,
+	                                             false);
+	senderProcess->excludeFromRestarts = true;
+	auto senderConn = makeReference<Sim2Conn>(senderProcess);
+	auto receiverConn = makeReference<Sim2Conn>(receiverProcess);
+	senderConn->connect(receiverConn, receiverProcess->address);
+	receiverConn->connect(senderConn, senderProcess->address);
+	senderConn->stableConnection = receiverConn->stableConnection = true;
+
+	uint8_t byte;
+	ASSERT_EQ(receiverConn->read(&byte, &byte + 1), 0);
+	Future<Void> readable = receiverConn->onReadable();
+	Future<Void> sent = receiverConn->onSentBytesForTest();
+	co_await g_simulator->onProcess(senderProcess);
+	UnsentPacketQueue packet;
+	auto buffer = packet.getWriteBuffer(1);
+	buffer->data()[0] = 'x';
+	buffer->bytes_written = 1;
+	ASSERT_EQ(senderConn->write(packet.getUnsent(), 1), 1);
+	packet.sent(1);
+	co_await timeoutError(sent, 1.0);
+	senderConn->close();
+	g_simulator->killProcess(senderProcess, ISimulator::KillType::KillInstantly);
+	co_await g_simulator->onProcess(receiverProcess);
+	g_simulator->destroyProcess(senderProcess);
+	ASSERT(!readable.isReady());
+	co_await timeoutError(readable, 3.0);
+	ASSERT_EQ(receiverConn->read(&byte, &byte + 1), 1);
+	ASSERT_EQ(byte, static_cast<uint8_t>('x'));
+	try {
+		co_await timeoutError(receiverConn->onReadable(), 3.0);
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	receiverConn->close();
+}
+
+static Future<Void> readAndDropOnPeerClose(Reference<Sim2Conn> conn) {
+	try {
+		co_await conn->onReadable();
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_connection_failed);
+	}
+	conn->close();
+}
+
+TEST_CASE("Lfdbrpc/Sim2Conn/readerDropsLastReferenceOnPeerClose") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+
+	auto process = g_simulator->getCurrentProcess();
+	auto senderConn = makeReference<Sim2Conn>(process);
+	auto receiverConn = makeReference<Sim2Conn>(process);
+	senderConn->connect(receiverConn, process->address);
+	receiverConn->connect(senderConn, process->address);
+	senderConn->stableConnection = receiverConn->stableConnection = true;
+
+	Future<Void> reader = readAndDropOnPeerClose(receiverConn);
+	receiverConn.clear();
+	senderConn->close();
+	senderConn.clear();
+	co_await timeoutError(reader, 3.0);
+}
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -2612,7 +2836,7 @@ void startNewSimulator(bool printSimTime) {
 	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;
 }
 
-Future<Void> startUnitTestSimulator() {
+Future<Void> startUnitTestSimulator(int wellKnownEndpointCount) {
 	startNewSimulator(false);
 	Standalone<StringRef> processId(deterministicRandom()->randomUniqueID().toString());
 	auto* process = g_simulator->newProcess(
@@ -2646,13 +2870,13 @@ Future<Void> startUnitTestSimulator() {
 	httpProcess->excludeFromRestarts = true;
 	co_await g_simulator->onProcess(httpProcess, TaskPriority::DefaultYield);
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(true, 1, wellKnownEndpointCount);
 	(void)FlowTransport::transport().bind(httpProcess->address, httpProcess->address);
 	g_simulator->addSimHTTPProcess(makeReference<HTTP::SimServerContext>());
 
 	co_await g_simulator->onProcess(process, TaskPriority::DefaultYield);
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(true, 1, wellKnownEndpointCount);
 	(void)FlowTransport::transport().bind(process->address, process->address);
 }
 
@@ -2744,7 +2968,8 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 
 	if (diskParameters->nextOperation < now())
 		diskParameters->nextOperation = now();
-	diskParameters->nextOperation += (1.0 / diskParameters->iops) + (size / diskParameters->bandwidth);
+	diskParameters->nextOperation +=
+	    (1.0 / diskParameters->iops) + (static_cast<double>(size) / diskParameters->bandwidth);
 
 	double randomLatency;
 	if (sync) {
@@ -2930,4 +3155,34 @@ ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
 
 void Sim2FileSystem::newFileSystem() {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Sim2FileSystem());
+}
+
+// Helper function to calculate the maximum satellite_logs based on available machines per datacenter
+// We count the minimum number of machines in any satellite datacenter to ensure we don't over-provision
+int getMaxSatelliteLogs() {
+	if (!g_network->isSimulated()) {
+		return 6; // Conservative default for non-simulated environments
+	}
+
+	// Count machines per datacenter
+	std::map<Optional<Standalone<StringRef>>, int> machinesPerDC;
+	for (auto& process : g_simulator->getAllProcesses()) {
+		if (process->locality.dcId().present()) {
+			machinesPerDC[process->locality.dcId()]++;
+		}
+	}
+
+	// Find the minimum machines in satellite DCs (0, 1, 2, 3, 4, 5).
+	// Note normal DCs can be selected as satellites, see usage of useNormalDCsAsSatellites.
+	int minSatelliteMachines = 6; // Start with max possible
+	for (int dcId = 0; dcId <= 5; dcId++) {
+		auto dcIdStr = Standalone<StringRef>(std::to_string(dcId));
+		int count = machinesPerDC[dcIdStr];
+		if (count > 0) {
+			minSatelliteMachines = std::min(minSatelliteMachines, count);
+		}
+	}
+
+	// Cap at 6 (the original max) and ensure at least 1
+	return std::max(1, std::min(6, minSatelliteMachines));
 }

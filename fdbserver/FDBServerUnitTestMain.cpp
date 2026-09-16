@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/Knobs.h"
@@ -40,7 +40,7 @@ namespace {
 Future<Void> initializeSimulation() {
 	resetServerKnobs(Randomize::True, IsSimulated::True);
 	CoroThreadPool::init();
-	return startUnitTestSimulator();
+	return startUnitTestSimulator(WLTOKEN_RESERVED_COUNT);
 }
 
 void initializeNetwork() {

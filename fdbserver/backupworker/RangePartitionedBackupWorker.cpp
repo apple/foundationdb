@@ -393,7 +393,7 @@ Future<Version> pullPartitionMapFromTLog(RangePartitionedBackupData* self, Parti
 Future<Void> persistPartitionMapToSS(RangePartitionedBackupData* self,
                                      Version partitionMapVersion,
                                      PartitionMap const& partitionMap) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	Key key = backupPartitionMapHistoryKeyFor(self->backupEpoch, partitionMapVersion);
 
 	BinaryWriter valueWriter(IncludeVersion());
@@ -431,7 +431,7 @@ Future<Void> persistPartitionMapToSS(RangePartitionedBackupData* self,
 Future<Optional<std::pair<Version, PartitionMap>>> loadActivePartitionMapFromSS(RangePartitionedBackupData* self,
                                                                                 LogEpoch epoch,
                                                                                 Version startVersion) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	KeyRange range = backupPartitionMapHistoryRangeFor(epoch);
 
 	while (true) {
@@ -767,7 +767,7 @@ Future<Void> addMutation(Reference<IBackupFile> logFile,
 }
 
 static Future<Void> updateLogBytesWritten(RangePartitionedBackupData* self, std::map<UID, int64_t> bytesPerBackup) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 	while (true) {
 		Error err;
@@ -1005,7 +1005,7 @@ static Future<Void> monitorBackupStartedKeyChanges(RangePartitionedBackupData* s
 
 // This function is used to set backup worker's saved version latestBackupWorkerSavedVersion in BackupConfig.
 Future<Void> setBackupKeys(RangePartitionedBackupData* self, std::map<UID, Version> savedLogVersions) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 	while (true) {
 		Error err;
@@ -1052,7 +1052,7 @@ Future<Void> setBackupKeys(RangePartitionedBackupData* self, std::map<UID, Versi
 }
 
 static Future<Void> monitorWorkerPause(RangePartitionedBackupData* self) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	Future<Void> watch;
 
 	while (true) {

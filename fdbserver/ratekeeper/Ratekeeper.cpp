@@ -171,7 +171,7 @@ Future<Void> Ratekeeper::trackStorageServerQueueInfo(StorageServerInterface ssi)
 	}
 }
 
-// works with ExcludeIncludeStorageServersWorkload.actor.cpp to make sure the size of SS list is bounded
+// works with ExcludeIncludeStorageServersWorkload.cpp to make sure the size of SS list is bounded
 Future<Void> Ratekeeper::monitorStorageServerQueueSizeInSimulation() {
 	if (!g_network->isSimulated()) {
 		co_return;

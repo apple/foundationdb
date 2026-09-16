@@ -1,5 +1,5 @@
 /*
- * AnnotateActor.cpp
+ * WaitState.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,6 +18,24 @@
  * limitations under the License.
  */
 
-#include "fdbclient/AnnotateActor.h"
+#pragma once
 
-std::map<WaitState, std::function<std::vector<Reference<ActorLineage>>()>> samples;
+#include <string_view>
+
+enum class WaitState { Disk, Network, Running };
+// usually we shouldn't use `using namespace` in a header file, but literals should be safe as user defined literals
+// need to be prefixed with `_`
+using namespace std::literals;
+
+constexpr std::string_view to_string(WaitState st) {
+	switch (st) {
+	case WaitState::Disk:
+		return "Disk"sv;
+	case WaitState::Network:
+		return "Network"sv;
+	case WaitState::Running:
+		return "Running"sv;
+	default:
+		return ""sv;
+	}
+}

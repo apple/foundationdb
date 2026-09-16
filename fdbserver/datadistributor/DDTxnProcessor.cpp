@@ -755,7 +755,7 @@ class DDTxnProcessorImpl {
 						co_return true;
 					}
 				}
-				// SOMEDAY: Write a wrapper in MoveKeys.actor.h
+				// SOMEDAY: Write a wrapper in fdbserver/core/MoveKeys.h
 				Optional<Value> readVal = co_await tr.get(moveKeysLockOwnerKey);
 				UID currentOwner =
 				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();

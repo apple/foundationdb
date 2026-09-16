@@ -436,7 +436,8 @@ private:
 // Accumulates mutation log value chunks, as both a vector of chunks and as a combined chunk,
 // in chunk order, and can check the chunk set for completion or intersection with a set
 // of ranges.
-struct AccumulatedMutations {
+class AccumulatedMutations {
+public:
 	AccumulatedMutations() : lastChunkNumber(-1) {}
 
 	// Add a KV pair for this mutation chunk set
@@ -450,11 +451,19 @@ struct AccumulatedMutations {
 	//     that matches the bytes after the header in the combined value in serializedMutations
 	bool isComplete() const;
 
+	// Returns the complete serialized payload, or no value if the chunk set is incomplete.
+	// The returned bytes remain valid until this accumulator is modified or destroyed.
+	Optional<StringRef> getCompleteMutations() const;
+
+	// The key and value bytes remain owned by the inputs passed to addChunk().
+	const std::vector<KeyValueRef>& getChunks() const { return kvs; }
+
 	// Returns true if a complete chunk contains any MutationRefs which intersect with any
 	// range in ranges.
 	// It is undefined behavior to run this if isComplete() does not return true.
 	bool matchesAnyRange(const RangeMapFilters& rangeMap) const;
 
+private:
 	std::vector<KeyValueRef> kvs;
 	std::string serializedMutations;
 	int lastChunkNumber;

@@ -75,12 +75,15 @@ extern const KeyRef samplingWindow;
 // Structure used to hold the values stored by global configuration. The arena
 // is used as memory to store both the key and the value (the value is only
 // stored in the arena if it is an object; primitives are just copied).
-struct ConfigValue : ReferenceCounted<ConfigValue> {
+class ConfigValue : public ReferenceCounted<ConfigValue> {
 	Arena arena;
 	std::any value;
 
+public:
 	ConfigValue() = default;
 	ConfigValue(Arena&& a, std::any&& v) : arena(a), value(v) {}
+
+	const std::any& getValue() const { return value; }
 };
 
 class GlobalConfig : NonCopyable {
@@ -122,8 +125,8 @@ public:
 	// reference which also contains the arena holding the object. As long as
 	// the caller keeps the ConfigValue reference, the value is guaranteed to
 	// be readable. An empty reference is returned if the value does not exist.
-	Reference<ConfigValue> get(KeyRef name);
-	std::map<KeyRef, Reference<ConfigValue>> get(KeyRangeRef range);
+	Reference<const ConfigValue> get(KeyRef name);
+	std::map<KeyRef, Reference<const ConfigValue>> get(KeyRangeRef range);
 
 	// For arithmetic value types, returns a copy of the value for the given
 	// key, or the supplied default value if the framework does not know about
@@ -134,8 +137,8 @@ public:
 		try {
 			auto configValue = get(name);
 			if (configValue.isValid()) {
-				if (configValue->value.has_value()) {
-					return std::any_cast<T>(configValue->value);
+				if (configValue->getValue().has_value()) {
+					return std::any_cast<T>(configValue->getValue());
 				}
 			}
 
@@ -195,7 +198,7 @@ private:
 	Future<Void> _updater;
 	Promise<Void> initialized;
 	AsyncTrigger configChanged;
-	std::unordered_map<StringRef, Reference<ConfigValue>> data;
+	std::unordered_map<StringRef, Reference<const ConfigValue>> data;
 	Version lastUpdate;
 	// The key should be a global config string literal key (see the top of this file).
 	std::unordered_map<KeyRef, std::function<void(std::optional<std::any>)>> callbacks;
