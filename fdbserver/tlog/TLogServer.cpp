@@ -2319,13 +2319,18 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		co_await delay(0, TaskPriority::TLogSpilledPeekReply);
 	}
 
+	// Capped CDC peeks feed a proxy that can only consume the committed prefix; uncapped peeks and other
+	// tag consumers retain their existing behavior. Nonblocking requests must return without waiting, and
+	// spill-only reads must drain persisted data without waiting for live commits. A stopped TLog cannot
+	// advance its frontier, and finite recovery/tag-history ranges must drain without requiring new commits.
+	// Only an unbounded live-tail peek can use commit progress to wake this wait.
 	const bool waitForCommittedFrontier = replyByteLimit > 0 && reqTag.locality == tagLocalityCDC &&
 	                                      !reqReturnIfBlocked && !reqOnlySpilled && !logData->stopped() &&
 	                                      (!reqEnd.present() || reqEnd.get() == std::numeric_limits<Version>::max());
 	if (waitForCommittedFrontier && poppedVersion(logData, reqTag) <= reqBegin) {
 		// A speculative message (or an empty tail) cannot advance native CDC until this frontier reaches begin.
 		// Waiting here lets commit progress wake the same capped peek instead of returning a stale frontier to
-		// the proxy. Keep finite/recovery, nonblocking, and uncapped peeks on their existing paths.
+		// the proxy.
 		co_await waitForCommittedVersion(logData, reqBegin, now() + SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT);
 	}
 
