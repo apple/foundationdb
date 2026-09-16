@@ -217,6 +217,19 @@ public:
 	static int get_eventfd() { return ctx.evfd; }
 	static void setTimeout(double ioTimeout) { ctx.setIOTimeout(ioTimeout); }
 
+	using FallocateFunction = int (*)(int, int, off_t, off_t);
+	using FtruncateFunction = int (*)(int, off_t);
+
+	static void setSyscallHooksForTest(FallocateFunction fallocate, FtruncateFunction ftruncate) {
+		fallocateFunc = fallocate;
+		ftruncateFunc = ftruncate;
+	}
+
+	static void resetSyscallHooksForTest() {
+		fallocateFunc = ::fallocate;
+		ftruncateFunc = ::ftruncate;
+	}
+
 	void addref() override { ReferenceCounted<AsyncFileKAIO>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileKAIO>::delref(); }
 	Future<int> read(void* data, int length, int64_t offset) override {
@@ -305,7 +318,9 @@ public:
 		double begin = timer_monotonic();
 
 		if (ctx.fallocateSupported && size >= lastFileSize) {
-			result = fallocate(fd, 0, 0, size);
+			do {
+				result = fallocateFunc(fd, 0, 0, size);
+			} while (result != 0 && errno == EINTR);
 			if (result != 0) {
 				int fallocateErrCode = errno;
 				TraceEvent("AsyncFileKAIOAllocateError")
@@ -324,8 +339,14 @@ public:
 				completed = true;
 			}
 		}
-		if (!completed)
-			result = ftruncate(fd, size);
+		int ftruncateErrCode = 0;
+		if (!completed) {
+			do {
+				result = ftruncateFunc(fd, size);
+			} while (result != 0 && errno == EINTR);
+			if (result != 0)
+				ftruncateErrCode = errno;
+		}
 
 		double end = timer_monotonic();
 		if (nondeterministicRandom()->random01() < end - begin) {
@@ -336,6 +357,7 @@ public:
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
 
 		if (result != 0) {
+			errno = ftruncateErrCode;
 			TraceEvent("AsyncFileKAIOTruncateError").detail("Fd", fd).detail("Filename", filename).GetLastError();
 			return io_error();
 		}
@@ -661,6 +683,8 @@ private:
 			io->next = io->prev = nullptr;
 		}
 	};
+	static inline FallocateFunction fallocateFunc = ::fallocate;
+	static inline FtruncateFunction ftruncateFunc = ::ftruncate;
 	static Context ctx;
 
 	explicit AsyncFileKAIO(int fd, int flags, std::string const& filename)
