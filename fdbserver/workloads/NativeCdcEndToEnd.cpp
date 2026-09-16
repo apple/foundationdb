@@ -1030,22 +1030,32 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_return proxyStatus.second;
 	}
 
+	// Returns with a consume outstanding that the proxy has parked at least once waiting for buffered data. A park on
+	// an idle stream lasts only as long as one peek, too briefly to sample the instantaneous gauges, so compare against
+	// a latched wait count instead: a park that completes between two samples still counts.
 	Future<Void> startBlockedConsume(Database cx,
 	                                 CDCStreamId streamId,
 	                                 Reference<NativeCdcConsumer> consumer,
 	                                 CDCProxyInterface proxy,
 	                                 Future<CDCConsumeReply>* outstanding) {
-		*outstanding = consumer->consume();
 		const double deadline = now() + operationTimeout;
+		UID observedProxyId = proxy.id();
+		int64_t consumeWaitsBefore = (co_await getCurrentProxyStatus(cx, streamId, &proxy)).consumeWaits;
+		*outstanding = consumer->consume();
 		while (true) {
-			CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, &proxy);
+			const int64_t consumeWaits = (co_await getCurrentProxyStatus(cx, streamId, &proxy)).consumeWaits;
+			if (proxy.id() != observedProxyId) {
+				// A replacement owner counts from zero, so a baseline from the previous one is never reached again.
+				observedProxyId = proxy.id();
+				consumeWaitsBefore = consumeWaits;
+			}
 			if (outstanding->isReady()) {
 				co_await *outstanding;
 				co_await timeoutError(consumer->acknowledge(), operationTimeout);
+				// A consume must still be outstanding at co_return, so nothing may be awaited past this re-issue.
 				*outstanding = consumer->consume();
-				continue;
 			}
-			if (status.activeConsumeRequests > 0 && status.readDemand > 0) {
+			if (consumeWaits > consumeWaitsBefore) {
 				co_return;
 			}
 			ASSERT_LT(now(), deadline);

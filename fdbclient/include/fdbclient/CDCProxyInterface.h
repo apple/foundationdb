@@ -172,6 +172,9 @@ struct CDCProxyBufferStatus {
 	int waiters = 0;
 	int activeConsumeRequests = 0;
 	int readDemand = 0;
+	// Monotonic count of consume requests that parked waiting for buffered data. The readDemand gauge is held only for
+	// as long as one peek takes, too briefly for a poller to observe reliably.
+	int64_t consumeWaits = 0;
 	int64_t popRequests = 0;
 	int64_t popAttempts = 0;
 	int64_t popCompletions = 0;
@@ -190,6 +193,7 @@ struct CDCProxyBufferStatus {
 		           waiters,
 		           activeConsumeRequests,
 		           readDemand,
+		           consumeWaits,
 		           popRequests,
 		           popAttempts,
 		           popCompletions,

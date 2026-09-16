@@ -502,6 +502,7 @@ class CDCProxy {
 	int64_t totalBufferedMutationBytes = 0;
 	int64_t peakActivePermits = 0;
 	int activeConsumeRequests = 0;
+	int64_t consumeWaits = 0;
 	int64_t popRequests = 0;
 	int64_t popAttempts = 0;
 	int64_t popCompletions = 0;
@@ -1842,6 +1843,7 @@ Future<Void> CDCProxy::waitForBufferedVersion(Reference<CDCBufferedStream> strea
 		co_return;
 	}
 
+	++consumeWaits;
 	changeStreamReadDemand(stream, 1);
 	ScopeExit releaseReadDemand([this, stream]() { changeStreamReadDemand(stream, -1); });
 	while (stream->active && !stream->bufferLimitExceeded && stream->bufferedThrough < version) {
@@ -2168,6 +2170,7 @@ Future<Void> CDCProxy::serveBufferStatusForTestingRequests(FutureStream<GetCDCPr
 		for (const auto& [streamId, stream] : streams) {
 			status.readDemand += stream->readDemand;
 		}
+		status.consumeWaits = consumeWaits;
 		status.popRequests = popRequests;
 		status.popAttempts = popAttempts;
 		status.popCompletions = popCompletions;
@@ -2224,6 +2227,7 @@ Future<Void> CDCProxy::traceMetrics() {
 		    .detail("BufferWaiters", bufferLock.waiters())
 		    .detail("ActiveConsumeRequests", activeConsumeRequests)
 		    .detail("ReadDemand", totalReadDemand)
+		    .detail("ConsumeWaits", consumeWaits)
 		    .detail("OldestStreamId", oldestStreamId)
 		    .detail("OldestRequiredVersion",
 		            oldestRequiredVersion == std::numeric_limits<Version>::max() ? invalidVersion
