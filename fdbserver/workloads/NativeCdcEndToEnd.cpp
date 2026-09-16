@@ -1082,8 +1082,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		// the tracked consumer so later workload phases do not retain a cursor behind acknowledgements made here.
 		Reference<NativeCdcConsumer> idleConsumer = streams.front().consumer;
 		const Version idleStartVersion = idleConsumer->position().lastConsumedVersion;
-		Future<CDCConsumeReply> idleConsume;
-		co_await startBlockedConsume(cx, streamId, idleConsumer, *proxy, &idleConsume);
+		// Check client exclusivity before yielding: committed-version progress can complete a consume before
+		// a status request observes read demand, even when the client correctly rejects overlapping operations.
+		Future<CDCConsumeReply> idleConsume = idleConsumer->consume();
+		ASSERT(!idleConsume.isReady());
 		Future<CDCConsumeReply> overlappingConsume = idleConsumer->consume();
 		ASSERT(overlappingConsume.isReady() && overlappingConsume.isError());
 		ASSERT_EQ(overlappingConsume.getError().code(), error_code_client_invalid_operation);
