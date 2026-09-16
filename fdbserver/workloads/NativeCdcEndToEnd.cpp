@@ -1030,29 +1030,6 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_return proxyStatus.second;
 	}
 
-	Future<Void> startBlockedConsume(Database cx,
-	                                 CDCStreamId streamId,
-	                                 Reference<NativeCdcConsumer> consumer,
-	                                 CDCProxyInterface proxy,
-	                                 Future<CDCConsumeReply>* outstanding) {
-		*outstanding = consumer->consume();
-		const double deadline = now() + operationTimeout;
-		while (true) {
-			CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, &proxy);
-			if (outstanding->isReady()) {
-				co_await *outstanding;
-				co_await timeoutError(consumer->acknowledge(), operationTimeout);
-				*outstanding = consumer->consume();
-				continue;
-			}
-			if (status.activeConsumeRequests > 0 && status.readDemand > 0) {
-				co_return;
-			}
-			ASSERT_LT(now(), deadline);
-			co_await delay(0.01);
-		}
-	}
-
 	Future<Void> waitForNoActiveConsumes(Database cx, CDCStreamId streamId, CDCProxyInterface* proxy) {
 		const double deadline = now() + operationTimeout;
 		while (true) {
