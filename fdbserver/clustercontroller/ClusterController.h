@@ -23,7 +23,6 @@
 #include <algorithm>
 #include <compare>
 #include <utility>
-#include <vector>
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ProcessClass.h"
@@ -2260,7 +2259,7 @@ public:
 		}
 		RoleFitness secondFitness(secondDetails, role, secondUsed);
 
-		if (!(firstFitness == secondFitness)) {
+		if (firstFitness < secondFitness) { // second pass produced a worse result → regression
 			auto describe = [&](const std::vector<WorkerDetails>& details,
 			                    const std::map<Optional<Standalone<StringRef>>, int>& used) {
 				std::string s;
@@ -2288,12 +2287,6 @@ public:
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
-		// Snapshot the RNG state before the first pass so the determinism-check pass below can
-		// replay the recruitment from the same starting point. Only the simulation check needs
-		// it, so production runs avoid the snapshot cost entirely.
-		Optional<std::vector<uint8_t>> savedRandomState;
-		if (g_network->isSimulated())
-			savedRandomState = deterministicRandom()->saveState();
 		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, true);
 		if (g_network->isSimulated()) {
 			try {
@@ -2312,12 +2305,6 @@ public:
 					}
 				}
 				if (!remoteDCUsedAsSatellite) {
-					// Replay the recruitment from the identical RNG state captured before the
-					// first pass, so both passes consume the same random sequence. Recruitment
-					// randomizes deliberately (e.g. among equal-fitness candidates), so without
-					// this the two passes would diverge on RNG drift alone; with it, any
-					// divergence is attributable to non-deterministic logic.
-					deterministicRandom()->restoreState(savedRandomState.get());
 					RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req, false);
 
 					std::map<Optional<Standalone<StringRef>>, int> firstUsed;
