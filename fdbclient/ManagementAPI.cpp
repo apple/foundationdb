@@ -2320,7 +2320,8 @@ Future<Void> timeKeeperSetDisable(Database cx) {
 	}
 }
 
-Future<Void> lockDatabase(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> lockDatabaseImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2340,24 +2341,12 @@ Future<Void> lockDatabase(Transaction* tr, UID id) {
 	tr->addWriteConflictRange(normalKeys);
 }
 
+Future<Void> lockDatabase(Transaction* tr, UID id) {
+	return lockDatabaseImpl(tr, id);
+}
+
 Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
-
-	if (val.present()) {
-		if (BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
-			co_return;
-		} else {
-			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
-			throw database_locked();
-		}
-	}
-
-	tr->atomicOp(databaseLockedKey,
-	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
-	             MutationRef::SetVersionstampedValue);
-	tr->addWriteConflictRange(normalKeys);
+	return lockDatabaseImpl(std::move(tr), id);
 }
 
 Future<Void> lockDatabase(Database cx, UID id) {
@@ -2380,7 +2369,8 @@ Future<Void> lockDatabase(Database cx, UID id) {
 	}
 }
 
-Future<Void> unlockDatabase(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> unlockDatabaseImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2396,20 +2386,12 @@ Future<Void> unlockDatabase(Transaction* tr, UID id) {
 	tr->clear(singleKeyRange(databaseLockedKey));
 }
 
+Future<Void> unlockDatabase(Transaction* tr, UID id) {
+	return unlockDatabaseImpl(tr, id);
+}
+
 Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
-
-	if (!val.present())
-		co_return;
-
-	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
-		throw database_locked();
-	}
-
-	tr->clear(singleKeyRange(databaseLockedKey));
+	return unlockDatabaseImpl(std::move(tr), id);
 }
 
 Future<Void> unlockDatabase(Database cx, UID id) {
@@ -2429,7 +2411,8 @@ Future<Void> unlockDatabase(Database cx, UID id) {
 	}
 }
 
-Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> checkDatabaseLockImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2440,15 +2423,12 @@ Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
 	}
 }
 
-Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
+Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
+	return checkDatabaseLockImpl(tr, id);
+}
 
-	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
-		throw database_locked();
-	}
+Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
+	return checkDatabaseLockImpl(std::move(tr), id);
 }
 
 Future<Void> advanceVersion(Database cx, Version v) {
