@@ -264,7 +264,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BACKUP_SIMULATED_LIMIT_BYTES,            1e6 ); if( randomize && buggify() ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
 	init( BACKUP_GET_RANGE_LIMIT_BYTES,            1e6 );
 	init( BACKUP_LOCK_BYTES,                       1e8 );
-	init( BACKUP_RANGE_TIMEOUT, TASKBUCKET_TIMEOUT_VERSIONS/CORE_VERSIONSPERSECOND/2.0 );
+	init( BACKUP_RANGE_TIMEOUT, static_cast<double>(TASKBUCKET_TIMEOUT_VERSIONS)/CORE_VERSIONSPERSECOND/2.0 );
 	init( BACKUP_RANGE_MINWAIT, std::max(1.0, BACKUP_RANGE_TIMEOUT/2.0));
 	init( BULKDUMP_JOB_TIMEOUT,              3600 * 24 ); // 24 hours - large DBs may take days
 	init( BULKLOAD_JOB_TIMEOUT,              3600 * 24 ); // 24 hours - large DBs may take days

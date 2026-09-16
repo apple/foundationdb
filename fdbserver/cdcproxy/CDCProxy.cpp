@@ -72,6 +72,30 @@ struct CDCTagInterval {
 	  : tag(tag), begin(begin), end(end), bufferedThrough(begin - 1) {}
 };
 
+// A transport retry supersedes only requests from the same logical consumer.
+class CDCConsumeLease : public ReferenceCounted<CDCConsumeLease> {
+	Optional<UID> consumerId;
+	Promise<Void> superseded;
+
+public:
+	explicit CDCConsumeLease(Optional<UID> consumerId) : consumerId(consumerId) {}
+
+	bool belongsTo(Optional<UID> other) const {
+		return consumerId.present() && consumerId.get().isValid() && consumerId == other;
+	}
+	void supersede() { superseded.send(Void()); }
+
+	Future<CDCConsumeReply> waitForReply(Future<CDCConsumeReply> reply) {
+		// Coroutine parameters can outlive completion while the caller retains its result future.
+		ScopeExit cancelReply([&reply]() { reply.cancel(); });
+		auto result = co_await race(reply, superseded.getFuture());
+		if (result.index() == 1) {
+			throw request_maybe_delivered();
+		}
+		co_return std::get<0>(std::move(result));
+	}
+};
+
 // Proxy-owned state for one assigned stream. In-flight actors may retain it after active becomes false.
 struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	CDCStreamId streamId;
@@ -85,7 +109,7 @@ struct CDCBufferedStream : ReferenceCounted<CDCBufferedStream> {
 	Version bufferedThrough = invalidVersion;
 	int64_t bufferedBytes = 0;
 	int readDemand = 0;
-	int activeConsumes = 0;
+	Reference<CDCConsumeLease> activeConsume;
 	std::vector<CDCTagInterval> tagIntervals;
 	std::deque<Standalone<VersionedMutationsRef>> mutations;
 	AsyncTrigger changed;
@@ -254,6 +278,10 @@ bool hasCompleteLogSystemConfig(LogSystemConfig const& config) {
 
 enum class CDCBufferTagPassResult { RETRY, WAIT_FOR_COMMIT, STOP };
 
+double remainingCommitWait(double passStart, double waitInterval, double currentTime) {
+	return std::max(0.0, passStart + waitInterval - currentTime);
+}
+
 Optional<CDCBufferPassLimits> calculateBufferPassLimits(int64_t bufferBytes,
                                                         int64_t maximumPeekBytes,
                                                         int64_t retainedReplyCount) {
@@ -404,7 +432,7 @@ class CDCProxy {
 	void clearBufferedMutations(Reference<CDCBufferedStream> stream);
 	void addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBufferedBatch batch);
 	void reconcileStreamMinVersion(Reference<CDCBufferedStream> stream, Version minVersion);
-	void markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin);
+	void markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin, int replyByteLimit);
 	void markTagStreamsRawReplyBudgetExceeded(Reference<CDCBufferedTag> tag, Version begin, int64_t retainedReplyCount);
 	void detachStreamFromTags(Reference<CDCBufferedStream> stream);
 	void deactivateStream(Reference<CDCBufferedStream> stream);
@@ -454,6 +482,7 @@ class CDCProxy {
 	Future<Void> monitorAcknowledgedDataPops();
 	void reconcileStreams();
 	Future<Void> consume(CDCConsumeRequest request);
+	Future<CDCConsumeReply> consumeReply(Reference<CDCBufferedStream> stream, CDCCursor cursor);
 	Future<Void> acknowledge(CDCAckRequest request);
 	Future<Void> registerStream(CDCRegisterStreamRequest request);
 	Future<Void> removeStream(CDCRemoveStreamRequest request);
@@ -493,13 +522,13 @@ Optional<MutationRef> clipCDCMutation(MutationRef const& mutation, KeyRangeRef c
 	return Optional<MutationRef>();
 }
 
-FDB_BOOLEAN_PARAM(PrioritizeConsume);
+FDB_BOOLEAN_PARAM(PrioritizeDrain);
 
 AsyncResult<CDCStreamReadState> readCDCStreamState(Database cx,
                                                    CDCStreamId streamId,
                                                    UID expectedProxyId,
                                                    bool requireKeys,
-                                                   PrioritizeConsume prioritizeConsume = PrioritizeConsume::False) {
+                                                   PrioritizeDrain prioritizeDrain = PrioritizeDrain::False) {
 	if (streamId == 0) {
 		throw client_invalid_operation();
 	}
@@ -510,7 +539,7 @@ AsyncResult<CDCStreamReadState> readCDCStreamState(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			if (prioritizeConsume) {
+			if (prioritizeDrain) {
 				// Draining committed CDC data must continue while ordinary transaction admission is throttled.
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
@@ -677,7 +706,7 @@ void CDCProxy::addBufferedBatch(Reference<CDCBufferedStream> stream, CDCBuffered
 	totalBufferedMutationBytes += batch.bufferedBytes;
 }
 
-void CDCProxy::markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin) {
+void CDCProxy::markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin, int replyByteLimit) {
 	for (const CDCStreamId streamId : tag->streamIds) {
 		auto stream = streams.find(streamId);
 		if (stream == streams.end() || !stream->second->active) {
@@ -692,7 +721,7 @@ void CDCProxy::markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, 
 		    .detail("Tag", tag->tag)
 		    .detail("StreamId", streamId)
 		    .detail("BeginVersion", begin)
-		    .detail("RawPeekLimit", SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
+		    .detail("RawPeekLimit", replyByteLimit);
 		stream->second->bufferLimitExceeded = true;
 		stream->second->changed.trigger();
 	}
@@ -1121,14 +1150,19 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 	// CDC ReplayMultiCursor instances disable constructor prefetch, so constructing this cursor cannot issue a peek
 	// before the proxy has reserved memory for every reply arena that its replicated read may retain.
 	Reference<IReplayPeekCursor> cursor = consumer->peekSingle(id, begin, tag->tag, {});
-	cursor->setReplyByteLimit(SERVER_KNOBS->MAXIMUM_PEEK_BYTES);
 	const int64_t retainedReplyCount = cursor->getMaxRetainedReplyCount();
-	Optional<CDCBufferPassLimits> limits =
-	    calculateBufferPassLimits(bufferLimit, SERVER_KNOBS->MAXIMUM_PEEK_BYTES, retainedReplyCount);
+	// Leave one reply-sized window for filtered mutations instead of rejecting a topology whose maximum-sized
+	// replies would consume the entire buffer. Every retained raw arena remains covered by the reservation.
+	const int replyByteLimit =
+	    std::min<int64_t>(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, bufferLimit / (retainedReplyCount + 1));
+	Optional<CDCBufferPassLimits> limits = calculateBufferPassLimits(bufferLimit, replyByteLimit, retainedReplyCount);
 	if (!limits.present()) {
 		markTagStreamsRawReplyBudgetExceeded(tag, begin, retainedReplyCount);
 		co_return CDCBufferTagPassResult::RETRY;
 	}
+	cursor->setReplyByteLimit(replyByteLimit);
+	CODE_PROBE(replyByteLimit < SERVER_KNOBS->MAXIMUM_PEEK_BYTES,
+	           "CDC proxy sizes raw replies to fit replicated reads within its buffer");
 	const int64_t rawPeekReservation = limits.get().rawReplyBytes;
 	const int64_t hardBufferedBatchLimit = limits.get().hardBufferedBytes;
 	const int64_t preferredBufferedBatch = limits.get().preferredBufferedBytes;
@@ -1172,7 +1206,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagPass(Reference<CDCBufferedTag>
 			if (e.code() != error_code_cdc_tlog_peek_reply_too_large) {
 				throw;
 			}
-			markTagStreamsBufferLimitExceeded(tag, begin);
+			markTagStreamsBufferLimitExceeded(tag, begin, replyByteLimit);
 			co_return CDCBufferTagPassResult::RETRY;
 		}
 	}
@@ -1227,17 +1261,20 @@ Future<Void> CDCProxy::bufferTag(Reference<CDCBufferedTag> tag) {
 			continue;
 		}
 
+		const double passStart = now();
 		const CDCBufferTagPassResult result = co_await bufferTagPass(tag, begin.get());
 		if (result == CDCBufferTagPassResult::STOP) {
 			co_return;
 		}
 		if (result == CDCBufferTagPassResult::WAIT_FOR_COMMIT) {
-			// The cursor may already hold a speculative message, so getMore() would complete immediately without
-			// refreshing its committed frontier. Drop that arena and reopen after one blocking-peek interval.
-			auto waitForCommit = co_await race(delay(SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT),
-			                                   logSystem->onChange(),
-			                                   tag->stopped.onTrigger(),
-			                                   tag->refresh.onTrigger());
+			// Older TLogs can immediately return a speculative message, for which getMore() would not refresh
+			// the committed frontier. Retain their bounded fallback, but do not add a second blocking-peek
+			// interval when a TLog already waited for commit progress. The zero-delay case still yields.
+			auto waitForCommit =
+			    co_await race(delay(remainingCommitWait(passStart, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT, now())),
+			                  logSystem->onChange(),
+			                  tag->stopped.onTrigger(),
+			                  tag->refresh.onTrigger());
 			if (waitForCommit.index() == 2) {
 				co_return;
 			}
@@ -1589,88 +1626,23 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 		if (!stream->active) {
 			throw wrong_shard_server();
 		}
-		if (stream->activeConsumes > 0) {
-			// A stream has one durable acknowledgement frontier, so concurrent logical consumers cannot be
-			// isolated. Reject overlapping server requests rather than duplicating an entire reply arena.
-			CODE_PROBE(true, "CDC proxy rejects concurrent consumers for one stream");
-			throw client_invalid_operation();
+		if (stream->activeConsume.isValid()) {
+			if (!stream->activeConsume->belongsTo(request.consumerId)) {
+				CODE_PROBE(true, "CDC proxy rejects concurrent consumers for one stream");
+				throw client_invalid_operation();
+			}
+			CODE_PROBE(true, "CDC proxy supersedes a consume after transport retry");
+			auto previous = stream->activeConsume;
+			previous->supersede();
 		}
-		++stream->activeConsumes;
-		ScopeExit releaseStreamConsume([stream]() {
-			ASSERT_GT(stream->activeConsumes, 0);
-			--stream->activeConsumes;
+		auto lease = makeReference<CDCConsumeLease>(request.consumerId);
+		stream->activeConsume = lease;
+		ScopeExit releaseStreamConsume([stream, lease]() {
+			if (stream->activeConsume == lease) {
+				stream->activeConsume.clear();
+			}
 		});
-		const CDCStreamReadState metadata =
-		    co_await readCDCStreamState(cx, request.cursor.streamId, id, true, PrioritizeConsume::True);
-		CODE_PROBE(stream->minVersion < metadata.minVersion, "Native CDC consume reconciles a durable acknowledgement");
-		reconcileStreamMinVersion(stream, metadata.minVersion);
-		if (request.cursor.lastConsumedVersion > stream->bufferedThrough) {
-			// A cursor is trusted only when this owner has delivered through it or when it is covered by the durable
-			// acknowledgement watermark used to initialize bufferedThrough. This prevents a fabricated cursor from
-			// making the proxy retain every intervening tagged mutation while trying to reach an unproven position.
-			if (request.cursor.lastConsumedVersion > metadata.readVersion) {
-				CODE_PROBE(true, "CDC proxy rejects a consume cursor beyond its transaction read version");
-			} else {
-				CODE_PROBE(true, "CDC proxy rejects an unproven consume cursor");
-			}
-			throw client_invalid_operation();
-		}
-
-		Version begin = request.cursor.lastConsumedVersion == invalidVersion ? stream->minVersion
-		                                                                     : request.cursor.lastConsumedVersion + 1;
-		if (begin < stream->minVersion) {
-			throw transaction_too_old();
-		}
-
-		auto buffered =
-		    co_await race(waitForBufferedVersion(stream, begin), delay(SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT));
-		if (buffered.index() == 1) {
-			CODE_PROBE(true, "CDC proxy expires an idle consume lease");
-			CDCConsumeReply reply;
-			reply.lastConsumedVersion = request.cursor.lastConsumedVersion;
-			request.reply.send(reply);
-			co_return;
-		}
-		if (stream->tooOld) {
-			throw transaction_too_old();
-		}
-		if (stream->bufferLimitExceeded) {
-			throw server_overloaded();
-		}
-		if (!stream->active) {
-			throw wrong_shard_server();
-		}
-
-		CDCConsumeReply reply;
-		CDCConsumeReplySelection selection;
-		for (const auto& versioned : stream->mutations) {
-			if (versioned.version < begin) {
-				continue;
-			}
-			if (versioned.version > stream->bufferedThrough) {
-				break;
-			}
-			if (!selectCDCConsumeReplyVersion(&selection,
-			                                  begin,
-			                                  versioned.version,
-			                                  estimatedCDCConsumeVersionBytes(versioned),
-			                                  SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES)) {
-				break;
-			}
-			// Retain the already-accounted stream arena instead of copying mutation payloads for every reply.
-			reply.arena.dependsOn(versioned.arena());
-			reply.mutations.push_back(reply.arena, VersionedMutationsRef(versioned.version, versioned.mutations));
-		}
-		if (selection.firstVersionTooLarge) {
-			CODE_PROBE(
-			    true, "CDC proxy rejects one consume version larger than its reply budget", probe::decoration::rare);
-			TraceEvent(SevWarn, "CDCProxyConsumeVersionExceedsReplyLimit", id)
-			    .detail("StreamId", stream->streamId)
-			    .detail("Version", begin)
-			    .detail("ReplyLimit", SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES);
-			throw server_overloaded();
-		}
-		reply.lastConsumedVersion = selectedCDCConsumeReplyThrough(selection, stream->bufferedThrough);
+		CDCConsumeReply reply = co_await lease->waitForReply(consumeReply(stream, request.cursor));
 		request.reply.send(reply);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -1680,12 +1652,85 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 	}
 }
 
+Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stream, CDCCursor cursor) {
+	const CDCStreamReadState metadata =
+	    co_await readCDCStreamState(cx, cursor.streamId, id, true, PrioritizeDrain::True);
+	CODE_PROBE(stream->minVersion < metadata.minVersion, "Native CDC consume reconciles a durable acknowledgement");
+	reconcileStreamMinVersion(stream, metadata.minVersion);
+	if (cursor.lastConsumedVersion > stream->bufferedThrough) {
+		// A cursor is trusted only when this owner has delivered through it or when it is covered by the durable
+		// acknowledgement watermark used to initialize bufferedThrough. This prevents a fabricated cursor from
+		// making the proxy retain every intervening tagged mutation while trying to reach an unproven position.
+		if (cursor.lastConsumedVersion > metadata.readVersion) {
+			CODE_PROBE(true, "CDC proxy rejects a consume cursor beyond its transaction read version");
+		} else {
+			CODE_PROBE(true, "CDC proxy rejects an unproven consume cursor");
+		}
+		throw client_invalid_operation();
+	}
+
+	Version begin = cursor.lastConsumedVersion == invalidVersion ? stream->minVersion : cursor.lastConsumedVersion + 1;
+	if (begin < stream->minVersion) {
+		throw transaction_too_old();
+	}
+
+	auto buffered =
+	    co_await race(waitForBufferedVersion(stream, begin), delay(SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT));
+	if (buffered.index() == 1) {
+		CODE_PROBE(true, "CDC proxy expires an idle consume lease");
+		CDCConsumeReply reply;
+		reply.lastConsumedVersion = cursor.lastConsumedVersion;
+		co_return reply;
+	}
+	if (stream->tooOld) {
+		throw transaction_too_old();
+	}
+	if (stream->bufferLimitExceeded) {
+		throw server_overloaded();
+	}
+	if (!stream->active) {
+		throw wrong_shard_server();
+	}
+
+	CDCConsumeReply reply;
+	CDCConsumeReplySelection selection;
+	for (const auto& versioned : stream->mutations) {
+		if (versioned.version < begin) {
+			continue;
+		}
+		if (versioned.version > stream->bufferedThrough) {
+			break;
+		}
+		if (!selectCDCConsumeReplyVersion(&selection,
+		                                  begin,
+		                                  versioned.version,
+		                                  estimatedCDCConsumeVersionBytes(versioned),
+		                                  SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES)) {
+			break;
+		}
+		// Retain the already-accounted stream arena instead of copying mutation payloads for every reply.
+		reply.arena.dependsOn(versioned.arena());
+		reply.mutations.push_back(reply.arena, VersionedMutationsRef(versioned.version, versioned.mutations));
+	}
+	if (selection.firstVersionTooLarge) {
+		CODE_PROBE(true, "CDC proxy rejects one consume version larger than its reply budget", probe::decoration::rare);
+		TraceEvent(SevWarn, "CDCProxyConsumeVersionExceedsReplyLimit", id)
+		    .detail("StreamId", stream->streamId)
+		    .detail("Version", begin)
+		    .detail("ReplyLimit", SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES);
+		throw server_overloaded();
+	}
+	reply.lastConsumedVersion = selectedCDCConsumeReplyThrough(selection, stream->bufferedThrough);
+	co_return reply;
+}
+
 Future<Void> CDCProxy::acknowledge(CDCAckRequest request) {
 	try {
 		if (request.version < 0 || request.version >= std::numeric_limits<Version>::max() - 1) {
 			throw client_invalid_operation();
 		}
-		const CDCStreamReadState metadata = co_await readCDCStreamState(cx, request.streamId, id, false);
+		const CDCStreamReadState metadata =
+		    co_await readCDCStreamState(cx, request.streamId, id, false, PrioritizeDrain::True);
 		if (metadata.minVersion <= request.version) {
 			throw client_invalid_operation();
 		}
@@ -1809,7 +1854,7 @@ Future<Void> CDCProxy::serveStatusRequests(FutureStream<GetCDCProxyStatusRequest
 				streamStatus.bufferedThrough = stream->bufferedThrough;
 				streamStatus.bufferedBytes = stream->bufferedBytes;
 				streamStatus.readDemand = stream->readDemand;
-				streamStatus.activeConsumeRequests = stream->activeConsumes;
+				streamStatus.activeConsumeRequests = stream->activeConsume.isValid() ? 1 : 0;
 				streamStatus.tooOld = stream->tooOld;
 				streamStatus.bufferLimitExceeded = stream->bufferLimitExceeded;
 			}
@@ -2082,6 +2127,17 @@ TEST_CASE("/NativeCDC/ProxyBufferCandidateSelection") {
 	ASSERT_EQ(rejectsOverLimit.oversizedStreamIds.front(), 1);
 	ASSERT(rejectsOverLimit.selectedStreamIds.contains(2));
 
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/CommitWaitDeadlineBudget") {
+	// Immediate legacy replies retain the fallback; time already spent in the pass is not charged twice.
+	ASSERT_EQ(remainingCommitWait(0.0, 0.4, 0.0), 0.4);
+	ASSERT_EQ(remainingCommitWait(0.0, 0.4, 0.2), 0.2);
+	ASSERT_EQ(remainingCommitWait(0.0, 0.4, 0.4), 0.0);
+	// Capacity waiting is part of the same pass, even when it exceeds the timeout before a peek is issued.
+	ASSERT_EQ(remainingCommitWait(0.0, 0.4, 2.0), 0.0);
+	ASSERT_EQ(remainingCommitWait(8.0, 0.5, 8.125), 0.375);
 	return Void();
 }
 

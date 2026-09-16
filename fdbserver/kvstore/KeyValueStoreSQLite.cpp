@@ -1645,6 +1645,72 @@ void SQLiteDB::createFromScratch() {
 	}
 }
 
+TEST_CASE("/fdbserver/kvstore/SQLite/LazyDelete/OverflowBudgetAndResume") {
+	// The in-memory backend exercises the real cursor and lazy-free table without background cleanup races.
+	SQLiteDB db(":memory:", false, false);
+	db.createFromScratch();
+	const std::string value(32768, 'v');
+	{
+		Cursor cursor(db, true);
+		cursor.set(KeyValueRef("before"_sr, "left"_sr));
+		cursor.set(KeyValueRef("zzzz"_sr, "right"_sr));
+		for (int i = 0; i < 128; ++i) {
+			const std::string key = format("key/%04d", i);
+			cursor.set(KeyValueRef(StringRef(key), StringRef(value)));
+		}
+		cursor.commit();
+	}
+	{
+		Cursor cursor(db, true);
+		bool empty = true;
+		cursor.fastClear(KeyRangeRef("key/"_sr, "key0"_sr), empty);
+		ASSERT(!empty);
+		cursor.commit();
+	}
+	constexpr int budget = 2;
+	uint32_t freeBefore;
+	int firstBatch;
+	{
+		Cursor cursor(db, true);
+		freeBefore = db.freePages();
+		ASSERT(cursor.lazyDelete(0) == 0);
+		firstBatch = cursor.lazyDelete(budget);
+		ASSERT(firstBatch > budget);
+		IntKeyCursor pending(db, db.freetable, false);
+		int empty = 1;
+		db.checkError("BtreeFirst", sqlite3BtreeFirst(pending.cursor, &empty));
+		ASSERT(!empty);
+		// Roll back the partial reclamation, then repeat it in a new transaction.
+	}
+	{
+		Cursor cursor(db, true);
+		ASSERT(db.freePages() == freeBefore);
+		ASSERT(cursor.lazyDelete(budget) == firstBatch);
+		cursor.commit();
+	}
+	bool finished = false;
+	for (int batch = 0; batch < 256 && !finished; ++batch) {
+		Cursor cursor(db, true);
+		finished = cursor.lazyDelete(budget) < budget;
+		cursor.commit();
+	}
+	ASSERT(finished);
+	{
+		Cursor cursor(db, false);
+		ASSERT(cursor.moveTo("before"_sr) == 0);
+		ASSERT(decodeKV(cursor.getEncodedRow()).value == "left"_sr);
+		ASSERT(cursor.moveTo("zzzz"_sr) == 0);
+		ASSERT(decodeKV(cursor.getEncodedRow()).value == "right"_sr);
+		ASSERT(cursor.moveTo("key/0000"_sr) != 0);
+		IntKeyCursor pending(db, db.freetable, false);
+		int empty = 0;
+		db.checkError("BtreeFirst", sqlite3BtreeFirst(pending.cursor, &empty));
+		ASSERT(empty);
+		ASSERT(db.check(false) == 0);
+	}
+	return Void();
+}
+
 struct ThreadSafeCounter {
 	volatile int64_t counter;
 	ThreadSafeCounter() : counter(0) {}
@@ -1972,7 +2038,7 @@ private:
 			int64_t freeListSize = freeListPages;
 			while (!freeTableEmpty && freeListSize < SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT) {
 				int deletedPages = cursor->lazyDelete(SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
-				freeTableEmpty = (deletedPages != SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
+				freeTableEmpty = (deletedPages < SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
 				springCleaningStats.lazyDeletePages += deletedPages;
 
 				freeListSize = conn.freePages();
@@ -2031,7 +2097,7 @@ private:
 					    std::min(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE,
 					             SERVER_KNOBS->SPRING_CLEANING_MAX_LAZY_DELETE_PAGES - workPerformed.lazyDeletePages));
 					int pagesDeleted = cursor->lazyDelete(pagesToDelete);
-					freeTableEmpty = (pagesDeleted != pagesToDelete);
+					freeTableEmpty = (pagesDeleted < pagesToDelete);
 					workPerformed.lazyDeletePages += pagesDeleted;
 					lazyDeleteTime += now() - begin;
 				} else {

@@ -35,7 +35,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/MultiInterface.h"
 
-#include "fdbclient/AnnotateActor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/CommitTransaction.h"
@@ -876,8 +875,8 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 			evt.detail(k.c_str(), proxies[i].id());
 		}
 	};
-	traceProxies(oldProxies, "OldProxy"s);
-	traceProxies(newProxies, "NewProxy"s);
+	traceProxies(oldProxies, std::string{ "OldProxy" });
+	traceProxies(newProxies, std::string{ "NewProxy" });
 	evt.log();
 	for (auto& i : oldProxies) {
 		req.reply = ReplyPromise<GetReadVersionReply>();

@@ -129,26 +129,32 @@ function(strip_debug_symbols target)
   endif()
   set(out_file "${path}/${out_name}")
   list(APPEND strip_command -o "${out_file}")
-  add_custom_command(
-    OUTPUT "${out_file}"
-    COMMAND ${strip_command} $<TARGET_FILE:${target}>
-    DEPENDS ${target}
-    COMMENT "Stripping symbols from ${target}")
-  add_custom_target(strip_only_${target} DEPENDS ${out_file})
   if(is_exec AND NOT APPLE)
+    # The debuglink command rewrites out_file, so it must finish before consumers copy it.
     add_custom_command(
-      OUTPUT "${out_file}.debug"
-      DEPENDS strip_only_${target}
+      OUTPUT "${out_file}" "${out_file}.debug"
+      COMMAND ${strip_command} $<TARGET_FILE:${target}>
       COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}>
               "${out_file}.debug"
       COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug"
               "${out_file}"
-      COMMENT "Copy debug symbols to ${out_name}.debug")
-    add_custom_target(strip_${target} DEPENDS "${out_file}.debug")
+      DEPENDS ${target}
+      COMMENT "Stripping symbols and copying debug symbols from ${target}")
   else()
-    add_custom_target(strip_${target})
-    add_dependencies(strip_${target} strip_only_${target})
+    add_custom_command(
+      OUTPUT "${out_file}"
+      COMMAND ${strip_command} $<TARGET_FILE:${target}>
+      DEPENDS ${target}
+      COMMENT "Stripping symbols from ${target}")
   endif()
+  if(is_exec AND NOT APPLE)
+    # Keep both outputs in one target so Makefile builds cannot run this command twice.
+    add_custom_target(strip_only_${target} DEPENDS "${out_file}" "${out_file}.debug")
+  else()
+    add_custom_target(strip_only_${target} DEPENDS "${out_file}")
+  endif()
+  add_custom_target(strip_${target})
+  add_dependencies(strip_${target} strip_only_${target})
   add_dependencies(strip_targets strip_${target})
 endfunction()
 

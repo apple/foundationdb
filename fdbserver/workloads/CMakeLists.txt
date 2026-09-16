@@ -15,6 +15,7 @@ target_link_libraries(fdbserver_workloads PRIVATE
   fdbserver_clustercontroller
   fdbserver_consistencyscan
   fdbserver_core
+  fdbserver_checkpoint
   fdbserver_kvstore
   fdbserver_worker
   fdbserver_tester
@@ -22,3 +23,7 @@ target_link_libraries(fdbserver_workloads PRIVATE
   fdbserver_resolver
   fdbserver_storageserver
   fdbserver_mocks3)
+
+if(WITH_ROCKSDB)
+  target_compile_definitions(fdbserver_workloads PRIVATE WITH_ROCKSDB)
+endif()

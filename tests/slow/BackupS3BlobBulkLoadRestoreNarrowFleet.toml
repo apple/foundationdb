@@ -51,30 +51,36 @@ minimumRegions = 1
 
 # Ensure enough storage servers for non-overlapping BulkLoad teams
 extraMachineCountDC = 3
-# Far below the sibling tests' extraStorageMachineCountPerDC = 5, but deliberately not zero.
 #
-# Bulk-load team selection rejects any team sharing a server with the source, and source is the union of
-# the owners of every shard the task range spans, so a wide enough task range has no legal destination
-# team. That state is DDBulkLoadEngineTaskGetTeamFailedToFindValidTeam with ValidTeamSize 0 and every
-# candidate team duplicated, which no number of attempts can clear because each one recomputes the same
-# source set. Provoking it is the point of this test, and a small fleet is how it is provoked.
+# getTeamForBulkLoad rejects any candidate team sharing a *server* with the source, and source is the union
+# of the owners of every shard the task range spans, so a wide enough range has no legal destination.
+# Provoking that is the point of this test; escaping it means narrowing the range, which is the path under
+# test. Narrowing bottoms out at one manifest per task, and one manifest can still span several destination
+# shards, so the cluster must field StorageTeamSize servers on distinct machines owning none of the range.
 #
-# It is escapable only by narrowing the range, so the task is split. Narrowing bottoms out at a range
-# inside one shard, whose source is that shard's StorageTeamSize machines -- so the fleet must be able to
-# field a team of StorageTeamSize machines that avoids those, i.e. at least 2 * StorageTeamSize machines
-# with data. Teams are built per machine, not per server, so extra storage servers on existing machines do
-# not help. Omitting this knob entirely leaves 5 healthy machines against StorageTeamSize 3: all
-# C(5,3) = 10 machine teams exist, every one of them necessarily touches the 3 source machines, and the
-# restore fails no matter how finely the task is split. Measured that way on seed 22222 -- 252 consecutive
-# placement failures, ValidTeamSize 0 throughout, TotalHealthyMachines 5, CurrentMachineTeams 10 of 10
-# possible. That is the test asserting something no fix can deliver.
+# That headroom has to come from more storage *machines*, not more servers per machine. Both add servers,
+# but co-tenants share the machine's simulated disk, and getTeamForBulkLoad also rejects teams whose
+# servers are low on disk -- its own comment warns that random low disk space can strand this test.
+# Measured at processesPerMachine 2: DiskNearCapacity 1175 vs 149, GetTeamReturnEmpty 534 vs 12, DDExiting
+# 58 vs 3, and the restore froze at 35 of 45 tasks for 2200s until the no-progress timeout fired twice.
+# Placement itself was fixed -- zero GetTeamFailedToFindValidTeam -- but disk starvation replaced it. So
+# pin one server per machine and buy headroom with extraStorageMachineCountPerDC, whose machines are
+# storage-class with a disk each.
 #
-# 1 lands the fleet exactly on the threshold, which is where the test has to sit to be worth anything: a
-# source of StorageTeamSize machines leaves precisely one legal machine team, so placement still fails
-# often enough to force splitting, yet a destination exists. Raising it to 2 was measured to make the test
-# vacuous -- 17 of 17 seeds completed without a single placement failure or split, so it stopped testing
-# the thing it exists to test.
-extraStorageMachineCountPerDC = 1
+# machineCount is not the lever either: the run this was written for had 22 machines and only 6 holding
+# data, because assignClasses starves storage independently of fleet size.
+#
+# Reproduction: seed 8008 is a local regression pair. At extraStorageMachineCountPerDC 0 it fails the way
+# this test used to -- 4 machines holding data, 750 placement failures, 8 SplitDeclined "single manifest",
+# restore_error. At 5 the same seed still provokes the condition (100 placement failures, 2 splits) and now
+# recovers, completing with the dataset verified. That pair is the check to run when changing anything here:
+# the fix must keep the provocation, not remove it.
+#
+# Provocation is seed-dependent and uncommon -- roughly 1 seed in 8 locally -- so a clean sweep proves
+# little on its own. Grep GetTeamFailedToFindValidTeam and DDBulkLoadTaskSplit to tell a passing run that
+# exercised the path from one that never reached it.
+processesPerMachine = 1
+extraStorageMachineCountPerDC = 5
 # The knobs below still matter for keeping the test honest: manifests are written one per shard
 # (FileBackupAgent.cpp), so min_shard_bytes controls how many exist and
 # manifest_count_max_per_bulkload_task how many a task groups. Left to their defaults this test degrades

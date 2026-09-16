@@ -86,21 +86,6 @@ std::string generateBulkDumpJobFolder(const UID& jobId);
 // Define task folder name.
 std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId);
 
-// Generate key-value data, byte sampling data, and manifest file.
-// Return BulkLoadManifest metadata (equivalent to content of the manifest file).
-// TODO(BulkDump): can cause slow tasks, do the task in a separate thread in the future.
-// The size of sortedData is defined at the place of generating the data (getRangeDataToDump).
-// The size is configured by MOVE_SHARD_KRM_ROW_LIMIT.
-Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
-                                                      std::shared_ptr<RangeDumpRawData> rangeDumpRawData,
-                                                      BulkLoadFileSet localFileSet,
-                                                      BulkLoadFileSet remoteFileSet,
-                                                      BulkLoadByteSampleSetting byteSampleSetting,
-                                                      Version dumpVersion,
-                                                      KeyRange dumpRange,
-                                                      BulkLoadType dumpType,
-                                                      BulkLoadTransportMethod transportMethod);
-
 // Upload manifest file for bulkdump job
 // Each job has one manifest file including manifest paths of all tasks.
 // The local file path:	<localRootLocal>/<jobId>-manifest.txt
