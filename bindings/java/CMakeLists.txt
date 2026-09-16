@@ -55,6 +55,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/package-info.java
   src/main/com/apple/foundationdb/Range.java
   src/main/com/apple/foundationdb/RangeQuery.java
+  src/main/com/apple/foundationdb/RangeQueryIterator.java
   src/main/com/apple/foundationdb/MappedRangeQuery.java
   src/main/com/apple/foundationdb/KeyArrayResult.java
   src/main/com/apple/foundationdb/KeyRangeArrayResult.java

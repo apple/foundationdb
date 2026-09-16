@@ -20,18 +20,13 @@
 
 package com.apple.foundationdb;
 
-import com.apple.foundationdb.EventKeeper.Events;
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncIterator;
 import com.apple.foundationdb.async.AsyncUtil;
 
 import java.util.List;
-import java.util.NoSuchElementException;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.BiConsumer;
 
-// TODO: Share code with RangeQuery?
 /**
  * Represents a query against FoundationDB for a range of keys. The
  *  result of this query can be iterated over in a blocking fashion with a call to
@@ -106,228 +101,27 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 	 */
 	@Override
 	public AsyncRangeIterator iterator() {
-		return new AsyncRangeIterator(this.rowLimit, this.reverse, this.streamingMode);
+		return new AsyncRangeIterator();
 	}
 
-	private class AsyncRangeIterator implements AsyncIterator<MappedKeyValue> {
-		// immutable aspects of this iterator
-		private final boolean rowsLimited;
-		private final boolean reverse;
-		private final StreamingMode streamingMode;
-
-		// There is the chance for parallelism in the two "chunks" for fetched data
-		private MappedRangeResult chunk = null;
-		private MappedRangeResult nextChunk = null;
-		private boolean fetchOutstanding = false;
-		private byte[] prevKey = null;
-		private int index = 0;
-		private int iteration = 0;
-		private KeySelector begin;
-		private KeySelector end;
-
-		private int rowsRemaining;
-
-		private FutureMappedResults fetchingChunk;
-		private CompletableFuture<Boolean> nextFuture;
-		private boolean isCancelled = false;
-
-		private AsyncRangeIterator(int rowLimit, boolean reverse, StreamingMode streamingMode) {
-			this.begin = MappedRangeQuery.this.begin;
-			this.end = MappedRangeQuery.this.end;
-			this.rowsLimited = rowLimit != 0;
-			this.rowsRemaining = rowLimit;
-			this.reverse = reverse;
-			this.streamingMode = streamingMode;
-
-			startNextFetch();
-		}
-
-		private synchronized boolean mainChunkIsTheLast() { return !chunk.more || (rowsLimited && rowsRemaining < 1); }
-
-		class FetchComplete implements BiConsumer<MappedRangeResultInfo, Throwable> {
-			final FutureMappedResults fetchingChunk;
-			final CompletableFuture<Boolean> promise;
-
-			FetchComplete(FutureMappedResults fetch, CompletableFuture<Boolean> promise) {
-				this.fetchingChunk = fetch;
-				this.promise = promise;
-			}
-
-			@Override
-			public void accept(MappedRangeResultInfo data, Throwable error) {
-				try {
-					if (error != null) {
-						if (eventKeeper != null) {
-							eventKeeper.increment(Events.RANGE_QUERY_CHUNK_FAILED);
-						}
-						promise.completeExceptionally(error);
-						if (error instanceof Error) {
-							throw(Error) error;
-						}
-
-						return;
-					}
-
-					final MappedRangeResult rangeResult = data.get();
-					final RangeResultSummary summary = rangeResult.getSummary();
-					if (summary.lastKey == null) {
-						promise.complete(Boolean.FALSE);
-						return;
-					}
-
-					synchronized (MappedRangeQuery.AsyncRangeIterator.this) {
-						fetchOutstanding = false;
-
-						// adjust the total number of rows we should ever fetch
-						rowsRemaining -= summary.keyCount;
-
-						// set up the next fetch
-						if (reverse) {
-							end = KeySelector.firstGreaterOrEqual(summary.lastKey);
-						} else {
-							begin = KeySelector.firstGreaterThan(summary.lastKey);
-						}
-
-						// If this is the first fetch or the main chunk is exhausted
-						if (chunk == null || index == chunk.values.size()) {
-							nextChunk = null;
-							chunk = rangeResult;
-							index = 0;
-						} else {
-							nextChunk = rangeResult;
-						}
-					}
-
-					promise.complete(Boolean.TRUE);
-				} finally {
-					fetchingChunk.close();
-				}
-			}
-		}
-
-		private synchronized void startNextFetch() {
-			if (fetchOutstanding)
-				throw new IllegalStateException("Reentrant call not allowed"); // This can not be called reentrantly
-			if (isCancelled) return;
-
-			if (chunk != null && mainChunkIsTheLast()) return;
-
-			fetchOutstanding = true;
-			nextChunk = null;
-
-			nextFuture = new CompletableFuture<>();
-			final long sTime = System.nanoTime();
-			fetchingChunk = tr.getMappedRange_internal(begin, end, mapper, rowsLimited ? rowsRemaining : 0, 0,
-			                                           streamingMode.code(), ++iteration, snapshot, reverse);
-
-			BiConsumer<MappedRangeResultInfo, Throwable> cons = new FetchComplete(fetchingChunk, nextFuture);
-			if (eventKeeper != null) {
-				eventKeeper.increment(Events.RANGE_QUERY_FETCHES);
-				cons = cons.andThen((r, t) -> {
-					eventKeeper.timeNanos(Events.RANGE_QUERY_FETCH_TIME_NANOS, System.nanoTime() - sTime);
-				});
-			}
-
-			fetchingChunk.whenComplete(cons);
+	private class AsyncRangeIterator extends RangeQueryIterator<MappedKeyValue, MappedRangeResultInfo> {
+		private AsyncRangeIterator() {
+			super(MappedRangeQuery.this.tr, MappedRangeQuery.this.begin, MappedRangeQuery.this.end,
+			      MappedRangeQuery.this.rowLimit, MappedRangeQuery.this.reverse, MappedRangeQuery.this.eventKeeper);
+			start();
 		}
 
 		@Override
-		public synchronized CompletableFuture<Boolean> onHasNext() {
-			if (isCancelled) throw new CancellationException();
-
-			// This will only happen before the first fetch has completed
-			if (chunk == null) {
-				return nextFuture;
-			}
-
-			// We have a chunk and are still working though it
-			if (index < chunk.values.size()) {
-				return AsyncUtil.READY_TRUE;
-			}
-
-			// If we are at the end of the current chunk there is either:
-			//   - no more data -or-
-			//   - we are already fetching the next block
-			return mainChunkIsTheLast() ? AsyncUtil.READY_FALSE : nextFuture;
+		protected FutureMappedResults fetch(KeySelector begin, KeySelector end, int rowLimit, int iteration) {
+			return MappedRangeQuery.this.tr.getMappedRange_internal(begin, end, mapper, rowLimit, 0,
+			                                                        streamingMode.code(), iteration, snapshot,
+			                                                        MappedRangeQuery.this.reverse);
 		}
 
 		@Override
-		public boolean hasNext() {
-			return onHasNext().join();
-		}
-
-		@Override
-		public MappedKeyValue next() {
-			CompletableFuture<Boolean> nextFuture;
-			synchronized (this) {
-				if (isCancelled) throw new CancellationException();
-
-				// at least the first chunk has been fetched and there is at least one
-				//  available result
-				if (chunk != null && index < chunk.values.size()) {
-					// If this is the first call to next() on a chunk, then we will want to
-					//  start fetching the data for the next block
-					boolean initialNext = index == 0;
-
-					MappedKeyValue result = chunk.values.get(index);
-					prevKey = result.getKey();
-					index++;
-
-					if (eventKeeper != null) {
-						// We record the BYTES_FETCHED here, rather than at a lower level,
-						// because some parts of the construction of a MappedRangeResult occur underneath
-						// the JNI boundary, and we don't want to pass the eventKeeper down there
-						// (note: account for the length fields as well when recording the bytes
-						// fetched)
-						eventKeeper.count(Events.BYTES_FETCHED, result.getKey().length + result.getValue().length + 8);
-						eventKeeper.increment(Events.RANGE_QUERY_RECORDS_FETCHED);
-					}
-
-					// If this is the first call to next() on a chunk there cannot
-					//  be another waiting, since we could not have issued a request
-					assert (!(initialNext && nextChunk != null));
-
-					// we are at the end of the current chunk and there is more to be had already
-					if (index == chunk.values.size() && nextChunk != null) {
-						index = 0;
-						chunk = nextChunk;
-						nextChunk = null;
-					}
-
-					if (initialNext) {
-						startNextFetch();
-					}
-
-					return result;
-				}
-
-				nextFuture = onHasNext();
-			}
-
-			// If there was no result ready then we need to wait on the future
-			//  and return the proper result, throwing if there are no more elements
-			return nextFuture
-			    .thenApply(hasNext -> {
-				    if (hasNext) {
-					    return next();
-				    }
-				    throw new NoSuchElementException();
-			    })
-			    .join();
-		}
-
-		@Override
-		public synchronized void remove() {
-			if (prevKey == null) throw new IllegalStateException("No value has been fetched from database");
-
-			tr.clear(prevKey);
-		}
-
-		@Override
-		public synchronized void cancel() {
-			isCancelled = true;
-			nextFuture.cancel(true);
-			fetchingChunk.cancel(true);
+		protected Chunk<MappedKeyValue> getChunk(MappedRangeResultInfo data) {
+			MappedRangeResult result = data.get();
+			return new Chunk<>(result.values, result.more);
 		}
 	}
 }
