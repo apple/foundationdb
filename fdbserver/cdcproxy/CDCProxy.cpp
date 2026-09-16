@@ -2058,6 +2058,37 @@ Future<Void> cdcProxyServer(CDCProxyInterface proxy,
 	}
 }
 
+TEST_CASE("/NativeCDC/ConsumeLeaseSupersession") {
+	const UID consumerId(1, 2);
+	auto lease = makeReference<CDCConsumeLease>(consumerId);
+	ASSERT(lease->belongsTo(consumerId));
+	ASSERT(!lease->belongsTo(UID(3, 4)));
+	ASSERT(!lease->belongsTo(Optional<UID>()));
+	ASSERT(!makeReference<CDCConsumeLease>(UID())->belongsTo(UID()));
+
+	Promise<CDCConsumeReply> pendingReply;
+	Future<CDCConsumeReply> original = lease->waitForReply(pendingReply.getFuture());
+	ASSERT(!original.isReady());
+	lease->supersede();
+	ASSERT(original.isReady() && original.isError());
+	ASSERT_EQ(original.getError().code(), error_code_request_maybe_delivered);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ConsumeLeaseCompletedReply") {
+	auto lease = makeReference<CDCConsumeLease>(UID(1, 2));
+	Promise<CDCConsumeReply> pendingReply;
+	Future<CDCConsumeReply> original = lease->waitForReply(pendingReply.getFuture());
+	CDCConsumeReply reply;
+	reply.lastConsumedVersion = 10;
+	pendingReply.send(reply);
+	ASSERT(original.isReady() && !original.isError());
+	lease->supersede();
+	ASSERT(!original.isError());
+	ASSERT_EQ(original.get().lastConsumedVersion, 10);
+	return Void();
+}
+
 TEST_CASE("/NativeCDC/ProxyMutationFiltering") {
 	const KeyRangeRef keys("c"_sr, "m"_sr);
 
