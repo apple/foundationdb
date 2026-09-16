@@ -56,15 +56,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE
         Debug
         CACHE STRING "Choose the type of build" FORCE)
-  elseif(FDB_RELEASE OR FDB_RELEASE_CANDIDATE)
+  else()
     message(STATUS "Setting build type to 'Release'")
     set(CMAKE_BUILD_TYPE
         Release
-        CACHE STRING "Choose the type of build" FORCE)
-  else()
-    message(STATUS "Setting build type to 'RelWithDebInfo'")
-    set(CMAKE_BUILD_TYPE
-        RelWithDebInfo
         CACHE STRING "Choose the type of build" FORCE)
   endif()
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
