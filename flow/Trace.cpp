@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ActorContext.h"
 #include "flow/Trace.h"
 #include "FileTraceLogWriter.h"
 #include "flow/Knobs.h"
@@ -502,6 +501,14 @@ public:
 							rolledFields.addField(itr->first, itr->second);
 						}
 					}
+
+					// Tracked-latest events first logged before the trace file was opened (e.g. an early
+					// ProgramStart in backup_agent) were cached without the universal annotation fields
+					// (LogGroup, Machine, Roles). Now that the log is open, annotate the rolled copy so it
+					// carries them. Already-annotated cached copies already have those fields (copied
+					// above), so skip them to avoid duplicating fields.
+					if (!events[idx].isAnnotated())
+						annotateEvent(rolledFields);
 
 					eventBuffer.push_back(rolledFields);
 				}
@@ -1345,9 +1352,6 @@ void BaseTraceEvent::writeEvent() {
 				if (this->severity == SevError) {
 					severity = SevInfo;
 					backtrace();
-#ifdef WITH_ACAC
-					detail("ActorStack", encodeActorContext(ActorContextDumpType::CURRENT_CALL_BACKTRACE));
-#endif // WITH_ACAC
 					severity = SevError;
 					if (errorKindIndex != -1) {
 						fields.mutate(errorKindIndex).second = toString(errorKind);
@@ -1473,23 +1477,24 @@ bool TraceBatch::dumpImmediately() {
 	return (g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP);
 }
 
-void TraceBatch::addEvent(const char* name, uint64_t id, const char* location) {
+void TraceBatch::addEvent(const char* name, uint64_t id, const char* location, UID traceID, uint64_t spanID) {
 	if (FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
 		return;
 	}
-	auto& eventInfo =
-	    eventBatch.emplace_back(EventInfo(TraceEvent::getCurrentTime(), ::timer_monotonic(), name, id, location));
+	auto& eventInfo = eventBatch.emplace_back(
+	    EventInfo(TraceEvent::getCurrentTime(), ::timer_monotonic(), name, id, location, traceID, spanID));
 	if (dumpImmediately())
 		dump();
 	else
 		g_traceLog.annotateEvent(eventInfo.fields);
 }
 
-void TraceBatch::addAttach(const char* name, uint64_t id, uint64_t to) {
+void TraceBatch::addAttach(const char* name, uint64_t id, uint64_t to, UID traceID, uint64_t spanID) {
 	if (FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
 		return;
 	}
-	auto& attachInfo = attachBatch.emplace_back(AttachInfo(TraceEvent::getCurrentTime(), name, id, to));
+	auto& attachInfo =
+	    attachBatch.emplace_back(AttachInfo(TraceEvent::getCurrentTime(), name, id, to, traceID, spanID));
 	if (dumpImmediately())
 		dump();
 	else
@@ -1551,7 +1556,9 @@ TraceBatch::EventInfo::EventInfo(double time,
                                  double monotonicTime,
                                  const char* name,
                                  uint64_t id,
-                                 const char* location) {
+                                 const char* location,
+                                 UID traceID,
+                                 uint64_t spanID) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	// Include monotonic time for computing elapsed time between events on the same machine.
@@ -1563,9 +1570,18 @@ TraceBatch::EventInfo::EventInfo(double time,
 	fields.addField("Type", name);
 	fields.addField("ID", format("%016" PRIx64, id));
 	fields.addField("Location", location);
+	if (traceID != UID() && spanID != 0) {
+		fields.addField("TraceID", traceID.toString());
+		fields.addField("SpanID", format("%016" PRIx64, spanID));
+	}
 }
 
-TraceBatch::AttachInfo::AttachInfo(double time, const char* name, uint64_t id, uint64_t to) {
+TraceBatch::AttachInfo::AttachInfo(double time,
+                                   const char* name,
+                                   uint64_t id,
+                                   uint64_t to,
+                                   UID traceID,
+                                   uint64_t spanID) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
@@ -1574,6 +1590,10 @@ TraceBatch::AttachInfo::AttachInfo(double time, const char* name, uint64_t id, u
 	fields.addField("Type", name);
 	fields.addField("ID", format("%016" PRIx64, id));
 	fields.addField("To", format("%016" PRIx64, to));
+	if (traceID != UID() && spanID != 0) {
+		fields.addField("TraceID", traceID.toString());
+		fields.addField("SpanID", format("%016" PRIx64, spanID));
+	}
 }
 
 TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::string file) {

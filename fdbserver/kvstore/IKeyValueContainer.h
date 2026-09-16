@@ -21,6 +21,7 @@
 #define IKEYVALUECONTAINER_H
 #pragma once
 
+#include "fdbclient/FDBTypes.h"
 #include "flow/IndexedSet.h"
 
 // Stored in the IndexedSets that hold the database.
@@ -36,7 +37,7 @@ struct KeyValueMapPair {
 		key = rhs.key;
 		value = rhs.value;
 	}
-	explicit(false) KeyValueMapPair(KeyValueMapPair const& rhs) : arena(rhs.arena), key(rhs.key), value(rhs.value) {}
+	KeyValueMapPair(KeyValueMapPair const&) = default;
 
 	KeyValueMapPair(KeyRef key, ValueRef value)
 	  : arena(key.expectedSize() + value.expectedSize()), key(arena, key), value(arena, value) {}
@@ -115,7 +116,7 @@ public:
 	static constexpr int getElementBytes() { return IndexedSet<KeyValueMapPair, uint64_t>::getElementBytes(); }
 
 private:
-	explicit(false) IKeyValueContainer(IKeyValueContainer const&); // unimplemented
+	IKeyValueContainer(IKeyValueContainer const&); // unimplemented
 	void operator=(IKeyValueContainer const&); // unimplemented
 	IndexedSet<KeyValueMapPair, uint64_t> data;
 };

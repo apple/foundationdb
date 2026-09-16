@@ -317,9 +317,9 @@ TLSPolicy::TLSPolicy(const LoadedTLSConfig& loaded, std::function<void()> on_fai
 	set_verify_peers(loaded.getVerifyPeers());
 }
 
-Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
+Future<LoadedTLSConfig> TLSConfig::loadAsync() const {
 	LoadedTLSConfig loaded;
-	auto materials = getTLSMaterialSources(*self, loaded);
+	auto materials = getTLSMaterialSources(*this, loaded);
 	std::vector<Future<Void>> reads;
 
 	for (const auto& material : materials) {
@@ -348,7 +348,7 @@ Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 		throw;
 	}
 
-	copyTLSSettings(*self, loaded);
+	copyTLSSettings(*this, loaded);
 	co_return loaded;
 }
 

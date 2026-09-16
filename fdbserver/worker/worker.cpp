@@ -19,15 +19,18 @@
  */
 
 #include <cstdlib>
+#include <map>
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "flow/ApiVersion.h"
 #include "flow/Buggify.h"
 #include "flow/CodeProbe.h"
 #include "flow/IAsyncFile.h"
+#include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/ProcessInterface.h"
@@ -47,7 +50,7 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "MetricLogger.h"
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/backupworker/RangePartitionedBackupWorker.h"
@@ -637,15 +640,7 @@ Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFul
 			    .detail("StoredConnectionString", storedConnectionString.toString())
 			    .detail("CurrentConnectionString", connectionString);
 		}
-		auto peers = FlowTransport::transport().getIncompatiblePeers();
-		for (auto it = peers->begin(); it != peers->end();) {
-			if (now() - it->second.second > FLOW_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING) {
-				request.incompatiblePeers.push_back(it->first);
-				it = peers->erase(it);
-			} else {
-				it++;
-			}
-		}
+		request.incompatiblePeers = FlowTransport::transport().consumeReportableIncompatiblePeers();
 
 		bool ccInterfacePresent = ccInterface->get().present();
 		if (ccInterfacePresent) {
@@ -1969,6 +1964,21 @@ bool skipInitRspInSim(const UID workerInterfID, const bool allowDropInSim) {
 	return skip;
 }
 
+Promise<TLogInterface> cacheLogRouterInitialization(WorkerCache<TLogInterface>& cache,
+                                                    InitializeLogRouterRequest const& request) {
+	Promise<TLogInterface> ready;
+	cache.set(request.reqId, ready.getFuture());
+	return ready;
+}
+
+bool replyToCachedLogRouter(WorkerCache<TLogInterface>& cache, InitializeLogRouterRequest const& request) {
+	if (!cache.exists(request.reqId)) {
+		return false;
+	}
+	forwardPromise(Uncancellable{}, request.reply, cache.get(request.reqId));
+	return true;
+}
+
 #ifdef FLOW_GRPC_ENABLED
 Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionRecord> ccr) {
 	if (GrpcServer::instance() == nullptr) {
@@ -2635,7 +2645,7 @@ class WorkerServerCore {
 		while (true) {
 			InitializeLogRouterRequest req = co_await interf.logRouter.getFuture();
 
-			if (!logRouterCache.exists(req.reqId)) {
+			if (!replyToCachedLogRouter(logRouterCache, req)) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::LogRouter;
 				TLogInterface recruited(locality);
@@ -2657,19 +2667,18 @@ class WorkerServerCore {
 				DUMPTOKEN(recruited.enablePopRequest);
 				DUMPTOKEN(recruited.snapRequest);
 
-				ReplyPromise<TLogInterface> logRouterReady = req.reply;
-				logRouterCache.set(req.reqId, logRouterReady.getFuture());
+				Promise<TLogInterface> logRouterReady = cacheLogRouterInitialization(logRouterCache, req);
 				Future<Void> logRouterProcess = logRouter(recruited, req, dbInfo);
 				logRouterProcess = logRouterCache.removeOnReady(req.reqId, logRouterProcess);
 				errorForwarders.add(
 				    zombie(recruited, forwardError(errors, Role::LOG_ROUTER, recruited.id(), logRouterProcess)));
 
 				TraceEvent("LogRouterInitRequest", req.reqId).detail("LogRouterId", recruited.id());
+				// A lost response must not leave duplicate requests waiting on that response's promise.
+				logRouterReady.send(recruited);
 				if (!skipInitRspInSim(interf.id(), req.allowDropInSim)) {
-					logRouterReady.send(recruited);
+					req.reply.send(recruited);
 				}
-			} else {
-				forwardPromise(Uncancellable{}, req.reply, logRouterCache.get(req.reqId));
 			}
 		}
 	}

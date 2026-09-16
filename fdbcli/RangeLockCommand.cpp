@@ -137,6 +137,11 @@ Future<bool> rangeLockCommandActor(Database cx, std::vector<StringRef> tokens) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
+			if (e.code() == error_code_range_lock_reject) {
+				fmt::println("ERROR: cannot unregister owner: owner still holds range locks; "
+				             "stop acquisitions, release the locks, and retry");
+				co_return false;
+			}
 			co_return reportRangeLockError(e, "unregister owner");
 		}
 		fmt::println("Unregistered range lock owner: {}", ownerId);

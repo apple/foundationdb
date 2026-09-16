@@ -8,7 +8,7 @@ Philosophy: mocks3 should be more intolerant/strict than real s3
 
 ## Problem
 
-FoundationDB's S3BlobStore client needs thorough testing against realistic S3 failure scenarios, but the existing [`MockS3Server`](https://github.com/apple/foundationdb/tree/main/fdbserver/MockS3Server.actor.cpp#L43) only provides deterministic "happy path" responses. Real S3 services exhibit various error conditions that clients must handle gracefully.
+FoundationDB's S3BlobStore client needs thorough testing against realistic S3 failure scenarios, but the existing [`MockS3Server`](https://github.com/apple/foundationdb/blob/main/fdbserver/mocks3/MockS3Server.cpp) only provides deterministic "happy path" responses. Real S3 services exhibit various error conditions that clients must handle gracefully.
 
 ## Design
 
@@ -108,14 +108,14 @@ MockS3ServerChaos Configuration:
 
 ## Usage
 
-Replace [`startMockS3Server()`](https://github.com/apple/foundationdb/tree/main/fdbserver/include/fdbserver/MockS3Server.h#L47) calls with `startMockS3ServerChaos()` in simulation tests:
+Replace [`startMockS3Server()`](https://github.com/apple/foundationdb/blob/main/fdbserver/mocks3/include/fdbserver/mocks3/MockS3Server.h) calls with `startMockS3ServerChaos()` in simulation tests:
 
 ```
 // Before: 
-wait(startMockS3Server(listenAddress));
+co_await startMockS3Server(listenAddress);
 
 // After:  
-wait(startMockS3ServerChaos(listenAddress));
+co_await startMockS3ServerChaos(listenAddress);
 ```
 
 Chaos behavior is controlled by **S3FaultInjector rates** (0.0-1.0), with **BUGGIFY providing occasional extra chaos** - no master boolean switch.

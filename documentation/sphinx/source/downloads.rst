@@ -50,7 +50,7 @@ FoundationDB's C bindings are installed with the FoundationDB client binaries. Y
 Python 3.8+
 -----------
 
-Python package is available from `PiPy <https://pypi.org/project/foundationdb/>`_
+Python package is available from `PyPI <https://pypi.org/project/foundationdb/>`_
 
 
 Ruby 2.0.0+

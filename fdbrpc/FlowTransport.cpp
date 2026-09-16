@@ -25,8 +25,12 @@
 #include "flow/NetworkAddress.h"
 #include "flow/network.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #if VALGRIND
@@ -48,7 +52,10 @@
 #include "flow/TDMetric.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
+#include "flow/ProcessEvents.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/ScopeExit.h"
+#include "flow/UnitTest.h"
 #include "flow/WatchFile.h"
 #include "flow/IConnection.h"
 #define XXH_INLINE_ALL
@@ -65,7 +72,7 @@ namespace {
 
 NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
 bool g_currentDeliverPeerAddressTrusted = false;
-Future<Void> g_currentDeliveryPeerDisconnect;
+const Future<Void>* g_currentDeliveryPeerDisconnect = nullptr;
 
 } // namespace
 
@@ -78,11 +85,23 @@ Future<Void> g_currentDeliveryPeerDisconnect;
 // messages as "messages".
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 
+// Leave room for the length, optional checksum, and next frame length in the receive buffer.
+static constexpr int packetFramingBytes(bool isTLS) {
+	return 2 * PACKET_LEN_WIDTH + (isTLS ? 0 : static_cast<int>(sizeof(XXH64_hash_t)));
+}
+
+static int maxPacketPayloadSize(int64_t configuredLimit, bool isTLS) {
+	return static_cast<int>(std::max<int64_t>(
+	    0, std::min<int64_t>(configuredLimit, std::numeric_limits<int>::max() - packetFramingBytes(isTLS))));
+}
+
 // FIXME: explain what this is for
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
 FDB_BOOLEAN_PARAM(InReadSocket);
 FDB_BOOLEAN_PARAM(IsStableConnection);
+FDB_BOOLEAN_PARAM(Randomize);
+FDB_BOOLEAN_PARAM(IsSimulated);
 
 class EndpointMap : NonCopyable {
 public:
@@ -113,8 +132,10 @@ private:
 	uint32_t firstFree;
 };
 
-EndpointMap::EndpointMap(int wellKnownEndpointCount)
-  : wellKnownEndpointCount(wellKnownEndpointCount), data(wellKnownEndpointCount), firstFree(-1) {}
+EndpointMap::EndpointMap(int wellKnownEndpointCount) : wellKnownEndpointCount(wellKnownEndpointCount), firstFree(-1) {
+	ASSERT(wellKnownEndpointCount >= WLTOKEN_FIRST_AVAILABLE);
+	data.resize(wellKnownEndpointCount);
+}
 
 void EndpointMap::realloc() {
 	int oldSize = data.size();
@@ -128,8 +149,8 @@ void EndpointMap::realloc() {
 }
 
 void EndpointMap::insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority) {
-	int index = token.second();
-	ASSERT(index <= wellKnownEndpointCount);
+	const auto index = token.second();
+	ASSERT(index < uint64_t(wellKnownEndpointCount));
 	ASSERT(data[index].receiver == nullptr);
 	data[index].receiver = r;
 	data[index].token() =
@@ -224,6 +245,81 @@ void EndpointMap::remove(Endpoint::Token const& token, NetworkMessageReceiver* r
 		data[index].nextFree = firstFree;
 		firstFree = index;
 	}
+}
+
+namespace {
+
+class EndpointMapTestReceiver final : public NetworkMessageReceiver {
+public:
+	void receive(ArenaObjectReader&) override { ASSERT(false); }
+	bool isPublic() const override { return true; }
+};
+
+void testWellKnownEndpointReservation(int count) {
+	EndpointMapTestReceiver reservedReceiver;
+	EndpointMapTestReceiver dynamicReceiver;
+	EndpointMapTestReceiver replacementReceiver;
+	EndpointMap endpoints(count);
+	for (int index = 0; index < count; ++index) {
+		const auto token = Endpoint::wellKnownToken(index);
+		ASSERT(token == UID(-1, index));
+		endpoints.insertWellKnown(&reservedReceiver, token, TaskPriority::ReadSocket);
+		ASSERT(endpoints.get(token) == &reservedReceiver);
+		ASSERT(endpoints.getPriority(token) == TaskPriority::ReadSocket);
+	}
+
+	UID first(0x123456789abcdef0, 0xfedcba9800000000);
+	endpoints.insert(&dynamicReceiver, first, TaskPriority::DefaultPromiseEndpoint);
+	ASSERT(first == UID(0x123456789abcdef0, 0xfedcba9800000000 | uint32_t(count)));
+	ASSERT(endpoints.get(first) == &dynamicReceiver);
+	ASSERT(endpoints.getPriority(first) == TaskPriority::DefaultPromiseEndpoint);
+
+	UID second(0x223456789abcdef0, 0xfedcba9800000000);
+	endpoints.insert(&dynamicReceiver, second, TaskPriority::DefaultEndpoint);
+	ASSERT(uint32_t(second.second()) == uint32_t(count + 1));
+	endpoints.remove(first, &replacementReceiver);
+	ASSERT(endpoints.get(first) == &dynamicReceiver);
+	endpoints.remove(first, &dynamicReceiver);
+
+	UID replacement(0x323456789abcdef0, 0x7654321000000000);
+	endpoints.insert(&replacementReceiver, replacement, TaskPriority::DefaultEndpoint);
+	ASSERT(replacement == UID(0x323456789abcdef0, 0x7654321000000000 | uint32_t(count)));
+	ASSERT(endpoints.get(first) == nullptr);
+	ASSERT(endpoints.get(replacement) == &replacementReceiver);
+
+	const auto lastReserved = Endpoint::wellKnownToken(count - 1);
+	endpoints.remove(lastReserved, &reservedReceiver);
+	UID afterReservedRemoval(0x423456789abcdef0, 0x7654321000000000);
+	endpoints.insert(&dynamicReceiver, afterReservedRemoval, TaskPriority::DefaultEndpoint);
+	ASSERT(uint32_t(afterReservedRemoval.second()) == uint32_t(count + 2));
+	endpoints.insertWellKnown(&replacementReceiver, lastReserved, TaskPriority::DefaultEndpoint);
+	ASSERT(endpoints.get(lastReserved) == &replacementReceiver);
+	for (int index = 0; index < count - 1; ++index) {
+		ASSERT(endpoints.get(Endpoint::wellKnownToken(index)) == &reservedReceiver);
+	}
+}
+
+} // namespace
+
+TEST_CASE("/fdbrpc/FlowTransport/WellKnownEndpointReservations") {
+	static_assert(WLTOKEN_ENDPOINT_NOT_FOUND == 0);
+	static_assert(WLTOKEN_PING_PACKET == 1);
+	static_assert(WLTOKEN_UNAUTHORIZED_ENDPOINT == 2);
+	static_assert(WLTOKEN_FIRST_AVAILABLE == 3);
+	testWellKnownEndpointReservation(WLTOKEN_FIRST_AVAILABLE);
+	testWellKnownEndpointReservation(WLTOKEN_FIRST_AVAILABLE + 4);
+	testWellKnownEndpointReservation(129);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/FlowTransport/PacketLimitBounds") {
+	const int maxInt = std::numeric_limits<int>::max();
+	ASSERT_EQ(maxPacketPayloadSize(64, false), 64);
+	ASSERT_EQ(maxPacketPayloadSize(64, true), 64);
+	ASSERT_EQ(maxPacketPayloadSize(std::numeric_limits<int64_t>::max(), false), maxInt - 4 * PACKET_LEN_WIDTH);
+	ASSERT_EQ(maxPacketPayloadSize(std::numeric_limits<int64_t>::max(), true), maxInt - 2 * PACKET_LEN_WIDTH);
+	ASSERT_EQ(maxPacketPayloadSize(-1, false), 0);
+	return Void();
 }
 
 struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
@@ -617,7 +713,7 @@ static Future<Void> connectionReader(TransportData* transport,
 
 static void sendLocal(TransportData* self, ISerializeSource const& what, const Endpoint& destination);
 static ReliablePacket* sendPacket(TransportData* self,
-                                  Reference<Peer> peer,
+                                  const Reference<Peer>& peer,
                                   ISerializeSource const& what,
                                   const Endpoint& destination,
                                   bool reliable);
@@ -1169,51 +1265,35 @@ static bool checkCompatible(const PeerCompatibilityPolicy& policy, ProtocolVersi
 	}
 }
 
-// This actor looks up the task associated with an endpoint
-// and sends the message to it. The actual deserialization will
+// Looks up the task associated with an endpoint and sends the message to it. The actual deserialization will
 // be done by that task (see NetworkMessageReceiver).
-static Future<Void> deliver(Uncancellable,
-                            TransportData* self,
-                            Endpoint destination,
-                            TaskPriority priority,
-                            ArenaReader reader,
-                            NetworkAddress peerAddress,
-                            bool isTrustedPeer,
-                            InReadSocket inReadSocket,
-                            Future<Void> disconnect) {
-	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
-	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
-	// with a higher priority. ReplyPromiseStream needs to guarantee that messages are received in the order they were
-	// sent, so we are using orderedDelay.
-	// NOTE: don't skip delay(0) when it's local deliver since it could cause out of order object deconstruction.
-	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
-		co_await orderedDelay(0, priority);
-	} else {
-		g_network->setCurrentTask(priority);
-	}
-
+static void deliverNow(TransportData* self,
+                       const Endpoint& destination,
+                       ArenaReader reader,
+                       const NetworkAddress& peerAddress,
+                       bool isTrustedPeer,
+                       const Future<Void>& disconnect) {
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver && (isTrustedPeer || receiver->isPublic())) {
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
-			co_return;
+			return;
 		}
 		try {
 			ASSERT(g_currentDeliveryPeerAddress == NetworkAddressList());
 			ASSERT(!g_currentDeliverPeerAddressTrusted);
 			g_currentDeliveryPeerAddress = destination.addresses;
 			g_currentDeliverPeerAddressTrusted = isTrustedPeer;
-			g_currentDeliveryPeerDisconnect = disconnect;
+			g_currentDeliveryPeerDisconnect = &disconnect;
+			auto clearDeliveryContext = ScopeExit([]() {
+				g_currentDeliveryPeerAddress = NetworkAddressList();
+				g_currentDeliverPeerAddressTrusted = false;
+				g_currentDeliveryPeerDisconnect = nullptr;
+			});
 			StringRef data = reader.arenaReadAll();
 			ASSERT(data.size() > 8);
-			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
+			ArenaObjectReader objReader(std::move(reader.arena()), data, AssumeVersion(reader.protocolVersion()));
 			receiver->receive(objReader);
-			g_currentDeliveryPeerAddress = NetworkAddressList();
-			g_currentDeliverPeerAddressTrusted = false;
-			g_currentDeliveryPeerDisconnect = Future<Void>();
 		} catch (Error& e) {
-			g_currentDeliveryPeerAddress = NetworkAddressList();
-			g_currentDeliverPeerAddressTrusted = false;
-			g_currentDeliveryPeerDisconnect = Future<Void>();
 			TraceEvent(SevError, "ReceiverError")
 			    .error(e)
 			    .detail("Token", destination.token.toString())
@@ -1257,6 +1337,48 @@ static Future<Void> deliver(Uncancellable,
 	}
 }
 
+static coro::DetachedCoroutine deliverAfterDelay(TransportData* self,
+                                                 Endpoint destination,
+                                                 TaskPriority priority,
+                                                 ArenaReader reader,
+                                                 NetworkAddress peerAddress,
+                                                 bool isTrustedPeer,
+                                                 Future<Void> disconnect) {
+	try {
+		co_await orderedDelay(0, priority);
+		deliverNow(self, destination, std::move(reader), peerAddress, isTrustedPeer, disconnect);
+	} catch (const Error&) {
+		// Typed delivery errors have no result consumer.
+	} catch (...) {
+		(void)unknown_error();
+	}
+}
+
+static void deliver(TransportData* self,
+                    Endpoint destination,
+                    TaskPriority priority,
+                    ArenaReader reader,
+                    NetworkAddress peerAddress,
+                    bool isTrustedPeer,
+                    InReadSocket inReadSocket,
+                    const Future<Void>& disconnect) {
+	// Preserve ordering and the asynchronous local/lower-priority delivery boundary. Incoming reads at or above
+	// ReadSocket can be delivered synchronously without allocating a coroutine frame.
+	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
+		deliverAfterDelay(self, destination, priority, std::move(reader), peerAddress, isTrustedPeer, disconnect);
+		return;
+	}
+
+	try {
+		g_network->setCurrentTask(priority);
+		deliverNow(self, destination, std::move(reader), peerAddress, isTrustedPeer, disconnect);
+	} catch (const Error&) {
+		// Typed delivery errors have no result consumer.
+	} catch (...) {
+		(void)unknown_error();
+	}
+}
+
 static void scanPackets(TransportData* transport,
                         uint8_t*& unprocessed_begin, // FIXME: why isn't this called `start`?
                         const uint8_t* e, // FIXME: why isn't this called `end`?
@@ -1264,7 +1386,7 @@ static void scanPackets(TransportData* transport,
                         NetworkAddress const& peerAddress,
                         bool isTrustedPeer,
                         ProtocolVersion peerProtocolVersion,
-                        Future<Void> disconnect,
+                        Future<Void> const& disconnect,
                         IsStableConnection isStableConnection) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
@@ -1296,10 +1418,10 @@ static void scanPackets(TransportData* transport,
 			p += sizeof(packetChecksum);
 		}
 
-		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
+		if (packetLen > maxPacketPayloadSize(FLOW_KNOBS->PACKET_LIMIT, peerAddress.isTLS())) {
 			TraceEvent(SevError, "PacketLimitExceeded")
 			    .detail("FromPeer", peerAddress.toString())
-			    .detail("Length", (int)packetLen);
+			    .detail("Length", packetLen);
 			throw platform_error();
 		}
 
@@ -1389,12 +1511,10 @@ static void scanPackets(TransportData* transport,
 		// we ignore packets to unknown endpoints if they're not going to a stream anyways, so we can just
 		// return here. The main place where this seems to happen is if a ReplyPromise is not waited on
 		// long enough.
-		// It would be slightly more elegant/readable to put this if-block into the deliver actor, but if
-		// we have many messages to UnknownEndpoint we want to optimize earlier. As deliver is an actor it
-		// will allocate some state on the heap and this prevents it from doing that.
+		// It would be slightly more elegant/readable to put this if-block into deliver, but if we have many messages
+		// to UnknownEndpoint we want to optimize earlier and avoid scheduling unnecessary delivery work.
 		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) != 0) {
-			deliver(Uncancellable(),
-			        transport,
+			deliver(transport,
 			        Endpoint({ peerAddress }, token),
 			        priority,
 			        std::move(reader),
@@ -1420,14 +1540,24 @@ static int getNewBufferSize(const uint8_t* begin,
 		return FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES;
 	}
 	const uint32_t packetLen = *(uint32_t*)begin;
-	if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
+	if (packetLen > maxPacketPayloadSize(FLOW_KNOBS->PACKET_LIMIT, peerAddress.isTLS())) {
 		TraceEvent(SevError, "PacketLimitExceeded")
 		    .detail("FromPeer", peerAddress.toString())
-		    .detail("Length", (int)packetLen);
+		    .detail("Length", packetLen);
 		throw platform_error();
 	}
-	return std::max<uint32_t>(FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES,
-	                          packetLen + sizeof(uint32_t) * (peerAddress.isTLS() ? 2 : 3));
+	return std::max<uint32_t>(FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES, packetLen + packetFramingBytes(peerAddress.isTLS()));
+}
+
+TEST_CASE("/fdbrpc/FlowTransport/PacketBufferFraming") {
+	const uint32_t packetLen = 8192;
+	const uint8_t* begin = reinterpret_cast<const uint8_t*>(&packetLen);
+	const uint8_t* end = begin + sizeof(packetLen);
+	const NetworkAddress plain(IPAddress(0x7f000001), 45000, true, false);
+	const NetworkAddress tls(IPAddress(0x7f000001), 45000, true, true);
+	ASSERT_EQ(getNewBufferSize(begin, end, plain, g_network->protocolVersion()), int(packetLen) + 16);
+	ASSERT_EQ(getNewBufferSize(begin, end, tls, g_network->protocolVersion()), int(packetLen) + 8);
+	return Void();
 }
 
 // This actor exists whenever there is an open or opening connection, whether incoming or outgoing
@@ -1446,6 +1576,7 @@ static Future<Void> connectionReader(TransportData* transport,
 	bool incompatiblePeerCounted = false;
 	NetworkAddress peerAddress;
 	ProtocolVersion peerProtocolVersion;
+	Future<Void> disconnect;
 	bool trusted = transport->allowList(conn->getPeerAddress().ip) && conn->hasTrustedPeer();
 	peerAddress = conn->getPeerAddress();
 
@@ -1603,6 +1734,7 @@ static Future<Void> connectionReader(TransportData* transport,
 							co_await delay(0); // Check for cancellation
 						}
 						peer->protocolVersion->set(peerProtocolVersion);
+						disconnect = peer->disconnect.getFuture();
 					}
 				}
 
@@ -1615,7 +1747,7 @@ static Future<Void> connectionReader(TransportData* transport,
 						            peerAddress,
 						            trusted,
 						            peerProtocolVersion,
-						            peer->disconnect.getFuture(),
+						            disconnect,
 						            IsStableConnection(g_network->isSimulated() && conn->isStableConnection()));
 					} else {
 						unprocessed_begin = unprocessed_end;
@@ -1848,7 +1980,7 @@ const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAll
 	return self->peers;
 }
 
-std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompatiblePeers() {
+std::vector<NetworkAddress> FlowTransport::consumeReportableIncompatiblePeers() {
 	for (auto it = self->incompatiblePeers.begin(); it != self->incompatiblePeers.end();) {
 		if (self->multiVersionConnections.contains(it->second.first)) {
 			it = self->incompatiblePeers.erase(it);
@@ -1856,7 +1988,16 @@ std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompa
 			it++;
 		}
 	}
-	return &self->incompatiblePeers;
+	std::vector<NetworkAddress> reportable;
+	for (auto it = self->incompatiblePeers.begin(); it != self->incompatiblePeers.end();) {
+		if (now() - it->second.second > FLOW_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING) {
+			reportable.push_back(it->first);
+			it = self->incompatiblePeers.erase(it);
+		} else {
+			it++;
+		}
+	}
+	return reportable;
 }
 
 Future<Void> FlowTransport::onIncompatibleChanged() {
@@ -1885,7 +2026,7 @@ Endpoint FlowTransport::loadedEndpoint(const UID& token) {
 }
 
 Future<Void> FlowTransport::loadedDisconnect() {
-	return g_currentDeliveryPeerDisconnect;
+	return g_currentDeliveryPeerDisconnect != nullptr ? *g_currentDeliveryPeerDisconnect : Future<Void>();
 }
 
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
@@ -1961,8 +2102,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	ASSERT(!copy.empty());
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) != 0) {
-		deliver(Uncancellable(),
-		        self,
+		deliver(self,
 		        destination,
 		        priority,
 		        ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion())),
@@ -1973,8 +2113,26 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	}
 }
 
+// PacketWriter appends to the peer's current tail before the frame length is known.
+static void discardUnsentPacket(PacketBuffer* firstBuffer, int initialBytesWritten, ReliablePacket* reliable) {
+	PacketBuffer* buffer = firstBuffer->nextPacketBuffer();
+	firstBuffer->next = nullptr;
+	firstBuffer->bytes_written = initialBytesWritten;
+	while (reliable) {
+		ReliablePacket* next = reliable->cont;
+		reliable->buffer->delref();
+		delete reliable;
+		reliable = next;
+	}
+	while (buffer) {
+		PacketBuffer* next = buffer->nextPacketBuffer();
+		buffer->delref();
+		buffer = next;
+	}
+}
+
 static ReliablePacket* sendPacket(TransportData* self,
-                                  Reference<Peer> peer,
+                                  const Reference<Peer>& peer,
                                   ISerializeSource const& what,
                                   const Endpoint& destination,
                                   bool reliable) {
@@ -1993,7 +2151,8 @@ static ReliablePacket* sendPacket(TransportData* self,
 	PacketBuffer* pb = peer->unsent.getWriteBuffer();
 	ReliablePacket* rp = reliable ? new ReliablePacket : 0;
 
-	int prevBytesWritten = pb->bytes_written;
+	const int initialBytesWritten = pb->bytes_written;
+	int prevBytesWritten = initialBytesWritten;
 	PacketBuffer* checksumPb = pb;
 
 	PacketWriter wr(pb,
@@ -2020,7 +2179,18 @@ static ReliablePacket* sendPacket(TransportData* self,
 	wr << destination.token;
 	what.serializePacketWriter(wr);
 	pb = wr.finish();
-	len = wr.size() - packetInfoSize;
+	const int64_t payloadSize = wr.size() - packetInfoSize;
+	if (payloadSize > maxPacketPayloadSize(FLOW_KNOBS->PACKET_LIMIT, destination.getPrimaryAddress().isTLS())) {
+		discardUnsentPacket(peer->unsent.getWriteBuffer(), initialBytesWritten, rp);
+		if (firstUnsent) {
+			peer->unsent.discardAll();
+		}
+		TraceEvent(SevWarnAlways, "PacketLimitExceeded")
+		    .detail("ToPeer", destination.getPrimaryAddress())
+		    .detail("Length", payloadSize);
+		throw platform_error();
+	}
+	len = payloadSize;
 
 	if (checksumEnabled) {
 		// Find the correct place to start calculating checksum
@@ -2075,12 +2245,7 @@ static ReliablePacket* sendPacket(TransportData* self,
 		packetInfoBuffer.write(&checksum, sizeof(checksum), sizeof(len));
 	}
 
-	if (len > FLOW_KNOBS->PACKET_LIMIT) {
-		TraceEvent(SevError, "PacketLimitExceeded")
-		    .detail("ToPeer", destination.getPrimaryAddress())
-		    .detail("Length", (int)len);
-		// throw platform_error();  // FIXME: How to recover from this situation?
-	} else if (len > FLOW_KNOBS->PACKET_WARNING) {
+	if (len > FLOW_KNOBS->PACKET_WARNING) {
 		TraceEvent(SevWarn, "LargePacketSent")
 		    .suppressFor(1.0)
 		    .detail("ToPeer", destination.getPrimaryAddress())
@@ -2104,6 +2269,68 @@ static ReliablePacket* sendPacket(TransportData* self,
 		peer->lastDataPacketSentTime = now();
 	}
 	return rp;
+}
+
+TEST_CASE("noSim/fdbrpc/FlowTransport/PacketLimitOnSend") {
+	FlowKnobs knobs(Randomize::False, IsSimulated::False);
+	knobs.PACKET_LIMIT = 256;
+	const FlowKnobs* previousKnobs = FLOW_KNOBS;
+	auto restoreKnobs = ScopeExit([previousKnobs]() { FLOW_KNOBS = previousKnobs; });
+	FLOW_KNOBS = &knobs;
+	TransportData transport(1, WLTOKEN_FIRST_AVAILABLE, nullptr);
+	NetworkAddress address(IPAddress(0x7f000001), 45000, true, false);
+	Endpoint endpoint(NetworkAddressList{ address, {} }, UID(1, 2));
+	Reference<Peer> peer = makeReference<Peer>(&transport, address);
+	sendPacket(&transport, peer, SerializeSource<StringRef>("ok"_sr), endpoint, false);
+	PacketBuffer* const tail = peer->unsent.getWriteBuffer();
+	uint32_t acceptedLength;
+	std::memcpy(&acceptedLength, tail->data(), sizeof(acceptedLength));
+	knobs.PACKET_LIMIT = acceptedLength;
+	sendPacket(&transport, peer, SerializeSource<StringRef>("ok"_sr), endpoint, false);
+	const int previousLength = tail->bytes_written;
+	const std::string previousBytes(reinterpret_cast<const char*>(tail->data()), previousLength);
+
+	knobs.PACKET_LIMIT = acceptedLength - 1;
+	bool boundaryRejected = false;
+	try {
+		sendPacket(&transport, peer, SerializeSource<StringRef>("ok"_sr), endpoint, true);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_platform_error);
+		boundaryRejected = true;
+	}
+	ASSERT(boundaryRejected);
+	ASSERT_EQ(tail->bytes_written, previousLength);
+
+	knobs.PACKET_LIMIT = 256;
+	const std::string oversized(std::size_t{ 32 } * 1024, 'x');
+	bool oversizedRejected = false;
+	try {
+		sendPacket(&transport, peer, SerializeSource<StringRef>(StringRef(oversized)), endpoint, true);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_platform_error);
+		oversizedRejected = true;
+	}
+	ASSERT(oversizedRejected);
+	ASSERT(peer->unsent.getWriteBuffer() == tail);
+	ASSERT(tail->next == nullptr);
+	ASSERT_EQ(tail->bytes_written, previousLength);
+	ASSERT(std::memcmp(tail->data(), previousBytes.data(), previousLength) == 0);
+	ASSERT(peer->reliable.empty());
+	sendPacket(&transport, peer, SerializeSource<StringRef>("again"_sr), endpoint, false);
+	ASSERT_GT(tail->bytes_written, previousLength);
+
+	Reference<Peer> emptyPeer = makeReference<Peer>(&transport, address);
+	bool emptyRejected = false;
+	try {
+		sendPacket(&transport, emptyPeer, SerializeSource<StringRef>(StringRef(oversized)), endpoint, true);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_platform_error);
+		emptyRejected = true;
+	}
+	ASSERT(emptyRejected);
+	ASSERT(emptyPeer->unsent.getUnsent() == nullptr);
+	ASSERT(emptyPeer->reliable.empty());
+	return Void();
 }
 
 ReliablePacket* FlowTransport::sendReliable(ISerializeSource const& what, const Endpoint& destination) {
@@ -2272,4 +2499,117 @@ static Future<Void> watchPublicKeyJwksFile(std::string filePath, TransportData* 
 
 void FlowTransport::watchPublicKeyFile(const std::string& publicKeyFilePath) {
 	self->publicKeyFileWatch = watchPublicKeyJwksFile(publicKeyFilePath, self);
+}
+
+extern bool g_crashOnError;
+
+namespace {
+
+class ThrowingDeliveryReceiver : public NetworkMessageReceiver {
+	const char* exceptionMessage;
+	int received = 0;
+	bool validPayload = false;
+
+public:
+	explicit ThrowingDeliveryReceiver(const char* exceptionMessage) : exceptionMessage(exceptionMessage) {}
+	bool isPublic() const override { return true; }
+	void receive(ArenaObjectReader& reader) override {
+		UID payload;
+		reader.deserialize(payload);
+		validPayload = payload == UID(1, 2);
+		++received;
+		throw std::runtime_error(exceptionMessage);
+	}
+	int receivedCount() const { return received; }
+	bool receivedValidPayload() const { return validPayload; }
+};
+
+Future<Void> checkRpcDeliveryException(Uncancellable, bool deferred) {
+	// Simulation counts SevError before trace observers can mark expected injections.
+	if (g_network->isSimulated() || g_crashOnError) {
+		co_return;
+	}
+	auto previousTask = g_network->getCurrentTask();
+	auto restoreTask = ScopeExit([previousTask]() { g_network->setCurrentTask(previousTask); });
+	TransportData transport(1, WLTOKEN_FIRST_AVAILABLE, nullptr);
+	// These constructor-started actors borrow transport; stop them before exercising or destroying the fixture.
+	transport.pingLogger.cancel();
+	transport.pingLogger = Future<Void>();
+	transport.connectionHistoryLoggerF.cancel();
+	transport.connectionHistoryLoggerF = Future<Void>();
+	if (transport.connectionLogWriterThread) {
+		co_await transport.connectionLogWriterThread->stop();
+		transport.connectionLogWriterThread = Reference<IThreadPool>();
+	}
+
+	const char* message =
+	    deferred ? "RpcUnexpectedException/deferredDelivery" : "RpcUnexpectedException/directDelivery";
+	int observed = 0;
+	int unexpected = 0;
+	bool previousTraceProcessEvents = g_traceProcessEvents;
+	auto restoreTraceProcessEvents =
+	    ScopeExit([previousTraceProcessEvents]() { g_traceProcessEvents = previousTraceProcessEvents; });
+	ProcessEvents::Event observer("TraceEvent::SystemError"_sr, [&](StringRef, const std::any& data, const Error&) {
+		auto tracePtr = std::any_cast<BaseTraceEvent*>(&data);
+		if (!tracePtr || !*tracePtr) {
+			++unexpected;
+			return;
+		}
+		auto* trace = *tracePtr;
+		int errorCode = 0;
+		std::string exception;
+		if (observed != 0 || trace->getSeverity() != SevError ||
+		    !trace->getFields().tryGetInt("ErrorCode", errorCode) || errorCode != error_code_unknown_error ||
+		    !trace->getFields().tryGetValue("StdException", exception) || exception != message) {
+			++unexpected;
+			return;
+		}
+		++observed;
+		trace->detail("ErrorIsInjectedFault", 1);
+	});
+	g_traceProcessEvents = true;
+
+	ThrowingDeliveryReceiver receiver(message);
+	TaskPriority priority = deferred ? TaskPriority::DefaultPromiseEndpoint : TaskPriority::ReadSocket;
+	UID token(2, 0);
+	transport.endpoints.insert(&receiver, token, priority);
+	auto removeEndpoint = ScopeExit([&]() { transport.endpoints.remove(token, &receiver); });
+	NetworkAddress peer = NetworkAddress::parse("127.0.0.1:54321");
+	Endpoint destination({ peer }, token);
+	ProtocolVersion version = g_network->protocolVersion();
+	auto bytes = ObjectWriter::toValue(UID(1, 2), AssumeVersion(version));
+	Future<Void> disconnect = Never();
+	deliver(&transport,
+	        destination,
+	        priority,
+	        ArenaReader(bytes.arena(), bytes, AssumeVersion(version)),
+	        peer,
+	        true,
+	        deferred ? InReadSocket::False : InReadSocket::True,
+	        disconnect);
+	int immediateReceives = receiver.receivedCount();
+	int immediateObservations = observed;
+	if (deferred) {
+		// The uncancellable helper keeps the receiver and transport alive until detached delivery has finished.
+		co_await orderedDelay(0, priority);
+	}
+	ASSERT_EQ(immediateReceives, deferred ? 0 : 1);
+	ASSERT_EQ(immediateObservations, deferred ? 0 : 1);
+	ASSERT_EQ(receiver.receivedCount(), 1);
+	ASSERT(receiver.receivedValidPayload());
+	ASSERT_EQ(observed, 1);
+	ASSERT_EQ(unexpected, 0);
+	ASSERT(g_currentDeliveryPeerAddress == NetworkAddressList());
+	ASSERT(!g_currentDeliverPeerAddressTrusted);
+	ASSERT(g_currentDeliveryPeerDisconnect == nullptr);
+}
+
+} // namespace
+
+TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/directDelivery") {
+	return checkRpcDeliveryException(Uncancellable(), false);
+}
+
+TEST_CASE("noSim/fdbrpc/RpcUnexpectedException/deferredDelivery") {
+	return checkRpcDeliveryException(Uncancellable(), true);
 }

@@ -45,7 +45,7 @@ set(OPEN_FOR_IDE
     CACHE BOOL "Open this in an IDE (won't compile/link)")
 set(AUTO_DISCOVER_UNIT_TESTS
     OFF
-    CACHE BOOL "Automatically discover unit-tests")
+    CACHE BOOL "Deprecated: use ENABLE_UNIT_TESTS for per-library CTest unit suites")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   if(OPEN_FOR_IDE)
@@ -69,18 +69,6 @@ set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
 option(USE_SCCACHE "Use sccache if found" ON)
 if(USE_SCCACHE)
   find_package(sccache)
-endif()
-
-option(WITH_ACAC "Enable actor stack recording" OFF)
-if(WITH_ACAC)
-  message(STATUS "Build FoundationDB with AcAC support")
-  if(FDB_RELEASE OR FDB_RELEASE_CANDIDATE)
-    message(
-      FATAL_ERROR
-        "ACAC will cause severe slowdown of the system and SHOULD not be enabled in Release."
-    )
-  endif()
-  add_compile_definitions(WITH_ACAC)
 endif()
 
 option(FDB_MEMORY_TRACKER "Compile in the sampled per-call-site memory tracker (flow/MemoryTracker)" ON)
@@ -179,10 +167,9 @@ endif()
 
 include(utils)
 
-# First thing we need is the actor compiler
 option(
   WITH_CSHARP
-  "Prefer C# build tools (actor compiler, coverage tool, vexillographer) when a toolchain is available"
+  "Prefer C# build tools (coverage tool, vexillographer) when a toolchain is available"
   ON)
 
 set(FDB_USE_CSHARP_TOOLS_EXPLICIT FALSE)
@@ -227,8 +214,6 @@ if(FDB_USE_CSHARP_TOOLS_EXPLICIT AND FDB_USE_CSHARP_TOOLS
     "FDB_USE_CSHARP_TOOLS is enabled, but CSHARP_TOOLCHAIN_FOUND is FALSE. Install .NET (dotnet) or Mono, or set WITH_CSHARP=OFF.")
 endif()
 
-include(CompileActorCompiler)
-
 if(FDB_USE_CSHARP_TOOLS AND CSHARP_TOOLCHAIN_FOUND)
   include(CompileCoverageTool)
   set(COVERAGETOOL_AVAILABLE TRUE)
@@ -238,7 +223,6 @@ endif()
 # Vexilographer generation is configured inside fdbclient
 include(CompileVexillographer)
 
-# with the actor compiler, we can now make the flow commands available
 include(FlowCommands)
 
 ###############################################################################
@@ -294,6 +278,8 @@ set(SANITIZER_OPTIONS
   "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions;LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/lsan.suppressions"
   CACHE STRING "Environment variables setting sanitizer options")
 
+include(AddFdbUnitTest)
+
 include(CompileBoost)
 include(GetFmt)
 include(GetMsgpack)
@@ -346,7 +332,7 @@ if(CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
     COMMAND
       $<TARGET_FILE:Python3::Interpreter>
       ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py ARGS -b
-      ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o
+      ${CMAKE_CURRENT_BINARY_DIR} -o
       ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json -ninjatool
       ${CMAKE_MAKE_PROGRAM} ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py
@@ -357,8 +343,7 @@ if(CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
             ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
 
-  # A prebuild target ensures that all actors, Swift-generated headers, and
-  # Swift modules are built.
+  # A prebuild target ensures that Swift-generated headers and modules are built.
   if(WITH_SWIFT)
     add_custom_target(prebuild_for_ide ALL DEPENDS fdbserver_swift
                                                    processed_compile_commands)

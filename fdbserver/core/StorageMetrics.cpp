@@ -790,21 +790,6 @@ int64_t TransientStorageMetricSample::addAndExpire(const Key& key, int64_t metri
 	return x;
 }
 
-// FIXME: both versions of erase are broken, because they do not remove items in the queue with will subtract a
-// metric from the value sometime in the future
-int64_t TransientStorageMetricSample::erase(KeyRef key) {
-	auto it = sample.find(key);
-	if (it == sample.end())
-		return 0;
-	int64_t x = sample.getMetric(it);
-	sample.erase(it);
-	return x;
-}
-
-void TransientStorageMetricSample::erase(KeyRangeRef keys) {
-	sample.erase(keys.begin, keys.end);
-}
-
 bool TransientStorageMetricSample::roll(int64_t metric) const {
 	return deterministicRandom()->random01() < (double)metric / metricUnitsPerSample; //< SOMEDAY: Better randomInt64?
 }

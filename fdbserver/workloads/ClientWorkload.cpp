@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/core/ServerDBInfo.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/core/FDBSimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"

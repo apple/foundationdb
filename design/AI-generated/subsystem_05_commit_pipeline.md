@@ -27,7 +27,7 @@ Phase 4: REPLY                          ▼
 
 ---
 
-## Commit Proxy -- [`CommitProxyServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/commitproxy/CommitProxyServer.actor.cpp)
+## Commit Proxy -- [`CommitProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/commitproxy/CommitProxyServer.cpp)
 
 The workhorse of the commit pipeline. Batches client commits and drives them through all phases.
 
@@ -51,7 +51,7 @@ struct ProxyCommitData {
 
 ### commitBatch() -- 5-Phase Pipeline
 
-**CommitBatchContext** (`CommitProxyServer.actor.cpp:491`):
+**CommitBatchContext** (`CommitProxyServer.cpp:491`):
 ```
 struct CommitBatchContext {
     std::vector<CommitTransactionRequest> trs;        // batch of transactions
@@ -295,7 +295,7 @@ Tags connect mutations to storage servers:
 
 | File | Purpose |
 |------|---------|
-| [`fdbserver/commitproxy/CommitProxyServer.actor.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/commitproxy/CommitProxyServer.actor.cpp) | 5-phase commit batch pipeline |
+| [`fdbserver/commitproxy/CommitProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/commitproxy/CommitProxyServer.cpp) | 5-phase commit batch pipeline |
 | `fdbserver/commitproxy/ProxyCommitData.h` | ProxyCommitData, tag lookup |
 | [`fdbserver/grvproxy/GrvProxyServer.cpp`](https://github.com/apple/foundationdb/blob/main/fdbserver/grvproxy/GrvProxyServer.cpp) | Read version assignment, rate limiting enforcement |
 | `fdbserver/grvproxy/GrvTransactionRateInfo.h` | Token-bucket rate limiter driven by ratekeeper |

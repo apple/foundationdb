@@ -76,8 +76,8 @@ struct TrackIt {
 	}
 
 	TrackIt() { printf("TrackItCreate\t%s\t%p\t%s\n", __trackit__type(), this, platform::get_backtrace().c_str()); }
-	explicit(false) TrackIt(const TrackIt& o) : TrackIt() {}
-	explicit(false) TrackIt(const TrackIt&& o) : TrackIt() {}
+	TrackIt(const TrackIt& o) : TrackIt() {}
+	TrackIt(const TrackIt&& o) : TrackIt() {}
 	TrackIt& operator=(const TrackIt& o) {
 		printf("TrackItAssigned\t%s\t%p<%p\t%s\n", __trackit__type(), this, &o, platform::get_backtrace().c_str());
 		return *this;
@@ -90,7 +90,7 @@ class NonCopyable {
 protected:
 	NonCopyable() = default;
 	~NonCopyable() = default; /// Protected non-virtual destructor
-	explicit(false) NonCopyable(NonCopyable&&) = default;
+	NonCopyable(NonCopyable&&) = default;
 	NonCopyable& operator=(NonCopyable&&) = default;
 	NonCopyable(const NonCopyable&) = delete;
 	NonCopyable& operator=(const NonCopyable&) = delete;
@@ -111,8 +111,8 @@ public:
 	Arena();
 	explicit Arena(size_t reservedSize);
 	//~Arena();
-	explicit(false) Arena(const Arena&);
-	explicit(false) Arena(Arena&& r) noexcept;
+	Arena(const Arena&);
+	Arena(Arena&& r) noexcept;
 	Arena& operator=(const Arena&);
 	Arena& operator=(Arena&&) noexcept;
 
@@ -315,9 +315,9 @@ public:
 	}
 
 	Standalone(const T& t, const Arena& arena) : Arena(arena), T(t) {}
-	explicit(false) Standalone(const Standalone<T>&) = default;
+	Standalone(const Standalone<T>&) = default;
 	Standalone<T>& operator=(const Standalone<T>&) = default;
-	explicit(false) Standalone(Standalone<T>&&) = default;
+	Standalone(Standalone<T>&&) = default;
 	Standalone<T>& operator=(Standalone<T>&&) = default;
 	~Standalone() = default;
 
@@ -904,7 +904,7 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 	string_serialized_traits<T> _string_traits;
 
 	VectorRefPreserializer() : _cached_size(0) {}
-	explicit(false) VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept
 	  : _cached_size(other._cached_size) {}
 	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept {
 		_cached_size = other._cached_size;
@@ -1311,7 +1311,7 @@ public:
 public: // Construction
 	static_assert(std::is_trivially_destructible_v<T>);
 	SmallVectorRef() = default;
-	explicit(false) SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
+	SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
 	  : m_size(other.m_size), arr(other.arr), data(other.data) {}
 	SmallVectorRef& operator=(const SmallVectorRef<T, InlineMembers>&) = default;
 

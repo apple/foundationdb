@@ -182,7 +182,6 @@ public:
 
 // TeamCollection's server team info.
 class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
-	friend class TCTeamInfoImpl;
 	std::vector<Reference<TCServerInfo>> servers;
 	std::vector<UID> serverIDs;
 	bool healthy;

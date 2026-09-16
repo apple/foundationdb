@@ -28,7 +28,8 @@
 #include <cstdio>
 #include <ctime>
 #include <functional>
-#include <iosfwd>
+#include <istream>
+#include <sstream>
 #include <string>
 
 // Read key/value pairs from stream. The stream is constituted by lines of text.
@@ -90,7 +91,7 @@ struct Hold {
 		}
 	}
 
-	explicit(false) Hold(Hold&& other) {
+	Hold(Hold&& other) {
 		pCount = other.pCount;
 		other.pCount = nullptr;
 		n = other.n;

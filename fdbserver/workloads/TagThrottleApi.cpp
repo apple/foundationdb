@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/TagThrottle.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TesterInterface.h"

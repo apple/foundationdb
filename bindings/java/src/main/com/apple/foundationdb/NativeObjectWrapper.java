@@ -45,18 +45,6 @@ abstract class NativeObjectWrapper implements AutoCloseable {
 		return closed;
 	}
 
-	public void checkUnclosed(String context) {
-		try {
-			if(FDB.instance().warnOnUnclosed && !closed) {
-				System.err.println(context + " not closed");
-			}
-		}
-		catch(Exception e) {
-			// Eat this error. This is called from the finalizer,
-			// so there isn't much we can do.
-		}
-	}
-
 	@Override
 	public void close() {
 		rwl.writeLock().lock();

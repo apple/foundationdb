@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/Atomic.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/RandomTestUtils.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "BulkSetup.h"

@@ -169,7 +169,7 @@ struct BackupData {
 			const bool firstWorker = info->self->tag.id == 0;
 			bool allUpdated = false;
 			Optional<std::vector<std::pair<int64_t, int64_t>>> workers;
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 			while (true) {
 				Error err;
@@ -498,7 +498,7 @@ static Future<Void> monitorBackupStartedKeyChanges(BackupData* self) {
 
 // Set "latestBackupWorkerSavedVersion" key for backups
 Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedLogVersions) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 	while (true) {
 		Error err;
@@ -764,7 +764,7 @@ static Future<std::vector<CompletedMutationLogFile>> retryMutationLogUpload(LogE
 }
 
 static Future<Void> updateLogBytesWritten(BackupData* self, std::vector<CompletedMutationLogFile> completedFiles) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 	while (true) {
 		Error err;
@@ -1183,7 +1183,7 @@ Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogEpoch r
 }
 
 static Future<Void> monitorWorkerPause(BackupData* self) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	Future<Void> watch;
 
 	while (true) {
@@ -1606,7 +1606,7 @@ TEST_CASE("/BackupWorker/MutationLogUpload/StopDuringRetry") {
 		}
 		retryReady.send(Void());
 		ASSERT(result.isReady() && result.isError());
-		ASSERT_EQ(result.getError().code(), cancel ? error_code_actor_cancelled : error_code_io_timeout);
+		ASSERT_EQ(result.getError().code(), cancel ? actor_cancelled().code() : io_timeout().code());
 		ASSERT_EQ(attempts, 1);
 	}
 	return Void();
@@ -1647,7 +1647,7 @@ TEST_CASE("/BackupWorker/MutationLogUpload/StopDuringWrite") {
 		ASSERT(result.isReady());
 		ASSERT_EQ(result.isError(), outcome != 0);
 		if (outcome != 0) {
-			ASSERT_EQ(result.getError().code(), outcome == 1 ? error_code_io_timeout : error_code_actor_cancelled);
+			ASSERT_EQ(result.getError().code(), outcome == 1 ? io_timeout().code() : actor_cancelled().code());
 		}
 		ASSERT_EQ(container->getAttempts(), 1);
 		ASSERT_EQ(retries, 0);

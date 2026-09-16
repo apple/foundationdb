@@ -75,6 +75,11 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 			co_return;
 		}
 		std::vector<StorageServerInterface> storageServers = co_await getStorageServers(cx);
+		// Rejected recruitments are idle during their retry delay, so a quiet database may not have a spare yet.
+		for (int retries = 0; storageServers.size() <= 3 && retries < 5; ++retries) {
+			co_await delay(20.0);
+			storageServers = co_await getStorageServers(cx);
+		}
 		// The test should have enough storage servers to exclude.
 		ASSERT(storageServers.size() > 3);
 

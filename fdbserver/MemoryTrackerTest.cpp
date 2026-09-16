@@ -365,9 +365,9 @@ TEST_CASE("/flow/MemoryTracker/samplingRate") {
 
 	int64_t sampled = 0;
 	memTrackerForEachSite([&](const MemoryTrackerCallSite& s) {
-		if (s.forceSampledCount == 0) {
-			sampled += s.cumulativeAllocs;
-		}
+		// Forced and ordinary samples can share a site. Without stack capture,
+		// the force-sampled ptrs buffer shares the small allocations' site.
+		sampled += s.cumulativeAllocs - s.forceSampledCount;
 	});
 
 	for (auto* p : ptrs) {

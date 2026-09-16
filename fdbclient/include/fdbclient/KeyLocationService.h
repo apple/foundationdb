@@ -20,7 +20,7 @@
 #ifndef FOUNDATIONDB_KEYLOCATIONSERVICE_H
 #define FOUNDATIONDB_KEYLOCATIONSERVICE_H
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/DatabaseContext.h"
 
 class IKeyLocationService {

@@ -163,6 +163,7 @@ def add_operation(fname, v):
     setattr(globals()["Database"], fname, f)
     setattr(globals()["Transaction"], fname, f)
 
+
 def fill_operations():
     _dict = getattr(_opts, "MutationType")
 
@@ -1499,7 +1500,8 @@ def read_pth_file():
 
 for pth in [
     lambda: os.path.join(this_dir, capi_name),
-    # lambda: os.path.join(this_dir, "../../lib", capi_name),  # For compatibility with existing unix installation process... should be removed
+    # For compatibility with existing unix installation process... should be removed
+    # lambda: os.path.join(this_dir, "../../lib", capi_name),
     read_pth_file,
 ]:
     p = pth()

@@ -724,8 +724,8 @@ static Future<Void> recruitRangePartitionedBackupWorkers(Reference<ClusterRecove
 	co_await delay(SERVER_KNOBS->SECONDS_BEFORE_RECRUIT_BACKUP_WORKER);
 
 	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
-	Reference<BackupProgress> backupProgress(
-	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochRangePartitionedBackupTagsInfo()));
+	auto backupProgress =
+	    makeReference<BackupProgress>(self->dbgid, self->logSystem->getOldEpochRangePartitionedBackupTagsInfo());
 	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	std::vector<Future<InitializeRangePartitionedBackupReply>> initializationReplies;
 
@@ -813,8 +813,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 	co_await delay(SERVER_KNOBS->SECONDS_BEFORE_RECRUIT_BACKUP_WORKER);
 
 	LogEpoch epoch = self->cstate.myDBState.recoveryCount;
-	Reference<BackupProgress> backupProgress(
-	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochLogRouterTagsInfo()));
+	auto backupProgress = makeReference<BackupProgress>(self->dbgid, self->logSystem->getOldEpochLogRouterTagsInfo());
 	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	std::vector<Future<InitializeBackupReply>> initializationReplies;
 
@@ -1165,8 +1164,8 @@ Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 		                                // this timeout monitor. Triggering more timeouts can make the situation worse.
 	}
 
-	// Calculate timeout with exponential backoff
-	const double scalingFactor = std::pow(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR, unfinishedRecoveries);
+	// The current attempt is still in progress; only preceding attempts contribute to the backoff.
+	const double scalingFactor = std::pow(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR, unfinishedRecoveries - 1);
 	const double scaledTimeout = std::min(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT * scalingFactor,
 	                                      SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT);
 

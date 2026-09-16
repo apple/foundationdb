@@ -198,7 +198,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 	if (!ok) {
 		std::string type = role.roleName + "Failed";
 
-		TraceEvent err(SevError, type.c_str(), id);
+		TraceEvent err(role == Role::BACKUP ? SevWarnAlways : SevError, type.c_str(), id);
 		if (e.code() != invalid_error_code) {
 			err.errorUnsuppressed(e);
 		}

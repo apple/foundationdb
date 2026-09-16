@@ -28,11 +28,11 @@
 
 struct LocalitySet : public ReferenceCounted<LocalitySet> {
 public:
-	explicit(false) LocalitySet(LocalitySet const& source)
+	LocalitySet(LocalitySet const& source)
 	  : _keymap(source._keymap), _entryArray(source._entryArray), _mutableEntryArray(source._mutableEntryArray),
 	    _keyValueArray(source._keyValueArray), _keyIndexArray(source._keyIndexArray), _cacheArray(source._cacheArray),
 	    _localitygroup(source._localitygroup), _cachehits(source._cachehits), _cachemisses(source._cachemisses) {}
-	explicit(false) LocalitySet(LocalitySet& localityGroup)
+	LocalitySet(LocalitySet& localityGroup)
 	  : _keymap(new StringToIntMap()), _localitygroup(&localityGroup), _cachehits(0), _cachemisses(0) {}
 	virtual ~LocalitySet() = default;
 
@@ -474,7 +474,7 @@ protected:
 		Reference<LocalitySet> _resultset;
 		LocalityCacheRecord(AttribRecord const& attribute, Reference<LocalitySet> resultset)
 		  : _attribute(attribute), _resultset(resultset) {}
-		explicit(false) LocalityCacheRecord(LocalityCacheRecord const&) = default;
+		LocalityCacheRecord(LocalityCacheRecord const&) = default;
 		virtual ~LocalityCacheRecord() = default;
 		LocalityCacheRecord& operator=(LocalityCacheRecord const&) = default;
 		int getMemoryUsed() const { return sizeof(_attribute) + sizeof(_resultset) + _resultset->getMemoryUsed(); }
@@ -521,7 +521,7 @@ protected:
 
 struct LocalityGroup : public LocalitySet {
 	LocalityGroup() : LocalitySet(*this), _valuemap(new StringToIntMap()) {}
-	explicit(false) LocalityGroup(LocalityGroup const&) = default;
+	LocalityGroup(LocalityGroup const&) = default;
 	~LocalityGroup() override = default;
 
 	LocalityEntry const& add(LocalityData const& data) {
@@ -601,7 +601,7 @@ protected:
 template <class V>
 struct LocalityMap : public LocalityGroup {
 	LocalityMap() = default;
-	explicit(false) LocalityMap(LocalityMap const&) = default;
+	LocalityMap(LocalityMap const&) = default;
 	~LocalityMap() override = default;
 
 	bool selectReplicas(Reference<IReplicationPolicy> const& policy,

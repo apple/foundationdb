@@ -42,7 +42,7 @@ struct RangeFileWriter : public IRangeFileWriter {
 
 	// Handles the first block and internal blocks. Ends current block if needed.
 	// The final flag is used in simulation to pad the file's final block to a whole block size.
-	static Future<Void> newBlock(RangeFileWriter* self, int bytesNeeded, bool final = false);
+	Future<Void> newBlock(int bytesNeeded, bool final = false);
 
 	// Used in simulation only to create backup file sizes which are an integer multiple of the block size.
 	Future<Void> padEnd(bool final) override;
@@ -51,11 +51,9 @@ struct RangeFileWriter : public IRangeFileWriter {
 	Future<Void> newBlockIfNeeded(int bytesNeeded);
 
 	// Start a new block if needed, then write the key and value.
-	static Future<Void> writeKV_impl(RangeFileWriter* self, Key k, Value v);
 	Future<Void> writeKV(Key k, Value v) override;
 
 	// Write begin key or end key.
-	static Future<Void> writeKey_impl(RangeFileWriter* self, Key k);
 	Future<Void> writeKey(Key k) override;
 
 	Future<Void> finish() override;
@@ -74,7 +72,6 @@ struct LogFileWriter {
 	explicit LogFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0);
 
 	// Start a new block if needed, then write the key and value.
-	static Future<Void> writeKV_impl(LogFileWriter* self, Key k, Value v);
 	Future<Void> writeKV(Key k, Value v);
 
 	Reference<IBackupFile> file;

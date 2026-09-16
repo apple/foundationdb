@@ -249,7 +249,7 @@ function(stage_correctness_package)
 
   add_custom_command(
     OUTPUT ${package_files}
-    DEPENDS ${package_dependencies}
+    DEPENDS strip_only_fdbserver ${package_dependencies}
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/CMakeCache.txt ${STAGE_OUT_DIR}
     COMMAND ${CMAKE_COMMAND} -E copy ${copy_sources} ${STAGE_OUT_DIR}/bin
     COMMENT "Copying files for ${STAGE_CONTEXT} package"
@@ -576,32 +576,7 @@ function(package_bindingtester)
   add_custom_target(bindingtester ALL DEPENDS ${tar_file} copy_bindingtester_binaries)
 endfunction()
 
-function(add_fdb_unit_test TEST_NAME PATTERN)
-  add_test(NAME ${TEST_NAME}
-           WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-           COMMAND ${CMAKE_BINARY_DIR}/bin/fdbserver -r unittests -f "${PATTERN}")
-  set_tests_properties(${TEST_NAME} PROPERTIES
-    FAIL_REGULAR_EXPRESSION "0 tests passed; 1 tests failed."
-  )
-endfunction()
-
-function(collect_unit_tests SOURCE_DIR)
-  message("Collecting unit_tests in ${SOURCE_DIR}")
-  execute_process(
-    COMMAND grep --include \*.h --include \*.cpp --include \*.hpp -rhoP "TEST_CASE\\(\\\"\\K[^\\\"]+(?=\\\"\\))" "${SOURCE_DIR}"
-    OUTPUT_VARIABLE TEST_NAMES
-  )
-  string(REGEX REPLACE "\n" ";" TEST_NAMES "${TEST_NAMES}")
-
-  foreach(TEST_NAME ${TEST_NAMES})
-    message("ADDING DISCOVERED UNIT TEST: ${TEST_NAME}")
-    add_fdb_unit_test(UnitTest_${TEST_NAME} ${TEST_NAME})
-  endforeach()
-endfunction()
-
-# Test for setting up Python venv for client tests.
-# Adding this test as a fixture to another test allows the use of non-native Python packages within client test scripts
-# by installing dependencies from requirements.txt
+# The test_venv_setup fixture is registered in tests/CMakeLists.txt.
 set(test_venv_dir ${CMAKE_BINARY_DIR}/tests/test_venv)
 if (WIN32)
   set(shell_cmd "cmd" CACHE INTERNAL "")
@@ -612,20 +587,6 @@ else()
   set(shell_opt "-c" CACHE INTERNAL "")
   set(test_venv_activate ". ${test_venv_dir}/bin/activate" CACHE INTERNAL "")
 endif()
-set(test_venv_cmd "")
-string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
-string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
-string(APPEND test_venv_cmd "&& pip install --upgrade pip ")
-string(APPEND test_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt")
-string(APPEND test_venv_cmd "&& pip install -e ${CMAKE_SOURCE_DIR}/tests/TestRunner ")
-# NOTE: At this stage we are in the virtual environment and Python3_EXECUTABLE is not available anymore
-string(APPEND test_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 -m pip install .) ")
-add_test(
-  NAME test_venv_setup
-  COMMAND bash -c ${test_venv_cmd}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(test_venv_setup PROPERTIES FIXTURES_SETUP test_virtual_env_setup TIMEOUT 120)
-set_tests_properties(test_venv_setup PROPERTIES RESOURCE_LOCK TEST_VENV_SETUP)
 
 # Run the test command under Python venv as a cmd (Windows) or bash (Linux/Apple) script, which allows && or || chaining.
 function(add_python_venv_test)

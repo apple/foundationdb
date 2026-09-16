@@ -35,7 +35,7 @@ If ``git clang-format`` complains about unstaged changes, or you want to format 
    clang-format -i path/to/file.cpp
 
    # Format multiple files
-   clang-format -i fdbserver/DataDistribution.actor.cpp fdbclient/SystemData.cpp
+   clang-format -i fdbserver/datadistributor/DataDistribution.cpp fdbclient/SystemData.cpp
 
 .. note::
 

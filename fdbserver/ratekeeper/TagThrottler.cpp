@@ -34,10 +34,11 @@ class TagThrottlerImpl {
 	bool autoThrottlingEnabled{ false };
 	Future<Void> expiredTagThrottleCleanup;
 
-	static Future<Void> monitorThrottlingChanges(TagThrottlerImpl* self) {
+public:
+	Future<Void> monitorThrottlingChanges() {
 		bool committed = false;
 		while (true) {
-			ReadYourWritesTransaction tr(self->db);
+			ReadYourWritesTransaction tr(db);
 
 			while (true) {
 				Error err;
@@ -58,30 +59,30 @@ class TagThrottlerImpl {
 
 					if (autoThrottlingEnabled.get().present() && autoThrottlingEnabled.get().get() == "0"_sr) {
 						CODE_PROBE(true, "Auto-throttling disabled");
-						if (self->autoThrottlingEnabled) {
-							TraceEvent("AutoTagThrottlingDisabled", self->id).log();
+						if (this->autoThrottlingEnabled) {
+							TraceEvent("AutoTagThrottlingDisabled", id).log();
 						}
-						self->autoThrottlingEnabled = false;
+						this->autoThrottlingEnabled = false;
 					} else if (autoThrottlingEnabled.get().present() && autoThrottlingEnabled.get().get() == "1"_sr) {
 						CODE_PROBE(true, "Auto-throttling enabled");
-						if (!self->autoThrottlingEnabled) {
-							TraceEvent("AutoTagThrottlingEnabled", self->id).log();
+						if (!this->autoThrottlingEnabled) {
+							TraceEvent("AutoTagThrottlingEnabled", id).log();
 						}
-						self->autoThrottlingEnabled = true;
+						this->autoThrottlingEnabled = true;
 					} else {
 						CODE_PROBE(true, "Auto-throttling unspecified");
 						if (autoThrottlingEnabled.get().present()) {
-							TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue", self->id)
+							TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue", id)
 							    .detail("Value", autoThrottlingEnabled.get().get());
 						}
-						self->autoThrottlingEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
+						this->autoThrottlingEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
 						if (!committed)
-							tr.set(tagThrottleAutoEnabledKey, self->autoThrottlingEnabled ? "1"_sr : "0"_sr);
+							tr.set(tagThrottleAutoEnabledKey, this->autoThrottlingEnabled ? "1"_sr : "0"_sr);
 					}
 
 					RkTagThrottleCollection updatedTagThrottles;
 
-					TraceEvent("RatekeeperReadThrottledTags", self->id)
+					TraceEvent("RatekeeperReadThrottledTags", id)
 					    .detail("NumThrottledTags", throttledTagKeys.get().size());
 					for (auto entry : throttledTagKeys.get()) {
 						TagThrottleKey tagKey = TagThrottleKey::fromKey(entry.key);
@@ -103,32 +104,28 @@ class TagThrottlerImpl {
 						if (tagValue.expirationTime > now()) {
 							TransactionTag tag = *tagKey.tags.begin();
 							Optional<ClientTagThrottleLimits> oldLimits =
-							    self->throttledTags.getManualTagThrottleLimits(tag, tagKey.priority);
+							    throttledTags.getManualTagThrottleLimits(tag, tagKey.priority);
 
 							if (tagKey.throttleType == TagThrottleType::AUTO) {
 								updatedTagThrottles.autoThrottleTag(
-								    self->id, tag, 0, tagValue.tpsRate, tagValue.expirationTime);
+								    id, tag, 0, tagValue.tpsRate, tagValue.expirationTime);
 								updatedTagThrottles.incrementBusyTagCount(tagValue.reason);
 							} else {
-								updatedTagThrottles.manualThrottleTag(self->id,
-								                                      tag,
-								                                      tagKey.priority,
-								                                      tagValue.tpsRate,
-								                                      tagValue.expirationTime,
-								                                      oldLimits);
+								updatedTagThrottles.manualThrottleTag(
+								    id, tag, tagKey.priority, tagValue.tpsRate, tagValue.expirationTime, oldLimits);
 							}
 						}
 					}
 
-					self->throttledTags = std::move(updatedTagThrottles);
-					++self->throttledTagChangeId;
+					throttledTags = std::move(updatedTagThrottles);
+					++throttledTagChangeId;
 
 					Future<Void> watchFuture = tr.watch(tagThrottleSignalKey);
 					co_await tr.commit();
 					committed = true;
 
 					co_await watchFuture;
-					TraceEvent("RatekeeperThrottleSignaled", self->id).log();
+					TraceEvent("RatekeeperThrottleSignaled", id).log();
 					CODE_PROBE(true, "Tag throttle changes detected");
 					break;
 				} catch (Error& e) {
@@ -138,12 +135,13 @@ class TagThrottlerImpl {
 					err = e;
 				}
 
-				TraceEvent("RatekeeperMonitorThrottlingChangesError", self->id).error(err);
+				TraceEvent("RatekeeperMonitorThrottlingChangesError", id).error(err);
 				co_await tr.onError(err);
 			}
 		}
 	}
 
+private:
 	Future<Void> tryUpdateAutoThrottling(TransactionTag tag, double rate, double busyness, TagThrottledReason reason) {
 		// NOTE: before the comparison with MIN_TAG_COST, the busiest tag rate also compares with MIN_TAG_PAGES_RATE
 		// currently MIN_TAG_PAGES_RATE > MIN_TAG_COST in our default knobs.
@@ -176,8 +174,6 @@ public:
 		expiredTagThrottleCleanup = recurring(std::bind_front(&TagThrottlerImpl::cleanupExpiredTagThrottles, this),
 		                                      SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
 	}
-	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
-
 	void addRequests(TransactionTag tag, int count) { throttledTags.addRequests(tag, count); }
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() {

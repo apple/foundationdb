@@ -9,7 +9,7 @@ The benchmark suite is split into three executables:
 
 These binaries can be used to microbenchmark parts of the FoundationDB code without always pulling in higher-level dependencies. Specifically, they can be used to:
 
-- Test the performance effects of changes to the actor compiler or to the `flow` and `fdbrpc` libraries
+- Test the performance effects of changes to the `flow` and `fdbrpc` libraries
 - Test the performance of various uses of the `flow` and `fdbrpc` libraries
 - Find areas for improvement in the `flow` and `fdbrpc` libraries
 - Compare `flow`/`fdbrpc` primitives to alternatives provided by the standard library or other third-party libraries.

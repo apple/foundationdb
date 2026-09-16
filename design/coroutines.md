@@ -1,34 +1,31 @@
 # Coroutines in Flow
 
-* [Introduction](#Introduction)
-* [Coroutines vs ACTORs](#coroutines-vs-actors)
+* [Introduction](#introduction)
 * [Basic Types](#basic-types)
-* [Choose-When](#choose-when)
-    * [Execution in when-expressions](#execution-in-when-expressions)
-    * [Waiting in When-Blocks](#waiting-in-when-blocks)
-    * [Migrating `choose`-`when`](#migrating-choose-when)
+* [Waiting for Multiple Futures](#waiting-for-multiple-futures)
+    * [Ordered Evaluation with Choose](#ordered-evaluation-with-choose)
+    * [Concurrent Request Handling](#concurrent-request-handling)
 * [Generators](#generators)
-    * [Generators and ranges](#generators-and-ranges)
-    * [Eager vs Lazy Execution](#eager-vs-lazy-execution)
+    * [Generators and Ranges](#generators-and-ranges)
+    * [Execution and Value Ownership](#execution-and-value-ownership)
     * [Generators vs Promise Streams](#generators-vs-promise-streams)
-* [Uncancellable](#uncancellable)
-* [Porting ACTOR's to C++ Coroutines](#porting-actors-to-c-coroutines)
-    * [Lifetime of Locals](#lifetime-of-locals)
-    * [Unnecessary Helper Actors](#unnecessary-helper-actors)
-    * [Replace Locals with Temporaries](#replace-locals-with-temporaries)
-    * [Don't Wait in Error-Handlers](#dont-wait-in-error-handlers)
-    * [Make Static Functions Class Members](#make-static-functions-class-members)
-    * [Initialization of Locals](#initialization-of-locals)
-* [Internals Reference](fdb-coroutines-internals.md) — deep dive into the coroutine runtime (SAV, Actor, awaiters, cancellation)
+* [Cancellation](#cancellation)
+    * [Uncancellable](#uncancellable)
+    * [NoThrowOnCancel](#nothrowoncancel)
+* [Lifetime and Ownership](#lifetime-and-ownership)
+    * [Locals and Scope](#locals-and-scope)
+    * [Parameters and Objects](#parameters-and-objects)
+* [Error Handlers](#error-handlers)
+* [Direct Await Expressions](#direct-await-expressions)
+* [Internals Reference](fdb-coroutines-internals.md) — coroutine runtime, awaiters, and cancellation
 
 ## Introduction
 
-In the past Flow implemented an actor mode by shipping its own compiler which would
-extend the C++ language with a few additional keywords. This, while still supported,
-is deprecated in favor of the standard C++20 coroutines.
+Flow uses standard C++20 coroutines for asynchronous code. Coroutines work with Flow's network loop, futures,
+RPC layer, and deterministic simulator. They use ordinary C++ control flow around `co_await`, `co_return`, and,
+for generators, `co_yield`.
 
-Coroutines are meant to be simple, look like serial code, and be easy to reason about.
-As simple example for a coroutine function can look like this:
+A simple coroutine looks like this:
 
 ```c++
 Future<double> simpleCoroutine() {
@@ -38,996 +35,333 @@ Future<double> simpleCoroutine() {
 }
 ```
 
-This document assumes some familiarity with Flow. As of today, actors and coroutines
-can be freely mixed, but new code should be written using coroutines.
+The function starts executing when called. It returns a `Future<double>` that becomes ready when the coroutine
+returns its result or fails. Awaiting a ready future does not suspend; awaiting a pending future registers a
+continuation with Flow and suspends until the value or error is available.
 
-## Coroutines vs ACTORs
-
-### Performance Characteristics
-
-**For detailed performance analysis, benchmarking results, and optimization techniques, see [`COROUTINE_PERF_ANALYSIS.md`](../COROUTINE_PERF_ANALYSIS.md).**
-
-**Key Summary**: C++20 coroutines show pattern-dependent performance:
-- **Excellent** for suspension-heavy patterns (YIELD: +83% faster than actors)
-- **Competitive** for allocation-heavy patterns (NET2: 3-8% slower than actors)
-- **Production ready** with performance characteristics suitable for most FDB workloads
+This guide assumes familiarity with Flow's basic types. Their coroutine support is defined in
+[`Coroutines.h`](../flow/include/flow/Coroutines.h) and
+[`CoroutinesImpl.h`](../flow/include/flow/CoroutinesImpl.h).
 
 ## Basic Types
 
-It is important to understand that C++ coroutine support doesn't change anything in Flow: they are not a replacement
-of Flow but they replace the actor compiler with a C++ compiler. This means, that the network loop, all Flow types,
-the RPC layer, and the simulator all remain unchanged. A coroutine simply returns a special `SAV<T>` which has handle
-to a coroutine.
+A function is a coroutine if its body contains `co_await`, `co_yield`, or `co_return`. Its return type must provide
+a compatible coroutine implementation. The main types covered here are:
 
-As defined in the C++20 standard, a function is a coroutine if its body contains at least one `co_await`, `co_yield`,
-or `co_return` statement. However, in order for this to work, the return type needs an underlying coroutine
-implementation. Flow provides these for the following types:
+* `Future<T>` returns one asynchronous result. A coroutine can await other Flow futures and return its value with
+  `co_return value;`. An unhandled error becomes the future's error. `co_yield` is not supported.
+* `Future<Void>` represents asynchronous completion without a result value. Use `co_return;`, or reach the end of
+  the function body. By default, awaiting a `Future<Void>` also produces no value.
+* `Generator<T>` produces values synchronously, using `co_yield`. It provides an input iterator interface.
+* `AsyncGenerator<T>` produces values on demand and can both `co_await` asynchronous work and `co_yield` results.
+  Calling the generator requests its next value and returns a `Future<T>`.
 
-* `Future<T>` is the primary type we use for coroutines. A coroutine returning
-  `Future<T>` is allowed to `co_await` other coroutines and it can `co_return`
-  a single value. `co_yield` is not implemented by this type.
-    * A special case is `Future<Void>`. Void-Futures are what a user would probably
-      expect `Future<>` to be (it has this type for historical reasons and to
-      provide compatibility with old Flow `ACTOR`s). A coroutine with return type
-      `Future<Void>` must not return anything. So either the coroutine can run until
-      the end, or it can be terminated by calling `co_return`.
-* `Generator<T>` can return a stream of values. However, they can't `co_await`
-  other coroutines. These are useful for streams where the values are lazily
-  computed but don't involve any IO.
-* `AsyncGenerator<T>` is similar to `Generator<T>` in that it can return a stream
-  of values, but in addition to that it can also `co_await` other coroutines.
-  Due to that, they're slightly less efficient than `Generator<T>`.
-  `AsyncGenerator<T>` should be used whenever values should be lazily generated
-  AND need IO. It is an alternative to `PromiseStream<T>`, which can be more efficient, but is
-  more intuitive to use correctly.
+`AsyncResult<T>` is also available for a single consumer that does not need a copyable `Future<T>`; it has a distinct
+ownership contract. See the [internals reference](fdb-coroutines-internals.md) for that API and the runtime types
+such as `SAV` and `Actor` that support coroutine execution.
 
-A more detailed explanation of `Generator<T>` and `AsyncGenerator<T>` can be
-found further down.
+## Waiting for Multiple Futures
 
-## Choose-When
-
-In actor compiled code we were able to use the keywords `choose` and `when` to wait on a
-statically known number of futures and execute corresponding code. Something like this:
+Prefer `race(...)` when waiting for one of several operations and then branching on the winner. It returns a
+`std::variant` whose index matches the winning argument. For example:
 
 ```c++
-choose {
-    when(wait(future1)) {
-        // do something
+Future<int> withDeadline(Future<int> result, double timeoutSeconds) {
+    auto winner = co_await race(result, delay(timeoutSeconds));
+    if (winner.index() == 0) {
+        co_return std::get<0>(winner);
     }
-    when(Foo f = wait(foo())) {
-        // do something else
-    }
+    throw io_timeout();
 }
 ```
 
-Since this is a compiler functionality, we can't use this with C++ coroutines. For most
-coroutine conversions, prefer `race(...)` and then branch on the returned `std::variant`.
-This keeps the control flow explicit and usually maps more directly to what the coroutine
-will do after the wait. `Choose` is still available for cases where the old `choose`-`when`
-shape is the clearest fit, or where you need its ordered evaluation behavior described below.
+If multiple inputs are already ready, the first argument that is ready wins. An error from the winning input is
+propagated rather than returned in the variant. For a `FutureStream<T>`, the winning branch consumes one value.
+Losing inputs are detached from the race, not explicitly cancelled, but dropping their last reference can cancel
+them. All argument expressions are evaluated before `race` is called; use separate statements when their evaluation
+order matters.
 
-For example, this actor pattern:
+Use helpers such as `quorum`, `waitForAll`, `waitForAllReady`, `timeoutError`, or `operator||` when they express the
+required behavior more directly. `race` and `Choose` are defined in
+[`CoroUtils.h`](../flow/include/flow/CoroUtils.h); the other helpers are in
+[`genericactors.h`](../flow/include/flow/genericactors.h).
 
-```c++
-choose {
-    when(R res = wait(f1)) {
-        return res;
-    }
-    when(wait(timeout(...))) {
-        throw io_timeout();
-    }
-}
-```
+### Ordered Evaluation with Choose
 
-should usually become:
-
-```c++
-auto result = co_await race(f1, timeout(...));
-if (result.index() == 0) {
-    co_return std::get<0>(result);
-}
-throw io_timeout();
-```
-
-`Choose` remains useful when you specifically want callback-style handling of the winner:
+`Choose` supports synchronous callbacks for the winning future:
 
 ```c++
 co_await Choose()
-    .When(future1, [](Void& const) {
-        // do something
+    .When(future1, [](Void const&) {
+        // Handle the first result.
     })
-    .When(foo(), [](Foo const& f) {
-        // do something else
+    .When(foo(), [](Foo const& value) {
+        // Handle the second result.
     }).run();
 ```
 
-While `Choose` and `choose` behave very similarly, there are some minor differences between
-the two. These are explained below.
-
-### Execution in when-expressions
-
-In the above example, there is one, potentially important difference between the old and new
-style: in the statement `when(Foo f = wait(foo()))` is only executed if `future1` is not ready.
-Depending on what the intent of the statement is, this could be desirable. Since `Choose::When`
-is a normal method, `foo()` will be evaluated whether the statement is already done or not.
-This can be worked around by passing a lambda that returns a Future instead:
+Each `When` checks readiness in call order. A handler for an already-ready future can run immediately while the
+chain is being constructed. Passing `foo()` still calls it even if an earlier branch has already won, because
+it is an ordinary C++ argument expression. Pass a factory to avoid creating a later future unnecessarily:
 
 ```c++
 co_await Choose()
-    .When(future1, [](Void& const) {
-        // do something
+    .When(future1, [](Void const&) {
+        // Handle the first result.
     })
-    .When([](){ return foo() }, [](Foo const& f) {
-        // do something else
+    .When([]() { return foo(); }, [](Foo const& value) {
+        // Handle the second result.
     }).run();
 ```
 
-The implementation of `When` will guarantee that this lambda will only be executed if all previous
-`When` calls didn't receive a ready future.
+The factory is called only if no earlier branch received a ready future. Use `Choose` when this ordered, lazy
+creation matters, or when synchronous callbacks make the code clearer. Handlers must return `void`; they cannot
+suspend with `co_await`. If the winner needs asynchronous follow-up work, use `race` and await it in the outer
+coroutine.
 
-## Waiting in When-Blocks
+### Concurrent Request Handling
 
-In FDB we sometimes see this pattern:
-
-```c++
-loop {
-  choose {
-      when(RequestA req = waitNext(requestAStream.getFuture())) {
-          wait(handleRequestA(req));
-      }
-      when(RequestB req = waitNext(requestBStream.getFuture())) {
-          wait(handleRequestb(req));
-      }
-      //...
-  }
-}
-```
-
-This is not possible to do with `Choose`. However, this is done deliberately as the above is
-considered an antipattern: This means that we can't serve two requests concurrently since the loop
-won't execute until the request has been served. Instead, this should be written like this:
-
-```c++
-state ActorCollection actors(false);
-loop {
-  choose {
-      when(RequestA req = waitNext(requestAStream.getFuture())) {
-          actors.add(handleRequestA(req));
-      }
-      when(RequestB req = waitNext(requestBStream.getFuture())) {
-          actors.add(handleRequestb(req));
-      }
-      //...
-      when(wait(actors.getResult())) {
-          // this only makes sure that errors are thrown correctly
-          UNREACHABLE();
-      }
-  }
-}
-```
-
-And so the above can easily be rewritten using `Choose`:
+Awaiting a request handler inside a receive loop serializes request handling. This can be intentional, but when
+requests should run concurrently, retain each handler's future in an `ActorCollection` and observe the collection's
+result to propagate failures:
 
 ```c++
 ActorCollection actors(false);
-loop {
-    co_await Choose()
-        .When(requestAStream.getFuture(), [&actors](RequestA const& req) {
-            actors.add(handleRequestA(req));  
-        })
-        .When(requestBStream.getFuture(), [&actors](RequestB const& req) {
-            actors.add(handleRequestB(req));  
-        })
-        .When(actors.getResult(), [](Void const&) {
-            UNREACHABLE();
-        }).run();
-}
-```
-
-### Migrating `choose`-`when`
-
-When porting actor code, use this rule of thumb:
-
-* Prefer `race(...)` when the `choose` picks one winner and then the code branches on which future completed.
-* Use `Choose()` when you need ordered `when` evaluation, lazy creation of later futures, or the callback style is
-  genuinely clearer than branching on a `std::variant`.
-* Use more specific helpers like `quorum`, `waitForAll`, `waitForAllReady`, or `operator||` when they express the
-  intent better than either `race` or `Choose`.
-
-`race(...)` is usually the best direct replacement for patterns like:
-
-```c++
-choose {
-    when(R res = wait(f1)) {
-        return res;
-    }
-    when(S res = wait(f2)) {
-        return use(res);
+while (true) {
+    auto request = co_await race(requestAStream.getFuture(), requestBStream.getFuture(), actors.getResult());
+    if (request.index() == 0) {
+        actors.add(handleRequestA(std::get<0>(request)));
+    } else if (request.index() == 1) {
+        actors.add(handleRequestB(std::get<1>(request)));
+    } else {
+        // With returnWhenEmptied=false, the collection only completes with an error.
+        UNREACHABLE();
     }
 }
 ```
 
-which becomes:
-
-```c++
-auto result = co_await race(f1, f2);
-if (result.index() == 0) {
-    co_return std::get<0>(result);
-}
-co_return use(std::get<1>(result));
-```
-
-However, often using `choose`-`when` is overkill and other facilities like `quorum` and
-`operator||` should be used instead. For example this:
-
-```c++
-choose {
-    when(R res = wait(f1)) {
-        return res;
-    }
-    when(wait(timeout(...))) {
-        throw io_timeout();
-    }
-}
-```
-
-Should be written like this:
-
-```c++
-co_await (f1 || timeout(...));
-if (f1.isReady()) {
-    co_return f1.get();
-}
-throw io_timeout();
-```
-
-(The above could also be packed into a helper function in `genericactors.h`).
+Include [`ActorCollection.h`](../flow/include/flow/ActorCollection.h) for this pattern. Handlers must own any request
+data they use after suspension; references into the local variant do not outlive the loop iteration. Bound
+concurrency when needed rather than allowing an unbounded collection of outstanding work.
 
 ## Generators
 
-With C++ coroutines we introduce two new basic types in Flow: `Generator<T>` and `AsyncGenerator<T>`. A generator is a
-special type of coroutine, which can return multiple values.
-
-`Generator<T>` and `AsyncGenerator<T>` implement a different interface and serve a very different purpose.
-`Generator<T>` conforms to the `input_iterator` trait -- so it can be used like a normal iterator (with the exception
-that copying the iterator has a different semantics). This also means that it can be used with the new `ranges`
-library in STL which was introduced in C++20.
-
-`AsyncGenerator<T>` implements the `()` operator which returns a new value every time it is called. However, this value
-HAS to be waited for (dropping it and attempting to call `()` again will result in undefined behavior!). This semantic
-difference allows an author to mix `co_await` and `co_yield` statements in a coroutine returning `AsyncGenerator<T>`.
-
-Since generators can produce infinitely long streams, they can be useful to use in places where we'd otherwise use a
-more complex in-line loop. For example, consider the code in `masterserver.actor.cpp` that is responsible generate
-version numbers. The logic for this code is currently in a long function. With a `Generator<T>` it can be isolated to
-one simple coroutine (which can be a direct member of `MasterData`). A simplified version of such a generator could
-look as follows:
-
-```c++
-Generator<Version> MasterData::versionGenerator() {
-    auto prevVersion = lastEpochEnd;
-    auto lastVersionTime = now();
-    while (true) {
-        auto t1 = now();
-        Version toAdd =
-			    std::max<Version>(1,
-			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
-			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
-        lastVersionTime = t1;
-        co_yield prevVersion + toAdd;
-        prevVersion += toAdd;
-    }
-}
-```
-
-Now that the logic to compute versions is separated, `MasterData` can simply create an instance of `Generator<Version>`
-by calling `auto vGenerator = MasterData::versionGenerator();` (and possibly storing that as a class member). It can
-then access the current version by calling `*vGenerator` and go to the next generator by incrementing the iterator
-(`++vGenerator`).
-
-`AsyncGenerator<T>` should be used in some places where we used promise streams before (though not all of them, this
-topic is discussed a bit later). For example:
-
-```c++
-template <class T, class F>
-AsyncGenerator<T> filter(AsyncGenerator<T> gen, F pred) {
-    while (gen) {
-        auto val = co_await gen();
-        if (pred(val)) {
-            co_yield val;
-        }
-    }
-}
-```
-
-Note how much simpler this function is compared to the old flow function:
-
-```c++
-ACTOR template <class T, class F>
-Future<Void> filter(FutureStream<T> input, F pred, PromiseStream<T> output) {
-	loop {
-		try {
-			T nextInput = waitNext(input);
-			if (pred(nextInput))
-				output.send(nextInput);
-		} catch (Error& e) {
-			if (e.code() == error_code_end_of_stream) {
-				break;
-			} else
-				throw;
-		}
-	}
-
-	output.sendError(end_of_stream());
-
-	return Void();
-}
-```
-
-A `FutureStream` can be converted into an `AsyncGenerator` by using a simple helper function:
-
-```c++
-template <class T>
-AsyncGenerator<T> toGenerator(FutureStream<T> stream) {
-    loop {
-        try {
-            co_yield co_await stream;
-        } catch (Error& e) {
-            if (e.code() == error_code_end_of_stream) {
-                co_return;
-            }
-            throw;
-        }
-    }
-}
-```
+Generators separate value production from consumption. Use `Generator<T>` for synchronous computation and
+`AsyncGenerator<T>` when producing the next value requires asynchronous work.
 
 ### Generators and Ranges
 
-`Generator<T>` can be used like an input iterator. This means, that it can also be used with `std::ranges`. Consider
-the following coroutine:
+A `Generator<T>` exposes its current value through `*generator` and advances with `++generator`. Copies share the
+same coroutine and iteration position; they do not create independent sequences. This makes it an input iterator,
+not a multipass iterator.
 
 ```c++
-// returns base^0, base^1, base^2, ...
+// Produces base^0, base^1, base^2, ...
 Generator<double> powersOf(double base) {
-    double curr = 1;
-    loop {
-        co_yield curr;
-        curr *= base;
+    double current = 1;
+    while (true) {
+        co_yield current;
+        current *= base;
     }
 }
 ```
 
-We can use this now to generate views. For example:
+Use `std::ranges::subrange` with `Generator<T>::end()` to apply range adaptors:
 
 ```c++
-for (auto v : generatorRange(powersOf(2)) 
-            | std::ranges::views::filter([](auto v) { return v > 10; })
-            | std::ranges::views::take(10)) {
-    fmt::print("{}\n", v);
+auto powers = std::ranges::subrange(powersOf(2), Generator<double>::end());
+for (double value : powers
+                    | std::views::filter([](double value) { return value > 10; })
+                    | std::views::take(10)) {
+    fmt::print("{}\n", value);
 }
 ```
 
-The above would print all powers of two between 10 and 2^10.
+This prints ten powers of two, from 16 through 8192. Include `<ranges>` for the standard range facilities.
 
-### Eager vs Lazy Execution
+An asynchronous generator requests its next value with `co_await generator()`:
 
-One major difference between async generators and tasks (coroutines returning only one value through `Future`) is the
-execution policy: An async generator will immediately suspend when it is called while a task will immediately start
-execution and needs to be explicitly scheduled.
+```c++
+AsyncGenerator<int> delayedValues(int count) {
+    for (int i = 0; i < count; ++i) {
+        co_await delay(0.01);
+        co_yield i;
+    }
+}
+```
 
-This is a conscious design decision. Lazy execution makes it much simpler to reason about memory ownership. For example,
-the following is ok:
+Keep the generator alive until each request finishes, and await that request before making another one. Do not copy
+an `AsyncGenerator` or abandon an outstanding request. When the generator reaches the end of its body or executes
+`co_return;`, the pending request reports `end_of_stream`. Checking `if (generator)` only tells you whether it has
+already finished; the next request can still discover the end of the stream.
+
+[`toGenerator`](../flow/include/flow/CoroUtils.h) adapts a `FutureStream<T>` to an `AsyncGenerator<T>`, translating the
+stream's `end_of_stream` into generator completion while preserving other errors.
+
+### Execution and Value Ownership
+
+The execution policy depends on the return type:
+
+* `Future<T>` coroutines begin immediately and run until suspension or completion.
+* `Generator<T>` begins immediately and runs to its first `co_yield` or completion. Incrementing it resumes production.
+* `AsyncGenerator<T>` initially suspends. Calling its `()` operator resumes production until a value, error, or
+  asynchronous suspension is reached.
+
+Both generator types suspend at `co_yield` until the next value is requested. This permits a generator to reuse
+storage between values, but the consumer must respect that storage's lifetime. For example:
 
 ```c++
 Generator<StringRef> randomStrings(int minLen, int maxLen) {
     Arena arena;
     auto buffer = new (arena) uint8_t[maxLen + 1];
     while (true) {
-        auto sz = deterministicRandom()->randomInt(minLen, maxLen + 1);
-        for (int i = 0; i < sz; ++i) {
+        auto size = deterministicRandom()->randomInt(minLen, maxLen + 1);
+        for (int i = 0; i < size; ++i) {
             buffer[i] = deterministicRandom()->randomAlphaNumeric();
         }
-        co_yield StringRef(buffer, sz);
+        co_yield StringRef(buffer, size);
     }
 }
 ```
 
-The above coroutine returns a stream of random strings. The memory is owned by the coroutine and so it always returns
-a `StringRef` and then reuses the memory in the next iteration. This makes this generator very cheap to use, as it only
-does one allocation in its lifetime. With eager execution, this would be much harder to write (and reason about): the
-coroutine would immediately generate a string and then eagerly compute the next one when the string is retrieved.
-However, in Flow a `co_yield` is guaranteed to suspend the coroutine until the value was consumed (this is not generally
-a guarantee with `co_yield` -- C++ coroutines give the implementer a great degree of freedom over decisions like this).
+Each `StringRef` points into the generator's arena. Its contents can change when the generator advances, and the
+storage is freed when the generator is destroyed. Copy a value into owning storage, such as `Standalone<StringRef>`,
+if it must survive either event. The same requirement applies when a consumer passes a view to background work.
 
 ### Generators vs Promise Streams
 
-Flow provides another mechanism to send streams of messages between actors: `PromiseStream<T>`. In fact,
-`AsyncGenerator<T>` uses `PromiseStream<T>` internally. So when should one be used over the other?
+`AsyncGenerator<T>` internally uses `PromiseStream<T>`, but the two interfaces express different production policies.
+A generator produces another value only when requested. A promise stream lets a producer enqueue values independently
+of the consumer.
 
-As a general rule of thumb: whenever possible, use `Generator<T>`, if not, use `AsyncGenerator<T>` if in doubt.
+Prefer a synchronous generator for simple computation. Use an asynchronous generator for demand-driven IO, such as
+reading the next block of a file. Use a promise stream when production should run ahead, when multiple sources feed
+a stream, or when an existing stream interface fits the operation. For example, prefetching file blocks can hide IO
+latency while the consumer processes earlier blocks.
 
-For pure computation it almost never makes sense to use a `PromiseStream<T>` (the only exception is if computation
-can be expensive enough that `co_await yield()` becomes necessary). `Generator<T>` is more lightweight and therefore
-usually more efficient. It is also easier to use.
+A producer that runs ahead needs explicit bounds or backpressure, an owner for its future, and error propagation to
+the consumer. Send owning values when the producer will reuse or release the underlying storage. A `PromiseStream`
+does not by itself bound its queue or keep a producer coroutine alive.
 
-When it comes to IO it becomes a bit more tricky. Assume we want to scan a file on disk, and we want to read it in
-4k blocks. This can be done quite elegantly using a coroutine:
+## Cancellation
+
+By default, explicitly cancelling a coroutine's future or dropping its last future reference requests cancellation.
+A suspended coroutine resumes and its await throws `actor_cancelled`. If cancellation is requested while it is
+running, the next Flow await observes it. Subsequent Flow awaits also throw cancellation rather than waiting.
+
+Use RAII for cleanup, and rethrow cancellation from error handlers unless the coroutine's contract explicitly
+requires something else. Do not silently consume `broken_promise` or other failures either. Keeping a future in a
+local or an `ActorCollection` makes the lifetime of asynchronous work explicit.
+
+### Uncancellable
+
+Some operations must finish even if their caller stops waiting. Add an `Uncancellable` marker parameter to make
+cancellation of the returned future a no-op:
 
 ```c++
-AsyncGenerator<Standalone<StringRef>> blockScanner(Reference<IAsyncFile> file) {
-    auto sz = co_await file->size();
-    decltype(sz) offset = 0;
-    constexpr decltype(sz) blockSize = 4*1024;
-    while (offset < sz) {
-        Arena arena;
-        auto block = new (arena) int8_t[blockSize];
-        auto toRead = std::min(sz - offset, blockSize);
-        auto r = co_await file->read(block, toRead, offset);
-        co_yield Standalone<StringRef>(StringRef(block, r), arena);
-        offset += r;
-    }
+Future<Void> finishOperation(Future<Void> operation, Uncancellable = {}) {
+    co_await operation;
 }
 ```
 
-The problem with the above generator though, is that we only start reading when the generator is invoked. If consuming
-the block takes sometimes a long time (for example because it has to be written somewhere), each call will take as long
-as the disk latency is for a read.
+Dropping all references to the returned future does not cancel this coroutine. It continues until completion or
+failure, so it must own any resources and data it needs for that duration. Use this marker only when required by the
+operation's lifetime contract; it does not prevent an awaited operation from failing.
 
-What if we want to hide this latency? In other words: what if we want to improve throughput and end-to-end latency by
-prefetching?
+### NoThrowOnCancel
 
-Doing this with a generator, while not trivial, is possible. But here it might be easier to use a `PromiseStream`
-(we can even reuse the above generator):
+`NoThrowOnCancel` keeps cancellation enabled but destroys the coroutine frame without resuming it to throw
+`actor_cancelled` inside the coroutine:
 
 ```c++
-Future<Void> blockScannerWithPrefetch(Reference<IAsyncFile> file,
-                                      PromiseStream<Standalone<StringRef> promise,
-                                      FlowLock lock) {
-    auto generator = blockScanner(file);
-    while (generator) {
-        {
-            FlowLock::Releaser _(co_await lock.take());
-            try {
-                promise.send(co_await generator());
-            } catch (Error& e) {
-                promise.sendError(e);
-                co_return;
-            }
-        }
-        // give caller opportunity to take the lock
-        co_await yield();
-    }
+Future<Void> waitForSignal(Future<Void> signal, NoThrowOnCancel = {}) {
+    co_await signal;
 }
 ```
 
-With the above the caller can control the prefetching dynamically by taking the lock if the queue becomes too full.
+Cancellation runs normal RAII cleanup for locals in scope, but it does not enter the coroutine's `catch` handlers.
+Observers of its returned future still receive `actor_cancelled`. `NoThrowOnCancel` and `Uncancellable` are mutually
+exclusive, and neither marker is supported by `AsyncGenerator`.
 
-## Uncancellable
+## Lifetime and Ownership
 
-By default, a coroutine runs until it is either done (reaches the end of the function body, a `co_return` statement,
-or throws an exception) or the last `Future<T>` object referencing that object is being dropped. The second use-case is
-implemented as follows:
+### Locals and Scope
 
-1. When the future count of a coroutine goes to `0`, the coroutine is immediately resumed and `actor_cancelled` is
-   thrown within that coroutine (this allows the coroutine to do some cleanup work).
-2. Any attempt to run `co_await expr` will immediately throw `actor_cancelled`.
+Coroutine locals follow normal C++ scoping rules. A local remains alive across suspension until its scope exits.
+For objects such as lock releasers, make sure that this is the intended lifetime: retaining a lock across a wait
+can block other work, while leaving a scope releases it.
 
-However, some coroutines aren't safe to be cancelled. This usually concerns disk IO operations. With `ACTOR` we could
-either have a return-type `void` or use the `UNCANCELLABLE` keyword to change this behavior: in this case, calling
-`Future<T>::cancel()` would be a no-op and dropping all futures wouldn't cause cancellation.
+The same rule applies to futures. A future declared inside an `if` or `try` block is destroyed at that block's end.
+If it is the last reference to pending cancellable work, that work is cancelled. Declare the future in the scope
+that must retain it, or add it to an `ActorCollection`; observe its result as well as retaining it.
 
-However, with C++ coroutines, this won't work:
+Initialize local values explicitly. For a passive aggregate with primitive fields, `SomeStruct value{};` initializes
+those fields, while `SomeStruct value;` may leave them uninitialized. Coroutine frames do not change C++ initialization
+rules.
 
-* We can't introduce new keywords in pure C++ (so `UNCANCELLABLE` would require some preprocessing).
-* Implementing a `promise_type` for `void` isn't a good idea, as this would make any `void`-function potentially a
-  coroutine.
+### Parameters and Objects
 
-However, this can also be seen as an opportunity: uncancellable actors are always a bit tricky to use, since we need to
-make sure that the caller keeps all memory alive that the uncancellable coroutine might reference until it is done.
-Because of that, whenever someone calls a coroutine, they need to be extra careful. However, someone might not know that
-the coroutine they call is uncancellable.
-
-We address this problem with the following definition:
-
----
-*Definition*:
-
-A coroutine is uncancellable if the first argument (or the second, if the coroutine is a class-member) is of type
-`Uncancellable`
-
----
-
-The definition of `Uncancellable` is trivial: `struct Uncancellable {};` -- it is simply used as a marker. So now, if
-a user calls an uncancellable coroutine, it will be obvious on the caller side. For example the following is *never*
-uncancellable:
+Prefer owning parameters passed by value for data used after suspension. Coroutine reference parameters remain
+references; the frame does not copy the referenced object. A temporary argument or caller-local object can therefore
+be destroyed while the coroutine is suspended.
 
 ```c++
-co_await foo();
-```
-
-But this one is:
-
-```c++
-co_await bar(Uncancellable());
-```
-
-## NoThrowOnCancel
-
-`NoThrowOnCancel` is a marker for coroutines that should still cancel, but should not run cancellation through an
-`actor_cancelled` exception inside the coroutine:
-
-```c++
-Future<Void> foo(NoThrowOnCancel = {}) {
-    Resource r;
-    co_await something();
+Future<Void> printLater(Key key) {
+    co_await delay(1.0);
+    fmt::print("{}\n", key.toString());
 }
 ```
 
-When a coroutine with this marker is cancelled, the coroutine frame is destroyed and normal C++ RAII cleanup runs for
-locals in scope. `catch` blocks inside the coroutine do not observe `actor_cancelled` for cancellation. This differs from
-`Uncancellable`, where cancelling the returned future is a no-op and the coroutine continues until completion.
+Here the frame owns a `Key`. Passing a `KeyRef`, `ValueRef`, or `StringRef` by value only copies a view and does not
+extend its arena's lifetime. Use an owning type such as `Key`, `Value`, or `Standalone<T>` when bytes must outlive
+the caller.
 
-## Porting `ACTOR`'s to C++ Coroutines
+If an API must take a reference, establish the required ownership before suspension and use only the owned copy
+thereafter. Copying inside the body before the first await works for an eager `Future<T>` coroutine, but not for an
+initially suspended `AsyncGenerator<T>` whose caller may already have destroyed the argument before the body starts.
 
-If you have an existing `ACTOR`, you can port it to a C++ coroutine by following these steps:
+A coroutine can be a non-static member function, but its `this` pointer does not keep the object alive. The owner must
+outlive the coroutine, or the coroutine must retain an appropriate owning reference. Similarly, a coroutine lambda's
+captures belong to its closure object; keep that object alive or pass owned values as coroutine parameters instead.
 
-1. Remove `ACTOR` keyword.
-2. If the actor is marked with `UNCANCELLABLE`, remove it and make the first argument `Uncancellable`. If the return
-   type of the actor is `void` make it `Future<Void>` instead and add an `Uncancellable` as the first argument.
-3. Remove all `state` modifiers from local variables.
-4. Replace all `wait(expr)` with `co_await expr`.
-5. Remove all `waitNext(expr)` with `co_await expr`.
-6. Rewrite existing `choose-when` statements by preferring `race(...)` for first-ready branching; use `Choose`
-   only when you need ordered `when` semantics or callback-style handling.
+## Error Handlers
 
-In addition, the following things should be looked out for:
-
-### Lifetime of locals
-
-Consider this code:
+C++ does not allow `co_await` inside a `catch` handler. Save the error and await recovery after leaving the handler.
+For a transaction retry loop, for example:
 
 ```c++
-Local foo;
-wait(bar());
-...
-```
-
-`foo` will be destroyed right after the `wait`-expression. However, after making this a coroutine:
-
-```c++
-Local foo;
-co_await bar();
-...
-```
-
-`foo` will stay alive until we leave the scope. This is better (as it is more intuitive and follows standard C++), but
-in some weird corner-cases code might depend on the semantic that locals get destroyed when we call into `wait`. Look
-out for things where destructors do semantically important work (like in `FlowLock::Releaser`).
-
-### Unnecessary Helper Actors
-
-In `flow/genericactors.h` we have a number of useful helpers. Some of them are also useful with C++ coroutines,
-others add unnecessary overhead. Look out for those and remove calls to it. The most important ones are `success` and
-`store`.
-
-```c++
-wait(success(f));
-```
-
-becomes
-
-```c++
-co_await f;
-```
-
-and
-
-```c++
-wait(store(v, f));
-```
-
-becomes
-
-```c++
-v = co_await f;
-```
-
-### Replace Locals with Temporaries
-
-In certain places we use locals just to work around actor compiler limitations. Since locals use up space in the
-coroutine object they should be removed wherever it makes sense (only if it doesn't make the code less readable!).
-
-For example:
-
-```c++
-Foo f = wait(foo);
-bar(f);
-```
-
-might become
-
-```c++
-bar(co_await foo);
-```
-
-### Don't Wait in Error-Handlers
-
-Using `co_await` in an error-handler produces a compilation error in C++. However, this was legal with `ACTOR`. There
-is no general best way of addressing this issue, but usually it's quite easy to move the `co_await` expression out of
-the `catch`-block.
-
-One place where we use this pattern a lot if in our transaction retry loop:
-
-```c++
-state ReadYourWritesTransaction tr(db);
-loop {
-    try {
-        Value v = wait(tr.get(key));
-        tr.set(key2, val2);
-        wait(tr.commit());
-        return Void();
-    } catch (Error& e) {
-        wait(tr.onError(e));
-    }
-}
-```
-
-Luckily, with coroutines, we can do one better: generalize the retry loop. The above could look like this:
-
-```c++
-co_await db.run([&](ReadYourWritesTransaction* tr) -> Future<Void> {
-    Value v = wait(tr->get(key));
-    tr->set(key2, val2);
-    wait(tr->commit());
-});
-```
-
-A possible implementation of `Database::run` would be:
-
-```c++
-template <std::invocable<ReadYourWritesTransaction*> Fun>
-Future<Void> Database::run(Fun fun) {
-    ReadYourWritesTransaction tr(*this);
-    Future<Void> onError;
+Future<Void> writeKey(Database db, Key key, Value value) {
+    ReadYourWritesTransaction tr(db);
     while (true) {
-        if (onError.isValid()) {
-            co_await onError;
-            onError = Future<Void>();
-        }
+        Error error;
         try {
-            co_await fun(&tr);
+            tr.set(key, value);
+            co_await tr.commit();
             co_return;
         } catch (Error& e) {
-            onError = tr.onError(e);
+            if (e.code() == error_code_actor_cancelled) {
+                throw;
+            }
+            error = e;
         }
+        co_await tr.onError(error);
     }
 }
 ```
 
-### Make Static Functions Class Members
+The successful path returns before recovery; only the failed path calls `onError`. That call applies the transaction's
+retry policy and propagates non-retryable errors. Include
+[`ReadYourWrites.h`](../fdbclient/include/fdbclient/ReadYourWrites.h) for this transaction API.
 
-With actors, we often see the following pattern:
+## Direct Await Expressions
 
-```c++
-struct Foo : IFoo {
-    ACTOR static Future<Void> bar(Foo* self) {
-        // use `self` here to access members of `Foo`
-    }
-    
-    Future<Void> bar() override {
-        return bar(this);
-    }
-};
-```
-
-This boilerplate is necessary, because `ACTOR`s can't be class members: the actor compiler will generate another
-`struct` and move the code there -- so `this` will point to the actor state and not to the class instance.
-
-With C++ coroutines, this limitation goes away. So a cleaner (and slightly more efficient) implementation of the above
-is:
+Await a future directly when no separate helper is needed:
 
 ```c++
-struct Foo : IFoo {
-    Future<Void> bar() override {
-        // `this` can be used like in any non-coroutine. `co_await` can be used.
-    }
-};
+co_await future;                 // Wait and discard a non-Void result.
+value = co_await anotherFuture;  // Wait and store the result.
+consume(co_await nextValue);     // Use the result in an expression.
 ```
 
-### Initialization of Locals
-
-There is one very subtle and hard to spot difference between `ACTOR` and a coroutine: the way some local variables are
-initialized. Consider the following code:
-
-```c++
-struct SomeStruct {
-    int a;
-    bool b;
-};
-
-ACTOR Future<Void> someActor() {
-    // beginning of body
-    state SomeStruct someStruct;
-    // rest of body
-}
-```
-
-For state variables, the actor-compiler generates the following code to initialize `SomeStruct someStruct`:
-
-```c++
-someStruct = SomeStruct();
-```
-
-This, however, is different from what might expect since now the default constructor is explicitly called. This means
-if the code is translated to:
-
-```c++
-Future<Void> someActor() {
-    // beginning of body
-    SomeStruct someStruct;
-    // rest of body
-}
-```
-
-initialization will be different. The exact equivalent instead would be something like this:
-
-```c++
-Future<Void> someActor() {
-    // beginning of body
-    SomeStruct someStruct{}; // auto someStruct = SomeStruct();
-    // rest of body
-}
-```
-
-If the struct `SomeStruct` would initialize its primitive members explicitly (for example by using `int a = 0;` and
-`bool b = false`) this would be a non-issue. And explicit initialization is probably the right fix here. Sadly, it
-doesn't seem like UBSAN finds these kind of subtle bugs.
-
-Another difference is, that if a `state` variables might be initialized twice: once at the creation of the actor using
-the default constructor and a second time at the point where the variable is initialized in the code. With C++
-coroutines we now get the expected behavior, which is better, but nonetheless a potential behavior change.
-
-### `state` Variables Inside Blocks
-
-The actor compiler **hoists** all `state` variables into the actor's state struct, regardless of C++ block scope. This
-means a `state` variable declared inside an `if`, `else`, `for`, or `try` block lives for the entire actor lifetime.
-In a coroutine, these become regular C++ locals that follow normal scoping rules.
-
-This is a source of subtle bugs. Consider:
-
-```c++
-ACTOR Future<Void> example() {
-    if (someCondition) {
-        state Future<Void> background = longRunningTask();
-    }
-    // In ACTOR code, `background` is still alive here — it was hoisted.
-    wait(delay(100.0));
-    return Void();
-}
-```
-
-A naive conversion:
-
-```c++
-Future<Void> example() {
-    if (someCondition) {
-        Future<Void> background = longRunningTask();
-    }
-    // BUG: `background` was destroyed at the `}` above, cancelling longRunningTask()!
-    co_await delay(100.0);
-}
-```
-
-The fix is to move the variable to function scope:
-
-```c++
-Future<Void> example() {
-    Future<Void> background;
-    if (someCondition) {
-        background = longRunningTask();
-    }
-    // `background` is still alive — correct.
-    co_await delay(100.0);
-}
-```
-
-**Rule**: When removing `state` from a variable, check whether it is declared inside a block. If so, move the
-declaration to function scope.
-
-### `const&` Parameters
-
-C++20 coroutines only store a reference in the coroutine frame for `const&` parameters — they do **not** copy the
-argument. If the caller passes a temporary (e.g. a default argument value, or a local that goes out of scope), the
-reference dangles after the first suspend point.
-
-```c++
-// DANGEROUS: if caller passes a temporary, `key` dangles after first co_await
-Future<Void> doSomething(Key const& key) {
-    co_await delay(1.0);
-    fmt::print("{}\n", key.toString()); // potential use-after-free
-}
-```
-
-The fix is to copy `const&` parameters to locals before the first `co_await`:
-
-```c++
-Future<Void> doSomething(Key const& key) {
-    Key keyCopy = key; // safe copy before any suspend
-    co_await delay(1.0);
-    fmt::print("{}\n", keyCopy.toString()); // OK
-}
-```
-
-**Rule**: Copy all `const&` parameters to local variables before the first `co_await`.
-
-### Forward Declarations in `.actor.h` Files
-
-When a function is converted from `ACTOR` to a coroutine, any forward declarations in `.actor.h` files must have the
-`ACTOR` keyword removed. The actor compiler automatically adds `const&` to all parameters in `ACTOR` declarations.
-If you also write `const&` explicitly, the generated code will contain `const& const&`, which is a compile error.
-
-```c++
-// workloads.h — WRONG: ACTOR + const& = double const&
-ACTOR Future<Void> foo(Database const& cx);
-
-// workloads.h — CORRECT: remove ACTOR since foo() is now a coroutine
-Future<Void> foo(Database const& cx);
-```
-
-### `DESCR` Deprecation
-
-The older TDMetric `DESCR` shorthand is deprecated. When a coroutine conversion touches metric event types, do not add
-new `DESCR(...)`-style declarations. Instead, define an explicit payload type with a
-`...Descriptor` suffix and specialize `Descriptor<T>` with `DescribeType<...>` and `DescribeField<...>` next to it.
-
-This keeps descriptor types unambiguous in coroutine-converted code and matches the old TDMetric pattern in files
-such as `flow/EventTypes.h`, `fdbclient/EventTypes.h`, and the workload metric definitions.
-
-### File Naming
-
-Converted files should be renamed from `.actor.cpp` to `.cpp` (or `.actor.h` to `.h`) since they no longer need the
-actor compiler. Both `fdbserver` and `flow_bench` use `fdb_find_sources()` in their `CMakeLists.txt`, which
-automatically picks up files by glob, so the rename is usually sufficient without any CMake changes.
-
-### Conversion Checklist
-
-1. Rename the file from `.actor.cpp` to `.cpp`.
-2. Remove `ACTOR` from all function definitions.
-3. Remove `UNCANCELLABLE`; add `Uncancellable` as the first parameter instead.
-4. Remove `state` from all local variable declarations.
-   - **Check**: is the variable inside a block (`if`/`else`/`for`/`try`)? If so, move it to function scope.
-5. Replace `wait(expr)` with `co_await expr`. Replace `waitNext(expr)` with `co_await expr`.
-6. Replace `return expr` with `co_return expr`. Replace `return Void()` with `co_return`.
-7. Rewrite `choose`/`when` by preferring `race(...)`; use `Choose` only for patterns that do not map cleanly to
-   `race`.
-8. Simplify: `wait(success(f))` → `co_await f`; `wait(store(v, f))` → `v = co_await f`.
-9. For `const&` parameters: copy to a local before the first `co_await`.
-10. Remove `ACTOR` from any forward declarations of the converted functions in `.actor.h` files.
-11. Build and run simulation tests to verify correctness.
-
-## Performance Analysis & Optimization
-
-### Performance Summary (Updated February 2026)
-
-Through optimization and profiling analysis, C++20 coroutines have made some performance improvements, reducing the gap with ACTOR-generated code from ~10% to 3-8% depending on workload patterns.
-
-#### Current Linux Performance Results (32-core, 3.1 GHz)
-
-```
-Benchmark Type    ACTOR Performance    Coroutine Performance    Gap        Status
---------------    ----------------     --------------------     ---        ------
-NET2/4096         2.67M/s             2.41M/s                  -8.5%      Target for optimization
-YIELD/4096        7.45M/s             13.6M/s                  +83%       Coroutines much faster ✅
-DELAY/4096        1.44M/s             5.22M/s                  +260%      Coroutines much faster ✅
-CALLBACK/1024/64  50.9M/s             8.7M/s (some patterns)   -82%       Mixed results
-```
-
-#### Key Insight: Workload Pattern Dependency
-
-**Coroutines excel in frame-reuse patterns** (YIELD, DELAY) where a single coroutine is suspended/resumed many times.
-
-**Coroutines lag in allocation-heavy patterns** (NET2) where many short-lived coroutines are created and destroyed.
-
-### Performance Analysis Deep Dive
-
-#### Root Cause Identification (February 2026)
-
-**Original Analysis**: Coroutines had 39.13% CPU overhead in `final_suspend()` that actors completely avoid.
-
-```
-ACTORS (2.67M/s):    43.31% CPU in direct ActorCallback::fire()
-COROUTINES (2.41M/s): 35.61% CPU in QuorumCallback + other overhead = ~75% total
-```
-
-#### Fix
-
-**Implementation**: Moved SAV cleanup from `final_suspend()` to `return_value()` to match actor completion timing.
-
-**Result**: Eliminated final_suspend() overhead from performance profiles (39.13% → 0.21% CPU usage).
-
-### Current Bottlenecks (February 2026)
-
-Based on comprehensive Linux profiling of optimized coroutines:
-
-#### 1. QuorumCallback Overhead (35.61% CPU)
-- **Impact**: Shared bottleneck between actors and coroutines
-- **Cause**: Callback chain traversal in SAV system
-- **Optimization**: Compiler hints provide minimal improvement
-
-#### 2. FastAllocator<128> Waste (7.19% CPU)
-- **Impact**: Frame allocation overhead in NET2 pattern
-- **Cause**: Some coroutine frames exceed 64-byte optimal bucket size
-- **Evidence**: 3.69% allocate + 3.50% release CPU usage
-- **Attempts**: Custom allocator forcing provided <1% improvement
-
-#### 3. AwaitableFuture Operations (3.66% CPU)
-- **Impact**: Coroutine-specific suspend/resume overhead
-- **Components**: 2.79% fire() + 0.87% resumeImpl()
-- **Nature**: Inherent to C++20 coroutine mechanics
-
-### Optimization Techniques - What Works and What Doesn't
-
-#### ✅ Successful Optimizations
-
-1. **Compiler optimization hints**: `__attribute__((hot))`, `__attribute__((always_inline))`, `__attribute__((flatten))`
-   - **Impact**: 2-5% performance improvements in hot paths
-   
-2. **Branch prediction hints**: `[[likely]]`, `[[unlikely]]`
-   - **Impact**: Optimizes common vs error paths
-   
-3. **Architectural changes**: Moving SAV cleanup from final_suspend() to return_value()
-   - **Impact**: Eliminated 39.13% CPU bottleneck (99.5% reduction)
-
-#### ❌ Ineffective Optimizations
-
-1. **Custom FastAllocator forcing**: Attempted to force frames into smaller buckets
-   - **Result**: Only 0.82% reduction in FastAllocator<128> overhead
-   - **Risk**: Unsafe for frames that don't fit smaller buckets
-   
-2. **Frame packing**: `__attribute__((packed))`, pointer bit-packing
-   - **Result**: Added overhead from indirection outweighed space savings
-   - **Issue**: Increased function call overhead
-
-3. **Aggressive final_suspend() bypass**: Attempted to skip SAV operations entirely
-   - **Result**: Broke Flow's reference counting semantics (double-free crashes)
-
-### Performance Comparison by Platform
-
-#### Linux (Release, -O3)
-- **Coroutines**: 2.41M/s NET2, 13.6M/s YIELD
-- **Actors**: 2.67M/s NET2, 7.45M/s YIELD
-
-#### macOS (Debug, -g)
-- **Coroutines**: 930k/s NET2 (significantly slower)
-- **Platform difference**: 2.56x performance gap between Linux and macOS
-
-### Benchmark Comparison Tool
-
-#### Generating Comprehensive Performance Reports
-
-To generate complete actor vs coroutine performance comparison reports (matching historical format):
-
-```bash
-cd build_output  # or your build directory
-python3 ../contrib/benchmark_comparison.py
-```
-
-**Output**: Complete comparison across all benchmark types:
-- DELAY benchmarks (DELAY + YIELD variants, all scales)
-- NET2 benchmarks (allocation-heavy patterns, all scales)
-- CALLBACK benchmarks (various template sizes and scales)
-- OVERALL_GEOMEAN calculations for statistical analysis
-
-**Requirements**:
-- Working flow_bench binary with both actor and coroutine benchmarks
-- Benchmark infrastructure must include: bench_net2, coroutine_net2, bench_delay, coroutine_delay_bench, coroutine_yield_bench, bench_callback, coroutine_callback
-
-**Usage**: Tool automatically runs benchmarks and generates comparison report in the format matching historical coroutine optimization reports.
-
-### Future Optimization Opportunities
-
-#### High-Impact Targets
-1. **QuorumCallback optimization** (35.61% CPU) - requires deeper architectural changes
-2. **Frame allocation strategy** - investigate frame pooling for allocation-heavy patterns
-3. **Profile-guided optimization** - compiler-level optimization based on runtime profiles
+Use named locals when they clarify ownership or control flow. Helpers remain useful when adapting futures for other
+APIs, but wrapping a future in `success` or `store` is unnecessary just to await it in a coroutine.

@@ -30,7 +30,7 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/Knobs.h"
 #include "TestSpecParser.h"
 

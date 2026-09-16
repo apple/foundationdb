@@ -303,11 +303,21 @@ if(NOT WIN32)
       COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
       @CLUSTER_FILE@
     )
+    # Legacy GRV futures ignore transaction timeouts; only the commit regressions apply.
+    add_unavailable_fdbclient_test(
+      NAME disconnected_timeout_legacy_api_unit_tests
+      COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
+      @CLUSTER_FILE@
+      --api-version=100
+      --test-case=500ms_commit_timeout_with_client_buggify,commit_cancel_with_client_buggify
+    )
+    # A disconnected multi-version client has no native transaction to cancel.
     add_unavailable_fdbclient_test(
       NAME disconnected_timeout_external_client_unit_tests
       COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
       @CLUSTER_FILE@
       ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+      --test-case-exclude=commit_cancel_with_client_buggify
     )
 
     file(GLOB API_TEST_FILES "${CMAKE_CURRENT_SOURCE_DIR}/test/apitester/tests/*.toml")

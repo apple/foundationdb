@@ -20,7 +20,7 @@
 
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/ManagementAPI.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbserver/core/FDBSimulatorProcessInfo.h"

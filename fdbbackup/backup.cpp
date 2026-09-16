@@ -1513,7 +1513,7 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		}
 	} else if (exe == ProgramExe::DR_AGENT) {
 		DatabaseBackupAgent dba;
-		Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(dest));
+		auto tr2 = makeReference<ReadYourWritesTransaction>(dest);
 		tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
 		RangeResult tagNames = co_await tr2->getRange(dba.tagNames.range(), 10000, snapshot);
@@ -1676,7 +1676,7 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
 	std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
 	std::string rootKey = backupStatusPrefixRange.begin.toString() + name + "/json";
 	std::string instanceKey = rootKey + "/" + "agent-" + id;
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(statusUpdateDest));
+	auto tr = makeReference<ReadYourWritesTransaction>(statusUpdateDest);
 	Future<Void> pollRateUpdater;
 
 	// In order to report a useful networkAddress to the cluster's layer status JSON object, determine which local
@@ -2658,7 +2658,7 @@ Future<Void> queryBackup(const char* name,
 			}
 
 			// We only need to know all the mutation logs from `snapshotVersion` to `restoreVersion`.
-			fileSet = co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, /*logOnly=*/true, snapshotVersion);
+			fileSet = co_await bc->getRestoreSet(restoreVersion, keyRangesFilter, /*logsOnly=*/true, snapshotVersion);
 		} else {
 			// When a snapshot version is not specified, we use the latest snapshot to restore to the `restoreVersion`.
 			fileSet = co_await bc->getRestoreSet(restoreVersion, keyRangesFilter);
@@ -2771,7 +2771,7 @@ Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOptions 
 
 	KeyBackedTag tag = makeBackupTag(tagName);
 
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	while (true) {
 		Error err;
 		try {
@@ -4526,6 +4526,7 @@ int main() {
 		int argc = static_cast<int>(persistentArgs.size());
 
 		std::vector<char*> argv;
+		argv.reserve(persistentArgs.size() + 1);
 		for (auto& arg : persistentArgs) {
 			argv.push_back(arg.data());
 		}

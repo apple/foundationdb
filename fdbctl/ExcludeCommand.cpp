@@ -75,7 +75,7 @@ Future<Void> excludeServersAndLocalities(Reference<IDatabase> db,
                                          bool failed,
                                          bool force) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -129,7 +129,7 @@ Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> d
                                                           bool waitForAllExcluded) {
 	std::set<NetworkAddress> inProgressExclusion;
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		inProgressExclusion.clear();
 		try {
