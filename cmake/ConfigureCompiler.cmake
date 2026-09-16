@@ -23,6 +23,7 @@ use_libcxx(_use_libcxx)
 env_set(USE_LIBCXX "${_use_libcxx}" BOOL "Use libc++")
 static_link_libcxx(_static_link_libcxx)
 env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstdcpp/libc++")
+env_set(MAX_LINK_JOBS "4" STRING "Maximum number of link jobs to run in parallel (to avoid OOM)")
 
 env_set(TRACE_PC_GUARD_INSTRUMENTATION_LIB "" STRING "Path to a library containing an implementation for __sanitizer_cov_trace_pc_guard. See https://clang.llvm.org/docs/SanitizerCoverage.html for more info.")
 env_set(PROFILE_INSTR_GENERATE OFF BOOL "If set, build FDB as an instrumentation build to generate profiles")
@@ -36,6 +37,9 @@ set(is_swift_compile "$<COMPILE_LANGUAGE:Swift>")
 set(is_cxx_compile "$<OR:$<COMPILE_LANGUAGE:CXX>,$<COMPILE_LANGUAGE:C>>")
 set(is_swift_link "$<LINK_LANGUAGE:Swift>")
 set(is_cxx_link "$<OR:$<LINK_LANGUAGE:CXX>,$<LINK_LANGUAGE:C>>")
+
+set_property(GLOBAL PROPERTY JOB_POOLS link_job_pool=${MAX_LINK_JOBS})
+set(CMAKE_JOB_POOL_LINK link_job_pool)
 
 set(USE_SANITIZER OFF)
 if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
