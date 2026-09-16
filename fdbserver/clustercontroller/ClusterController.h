@@ -2259,7 +2259,18 @@ public:
 		}
 		RoleFitness secondFitness(secondDetails, role, secondUsed);
 
-		if (firstFitness < secondFitness) { // second pass produced a worse result → regression
+		auto worseIgnoringWorstUsed = [](const RoleFitness& a, const RoleFitness& b) {
+			if (a.worstFit != b.worstFit)
+				return a.worstFit < b.worstFit;
+			if (a.count != b.count)
+				return a.count > b.count;
+			if (a.degraded != b.degraded)
+				return b.degraded;
+			if (a.role != recruitment::TLog && a.role != recruitment::LogRouter && a.bestFit != b.bestFit)
+				return a.bestFit < b.bestFit;
+			return false;
+		};
+		if (worseIgnoringWorstUsed(firstFitness, secondFitness)) { // second pass produced a worse result -> regression
 			auto describe = [&](const std::vector<WorkerDetails>& details,
 			                    const std::map<Optional<Standalone<StringRef>>, int>& used) {
 				std::string s;
