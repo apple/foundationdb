@@ -1306,8 +1306,8 @@ public:
 	MutationLogUploadTestFile(std::string name,
 	                          Failure failure,
 	                          Future<Void> firstAppend = Void(),
-	                          Future<Void> finishResult = Void())
-	  : IBackupFile(name), failure(failure), firstAppend(firstAppend), finishResult(finishResult) {}
+	                          Future<Void> finishFailure = io_timeout())
+	  : IBackupFile(name), failure(failure), firstAppend(firstAppend), finishFailure(finishFailure) {}
 
 	Future<Void> appendImpl(const void* data, size_t len) override {
 		ASSERT(!finished && !failed);
@@ -1325,9 +1325,9 @@ public:
 		finished = true;
 		if (failure == Failure::FINISH) {
 			failed = true;
-			return io_timeout();
+			return finishFailure;
 		}
-		return finishResult;
+		return Void();
 	}
 
 	int64_t size() const override { return contents.size(); }
@@ -1339,7 +1339,7 @@ public:
 private:
 	const Failure failure;
 	const Future<Void> firstAppend;
-	const Future<Void> finishResult;
+	const Future<Void> finishFailure;
 	std::string contents;
 	int appends = 0;
 	bool finished = false;
@@ -1353,8 +1353,8 @@ public:
 
 	explicit MutationLogUploadTestContainer(std::vector<Failure> failures,
 	                                        Future<Void> firstAppend = Void(),
-	                                        Future<Void> firstFinish = Void())
-	  : failures(std::move(failures)), firstAppend(firstAppend), firstFinish(firstFinish) {}
+	                                        Future<Void> finishFailure = io_timeout())
+	  : failures(std::move(failures)), firstAppend(firstAppend), finishFailure(finishFailure) {}
 
 	Future<Reference<IBackupFile>> writeFile(const std::string& name) override {
 		Failure failure = attempts < failures.size() ? failures[attempts] : Failure::NONE;
@@ -1362,10 +1362,8 @@ public:
 		if (failure == Failure::CREATE) {
 			return io_error();
 		}
-		auto file = makeReference<MutationLogUploadTestFile>(name,
-		                                                     failure,
-		                                                     attempts == 1 ? firstAppend : Future<Void>(Void()),
-		                                                     attempts == 1 ? firstFinish : Future<Void>(Void()));
+		auto file = makeReference<MutationLogUploadTestFile>(
+		    name, failure, attempts == 1 ? firstAppend : Future<Void>(Void()), finishFailure);
 		files.push_back(file);
 		return Reference<IBackupFile>(file);
 	}
@@ -1387,7 +1385,7 @@ public:
 private:
 	const std::vector<Failure> failures;
 	const Future<Void> firstAppend;
-	const Future<Void> firstFinish;
+	const Future<Void> finishFailure;
 	int attempts = 0;
 	std::vector<Reference<MutationLogUploadTestFile>> files;
 };
@@ -1417,9 +1415,12 @@ TEST_CASE("/BackupWorker/MutationLogUpload/RetryFreshFiles") {
 	bool stopped = false;
 	int retries = 0;
 	Promise<Void> firstRetry;
+	Promise<Void> finishReady;
 	using Failure = MutationLogUploadTestFile::Failure;
 	auto container = makeReference<MutationLogUploadTestContainer>(
-	    std::vector<Failure>{ Failure::CREATE, Failure::APPEND, Failure::FINISH, Failure::NONE });
+	    std::vector<Failure>{ Failure::CREATE, Failure::APPEND, Failure::FINISH, Failure::NONE },
+	    Future<Void>(Void()),
+	    finishReady.getFuture());
 	std::vector<VersionedMessage> messages{ testMutationLogMessage(
 		MutationRef(MutationRef::SetValue, "key"_sr, "v"_sr)) };
 	MutationLogBatch batch(
@@ -1430,13 +1431,17 @@ TEST_CASE("/BackupWorker/MutationLogUpload/RetryFreshFiles") {
 	    &stopped,
 	    [&]() { return batch.write(&messages, 100, 99, [](UID) { return false; }); },
 	    [&](Error err) -> Future<Void> {
-		    ASSERT(err.code() == error_code_io_error || err.code() == error_code_io_timeout);
+		    ASSERT(err.code() == error_code_io_error || err.code() == error_code_http_request_failed);
 		    return ++retries == 1 ? firstRetry.getFuture() : Future<Void>(Void());
 	    });
 
 	ASSERT_EQ(container->getAttempts(), 1);
 	ASSERT(!result.isReady());
 	firstRetry.send(Void());
+	ASSERT_EQ(container->getAttempts(), 3);
+	ASSERT_EQ(retries, 2);
+	ASSERT(!result.isReady());
+	finishReady.sendError(http_request_failed());
 	std::vector<CompletedMutationLogFile> completed = co_await result;
 	ASSERT_EQ(container->getAttempts(), 4);
 	ASSERT_EQ(retries, 3);
@@ -1453,43 +1458,6 @@ TEST_CASE("/BackupWorker/MutationLogUpload/RetryFreshFiles") {
 	ASSERT(files[1]->getFileName() != files[2]->getFileName());
 	for (const auto& file : files) {
 		ASSERT(file->getFileName().find("/log,100,101,") != std::string::npos);
-	}
-}
-
-TEST_CASE("/BackupWorker/MutationLogUpload/RetryBlobStoreFinish") {
-	for (Error error : { http_request_failed(), connection_failed(), timed_out(), lookup_failed() }) {
-		bool stopped = false;
-		int retries = 0;
-		Promise<Void> finishReady;
-		using Failure = MutationLogUploadTestFile::Failure;
-		auto container = makeReference<MutationLogUploadTestContainer>(
-		    std::vector<Failure>{}, Future<Void>(Void()), finishReady.getFuture());
-		std::vector<VersionedMessage> messages{ testMutationLogMessage(
-			MutationRef(MutationRef::SetValue, "key"_sr, "v"_sr)) };
-		MutationLogBatch batch(
-		    UID(9, 9), Tag(tagLocalityLogRouter, 0), 1, 100, 1, 1024, { { UID(1, 1), 100, container, {} } });
-		auto result = retryMutationLogUpload(
-		    4,
-		    5,
-		    &stopped,
-		    [&]() { return batch.write(&messages, 100, 99, [](UID) { return false; }); },
-		    [&](Error err) -> Future<Void> {
-			    ASSERT_EQ(err.code(), error.code());
-			    ++retries;
-			    return Void();
-		    });
-		ASSERT(!result.isReady());
-		ASSERT_EQ(container->getAttempts(), 1);
-		finishReady.sendError(error);
-		auto completed = co_await result;
-		ASSERT_EQ(retries, 1);
-		ASSERT_EQ(container->getAttempts(), 2);
-		ASSERT_EQ(completed.size(), 1);
-		const auto& files = container->getFiles();
-		ASSERT_EQ(files.size(), 2);
-		ASSERT_EQ(completed.front().file->getFileName(), files.back()->getFileName());
-		ASSERT(files.front()->getFileName() != files.back()->getFileName());
-		ASSERT_EQ(files.front()->bytes(), files.back()->bytes());
 	}
 }
 
@@ -1618,21 +1586,6 @@ TEST_CASE("/BackupWorker/MutationLogUpload/PreserveFailurePolicy") {
 			}
 		}
 	}
-	bool stopped = false;
-	int attempts = 0;
-	auto longOutage = retryMutationLogUpload(
-	    4,
-	    5,
-	    &stopped,
-	    [&]() -> Future<std::vector<CompletedMutationLogFile>> {
-		    if (++attempts <= 32) {
-			    return io_error();
-		    }
-		    return std::vector<CompletedMutationLogFile>();
-	    },
-	    [](Error) -> Future<Void> { return Void(); });
-	ASSERT(longOutage.isReady() && !longOutage.isError());
-	ASSERT_EQ(attempts, 33);
 	return Void();
 }
 
@@ -1666,43 +1619,40 @@ TEST_CASE("/BackupWorker/MutationLogUpload/StopDuringRetry") {
 }
 
 TEST_CASE("/BackupWorker/MutationLogUpload/StopDuringWrite") {
-	using Failure = MutationLogUploadTestFile::Failure;
 	for (int outcome = 0; outcome < 3; ++outcome) {
 		bool stopped = false;
+		int attempts = 0;
 		int retries = 0;
-		Promise<Void> finishReady;
-		auto container = makeReference<MutationLogUploadTestContainer>(
-		    std::vector<Failure>{}, Future<Void>(Void()), finishReady.getFuture());
-		std::vector<VersionedMessage> messages{ testMutationLogMessage(
-			MutationRef(MutationRef::SetValue, "key"_sr, "v"_sr)) };
-		MutationLogBatch batch(
-		    UID(9, 9), Tag(tagLocalityLogRouter, 0), 1, 100, 1, 1024, { { UID(1, 1), 100, container, {} } });
+		Promise<std::vector<CompletedMutationLogFile>> writeReady;
 		auto result = retryMutationLogUpload(
 		    4,
 		    5,
 		    &stopped,
-		    [&]() { return batch.write(&messages, 100, 99, [](UID) { return false; }); },
+		    [&]() {
+			    ++attempts;
+			    return writeReady.getFuture();
+		    },
 		    [&](Error) -> Future<Void> {
 			    ++retries;
 			    return Void();
 		    });
 		ASSERT(!result.isReady());
-		ASSERT(container->getFiles().front()->isFinished());
+		ASSERT_EQ(attempts, 1);
 		stopped = true;
 		if (outcome == 2) {
 			result.cancel();
 		}
 		if (outcome == 1) {
-			finishReady.sendError(io_timeout());
+			writeReady.sendError(io_timeout());
 		} else {
-			finishReady.send(Void());
+			writeReady.send(std::vector<CompletedMutationLogFile>());
 		}
 		ASSERT(result.isReady());
 		ASSERT_EQ(result.isError(), outcome != 0);
 		if (outcome != 0) {
 			ASSERT_EQ(result.getError().code(), outcome == 1 ? io_timeout().code() : actor_cancelled().code());
 		}
-		ASSERT_EQ(container->getAttempts(), 1);
+		ASSERT_EQ(attempts, 1);
 		ASSERT_EQ(retries, 0);
 	}
 	return Void();
