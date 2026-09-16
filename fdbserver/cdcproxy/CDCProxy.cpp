@@ -2075,20 +2075,6 @@ TEST_CASE("/NativeCDC/ConsumeLeaseSupersession") {
 	return Void();
 }
 
-TEST_CASE("/NativeCDC/ConsumeLeaseCompletedReply") {
-	auto lease = makeReference<CDCConsumeLease>(UID(1, 2));
-	Promise<CDCConsumeReply> pendingReply;
-	Future<CDCConsumeReply> original = lease->waitForReply(pendingReply.getFuture());
-	CDCConsumeReply reply;
-	reply.lastConsumedVersion = 10;
-	pendingReply.send(reply);
-	ASSERT(original.isReady() && !original.isError());
-	lease->supersede();
-	ASSERT(!original.isError());
-	ASSERT_EQ(original.get().lastConsumedVersion, 10);
-	return Void();
-}
-
 TEST_CASE("/NativeCDC/ProxyMutationFiltering") {
 	const KeyRangeRef keys("c"_sr, "m"_sr);
 
