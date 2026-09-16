@@ -982,12 +982,6 @@ private:
 	VersionedData versionedData;
 	std::map<Version, Standalone<VerUpdateRef>> mutationLog; // versions (durableVersion, version]
 
-	using WatchMapKey = std::pair<int64_t, Key>;
-	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
-	using WatchMapValue = Reference<ServerWatchMetadata>;
-	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
-	WatchMap_t watchMap; // keep track of server watches
-
 public:
 	struct PendingNewShard {
 		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(format("%016llx", shardId)), range(range) {}
@@ -1310,84 +1304,9 @@ public:
 	Key sk;
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	Database cx;
-	ActorCollection actors;
 
-	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
-	AsyncVar<bool> byteSampleClearsTooLarge;
-	Future<Void> byteSampleRecovery;
-	Future<Void> durableInProgress;
-
-	AsyncMap<Key, bool> watches;
-	AsyncMap<int64_t, bool> tenantWatches;
-	int64_t watchBytes;
-	int64_t numWatches;
-	AsyncVar<bool> noRecentUpdates;
-	double lastUpdate;
-
-	std::string folder;
-	std::string checkpointFolder;
-	std::string fetchedCheckpointFolder;
-
-	// defined only during splitMutations()/addMutation()
-	UpdateEagerReadInfo* updateEagerReads;
-
-	FlowLock durableVersionLock;
-	FlowLock fetchKeysParallelismLock;
-	// Extra lock that prevents too much post-initial-fetch work from building up, such as mutation applying and change
-	// feed tail fetching
-	FlowLock fetchKeysParallelismChangeFeedLock;
-	int64_t fetchKeysBytesBudget;
-	AsyncVar<bool> fetchKeysBudgetUsed;
-	int64_t fetchKeysTotalCommitBytes;
-	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
-
-	FlowLock serveFetchCheckpointParallelismLock;
-
-	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
-
-	Reference<PriorityMultiLock> ssLock;
-	std::vector<int> readPriorityRanks;
-
-	Future<PriorityMultiLock::Lock> getReadLock(const Optional<ReadOptions>& options) {
-		int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
-		readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
-		return ssLock->lock(readPriorityRanks[readType]);
-	}
-
-	FlowLock serveAuditStorageParallelismLock;
-
-	int64_t instanceID;
-
-	Promise<Void> otherError;
-	Promise<Void> coreStarted;
-	bool shuttingDown;
-
-	Promise<Void> registerInterfaceAcceptingRequests;
-	Future<Void> interfaceRegistered;
-
-	bool behind;
-	bool versionBehind;
-
-	bool debug_inApplyUpdate;
-	double debug_lastValidateTime;
-
-	int64_t lastBytesInputEBrake;
-	Version lastDurableVersionEBrake;
-
-	int maxQueryQueue;
-	int getAndResetMaxQueryQueueSize() {
-		int val = maxQueryQueue;
-		maxQueryQueue = 0;
-		return val;
-	}
-
-	TransactionTagCounter transactionTagCounter;
-	BusiestWriteTagContext busiestWriteTagContext;
-
-	Optional<LatencyBandConfig> latencyBandConfig;
-
-	Optional<EncryptionAtRestMode> encryptionMode;
-
+	// counters must be declared before every member that can own an actor (actors, watchMap, …): cancelling those
+	// actors runs CountedSection destructors that touch these counters, so counters must outlive them
 	struct Counters {
 		CounterCollection cc;
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
@@ -1615,6 +1534,92 @@ public:
 			specialCounter(cc, "ChangeFeedMemoryBytes", [self]() { return self->changeFeedMemoryBytes; });
 		}
 	} counters;
+
+private:
+	using WatchMapKey = std::pair<int64_t, Key>;
+	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
+	using WatchMapValue = Reference<ServerWatchMetadata>;
+	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
+	WatchMap_t watchMap; // keep track of server watches
+
+public:
+	ActorCollection actors;
+
+	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
+	AsyncVar<bool> byteSampleClearsTooLarge;
+	Future<Void> byteSampleRecovery;
+	Future<Void> durableInProgress;
+
+	AsyncMap<Key, bool> watches;
+	AsyncMap<int64_t, bool> tenantWatches;
+	int64_t watchBytes;
+	int64_t numWatches;
+	AsyncVar<bool> noRecentUpdates;
+	double lastUpdate;
+
+	std::string folder;
+	std::string checkpointFolder;
+	std::string fetchedCheckpointFolder;
+
+	// defined only during splitMutations()/addMutation()
+	UpdateEagerReadInfo* updateEagerReads;
+
+	FlowLock durableVersionLock;
+	FlowLock fetchKeysParallelismLock;
+	// Extra lock that prevents too much post-initial-fetch work from building up, such as mutation applying and change
+	// feed tail fetching
+	FlowLock fetchKeysParallelismChangeFeedLock;
+	int64_t fetchKeysBytesBudget;
+	AsyncVar<bool> fetchKeysBudgetUsed;
+	int64_t fetchKeysTotalCommitBytes;
+	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
+
+	FlowLock serveFetchCheckpointParallelismLock;
+
+	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
+
+	Reference<PriorityMultiLock> ssLock;
+	std::vector<int> readPriorityRanks;
+
+	Future<PriorityMultiLock::Lock> getReadLock(const Optional<ReadOptions>& options) {
+		int readType = (int)(options.present() ? options.get().type : ReadType::NORMAL);
+		readType = std::clamp<int>(readType, 0, readPriorityRanks.size() - 1);
+		return ssLock->lock(readPriorityRanks[readType]);
+	}
+
+	FlowLock serveAuditStorageParallelismLock;
+
+	int64_t instanceID;
+
+	Promise<Void> otherError;
+	Promise<Void> coreStarted;
+	bool shuttingDown;
+
+	Promise<Void> registerInterfaceAcceptingRequests;
+	Future<Void> interfaceRegistered;
+
+	bool behind;
+	bool versionBehind;
+
+	bool debug_inApplyUpdate;
+	double debug_lastValidateTime;
+
+	int64_t lastBytesInputEBrake;
+	Version lastDurableVersionEBrake;
+
+	int maxQueryQueue;
+	int getAndResetMaxQueryQueueSize() {
+		int val = maxQueryQueue;
+		maxQueryQueue = 0;
+		return val;
+	}
+
+	TransactionTagCounter transactionTagCounter;
+	BusiestWriteTagContext busiestWriteTagContext;
+
+	Optional<LatencyBandConfig> latencyBandConfig;
+
+	Optional<EncryptionAtRestMode> encryptionMode;
 
 	// Bytes read from storage engine when a storage server starts.
 	int64_t bytesRestored = 0;
@@ -2416,12 +2421,12 @@ std::shared_ptr<MoveInShard> StorageServer::getMoveInShard(const UID& dataMoveId
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, req.spanContext);
+	state CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	try {
 		++data->counters.getValueQueries;
-		++data->counters.allQueries;
 		if (req.key.startsWith(systemKeys.begin)) {
 			++data->counters.systemKeyQueries;
 		}
@@ -2539,8 +2544,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	// Key size is not included in "BytesQueried", but still contributes to cost,
 	// so it must be accounted for here.
 	data->transactionTagCounter.addRequest(req.tags, req.key.size() + resultSize);
-
-	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -4535,8 +4538,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
+	state CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	++data->counters.getRangeQueries;
-	++data->counters.allQueries;
 	if (req.begin.getKey().startsWith(systemKeys.begin)) {
 		++data->counters.systemKeyQueries;
 		++data->counters.getRangeSystemKeyQueries;
@@ -4711,7 +4714,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -6224,8 +6226,9 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
-	++data->counters.getMappedRangeQueries;
-	++data->counters.allQueries;
+	state CountedSection csAll(data->counters.allQueries, data->counters.finishedQueries);
+	state CountedSection csRangeMapped(data->counters.getMappedRangeQueries,
+	                                   data->counters.finishedGetMappedRangeQueries);
 	if (req.begin.getKey().startsWith(systemKeys.begin)) {
 		++data->counters.systemKeyQueries;
 	}
@@ -6404,8 +6407,6 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-	++data->counters.finishedQueries;
-	++data->counters.finishedGetMappedRangeQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -6433,8 +6434,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	state int64_t resultSize = 0;
 
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
+	state CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	++data->counters.getRangeStreamQueries;
-	++data->counters.allQueries;
 	if (req.begin.getKey().startsWith(systemKeys.begin)) {
 		++data->counters.systemKeyQueries;
 	}
@@ -6632,7 +6633,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-	++data->counters.finishedQueries;
 
 	return Void();
 }
@@ -6643,8 +6643,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
+	state CountedSection cs(data->counters.allQueries, data->counters.finishedQueries);
 	++data->counters.getKeyQueries;
-	++data->counters.allQueries;
 	data->maxQueryQueue = std::max<int>(
 	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
@@ -6719,8 +6719,6 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// key It would be more accurate to count all the read bytes, but it's not critical because this function is only
 	// used if read-your-writes is disabled
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-
-	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
