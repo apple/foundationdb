@@ -368,13 +368,13 @@ struct LoadBalanceRequestHooks<Request,
 				// FIXME: optimize to avoid creating new netNotifiedQueue for each message
 				RequestStream<Request, P> tssRequestStream(tssData.get().endpoint);
 				Future<ErrorOr<REPLY_TYPE(Request)>> fTssResult = tssRequestStream.tryGetReply(request);
-				model->addActor.send(tssComparison(request,
-				                                   ssResponse,
-				                                   fTssResult,
-				                                   tssData.get(),
-				                                   stream->getEndpoint().token.first(),
-				                                   alternatives,
-				                                   channel));
+				model->addBackgroundActor(tssComparison(request,
+				                                        ssResponse,
+				                                        fTssResult,
+				                                        tssData.get(),
+				                                        stream->getEndpoint().token.first(),
+				                                        alternatives,
+				                                        channel));
 			}
 		}
 	}

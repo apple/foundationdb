@@ -282,7 +282,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		fp->mutations.erase(fp->mutations.begin());
 		if (fp->mutations.empty()) {
 			// decode one more block
-			co_await decodeToVersion(fp, /*version=*/0, endVersion, getLogFile(fp->idx));
+			co_await decodeToVersion(fp, /*minVersion=*/0, endVersion, getLogFile(fp->idx));
 		}
 
 		if (fp->empty()) {

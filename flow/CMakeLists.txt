@@ -6,7 +6,6 @@ fdb_find_sources(FLOW_SRCS)
 list(REMOVE_ITEM FLOW_SRCS LinkTest.cpp)
 list(REMOVE_ITEM FLOW_SRCS TLSTest.cpp)
 list(REMOVE_ITEM FLOW_SRCS MkCertCli.cpp)
-list(REMOVE_ITEM FLOW_SRCS acac.cpp)
 list(REMOVE_ITEM FLOW_SRCS FlowTest.cpp)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
@@ -163,13 +162,6 @@ foreach(ft flow flow_sampling flowlinktest flow_test)
     REQUIRED)
   target_link_libraries(${ft} PUBLIC std::coroutines)
 endforeach()
-
-if(OPEN_FOR_IDE)
-  add_library(acac OBJECT acac.cpp)
-else()
-  add_executable(acac acac.cpp)
-endif()
-target_link_libraries(acac PUBLIC flow boost_target_program_options)
 
 target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
 

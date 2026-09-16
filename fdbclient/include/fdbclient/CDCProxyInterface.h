@@ -119,15 +119,18 @@ struct CDCConsumeRequest {
 	constexpr static FileIdentifier file_identifier = 8178243;
 	CDCCursor cursor;
 	ReplyPromise<CDCConsumeReply> reply;
+	// Stable across one consumer's RPC retries; absent for legacy or direct callers.
+	Optional<UID> consumerId;
 
 	CDCConsumeRequest() = default;
-	explicit CDCConsumeRequest(CDCCursor cursor) : cursor(cursor) {}
+	explicit CDCConsumeRequest(CDCCursor cursor, Optional<UID> consumerId = {})
+	  : cursor(cursor), consumerId(consumerId) {}
 
 	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, cursor, reply);
+		serializer(ar, cursor, reply, consumerId);
 	}
 };
 
