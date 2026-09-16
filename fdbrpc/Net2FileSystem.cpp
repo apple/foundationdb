@@ -47,7 +47,30 @@
 #include "flow/UnitTest.h"
 
 #ifdef __linux__
+#include <cerrno>
+
 namespace {
+int truncateTestFallocateCalls = 0;
+int truncateTestFtruncateCalls = 0;
+
+int fallocateWithOneShotEINTR(int fd, int mode, off_t offset, off_t length) {
+	++truncateTestFallocateCalls;
+	if (truncateTestFallocateCalls == 1) {
+		errno = EINTR;
+		return -1;
+	}
+	return ::fallocate(fd, mode, offset, length);
+}
+
+int ftruncateWithOneShotEINTR(int fd, off_t length) {
+	++truncateTestFtruncateCalls;
+	if (truncateTestFtruncateCalls == 1) {
+		errno = EINTR;
+		return -1;
+	}
+	return ::ftruncate(fd, length);
+}
+
 Future<Void> runAsyncFileKAIOTestOps(Reference<IAsyncFile> f, int numIterations, int fileSize, bool expectedToSucceed) {
 	void* buf = FastAllocator<4096>::allocate(); // we leak this if there is an error, but that shouldn't be a big deal
 
@@ -128,6 +151,42 @@ TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
 		}
 
 		co_await AsyncFileEIO::deleteFile(f->getFilename(), true);
+	}
+}
+
+TEST_CASE("/fdbrpc/AsyncFileKAIO/TruncateEINTR") {
+	// This test does nothing in simulation because simulation doesn't support AsyncFileKAIO
+	if (!g_network->isSimulated()) {
+		const std::string filename = "/tmp/__KAIO_TRUNCATE_EINTR_TEST_FILE__." +
+		                             deterministicRandom()->randomUniqueID().toString();
+		Reference<IAsyncFile> f;
+		Optional<Error> err;
+		try {
+			f = co_await AsyncFileKAIO::open(filename,
+			                                 IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE |
+			                                     IAsyncFile::OPEN_CREATE,
+			                                 0666,
+			                                 nullptr);
+			truncateTestFallocateCalls = 0;
+			truncateTestFtruncateCalls = 0;
+			AsyncFileKAIO::setSyscallHooksForTest(fallocateWithOneShotEINTR, ftruncateWithOneShotEINTR);
+
+			co_await f->truncate(2 * 4096);
+			ASSERT(truncateTestFallocateCalls == 2);
+			ASSERT(truncateTestFtruncateCalls == 0);
+			ASSERT((co_await f->size()) == 2 * 4096);
+
+			co_await f->truncate(4096);
+			ASSERT(truncateTestFtruncateCalls == 2);
+			ASSERT((co_await f->size()) == 4096);
+		} catch (Error& e) {
+			err = e;
+		}
+		AsyncFileKAIO::resetSyscallHooksForTest();
+		if (f)
+			co_await AsyncFileEIO::deleteFile(f->getFilename(), true);
+		if (err.present())
+			throw err.get();
 	}
 }
 #endif // __linux__
