@@ -750,8 +750,12 @@ static Future<std::vector<CompletedMutationLogFile>> retryMutationLogUpload(LogE
 		try {
 			co_return co_await writeFiles();
 		} catch (Error& e) {
-			if ((e.code() != error_code_io_error && e.code() != error_code_io_timeout) ||
-			    backupEpoch >= recruitedEpoch || *stopped) {
+			// Blob-store requests can exhaust their own bounded retries before the destination recovers.
+			const bool destinationError = e.code() == error_code_io_error || e.code() == error_code_io_timeout ||
+			                              e.code() == error_code_http_request_failed ||
+			                              e.code() == error_code_connection_failed ||
+			                              e.code() == error_code_timed_out || e.code() == error_code_lookup_failed;
+			if (!destinationError || backupEpoch >= recruitedEpoch || *stopped) {
 				throw;
 			}
 			err = e;
@@ -839,6 +843,7 @@ Future<std::vector<CompletedMutationLogFile>> MutationLogBatch::write(std::vecto
                                                                       IsStopped isStopped) const {
 	ASSERT(numMessages <= messages->size());
 	std::vector<Future<Reference<IBackupFile>>> logFileFutures;
+	logFileFutures.reserve(backups.size());
 	std::vector<Reference<IBackupFile>> logFiles;
 	for (const auto& backup : backups) {
 		logFileFutures.push_back(isStopped(backup.uid)
@@ -1451,6 +1456,43 @@ TEST_CASE("/BackupWorker/MutationLogUpload/RetryFreshFiles") {
 	}
 }
 
+TEST_CASE("/BackupWorker/MutationLogUpload/RetryBlobStoreFinish") {
+	for (Error error : { http_request_failed(), connection_failed(), timed_out(), lookup_failed() }) {
+		bool stopped = false;
+		int retries = 0;
+		Promise<Void> finishReady;
+		using Failure = MutationLogUploadTestFile::Failure;
+		auto container = makeReference<MutationLogUploadTestContainer>(
+		    std::vector<Failure>{}, Future<Void>(Void()), finishReady.getFuture());
+		std::vector<VersionedMessage> messages{ testMutationLogMessage(
+			MutationRef(MutationRef::SetValue, "key"_sr, "v"_sr)) };
+		MutationLogBatch batch(
+		    UID(9, 9), Tag(tagLocalityLogRouter, 0), 1, 100, 1, 1024, { { UID(1, 1), 100, container, {} } });
+		auto result = retryMutationLogUpload(
+		    4,
+		    5,
+		    &stopped,
+		    [&]() { return batch.write(&messages, 100, 99, [](UID) { return false; }); },
+		    [&](Error err) -> Future<Void> {
+			    ASSERT_EQ(err.code(), error.code());
+			    ++retries;
+			    return Void();
+		    });
+		ASSERT(!result.isReady());
+		ASSERT_EQ(container->getAttempts(), 1);
+		finishReady.sendError(error);
+		auto completed = co_await result;
+		ASSERT_EQ(retries, 1);
+		ASSERT_EQ(container->getAttempts(), 2);
+		ASSERT_EQ(completed.size(), 1);
+		const auto& files = container->getFiles();
+		ASSERT_EQ(files.size(), 2);
+		ASSERT_EQ(completed.front().file->getFileName(), files.back()->getFileName());
+		ASSERT(files.front()->getFileName() != files.back()->getFileName());
+		ASSERT_EQ(files.front()->bytes(), files.back()->bytes());
+	}
+}
+
 TEST_CASE("/BackupWorker/MutationLogUpload/ChangingRecipients") {
 	using Failure = MutationLogUploadTestFile::Failure;
 	const UID firstUid(1, 1);
@@ -1532,12 +1574,23 @@ TEST_CASE("/BackupWorker/MutationLogUpload/ChangingRecipients") {
 }
 
 TEST_CASE("/BackupWorker/MutationLogUpload/PreserveFailurePolicy") {
-	for (Error error :
-	     { io_error(), io_timeout(), actor_cancelled(), worker_removed(), broken_promise(), http_request_failed() }) {
+	const std::pair<Error, bool> cases[] = { { io_error(), true },
+		                                     { io_timeout(), true },
+		                                     { http_request_failed(), true },
+		                                     { connection_failed(), true },
+		                                     { timed_out(), true },
+		                                     { lookup_failed(), true },
+		                                     { actor_cancelled(), false },
+		                                     { worker_removed(), false },
+		                                     { broken_promise(), false },
+		                                     { http_auth_failed(), false },
+		                                     { http_not_accepted(), false },
+		                                     { backup_auth_missing(), false },
+		                                     { backup_auth_unreadable(), false } };
+	for (const auto& [error, retryable] : cases) {
 		for (bool oldEpoch : { false, true }) {
 			for (bool stopped : { false, true }) {
-				const bool shouldRetry = oldEpoch && !stopped &&
-				                         (error.code() == error_code_io_error || error.code() == error_code_io_timeout);
+				const bool shouldRetry = oldEpoch && !stopped && retryable;
 				int attempts = 0;
 				int retries = 0;
 				auto result = retryMutationLogUpload(
