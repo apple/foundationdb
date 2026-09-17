@@ -95,6 +95,29 @@ FDBKeyRange copyNativeCdcKeyRange(Arena& arena, KeyRangeRef source) {
 	return FDBKeyRange{ begin.begin(), begin.size(), end.begin(), end.size() };
 }
 
+std::vector<KeyRange> copyNativeCdcRanges(FDBKeyRange const* ranges, int rangeCount) {
+	if (rangeCount <= 0 || rangeCount > NATIVE_CDC_MAX_RANGES || ranges == nullptr) {
+		throw client_invalid_operation();
+	}
+	std::vector<KeyRange> result;
+	result.reserve(rangeCount);
+	for (int i = 0; i < rangeCount; ++i) {
+		auto const& range = ranges[i];
+		if (range.begin_key_length < 0 || range.end_key_length < 0 ||
+		    (range.begin_key_length > 0 && range.begin_key == nullptr) ||
+		    (range.end_key_length > 0 && range.end_key == nullptr)) {
+			throw client_invalid_operation();
+		}
+		KeyRef begin(range.begin_key, range.begin_key_length);
+		KeyRef end(range.end_key, range.end_key_length);
+		if (begin >= end) {
+			throw client_invalid_operation();
+		}
+		result.emplace_back(KeyRangeRef(begin, end));
+	}
+	return result;
+}
+
 CNativeCdcStreamInfoArray makeCNativeCdcStreamInfoArray(std::vector<NativeCdcStreamInfo> const& source) {
 	CNativeCdcStreamInfoArray result;
 	result.streams.reserve(result.arena, source.size());
@@ -102,7 +125,12 @@ CNativeCdcStreamInfoArray makeCNativeCdcStreamInfoArray(std::vector<NativeCdcStr
 		FDBCdcStreamInfo cStream;
 		cStream.name = copyNativeCdcKey(result.arena, stream.name);
 		cStream.stream_id = stream.streamId;
-		cStream.key_range = copyNativeCdcKeyRange(result.arena, stream.keys);
+		cStream.range_count = stream.ranges.size();
+		auto* ranges = new (result.arena) FDBKeyRange[stream.ranges.size()];
+		for (int i = 0; i < cStream.range_count; ++i) {
+			ranges[i] = copyNativeCdcKeyRange(result.arena, stream.ranges[i]);
+		}
+		cStream.ranges = ranges;
 		cStream.min_version = stream.minVersion;
 		result.streams.push_back(result.arena, cStream);
 	}
@@ -565,17 +593,13 @@ extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
 extern "C" DLLEXPORT FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* db,
                                                                  uint8_t const* name,
                                                                  int name_length,
-                                                                 uint8_t const* begin_key,
-                                                                 int begin_key_length,
-                                                                 uint8_t const* end_key,
-                                                                 int end_key_length) {
+                                                                 FDBKeyRange const* ranges,
+                                                                 int range_count) {
 	RETURN_FUTURE_ON_ERROR(
 	    CDCStreamId,
-	    return (FDBFuture*)(DB(db)
-	                            ->registerNativeCdcStream(
-	                                KeyRef(name, name_length),
-	                                KeyRangeRef(KeyRef(begin_key, begin_key_length), KeyRef(end_key, end_key_length)))
-	                            .extractPtr()););
+	    if (name_length <= 0 || name == nullptr) { throw client_invalid_operation(); } auto rangesCopy =
+	        copyNativeCdcRanges(ranges, range_count);
+	    return (FDBFuture*)(DB(db)->registerNativeCdcStream(KeyRef(name, name_length), rangesCopy).extractPtr()););
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* db, uint8_t const* name, int name_length) {
