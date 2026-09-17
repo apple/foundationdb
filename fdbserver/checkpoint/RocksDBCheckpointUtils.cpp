@@ -508,10 +508,11 @@ void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader
 		return;
 	}
 
-	a.done.send(Void());
 	TraceEvent(SevDebug, "RocksDBCheckpointReaderInitEnd", logId)
 	    .detail("Path", path)
 	    .detail("ColumnFamily", cf->GetName());
+	// Readiness lets another thread close the column family, so finish accessing it before publishing.
+	a.done.send(Void());
 }
 
 void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader::CloseAction& a) {
