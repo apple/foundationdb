@@ -150,7 +150,7 @@ void EndpointMap::realloc() {
 
 void EndpointMap::insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority) {
 	const auto index = token.second();
-	ASSERT(index < uint64_t(wellKnownEndpointCount));
+	ASSERT_LT(index, uint64_t(wellKnownEndpointCount));
 	ASSERT(data[index].receiver == nullptr);
 	data[index].receiver = r;
 	data[index].token() =
@@ -1343,7 +1343,7 @@ static void deliverNow(TransportData* self,
 				g_currentDeliveryPeerDisconnect = nullptr;
 			});
 			StringRef data = reader.arenaReadAll();
-			ASSERT(data.size() > 8);
+			ASSERT_GT(data.size(), 8);
 			ArenaObjectReader objReader(std::move(reader.arena()), data, AssumeVersion(reader.protocolVersion()));
 			receiver->receive(objReader);
 		} catch (Error& e) {
