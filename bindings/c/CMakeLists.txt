@@ -354,15 +354,17 @@ if(NOT WIN32)
       )
     endforeach()
 
-    add_python_venv_test(NAME fdb_c_upgrade_to_future_version
-      COMMAND python -m fdb_test_runner.upgrade_test
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
-      --process-number 3
-      )
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      add_python_venv_test(NAME fdb_c_upgrade_to_future_version
+        COMMAND python -m fdb_test_runner.upgrade_test
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
+        --process-number 3
+        )
+    endif()
 
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
       add_python_venv_test(NAME fdb_c_client_config_tests
         COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_client_config_tests.py
         --build-dir ${CMAKE_BINARY_DIR}
