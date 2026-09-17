@@ -253,6 +253,8 @@ void insertCoalescedRange(Map<StoredKey, Val, MapPair<StoredKey, Val>, Metric>& 
 	}
 }
 
+// Coalesces adjacent equal-valued ranges in memory. The transaction sequencing requirements of the
+// database-backed krmSetRangeCoalescing operations do not apply to this synchronous update.
 template <class StoredKey, class Val, class Metric, class MetricFunc, class MakeKeyAfter>
 void insertCoalescedKey(Map<StoredKey, Val, MapPair<StoredKey, Val>, Metric>& map,
                         const MetricFunc& mf,
