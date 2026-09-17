@@ -157,7 +157,8 @@ public:
 	// Native CDC operations. These values are intentionally independent from
 	// NativeAPI so multi-version client wrappers can forward them without
 	// depending on the native client implementation.
-	virtual ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) = 0;
+	virtual ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name,
+	                                                          const std::vector<KeyRange>& ranges) = 0;
 	virtual ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) = 0;
 	virtual ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() = 0;
 	virtual ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) = 0;
