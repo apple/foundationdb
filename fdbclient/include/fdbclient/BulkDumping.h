@@ -45,8 +45,8 @@ public:
 	              BulkLoadType loadType,
 	              BulkLoadTransportMethod transportMethod,
 	              std::string jobRoot,
-				  Optional<UID> fixedJobId)
-	  :jobRange(jobRange), phase(BulkDumpPhase::Submitted) {
+	              Optional<UID> fixedJobId)
+	  : jobRange(jobRange), phase(BulkDumpPhase::Submitted) {
 		manifest = BulkLoadManifest(loadType, transportMethod, jobRoot);
 		jobId = fixedJobId.orDefault(deterministicRandom()->randomUniqueID());
 		ASSERT(isValid());
