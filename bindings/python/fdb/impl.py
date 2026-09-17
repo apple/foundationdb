@@ -907,11 +907,12 @@ class FutureCdcStreamInfoArray(Future):
             CdcStreamInfo(
                 ctypes.string_at(stream.name.key, stream.name.key_length),
                 stream.stream_id,
-                ctypes.string_at(
-                    stream.key_range.begin_key, stream.key_range.begin_key_length
-                ),
-                ctypes.string_at(
-                    stream.key_range.end_key, stream.key_range.end_key_length
+                tuple(
+                    CdcKeyRange(
+                        ctypes.string_at(r.begin_key, r.begin_key_length),
+                        ctypes.string_at(r.end_key, r.end_key_length),
+                    )
+                    for r in stream.ranges[: stream.range_count]
                 ),
                 stream.min_version,
             )
@@ -1421,21 +1422,40 @@ class Database(_TransactionCreator):
     def get_client_status(self):
         return Key(self.capi.fdb_database_get_client_status(self.dpointer))
 
-    def register_cdc_stream(self, name, begin_key, end_key):
-        """Register a named CDC range and return a future containing its stream ID."""
+    def register_cdc_stream(self, name, begin_key=None, end_key=None, *, ranges=None):
+        """Register a named CDC range union and return its stream ID future.
+
+        Supply either begin_key and end_key, or ranges as an iterable of
+        (begin_key, end_key) pairs. The native client canonicalizes the union.
+        """
         _require_cdc_api_version()
         name = keyToBytes(name)
-        begin_key = keyToBytes(begin_key)
-        end_key = keyToBytes(end_key)
+        if ranges is None:
+            if begin_key is None or end_key is None:
+                raise TypeError("Supply both begin_key and end_key, or ranges")
+            ranges = ((begin_key, end_key),)
+        elif begin_key is not None or end_key is not None:
+            raise TypeError("ranges cannot be combined with begin_key or end_key")
+        # Keep converted key bytes alive until the C API has copied every range.
+        ranges = [(keyToBytes(begin), keyToBytes(end)) for begin, end in ranges]
+        native_ranges = (KeyRangeStruct * len(ranges))(
+            *(
+                KeyRangeStruct(
+                    ctypes.cast(begin, ctypes.POINTER(ctypes.c_byte)),
+                    len(begin),
+                    ctypes.cast(end, ctypes.POINTER(ctypes.c_byte)),
+                    len(end),
+                )
+                for begin, end in ranges
+            )
+        )
         return FutureUInt64(
             self.capi.fdb_database_register_cdc_stream(
                 self.dpointer,
                 name,
                 len(name),
-                begin_key,
-                len(begin_key),
-                end_key,
-                len(end_key),
+                native_ranges,
+                len(ranges),
             )
         )
 
@@ -1515,14 +1535,34 @@ class CdcCursor(NamedTuple):
     last_consumed_version: int
 
 
+class CdcKeyRange(NamedTuple):
+    """A half-open CDC key range with Python-owned endpoint bytes."""
+
+    begin_key: bytes
+    end_key: bytes
+
+
 class CdcStreamInfo(NamedTuple):
     """A registered stream and its durable minimum required version."""
 
     name: bytes
     stream_id: int
-    begin_key: bytes
-    end_key: bytes
+    ranges: Tuple[CdcKeyRange, ...]
     min_version: int
+
+    @property
+    def begin_key(self):
+        """Return the begin key of a single-range stream."""
+        if len(self.ranges) != 1:
+            raise ValueError("Use ranges for a multi-range CDC stream")
+        return self.ranges[0].begin_key
+
+    @property
+    def end_key(self):
+        """Return the end key of a single-range stream."""
+        if len(self.ranges) != 1:
+            raise ValueError("Use ranges for a multi-range CDC stream")
+        return self.ranges[0].end_key
 
 
 class CdcMutation(NamedTuple):
@@ -1723,7 +1763,8 @@ class CdcStreamInfoStruct(ctypes.Structure):
     _fields_ = [
         ("name", KeyStruct),
         ("stream_id", ctypes.c_uint64),
-        ("key_range", KeyRangeStruct),
+        ("ranges", ctypes.POINTER(KeyRangeStruct)),
+        ("range_count", ctypes.c_int),
         ("min_version", ctypes.c_int64),
     ]
 
@@ -2264,9 +2305,7 @@ def _init_cdc_c_api():
                 ctypes.c_void_p,
                 ctypes.c_void_p,
                 ctypes.c_int,
-                ctypes.c_void_p,
-                ctypes.c_int,
-                ctypes.c_void_p,
+                ctypes.POINTER(KeyRangeStruct),
                 ctypes.c_int,
             ],
             ctypes.c_void_p,

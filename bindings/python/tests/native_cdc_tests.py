@@ -48,7 +48,7 @@ class CdcDecodingTests(unittest.TestCase):
         pointer_size = ctypes.sizeof(ctypes.c_void_p)
         layouts = (
             (impl.KeyRangeStruct, 2 * pointer_size + 8),
-            (impl.CdcStreamInfoStruct, 3 * pointer_size + 28),
+            (impl.CdcStreamInfoStruct, 2 * pointer_size + 24),
             (impl.CdcMutationStruct, 2 * pointer_size + 12),
             (impl.CdcVersionedMutationsStruct, pointer_size + 12),
         )
@@ -211,6 +211,7 @@ class NativeCdcTests(unittest.TestCase):
             (info.name, info.stream_id, info.begin_key, info.end_key),
             (self.name, stream_id, self.begin, self.end),
         )
+        self.assertEqual(info.ranges, (fdb.CdcKeyRange(self.begin, self.end),))
         self.assertGreaterEqual(info.min_version, 0)
         with self.assertRaises(AttributeError):
             info.name = b"different"
@@ -314,6 +315,78 @@ class NativeCdcTests(unittest.TestCase):
             self.name, [stream.name for stream in wait(self.db.list_cdc_streams())]
         )
 
+    def test_multi_range_union_filtering_and_resume(self):
+        first = fdb.CdcKeyRange(self.prefix + b"a\x00", self.prefix + b"c\xff")
+        second = fdb.CdcKeyRange(self.prefix + b"x\x00", self.prefix + b"z\xff")
+        split = self.prefix + b"b"
+        ranges = (
+            second,
+            (split, first.end_key),
+            (first.begin_key, split),
+            first,
+        )
+        stream_id = wait(
+            self.db.register_cdc_stream(self.name, ranges=(r for r in ranges))
+        )
+        self.addCleanup(lambda: wait(self.db.remove_cdc_stream(self.name)))
+        self.assertEqual(
+            wait(self.db.register_cdc_stream(self.name, ranges=(first, second))),
+            stream_id,
+        )
+        info = self.stream_info()
+        self.assertEqual(info.ranges, (first, second))
+        for field in ("begin_key", "end_key"):
+            with self.assertRaisesRegex(ValueError, "Use ranges"):
+                getattr(info, field)
+        with self.assertRaises(AttributeError):
+            info.ranges[0].begin_key = b"different"
+
+        with wait(self.db.create_cdc_consumer(self.name)) as consumer:
+
+            def write_sets(tr):
+                tr[first.begin_key] = b"first\x00\xff"
+                tr[second.begin_key] = b"second\x00\xff"
+                tr[first.end_key] = b"excluded end"
+                tr[self.prefix + b"gap"] = b"excluded gap"
+                tr[second.end_key] = b"excluded end"
+
+            version = self.commit(write_sets)
+            groups = self.consume_through(consumer, version)
+            self.assertCountEqual(
+                groups[version],
+                (
+                    fdb.CdcMutation(
+                        fdb.CdcMutationType.SET_VALUE, first.begin_key, b"first\x00\xff"
+                    ),
+                    fdb.CdcMutation(
+                        fdb.CdcMutationType.SET_VALUE,
+                        second.begin_key,
+                        b"second\x00\xff",
+                    ),
+                ),
+            )
+            wait(consumer.acknowledge())
+            cursor = consumer.get_position()
+            self.assertEqual(
+                self.stream_info().min_version, cursor.last_consumed_version + 1
+            )
+
+        with wait(self.db.resume_cdc_consumer(cursor)) as resumed:
+            self.assertEqual(resumed.get_position(), cursor)
+            version = self.commit(
+                lambda tr: tr.clear_range(self.prefix, self.prefix + b"\xff")
+            )
+            groups = self.consume_through(resumed, version)
+            self.assertCountEqual(
+                groups[version],
+                tuple(
+                    fdb.CdcMutation(fdb.CdcMutationType.CLEAR_RANGE, *r)
+                    for r in (first, second)
+                ),
+            )
+            wait(resumed.acknowledge())
+            self.assertEqual(self.stream_info().ranges, (first, second))
+
     def test_native_errors_propagate(self):
         with self.assertRaises(fdb.FDBError):
             wait(self.db.create_cdc_consumer(self.name))
@@ -321,6 +394,20 @@ class NativeCdcTests(unittest.TestCase):
         with self.assertRaises(fdb.FDBError):
             wait(self.db.register_cdc_stream(self.name, self.begin, self.end + b"\x00"))
         self.assertEqual(self.stream_info().end_key, self.end)
+        for ranges in ((), ((self.end, self.begin),), ((self.begin, self.begin),)):
+            with self.subTest(ranges=ranges):
+                with self.assertRaises(fdb.FDBError):
+                    wait(self.db.register_cdc_stream(self.name, ranges=ranges))
+        for kwargs in (
+            {},
+            {"begin_key": self.begin},
+            {"end_key": self.end},
+            {"begin_key": self.begin, "ranges": ((self.begin, self.end),)},
+            {"end_key": self.end, "ranges": ((self.begin, self.end),)},
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(TypeError):
+                    self.db.register_cdc_stream(self.name, **kwargs)
 
     def test_missing_cdc_symbols_preserves_normal_database_use(self):
         impl = fdb.impl
@@ -375,6 +462,7 @@ class LegacyApiTests(unittest.TestCase):
         self.assertEqual(self.db[key], b"normal database operations still work")
         operations = (
             lambda: self.db.register_cdc_stream(b"legacy", b"a", b"z"),
+            lambda: self.db.register_cdc_stream(b"legacy", ranges=((b"a", b"z"),)),
             lambda: self.db.remove_cdc_stream(b"legacy"),
             lambda: self.db.list_cdc_streams(),
             lambda: self.db.create_cdc_consumer(b"legacy"),

@@ -111,6 +111,7 @@ def api_version(ver):
         "StreamingMode",
         "CdcMutationType",
         "CdcCursor",
+        "CdcKeyRange",
         "CdcStreamInfo",
         "CdcMutation",
         "CdcVersionedMutations",

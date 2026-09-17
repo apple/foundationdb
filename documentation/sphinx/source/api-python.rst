@@ -461,13 +461,18 @@ Database options
 Native change data capture (CDC)
 ================================
 
-CDC provides durable, named streams of committed mutations for a non-empty,
-half-open user-key range. Select API version 800 or later with
+CDC provides durable, named streams of committed mutations for a non-empty
+union of half-open user-key ranges. Select API version 800 or later with
 :func:`api_version` before using this interface. New stream registration also
 requires the cluster's ``ENABLE_NATIVE_CDC`` admission knob. Existing streams
 can still be listed or removed while admission is disabled; consumer creation,
 resume, consumption, and acknowledgement also remain available. Repeating an
-existing same-name, same-range registration remains idempotent.
+existing same-name, same-range-union registration remains idempotent.
+
+Native CDC is experimental. These bindings require the multi-range CDC C
+library and server implementation; older single-range CDC binaries use an
+incompatible interface even if they support API version 800. Drain and remove
+existing streams before upgrading all CDC-capable clients and servers together.
 
 Unlike the synchronous database key-value methods, the CDC database methods
 and the consumer's ``consume()`` and ``acknowledge()`` methods return
@@ -489,13 +494,31 @@ application writes by using :func:`transactional`.
 Stream management
 -----------------
 
-.. method:: Database.register_cdc_stream(name, begin_key, end_key)
+.. method:: Database.register_cdc_stream(name, begin_key=None, end_key=None, *, ranges=None)
 
-    Registers the byte-string ``name`` for ``[begin_key, end_key)`` in normal
-    user key space. The name and range must be non-empty. Repeating the same
-    name and range is idempotent; reusing a name with another range fails.
+    Registers the byte-string ``name`` for a range union in normal user key
+    space. Supply either ``begin_key`` and ``end_key`` for one half-open range,
+    or the keyword argument ``ranges`` with an iterable of
+    ``(begin_key, end_key)`` pairs (including :class:`CdcKeyRange` records).
+    Combining the two forms raises ``TypeError``. The name, range collection,
+    and each range must be non-empty. Supply at most 1024 ranges before
+    canonicalization; the encoded union must fit within the native metadata
+    value-size limit.
+
+    Registration sorts the ranges and merges overlaps, duplicates, and adjacent
+    intervals into a canonical union. Repeating the same name and canonical
+    union is idempotent, regardless of input order or partitioning; reusing a
+    name with a different union fails. All ranges share one stream ID, cursor,
+    and acknowledgement frontier. Mutations in gaps are excluded, and a clear
+    spanning multiple ranges produces one clipped clear per intersected range.
     Returns a future whose value is the unsigned 64-bit stream ID as a Python
     ``int``. Register long-lived streams rather than a stream per request.
+
+    For example::
+
+        stream_id = db.register_cdc_stream(
+            b"commerce", ranges=[(b"order/", b"order0"), (b"payment/", b"payment0")]
+        ).wait()
 
 .. method:: Database.remove_cdc_stream(name)
 
@@ -542,18 +565,26 @@ native result. They remain valid after the future or consumer is released.
     which mutations have been delivered. Both fields are Python ``int``
     values. A delivered cursor is not proof of processing or acknowledgement.
 
-.. class:: CdcStreamInfo(name, stream_id, begin_key, end_key, min_version)
+.. class:: CdcKeyRange(begin_key, end_key)
 
-    A stream's byte-string name, integer ID, half-open registered key range,
-    and durable minimum required version. ``min_version`` is a retention
-    frontier, not a snapshot version for the registered key range.
+    The inclusive begin and exclusive end byte strings of one registered range.
+
+.. class:: CdcStreamInfo(name, stream_id, ranges, min_version)
+
+    A stream's byte-string name, integer ID, canonical range union as a tuple
+    of :class:`CdcKeyRange` records, and durable minimum required version.
+    ``min_version`` is a retention frontier, not a snapshot version for the
+    registered ranges. The ``begin_key`` and ``end_key`` properties are
+    available when the canonical union contains exactly one range; accessing
+    them on a multi-range stream raises ``ValueError``. Use ``ranges`` to
+    inspect any stream without treating gaps as registered keys.
 
 .. class:: CdcMutation(type, param1, param2)
 
     One raw mutation. ``type`` is an integer, including for unrecognized
     mutation types; ``param1`` and ``param2`` are byte strings. For
     ``SET_VALUE`` they are the key and value; for ``CLEAR_RANGE`` they are
-    the begin and end keys, clipped to the registered range; for atomic
+    the begin and end keys, clipped to a registered range; for atomic
     mutations they are the key and operand. CDC returns raw mutation
     operations, not a materialized post-mutation value for every key.
 
