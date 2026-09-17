@@ -2259,18 +2259,7 @@ public:
 		}
 		RoleFitness secondFitness(secondDetails, role, secondUsed);
 
-		auto worseIgnoringWorstUsed = [](const RoleFitness& a, const RoleFitness& b) {
-			if (a.worstFit != b.worstFit)
-				return a.worstFit < b.worstFit;
-			if (a.count != b.count)
-				return a.count > b.count;
-			if (a.degraded != b.degraded)
-				return b.degraded;
-			if (a.role != recruitment::TLog && a.role != recruitment::LogRouter && a.bestFit != b.bestFit)
-				return a.bestFit < b.bestFit;
-			return false;
-		};
-		if (worseIgnoringWorstUsed(firstFitness, secondFitness)) { // second pass produced a worse result -> regression
+		if (!(firstFitness == secondFitness)) {
 			auto describe = [&](const std::vector<WorkerDetails>& details,
 			                    const std::map<Optional<Standalone<StringRef>>, int>& used) {
 				std::string s;
@@ -2298,8 +2287,20 @@ public:
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
+		// The determinism check below re-runs recruitment and compares the result against the first
+		// pass. Recruitment deliberately randomizes (randomShuffle/randomChoice among equal candidates),
+		// so both passes must start from the same RNG state or they would trivially disagree. Seed the
+		// generator before the first pass, then reseed it from the same value before the replay, so both
+		// passes draw an identical random sequence. This is simulation-only; production runs are unaffected
+		// because the generator there is not seeded deterministically.
+		uint64_t seed = 0;
+		if (g_network->isSimulated()) {
+			seed = deterministicRandom()->randomUInt64();
+			deterministicRandom()->resetSeed(seed);
+		}
 		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, true);
 		if (g_network->isSimulated()) {
+			deterministicRandom()->resetSeed(seed);
 			try {
 				// FIXME: The logic to pick a satellite in a remote region is not
 				// deterministic and can therefore break this nondeterminism check.
