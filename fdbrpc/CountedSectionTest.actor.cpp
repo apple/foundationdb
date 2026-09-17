@@ -52,7 +52,7 @@ TEST_CASE("/fdbrpc/countedsection/uninterrupted") {
 	return Void();
 }
 
-TEST_CASE("/fdbrpc/countedesction/interrupted") {
+TEST_CASE("/fdbrpc/countedsection/interrupted") {
 	state TestCounters tc;
 
 	{
