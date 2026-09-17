@@ -50,20 +50,19 @@ set(AUTO_DISCOVER_UNIT_TESTS
     OFF
     CACHE BOOL "Deprecated: use ENABLE_UNIT_TESTS for per-library CTest unit suites")
 
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+if(NOT CMAKE_CONFIGURATION_TYPES)
   if(OPEN_FOR_IDE)
-    message(STATUS "Defaulting build type to 'Debug' for OPEN_FOR_IDE")
     set(CMAKE_BUILD_TYPE
         Debug
-        CACHE STRING "Choose the type of build" FORCE)
+        CACHE STRING "Choose the type of build")
   else()
-    message(STATUS "Setting build type to 'Release'")
     set(CMAKE_BUILD_TYPE
         Release
-        CACHE STRING "Choose the type of build" FORCE)
+        CACHE STRING "Choose the type of build")
   endif()
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
-                                               "MinSizeRel" "RelWithDebInfo")
+  set_property(CACHE CMAKE_BUILD_TYPE
+               PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+  message(STATUS "Using build type: ${CMAKE_BUILD_TYPE}")
 endif()
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
