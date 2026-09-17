@@ -1030,29 +1030,6 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_return proxyStatus.second;
 	}
 
-	Future<Void> startBlockedConsume(Database cx,
-	                                 CDCStreamId streamId,
-	                                 Reference<NativeCdcConsumer> consumer,
-	                                 CDCProxyInterface proxy,
-	                                 Future<CDCConsumeReply>* outstanding) {
-		*outstanding = consumer->consume();
-		const double deadline = now() + operationTimeout;
-		while (true) {
-			CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, &proxy);
-			if (outstanding->isReady()) {
-				co_await *outstanding;
-				co_await timeoutError(consumer->acknowledge(), operationTimeout);
-				*outstanding = consumer->consume();
-				continue;
-			}
-			if (status.activeConsumeRequests > 0 && status.readDemand > 0) {
-				co_return;
-			}
-			ASSERT_LT(now(), deadline);
-			co_await delay(0.01);
-		}
-	}
-
 	Future<Void> waitForNoActiveConsumes(Database cx, CDCStreamId streamId, CDCProxyInterface* proxy) {
 		const double deadline = now() + operationTimeout;
 		while (true) {
@@ -1082,8 +1059,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		// the tracked consumer so later workload phases do not retain a cursor behind acknowledgements made here.
 		Reference<NativeCdcConsumer> idleConsumer = streams.front().consumer;
 		const Version idleStartVersion = idleConsumer->position().lastConsumedVersion;
-		Future<CDCConsumeReply> idleConsume;
-		co_await startBlockedConsume(cx, streamId, idleConsumer, *proxy, &idleConsume);
+		// Check client exclusivity before yielding: committed-version progress can complete a consume before
+		// a status request observes read demand, even when the client correctly rejects overlapping operations.
+		Future<CDCConsumeReply> idleConsume = idleConsumer->consume();
+		ASSERT(!idleConsume.isReady());
 		Future<CDCConsumeReply> overlappingConsume = idleConsumer->consume();
 		ASSERT(overlappingConsume.isReady() && overlappingConsume.isError());
 		ASSERT_EQ(overlappingConsume.getError().code(), error_code_client_invalid_operation);
@@ -1128,16 +1107,19 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		first.cancel();
 		co_await waitForNoActiveConsumes(cx, streamId, proxy);
 
-		// Reproduce the server-side overlap without relying on the timing of a socket reset: both requests belong
-		// to one consumer, so the retry must supersede the pending metadata read instead of failing exclusivity.
+		// The first request may finish before the retry reaches the proxy. A pending request is superseded, while
+		// an already-completed request retains its reply; either ordering must allow the same consumer to retry.
 		const UID consumerId = deterministicRandom()->randomUniqueID();
 		Future<ErrorOr<CDCConsumeReply>> original =
 		    proxy->consume.tryGetReply(CDCConsumeRequest(currentCursor, consumerId));
 		Future<ErrorOr<CDCConsumeReply>> retry =
 		    proxy->consume.tryGetReply(CDCConsumeRequest(currentCursor, consumerId));
-		const ErrorOr<CDCConsumeReply> superseded = co_await timeoutError(original, operationTimeout);
-		ASSERT(superseded.isError());
-		ASSERT_EQ(superseded.getError().code(), error_code_request_maybe_delivered);
+		const ErrorOr<CDCConsumeReply> firstReply = co_await timeoutError(original, operationTimeout);
+		if (firstReply.isError()) {
+			ASSERT_EQ(firstReply.getError().code(), error_code_request_maybe_delivered);
+		} else {
+			ASSERT_GE(firstReply.get().lastConsumedVersion, currentCursor.lastConsumedVersion);
+		}
 		co_await timeoutError(throwErrorOr(retry), operationTimeout);
 		co_await waitForNoActiveConsumes(cx, streamId, proxy);
 	}
