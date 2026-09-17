@@ -395,6 +395,22 @@ ThreadFuture<VersionVector> DLTransaction::getVersionVector() {
 
 namespace {
 
+KeyRange copyKeyRange(FdbCApi::FDBKeyRange const& source) {
+	return KeyRange(KeyRangeRef(KeyRef(static_cast<const uint8_t*>(source.beginKey), source.beginKeyLength),
+	                            KeyRef(static_cast<const uint8_t*>(source.endKey), source.endKeyLength)));
+}
+
+RangeLockOwnerInfo copyRangeLockOwnerInfo(FdbCApi::FDBRangeLockOwner const& source) {
+	return RangeLockOwnerInfo{ Key(KeyRef(source.ownerId.key, source.ownerId.keyLength)),
+		                       Value(ValueRef(source.description.key, source.description.keyLength)) };
+}
+
+RangeLockInfo copyRangeLockInfo(FdbCApi::FDBRangeLock const& source) {
+	return RangeLockInfo{ copyKeyRange(source.keyRange),
+		                  copyKeyRange(source.lockedRange),
+		                  Key(KeyRef(source.ownerId.key, source.ownerId.keyLength)) };
+}
+
 NativeCdcStreamInfo copyNativeCdcStreamInfo(FdbCApi::FDBNativeCdcStreamInfo const& source) {
 	NativeCdcStreamInfo result;
 	result.name = Key(StringRef(source.name.key, source.name.keyLength));
@@ -553,6 +569,95 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	FdbCApi::FDBFuture* f =
 	    api->databaseCreateSnapshot(db, uid.begin(), uid.size(), snapshot_command.begin(), snapshot_command.size());
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+}
+
+ThreadFuture<Void> DLDatabase::registerRangeLockOwner(const KeyRef& ownerId, const StringRef& description) {
+	if (!api->databaseRegisterRangeLockOwner) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseRegisterRangeLockOwner(
+	    db, ownerId.begin(), ownerId.size(), description.begin(), description.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture*, FdbCApi*) { return Void(); });
+}
+
+ThreadFuture<Void> DLDatabase::removeRangeLockOwner(const KeyRef& ownerId) {
+	if (!api->databaseRemoveRangeLockOwner) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseRemoveRangeLockOwner(db, ownerId.begin(), ownerId.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture*, FdbCApi*) { return Void(); });
+}
+
+ThreadFuture<std::vector<RangeLockOwnerInfo>> DLDatabase::listRangeLockOwners() {
+	if (!api->databaseListRangeLockOwners || !api->futureGetRangeLockOwnerArray) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseListRangeLockOwners(db);
+	return toThreadFuture<std::vector<RangeLockOwnerInfo>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		FdbCApi::FDBRangeLockOwner const* owners;
+		int count;
+		FdbCApi::fdb_error_t error = api->futureGetRangeLockOwnerArray(f, &owners, &count);
+		ASSERT(!error);
+		std::vector<RangeLockOwnerInfo> result;
+		result.reserve(count);
+		for (int i = 0; i < count; ++i) {
+			result.push_back(copyRangeLockOwnerInfo(owners[i]));
+		}
+		return result;
+	});
+}
+
+ThreadFuture<Void> DLDatabase::takeExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) {
+	if (!api->databaseTakeExclusiveReadLock) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseTakeExclusiveReadLock(
+	    db, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), ownerId.begin(), ownerId.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture*, FdbCApi*) { return Void(); });
+}
+
+ThreadFuture<Void> DLDatabase::releaseExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) {
+	if (!api->databaseReleaseExclusiveReadLock) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseReleaseExclusiveReadLock(
+	    db, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), ownerId.begin(), ownerId.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture*, FdbCApi*) { return Void(); });
+}
+
+ThreadFuture<std::vector<RangeLockInfo>> DLDatabase::listExclusiveReadLocks(const KeyRangeRef& keys) {
+	if (!api->databaseListExclusiveReadLocks || !api->futureGetRangeLockArray) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseListExclusiveReadLocks(
+	    db, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
+	return toThreadFuture<std::vector<RangeLockInfo>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		FdbCApi::FDBRangeLock const* locks;
+		int count;
+		FdbCApi::fdb_error_t error = api->futureGetRangeLockArray(f, &locks, &count);
+		ASSERT(!error);
+		std::vector<RangeLockInfo> result;
+		result.reserve(count);
+		for (int i = 0; i < count; ++i) {
+			result.push_back(copyRangeLockInfo(locks[i]));
+		}
+		return result;
+	});
+}
+
+ThreadFuture<Void> DLDatabase::releaseAllExclusiveReadLocks(const KeyRef& ownerId) {
+	if (!api->databaseReleaseAllExclusiveReadLocks) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseReleaseAllExclusiveReadLocks(db, ownerId.begin(), ownerId.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture*, FdbCApi*) { return Void(); });
 }
 
 ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
@@ -777,6 +882,23 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_get_client_status",
 	                   headerVersion >= ApiVersion::withGetClientStatus().version());
+	// Clients predating the range-lock API can advertise the same API version, so these symbols stay optional.
+	loadClientFunction(
+	    &api->databaseRegisterRangeLockOwner, lib, fdbCPath, "fdb_database_register_range_lock_owner", false);
+	loadClientFunction(
+	    &api->databaseRemoveRangeLockOwner, lib, fdbCPath, "fdb_database_remove_range_lock_owner", false);
+	loadClientFunction(&api->databaseListRangeLockOwners, lib, fdbCPath, "fdb_database_list_range_lock_owners", false);
+	loadClientFunction(
+	    &api->databaseTakeExclusiveReadLock, lib, fdbCPath, "fdb_database_take_exclusive_read_lock", false);
+	loadClientFunction(
+	    &api->databaseReleaseExclusiveReadLock, lib, fdbCPath, "fdb_database_release_exclusive_read_lock", false);
+	loadClientFunction(
+	    &api->databaseListExclusiveReadLocks, lib, fdbCPath, "fdb_database_list_exclusive_read_locks", false);
+	loadClientFunction(&api->databaseReleaseAllExclusiveReadLocks,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_release_all_exclusive_read_locks",
+	                   false);
 	loadClientFunction(&api->databaseRegisterNativeCdcStream,
 	                   lib,
 	                   fdbCPath,
@@ -915,6 +1037,9 @@ void DLApi::init() {
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
 	loadClientFunction(
 	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 710);
+	loadClientFunction(
+	    &api->futureGetRangeLockOwnerArray, lib, fdbCPath, "fdb_future_get_range_lock_owner_array", false);
+	loadClientFunction(&api->futureGetRangeLockArray, lib, fdbCPath, "fdb_future_get_range_lock_array", false);
 	loadClientFunction(&api->futureGetNativeCdcStreamInfoArray,
 	                   lib,
 	                   fdbCPath,
@@ -1654,6 +1779,34 @@ ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringR
 
 ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
 	return executeOperation(&IDatabase::createSnapshot, uid, snapshot_command);
+}
+
+ThreadFuture<Void> MultiVersionDatabase::registerRangeLockOwner(const KeyRef& ownerId, const StringRef& description) {
+	return executeOperation(&IDatabase::registerRangeLockOwner, ownerId, description);
+}
+
+ThreadFuture<Void> MultiVersionDatabase::removeRangeLockOwner(const KeyRef& ownerId) {
+	return executeOperation(&IDatabase::removeRangeLockOwner, ownerId);
+}
+
+ThreadFuture<std::vector<RangeLockOwnerInfo>> MultiVersionDatabase::listRangeLockOwners() {
+	return executeOperation(&IDatabase::listRangeLockOwners);
+}
+
+ThreadFuture<Void> MultiVersionDatabase::takeExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) {
+	return executeOperation(&IDatabase::takeExclusiveReadLock, keys, ownerId);
+}
+
+ThreadFuture<Void> MultiVersionDatabase::releaseExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) {
+	return executeOperation(&IDatabase::releaseExclusiveReadLock, keys, ownerId);
+}
+
+ThreadFuture<std::vector<RangeLockInfo>> MultiVersionDatabase::listExclusiveReadLocks(const KeyRangeRef& keys) {
+	return executeOperation(&IDatabase::listExclusiveReadLocks, keys);
+}
+
+ThreadFuture<Void> MultiVersionDatabase::releaseAllExclusiveReadLocks(const KeyRef& ownerId) {
+	return executeOperation(&IDatabase::releaseAllExclusiveReadLocks, ownerId);
 }
 
 ThreadFuture<CDCStreamId> MultiVersionDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
@@ -2960,6 +3113,39 @@ std::string ClientInfo::getTraceFileIdentifier(const std::string& baseIdentifier
 }
 
 // UNIT TESTS
+TEST_CASE("/fdbclient/multiversionclient/RangeLocksUnsupported") {
+	auto api = makeReference<FdbCApi>();
+	auto db = makeReference<DLDatabase>(api, static_cast<FdbCApi::FDBDatabase*>(nullptr));
+	const KeyRef ownerId = "owner"_sr;
+	const KeyRangeRef keys("a"_sr, "z"_sr);
+	const auto expectUnsupported = [](auto result) {
+		ASSERT(result.isError());
+		ASSERT_EQ(result.getError().code(), error_code_unsupported_operation);
+	};
+
+	expectUnsupported(db->registerRangeLockOwner(ownerId, "description"_sr));
+	expectUnsupported(db->removeRangeLockOwner(ownerId));
+	expectUnsupported(db->listRangeLockOwners());
+	expectUnsupported(db->takeExclusiveReadLock(keys, ownerId));
+	expectUnsupported(db->releaseExclusiveReadLock(keys, ownerId));
+	expectUnsupported(db->listExclusiveReadLocks(keys));
+	expectUnsupported(db->releaseAllExclusiveReadLocks(ownerId));
+
+	api->databaseListRangeLockOwners = [](FdbCApi::FDBDatabase*) -> FdbCApi::FDBFuture* {
+		ASSERT(false);
+		return nullptr;
+	};
+	expectUnsupported(db->listRangeLockOwners());
+	api->databaseListExclusiveReadLocks =
+	    [](FdbCApi::FDBDatabase*, uint8_t const*, int, uint8_t const*, int) -> FdbCApi::FDBFuture* {
+		ASSERT(false);
+		return nullptr;
+	};
+	expectUnsupported(db->listExclusiveReadLocks(keys));
+
+	return Void();
+}
+
 TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing") {
 	auto vals = parseOptionValues("a");
 	ASSERT(vals.size() == 1 && vals[0] == "a");

@@ -187,6 +187,19 @@ typedef struct keyrange {
 	int end_key_length;
 } FDBKeyRange;
 
+typedef struct range_lock_owner {
+	FDBKey owner_id;
+	FDBKey description;
+} FDBRangeLockOwner;
+
+typedef struct range_lock {
+	/* The portion of the locked range returned by the query. */
+	FDBKeyRange key_range;
+	/* The original range used to acquire the lock; use these bounds to release it. */
+	FDBKeyRange locked_range;
+	FDBKey owner_id;
+} FDBRangeLock;
+
 /*
  * Raw mutation types returned by CDC. The numeric values match
  * MutationRef::Type and, for atomic operations, FDBMutationType.
@@ -397,6 +410,15 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_keyrange_array(FDBFuture
                                                                        FDBKeyRange const** out_ranges,
                                                                        int* out_count);
 
+/* The returned arrays and their bytes remain valid until the future is destroyed or releases its memory. */
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_range_lock_owner_array(FDBFuture* f,
+                                                                               FDBRangeLockOwner const** out_owners,
+                                                                               int* out_count);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_range_lock_array(FDBFuture* f,
+                                                                         FDBRangeLock const** out_locks,
+                                                                         int* out_count);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_cdc_stream_info_array(FDBFuture* f,
                                                                               FDBCdcStreamInfo const** out_streams,
                                                                               int* out_count);
@@ -433,6 +455,50 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_set_option(FDBDatabase* d,
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
                                                                          FDBTransaction** out_transaction);
+
+/* Range-lock management operations manage their own transactions. All input bytes are copied before returning.
+ * Owners must be registered before acquiring a lock. Acquisition and release require the same owner and exact range.
+ * Ranges must be nonempty and within the user key space. Enforcement requires enable_read_lock_on_range on the servers.
+ * Release locks before removing their owner. Owner identifiers are not authentication credentials. */
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_register_range_lock_owner(FDBDatabase* db,
+                                                                               uint8_t const* owner_id,
+                                                                               int owner_id_length,
+                                                                               uint8_t const* description,
+                                                                               int description_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_remove_range_lock_owner(FDBDatabase* db,
+                                                                             uint8_t const* owner_id,
+                                                                             int owner_id_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_list_range_lock_owners(FDBDatabase* db);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_take_exclusive_read_lock(FDBDatabase* db,
+                                                                              uint8_t const* begin_key,
+                                                                              int begin_key_length,
+                                                                              uint8_t const* end_key,
+                                                                              int end_key_length,
+                                                                              uint8_t const* owner_id,
+                                                                              int owner_id_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_release_exclusive_read_lock(FDBDatabase* db,
+                                                                                 uint8_t const* begin_key,
+                                                                                 int begin_key_length,
+                                                                                 uint8_t const* end_key,
+                                                                                 int end_key_length,
+                                                                                 uint8_t const* owner_id,
+                                                                                 int owner_id_length);
+
+/* Listings may span multiple transactions and do not provide an atomic snapshot. */
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_list_exclusive_read_locks(FDBDatabase* db,
+                                                                               uint8_t const* begin_key,
+                                                                               int begin_key_length,
+                                                                               uint8_t const* end_key,
+                                                                               int end_key_length);
+
+/* Releases this owner's locks in multiple transactions; concurrent lock acquisition must be coordinated separately. */
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_release_all_exclusive_read_locks(FDBDatabase* db,
+                                                                                      uint8_t const* owner_id,
+                                                                                      int owner_id_length);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* db,
                                                                          uint8_t const* name,

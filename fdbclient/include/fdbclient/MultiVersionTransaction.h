@@ -92,6 +92,17 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		int endKeyLength;
 	};
 
+	using FDBRangeLockOwner = struct range_lock_owner {
+		FDBKey ownerId;
+		FDBKey description;
+	};
+
+	using FDBRangeLock = struct range_lock {
+		FDBKeyRange keyRange;
+		FDBKeyRange lockedRange;
+		FDBKey ownerId;
+	};
+
 	using FDBNativeCdcStreamInfo = struct native_cdc_stream_info {
 		FDBKey name;
 		uint64_t streamId;
@@ -154,6 +165,37 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
 
 	FDBFuture* (*databaseGetClientStatus)(FDBDatabase* db);
+	FDBFuture* (*databaseRegisterRangeLockOwner)(FDBDatabase* database,
+	                                             uint8_t const* ownerId,
+	                                             int ownerIdLength,
+	                                             uint8_t const* description,
+	                                             int descriptionLength) = nullptr;
+	FDBFuture* (*databaseRemoveRangeLockOwner)(FDBDatabase* database,
+	                                           uint8_t const* ownerId,
+	                                           int ownerIdLength) = nullptr;
+	FDBFuture* (*databaseListRangeLockOwners)(FDBDatabase* database) = nullptr;
+	FDBFuture* (*databaseTakeExclusiveReadLock)(FDBDatabase* database,
+	                                            uint8_t const* beginKey,
+	                                            int beginKeyLength,
+	                                            uint8_t const* endKey,
+	                                            int endKeyLength,
+	                                            uint8_t const* ownerId,
+	                                            int ownerIdLength) = nullptr;
+	FDBFuture* (*databaseReleaseExclusiveReadLock)(FDBDatabase* database,
+	                                               uint8_t const* beginKey,
+	                                               int beginKeyLength,
+	                                               uint8_t const* endKey,
+	                                               int endKeyLength,
+	                                               uint8_t const* ownerId,
+	                                               int ownerIdLength) = nullptr;
+	FDBFuture* (*databaseListExclusiveReadLocks)(FDBDatabase* database,
+	                                             uint8_t const* beginKey,
+	                                             int beginKeyLength,
+	                                             uint8_t const* endKey,
+	                                             int endKeyLength) = nullptr;
+	FDBFuture* (*databaseReleaseAllExclusiveReadLocks)(FDBDatabase* database,
+	                                                   uint8_t const* ownerId,
+	                                                   int ownerIdLength) = nullptr;
 	FDBFuture* (*databaseRegisterNativeCdcStream)(FDBDatabase* database,
 	                                              uint8_t const* name,
 	                                              int nameLength,
@@ -299,6 +341,10 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                            FDBMappedKeyValue const** outKVM,
 	                                            int* outCount,
 	                                            fdb_bool_t* outMore);
+	fdb_error_t (*futureGetRangeLockOwnerArray)(FDBFuture* f,
+	                                            FDBRangeLockOwner const** outOwners,
+	                                            int* outCount) = nullptr;
+	fdb_error_t (*futureGetRangeLockArray)(FDBFuture* f, FDBRangeLock const** outLocks, int* outCount) = nullptr;
 	fdb_error_t (*futureGetNativeCdcStreamInfoArray)(FDBFuture* f,
 	                                                 FDBNativeCdcStreamInfo const** outStreams,
 	                                                 int* outCount);
@@ -433,6 +479,13 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+	ThreadFuture<Void> registerRangeLockOwner(const KeyRef& ownerId, const StringRef& description) override;
+	ThreadFuture<Void> removeRangeLockOwner(const KeyRef& ownerId) override;
+	ThreadFuture<std::vector<RangeLockOwnerInfo>> listRangeLockOwners() override;
+	ThreadFuture<Void> takeExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) override;
+	ThreadFuture<Void> releaseExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) override;
+	ThreadFuture<std::vector<RangeLockInfo>> listExclusiveReadLocks(const KeyRangeRef& keys) override;
+	ThreadFuture<Void> releaseAllExclusiveReadLocks(const KeyRef& ownerId) override;
 	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) override;
 	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
 	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;
@@ -751,6 +804,13 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+	ThreadFuture<Void> registerRangeLockOwner(const KeyRef& ownerId, const StringRef& description) override;
+	ThreadFuture<Void> removeRangeLockOwner(const KeyRef& ownerId) override;
+	ThreadFuture<std::vector<RangeLockOwnerInfo>> listRangeLockOwners() override;
+	ThreadFuture<Void> takeExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) override;
+	ThreadFuture<Void> releaseExclusiveReadLock(const KeyRangeRef& keys, const KeyRef& ownerId) override;
+	ThreadFuture<std::vector<RangeLockInfo>> listExclusiveReadLocks(const KeyRangeRef& keys) override;
+	ThreadFuture<Void> releaseAllExclusiveReadLocks(const KeyRef& ownerId) override;
 	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) override;
 	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
 	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;

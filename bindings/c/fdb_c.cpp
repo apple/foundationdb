@@ -28,6 +28,7 @@
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/NativeCdcClient.h"
+#include "fdbclient/SystemData.h"
 #include "foundationdb/fdb_c.h"
 #include "foundationdb/fdb_c_internal.h"
 
@@ -63,6 +64,12 @@ int g_api_version = 0;
 /* This must be true so that we can return the data pointer of a
    Standalone<RangeResultRef> as an array of FDBKeyValue. */
 static_assert(sizeof(FDBKeyValue) == sizeof(KeyValueRef), "FDBKeyValue / KeyValueRef size mismatch");
+static_assert(sizeof(FDBRangeLockOwner) == sizeof(FdbCApi::FDBRangeLockOwner) &&
+                  alignof(FDBRangeLockOwner) == alignof(FdbCApi::FDBRangeLockOwner),
+              "FDBRangeLockOwner external client layout mismatch");
+static_assert(sizeof(FDBRangeLock) == sizeof(FdbCApi::FDBRangeLock) &&
+                  alignof(FDBRangeLock) == alignof(FdbCApi::FDBRangeLock),
+              "FDBRangeLock external client layout mismatch");
 static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_SET_VALUE) == static_cast<int>(MutationRef::Type::SetValue),
               "FDB_BG_MUTATION_TYPE_SET_VALUE enum value mismatch");
 static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_CLEAR_RANGE) == static_cast<int>(MutationRef::Type::ClearRange),
@@ -84,12 +91,12 @@ struct CNativeCdcConsumeResult {
 	Version lastConsumedVersion = invalidVersion;
 };
 
-FDBKey copyNativeCdcKey(Arena& arena, KeyRef source) {
+FDBKey copyCKey(Arena& arena, KeyRef source) {
 	StringRef copy(arena, source);
 	return FDBKey{ copy.begin(), copy.size() };
 }
 
-FDBKeyRange copyNativeCdcKeyRange(Arena& arena, KeyRangeRef source) {
+FDBKeyRange copyCKeyRange(Arena& arena, KeyRangeRef source) {
 	StringRef begin(arena, source.begin);
 	StringRef end(arena, source.end);
 	return FDBKeyRange{ begin.begin(), begin.size(), end.begin(), end.size() };
@@ -100,9 +107,9 @@ CNativeCdcStreamInfoArray makeCNativeCdcStreamInfoArray(std::vector<NativeCdcStr
 	result.streams.reserve(result.arena, source.size());
 	for (auto const& stream : source) {
 		FDBCdcStreamInfo cStream;
-		cStream.name = copyNativeCdcKey(result.arena, stream.name);
+		cStream.name = copyCKey(result.arena, stream.name);
 		cStream.stream_id = stream.streamId;
-		cStream.key_range = copyNativeCdcKeyRange(result.arena, stream.keys);
+		cStream.key_range = copyCKeyRange(result.arena, stream.keys);
 		cStream.min_version = stream.minVersion;
 		result.streams.push_back(result.arena, cStream);
 	}
@@ -154,6 +161,62 @@ FDBFuture* mapNativeCdcConsumeFuture(ThreadFuture<NativeCdcConsumeResult> source
 		    return makeCNativeCdcConsumeResult(source.get());
 	    });
 	return (FDBFuture*)result.extractPtr();
+}
+
+using CRangeLockOwnerArray = Standalone<VectorRef<FDBRangeLockOwner>>;
+using CRangeLockArray = Standalone<VectorRef<FDBRangeLock>>;
+
+FDBFuture* mapRangeLockOwnersFuture(ThreadFuture<std::vector<RangeLockOwnerInfo>> source) {
+	auto result = mapThreadFuture<std::vector<RangeLockOwnerInfo>, CRangeLockOwnerArray>(
+	    source, [](ErrorOr<std::vector<RangeLockOwnerInfo>> source) -> ErrorOr<CRangeLockOwnerArray> {
+		    if (source.isError()) {
+			    return ErrorOr<CRangeLockOwnerArray>(source.getError());
+		    }
+		    CRangeLockOwnerArray owners;
+		    owners.reserve(owners.arena(), source.get().size());
+		    for (auto const& owner : source.get()) {
+			    owners.push_back(owners.arena(),
+			                     FDBRangeLockOwner{ copyCKey(owners.arena(), owner.ownerId),
+			                                        copyCKey(owners.arena(), owner.description) });
+		    }
+		    return owners;
+	    });
+	return (FDBFuture*)result.extractPtr();
+}
+
+FDBFuture* mapRangeLocksFuture(ThreadFuture<std::vector<RangeLockInfo>> source) {
+	auto result = mapThreadFuture<std::vector<RangeLockInfo>, CRangeLockArray>(
+	    source, [](ErrorOr<std::vector<RangeLockInfo>> source) -> ErrorOr<CRangeLockArray> {
+		    if (source.isError()) {
+			    return ErrorOr<CRangeLockArray>(source.getError());
+		    }
+		    CRangeLockArray locks;
+		    locks.reserve(locks.arena(), source.get().size());
+		    for (auto const& lock : source.get()) {
+			    locks.push_back(locks.arena(),
+			                    FDBRangeLock{ copyCKeyRange(locks.arena(), lock.keys),
+			                                  copyCKeyRange(locks.arena(), lock.lockedRange),
+			                                  copyCKey(locks.arena(), lock.ownerId) });
+		    }
+		    return locks;
+	    });
+	return (FDBFuture*)result.extractPtr();
+}
+
+StringRef rangeLockBytes(uint8_t const* data, int length, bool allowEmpty = true) {
+	if (length < 0 || (length > 0 && data == nullptr) || (!allowEmpty && length == 0)) {
+		throw range_lock_failed();
+	}
+	return StringRef(data, length);
+}
+
+KeyRangeRef rangeLockRange(uint8_t const* beginKey, int beginKeyLength, uint8_t const* endKey, int endKeyLength) {
+	KeyRef begin = rangeLockBytes(beginKey, beginKeyLength);
+	KeyRef end = rangeLockBytes(endKey, endKeyLength);
+	if (begin >= end || end > normalKeys.end) {
+		throw range_lock_failed();
+	}
+	return KeyRangeRef(begin, end);
 }
 
 } // namespace
@@ -433,6 +496,20 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_cdc_stream_info_array(FDBFuture*
 	                 *out_count = result.streams.size(););
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_range_lock_owner_array(FDBFuture* f,
+                                                                       FDBRangeLockOwner const** out_owners,
+                                                                       int* out_count) {
+	CATCH_AND_RETURN(CRangeLockOwnerArray owners = TSAV(CRangeLockOwnerArray, f)->get(); *out_owners = owners.begin();
+	                 *out_count = owners.size(););
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_range_lock_array(FDBFuture* f,
+                                                                 FDBRangeLock const** out_locks,
+                                                                 int* out_count) {
+	CATCH_AND_RETURN(CRangeLockArray locks = TSAV(CRangeLockArray, f)->get(); *out_locks = locks.begin();
+	                 *out_count = locks.size(););
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_cdc_consumer(FDBFuture* f, FDBCdcConsumer** out_consumer) {
 	CATCH_AND_RETURN(Reference<INativeCdcConsumer> consumer = TSAV(Reference<INativeCdcConsumer>, f)->get();
 	                 *out_consumer = (FDBCdcConsumer*)consumer.extractPtr(););
@@ -560,6 +637,84 @@ extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
 	CATCH_AND_RETURN(Reference<ITransaction> tr = DB(d)->createTransaction();
 	                 if (g_api_version <= 15) tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	                 *out_transaction = (FDBTransaction*)tr.extractPtr(););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_register_range_lock_owner(FDBDatabase* db,
+                                                                       uint8_t const* owner_id,
+                                                                       int owner_id_length,
+                                                                       uint8_t const* description,
+                                                                       int description_length) {
+	RETURN_FUTURE_ON_ERROR(
+	    Void,
+	    return (FDBFuture*)(DB(db)
+	                            ->registerRangeLockOwner(rangeLockBytes(owner_id, owner_id_length, false),
+	                                                     rangeLockBytes(description, description_length, false))
+	                            .extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_remove_range_lock_owner(FDBDatabase* db,
+                                                                     uint8_t const* owner_id,
+                                                                     int owner_id_length) {
+	RETURN_FUTURE_ON_ERROR(
+	    Void,
+	    return (
+	        FDBFuture*)(DB(db)->removeRangeLockOwner(rangeLockBytes(owner_id, owner_id_length, false)).extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_list_range_lock_owners(FDBDatabase* db) {
+	RETURN_FUTURE_ON_ERROR(CRangeLockOwnerArray, return mapRangeLockOwnersFuture(DB(db)->listRangeLockOwners()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_take_exclusive_read_lock(FDBDatabase* db,
+                                                                      uint8_t const* begin_key,
+                                                                      int begin_key_length,
+                                                                      uint8_t const* end_key,
+                                                                      int end_key_length,
+                                                                      uint8_t const* owner_id,
+                                                                      int owner_id_length) {
+	RETURN_FUTURE_ON_ERROR(
+	    Void,
+	    return (FDBFuture*)(DB(db)
+	                            ->takeExclusiveReadLock(
+	                                rangeLockRange(begin_key, begin_key_length, end_key, end_key_length),
+	                                rangeLockBytes(owner_id, owner_id_length, false))
+	                            .extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_release_exclusive_read_lock(FDBDatabase* db,
+                                                                         uint8_t const* begin_key,
+                                                                         int begin_key_length,
+                                                                         uint8_t const* end_key,
+                                                                         int end_key_length,
+                                                                         uint8_t const* owner_id,
+                                                                         int owner_id_length) {
+	RETURN_FUTURE_ON_ERROR(
+	    Void,
+	    return (FDBFuture*)(DB(db)
+	                            ->releaseExclusiveReadLock(
+	                                rangeLockRange(begin_key, begin_key_length, end_key, end_key_length),
+	                                rangeLockBytes(owner_id, owner_id_length, false))
+	                            .extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_list_exclusive_read_locks(FDBDatabase* db,
+                                                                       uint8_t const* begin_key,
+                                                                       int begin_key_length,
+                                                                       uint8_t const* end_key,
+                                                                       int end_key_length) {
+	RETURN_FUTURE_ON_ERROR(CRangeLockArray,
+	                       return mapRangeLocksFuture(DB(db)->listExclusiveReadLocks(
+	                           rangeLockRange(begin_key, begin_key_length, end_key, end_key_length))););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_release_all_exclusive_read_locks(FDBDatabase* db,
+                                                                              uint8_t const* owner_id,
+                                                                              int owner_id_length) {
+	RETURN_FUTURE_ON_ERROR(
+	    Void,
+	    return (FDBFuture*)(DB(db)
+	                            ->releaseAllExclusiveReadLocks(rangeLockBytes(owner_id, owner_id_length, false))
+	                            .extractPtr()););
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* db,

@@ -291,6 +291,8 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
    call to an ``fdb_future_get_*()`` function that returns memory owned by
    the future. This includes :func:`fdb_future_get_key`,
    :func:`fdb_future_get_value`, :func:`fdb_future_get_keyvalue_array`,
+   :func:`fdb_future_get_range_lock_owner_array`,
+   :func:`fdb_future_get_range_lock_array`,
    :func:`fdb_future_get_cdc_stream_info_array`, and
    :func:`fdb_future_get_cdc_versioned_mutations`. It indicates that the
    memory returned by the prior get call is no longer needed by the
@@ -560,6 +562,166 @@ An |database-blurb1| Modifications to a database are performed via transactions.
          ...
          ]
       }
+
+.. _c-range-locks:
+
+Range locks
+-----------
+
+The range-lock C API exposes the experimental exclusive read locks described
+in :doc:`rangelock`. An exclusive read lock prevents ordinary transactions
+from writing to a range while allowing reads. These are administrative,
+database-wide operations; they do not operate on an :type:`FDBTransaction`
+or a tenant.
+
+Applications must select API version 800 or later. If the selected external
+client library lacks a requested range-lock operation, its future reports
+``unsupported_operation`` (2108).
+
+All byte-string inputs use explicit lengths, may contain embedded null bytes,
+and need not be null-terminated. Input memory only needs to remain valid until
+the function returns. Negative lengths, null pointers with positive lengths,
+empty owner IDs, and empty descriptions fail with ``range_lock_failed``
+(1241). A range must be non-empty and contained in normal user key space:
+``begin_key < end_key <= "\xff"``. An empty begin key and the exclusive end
+key ``"\xff"`` are valid. Other range bounds fail with ``range_lock_failed``.
+
+.. warning::
+
+   Successful acquisition persists lock metadata; it does not verify that
+   servers enforce the lock. Commit proxies must have
+   ``knob_enable_read_lock_on_range=true``, and range-lock enforcement is
+   disabled when version-vector modes are enabled. ``LOCK_AWARE`` transactions
+   bypass range locks. Owner IDs are application identifiers, not credentials:
+   these operations do not provide an authorization boundary.
+
+Each operation runs its own transaction retry loop. A successful take or
+release updates its entire range atomically; release-all may commit multiple
+updates.
+Cancellation, destroying an outstanding future, or an uncertain commit outcome
+does not prove that no update committed. Coordinate operations for an owner
+and range before retrying or issuing a conflicting operation. There is no
+acquisition generation or fencing token: a delayed release can remove a later
+lock acquired with the same owner ID and original range.
+
+.. type:: FDBRangeLockOwner
+
+   A registered owner and its description::
+
+      typedef struct {
+          FDBKey owner_id;
+          FDBKey description;
+      } FDBRangeLockOwner;
+
+   Both fields contain bytes and their explicit lengths; callers must not
+   assume null termination. Their memory is owned by the listing future.
+
+.. type:: FDBRangeLock
+
+   A listed exclusive read lock::
+
+      typedef struct {
+          FDBKeyRange key_range;
+          FDBKeyRange locked_range;
+          FDBKey owner_id;
+      } FDBRangeLock;
+
+   ``key_range`` is the locked segment within the requested listing range.
+   ``locked_range`` is the original range used to acquire the lock and can
+   extend beyond that listing range. The lock's identity is its owner ID,
+   original range, and exclusive read lock type. Pass ``locked_range``, not
+   ``key_range``, when releasing the listed lock. All referenced memory is
+   owned by the listing future.
+
+.. function:: FDBFuture* fdb_database_register_range_lock_owner(FDBDatabase* database, uint8_t const* owner_id, int owner_id_length, uint8_t const* description, int description_length)
+
+   Registers ``owner_id`` with a non-empty description. Registering an existing
+   ID updates its description without changing its locks; repeating the same
+   ID and description succeeds. An owner must be registered before taking or
+   releasing an individual range lock.
+
+   |future-returnvoid|
+
+.. function:: FDBFuture* fdb_database_remove_range_lock_owner(FDBDatabase* database, uint8_t const* owner_id, int owner_id_length)
+
+   Removes the owner's registration. Removing a missing owner succeeds.
+   This does not release its locks or check that it has no locks. Stop new
+   acquisitions and release the owner's locks before removing it. If an owner
+   was removed while holding locks, register the same ID again before using
+   :func:`fdb_database_release_exclusive_read_lock()`.
+
+   |future-returnvoid|
+
+.. function:: FDBFuture* fdb_database_list_range_lock_owners(FDBDatabase* database)
+
+   Returns registered owners. Extract the result with
+   :func:`fdb_future_get_range_lock_owner_array()`. The listing may span
+   transaction retries and is not guaranteed to represent one coherent
+   snapshot under concurrent changes.
+
+.. function:: fdb_error_t fdb_future_get_range_lock_owner_array(FDBFuture* future, FDBRangeLockOwner const** out_owners, int* out_count)
+
+   Extracts the owner array returned by
+   :func:`fdb_database_list_range_lock_owners()`. ``out_count`` receives the
+   number of entries. |future-warning| |future-get-return1|
+   |future-get-return2|.
+
+   |future-memory-mine|
+
+.. function:: FDBFuture* fdb_database_take_exclusive_read_lock(FDBDatabase* database, uint8_t const* begin_key, int begin_key_length, uint8_t const* end_key, int end_key_length, uint8_t const* owner_id, int owner_id_length)
+
+   Acquires an exclusive read lock on ``[begin_key, end_key)`` for a registered
+   owner. Repeating the same owner and range succeeds. Any overlapping lock
+   with a different owner or original range rejects the request with
+   ``range_lock_reject`` (1247), including a different overlapping range owned
+   by the same owner. An unregistered owner fails with ``range_lock_failed``.
+
+   With enforcement enabled, ordinary transactions that write to the locked
+   range fail with ``transaction_rejected_range_locked`` (1242), which is
+   retryable through :func:`fdb_transaction_on_error()`.
+
+   |future-returnvoid|
+
+.. function:: FDBFuture* fdb_database_release_exclusive_read_lock(FDBDatabase* database, uint8_t const* begin_key, int begin_key_length, uint8_t const* end_key, int end_key_length, uint8_t const* owner_id, int owner_id_length)
+
+   Releases an exclusive read lock with the same owner and original range.
+   Releasing an unlocked range succeeds, but the owner must still be
+   registered. Any overlapping lock with a different owner or original range
+   rejects the request with ``range_unlock_reject`` (1248). An unregistered
+   owner fails with ``range_lock_failed``.
+
+   |future-returnvoid|
+
+.. function:: FDBFuture* fdb_database_list_exclusive_read_locks(FDBDatabase* database, uint8_t const* begin_key, int begin_key_length, uint8_t const* end_key, int end_key_length)
+
+   Returns exclusive read locks intersecting ``[begin_key, end_key)``. Extract
+   the result with :func:`fdb_future_get_range_lock_array()`. To inspect all
+   locks, use an empty begin key and the one-byte end key ``"\xff"``. The
+   listing may span transaction retries and is not guaranteed to represent one
+   coherent snapshot under concurrent changes.
+
+.. function:: fdb_error_t fdb_future_get_range_lock_array(FDBFuture* future, FDBRangeLock const** out_locks, int* out_count)
+
+   Extracts the lock array returned by
+   :func:`fdb_database_list_exclusive_read_locks()`. ``out_count`` receives the
+   number of entries. |future-warning| |future-get-return1|
+   |future-get-return2|.
+
+   |future-memory-mine|
+
+.. function:: FDBFuture* fdb_database_release_all_exclusive_read_locks(FDBDatabase* database, uint8_t const* owner_id, int owner_id_length)
+
+   Scans normal user key space and releases exclusive read locks belonging to
+   ``owner_id``. Other owners' locks are preserved. This operation does not
+   require the owner to remain registered and does not remove its registration.
+
+   The scan is not atomic: it can commit partial progress before an error or
+   cancellation. Concurrent acquisitions can create locks behind the scan, so
+   successful completion does not guarantee that the owner has no locks.
+   Stop new acquisitions and reconcile outstanding operations before using
+   release-all as cleanup.
+
+   |future-returnvoid|
 
 CDC
 ---
