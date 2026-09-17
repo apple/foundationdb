@@ -54,7 +54,7 @@ NOTE: All blocks except for the final block will have one last  value which will
 
 The code related to how a range file is written is in the `struct RangeFileWriter` in `namespace fileBackup`.
 
-The code that decodes a range block is in `ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset, int len, Database cx)`.
+The current range-block decoder is `fileBackup::decodeRangeFileBlock()` in [`BackupFileFormat.cpp`](../fdbclient/BackupFileFormat.cpp).
 
 
 ### Data format in a log file
@@ -82,7 +82,7 @@ where type is the mutation type, such as Set or Clear, `kLen` and `vLen` respect
 
 The code related to how a log file is written is in the `struct LogFileWriter` in `namespace fileBackup`.
 
-The code that decodes a mutation block is in `ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset, int len)`.
+The current mutation-block decoder is `fileBackup::decodeMutationLogFileBlock()` in [`BackupFileFormat.cpp`](../fdbclient/BackupFileFormat.cpp).
 
 
 ### Endianness

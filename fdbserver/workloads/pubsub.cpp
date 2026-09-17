@@ -19,7 +19,7 @@
  */
 
 #include <cinttypes>
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "pubsub.h"
 
 Value uInt64ToValue(uint64_t v) {

@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "fdbclient/BulkDumping.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -41,7 +42,7 @@
 #include "fdbclient/ManagementAPI.h"
 
 #include "fdbclient/SystemData.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
@@ -2273,6 +2274,7 @@ Future<Void> waitForFullReplication(Database cx) {
 			config.fromKeyValues((VectorRef<KeyValueRef>)confResults);
 
 			std::vector<Future<Optional<Value>>> replicasFutures;
+			replicasFutures.reserve(config.regions.size());
 			for (auto& region : config.regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
@@ -2318,7 +2320,8 @@ Future<Void> timeKeeperSetDisable(Database cx) {
 	}
 }
 
-Future<Void> lockDatabase(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> lockDatabaseImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2338,24 +2341,12 @@ Future<Void> lockDatabase(Transaction* tr, UID id) {
 	tr->addWriteConflictRange(normalKeys);
 }
 
+Future<Void> lockDatabase(Transaction* tr, UID id) {
+	return lockDatabaseImpl(tr, id);
+}
+
 Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
-
-	if (val.present()) {
-		if (BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
-			co_return;
-		} else {
-			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
-			throw database_locked();
-		}
-	}
-
-	tr->atomicOp(databaseLockedKey,
-	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
-	             MutationRef::SetVersionstampedValue);
-	tr->addWriteConflictRange(normalKeys);
+	return lockDatabaseImpl(std::move(tr), id);
 }
 
 Future<Void> lockDatabase(Database cx, UID id) {
@@ -2378,7 +2369,8 @@ Future<Void> lockDatabase(Database cx, UID id) {
 	}
 }
 
-Future<Void> unlockDatabase(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> unlockDatabaseImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2394,20 +2386,12 @@ Future<Void> unlockDatabase(Transaction* tr, UID id) {
 	tr->clear(singleKeyRange(databaseLockedKey));
 }
 
+Future<Void> unlockDatabase(Transaction* tr, UID id) {
+	return unlockDatabaseImpl(tr, id);
+}
+
 Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
-
-	if (!val.present())
-		co_return;
-
-	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
-		throw database_locked();
-	}
-
-	tr->clear(singleKeyRange(databaseLockedKey));
+	return unlockDatabaseImpl(std::move(tr), id);
 }
 
 Future<Void> unlockDatabase(Database cx, UID id) {
@@ -2427,7 +2411,8 @@ Future<Void> unlockDatabase(Database cx, UID id) {
 	}
 }
 
-Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> checkDatabaseLockImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2438,15 +2423,12 @@ Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
 	}
 }
 
-Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
+Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
+	return checkDatabaseLockImpl(tr, id);
+}
 
-	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
-		throw database_locked();
-	}
+Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
+	return checkDatabaseLockImpl(std::move(tr), id);
 }
 
 Future<Void> advanceVersion(Database cx, Version v) {
@@ -2769,7 +2751,7 @@ Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState)
 	tr->set(newJobKey, bulkLoadJobValue(jobState));
 }
 
-AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
+AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx, bool lockAware) {
 	RangeResult jobHistoryResult;
 	Key beginKey = bulkLoadJobHistoryKeys.begin;
 	Key endKey = bulkLoadJobHistoryKeys.end;
@@ -2778,6 +2760,15 @@ AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx
 	while (true) {
 		Error err;
 		try {
+			// READ_LOCK_AWARE is the load-bearing one: a caller may read this while the database is
+			// locked -- a restore holds the lock while deciding whether its bulkload job succeeded --
+			// and database_locked is retryable, so without it the loop below spins forever instead of
+			// failing. The read-only variant suffices here and enforces that this stays a read.
+			// READ_SYSTEM_KEYS is belt-and-braces for a system-keyspace range.
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			if (lockAware) {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			}
 			jobHistoryResult.clear();
 			jobHistoryResult =
 			    co_await tr.getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX);

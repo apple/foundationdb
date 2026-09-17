@@ -21,6 +21,7 @@
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
@@ -148,17 +149,21 @@ struct RangeLocking : TestWorkload {
 		}
 	}
 
-	Future<Void> expectClearRejected(Database cx, KeyRange range) {
+	Future<Void> expectOperationRejected(Future<Void> operation, int expectedError) {
 		bool rejected = false;
 		try {
-			co_await clearRange(cx, range);
+			co_await operation;
 		} catch (Error& e) {
-			if (e.code() != error_code_transaction_rejected_range_locked) {
+			if (e.code() != expectedError) {
 				throw;
 			}
 			rejected = true;
 		}
 		ASSERT(rejected);
+	}
+
+	Future<Void> expectClearRejected(Database cx, KeyRange range) {
+		return expectOperationRejected(clearRange(cx, range), error_code_transaction_rejected_range_locked);
 	}
 
 	Future<Void> testNormalKeyspaceBoundary(Database cx) {
@@ -189,6 +194,172 @@ struct RangeLocking : TestWorkload {
 		lockedValue = co_await getKey(cx, lockedKey);
 		ASSERT(!lockedValue.present());
 		TraceEvent("RangeLockNormalKeyspaceBoundaryPassed");
+	}
+
+	Future<Void> testLogicalIdentity(Database cx) {
+		const RangeLockOwnerName owner = "RangeLockIdentityA";
+		const RangeLockOwnerName collidingOwner = owner + "ExclusiveReadLock{ begin=X";
+		const KeyRange range = KeyRangeRef("XExclusiveReadLock{ begin=a"_sr, "z"_sr);
+		const KeyRange collidingRange = KeyRangeRef("a"_sr, "z"_sr);
+		const RangeLockState original(RangeLockType::ExclusiveReadLock, owner, range);
+		const RangeLockState colliding(RangeLockType::ExclusiveReadLock, collidingOwner, collidingRange);
+		const Key protectedKey = "m"_sr;
+		const Value value = "preserved"_sr;
+		ASSERT(original != colliding);
+		ASSERT(original.getLockUniqueString() == colliding.getLockUniqueString());
+		co_await registerRangeLockOwner(cx, owner, owner);
+		co_await registerRangeLockOwner(cx, collidingOwner, collidingOwner);
+		co_await setKey(cx, protectedKey, value);
+		co_await takeExclusiveReadLockOnRange(cx, range, owner);
+
+		co_await expectOperationRejected(takeExclusiveReadLockOnRange(cx, collidingRange, collidingOwner),
+		                                 error_code_range_lock_reject);
+		auto locks = co_await findExclusiveReadLockOnRange(cx, normalKeys);
+		ASSERT(locks.size() == 1 && locks[0].first == range && locks[0].second == original);
+		co_await expectOperationRejected(releaseExclusiveReadLockOnRange(cx, collidingRange, collidingOwner),
+		                                 error_code_range_unlock_reject);
+		locks = co_await findExclusiveReadLockOnRange(cx, normalKeys);
+		ASSERT(locks.size() == 1 && locks[0].first == range && locks[0].second == original);
+		co_await expectClearRejected(cx, collidingRange);
+		const Optional<Value> protectedValue = co_await getKey(cx, protectedKey);
+		ASSERT(protectedValue.present() && protectedValue.get() == value);
+
+		co_await releaseExclusiveReadLockOnRange(cx, range, owner);
+		co_await clearKey(cx, protectedKey);
+		co_await removeRangeLockOwner(cx, owner);
+		co_await removeRangeLockOwner(cx, collidingOwner);
+		TraceEvent("RangeLockLogicalIdentityPassed");
+	}
+
+	Future<Void> testOwnerRemoval(Database cx) {
+		const RangeLockOwnerName owner = "RangeLockOwnerRemoval";
+		const RangeLockOwnerName foreignOwner = "RangeLockOwnerRemovalForeign";
+		const std::vector<KeyRange> foreignRanges = {
+			KeyRangeRef("rangeLockOwnerRemoval/a"_sr, "rangeLockOwnerRemoval/b"_sr),
+			KeyRangeRef("rangeLockOwnerRemoval/c"_sr, "rangeLockOwnerRemoval/d"_sr),
+			KeyRangeRef("rangeLockOwnerRemoval/e"_sr, "rangeLockOwnerRemoval/f"_sr)
+		};
+		const KeyRange range = KeyRangeRef("rangeLockOwnerRemoval/y"_sr, normalKeys.end);
+		co_await registerRangeLockOwner(cx, owner, "owner whose locks must survive unregister");
+		co_await registerRangeLockOwner(cx, foreignOwner, foreignOwner);
+		for (const auto& foreignRange : foreignRanges) {
+			co_await takeExclusiveReadLockOnRange(cx, foreignRange, foreignOwner);
+		}
+		co_await takeExclusiveReadLockOnRange(cx, range, owner);
+
+		Transaction scan(cx);
+		while (true) {
+			Error err;
+			try {
+				scan.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				scan.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				const RangeResult firstPage = co_await krmGetRanges(&scan, rangeLockPrefix, normalKeys);
+				ASSERT(firstPage.more && firstPage.back().key < range.begin);
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await scan.onError(err);
+		}
+
+		const auto ownerBefore = co_await getRangeLockOwner(cx, owner);
+		ASSERT(ownerBefore.present());
+		const auto locksBefore = co_await findExclusiveReadLockOnRange(cx, normalKeys);
+		ASSERT(locksBefore.size() == foreignRanges.size() + 1);
+		co_await expectOperationRejected(removeRangeLockOwner(cx, owner), error_code_range_lock_reject);
+		const auto ownerAfter = co_await getRangeLockOwner(cx, owner);
+		ASSERT(ownerAfter.present() && rangeLockOwnerValue(ownerAfter.get()) == rangeLockOwnerValue(ownerBefore.get()));
+		const auto locksAfter = co_await findExclusiveReadLockOnRange(cx, normalKeys);
+		ASSERT(locksAfter == locksBefore);
+		co_await expectClearRejected(cx, range);
+		TraceEvent("RangeLockOwnerRemovalPagedScanPassed");
+
+		co_await releaseExclusiveReadLockOnRange(cx, range, owner);
+		co_await removeRangeLockOwner(cx, owner);
+		co_await removeRangeLockOwner(cx, owner);
+		const auto removedOwner = co_await getRangeLockOwner(cx, owner);
+		ASSERT(!removedOwner.present());
+		const auto remainingLocks = co_await findExclusiveReadLockOnRange(cx, normalKeys);
+		ASSERT(remainingLocks.size() == foreignRanges.size());
+		for (int i = 0; i < foreignRanges.size(); ++i) {
+			ASSERT(remainingLocks[i].first == foreignRanges[i]);
+			ASSERT(remainingLocks[i].second ==
+			       RangeLockState(RangeLockType::ExclusiveReadLock, foreignOwner, foreignRanges[i]));
+		}
+		co_await testOwnerRemovalRace(cx);
+		co_await releaseExclusiveReadLockByUser(cx, foreignOwner);
+		co_await removeRangeLockOwner(cx, foreignOwner);
+		TraceEvent("RangeLockOwnerRemovalPassed");
+	}
+
+	Future<Void> testOwnerRemovalConflict(Database cx) {
+		const RangeLockOwnerName owner = "RangeLockOwnerRemovalConflict";
+		const KeyRange range = KeyRangeRef("rangeLockOwnerRemovalConflict/a"_sr, "rangeLockOwnerRemovalConflict/b"_sr);
+		Transaction acquire(cx);
+		while (true) {
+			Error err;
+			try {
+				co_await registerRangeLockOwner(cx, owner, owner);
+				co_await takeExclusiveReadLockOnRange(&acquire, range, owner);
+				co_await removeRangeLockOwner(cx, owner);
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await acquire.onError(err);
+		}
+		const ErrorOr<Void> commitResult = co_await errorOr(acquire.commit());
+		ASSERT(commitResult.isError());
+		co_await acquire.onError(commitResult.getError());
+		co_await expectOperationRejected(takeExclusiveReadLockOnRange(cx, range, owner), error_code_range_lock_failed);
+		const auto removedOwner = co_await getRangeLockOwner(cx, owner);
+		const auto remainingLocks = co_await findExclusiveReadLockOnRange(cx, range);
+		ASSERT(!removedOwner.present() && remainingLocks.empty());
+		TraceEvent("RangeLockOwnerRemovalConflictPassed").detail("CommitError", commitResult.getError().code());
+	}
+
+	Future<Void> testOwnerRemovalRace(Database cx) {
+		const RangeLockOwnerName owner = "RangeLockOwnerRemovalRace";
+		const KeyRange range = KeyRangeRef("rangeLockOwnerRemoval/0"_sr, "rangeLockOwnerRemoval/1"_sr);
+		int acquireWins = 0;
+		int removeWins = 0;
+		for (int i = 0; i < 10; ++i) {
+			co_await registerRangeLockOwner(cx, owner, owner);
+			Future<ErrorOr<Void>> taking;
+			Future<ErrorOr<Void>> removing;
+			if (i % 2 == 0) {
+				taking = errorOr(takeExclusiveReadLockOnRange(cx, range, owner));
+				removing = errorOr(removeRangeLockOwner(cx, owner));
+			} else {
+				removing = errorOr(removeRangeLockOwner(cx, owner));
+				taking = errorOr(takeExclusiveReadLockOnRange(cx, range, owner));
+			}
+			const ErrorOr<Void> takeResult = co_await taking;
+			const ErrorOr<Void> removeResult = co_await removing;
+			if (takeResult.isError() && takeResult.getError().code() != error_code_range_lock_failed) {
+				throw takeResult.getError();
+			}
+			if (removeResult.isError() && removeResult.getError().code() != error_code_range_lock_reject) {
+				throw removeResult.getError();
+			}
+			ASSERT(takeResult.isError() != removeResult.isError());
+			const auto registeredOwner = co_await getRangeLockOwner(cx, owner);
+			const auto locks = co_await findExclusiveReadLockOnRange(cx, range);
+			if (!takeResult.isError()) {
+				++acquireWins;
+				ASSERT(registeredOwner.present());
+				ASSERT(locks.size() == 1 && locks[0].first == range &&
+				       locks[0].second == RangeLockState(RangeLockType::ExclusiveReadLock, owner, range));
+				co_await releaseExclusiveReadLockOnRange(cx, range, owner);
+				co_await removeRangeLockOwner(cx, owner);
+			} else {
+				++removeWins;
+				ASSERT(!registeredOwner.present() && locks.empty());
+			}
+		}
+		TraceEvent("RangeLockOwnerRemovalRacePassed")
+		    .detail("AcquireWins", acquireWins)
+		    .detail("RemoveWins", removeWins);
 	}
 
 	std::string getLockRangesString(const std::vector<std::pair<KeyRange, RangeLockState>>& locks) {
@@ -386,6 +557,7 @@ struct RangeLocking : TestWorkload {
 		std::vector<std::pair<KeyRange, RangeLockState>> res;
 		res = co_await findExclusiveReadLockOnRange(cx, normalKeys);
 		std::vector<KeyRange> ranges;
+		ranges.reserve(res.size());
 		for (const auto& [lockedRange, _lockState] : res) {
 			ranges.push_back(lockedRange);
 		}
@@ -660,6 +832,9 @@ struct RangeLocking : TestWorkload {
 			co_return;
 		}
 		co_await testNormalKeyspaceBoundary(cx);
+		co_await testLogicalIdentity(cx);
+		co_await testOwnerRemoval(cx);
+		co_await testOwnerRemovalConflict(cx);
 		co_await complexTest(this, cx);
 		co_await testUnlockByUser(this, cx);
 	}

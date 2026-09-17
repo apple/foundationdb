@@ -23,7 +23,6 @@
 #define FDBRPC_FLOW_ASYNC_GRPC_CLIENT_H
 
 #include <memory>
-#undef loop
 #include <grpcpp/grpcpp.h>
 
 #include "flow/flow.h"
@@ -47,7 +46,6 @@ class AsyncGrpcClient {
 public:
 	using Rpc = typename ServiceType::Stub;
 
-	// Isn't necessary unless initialized mid-block using Flow actor compiler.
 	AsyncGrpcClient() = default;
 
 	AsyncGrpcClient(const std::string& endpoint, std::shared_ptr<AsyncTaskExecutor> pool)

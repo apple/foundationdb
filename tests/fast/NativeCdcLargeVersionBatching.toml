@@ -1,0 +1,34 @@
+[configuration]
+config = 'single'
+singleRegion = true
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 1
+# Each two-value version exceeds 64 KiB; several fit 512 KiB, but all eight do not.
+maximum_peek_bytes = 524288
+cdc_proxy_consume_reply_bytes = 524288
+cdc_proxy_buffer_bytes = 8388608
+cdc_proxy_consume_poll_timeout = 30.0
+
+[[test]]
+testTitle = 'NativeCdcLargeVersionBatching'
+useDB = true
+timeout = 600
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+runFailureWorkloads = false
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 1
+    minStreamCount = 1
+    maxStreamCount = 1
+    keyCount = 4
+    writesPerRound = 1
+    rounds = 0
+    testReplyChunking = true
+    memoryTestValueBytes = 40000
+    operationTimeout = 120.0

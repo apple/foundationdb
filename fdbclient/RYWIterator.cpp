@@ -424,6 +424,48 @@ static int getWriteMapCount(WriteMap* p) {
 	return count;
 }
 
+TEST_CASE("/fdbclient/ExtStringRef/materialization") {
+	struct MaterializationCase {
+		StringRef base;
+		int padding;
+		StringRef expected;
+	};
+	const MaterializationCase cases[] = {
+		{ ""_sr, 0, ""_sr },
+		{ ""_sr, 3, "\x00\x00\x00"_sr },
+		{ "a\x00z"_sr, 0, "a\x00z"_sr },
+		{ "a\x00z"_sr, 1, "a\x00z\x00"_sr },
+		{ "a\x00z"_sr, 3, "a\x00z\x00\x00\x00"_sr },
+	};
+	for (const auto& test : cases) {
+		Standalone<StringRef> base(test.base);
+		ExtStringRef extended(base, test.padding);
+		Arena ownedArena;
+		Arena borrowArena;
+		StringRef owned = extended.toArena(ownedArena);
+		StringRef borrowedOrOwned = extended.toArenaOrRef(borrowArena);
+		Standalone<StringRef> standalone = extended.toStandaloneStringRef();
+		ASSERT(owned == test.expected);
+		ASSERT(borrowedOrOwned == test.expected);
+		ASSERT(standalone == test.expected);
+		if (test.padding == 0) {
+			ASSERT(borrowedOrOwned.begin() == base.begin());
+			ASSERT(borrowArena.getSize() == 0);
+		}
+		if (!base.empty()) {
+			mutateString(base)[0] = 'b';
+			ASSERT(owned == test.expected);
+			ASSERT(standalone == test.expected);
+			if (test.padding == 0) {
+				ASSERT(borrowedOrOwned == base);
+			} else {
+				ASSERT(borrowedOrOwned == test.expected);
+			}
+		}
+	}
+	return Void();
+}
+
 TEST_CASE("/fdbclient/WriteMap/emptiness") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);

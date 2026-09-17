@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ActorContext.h"
 #include "flow/Trace.h"
 #include "FileTraceLogWriter.h"
 #include "flow/Knobs.h"
@@ -502,6 +501,14 @@ public:
 							rolledFields.addField(itr->first, itr->second);
 						}
 					}
+
+					// Tracked-latest events first logged before the trace file was opened (e.g. an early
+					// ProgramStart in backup_agent) were cached without the universal annotation fields
+					// (LogGroup, Machine, Roles). Now that the log is open, annotate the rolled copy so it
+					// carries them. Already-annotated cached copies already have those fields (copied
+					// above), so skip them to avoid duplicating fields.
+					if (!events[idx].isAnnotated())
+						annotateEvent(rolledFields);
 
 					eventBuffer.push_back(rolledFields);
 				}
@@ -1345,9 +1352,6 @@ void BaseTraceEvent::writeEvent() {
 				if (this->severity == SevError) {
 					severity = SevInfo;
 					backtrace();
-#ifdef WITH_ACAC
-					detail("ActorStack", encodeActorContext(ActorContextDumpType::CURRENT_CALL_BACKTRACE));
-#endif // WITH_ACAC
 					severity = SevError;
 					if (errorKindIndex != -1) {
 						fields.mutate(errorKindIndex).second = toString(errorKind);

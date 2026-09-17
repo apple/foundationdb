@@ -1008,12 +1008,6 @@ public:
 	Future(Never) : sav(new SAV<T>(1, 0)) { sav->send(Never()); }
 	Future(const Error& error) : sav(new SAV<T>(1, 0)) { sav->sendError(error); }
 
-#ifndef NO_INTELLISENSE
-	template <class U>
-	    requires(std::is_assignable_v<T, U>)
-	Future(const U&) {}
-#endif
-
 	~Future() {
 		if (sav)
 			sav->delFutureRef();

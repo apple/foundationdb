@@ -20,7 +20,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include <boost/algorithm/string.hpp>
 
 KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix) {

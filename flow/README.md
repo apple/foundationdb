@@ -2,25 +2,23 @@ Flow Tutorial
 =============
 
    * [Using Flow](#using-flow)
-      * [Keywords/primitives](#keywordsprimitives)
+      * [Primitives](#primitives)
          * [Promise, Future](#promise-future)
-         * [Network traversal](#network-traversal)
-         * [wait()](#wait)
-         * [ACTOR](#actor)
-         * [State Variables](#state-variables)
+         * [Network messaging](#network-messaging)
+         * [co_await](#co_await)
+         * [Coroutines](#coroutines)
+         * [Local variables and lifetimes](#local-variables-and-lifetimes)
          * [Void](#void)
          * [PromiseStream&lt;&gt;, FutureStream&lt;&gt;](#promisestream-futurestream)
-         * [waitNext()](#waitnext)
-         * [choose / when](#choose--when)
+         * [Racing futures](#racing-futures)
          * [Future composition](#future-composition)
       * [Design Patterns](#design-patterns)
-         * [RPC](#rpc)
-         * [ACTOR return values](#actor-return-values)
+         * [Request/reply](#requestreply)
+         * [Flatbuffers/ObjectSerializer](#flatbuffersobjectserializer)
+         * [Coroutine return values](#coroutine-return-values)
       * [“gotchas”](#gotchas)
-         * [Actor compiler](#actor-compiler)
-            * [Switch statements](#switch-statements)
-            * [try/catch with no wait()](#trycatch-with-no-wait)
-         * [ACTOR cancellation](#actor-cancellation)
+         * [Exception handling](#exception-handling)
+         * [Coroutine cancellation](#coroutine-cancellation)
    * [Memory Management](#memory-management)
       * [Reference Counting](#reference-counting)
          * [Potential Gotchas](#potential-gotchas)
@@ -29,26 +27,28 @@ Flow Tutorial
          * [Potential Gotchas](#potential-gotchas-1)
             * [Function Creating and Returning a non-Standalone Ref Object](#function-creating-and-returning-a-non-standalone-ref-object)
             * [Assigning Returned Standalone Object to non Standalone Variable](#assigning-returned-standalone-object-to-non-standalone-variable)
-            * [Use of Standalone Objects in ACTOR Functions](#use-of-standalone-objects-in-actor-functions)
+            * [Use of Standalone Objects in Coroutines](#use-of-standalone-objects-in-coroutines)
 
 # Using Flow
 
-Flow introduces some new keywords and flow controls. Combining these into workable units
-also introduces some new design patterns to C++ programmers.
+Flow provides asynchronous communication and cooperative scheduling using standard C++
+coroutines. Include `flow/flow.h` for the runtime types and `flow/CoroUtils.h` for
+`race()`. Coroutine code lives in ordinary `.cpp` and `.h` files.
 
-## Keywords/primitives
+See [the coroutine design guide](../design/coroutines.md) for more details and
+[the runnable coroutine tutorial](../documentation/coro_tutorial/tutorial.cpp) for
+examples that use the network and FoundationDB client APIs.
+
+## Primitives
 
 The essence of Flow is the capability of passing messages asynchronously between
 components. The basic data types that connect asynchronous senders and receivers are
 `Promise<>` and `Future<>`. The sender holds a `Promise<X>` to, sometime in the future, deliver
 a value of type `X` to the holder of the `Future<X>`. A receiver, holding a `Future<X>`, at some point
-needs the `X` to continue computation, and invokes the `wait(Future<> f)` statement to pause
-until the value is delivered. To use the `wait()` statement, a function needs to be declared as an
-ACTOR function, a special flow keyword which directs the flow compiler to create the necessary
-internal callbacks, etc. Similarly, When a component wants to deal not with one asynchronously
-delivered value, but with a series, there are `PromiseStream<>` and `FutureStream<>`. These
-two constructs allow for “reliable delivery” of messages, and play an important role in the design
-patterns.
+needs the `X` to continue computation, and uses `co_await` to suspend until the value is
+delivered. Other coroutines can run while it is suspended. When a component wants to deal
+with a series of asynchronously delivered values, it uses `PromiseStream<>` and
+`FutureStream<>`.
 
 ### Promise<T>, Future<T>
 
@@ -66,86 +66,75 @@ p.send( 4 );
 printf( "%d\n", f.get() ); // f is already set
 ```
 
-### Network traversal
+### Network messaging
 
-Promises and futures can be used within a single process, but their real strength in a distributed
-system is that they can traverse the network. For example, one computer could create a
-promise/future pair, then send the promise to another computer over the network. The promise
-and future will still be connected, and when the promise is fulfilled by the remote computer, the
-original holder of the future will see the value appear.
+`Promise<T>` and `Future<T>` are local process handles. FoundationDB's RPC layer builds
+network communication on top of these primitives with `RequestStream<T>` and
+`ReplyPromise<T>`. A request can carry a reply promise to another process; sending the reply
+there makes the caller's future ready. See the [request/reply example](#requestreply) below
+for the local form of this pattern.
 
-[TODO: network delivery guarantees]
+### co_await
 
-### wait()
+`co_await` suspends a coroutine until a future becomes ready. If the future is already ready,
+execution continues without suspending. Awaiting a failed future throws its `Error` at the
+`co_await` expression.
 
-Wait allows for the calling code to pause execution while the value of a `Future` is set. This
-statement is called with a `Future<T>` as its parameter and returns a `T`; the eventual value of the
-`Future`. Errors that are generated in the code that is setting the `Future`, will be thrown from
-the location of the `wait()`, so `Error`s must be caught at this location.
-
-The following example shows a snippet (from an ACTOR) of waiting on a `Future`:
+The following snippet waits on a `Future<int>` inside a coroutine:
 
 ```c++
 Future<int> f = asyncCalculation(); // defined elsewhere
-int count = wait( f );
+int count = co_await f;
 printf( "%d\n", count );
 ```
 
-It is worth noting that, although the function `wait()` is declared in [actorcompiler.h](include/flow/actorcompiler.h), this
-“function” is compiled by the Actor Compiler into a complex set of integrated statements and
-callbacks. It is therefore never present in generated code or at link time.
-**Note** : because of the way that the actor compiler is built, `wait()` must always assign the
-resulting value to a _newly declared variable._
-
-From 6.1, `wait()` on `Void` actors shouldn't assign the resulting value. So, the following code
+Await a `Future<Void>` without assigning the result:
 
 ```c++
 Future<Void> asyncTask(); //defined elsewhere
-Void _ = _wait(asyncTask());
+co_await asyncTask();
 ```
 
-becomes
+### Coroutines
+
+A function containing `co_await` or `co_return` is a coroutine. A Flow coroutine returning
+`Future<T>` produces its result with `co_return value;`. The C++ compiler preserves its
+execution state across suspension points.
+
+Calling a coroutine that returns `Future<T>` starts it immediately. It runs until it completes
+or awaits something that is not ready. Retain the returned future for work that must continue; see
+[coroutine cancellation](#coroutine-cancellation).
+
+The following function waits for a value, adds `offset`, and returns the result:
 
 ```c++
-Future<Void> asyncTask(); //defined elsewhere
-wait(asyncTask());
-```
-
-### ACTOR
-
-The only code that can call the `wait()` function are functions that are themselves labeled with
-the “ACTOR” tag. This is the essential unit of asynchronous work that can be chained together
-to create complex message-passing systems.
-An actor, although declared as returning a `Future<T>`, simply returns a `T`. Because an actor
-may wait on the results of other actors, an actor must return either a `Future `or `void`. In most
-cases returning `void `is less advantageous than returning a `Future`, since there are
-implications for actor cancellation. See the Actor Cancellation section for details.
-
-The following simple actor function waits on the `Future` to be ready, when it is ready adds `offset` and returns the result:
-
-```c++
-ACTOR Future<int> asyncAdd(Future<int> f, int offset) {
-    int value = wait( f );
-    return value + offset;
+Future<int> asyncAdd(Future<int> f, int offset) {
+    int value = co_await f;
+    co_return value + offset;
 }
 ```
 
-### State Variables
+### Local variables and lifetimes
 
-Since ACTOR-labeled functions are compiled into a c++ class and numerous supporting
-functions, the variable scoping rules that normally apply are altered. The differences arise out
-of the fact that control flow is broken at wait() statements. Generally the compiled code is
-broken into chunks at wait statements, so scoping variables so that they can be seen in multiple
-“chunks” requires the `state `keyword.
-The following function waits on two inputs and outputs the sum with an offset attached:
+Local variables follow normal C++ scope rules and remain alive across suspension while
+their scope is active. The following function retains `value1` while waiting for `f2`:
 
 ```c++
-ACTOR Future<int> asyncCalculation(Future<int> f1, Future<int> f2, int offset ) {
-    state int value1 = wait( f1 );
-    int value2 = wait( f2 );
-    return value1 + value2 + offset;
+Future<int> asyncCalculation(Future<int> f1, Future<int> f2, int offset) {
+    int value1 = co_await f1;
+    int value2 = co_await f2;
+    co_return value1 + value2 + offset;
 }
 ```
+
+Parameters passed by value are stored in the coroutine frame. A reference, pointer, or
+non-owning view does not keep the referenced object alive; its owner must outlive all uses,
+including uses after suspension. Prefer owning parameters such as `Reference<T>` or
+`Standalone<T>` when a coroutine must retain an object or its bytes.
+
+Captures in a coroutine lambda belong to the lambda's closure, which may be destroyed while
+the coroutine is suspended. Prefer a named coroutine with explicit value parameters when
+the work can outlive the call that starts it.
 
 ### Void
 
@@ -153,143 +142,129 @@ The `Void `type is used as a signalling-only type for coordination of asynchrono
 The following function waits on an input, sends an output to a `Promise`, and signals completion:
 
 ```c++
-ACTOR Future<Void> asyncCalculation(Future<int> f, Promise<int> p, int offset ) {
-    int value = wait( f );
+Future<Void> asyncCalculation(Future<int> f, Promise<int> p, int offset) {
+    int value = co_await f;
     p.send( value + offset );
-    return Void();
+    co_return;
 }
 ```
 
 ### PromiseStream<>, FutureStream<>
 
-PromiseStream ​and `FutureStream` are groupings of a series of asynchronous messages.
-
-
-These allow for two important features: multiplexing and network reliability, discussed later.
-They can be waited on with the `waitNext()` function.
-
-### waitNext()
-
-Like `wait()`, `waitNext()` pauses program execution and awaits the next value in a
-`FutureStream`. If there is a value ready in the stream, execution continues without delay. The
-following “server” waits on input, sends an output to a `PromiseStream`:
+`PromiseStream<T>` sends a series of values, and `FutureStream<T>` receives them. Await a
+`FutureStream<T>` directly to consume its next value. If a value is already queued, execution
+continues without suspension. The following server waits for input and sends the result to a
+`PromiseStream<int>`:
 
 ```c++
-ACTOR void asyncCalculation(FutureStream<int> f, PromiseStream<int> p, int offset ) {
-    while( true ) {
-        int value = waitNext( f );
+Future<Void> asyncCalculation(FutureStream<int> f, PromiseStream<int> p, int offset) {
+    while (true) {
+        int value = co_await f;
         p.send( value + offset );
     }
 }
 ```
 
-### choose / when
+### Racing futures
 
-The `choose / when` construct allows an Actor to wait for multiple `Future `events at once in a
-ordered and predictable way. Only the `when` associated with the first future to become ready
-will be executed. The following shows the general use of choose and when:
+`race()` waits for the first ready input and returns a `std::variant` whose index identifies
+the winning argument. Inputs can be futures or streams; a winning stream consumes one
+element. If multiple inputs are already ready, the lowest argument index wins.
 
 ```c++
-choose {
-    when( int number = waitNext( futureStreamA ) ) {
-        // clause A
-    }
-    when( std::string text = wait( futureB ) ) {
-        // clause B
-    }
+auto result = co_await race(futureStreamA, futureB);
+if (result.index() == 0) {
+    int number = std::get<0>(result);
+    // Handle the stream value.
+} else {
+    std::string text = std::get<1>(result);
+    // Handle the future value.
 }
 ```
 
-You can put this construct in a loop if you need multiple `when` clauses to execute.
+Errors propagate from the winning input. Losing inputs are detached from the race, not
+explicitly cancelled. They can still be cancelled if releasing the race drops their last future
+reference. Retain a future separately when its operation must continue after losing a race.
+
+Put the race in a loop to process a sequence of events. A completed non-stream future remains
+ready, so replace it or remove it from the race after handling it.
 
 ### Future composition
 
 Futures can be chained together with the result of one depending on the output of another.
 
 ```c++
-ACTOR Future<int> asyncAddition(Future<int> f, int offset ) {
-    int value = wait( f );
-    return value + offset;
+Future<int> asyncAddition(Future<int> f, int offset) {
+    int value = co_await f;
+    co_return value + offset;
 }
 
-ACTOR Future<int> asyncDivision(Future<int> f, int divisor ) {
-    int value = wait( f );
-    return value / divisor;
+Future<int> asyncDivision(Future<int> f, int divisor) {
+    int value = co_await f;
+    co_return value / divisor;
 }
 
-ACTOR Future<int> asyncCalculation( Future<int> f ) {
-    int value = wait( asyncDivision(
-    asyncAddition( f, 10 ), 2 ) );
-    return value;
+Future<int> asyncCalculation(Future<int> f) {
+    co_return co_await asyncDivision(asyncAddition(f, 10), 2);
 }
 ```
 
 
 ## Design Patterns
 
-### RPC
+### Request/reply
 
-Many of the “servers” in FoundationDB that communicate over the network expose their interfaces as a struct of PromiseStreams--one for each request type. For instance, a logical server that keeps a count could look like this:
+Many logical servers expose one request stream per request type. This local example uses
+promise streams to maintain a count. A network interface uses the RPC types described
+[above](#network-messaging) and also needs serialization.
 
 ```c++
 struct CountingServerInterface {
     PromiseStream<int> addCount;
     PromiseStream<int> subtractCount;
     PromiseStream<Promise<int>> getCount;
-
-    // serialization code required for use on a network
-    template <class Ar>
-    void serialize( Ar& ar ) {
-        serializer(ar, addCount, subtractCount, getCount);
-    }
 };
 ```
 
 Clients can then pass messages to the server with calls such as this:
 
 ```c++
-CountingServerInterface csi = ...; // comes from somewhere
-csi.addCount.send(5);
-csi.subtractCount.send(2);
-Promise<int> finalCount;
-csi.getCount.send(finalCount);
-int value = wait( finalCount.getFuture() );
+Future<int> updateAndReadCount(CountingServerInterface csi) {
+    csi.addCount.send(5);
+    csi.subtractCount.send(2);
+    Promise<int> finalCount;
+    csi.getCount.send(finalCount);
+    co_return co_await finalCount.getFuture();
+}
 ```
 
-There is even a utility function to take the place of the last three lines: [TODO: And is necessary
-when sending requests over a real network to ensure delivery]
+A single server coroutine handles requests by repeatedly racing the request streams:
 
 ```c++
-CountingServerInterface csi = ...; // comes from somewhere
-csi.addCount.send(5);
-csi.subtractCount.send(2);
-int value = wait( csi.getCount.getReply<int>() );
-```
-
-Canonically, a single server ACTOR that implements the interface is a loop with a choose
-statement between all of the request types:
-
-```c++
-ACTOR void serveCountingServerInterface(CountingServerInterface csi) {
-    state int count = 0;
-    loop {
-        choose {
-            when (int x = waitNext(csi.addCount.getFuture())){
-                count += x;
-            }
-            when (int x = waitNext(csi.subtractCount.getFuture())){
-                count -= x;
-            }
-            when (Promise<int> r = waitNext(csi.getCount.getFuture())){
-                r.send( count ); // goes to client
-            }
+Future<Void> serveCountingServerInterface(CountingServerInterface csi) {
+    int count = 0;
+    while (true) {
+        auto request = co_await race(csi.addCount.getFuture(),
+                                     csi.subtractCount.getFuture(),
+                                     csi.getCount.getFuture());
+        switch (request.index()) {
+        case 0:
+            count += std::get<0>(request);
+            break;
+        case 1:
+            count -= std::get<1>(request);
+            break;
+        case 2:
+            std::get<2>(request).send(count);
+            break;
         }
     }
 }
 ```
 
-In this example, the add and subtract interfaces modify the count itself, stored with a state
-variable. The get interface is a bit more complicated, taking a `Promise<int>` instead of just an
+The caller must keep the server's returned `Future<Void>` alive while the server is needed.
+The add and subtract interfaces modify the count, which remains alive across each suspension.
+The get interface takes a `Promise<int>` instead of just an
 int. In the interface class, you can see a `PromiseStream<Promise<int>>`. This is a common
 construct that is analogous to sending someone a self-addressed envelope. You send a
 promise to a someone else, who then unpacks it and send the answer back to you, because
@@ -411,48 +386,42 @@ you are holding the corresponding future.
     template or something similar so that we can write smaller messages for
     deprecated fields.
 
-### ACTOR return values
+### Coroutine return values
 
-An actor can have only one returned Future, so there is a case that one actor wants to perform
-some operation more than once:
+A coroutine's returned future completes only once. Use a promise stream to send repeated
+results while the coroutine is running:
 
 ```c++
-ACTOR Future<Void> periodically(PromiseStream<Void> ps, int seconds) {
-    loop {
-        wait( delay( seconds ) );
+Future<Void> periodically(PromiseStream<Void> ps, int seconds) {
+    while (true) {
+        co_await delay(seconds);
         ps.send(Void());
     }
 }
 ```
 
-In this example, the `PromiseStream `is actually a way for the actor to return data from some
-operation that it ongoing.
-
-By default it is a compiler error to discard the result of a cancellable actor. If you don't think this is appropriate for your actor you can use the `[[flow_allow_discard]]` attribute.
-This does not apply to UNCANCELLABLE actors.
+Keep the returned `Future<Void>` alive for as long as periodic notifications are needed.
+Its lifetime controls the work; the stream carries the notifications.
 
 ## “gotchas”
 
-### Actor compiler
+### Exception handling
 
-There are some things about the actor compiler that can confuse and may change over time
+An error from an awaited future is thrown at the `co_await` expression. Catch errors around
+the operation that can fail, and propagate errors that the coroutine cannot handle. C++ does
+not allow `co_await` inside a `catch` handler. If recovery itself is asynchronous, save the
+error and await the recovery operation after leaving the handler.
 
-#### Switch statements
+### Coroutine cancellation
 
-Do not use these with wait statements inside!
+By default, dropping the last reference to a pending coroutine's returned `Future` cancels
+that coroutine. An explicit `Future::cancel()` also requests cancellation. A suspended
+coroutine resumes by throwing `actor_cancelled` from its await; local objects are destroyed
+as their scopes unwind. Do not discard a future when its work must continue.
 
-#### try/catch with no wait()
-
-When a `try/catch` block does not `wait()` the blocks are still decomposed into separate
-functions. This means that variables that you want to access both before and after such a block
-will need to be declared state.
-
-### ACTOR cancellation
-
-When the reference to the returned `Future` of an actor is dropped, that actor will be cancelled.
-Cancellation of an actor means that any `wait()`s that were currently active (the callback was
-currently registered) will be delivered an exception (`actor_cancelled`). In almost every case
-this exception should not be caught, though there are certainly exceptions!
+Do not swallow `actor_cancelled` in an error or retry handler. Rethrow it after any required
+synchronous cleanup so that cancellation can finish. Preserve `broken_promise` and other
+errors unless the caller's contract explicitly handles them.
 
 # Memory Management
 
@@ -597,27 +566,26 @@ returned from `foo`. When this returned `StringRef` is subsequently deallocated,
 longer be valid.
 
 
-#### Use of Standalone Objects in ACTOR Functions
+#### Use of Standalone Objects in Coroutines
 
-Special care needs to be taken when using using `Standalone` values in actor functions.
-Consider the following example:
+An owning local remains alive across suspension while its scope is active. A non-owning
+`StringRef` still does not retain its arena. When a coroutine needs to own bytes independently
+of its caller, pass a `Standalone<StringRef>` by value:
 
-```
-ACTOR Future<void> foo(StringRef param)
-{
-    //Do something
-    return Void();
+```c++
+Future<Void> printLater(Standalone<StringRef> text) {
+    co_await delay(1.0);
+    printf("%s\n", text.toString().c_str());
+    co_return;
 }
 
-ACTOR Future<Void> bar()
-{
-    Standalone<StringRef> str("string");
-    wait(foo(str));
-    return Void();
+Future<Void> printMessage() {
+    Standalone<StringRef> text("string"_sr);
+    co_await printLater(text);
+    co_return;
 }
 ```
 
-Although it appears at first glance that `bar` keeps the `Arena` for `str` alive during the call to `foo`,
-it will actually go out of scope in the class generated by the actor compiler. As a result, `param` in
-`foo` will become invalid. To prevent this, either declare `param` to be of type
-`Standalone<StringRef>` or make `str` a state variable.
+Both coroutines retain the arena in this example. Passing a `StringRef` instead would be safe
+only if its owner remained alive until the callee finished using it. The same rule applies to
+`KeyRef`, `ValueRef`, and other views into arena-backed storage.

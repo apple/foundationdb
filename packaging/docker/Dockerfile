@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM rockylinux/rockylinux:9.8-minimal AS base
+FROM rockylinux/rockylinux:10.2-minimal AS base
 
 # It seems mirrorlist can be less reliable, just use original baseurl for package repo.
 RUN sed -i.bak 's/^#baseurl=/baseurl=/; s/^mirrorlist=/#mirrorlist=/' /etc/yum.repos.d/rocky.repo
@@ -154,18 +154,11 @@ ENTRYPOINT ["/usr/bin/fdb-kubernetes-monitor"]
 
 FROM foundationdb-base AS foundationdb-kubernetes-sidecar
 
-# We use python3.9 here as the tests with 3.12 resulted in the following error:
-# error:0A000126:SSL routines::unexpected eof while reading. This could be an issue
-# with the installed openssl version. Since the sidecar support will be deprecated in the
-# future it's fine to use python 3.9 here.
-# EOL for python 3.9 is 2025-10: https://devguide.python.org/versions/
 RUN microdnf -y install \
-    python3.9 \
-    python3.9-pip && \
+    python3 \
+    python3-pip && \
     microdnf clean all && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.9 20 && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 20 && \
-    python3 -m pip install watchdog==4.0.1
+    python3 -m pip install watchdog==4.0.2
 
 WORKDIR /
 COPY entrypoint.bash sidecar.py /
@@ -199,6 +192,7 @@ ENV FDB_COORDINATOR=""
 ENV FDB_COORDINATOR_PORT=4500
 ENV FDB_CLUSTER_FILE_CONTENTS=""
 ENV FDB_PROCESS_CLASS=unset
+ENV FDB_IP_VERSION=4
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/var/fdb/scripts/fdb.bash"]
 
 FROM foundationdb-base AS mako
@@ -229,7 +223,7 @@ ENTRYPOINT ["/usr/bin/mako"]
 FROM foundationdb-base AS ycsb
 
 RUN microdnf -y install \
-    java-11-openjdk java-11-openjdk-devel && \
+    java-21-openjdk java-21-openjdk-devel && \
     microdnf clean all && \
     rm -rf /var/cache/yum
 

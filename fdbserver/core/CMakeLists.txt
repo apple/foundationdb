@@ -2,9 +2,9 @@ fdb_find_sources(FDBSERVER_CORE_LOCAL_SRCS)
 
 set(FDBSERVER_CORE_SRCS ${FDBSERVER_CORE_LOCAL_SRCS})
 if(${COROUTINE_IMPL} STREQUAL libcoro)
-  list(APPEND FDBSERVER_CORE_SRCS ../coroimpl/CoroFlowCoro.actor.cpp)
+  list(APPEND FDBSERVER_CORE_SRCS ../coroimpl/CoroFlowCoro.cpp)
 else()
-  list(APPEND FDBSERVER_CORE_SRCS ../coroimpl/CoroFlow.actor.cpp)
+  list(APPEND FDBSERVER_CORE_SRCS ../coroimpl/CoroFlow.cpp)
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbserver_core SRCS ${FDBSERVER_CORE_SRCS})
@@ -21,15 +21,3 @@ target_include_directories(fdbserver_core
   PRIVATE
     ${CMAKE_SOURCE_DIR}/fdbserver/include)
 target_link_libraries(fdbserver_core PUBLIC fdbclient)
-
-if(WITH_ROCKSDB)
-  add_dependencies(fdbserver_core rocksdb)
-  if(WITH_LIBURING)
-    target_include_directories(fdbserver_core PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
-    target_link_libraries(fdbserver_core PRIVATE ${ROCKSDB_LIBRARIES} ${uring_LIBRARIES} ${LZ4_LIBRARY})
-  else()
-    target_include_directories(fdbserver_core PRIVATE ${ROCKSDB_INCLUDE_DIR})
-    target_link_libraries(fdbserver_core PRIVATE ${ROCKSDB_LIBRARIES} ${LZ4_LIBRARY})
-  endif()
-  target_compile_definitions(fdbserver_core PUBLIC WITH_ROCKSDB)
-endif()

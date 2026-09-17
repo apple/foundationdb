@@ -24,7 +24,7 @@
 #include <climits>
 
 #include "flow/flow.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/KeyBackedTypes.h"

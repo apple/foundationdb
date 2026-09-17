@@ -29,7 +29,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/NativeCdc.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
 
@@ -221,13 +221,13 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 	});
 }
 
-ThreadFuture<CDCStreamId> ThreadSafeDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
+ThreadFuture<CDCStreamId> ThreadSafeDatabase::registerNativeCdcStream(const KeyRef& name,
+                                                                      const std::vector<KeyRange>& ranges) {
 	DatabaseContext* db = this->db;
 	Key nameCopy(name);
-	KeyRange keysCopy(keys);
-	return onMainThread([db, nameCopy, keysCopy]() -> Future<CDCStreamId> {
+	return onMainThread([db, nameCopy, ranges]() -> Future<CDCStreamId> {
 		db->checkDeferredError();
-		return registerNativeCdcStreamClient(Database(Reference<DatabaseContext>::addRef(db)), nameCopy, keysCopy);
+		return registerNativeCdcStreamClient(Database(Reference<DatabaseContext>::addRef(db)), nameCopy, ranges);
 	});
 }
 

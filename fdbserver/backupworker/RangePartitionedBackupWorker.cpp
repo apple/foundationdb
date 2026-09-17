@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "BackupWorkerPause.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
@@ -239,6 +240,7 @@ struct RangePartitionedBackupData {
 
 	Future<Void> waitAllBackupsReady() {
 		std::vector<Future<Void>> all;
+		all.reserve(backups.size());
 		for (auto& [uid, info] : backups) {
 			all.push_back(info.waitBackupReady());
 		}
@@ -392,7 +394,7 @@ Future<Version> pullPartitionMapFromTLog(RangePartitionedBackupData* self, Parti
 Future<Void> persistPartitionMapToSS(RangePartitionedBackupData* self,
                                      Version partitionMapVersion,
                                      PartitionMap const& partitionMap) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	Key key = backupPartitionMapHistoryKeyFor(self->backupEpoch, partitionMapVersion);
 
 	BinaryWriter valueWriter(IncludeVersion());
@@ -430,7 +432,7 @@ Future<Void> persistPartitionMapToSS(RangePartitionedBackupData* self,
 Future<Optional<std::pair<Version, PartitionMap>>> loadActivePartitionMapFromSS(RangePartitionedBackupData* self,
                                                                                 LogEpoch epoch,
                                                                                 Version startVersion) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	KeyRange range = backupPartitionMapHistoryRangeFor(epoch);
 
 	while (true) {
@@ -766,7 +768,7 @@ Future<Void> addMutation(Reference<IBackupFile> logFile,
 }
 
 static Future<Void> updateLogBytesWritten(RangePartitionedBackupData* self, std::map<UID, int64_t> bytesPerBackup) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 	while (true) {
 		Error err;
@@ -909,6 +911,7 @@ Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastV
 	// Finish files
 	// TODO akanksha: Add FileLevel checksum.
 	std::vector<Future<Void>> finished;
+	finished.reserve(activeFiles.size());
 	for (auto& lf : activeFiles) {
 		finished.push_back(lf.file->finish());
 	}
@@ -1003,7 +1006,7 @@ static Future<Void> monitorBackupStartedKeyChanges(RangePartitionedBackupData* s
 
 // This function is used to set backup worker's saved version latestBackupWorkerSavedVersion in BackupConfig.
 Future<Void> setBackupKeys(RangePartitionedBackupData* self, std::map<UID, Version> savedLogVersions) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 	while (true) {
 		Error err;
@@ -1042,36 +1045,6 @@ Future<Void> setBackupKeys(RangePartitionedBackupData* self, std::map<UID, Versi
 			}
 			co_await tr->commit();
 			co_return;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr->onError(err);
-	}
-}
-
-static Future<Void> monitorWorkerPause(RangePartitionedBackupData* self) {
-	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
-	Future<Void> watch;
-
-	while (true) {
-		Error err;
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			Optional<Value> value = co_await tr->get(backupPausedKey);
-			bool paused = value.present() && value.get() == "1"_sr;
-			if (self->paused.get() != paused) {
-				TraceEvent(paused ? "RangePartitionedBWPaused" : "RangePartitionedBWResumed", self->myId).log();
-				self->paused.set(paused);
-			}
-
-			watch = tr->watch(backupPausedKey);
-			co_await tr->commit();
-			co_await watch;
-			tr->reset();
-			continue;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -1311,7 +1284,11 @@ Future<Void> rangePartitionedBackupWorker(BackupInterface interf,
 			addActor.send(monitorRangePartitionedBackupProgress(&self));
 		}
 
-		addActor.send(monitorWorkerPause(&self));
+		addActor.send(monitorBackupPause(self.cx,
+		                                 self.myId,
+		                                 &self.paused,
+		                                 /*pausedEvent=*/"RangePartitionedBWPaused",
+		                                 /*resumedEvent=*/"RangePartitionedBWResumed"));
 		// Must be sent before processPartitionMap so logSystem is populated before the partition-map peek.
 		addActor.send(monitorLogSystemFromDbInfo(db, &self));
 

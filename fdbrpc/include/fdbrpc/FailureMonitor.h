@@ -168,8 +168,6 @@ private:
 	YieldedAsyncMap<Endpoint, bool> endpointKnownFailed;
 	AsyncMap<NetworkAddress, bool> disconnectTriggers;
 	std::unordered_map<Endpoint, FailedReason> failedEndpoints;
-
-	friend class OnStateChangedActorActor;
 };
 
 #endif

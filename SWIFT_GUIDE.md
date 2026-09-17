@@ -52,8 +52,6 @@ Then, you can then include the generated module in C++:
 ```cpp
 // ... 
 #include "SwiftModules/FDBServer"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 ```
 
 ## Swift Basics

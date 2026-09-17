@@ -69,13 +69,16 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	int rounds;
 	int assignmentPublicationChecks;
 	bool testProxyReplacement;
+	bool testTagOwnership;
 	bool injectUndeliveredProxyHalt;
 	bool testMemoryBound;
 	bool testReplyChunking;
+	bool testMultipleRanges;
 	bool testOversizedPeek;
 	bool testDurableAckScan;
 	bool testDelayedRetention;
 	bool testRetiredRecovery;
+	bool blockRetiredPopWithLiveStream;
 	bool testRetiredSharedTagSnapshot;
 	bool prepareRestartDrain;
 	bool drainAfterRestart;
@@ -223,7 +226,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		StreamState stream;
 		stream.name = Key(StringRef(format("native-cdc-e2e/stream/%04d", nextStreamNumber++)));
 		stream.keys = std::move(keys);
-		co_await timeoutError(registerNativeCdcStreamClient(cx, stream.name, stream.keys), operationTimeout);
+		// GCC 13 cannot lower initializer-list vector arguments inside these awaited expressions.
+		const std::vector<KeyRange> ranges{ stream.keys };
+		co_await timeoutError(registerNativeCdcStreamClient(cx, stream.name, ranges), operationTimeout);
 		stream.consumer = co_await timeoutError(createNativeCdcConsumer(cx, stream.name), operationTimeout);
 		streams.push_back(std::move(stream));
 	}
@@ -257,14 +262,16 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Key name = "native-cdc-e2e/lifecycle"_sr;
 		const KeyRange keys(KeyRangeRef("native-cdc-e2e/lifecycle/"_sr, "native-cdc-e2e/lifecycle0"_sr));
 		const KeyRange conflictingKeys(KeyRangeRef("native-cdc-e2e/lifecycle/"_sr, "native-cdc-e2e/lifecycle1"_sr));
+		const std::vector<KeyRange> ranges{ keys };
 
 		const CDCStreamId streamId =
-		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
-		ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout), streamId);
+		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, ranges), operationTimeout);
+		ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, ranges), operationTimeout), streamId);
 
 		bool conflictingRegistrationRejected = false;
 		try {
-			co_await timeoutError(registerNativeCdcStreamClient(cx, name, conflictingKeys), operationTimeout);
+			const std::vector<KeyRange> conflictingRanges{ conflictingKeys };
+			co_await timeoutError(registerNativeCdcStreamClient(cx, name, conflictingRanges), operationTimeout);
 		} catch (Error& e) {
 			if (e.code() != error_code_client_invalid_operation) {
 				throw;
@@ -279,7 +286,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		    listed.begin(), listed.end(), [&](NativeCdcStreamInfo const& stream) { return stream.name == name; });
 		ASSERT_EQ(found != listed.end(), true);
 		ASSERT_EQ(found->streamId, streamId);
-		ASSERT_EQ(found->keys, keys);
+		ASSERT_EQ(found->ranges.size(), 1);
+		ASSERT_EQ(found->ranges.front(), keys);
 
 		bool futureConsumeRejected = false;
 		try {
@@ -343,7 +351,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const KeyRange expectedLower(KeyRangeRef(keys.begin, lowerClear.end));
 		const KeyRange expectedUpper(KeyRangeRef(upperClear.begin, keys.end));
 
-		co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+		const std::vector<KeyRange> ranges{ keys };
+		co_await timeoutError(registerNativeCdcStreamClient(cx, name, ranges), operationTimeout);
 		Reference<NativeCdcConsumer> consumer =
 		    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
 
@@ -397,8 +406,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Value value = Value(StringRef(format("assignment-value/%04d", check)));
 
 		co_await delay(0.1);
+		const std::vector<KeyRange> ranges{ keys };
 		const CDCStreamId streamId =
-		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, ranges), operationTimeout);
 		Reference<NativeCdcConsumer> consumer =
 		    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
 		ASSERT_EQ(consumer->position().streamId, streamId);
@@ -406,6 +416,181 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Version committed = co_await writeValue(cx, key, value);
 		co_await consumeThroughValue(consumer, committed, key, value);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+	}
+
+	Key multipleRangeKey(StringRef suffix) const {
+		return suffix.withPrefix("native-cdc-e2e/multiple-ranges/data/"_sr);
+	}
+
+	KeyRange multipleRangeKeys(StringRef begin, StringRef end) const {
+		return KeyRange(KeyRangeRef(multipleRangeKey(begin), multipleRangeKey(end)));
+	}
+
+	Future<Void> consumeExpectedVersion(Reference<NativeCdcConsumer> consumer,
+	                                    Version committed,
+	                                    Standalone<VectorRef<MutationRef>> expected) {
+		const double deadline = now() + operationTimeout;
+		bool observed = false;
+		while (!observed) {
+			ASSERT_LT(now(), deadline);
+			CDCConsumeReply reply = co_await timeoutError(consumer->consume(), deadline - now());
+			for (const auto& versioned : reply.mutations) {
+				ASSERT_LE(versioned.version, reply.lastConsumedVersion);
+				if (versioned.version != committed) {
+					continue;
+				}
+				ASSERT(!observed);
+				ASSERT_EQ(versioned.mutations.size(), expected.size());
+				for (int i = 0; i < expected.size(); ++i) {
+					ASSERT_EQ(versioned.mutations[i].type, expected[i].type);
+					ASSERT_EQ(versioned.mutations[i].param1, expected[i].param1);
+					ASSERT_EQ(versioned.mutations[i].param2, expected[i].param2);
+				}
+				observed = true;
+			}
+		}
+		ASSERT_GE(consumer->position().lastConsumedVersion, committed);
+	}
+
+	Future<Version> writeMultipleRangeClear(Database cx) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.set(multipleRangeKey("e"_sr), "before-left"_sr);
+				tr.set(multipleRangeKey("q"_sr), "before-middle"_sr);
+				tr.set(multipleRangeKey("w"_sr), "before-right"_sr);
+				tr.set(multipleRangeKey("h"_sr), "before-gap"_sr);
+				tr.clear(multipleRangeKeys("d"_sr, "x"_sr));
+				tr.set(multipleRangeKey("e"_sr), "after-left"_sr);
+				tr.set(multipleRangeKey("q"_sr), "after-middle"_sr);
+				tr.set(multipleRangeKey("y"_sr), "after-right"_sr);
+				tr.clear(multipleRangeKeys("g"_sr, "j"_sr));
+				co_await tr.commit();
+				co_return tr.getCommittedVersion();
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
+	Future<Void> validateMultipleRanges(Database cx) {
+		ASSERT(streams.empty());
+		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 1);
+		const Key name = "native-cdc-e2e/multiple-ranges"_sr;
+		const Key gapName = "native-cdc-e2e/multiple-ranges-gap"_sr;
+		const std::vector<KeyRange> ranges{ multipleRangeKeys("b"_sr, "f"_sr),
+			                                multipleRangeKeys("m"_sr, "r"_sr),
+			                                multipleRangeKeys("w"_sr, "z"_sr) };
+		const std::vector<KeyRange> registrationRanges{
+			multipleRangeKeys("m"_sr, "r"_sr), multipleRangeKeys("c"_sr, "f"_sr), multipleRangeKeys("b"_sr, "d"_sr),
+			multipleRangeKeys("b"_sr, "c"_sr), multipleRangeKeys("x"_sr, "z"_sr), multipleRangeKeys("w"_sr, "x"_sr),
+			multipleRangeKeys("m"_sr, "r"_sr)
+		};
+		const CDCStreamId streamId =
+		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, registrationRanges), operationTimeout);
+		ASSERT_EQ(co_await timeoutError(registerNativeCdcStreamClient(cx, name, ranges), operationTimeout), streamId);
+		bool changedGapsRejected = false;
+		try {
+			const std::vector<KeyRange> mergedRanges{ multipleRangeKeys("b"_sr, "z"_sr) };
+			co_await timeoutError(registerNativeCdcStreamClient(cx, name, mergedRanges), operationTimeout);
+		} catch (Error& e) {
+			if (e.code() != error_code_client_invalid_operation) {
+				throw;
+			}
+			changedGapsRejected = true;
+		}
+		ASSERT(changedGapsRejected);
+		const std::vector<NativeCdcStreamInfo> listed =
+		    co_await timeoutError(listNativeCdcStreamsClient(cx), operationTimeout);
+		const auto found = std::find_if(
+		    listed.begin(), listed.end(), [&](NativeCdcStreamInfo const& stream) { return stream.name == name; });
+		ASSERT(found != listed.end());
+		ASSERT_EQ(found->streamId, streamId);
+		ASSERT_EQ(found->ranges, ranges);
+
+		// Route excluded keys onto the same tag so the proxy must filter shared-tag false positives.
+		const std::vector<KeyRange> gapRanges{ multipleRangeKeys("a"_sr, "zz"_sr) };
+		co_await timeoutError(registerNativeCdcStreamClient(cx, gapName, gapRanges), operationTimeout);
+		Reference<NativeCdcConsumer> consumer =
+		    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+		ASSERT_EQ(consumer->position().streamId, streamId);
+		std::vector<std::pair<Key, Value>> values;
+		for (StringRef suffix :
+		     { "a"_sr, "b"_sr, "e"_sr, "f"_sr, "h"_sr, "m"_sr, "q"_sr, "r"_sr, "s"_sr, "w"_sr, "y"_sr, "z"_sr }) {
+			values.emplace_back(multipleRangeKey(suffix), suffix);
+		}
+		Standalone<VectorRef<MutationRef>> expected;
+		for (StringRef suffix : { "b"_sr, "e"_sr, "m"_sr, "q"_sr, "w"_sr, "y"_sr }) {
+			expected.push_back_deep(expected.arena(),
+			                        MutationRef(MutationRef::SetValue, multipleRangeKey(suffix), suffix));
+		}
+		const Version written = co_await writeValues(cx, values);
+		co_await consumeExpectedVersion(consumer, written, expected);
+		co_await timeoutError(consumer->acknowledge(), operationTimeout);
+
+		expected = Standalone<VectorRef<MutationRef>>();
+		for (const auto& [suffix, value] : { std::pair("e"_sr, "before-left"_sr),
+		                                     std::pair("q"_sr, "before-middle"_sr),
+		                                     std::pair("w"_sr, "before-right"_sr) }) {
+			expected.push_back_deep(expected.arena(),
+			                        MutationRef(MutationRef::SetValue, multipleRangeKey(suffix), value));
+		}
+		for (const auto& range : { multipleRangeKeys("d"_sr, "f"_sr), ranges[1], multipleRangeKeys("w"_sr, "x"_sr) }) {
+			expected.push_back_deep(expected.arena(), MutationRef(MutationRef::ClearRange, range.begin, range.end));
+		}
+		for (const auto& [suffix, value] : { std::pair("e"_sr, "after-left"_sr),
+		                                     std::pair("q"_sr, "after-middle"_sr),
+		                                     std::pair("y"_sr, "after-right"_sr) }) {
+			expected.push_back_deep(expected.arena(),
+			                        MutationRef(MutationRef::SetValue, multipleRangeKey(suffix), value));
+		}
+		const Version cleared = co_await writeMultipleRangeClear(cx);
+		co_await consumeExpectedVersion(consumer, cleared, expected);
+
+		CDCProxyInterface original = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
+		co_await timeoutError(haltProxyUntilReplaced(cx, original, false), operationTimeout);
+		CDCProxyInterface replacement =
+		    co_await timeoutError(waitForAssignedProxy(cx, streamId, original.id()), operationTimeout);
+		ASSERT_NE(original.id(), replacement.id());
+		// One unacknowledged version must be replayed in full, including all disjoint clear fragments.
+		co_await consumeExpectedVersion(consumer, cleared, expected);
+		co_await timeoutError(consumer->acknowledge(), operationTimeout);
+		const CDCCursor checkpoint = consumer->position();
+		ASSERT_EQ(checkpoint.streamId, streamId);
+		const std::vector<NativeCdcStreamInfo> acknowledged =
+		    co_await timeoutError(listNativeCdcStreamsClient(cx), operationTimeout);
+		const auto acknowledgedStream = std::find_if(
+		    acknowledged.begin(), acknowledged.end(), [&](const auto& stream) { return stream.name == name; });
+		ASSERT(acknowledgedStream != acknowledged.end());
+		ASSERT_EQ(acknowledgedStream->ranges, ranges);
+		ASSERT_EQ(acknowledgedStream->minVersion, checkpoint.lastConsumedVersion + 1);
+		// The multi-range stream must retain unread history without another stream holding its tag back.
+		co_await timeoutError(removeNativeCdcStreamClient(cx, gapName), operationTimeout);
+
+		values.clear();
+		expected = Standalone<VectorRef<MutationRef>>();
+		for (StringRef suffix : { "b"_sr, "m"_sr, "w"_sr }) {
+			values.emplace_back(multipleRangeKey(suffix), "recovered-range"_sr);
+			expected.push_back_deep(expected.arena(),
+			                        MutationRef(MutationRef::SetValue, values.back().first, values.back().second));
+		}
+		values.emplace_back(multipleRangeKey("h"_sr), "excluded-gap"_sr);
+		const Version retained = co_await writeValues(cx, values);
+		co_await timeoutError(forceTransactionSystemRecovery(), operationTimeout);
+		consumer = resumeNativeCdcConsumer(cx, checkpoint);
+		co_await consumeExpectedVersion(consumer, retained, expected);
+		co_await timeoutError(consumer->acknowledge(), operationTimeout);
+
+		// A new commit must use the recovered range routing, including exclusion of the untracked gap.
+		const Version resumed = co_await writeValues(cx, values);
+		co_await consumeExpectedVersion(consumer, resumed, expected);
+		co_await timeoutError(consumer->acknowledge(), operationTimeout);
+		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+		co_await timeoutError(waitForFullyRecovered(), operationTimeout);
+		CODE_PROBE(true, "Native CDC consumes and recovers one stream covering multiple disjoint ranges");
 	}
 
 	Future<Void> validateAssignmentPublication(Database cx) {
@@ -467,6 +652,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Key name = "native-cdc-e2e/stale-initialization"_sr;
 		const KeyRange keys(
 		    KeyRangeRef("native-cdc-e2e/stale-initialization/"_sr, "native-cdc-e2e/stale-initialization0"_sr));
+		const std::vector<KeyRange> ranges{ keys };
 		const double deadline = now() + operationTimeout;
 		bool recovering = false;
 		bool streamRegistered = false;
@@ -486,7 +672,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				co_await timeoutError(setAllProxyPopsPaused(cx, true), operationTimeout);
 				streamRegistered = true;
 				const CDCStreamId streamId =
-				    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+				    co_await timeoutError(registerNativeCdcStreamClient(cx, name, ranges), operationTimeout);
 				CDCProxyInterface proxy = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
 				const CDCCursor cursor(streamId, invalidVersion);
 				Future<ErrorOr<CDCConsumeReply>> pendingConsume = proxy.consume.tryGetReply(CDCConsumeRequest(cursor));
@@ -538,8 +724,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Key key = "native-cdc-e2e/proxy-replacement/value"_sr;
 		const Value value = "replacement-value"_sr;
 
+		const std::vector<KeyRange> ranges{ keys };
 		const CDCStreamId streamId =
-		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, ranges), operationTimeout);
 		Reference<NativeCdcConsumer> consumer =
 		    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
 		CDCProxyInterface original = co_await timeoutError(waitForAssignedProxy(cx, streamId), operationTimeout);
@@ -565,6 +752,177 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Version committed = co_await writeValue(cx, key, value);
 		co_await consumeThroughValue(consumer, committed, key, value);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+	}
+
+	Future<Void> checkTagOwner(Database cx, Tag tag, Optional<CDCStreamId> expected) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> value = co_await tr.get(cdcTagOwnerKeyFor(tag));
+				ASSERT_EQ(value.present(), expected.present());
+				if (value.present()) {
+					ASSERT_EQ(decodeCDCTagOwnerValue(value.get()), expected.get());
+				}
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
+	Future<Void> overwriteTagOwnerForTesting(Database cx, Tag tag, Optional<CDCStreamId> anchor) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				if (anchor.present()) {
+					tr.set(cdcTagOwnerKeyFor(tag), cdcTagOwnerValue(anchor.get()));
+				} else {
+					tr.clear(cdcTagOwnerKeyFor(tag));
+				}
+				co_await tr.commit();
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
+	Future<CDCStreamId> registerThroughProxy(Database cx,
+	                                         Key name,
+	                                         KeyRange keys,
+	                                         Optional<CDCStreamId> sharedTagStream = Optional<CDCStreamId>()) {
+		const std::vector<KeyRange> ranges{ keys };
+		const double deadline = now() + operationTimeout;
+		CDCStreamId streamId = 0;
+		if (sharedTagStream.present()) {
+			while (true) {
+				if (now() >= deadline) {
+					throw timed_out();
+				}
+				Future<Void> proxyChanged = cx->clientInfo->onChange();
+				const ClientDBInfo& clientInfo = cx->clientInfo->get();
+				const auto anchor = clientInfo.streamToCDCProxyId.find(sharedTagStream.get());
+				if (clientInfo.cdcProxies.size() != 2 || anchor == clientInfo.streamToCDCProxyId.end() ||
+				    std::none_of(
+				        clientInfo.cdcProxies.begin(),
+				        clientInfo.cdcProxies.end(),
+				        [&](CDCProxyInterface const& candidate) { return candidate.id() == anchor->second; })) {
+					co_await timeoutError(proxyChanged, deadline - now());
+					continue;
+				}
+				CDCProxyInterface proxy =
+				    clientInfo.cdcProxies[clientInfo.cdcProxies.front().id() == anchor->second ? 1 : 0];
+				ASSERT_NE(proxy.id(), anchor->second);
+				try {
+					Future<ErrorOr<CDCRegisterStreamReply>> request =
+					    proxy.registerStream.tryGetReply(CDCRegisterStreamRequest(name, ranges));
+					// A different stream's assignment publication must not discard an in-flight registration.
+					while (true) {
+						auto result =
+						    co_await timeoutError(race(throwErrorOr(request), proxyChanged), deadline - now());
+						if (result.index() == 0) {
+							streamId = std::get<0>(result).streamId;
+							break;
+						}
+						proxyChanged = cx->clientInfo->onChange();
+						const auto& proxies = cx->clientInfo->get().cdcProxies;
+						if (std::none_of(proxies.begin(), proxies.end(), [&](CDCProxyInterface const& candidate) {
+							    return candidate.id() == proxy.id();
+						    })) {
+							break;
+						}
+					}
+				} catch (Error& e) {
+					if (e.code() != error_code_wrong_shard_server && e.code() != error_code_broken_promise &&
+					    e.code() != error_code_connection_failed && e.code() != error_code_request_maybe_delivered) {
+						throw;
+					}
+				}
+				if (streamId != 0) {
+					break;
+				}
+				co_await delay(0.1);
+			}
+		} else {
+			streamId = co_await timeoutError(registerNativeCdcStreamClient(cx, name, ranges), deadline - now());
+		}
+		co_await timeoutError(waitForAssignedProxy(cx, streamId), deadline - now());
+		// Recovery can replace the owner while registration or consumption is in flight. Compare live streams
+		// in the same published snapshot instead of retaining a proxy ID across those waits.
+		const auto& assignments = cx->clientInfo->get().streamToCDCProxyId;
+		const auto owner = assignments.find(streamId);
+		ASSERT(owner != assignments.end());
+		if (sharedTagStream.present()) {
+			const auto sharedOwner = assignments.find(sharedTagStream.get());
+			ASSERT(sharedOwner != assignments.end());
+			ASSERT_EQ(owner->second, sharedOwner->second);
+		}
+		co_return streamId;
+	}
+
+	Future<Void> validateTagOwnership(Database cx) {
+		ASSERT(streams.empty());
+		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 1);
+		const Tag tag(tagLocalityCDC, 0);
+		const Key firstName = "native-cdc-e2e/tag-owner/first"_sr;
+		const Key secondName = "native-cdc-e2e/tag-owner/second"_sr;
+		const Key thirdName = "native-cdc-e2e/tag-owner/third"_sr;
+		const Key key = "native-cdc-e2e/tag-owner/data"_sr;
+		const KeyRange keys(KeyRangeRef(key, keyAfter(key)));
+		const std::vector<KeyRange> ranges{ keys };
+		const CDCStreamId firstId =
+		    co_await timeoutError(registerNativeCdcStreamClient(cx, firstName, ranges), operationTimeout);
+		CDCProxyInterface owner = co_await timeoutError(waitForAssignedProxy(cx, firstId), operationTimeout);
+		ASSERT_EQ(cx->clientInfo->get().cdcProxies.size(), 2);
+		co_await checkTagOwner(cx, tag, firstId);
+
+		// The public client usually chooses the first proxy, which cannot distinguish an index hit from caller choice.
+		const CDCStreamId removedId = co_await registerThroughProxy(cx, secondName, keys, firstId);
+		co_await checkTagOwner(cx, tag, firstId);
+		co_await timeoutError(removeNativeCdcStreamClient(cx, secondName), operationTimeout);
+		co_await checkTagOwner(cx, tag, firstId);
+
+		for (const Optional<CDCStreamId> invalidAnchor :
+		     { Optional<CDCStreamId>(), Optional<CDCStreamId>(removedId) }) {
+			co_await overwriteTagOwnerForTesting(cx, tag, invalidAnchor);
+			co_await registerThroughProxy(cx, secondName, keys, firstId);
+			co_await checkTagOwner(cx, tag, firstId);
+			co_await timeoutError(removeNativeCdcStreamClient(cx, secondName), operationTimeout);
+		}
+
+		Reference<NativeCdcConsumer> consumer =
+		    co_await timeoutError(createNativeCdcConsumer(cx, firstName), operationTimeout);
+		const Value value = "tag-owner-retained-across-replacement"_sr;
+		const Version committed = co_await writeValue(cx, key, value);
+		co_await timeoutError(haltProxyUntilReplaced(cx, owner, false), operationTimeout);
+		co_await timeoutError(waitForAssignedProxy(cx, firstId, owner.id()), operationTimeout);
+		ASSERT_EQ(cx->clientInfo->get().cdcProxies.size(), 2);
+		const CDCStreamId secondId = co_await registerThroughProxy(cx, secondName, keys, firstId);
+		co_await checkTagOwner(cx, tag, firstId);
+		co_await consumeThroughValue(consumer, committed, key, value);
+
+		co_await timeoutError(removeNativeCdcStreamClient(cx, firstName), operationTimeout);
+		co_await checkTagOwner(cx, tag, Optional<CDCStreamId>());
+		co_await registerThroughProxy(cx, thirdName, keys, secondId);
+		co_await checkTagOwner(cx, tag, secondId);
+		co_await timeoutError(removeNativeCdcStreamClient(cx, thirdName), operationTimeout);
+		co_await checkTagOwner(cx, tag, secondId);
+		co_await timeoutError(removeNativeCdcStreamClient(cx, secondName), operationTimeout);
+		co_await checkTagOwner(cx, tag, Optional<CDCStreamId>());
+
+		const CDCStreamId reusedId = co_await registerThroughProxy(cx, firstName, keys);
+		co_await checkTagOwner(cx, tag, reusedId);
+		co_await timeoutError(removeNativeCdcStreamClient(cx, firstName), operationTimeout);
+		co_await checkTagOwner(cx, tag, Optional<CDCStreamId>());
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 	}
 
 	Future<bool> setUnpublishedStreamOwner(Database cx,
@@ -622,8 +980,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Key key = "native-cdc-e2e/stale-ownership/value"_sr;
 		const Value value = "replacement-survives-stale-removal"_sr;
 		const double deadline = now() + operationTimeout;
+		const std::vector<KeyRange> ranges{ keys };
 		CDCStreamId expectedStreamId =
-		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+		    co_await timeoutError(registerNativeCdcStreamClient(cx, name, ranges), operationTimeout);
 
 		const auto rejectedWrongOwner = [](ErrorOr<Void> const& result) {
 			ASSERT(!result.present());
@@ -719,9 +1078,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 			co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
 			const CDCStreamId replacementId =
-			    co_await timeoutError(registerNativeCdcStreamClient(cx, name, keys), operationTimeout);
+			    co_await timeoutError(registerNativeCdcStreamClient(cx, name, ranges), operationTimeout);
 			ASSERT_NE(replacementId, streamId);
 			expectedStreamId = replacementId;
+			const NativeCdcRemoveResult guardedRemoval =
+			    co_await timeoutError(removeNativeCdcStreamGuarded(cx, name, streamId), operationTimeout);
+			ASSERT(guardedRemoval == NativeCdcRemoveResult::StreamReplaced);
 			const ErrorOr<Void> staleRemoval = co_await timeoutError(
 			    owner.removeStream.tryGetReply(CDCRemoveStreamRequest(name, streamId)), operationTimeout);
 			existing = co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
@@ -856,29 +1218,6 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_return proxyStatus.second;
 	}
 
-	Future<Void> startBlockedConsume(Database cx,
-	                                 CDCStreamId streamId,
-	                                 Reference<NativeCdcConsumer> consumer,
-	                                 CDCProxyInterface proxy,
-	                                 Future<CDCConsumeReply>* outstanding) {
-		*outstanding = consumer->consume();
-		const double deadline = now() + operationTimeout;
-		while (true) {
-			CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, &proxy);
-			if (outstanding->isReady()) {
-				co_await *outstanding;
-				co_await timeoutError(consumer->acknowledge(), operationTimeout);
-				*outstanding = consumer->consume();
-				continue;
-			}
-			if (status.activeConsumeRequests > 0 && status.readDemand > 0) {
-				co_return;
-			}
-			ASSERT_LT(now(), deadline);
-			co_await delay(0.01);
-		}
-	}
-
 	Future<Void> waitForNoActiveConsumes(Database cx, CDCStreamId streamId, CDCProxyInterface* proxy) {
 		const double deadline = now() + operationTimeout;
 		while (true) {
@@ -908,8 +1247,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		// the tracked consumer so later workload phases do not retain a cursor behind acknowledgements made here.
 		Reference<NativeCdcConsumer> idleConsumer = streams.front().consumer;
 		const Version idleStartVersion = idleConsumer->position().lastConsumedVersion;
-		Future<CDCConsumeReply> idleConsume;
-		co_await startBlockedConsume(cx, streamId, idleConsumer, *proxy, &idleConsume);
+		// Check client exclusivity before yielding: committed-version progress can complete a consume before
+		// a status request observes read demand, even when the client correctly rejects overlapping operations.
+		Future<CDCConsumeReply> idleConsume = idleConsumer->consume();
+		ASSERT(!idleConsume.isReady());
 		Future<CDCConsumeReply> overlappingConsume = idleConsumer->consume();
 		ASSERT(overlappingConsume.isReady() && overlappingConsume.isError());
 		ASSERT_EQ(overlappingConsume.getError().code(), error_code_client_invalid_operation);
@@ -922,8 +1263,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		for (int i = 0; i < 4; ++i) {
 			Key name = Key(StringRef(format("native-cdc-e2e/lease/%04d", i)));
 			Key key = keyForIndex(keyCount / 2);
-			co_await timeoutError(registerNativeCdcStreamClient(cx, name, KeyRangeRef(key, keyAfter(key))),
-			                      operationTimeout);
+			const std::vector<KeyRange> ranges{ KeyRangeRef(key, keyAfter(key)) };
+			co_await timeoutError(registerNativeCdcStreamClient(cx, name, ranges), operationTimeout);
 			CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, proxy);
 			ASSERT_LE(status.activeConsumeRequests, 1);
 			ASSERT_LE(status.readDemand, 1);
@@ -953,6 +1294,22 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await expectConcurrentConsumeRejected(*proxy, currentCursor);
 		first.cancel();
 		co_await waitForNoActiveConsumes(cx, streamId, proxy);
+
+		// The first request may finish before the retry reaches the proxy. A pending request is superseded, while
+		// an already-completed request retains its reply; either ordering must allow the same consumer to retry.
+		const UID consumerId = deterministicRandom()->randomUniqueID();
+		Future<ErrorOr<CDCConsumeReply>> original =
+		    proxy->consume.tryGetReply(CDCConsumeRequest(currentCursor, consumerId));
+		Future<ErrorOr<CDCConsumeReply>> retry =
+		    proxy->consume.tryGetReply(CDCConsumeRequest(currentCursor, consumerId));
+		const ErrorOr<CDCConsumeReply> firstReply = co_await timeoutError(original, operationTimeout);
+		if (firstReply.isError()) {
+			ASSERT_EQ(firstReply.getError().code(), error_code_request_maybe_delivered);
+		} else {
+			ASSERT_GE(firstReply.get().lastConsumedVersion, currentCursor.lastConsumedVersion);
+		}
+		co_await timeoutError(throwErrorOr(retry), operationTimeout);
+		co_await waitForNoActiveConsumes(cx, streamId, proxy);
 	}
 
 	Future<Void> requestPopsUntilStopped(Database cx, Reference<AsyncVar<bool>> stopped) {
@@ -968,14 +1325,18 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		auto initialProxyStatus = co_await timeoutError(getAssignedProxyStatus(cx, streamId), operationTimeout);
 		bool followedProxyReplacement = proxy->id() != initialProxyStatus.first.id();
 		updateObservedProxy(*proxy, initialProxyStatus.first);
-		const CDCProxyBufferStatus initial = initialProxyStatus.second;
+		CDCProxyBufferStatus initial = initialProxyStatus.second;
 		auto stopped = makeReference<AsyncVar<bool>>(false);
 		Future<Void> requester = requestPopsUntilStopped(cx, stopped);
 		const double deadline = now() + operationTimeout;
 		while (true) {
 			const UID previousProxy = proxy->id();
 			const CDCProxyBufferStatus status = co_await getCurrentProxyStatus(cx, streamId, proxy);
-			followedProxyReplacement |= previousProxy != proxy->id();
+			if (previousProxy != proxy->id()) {
+				// Pop counters belong to one proxy instance; require fresh progress after replacement.
+				initial = status;
+				followedProxyReplacement = true;
+			}
 			if (status.popCompletions > initial.popCompletions) {
 				ASSERT_GT(status.popRequests, initial.popRequests);
 				break;
@@ -1064,9 +1425,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 		const Version lastVersion = expected.back().version;
 
-		// Prime one proxy-owned retained buffer without acknowledging. The first consume starts with several complete
-		// TLog versions available, so it also exercises raw-peek truncation before the resumed consumer exercises the
-		// proxy-to-client reply bound.
+		// Prime one proxy-owned retained buffer without acknowledging. Several complete versions fit one TLog peek,
+		// but all versions exceed its bound; a batched reply proves one pass buffered multiple complete versions.
+		bool sawBatchedPrimingReply = false;
 		const double primeDeadline = now() + operationTimeout;
 		while (stream.consumer->position().lastConsumedVersion < lastVersion) {
 			const Version previous = stream.consumer->position().lastConsumedVersion;
@@ -1083,7 +1444,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				continue;
 			}
 			ASSERT_GT(reply.lastConsumedVersion, previous);
+			sawBatchedPrimingReply |= reply.mutations.size() > 1;
 		}
+		ASSERT(sawBatchedPrimingReply);
 
 		Reference<NativeCdcConsumer> resumed =
 		    resumeNativeCdcConsumer(cx, CDCCursor(stream.consumer->position().streamId, invalidVersion));
@@ -1406,8 +1769,80 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.back().name), operationTimeout);
 		streams.pop_back();
 
+		NativeCdcStatus blockedStatus;
+		// A proxy sample can fail during recovery even though the durable status read succeeded.
+		const double sampleDeadline = now() + operationTimeout;
+		while (true) {
+			ASSERT_LT(now(), sampleDeadline);
+			blockedStatus = co_await timeoutError(getNativeCdcStatus(cx), sampleDeadline - now());
+			ASSERT(blockedStatus.metadataComplete);
+			ASSERT_EQ(blockedStatus.streams.size(), 1);
+			const NativeCdcStreamStatus& blocker = blockedStatus.streams.front();
+			ASSERT_EQ(blocker.info.streamId, streams.front().consumer->position().streamId);
+			ASSERT_EQ(blocker.info.name, streams.front().name);
+			ASSERT_EQ(blocker.info.ranges.size(), 1);
+			ASSERT_EQ(blocker.info.ranges.front(), keys);
+			ASSERT_GT(blocker.info.minVersion, invalidVersion);
+			ASSERT_LE(blocker.info.minVersion, committed);
+			ASSERT_EQ(blocker.tags.size(), 1);
+			ASSERT_EQ(blockedStatus.tags.size(), 1);
+			const NativeCdcTagStatus& tag = blockedStatus.tags.front();
+			ASSERT_EQ(tag.tag, blocker.tags.front());
+			ASSERT(tag.pendingRetiredPop);
+			ASSERT_EQ(tag.blockingStreams.size(), 1);
+			ASSERT_EQ(tag.blockingStreams.front(), blocker.info.streamId);
+			ASSERT_GT(tag.safePopVersion, invalidVersion);
+			ASSERT_LE(tag.safePopVersion, committed);
+			ASSERT(blocker.owner.present());
+			const auto proxySample =
+			    std::find_if(blockedStatus.proxies.begin(),
+			                 blockedStatus.proxies.end(),
+			                 [&](NativeCdcProxyStatus const& proxy) { return proxy.id == blocker.owner.get(); });
+			if (proxySample == blockedStatus.proxies.end()) {
+				// The durable owner may not yet be in the published proxy list after replacement.
+				co_await delay(0.1);
+				continue;
+			}
+			if (!proxySample->sample.present()) {
+				ASSERT(proxySample->error.present());
+				const int code = proxySample->error.get().code();
+				if (code != error_code_timed_out && code != error_code_broken_promise &&
+				    code != error_code_connection_failed && code != error_code_request_maybe_delivered &&
+				    code != error_code_wrong_shard_server) {
+					throw proxySample->error.get();
+				}
+				co_await delay(0.1);
+				continue;
+			}
+			ASSERT_GT(proxySample->sample.get().bufferLimit, 0);
+			const auto& sampledStreams = proxySample->sample.get().streams;
+			ASSERT(std::any_of(sampledStreams.begin(), sampledStreams.end(), [&](CDCProxyStreamStatus const& stream) {
+				return stream.streamId == blocker.info.streamId;
+			}));
+			break;
+		}
+		const NativeCdcStreamStatus& blocker = blockedStatus.streams.front();
+
 		co_await setAllProxyPopsPaused(cx, false);
 		co_await consumeThroughValue(streams.front().consumer, committed, key, value);
+		const CDCProxyInterface proxy =
+		    co_await timeoutError(waitForAssignedProxy(cx, blocker.info.streamId), operationTimeout);
+		GetCDCProxyStatusRequest request;
+		request.streamIds = { blocker.info.streamId, 0 };
+		const CDCProxyStatusReply reply = co_await timeoutError(proxy.getStatus.getReply(request), operationTimeout);
+		ASSERT_EQ(reply.streams.size(), 2);
+		ASSERT(std::any_of(reply.streams.begin(), reply.streams.end(), [&](CDCProxyStreamStatus const& stream) {
+			return stream.streamId == blocker.info.streamId && stream.present;
+		}));
+		ASSERT(std::any_of(reply.streams.begin(), reply.streams.end(), [](CDCProxyStreamStatus const& stream) {
+			return stream.streamId == 0 && !stream.present;
+		}));
+		GetCDCProxyStatusRequest oversizedRequest;
+		oversizedRequest.streamIds.resize(GetCDCProxyStatusRequest::MAX_STREAMS + 1, 0);
+		const ErrorOr<CDCProxyStatusReply> oversizedReply =
+		    co_await timeoutError(proxy.getStatus.tryGetReply(oversizedRequest), operationTimeout);
+		ASSERT(!oversizedReply.present());
+		ASSERT_EQ(oversizedReply.getError().code(), error_code_client_invalid_operation);
 		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
 		streams.clear();
 		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
@@ -1449,18 +1884,62 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	Future<Void> validateRetiredCleanupAcrossRecovery(Database cx) {
 		ASSERT_EQ(streams.size(), 1);
 		co_await timeoutError(waitForTransactionSystemAvailable(), operationTimeout);
+		if (blockRetiredPopWithLiveStream) {
+			ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 1);
+			// Another region's proxy can finish a retired pop while the locally published proxy is paused.
+			// Keep the original stream on the shared tag until after recovery so that pop remains pending.
+			const Key key = keyForIndex(keyCount / 2);
+			co_await addStream(cx, KeyRange(KeyRangeRef(key, keyAfter(key))));
+		}
+		const Key name = streams.back().name;
+		const CDCStreamId streamId = streams.back().consumer->position().streamId;
 		co_await setAllProxyPopsPaused(cx, true);
-		co_await timeoutError(removeNativeCdcStreamClient(cx, streams.back().name), operationTimeout);
-		streams.clear();
+		const NativeCdcRemoveResult removed =
+		    co_await timeoutError(removeNativeCdcStreamGuarded(cx, name, streamId), operationTimeout);
+		ASSERT(removed == NativeCdcRemoveResult::Removed);
+		streams.pop_back();
 		co_await timeoutError(waitForRetiredTagState(cx, true), operationTimeout);
+		const NativeCdcRemoveResult repeated =
+		    co_await timeoutError(removeNativeCdcStreamGuarded(cx, name, streamId), operationTimeout);
+		ASSERT(repeated == NativeCdcRemoveResult::AlreadyAbsent);
+		const NativeCdcStatus pendingStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+		ASSERT(pendingStatus.metadataComplete);
+		ASSERT_EQ(pendingStatus.streams.size(), streams.size());
+		if (blockRetiredPopWithLiveStream) {
+			ASSERT_EQ(pendingStatus.streams.front().info.streamId, streams.front().consumer->position().streamId);
+			ASSERT_EQ(pendingStatus.tags.size(), 1);
+			const NativeCdcTagStatus& tag = pendingStatus.tags.front();
+			ASSERT_EQ(tag.blockingStreams.size(), 1);
+			ASSERT_EQ(tag.blockingStreams.front(), streams.front().consumer->position().streamId);
+			ASSERT_LT(tag.safePopVersion, tag.retiredPopVersion);
+		}
+		ASSERT(std::any_of(pendingStatus.tags.begin(), pendingStatus.tags.end(), [](NativeCdcTagStatus const& tag) {
+			return tag.pendingRetiredPop;
+		}));
 		TraceEvent("NativeCdcRetiredMarkerCreated").log();
 
 		co_await forceTransactionSystemRecovery();
 		TraceEvent("NativeCdcRetiredRecoveryComplete").log();
+		if (blockRetiredPopWithLiveStream) {
+			const NativeCdcStatus recoveredStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+			ASSERT(recoveredStatus.metadataComplete);
+			ASSERT_EQ(recoveredStatus.streams.size(), 1);
+			ASSERT(std::any_of(recoveredStatus.tags.begin(),
+			                   recoveredStatus.tags.end(),
+			                   [](NativeCdcTagStatus const& tag) { return tag.pendingRetiredPop; }));
+			co_await timeoutError(removeNativeCdcStreamClient(cx, streams.front().name), operationTimeout);
+			streams.clear();
+		}
 		co_await setAllProxyPopsPaused(cx, false);
 		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 		TraceEvent("NativeCdcRetiredCleanupComplete").log();
 		co_await timeoutError(waitForFullyRecovered(), operationTimeout);
+		const NativeCdcStatus drainedStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+		ASSERT(drainedStatus.metadataComplete);
+		ASSERT(drainedStatus.streams.empty());
+		ASSERT(std::none_of(drainedStatus.tags.begin(), drainedStatus.tags.end(), [](NativeCdcTagStatus const& tag) {
+			return tag.pendingRetiredPop;
+		}));
 		CODE_PROBE(true, "Native CDC retired tag cleanup allows recovery to complete");
 	}
 
@@ -1482,6 +1961,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		const Key name = "native-cdc-e2e/stream/0000"_sr;
 		Reference<NativeCdcConsumer> consumer =
 		    co_await timeoutError(createNativeCdcConsumer(cx, name), operationTimeout);
+		const NativeCdcStatus activeStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+		ASSERT(activeStatus.metadataComplete);
+		ASSERT(!activeStatus.admissionEnabled);
+		ASSERT_EQ(activeStatus.streams.size(), 1);
+		ASSERT_EQ(activeStatus.streams.front().info.name, name);
+		ASSERT_EQ(activeStatus.streams.front().info.streamId, consumer->position().streamId);
 		bool observed = false;
 		while (!observed) {
 			CDCConsumeReply reply = co_await timeoutError(consumer->consume(), operationTimeout);
@@ -1495,17 +1980,26 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			}
 			co_await timeoutError(consumer->acknowledge(), operationTimeout);
 		}
-		co_await timeoutError(removeNativeCdcStreamClient(cx, name), operationTimeout);
+		const NativeCdcRemoveResult removed = co_await timeoutError(
+		    removeNativeCdcStreamGuarded(cx, name, consumer->position().streamId), operationTimeout);
+		ASSERT(removed == NativeCdcRemoveResult::Removed);
 		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 		const std::vector<NativeCdcStreamInfo> remainingStreams =
 		    co_await timeoutError(listNativeCdcStreamsClient(cx), operationTimeout);
 		ASSERT(remainingStreams.empty());
+		const NativeCdcStatus drainedStatus = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
+		ASSERT(drainedStatus.metadataComplete);
+		ASSERT(!drainedStatus.admissionEnabled);
+		ASSERT(drainedStatus.streams.empty());
+		ASSERT(std::none_of(drainedStatus.tags.begin(), drainedStatus.tags.end(), [](NativeCdcTagStatus const& tag) {
+			return tag.pendingRetiredPop;
+		}));
 
 		Optional<Error> registrationError;
 		try {
-			co_await timeoutError(
-			    registerNativeCdcStreamClient(cx, "native-cdc-e2e/disabled-registration"_sr, normalKeys),
-			    operationTimeout);
+			const std::vector<KeyRange> ranges{ normalKeys };
+			co_await timeoutError(registerNativeCdcStreamClient(cx, "native-cdc-e2e/disabled-registration"_sr, ranges),
+			                      operationTimeout);
 		} catch (Error& e) {
 			registrationError = e;
 		}
@@ -1586,6 +2080,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> run(Database cx) {
+		if (testMultipleRanges) {
+			co_await validateMultipleRanges(cx);
+			co_return;
+		}
 		if (testRetiredSharedTagSnapshot) {
 			co_await validateRetiredSharedTagSnapshot(cx);
 			co_return;
@@ -1636,6 +2134,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				chosenKeys.insert(deterministicRandom()->randomInt(0, keyCount));
 			}
 			std::vector<std::pair<Key, Value>> values;
+			values.reserve(chosenKeys.size());
 			for (int index : chosenKeys) {
 				values.emplace_back(keyForIndex(index), Value(StringRef(format("round/%04d/key/%04d", round, index))));
 			}
@@ -1663,6 +2162,9 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		} else {
 			co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 		}
+		if (testTagOwnership) {
+			co_await timeoutError(validateTagOwnership(cx), operationTimeout);
+		}
 	}
 
 public:
@@ -1677,13 +2179,16 @@ public:
 		rounds = getOption(options, "rounds"_sr, 30);
 		assignmentPublicationChecks = getOption(options, "assignmentPublicationChecks"_sr, 0);
 		testProxyReplacement = getOption(options, "testProxyReplacement"_sr, false);
+		testTagOwnership = getOption(options, "testTagOwnership"_sr, false);
 		injectUndeliveredProxyHalt = getOption(options, "injectUndeliveredProxyHalt"_sr, false);
 		testMemoryBound = getOption(options, "testMemoryBound"_sr, false);
 		testReplyChunking = getOption(options, "testReplyChunking"_sr, false);
+		testMultipleRanges = getOption(options, "testMultipleRanges"_sr, false);
 		testOversizedPeek = getOption(options, "testOversizedPeek"_sr, false);
 		testDurableAckScan = getOption(options, "testDurableAckScan"_sr, false);
 		testDelayedRetention = getOption(options, "testDelayedRetention"_sr, false);
 		testRetiredRecovery = getOption(options, "testRetiredRecovery"_sr, false);
+		blockRetiredPopWithLiveStream = getOption(options, "blockRetiredPopWithLiveStream"_sr, false);
 		testRetiredSharedTagSnapshot = getOption(options, "testRetiredSharedTagSnapshot"_sr, false);
 		prepareRestartDrain = getOption(options, "prepareRestartDrain"_sr, false);
 		drainAfterRestart = getOption(options, "drainAfterRestart"_sr, false);
@@ -1706,6 +2211,7 @@ public:
 		ASSERT(!(testReplyChunking && (testOversizedPeek || testDurableAckScan)));
 		ASSERT(!(testOversizedPeek && testDurableAckScan));
 		ASSERT(!(testRetiredSharedTagSnapshot && testRetiredRecovery));
+		ASSERT(!blockRetiredPopWithLiveStream || testRetiredRecovery);
 	}
 
 	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.
@@ -1716,6 +2222,9 @@ public:
 			return Void();
 		}
 		if (drainAfterRestart) {
+			return Void();
+		}
+		if (testMultipleRanges) {
 			return Void();
 		}
 		if (prepareRestartDrain) {

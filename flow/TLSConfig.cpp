@@ -180,40 +180,31 @@ void ConfigureSSLStream(Reference<TLSPolicy> policy,
 	}
 }
 
-std::string TLSConfig::getCertificatePathSync() const {
-	if (!tlsCertPath.empty()) {
-		return tlsCertPath;
+static std::string resolveTLSMaterialPath(const std::string& configuredPath,
+                                          const char* envName,
+                                          const char* defaultFileName) {
+	if (!configuredPath.empty()) {
+		return configuredPath;
 	}
 
-	std::string envCertPath;
-	if (platform::getEnvironmentVar("FDB_TLS_CERTIFICATE_FILE", envCertPath)) {
-		return envCertPath;
+	std::string envPath;
+	if (platform::getEnvironmentVar(envName, envPath)) {
+		return envPath;
 	}
 
-	const char* defaultCertFileName = "cert.pem";
-	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultCertFileName))) {
-		return joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultFileName))) {
+		return joinPath(platform::getDefaultConfigPath(), defaultFileName);
 	}
 
 	return std::string();
 }
 
+std::string TLSConfig::getCertificatePathSync() const {
+	return resolveTLSMaterialPath(tlsCertPath, "FDB_TLS_CERTIFICATE_FILE", "cert.pem");
+}
+
 std::string TLSConfig::getKeyPathSync() const {
-	if (!tlsKeyPath.empty()) {
-		return tlsKeyPath;
-	}
-
-	std::string envKeyPath;
-	if (platform::getEnvironmentVar("FDB_TLS_KEY_FILE", envKeyPath)) {
-		return envKeyPath;
-	}
-
-	const char* defaultKeyFileName = "key.pem";
-	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultKeyFileName))) {
-		return joinPath(platform::getDefaultConfigPath(), defaultKeyFileName);
-	}
-
-	return std::string();
+	return resolveTLSMaterialPath(tlsKeyPath, "FDB_TLS_KEY_FILE", "key.pem");
 }
 
 std::string TLSConfig::getCAPathSync() const {
@@ -317,9 +308,9 @@ TLSPolicy::TLSPolicy(const LoadedTLSConfig& loaded, std::function<void()> on_fai
 	set_verify_peers(loaded.getVerifyPeers());
 }
 
-Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
+Future<LoadedTLSConfig> TLSConfig::loadAsync() const {
 	LoadedTLSConfig loaded;
-	auto materials = getTLSMaterialSources(*self, loaded);
+	auto materials = getTLSMaterialSources(*this, loaded);
 	std::vector<Future<Void>> reads;
 
 	for (const auto& material : materials) {
@@ -348,7 +339,7 @@ Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 		throw;
 	}
 
-	copyTLSSettings(*self, loaded);
+	copyTLSSettings(*this, loaded);
 	co_return loaded;
 }
 

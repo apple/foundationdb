@@ -3,3 +3,10 @@ testTitle = 'AtomicOpsCorrectnessTest'
 
     [[test.workload]]
     testName = 'AtomicOpsApiCorrectness'
+
+[[test]]
+testTitle = 'AtomicAppendIfFitsBoundary'
+
+    [[test.workload]]
+    testName = 'AtomicOpsApiCorrectness'
+    opType = 9

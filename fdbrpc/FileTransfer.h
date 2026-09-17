@@ -22,7 +22,6 @@
 #define FDBRPC_FILE_TRANSFER_H
 #include <optional>
 
-#undef loop
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/server_context.h>
 #include <grpcpp/support/status.h>

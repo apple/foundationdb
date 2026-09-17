@@ -195,6 +195,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( CHANGE_FEED_CACHE_LIMIT_BYTES,        500000 ); if( randomize && buggify() ) CHANGE_FEED_CACHE_LIMIT_BYTES = 50000;
 	init( ENABLE_NATIVE_CDC,                     false ); if( randomize && buggify() ) ENABLE_NATIVE_CDC = true;
 	init( NATIVE_CDC_TAG_COUNT,                    256 ); if( randomize && buggify() ) NATIVE_CDC_TAG_COUNT = 2;
+	init( NATIVE_CDC_STATUS_TIMEOUT,               2.0 );
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && buggify() ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && buggify() ) GRV_BATCH_TIMEOUT = 0.1;
@@ -263,7 +264,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BACKUP_SIMULATED_LIMIT_BYTES,            1e6 ); if( randomize && buggify() ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
 	init( BACKUP_GET_RANGE_LIMIT_BYTES,            1e6 );
 	init( BACKUP_LOCK_BYTES,                       1e8 );
-	init( BACKUP_RANGE_TIMEOUT, TASKBUCKET_TIMEOUT_VERSIONS/CORE_VERSIONSPERSECOND/2.0 );
+	init( BACKUP_RANGE_TIMEOUT, static_cast<double>(TASKBUCKET_TIMEOUT_VERSIONS)/CORE_VERSIONSPERSECOND/2.0 );
 	init( BACKUP_RANGE_MINWAIT, std::max(1.0, BACKUP_RANGE_TIMEOUT/2.0));
 	init( BULKDUMP_JOB_TIMEOUT,              3600 * 24 ); // 24 hours - large DBs may take days
 	init( BULKLOAD_JOB_TIMEOUT,              3600 * 24 ); // 24 hours - large DBs may take days

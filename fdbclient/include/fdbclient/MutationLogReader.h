@@ -22,7 +22,7 @@
 
 #include <deque>
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "flow/flow.h"
 #include "flow/ActorCollection.h"
 
@@ -106,8 +106,8 @@ public:
 	                                                   Version ev,
 	                                                   Key uid,
 	                                                   Key beginKey,
-	                                                   unsigned pd) {
-		Reference<MutationLogReader> self(new MutationLogReader(cx, bv, ev, uid, beginKey, pd));
+	                                                   unsigned pipelineDepth) {
+		Reference<MutationLogReader> self(new MutationLogReader(cx, bv, ev, uid, beginKey, pipelineDepth));
 		co_await self->initializePQ();
 		co_return self;
 	}

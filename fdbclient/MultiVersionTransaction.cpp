@@ -48,7 +48,7 @@
 #include <fcntl.h>
 #endif // __unixish__
 
-#ifdef FDBCLIENT_NATIVEAPI_ACTOR_H
+#ifdef FDBCLIENT_NATIVEAPI_H
 #error "MVC should not depend on the Native API"
 #endif
 
@@ -399,9 +399,13 @@ NativeCdcStreamInfo copyNativeCdcStreamInfo(FdbCApi::FDBNativeCdcStreamInfo cons
 	NativeCdcStreamInfo result;
 	result.name = Key(StringRef(source.name.key, source.name.keyLength));
 	result.streamId = source.streamId;
-	result.keys = KeyRange(
-	    KeyRangeRef(KeyRef(static_cast<const uint8_t*>(source.keyRange.beginKey), source.keyRange.beginKeyLength),
-	                KeyRef(static_cast<const uint8_t*>(source.keyRange.endKey), source.keyRange.endKeyLength)));
+	result.ranges.reserve(source.rangeCount);
+	for (int i = 0; i < source.rangeCount; ++i) {
+		auto const& range = source.ranges[i];
+		result.ranges.emplace_back(
+		    KeyRangeRef(KeyRef(static_cast<const uint8_t*>(range.beginKey), range.beginKeyLength),
+		                KeyRef(static_cast<const uint8_t*>(range.endKey), range.endKeyLength)));
+	}
 	result.minVersion = source.minVersion;
 	return result;
 }
@@ -555,13 +559,21 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
-ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
+ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcStream(const KeyRef& name, const std::vector<KeyRange>& ranges) {
 	if (!api->databaseRegisterNativeCdcStream) {
 		return unsupported_operation();
 	}
+	if (ranges.empty() || ranges.size() > NATIVE_CDC_MAX_RANGES) {
+		return client_invalid_operation();
+	}
 
-	FdbCApi::FDBFuture* f = api->databaseRegisterNativeCdcStream(
-	    db, name.begin(), name.size(), keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
+	std::vector<FdbCApi::FDBKeyRange> cRanges;
+	cRanges.reserve(ranges.size());
+	for (auto const& range : ranges) {
+		cRanges.push_back({ range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size() });
+	}
+	FdbCApi::FDBFuture* f =
+	    api->databaseRegisterNativeCdcStream(db, name.begin(), name.size(), cRanges.data(), cRanges.size());
 	return toThreadFuture<CDCStreamId>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		uint64_t streamId;
 		FdbCApi::fdb_error_t error = api->futureGetUInt64(f, &streamId);
@@ -1656,8 +1668,9 @@ ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, co
 	return executeOperation(&IDatabase::createSnapshot, uid, snapshot_command);
 }
 
-ThreadFuture<CDCStreamId> MultiVersionDatabase::registerNativeCdcStream(const KeyRef& name, const KeyRangeRef& keys) {
-	return executeOperation(&IDatabase::registerNativeCdcStream, name, keys);
+ThreadFuture<CDCStreamId> MultiVersionDatabase::registerNativeCdcStream(const KeyRef& name,
+                                                                        const std::vector<KeyRange>& ranges) {
+	return executeOperation(&IDatabase::registerNativeCdcStream, name, ranges);
 }
 
 ThreadFuture<Void> MultiVersionDatabase::removeNativeCdcStream(const KeyRef& name) {
@@ -2263,9 +2276,9 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 			char tempName[MAX_TMP_NAME_LENGTH];
 			snprintf(tempName, MAX_TMP_NAME_LENGTH, "%s/%s-XXXXXX", tmpDir.c_str(), filename.c_str());
 			int tempFd = mkstemp(tempName);
-			int fd;
+			int fd = open(path.c_str(), O_RDONLY);
 
-			if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
+			if (fd == -1) {
 				TraceEvent("ExternalClientNotFound").detail("LibraryPath", path);
 				throw file_not_found();
 			}

@@ -56,11 +56,12 @@ struct MetricNameRef {
 	int expectedSize() const { return type.expectedSize() + name.expectedSize(); }
 
 	inline int compare(MetricNameRef const& r) const {
-		int cmp;
-		if ((cmp = type.compare(r.type))) {
+		int cmp = type.compare(r.type);
+		if (cmp) {
 			return cmp;
 		}
-		if ((cmp = name.compare(r.name))) {
+		cmp = name.compare(r.name);
+		if (cmp) {
 			return cmp;
 		}
 		return id.compare(r.id);
@@ -396,12 +397,6 @@ template <class T>
 struct Descriptor {
 	// Specialize Descriptor<T> next to each metric payload struct, typically by inheriting from
 	// DescribeType<T, "...", DescribeField<&T::member, "...">, ...>.
-#ifndef NO_INTELLISENSE
-	using fields = std::tuple<>;
-	using field_indexes = tuple_indexes_t<fields>;
-
-	static StringRef typeName() { return ""_sr; }
-#endif
 };
 
 // String literals need a wrapper type before they can be used as non-type template parameters.
@@ -974,7 +969,6 @@ struct EventMetric final : E, ReferenceCounted<EventMetric<E>>, MetricUtil<Event
 
 	template <size_t... Is>
 	void logFields(index_sequence<Is...>, uint64_t t, int64_t l, bool& overflow, int64_t& bytes) {
-#ifdef NO_INTELLISENSE
 		auto _ = { (std::get<Is>(values).log(
 			            std::tuple_element<Is, typename Descriptor<E>::fields>::type::get(static_cast<E&>(*this)),
 			            t,
@@ -983,23 +977,18 @@ struct EventMetric final : E, ReferenceCounted<EventMetric<E>>, MetricUtil<Event
 			            bytes),
 			        Void())... };
 		(void)_;
-#endif
 	}
 
 	template <size_t... Is>
 	void initFields(index_sequence<Is...>) {
-#ifdef NO_INTELLISENSE
 		auto _ = { (std::get<Is>(values).init(), Void())... };
 		(void)_;
-#endif
 	}
 
 	template <size_t... Is>
 	void nextKeys(index_sequence<Is...>, uint64_t t, int64_t l) {
-#ifdef NO_INTELLISENSE
 		auto _ = { (std::get<Is>(values).nextKey(t, l), Void())... };
 		(void)_;
-#endif
 	}
 
 	void flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) override {
@@ -1013,10 +1002,8 @@ struct EventMetric final : E, ReferenceCounted<EventMetric<E>>, MetricUtil<Event
 
 	template <size_t... Is>
 	void flushFields(index_sequence<Is...>, MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) {
-#ifdef NO_INTELLISENSE
 		auto _ = { (std::get<Is>(values).flushField(mk, rollTime, batch), Void())... };
 		(void)_;
-#endif
 	}
 
 	void rollMetric(uint64_t t) override {
@@ -1026,10 +1013,8 @@ struct EventMetric final : E, ReferenceCounted<EventMetric<E>>, MetricUtil<Event
 
 	template <size_t... Is>
 	void rollFields(index_sequence<Is...>, uint64_t t) {
-#ifdef NO_INTELLISENSE
 		auto _ = { (std::get<Is>(values).rollMetric(t), Void())... };
 		(void)_;
-#endif
 	}
 
 	void registerFields(MetricKeyRef const& mk, std::vector<Standalone<StringRef>>& fieldKeys) override {
@@ -1039,10 +1024,8 @@ struct EventMetric final : E, ReferenceCounted<EventMetric<E>>, MetricUtil<Event
 
 	template <size_t... Is>
 	void registerFields(index_sequence<Is...>, const MetricKeyRef& mk, std::vector<Standalone<StringRef>>& fieldKeys) {
-#ifdef NO_INTELLISENSE
 		auto _ = { (std::get<Is>(values).registerField(mk, fieldKeys), Void())... };
 		(void)_;
-#endif
 	}
 
 private:

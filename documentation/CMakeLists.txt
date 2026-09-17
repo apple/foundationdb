@@ -1,4 +1,3 @@
-add_subdirectory(tutorial)
 add_subdirectory(coro_tutorial)
 
 set(SPHINX_DOCUMENT_DIR "${CMAKE_SOURCE_DIR}/documentation/sphinx")

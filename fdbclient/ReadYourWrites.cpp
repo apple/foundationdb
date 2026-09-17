@@ -21,7 +21,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "RYWIterator.h"
 #include "fdbclient/ClientOptionValidation.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SpecialKeySpace.h"
@@ -1368,6 +1368,7 @@ public:
 				if (ryw->resetPromise.isSet())
 					throw ryw->resetPromise.getFuture().getError();
 				if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
+					co_await getReadVersion(ryw);
 					simulateTimeoutInFlightCommit(Uncancellable(), ryw);
 					throw transaction_timed_out();
 				}
@@ -1392,6 +1393,7 @@ public:
 			}
 
 			if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
+				co_await getReadVersion(ryw);
 				simulateTimeoutInFlightCommit(Uncancellable(), ryw);
 				throw transaction_timed_out();
 			}
@@ -1408,7 +1410,7 @@ public:
 			// Propagating here closes that gap; it is a no-op when watches have already been
 			// resolved or cleared by commitAndWatch() itself.
 			// TODO: the root cause is the actor_cancelled guard in commitAndWatch()
-			// (NativeAPI.actor.cpp); this covers RYW callers but raw Transaction callers remain
+			// (NativeAPI.cpp); this covers RYW callers but raw Transaction callers remain
 			// exposed.
 			if (e.code() != error_code_actor_cancelled) {
 				ryw->tr.cancelWatches(e);

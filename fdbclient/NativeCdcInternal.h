@@ -27,7 +27,7 @@
 // Durable metadata operations used by CDC server roles. Registration is
 // feature gated; drain and cleanup operations remain available for streams
 // persisted before native CDC is disabled.
-Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, KeyRange keys, UID proxyId);
+Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, std::vector<KeyRange> ranges, UID proxyId);
 // Persists per-tag final-pop watermarks before removing stream metadata.
 Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, UID proxyId);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx);

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/TesterInterface.h"
@@ -83,7 +83,6 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	// disable the default timeout setting
 	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
 
-	// Copied from tester.actor.cpp, added parameter to determine the key's length
 	Key keyForIndex(int n) {
 		double p = (double)n / nodeCount;
 		// 8 bytes for Cid_* suffix of each client
@@ -134,8 +133,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 	Future<Void> conflictingClient(Database cx, ReportConflictingKeysWorkload* self) {
 
-		Reference<ReadYourWritesTransaction> tr1(new ReadYourWritesTransaction(cx));
-		Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
+		auto tr1 = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr2 = makeReference<ReadYourWritesTransaction>(cx);
 		std::vector<KeyRange> readConflictRanges;
 		std::vector<KeyRange> writeConflictRanges;
 

@@ -41,11 +41,11 @@
 
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ClusterConnectionFile.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
-#include "fdbrpc/WellKnownEndpoints.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.h"
@@ -243,9 +243,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 
 // clang-format on
 
-extern void dsltest();
 extern void pingtest();
-extern void copyTest();
 extern void versionedMapTest();
 extern void createTemplateDatabase();
 
@@ -940,7 +938,6 @@ enum class ServerRole {
 	ConsistencyCheck,
 	ConsistencyCheckUrgent,
 	CreateTemplateDatabase,
-	DSLTest,
 	FDBD,
 	KVFileGenerateIOLogChecksums,
 	KVFileIntegrityCheck,
@@ -1226,8 +1223,6 @@ private:
 					role = ServerRole::SkipListTest;
 				else if (!strcmp(sRole, "search"))
 					role = ServerRole::SearchMutations;
-				else if (!strcmp(sRole, "dsltest"))
-					role = ServerRole::DSLTest;
 				else if (!strcmp(sRole, "versionedmaptest"))
 					role = ServerRole::VersionedMapTest;
 				else if (!strcmp(sRole, "createtemplatedb"))
@@ -1933,11 +1928,6 @@ int main(int argc, char* argv[]) {
 
 		if (role == ServerRole::SkipListTest) {
 			skipListTest();
-			flushAndExit(FDB_EXIT_SUCCESS);
-		}
-
-		if (role == ServerRole::DSLTest) {
-			dsltest();
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
 

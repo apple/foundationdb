@@ -23,7 +23,7 @@
 
 #include "flow/IRandom.h"
 #include "flow/ProcessEvents.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
@@ -275,6 +275,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					std::vector<Future<Optional<Value>>> serverListEntries;
+					serverListEntries.reserve(storageServers.size());
 					for (int s = 0; s < storageServers.size(); s++)
 						serverListEntries.push_back(tr.get(serverListKeyFor(storageServers[s])));
 					std::vector<Optional<Value>> serverListValues = co_await getAll(serverListEntries);

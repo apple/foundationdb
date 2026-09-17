@@ -259,11 +259,8 @@ int8_t actor_wait_state;
 | -1 | `ACTOR_WAIT_STATE_CANCELLED` | Cancellation requested |
 | -2 | `ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK` | Cancellation detected during `await_ready()` before the awaiter registered a callback |
 
-In actor-compiler-generated code, values >1 identify *which* callback group
-fired (the generated state machine uses the value to jump to the right
-continuation). For C++ coroutines this distinction is unnecessary — the
-`coroutine_handle` already encodes the suspend point — so the value is
-always 1.
+The `coroutine_handle` encodes the suspension point, so a suspended C++
+coroutine uses the single waiting value 1.
 
 Constructed with `SAV(1, 1)`: starts with futures=1 and promises=1. The
 futures=1 is consumed by the `Future<T>` returned from `get_return_object()`.
@@ -612,14 +609,13 @@ either resumes the producer to throw `actor_cancelled()` or (with
 
 ---
 
-## `choose` / `when` for Coroutines
+## Waiting for Multiple Futures
 
 ```
 flow/include/flow/CoroUtils.h
 ```
 
-The coroutine equivalent of the actor compiler's `choose { when(...) { ... } }`
-pattern. Two forms:
+Flow provides two ways to await the first of several futures:
 
 ### `Choose().When(future, handler).When(...).run()`
 

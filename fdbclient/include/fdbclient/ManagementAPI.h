@@ -31,7 +31,7 @@ standard API and some knowledge of the contents of the system key space.
 #include <map>
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/ProcessClass.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/MonitorLeader.h"
@@ -204,7 +204,7 @@ Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState);
 
 // Get all past bulkLoad jobs from history map
-AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx);
+AsyncResult<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx, bool lockAware = false);
 
 // Erase all bulkLoad job history metadata if jobId is not provided. Otherwise, erase the job with the given jobId.
 Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId = Optional<UID>());

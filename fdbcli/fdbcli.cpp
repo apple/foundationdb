@@ -21,7 +21,7 @@
 #include "boost/lexical_cast.hpp"
 #include "fmt/format.h"
 #include "fdbclient/ClusterConnectionFile.h"
-#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/MultiVersionTransaction.h"
@@ -1633,6 +1633,14 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 
 				if (tokencmp(tokens[0], "rangelock")) {
 					bool _result = co_await makeInterruptable(rangeLockCommandActor(localDb, tokens));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "cdc")) {
+					bool _result = co_await makeInterruptable(cdcCommandActor(localDb, tokens));
 					if (!_result) {
 						is_error = true;
 					}

@@ -50,7 +50,7 @@ Generating options file
 ----------
 
 The [generated.go](./src/fdb/generated.go) is generated based on the [fdb.options](../../fdbclient/vexillographer/fdb.options) file.
-If you change the `fdb.options` file you can update the `generated.go` by running the following command from the root of this reporsitory:
+If you change the `fdb.options` file you can update the `generated.go` by running the following command from the root of this repository:
 
 ```bash
 go run bindings/go/src/_util/translate_fdb_options.go < fdbclient/vexillographer/fdb.options > bindings/go/src/fdb/generated.go
