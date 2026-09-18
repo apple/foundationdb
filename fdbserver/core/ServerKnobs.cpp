@@ -197,6 +197,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT,                 0.2 );
 	init( NATIVE_CDC_TAG_MIN_BYTES_PER_SECOND_IMPROVEMENT,       10000 );
 	init( NATIVE_CDC_TAG_MAX_STREAMS,                            1000 );
+	init( NATIVE_CDC_TAG_MODEL_MAX_ENTRIES,                   2000000 );
 	init( NATIVE_CDC_TAG_SAMPLE_CONCURRENCY,                        8 );
 	init( NATIVE_CDC_TAG_SAMPLE_SHARD_LIMIT,                     1000 );
 	init( APPLY_MUTATION_BYTES,                                  1e6 );

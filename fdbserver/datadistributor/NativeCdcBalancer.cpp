@@ -75,7 +75,6 @@ class NativeCdcLoadModel {
 	std::vector<std::vector<std::pair<size_t, size_t>>> streamSegments;
 	bool complete = false;
 
-public:
 	explicit NativeCdcLoadModel(std::vector<NativeCdcTagState> states) : streams(std::move(states)) {
 		KeyRangeMap<std::set<size_t>> coveringStreams;
 		for (size_t i = 0; i < streams.size(); ++i) {
@@ -103,6 +102,26 @@ public:
 			}
 			segments.push_back(std::move(segment));
 		}
+	}
+
+public:
+	static Optional<NativeCdcLoadModel> create(std::vector<NativeCdcTagState> const& states, int64_t maxEntries) {
+		if (maxEntries <= 0) {
+			return {};
+		}
+		if (!states.empty()) {
+			// M ranges have at most 2M-1 nonempty segments, each covering at most N streams or tags.
+			// Bound both coverage memberships and tag-prefix entries before copying any coverage sets.
+			const uint64_t maxRanges = static_cast<uint64_t>(maxEntries) / states.size() / 2;
+			uint64_t ranges = 0;
+			for (const auto& state : states) {
+				if (state.ranges.empty() || state.ranges.size() > maxRanges - ranges) {
+					return {};
+				}
+				ranges += state.ranges.size();
+			}
+		}
+		return NativeCdcLoadModel(states);
 	}
 
 	size_t segmentCount() const { return segments.size(); }
@@ -250,7 +269,8 @@ Version nativeCdcDurationVersions(double seconds) {
 bool validNativeCdcBalancerKnobs() {
 	return SERVER_KNOBS->NATIVE_CDC_TAG_MAX_STREAMS > 0 &&
 	       SERVER_KNOBS->NATIVE_CDC_TAG_MAX_STREAMS < std::numeric_limits<int>::max() &&
-	       SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_CONCURRENCY > 0 && SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_SHARD_LIMIT > 1 &&
+	       SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES > 0 && SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_CONCURRENCY > 0 &&
+	       SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_SHARD_LIMIT > 1 &&
 	       std::isfinite(SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_TIMEOUT) &&
 	       SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_TIMEOUT > 0 &&
 	       std::isfinite(SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_MAX_AGE) &&
@@ -520,7 +540,16 @@ class NativeCdcBalancer {
 		const Version validThrough = snapshot.get().version > std::numeric_limits<Version>::max() - lifetime
 		                                 ? std::numeric_limits<Version>::max()
 		                                 : snapshot.get().version + lifetime;
-		NativeCdcLoadModel model(snapshot.get().streams);
+		Optional<NativeCdcLoadModel> boundedModel =
+		    NativeCdcLoadModel::create(snapshot.get().streams, SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES);
+		if (!boundedModel.present()) {
+			CODE_PROBE(true, "Native CDC DD skips an overlap model exceeding its entry budget");
+			TraceEvent("NativeCdcTagModelBudgetExceeded", lock.myOwner)
+			    .detail("Streams", snapshot.get().streams.size())
+			    .detail("MaxEntries", SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES);
+			co_return;
+		}
+		NativeCdcLoadModel& model = boundedModel.get();
 		// One deadline bounds all segment requests. Partial/failed samples are never published as zero load.
 		const Optional<Void> sampled =
 		    co_await timeout(sampleNativeCdcLoads(cx, &model), SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_TIMEOUT);
@@ -581,9 +610,11 @@ NativeCdcTagState nativeCdcPolicyTestStream(CDCStreamId streamId,
 }
 
 TEST_CASE("/NativeCDC/TagBalancing/DisjointThroughput") {
-	NativeCdcLoadModel model({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0),
-	                           nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 0),
-	                           nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 1) });
+	auto model = NativeCdcLoadModel::create({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0),
+	                                          nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 0),
+	                                          nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 1) },
+	                                        SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES)
+	                 .get();
 	ASSERT_EQ(model.segmentCount(), 3);
 	ASSERT(model.setSample(0, 40000000));
 	ASSERT(model.setSample(1, 40000000));
@@ -604,9 +635,11 @@ TEST_CASE("/NativeCDC/TagBalancing/DisjointThroughput") {
 TEST_CASE("/NativeCDC/TagBalancing/MultipleRanges") {
 	auto split = nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0);
 	split.ranges.emplace_back(KeyRangeRef("c"_sr, "d"_sr));
-	NativeCdcLoadModel model({ split,
-	                           nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 1),
-	                           nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 0) });
+	auto model = NativeCdcLoadModel::create({ split,
+	                                          nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 1),
+	                                          nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 0) },
+	                                        SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES)
+	                 .get();
 	ASSERT_EQ(model.segmentCount(), 4);
 	ASSERT(model.setSample(0, 40000000));
 	ASSERT(model.setSample(1, 1000000000));
@@ -625,17 +658,21 @@ TEST_CASE("/NativeCDC/TagBalancing/MultipleRanges") {
 }
 
 TEST_CASE("/NativeCDC/TagBalancing/Overlap") {
-	NativeCdcLoadModel identical({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0),
-	                               nativeCdcPolicyTestStream(2, KeyRangeRef("a"_sr, "b"_sr), 0) });
+	auto identical = NativeCdcLoadModel::create({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0),
+	                                              nativeCdcPolicyTestStream(2, KeyRangeRef("a"_sr, "b"_sr), 0) },
+	                                            SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES)
+	                     .get();
 	ASSERT_EQ(identical.segmentCount(), 1);
 	ASSERT(identical.setSample(0, 40000000));
 	ASSERT(identical.finishSamples());
 	ASSERT_EQ(identical.loads().at(Tag(tagLocalityCDC, 0)), 40000000);
 	ASSERT(!identical.chooseMove(1000, 2, 0, 0, 0).present());
 
-	NativeCdcLoadModel partial({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "d"_sr), 0),
-	                             nativeCdcPolicyTestStream(2, KeyRangeRef("c"_sr, "f"_sr), 0),
-	                             nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 1) });
+	auto partial = NativeCdcLoadModel::create({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "d"_sr), 0),
+	                                            nativeCdcPolicyTestStream(2, KeyRangeRef("c"_sr, "f"_sr), 0),
+	                                            nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 1) },
+	                                          SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES)
+	                   .get();
 	ASSERT_EQ(partial.segmentCount(), 3);
 	ASSERT(partial.setSample(0, 2000000));
 	ASSERT(partial.setSample(1, 3000000));
@@ -650,9 +687,12 @@ TEST_CASE("/NativeCDC/TagBalancing/Overlap") {
 }
 
 TEST_CASE("/NativeCDC/TagBalancing/OwnerAndPending") {
-	NativeCdcLoadModel model({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0, UID(1, 1), true),
-	                           nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 0),
-	                           nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 1, UID(2, 2)) });
+	auto model =
+	    NativeCdcLoadModel::create({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0, UID(1, 1), true),
+	                                 nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 0),
+	                                 nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 1, UID(2, 2)) },
+	                               SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES)
+	        .get();
 	ASSERT(model.setSample(0, 40000000));
 	ASSERT(model.setSample(1, 40000000));
 	ASSERT(model.setSample(2, 1000000));
@@ -666,7 +706,9 @@ TEST_CASE("/NativeCDC/TagBalancing/OwnerAndPending") {
 }
 
 TEST_CASE("/NativeCDC/TagBalancing/IncompleteAndZeroSamples") {
-	NativeCdcLoadModel model({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0) });
+	auto model = NativeCdcLoadModel::create({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0) },
+	                                        SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES)
+	                 .get();
 	ASSERT(!model.finishSamples());
 	ASSERT(!model.setSample(0, -1));
 	ASSERT(model.setSample(0, 0));
@@ -676,6 +718,32 @@ TEST_CASE("/NativeCDC/TagBalancing/IncompleteAndZeroSamples") {
 	int64_t total = std::numeric_limits<int64_t>::max() - 1;
 	ASSERT(!addNativeCdcLoad(&total, 2));
 	ASSERT(addNativeCdcLoad(&total, 1));
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/ModelEntryBudget") {
+	std::vector<NativeCdcTagState> streams{ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "f"_sr), 0),
+		                                    nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "e"_sr), 0),
+		                                    nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 1) };
+	// The same stream count needs a larger entry budget once streams cover disjoint range unions.
+	ASSERT(NativeCdcLoadModel::create(streams, 18).present());
+	for (auto& stream : streams) {
+		stream.ranges.emplace_back(KeyRangeRef("x"_sr, "y"_sr));
+	}
+	ASSERT(!NativeCdcLoadModel::create(streams, 18).present());
+	ASSERT(!NativeCdcLoadModel::create(streams, 35).present());
+	auto model = NativeCdcLoadModel::create(streams, 36);
+	ASSERT(model.present());
+	ASSERT_EQ(model.get().segmentCount(), 6);
+	for (size_t i = 0; i < model.get().segmentCount(); ++i) {
+		ASSERT(model.get().setSample(i, 1000));
+	}
+	ASSERT(model.get().finishSamples());
+	ASSERT_EQ(model.get().loads().at(Tag(tagLocalityCDC, 0)), 6000);
+	ASSERT_EQ(model.get().loads().at(Tag(tagLocalityCDC, 1)), 2000);
+	ASSERT(!NativeCdcLoadModel::create(streams, 0).present());
+	ASSERT(!NativeCdcLoadModel::create(streams, -1).present());
+	ASSERT(NativeCdcLoadModel::create(streams, std::numeric_limits<int64_t>::max()).present());
 	return Void();
 }
 

@@ -448,8 +448,18 @@ same shared-tag writes twice. These metrics are sampled write-cost estimates,
 not exact tagged TLog bytes, and range-clear attribution follows the existing
 storage-metrics contract.
 
-Sampling is bounded by stream count, shard count, request concurrency, and a
-deadline. A failed, incomplete, or expired sample is not usable for placement.
+Before constructing the overlap model, the controller bounds projected entries
+by `2 * streamCount * totalRangeCount`. This bounds coverage memberships and
+tag-prefix entries, including the prefix sentinel, without expanding the ranges.
+`NATIVE_CDC_TAG_MODEL_MAX_ENTRIES` defaults to 2,000,000; an over-budget pass skips
+sampling and moves while pending-history cleanup continues. This conservative
+bound can reject configurations whose actual overlap would fit. It limits model
+entries, not exact resident bytes: coverage copies and tree-node overhead add
+memory costs.
+
+Sampling requests are additionally bounded by stream count, shard count, request
+concurrency, and a deadline. A failed, incomplete, or expired sample is not usable
+for placement.
 Publishing samples and applying a move both revalidate the durable assignment
 generation and the data-distributor lock. Registration, removal, ownership
 repair, and retagging invalidate the previous generation's comparisons.
@@ -907,8 +917,9 @@ It does not establish an unrestricted stream-count or throughput envelope.
   size and lifetime limits until these paths are sharded or incrementally
   maintained.
 * The controller limits sampling to `NATIVE_CDC_TAG_MAX_STREAMS` (1,000 by
-  default). This is a balancing-work limit, not a supported cluster stream-count
-  guarantee or an admission quota. Larger configurations need separate scaling
+  default) and the projected overlap-model entry budget above. These are
+  balancing-work limits, not a supported cluster stream-count guarantee or an
+  admission quota. Larger configurations need separate scaling
   qualification. Pending-history cleanup is independent of sampling eligibility.
 * One pending move per stream and conservative cooldown/hysteresis intentionally
   favor stability over rapid reaction. Cross-proxy placement and migration remain
