@@ -24,7 +24,6 @@
 #endif // _WIN32
 
 #include "flow/Platform.h"
-#include "flow/ParseNumber.h"
 
 #include <algorithm>
 #include <iostream>
@@ -1528,8 +1527,7 @@ void initPdhStrings(SystemStatisticsState* state, std::string dataFolder) {
 			                    "PdhEnumObjectItems")) {
 				char* ptr = buf;
 				while (*ptr) {
-					auto deviceNumber = parseNumberPrefix<int>(StringRef(static_cast<const char*>(ptr)));
-					if (isdigit(*ptr) && deviceNumber.present() && deviceNumber.get() == storage_device.DeviceNumber) {
+					if (isdigit(*ptr) && atoi(ptr) == storage_device.DeviceNumber) {
 						state->pdhStrings.diskDevice = ptr;
 						break;
 					}

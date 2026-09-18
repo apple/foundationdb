@@ -48,7 +48,6 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/Trace.h"
-#include "flow/ParseNumber.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
@@ -104,12 +103,11 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos + 1);
 
-		auto specifiedProxiesCount = key == "proxies" ? parseNumber<int>(StringRef(value)) : Optional<int>();
-		if (key == "proxies" && specifiedProxiesCount.present()) {
+		if (key == "proxies" && isInteger(value)) {
 			printf("Warning: Proxy role is being split into GRV Proxy and Commit Proxy, now prefer configuring "
 			       "'grv_proxies' and 'commit_proxies' separately. Generally we should follow that 'commit_proxies'"
 			       " is three times of 'grv_proxies' count and 'grv_proxies' should be not more than 4.\n");
-			int proxiesCount = specifiedProxiesCount.get();
+			int proxiesCount = atoi(value.c_str());
 			if (proxiesCount == -1) {
 				proxiesCount = CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES + CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
 				ASSERT_WE_THINK(proxiesCount >= 2);
@@ -134,7 +132,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			       commitProxyCount);
 
 			TraceEvent("DatabaseConfigurationProxiesSpecified")
-			    .detail("SpecifiedProxies", specifiedProxiesCount.get())
+			    .detail("SpecifiedProxies", atoi(value.c_str()))
 			    .detail("EffectiveSpecifiedProxies", proxiesCount)
 			    .detail("ConvertedGrvProxies", grvProxyCount)
 			    .detail("ConvertedCommitProxies", commitProxyCount);
@@ -1203,8 +1201,8 @@ struct AutoQuorumChange final : IQuorumChange {
 		Future<Optional<Value>> fStorageReplicas = tr->get("storage_replicas"_sr.withPrefix(configKeysPrefix));
 		Future<Optional<Value>> fLogReplicas = tr->get("log_replicas"_sr.withPrefix(configKeysPrefix));
 		co_await (success(fStorageReplicas) && success(fLogReplicas));
-		int redundancy = std::min(parseNumberPrefix<int>(fStorageReplicas.get().get()).orDefault(0),
-		                          parseNumberPrefix<int>(fLogReplicas.get().get()).orDefault(0));
+		int redundancy = std::min(atoi(fStorageReplicas.get().get().toString().c_str()),
+		                          atoi(fLogReplicas.get().get().toString().c_str()));
 
 		co_return redundancy;
 	}
@@ -1468,7 +1466,7 @@ Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> serve
 	std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	bool containNewExclusion = false;
 	for (auto& s : servers) {
-		if (exclusions.contains(s)) {
+		if (exclusions.find(s) != exclusions.end()) {
 			continue;
 		}
 		containNewExclusion = true;
@@ -1542,7 +1540,7 @@ Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::string> 
 	std::set<std::string> exclusion(excl.begin(), excl.end());
 	bool containNewExclusion = false;
 	for (const auto& l : localities) {
-		if (exclusion.contains(l)) {
+		if (exclusion.find(l) != exclusion.end()) {
 			continue;
 		}
 		containNewExclusion = true;

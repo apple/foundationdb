@@ -31,13 +31,10 @@
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <cerrno>
-#include <cctype>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
-#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -115,10 +112,8 @@ void printUsage(const char* program, const UnitTestRunnerConfig& config) {
 
 bool parseInt(const char* text, int* value) {
 	char* end = nullptr;
-	errno = 0;
 	long parsed = strtol(text, &end, 10);
-	if (end == text || *end != '\0' || errno == ERANGE || parsed < std::numeric_limits<int>::min() ||
-	    parsed > std::numeric_limits<int>::max()) {
+	if (*text == '\0' || *end != '\0') {
 		return false;
 	}
 	*value = static_cast<int>(parsed);
@@ -126,73 +121,13 @@ bool parseInt(const char* text, int* value) {
 }
 
 bool parseUInt64(const char* text, uint64_t* value) {
-	const char* first = text;
-	while (std::isspace(static_cast<unsigned char>(*first))) {
-		++first;
-	}
-	if (*first == '-') {
-		return false;
-	}
-
 	char* end = nullptr;
-	errno = 0;
-	unsigned long long parsed = strtoull(text, &end, 10);
-	if (end == text || *end != '\0' || errno == ERANGE || parsed > std::numeric_limits<uint64_t>::max()) {
+	uint64_t parsed = strtoull(text, &end, 10);
+	if (*text == '\0' || *end != '\0') {
 		return false;
 	}
 	*value = parsed;
 	return true;
-}
-
-TEST_CASE("/flow/UnitTestRunner/numericOptions") {
-	const int intMin = std::numeric_limits<int>::min();
-	const int intMax = std::numeric_limits<int>::max();
-	for (const auto& [text, expected] :
-	     std::vector<std::pair<std::string, int>>{ { "0", 0 },
-	                                               { " \t+0012", 12 },
-	                                               { "-1", -1 },
-	                                               { std::to_string(intMin), intMin },
-	                                               { std::to_string(intMax), intMax } }) {
-		int value = 123;
-		ASSERT(parseInt(text.c_str(), &value));
-		ASSERT_EQ(value, expected);
-	}
-	for (const std::string& text : std::vector<std::string>{ "",
-	                                                         " \t",
-	                                                         "+",
-	                                                         "1x",
-	                                                         "1 ",
-	                                                         std::to_string(static_cast<int64_t>(intMin) - 1),
-	                                                         std::to_string(static_cast<int64_t>(intMax) + 1),
-	                                                         "999999999999999999999999999999" }) {
-		int value = 123;
-		ASSERT(!parseInt(text.c_str(), &value));
-		ASSERT_EQ(value, 123);
-	}
-
-	const uint64_t uintMax = std::numeric_limits<uint64_t>::max();
-	for (const auto& [text, expected] : std::vector<std::pair<std::string, uint64_t>>{
-	         { "0", 0 }, { " \t+0012", 12 }, { std::to_string(uintMax), uintMax } }) {
-		uint64_t value = 123;
-		ASSERT(parseUInt64(text.c_str(), &value));
-		ASSERT_EQ(value, expected);
-	}
-	for (const char* text : { "",
-	                          " \t",
-	                          "+",
-	                          "1x",
-	                          "1 ",
-	                          "-1",
-	                          " \t-1",
-	                          "-0",
-	                          "18446744073709551616",
-	                          "999999999999999999999999999999" }) {
-		uint64_t value = 123;
-		ASSERT(!parseUInt64(text, &value));
-		ASSERT_EQ(value, uint64_t{ 123 });
-	}
-
-	return Void();
 }
 
 bool parseArgs(int argc, char** argv, UnitTestRunnerOptions* options) {

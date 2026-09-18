@@ -1,4 +1,3 @@
-#include "flow/ParseNumber.h"
 #include <cstdio>
 #include <inttypes.h>
 
@@ -10,7 +9,8 @@ Key doubleToTestKey(double p) {
 }
 
 double testKeyToDouble(const KeyRef& p) {
-	uint64_t x = parseNumberPrefix<uint64_t>(p, 16).orDefault(0);
+	uint64_t x = 0;
+	sscanf(p.toString().c_str(), "%" SCNx64, &x);
 	return *(double*)&x;
 }
 

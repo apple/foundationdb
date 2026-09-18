@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ParseNumber.h"
 #include <algorithm>
 #include <limits>
 #include <unordered_set>
@@ -2243,7 +2242,8 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 						// No matter whether the task range is aligned with the manifest entry range, the task
 						// begin key must be in the manifestEntryMap. See manifestEntryMap definition for more
 						// details.
-						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->contains(task.getRange().begin));
+						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->find(task.getRange().begin) !=
+						       self->bulkLoadJobManager.get().manifestEntryMap->end());
 						if (task.onAnyPhase(
 						        { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error })) {
 							ASSERT(task.getRange().end == res[i + 1].key);
@@ -3455,7 +3455,7 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 			Optional<Value> regionsValue = co_await tr.get("usable_regions"_sr.withPrefix(configKeysPrefix));
 			int usableRegions = 1;
 			if (regionsValue.present()) {
-				usableRegions = parseNumberPrefix<int>(regionsValue.get()).orDefault(0);
+				usableRegions = atoi(regionsValue.get().toString().c_str());
 			}
 			auto masterDcId = dbInfo->get().master.locality.dcId();
 			int storageFailures = 0;
@@ -3493,7 +3493,7 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 
 			for (const auto& tlog : *tlogs) {
 				TraceEvent(SevDebug, "GetStatefulWorkersTLog").detail("Addr", tlog.address());
-				if (!workersMap.contains(tlog.address())) {
+				if (workersMap.find(tlog.address()) == workersMap.end()) {
 					TraceEvent(SevWarn, "MissingTLogWorkerInterface").detail("TlogAddress", tlog.address());
 					throw snap_tlog_failed();
 				}
@@ -3518,8 +3518,8 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 				// as we use primary addresses from storage and tlog interfaces above
 				NetworkAddress primary = worker.interf.address();
 				Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
-				if (coordinatorsAddrSet.contains(primary) ||
-				    (secondary.present() && coordinatorsAddrSet.contains(secondary.get()))) {
+				if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
+				    (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
 					if (result.contains(primary)) {
 						ASSERT(workersMap[primary].id() == result[primary].first.id());
 						result[primary].second.append(",coord");

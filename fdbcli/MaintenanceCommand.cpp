@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ParseNumber.h"
 #include <cinttypes>
 
 #include "boost/lexical_cast.hpp"
@@ -148,12 +147,14 @@ Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<String
 		bool clearResult = co_await clearHealthyZone(db, true);
 		result = clearResult;
 	} else if (tokens.size() == 4 && tokencmp(tokens[1], "on")) {
-		auto seconds = parseNumber<double>(tokens[3]);
-		if (!seconds.present()) {
+		double seconds;
+		int n = 0;
+		auto secondsStr = tokens[3].toString();
+		if (sscanf(secondsStr.c_str(), "%lf%n", &seconds, &n) != 1 || n != secondsStr.size()) {
 			printUsage(tokens[0]);
 			result = false;
 		} else {
-			bool setResult = co_await setHealthyZone(db, tokens[2], seconds.get(), true);
+			bool setResult = co_await setHealthyZone(db, tokens[2], seconds, true);
 			result = setResult;
 		}
 	} else {

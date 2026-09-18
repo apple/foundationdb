@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ParseNumber.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
@@ -88,7 +87,11 @@ struct StorefrontWorkload : TestWorkload {
 	    return x;
 	}*/
 
-	static inline int valueToInt(const StringRef& v) { return parseNumberPrefix<int>(v).orDefault(0); }
+	static inline int valueToInt(const StringRef& v) {
+		int x = 0;
+		sscanf(v.toString().c_str(), "%d", &x);
+		return x;
+	}
 
 	Key keyForIndex(int n) { return itemKey(n); }
 	Key itemKey(int item) { return StringRef(format("/items/%016d", item)); }

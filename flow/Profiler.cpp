@@ -20,7 +20,6 @@
 
 #include "flow/flow.h"
 #include "flow/network.h"
-#include "flow/ParseNumber.h"
 
 #ifdef __linux__
 
@@ -276,7 +275,7 @@ void startProfiling(INetwork* network,
 		period = maybePeriod.get();
 	} else {
 		const char* periodEnv = getenv("FLOW_PROFILER_PERIOD");
-		period = (periodEnv ? parseNumberPrefix<int>(StringRef(periodEnv)).orDefault(0) : 2000);
+		period = (periodEnv ? atoi(periodEnv) : 2000);
 	}
 	std::string outputFile;
 	if (maybeOutputFile.present()) {

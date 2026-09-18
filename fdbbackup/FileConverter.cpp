@@ -30,7 +30,6 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/MutationList.h"
 #include "flow/flow.h"
-#include "flow/ParseNumber.h"
 #include "flow/serialize.h"
 #include "fdbclient/BuildFlags.h"
 
@@ -513,27 +512,21 @@ int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {
 			printConvertUsage();
 			return FDB_EXIT_ERROR;
 
-		case OPT_BEGIN_VERSION: {
-			auto version = parseNumberPrefix<Version>(StringRef(arg));
-			if (!version.present()) {
+		case OPT_BEGIN_VERSION:
+			if (!sscanf(arg, "%" SCNd64, &param->begin)) {
 				std::cerr << "ERROR: could not parse begin version " << arg << "\n";
 				printConvertUsage();
 				return FDB_EXIT_ERROR;
 			}
-			param->begin = version.get();
 			break;
-		}
 
-		case OPT_END_VERSION: {
-			auto version = parseNumberPrefix<Version>(StringRef(arg));
-			if (!version.present()) {
+		case OPT_END_VERSION:
+			if (!sscanf(arg, "%" SCNd64, &param->end)) {
 				std::cerr << "ERROR: could not parse end version " << arg << "\n";
 				printConvertUsage();
 				return FDB_EXIT_ERROR;
 			}
-			param->end = version.get();
 			break;
-		}
 
 		case OPT_CONTAINER:
 			param->container_url = args->OptionArg();

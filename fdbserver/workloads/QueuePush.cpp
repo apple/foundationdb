@@ -17,7 +17,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "flow/ParseNumber.h"
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
@@ -81,11 +80,12 @@ struct QueuePushWorkload : TestWorkload {
 	static Key keyForIndex(int base, int offset) { return StringRef(format("%08x%08x", base, offset)); }
 
 	static std::pair<int, int> valuesForKey(KeyRef value) {
+		int base, offset;
 		ASSERT(value.size() == 16);
-		auto base = parseNumberPrefix<unsigned int>(value.substr(0, 8), 16);
-		auto offset = parseNumberPrefix<unsigned int>(value.substr(8, 8), 16);
-		if (base.present() && offset.present()) {
-			return std::make_pair(static_cast<int>(base.get()), static_cast<int>(offset.get()));
+
+		if (sscanf(value.substr(0, 8).toString().c_str(), "%x", &base) &&
+		    sscanf(value.substr(8, 8).toString().c_str(), "%x", &offset)) {
+			return std::make_pair(base, offset);
 		} else {
 			// SOMEDAY: what should this really be?  Should we rely on exceptions for control flow here?
 			throw client_invalid_operation();

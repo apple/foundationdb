@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ParseNumber.h"
 #include <algorithm>
 
 #include "fdbclient/FDBTypes.h"
@@ -257,7 +256,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
-	static inline uint64_t valueToUInt64(const StringRef& v) { return parseNumberPrefix<uint64_t>(v, 16).orDefault(0); }
+	static inline uint64_t valueToUInt64(const StringRef& v) {
+		long long unsigned int x = 0;
+		sscanf(v.toString().c_str(), "%llx", &x);
+		return x;
+	}
 
 	inline Standalone<StringRef> getDatabaseName(int dbIndex) { return StringRef(format("DestroyDB%d", dbIndex)); }
 

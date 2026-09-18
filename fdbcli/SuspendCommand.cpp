@@ -18,10 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ParseNumber.h"
-#include <cmath>
-#include <limits>
-
 #include "boost/algorithm/string.hpp"
 
 #include "fdbcli/fdbcli.h"
@@ -72,10 +68,11 @@ Future<bool> suspendCommandActor(Reference<IDatabase> db,
 		}
 
 		if (result) {
-			auto seconds = parseNumber<double>(tokens[1]);
+			double seconds{ 0 };
+			int n = 0;
 			int i{ 0 };
-			if (!seconds.present() || !std::isfinite(seconds.get()) ||
-			    seconds.get() < std::numeric_limits<int>::min() || seconds.get() > std::numeric_limits<int>::max()) {
+			auto secondsStr = tokens[1].toString();
+			if (sscanf(secondsStr.c_str(), "%lf%n", &seconds, &n) != 1 || n != secondsStr.size()) {
 				printUsage(tokens[0]);
 				result = false;
 			} else {
@@ -84,8 +81,8 @@ Future<bool> suspendCommandActor(Reference<IDatabase> db,
 					addressesVec.push_back(tokens[i].toString());
 				}
 				addressesStr = boost::algorithm::join(addressesVec, ",");
-				int64_t suspendRequestSent = co_await safeThreadFutureToFuture(
-				    db->rebootWorker(addressesStr, false, static_cast<int>(seconds.get())));
+				int64_t suspendRequestSent =
+				    co_await safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, static_cast<int>(seconds)));
 				if (!suspendRequestSent) {
 					result = false;
 					fprintf(

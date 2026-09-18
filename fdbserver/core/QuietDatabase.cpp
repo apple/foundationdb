@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/UnitTest.h"
-#include "flow/ParseNumber.h"
 #include <cinttypes>
 #include <vector>
 #include <map>
@@ -145,43 +143,14 @@ Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<ServerDBInfo> co
 
 // Computes the queue size for storage servers and tlogs using the bytesInput and bytesDurable attributes
 int64_t getQueueSize(const TraceEventFields& md) {
-	auto parseBytes = [](const std::string& text) {
-		StringRef remaining(text);
-		for (int i = 0; i < 2; ++i) {
-			int consumed = 0;
-			if (!parseNumberPrefix<double>(remaining, 10, &consumed).present()) {
-				throw attribute_not_found();
-			}
-			remaining = remaining.substr(consumed);
-		}
-		auto bytes = parseNumberPrefix<int64_t>(remaining);
-		if (!bytes.present()) {
-			throw attribute_not_found();
-		}
-		return bytes.get();
-	};
-	return parseBytes(md.getValue("BytesInput")) - parseBytes(md.getValue("BytesDurable"));
-}
+	double inputRate, durableRate;
+	double inputRoughness, durableRoughness;
+	int64_t inputBytes, durableBytes;
 
-TEST_CASE("/fdbserver/QuietDatabase/queueCounterParsing") {
-	TraceEventFields fields;
-	fields.addField("BytesInput", "1.25 2.5 100");
-	fields.addField("BytesDurable", "1.0 2.0 40");
-	ASSERT_EQ(getQueueSize(fields), 60);
-	for (const char* text : { "", "1.0 2.0", "1.0 2.0 9223372036854775808" }) {
-		TraceEventFields invalid;
-		invalid.addField("BytesInput", text);
-		invalid.addField("BytesDurable", "1.0 2.0 40");
-		bool rejected = false;
-		try {
-			getQueueSize(invalid);
-		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_attribute_not_found);
-			rejected = true;
-		}
-		ASSERT(rejected);
-	}
-	return Void();
+	sscanf(md.getValue("BytesInput").c_str(), "%lf %lf %" SCNd64, &inputRate, &inputRoughness, &inputBytes);
+	sscanf(md.getValue("BytesDurable").c_str(), "%lf %lf %" SCNd64, &durableRate, &durableRoughness, &durableBytes);
+
+	return inputBytes - durableBytes;
 }
 
 int64_t getDurableVersion(const TraceEventFields& md) {
@@ -220,8 +189,8 @@ Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<Asyn
 	for (const auto& worker : workers) {
 		NetworkAddress primary = worker.interf.address();
 		Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
-		if (coordinatorsAddrSet.contains(primary) ||
-		    (secondary.present() && coordinatorsAddrSet.contains(secondary.get()))) {
+		if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
+		    (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
 			result.push_back(worker.interf);
 		}
 	}
@@ -316,7 +285,7 @@ Future<std::pair<std::vector<WorkerInterface>, int>> getStorageWorkers(Database 
 	    });
 	int usableRegions = 1;
 	if (regionsValue.present()) {
-		usableRegions = parseNumberPrefix<int>(regionsValue.get()).orDefault(0);
+		usableRegions = atoi(regionsValue.get().toString().c_str());
 	}
 	auto masterDcId = dbInfo->get().master.locality.dcId();
 

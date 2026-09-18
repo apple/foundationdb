@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ParseNumber.h"
 #include "flow/UnitTest.h"
 #include "flow/Error.h"
 #include "fdbclient/Tuple.h"
@@ -77,8 +76,8 @@ struct SayHelloTaskFunc : TaskFuncBase {
 		if (!task->params["chained"_sr].compare("false"_sr)) {
 			co_await done->set(tr, taskBucket);
 		} else {
-			int subtaskCount = parseNumberPrefix<int>(task->params["subtaskCount"_sr]).orDefault(0);
-			int currTaskNumber = parseNumberPrefix<int>(value.removePrefix("task_"_sr)).orDefault(0);
+			int subtaskCount = atoi(task->params["subtaskCount"_sr].toString().c_str());
+			int currTaskNumber = atoi(value.removePrefix("task_"_sr).toString().c_str());
 			TraceEvent("TaskBucketCorrectnessSayHello")
 			    .detail("SubtaskCount", subtaskCount)
 			    .detail("CurrTaskNumber", currTaskNumber);
@@ -135,7 +134,7 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 
 		int subtaskCount = 1;
 		if (!task->params["chained"_sr].compare("false"_sr)) {
-			subtaskCount = parseNumberPrefix<int>(task->params["subtaskCount"_sr]).orDefault(0);
+			subtaskCount = atoi(task->params["subtaskCount"_sr].toString().c_str());
 		}
 		for (int i = 0; i < subtaskCount; ++i) {
 			auto new_task = makeReference<Task>(

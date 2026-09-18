@@ -27,7 +27,6 @@
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
-#include "flow/ParseNumber.h"
 #include "fdbclient/FDBTypes.h"
 
 template <typename T>
@@ -65,7 +64,7 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 			alpha = true;
 			return (unsigned int)s[0];
 		} else {
-			return parseNumberPrefix<long>(s).orDefault(0);
+			return atol(s.toString().c_str());
 		}
 	}
 
@@ -221,11 +220,10 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
 		maxKeyLen = keyGen.getMaxKeyLen();
 		ASSERT(indexGenerator.max > 0);
 		std::set<Key> uniqueKeys;
-		uint64_t inserts = 0;
+		int inserts = 0;
 		// for smaller indexGenerator.max, give it more insert try, as it may not find enough unique keys with 3 * max.
 		// It adds roughly log * 100. For example, even for max is 1, it will try at least 100 times.
-		const uint64_t maxInsertTry =
-		    uint64_t{ 3 } * indexGenerator.max + (((sizeof(uint) * 8) - clz(indexGenerator.max)) * 100);
+		const uint maxInsertTry = 3 * indexGenerator.max + (((sizeof(uint) * 8) - clz(indexGenerator.max)) * 100);
 		while (uniqueKeys.size() < indexGenerator.max) {
 			auto k = keyGen.next();
 			uniqueKeys.insert(k);

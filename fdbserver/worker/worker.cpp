@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ParseNumber.h"
 #include <cstdlib>
 #include <map>
 #include <tuple>
@@ -1492,13 +1491,7 @@ Future<Void> runProfiler(ProfilerRequest req) {
 bool checkHighMemory(int64_t threshold, bool* error) {
 #if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 	*error = false;
-	const long pageSizeResult = sysconf(_SC_PAGESIZE);
-	if (pageSizeResult <= 0) {
-		TraceEvent("GetPageSizeFailure").log();
-		*error = true;
-		return false;
-	}
-	const uint64_t page_size = static_cast<uint64_t>(pageSizeResult);
+	uint64_t page_size = sysconf(_SC_PAGESIZE);
 	int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
 		TraceEvent("OpenStatmFileFailure").log();
@@ -1509,23 +1502,15 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 	const int buf_sz = 256;
 	char stat_buf[buf_sz];
 	ssize_t stat_nread = read(fd, stat_buf, buf_sz);
-	close(fd);
-	if (stat_nread <= 0) {
+	if (stat_nread < 0) {
 		TraceEvent("ReadStatmFileFailure").log();
 		*error = true;
 		return false;
 	}
 
-	StringRef statText(reinterpret_cast<const uint8_t*>(stat_buf), stat_nread);
-	int consumed = 0;
-	auto vmsize = parseNumberPrefix<uint64_t>(statText, 10, &consumed);
-	auto rssPages = parseNumberPrefix<uint64_t>(statText.substr(consumed));
-	if (!vmsize.present() || !rssPages.present() || rssPages.get() > std::numeric_limits<uint64_t>::max() / page_size) {
-		TraceEvent("ParseStatmFileFailure").log();
-		*error = true;
-		return false;
-	}
-	uint64_t rss = rssPages.get() * page_size;
+	uint64_t vmsize, rss;
+	sscanf(stat_buf, "%lu %lu", &vmsize, &rss);
+	rss *= page_size;
 	if (rss >= threshold) {
 		return true;
 	}

@@ -28,7 +28,6 @@
 
 #include <toml.hpp>
 
-#include "flow/ParseNumber.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
@@ -383,19 +382,20 @@ class TestConfig : public BasicTestConfig {
 			}
 
 			if (attrib == "extraDatabaseCount") {
-				extraDatabaseCount = parseNumberPrefix<int>(StringRef(value)).orDefault(extraDatabaseCount);
+				sscanf(value.c_str(), "%d", &extraDatabaseCount);
 			}
 
 			if (attrib == "minimumReplication") {
-				minimumReplication = parseNumberPrefix<int>(StringRef(value)).orDefault(minimumReplication);
+				sscanf(value.c_str(), "%d", &minimumReplication);
 			}
 
 			if (attrib == "minimumRegions") {
-				minimumRegions = parseNumberPrefix<int>(StringRef(value)).orDefault(minimumRegions);
+				sscanf(value.c_str(), "%d", &minimumRegions);
 			}
 
 			if (attrib == "configureLocked") {
-				int configureLockedInt = parseNumberPrefix<int>(StringRef(value)).orDefault(0);
+				int configureLockedInt;
+				sscanf(value.c_str(), "%d", &configureLockedInt);
 				configureLocked = (configureLockedInt != 0);
 			}
 
@@ -404,7 +404,7 @@ class TestConfig : public BasicTestConfig {
 			}
 
 			if (attrib == "logAntiQuorum") {
-				logAntiQuorum = parseNumberPrefix<int>(StringRef(value)).orDefault(logAntiQuorum);
+				sscanf(value.c_str(), "%d", &logAntiQuorum);
 			}
 
 			if (attrib == "storageEngineExcludeTypes") {
@@ -418,7 +418,7 @@ class TestConfig : public BasicTestConfig {
 				}
 			}
 			if (attrib == "maxTLogVersion") {
-				maxTLogVersion = parseNumberPrefix<int>(StringRef(value)).orDefault(maxTLogVersion);
+				sscanf(value.c_str(), "%d", &maxTLogVersion);
 			}
 			if (attrib == "disableTss") {
 				disableTss = strcmp(value.c_str(), "true") == 0;
@@ -442,12 +442,10 @@ class TestConfig : public BasicTestConfig {
 				longRunningTest = strcmp(value.c_str(), "true") == 0;
 			}
 			if (attrib == "simulationNormalRunTestsTimeoutSeconds") {
-				simulationNormalRunTestsTimeoutSeconds =
-				    parseNumberPrefix<int>(StringRef(value)).orDefault(simulationNormalRunTestsTimeoutSeconds);
+				sscanf(value.c_str(), "%d", &simulationNormalRunTestsTimeoutSeconds);
 			}
 			if (attrib == "simulationBuggifyRunTestsTimeoutSeconds") {
-				simulationBuggifyRunTestsTimeoutSeconds =
-				    parseNumberPrefix<int>(StringRef(value)).orDefault(simulationBuggifyRunTestsTimeoutSeconds);
+				sscanf(value.c_str(), "%d", &simulationBuggifyRunTestsTimeoutSeconds);
 			}
 		}
 
@@ -667,8 +665,8 @@ Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 		    .detail("ConnectionString", connRecord->getConnectionString().toString())
 		    .detail("ExtraString", fdbSimulationPolicyState().extraDatabases[0]);
 
-		DatabaseBackupAgent dbAgent(cx);
-		DatabaseBackupAgent extraAgent(drDatabase);
+		DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
+		DatabaseBackupAgent extraAgent = DatabaseBackupAgent(drDatabase);
 
 		auto drPollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
 
@@ -1362,27 +1360,19 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	// allows multiple ipAddr entries
 	ini.SetMultiKey();
 
-	auto parseRestartInteger = [](const char* text) {
-		Optional<int> value = text == nullptr ? Optional<int>() : parseNumberPrefix<int>(StringRef(text));
-		if (!value.present()) {
-			throw test_specification_invalid();
-		}
-		return value.get();
-	};
-
 	try {
-		int machineCount = parseRestartInteger(ini.GetValue("META", "machineCount"));
-		int processesPerMachine = parseRestartInteger(ini.GetValue("META", "processesPerMachine"));
+		int machineCount = atoi(ini.GetValue("META", "machineCount"));
+		int processesPerMachine = atoi(ini.GetValue("META", "processesPerMachine"));
 		int listenersPerProcess = 1;
 		auto listenersPerProcessStr = ini.GetValue("META", "listenersPerProcess");
 		if (listenersPerProcessStr != nullptr) {
-			listenersPerProcess = parseRestartInteger(listenersPerProcessStr);
+			listenersPerProcess = atoi(listenersPerProcessStr);
 		}
-		int desiredCoordinators = parseRestartInteger(ini.GetValue("META", "desiredCoordinators"));
-		int testerCount = parseRestartInteger(ini.GetValue("META", "testerCount"));
+		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
+		int testerCount = atoi(ini.GetValue("META", "testerCount"));
 		auto tssModeStr = ini.GetValue("META", "tssMode");
 		if (tssModeStr != nullptr) {
-			fdbSimulationPolicyState().tssMode = static_cast<FDBTSSMode>(parseRestartInteger(tssModeStr));
+			fdbSimulationPolicyState().tssMode = static_cast<FDBTSSMode>(atoi(tssModeStr));
 		}
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
 		if (testConfig->extraDatabaseMode == FDBExtraDatabaseMode::Local) {
@@ -1422,8 +1412,7 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				zoneId = Standalone<StringRef>(zoneIdStr);
 			}
 
-			auto cType = static_cast<ProcessClass::ClassType>(
-			    parseRestartInteger(ini.GetValue(machineIdString.c_str(), "mClass")));
+			auto cType = static_cast<ProcessClass::ClassType>(atoi(ini.GetValue(machineIdString.c_str(), "mClass")));
 			// using specialized class types can lead to nondeterministic recruitment
 			if (cType == ProcessClass::MasterClass || cType == ProcessClass::ResolutionClass) {
 				cType = ProcessClass::StatelessClass;
@@ -1435,7 +1424,7 @@ Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			}
 
 			std::vector<IPAddress> ipAddrs;
-			int processes = parseRestartInteger(ini.GetValue(machineIdString.c_str(), "processes"));
+			int processes = atoi(ini.GetValue(machineIdString.c_str(), "processes"));
 
 			auto ip = ini.GetValue(machineIdString.c_str(), "ipAddr");
 
@@ -1742,7 +1731,8 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		}
 
 	} else if (SERVER_KNOBS->ENFORCE_SHARDED_ROCKSDB_SIM_IF_AVALIABLE &&
-	           !testConfig.storageEngineExcludeTypes.contains(SimulationStorageEngine::SHARDED_ROCKSDB)) {
+	           testConfig.storageEngineExcludeTypes.find(SimulationStorageEngine::SHARDED_ROCKSDB) ==
+	               testConfig.storageEngineExcludeTypes.end()) {
 		reason = "ENFORCE_SHARDED_ROCKSDB_SIM_IF_AVALIABLE is enabled"_sr;
 		result = SimulationStorageEngine::SHARDED_ROCKSDB;
 

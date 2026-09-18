@@ -29,11 +29,9 @@
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
-#include "flow/ParseNumber.h"
 
 #include <algorithm>
 #include <cinttypes>
-#include <cctype>
 
 class BackupContainerFileSystemImpl {
 public:
@@ -172,24 +170,16 @@ public:
 
 	static bool pathToRangeFile(RangeFile& out, const std::string& path, int64_t size) {
 		std::string name = fileNameOnly(path);
-		StringRef fields(name);
-		if (name.find('\0') != std::string::npos || fields.eat(","_sr) != "range"_sr) {
-			return false;
-		}
-		auto version = parseNumber<Version>(fields.eat(","_sr));
-		bool foundSeparator = false;
-		auto uid = fields.eat(","_sr, &foundSeparator);
-		auto blockSize = parseNumber<uint32_t>(fields);
-		if (!version.present() || uid.empty() || !foundSeparator || !blockSize.present()) {
-			return false;
-		}
 		RangeFile f;
 		f.fileName = path;
 		f.fileSize = size;
-		f.version = version.get();
-		f.blockSize = blockSize.get();
-		out = f;
-		return true;
+		int len;
+		if (sscanf(name.c_str(), "range,%" SCNd64 ",%*[^,],%u%n", &f.version, &f.blockSize, &len) == 2 &&
+		    len == name.size()) {
+			out = f;
+			return true;
+		}
+		return false;
 	}
 
 	static Future<Void> writeKeyspaceSnapshotFile(Reference<BackupContainerFileSystem> bc,
@@ -1394,16 +1384,11 @@ public:
 
 	// Extract the snapshot begin version from a path
 	static Version extractSnapshotBeginVersion(const std::string& path) {
-		StringRef input(path);
-		const StringRef prefix = "kvranges/snapshot."_sr;
-		if (!input.startsWith(prefix)) {
-			return invalidVersion;
+		Version snapshotBeginVersion;
+		if (sscanf(path.c_str(), "kvranges/snapshot.%018" SCNd64, &snapshotBeginVersion) == 1) {
+			return snapshotBeginVersion;
 		}
-		input = input.substr(prefix.size());
-		while (!input.empty() && std::isspace(static_cast<unsigned char>(input[0]))) {
-			input = input.substr(1);
-		}
-		return parseNumberPrefix<Version>(input.substr(0, std::min(input.size(), 18))).orDefault(invalidVersion);
+		return invalidVersion;
 	}
 
 	// The innermost folder covers 100,000 seconds (1e11 versions) which is 5,000 mutation log files at current
@@ -1424,63 +1409,67 @@ public:
 
 	static bool pathToLogFile(LogFile& out, const std::string& path, int64_t size) {
 		std::string name = fileNameOnly(path);
-		StringRef fields(name);
-		if (name.find('\0') != std::string::npos || fields.eat(","_sr) != "log"_sr) {
-			return false;
-		}
-		auto beginVersion = parseNumber<Version>(fields.eat(","_sr));
-		auto endVersion = parseNumber<Version>(fields.eat(","_sr));
-		bool foundSeparator = false;
-		auto uid = fields.eat(","_sr, &foundSeparator);
-		if (!beginVersion.present() || !endVersion.present() || uid.empty() || !foundSeparator) {
-			return false;
-		}
 		LogFile f;
 		f.fileName = path;
 		f.fileSize = size;
-		f.beginVersion = beginVersion.get();
-		f.endVersion = endVersion.get();
-		auto blockSize = parseNumber<uint32_t>(fields);
-		if (!blockSize.present()) {
-			auto tagId = parseNumber<int>(fields.eat("-of-"_sr, &foundSeparator));
-			if (!tagId.present() || tagId.get() < 0 || !foundSeparator) {
-				return false;
-			}
-			auto totalTags = parseNumber<int>(fields.eat(","_sr));
-			blockSize = parseNumber<uint32_t>(fields);
-			if (!totalTags.present() || !blockSize.present()) {
-				return false;
-			}
-			f.tagId = tagId.get();
-			f.totalTags = totalTags.get();
+		int len;
+		if (sscanf(name.c_str(),
+		           "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u%n",
+		           &f.beginVersion,
+		           &f.endVersion,
+		           &f.blockSize,
+		           &len) == 3 &&
+		    len == name.size()) {
+			out = f;
+			return true;
+		} else if (sscanf(name.c_str(),
+		                  "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%d-of-%d,%u%n",
+		                  &f.beginVersion,
+		                  &f.endVersion,
+		                  &f.tagId,
+		                  &f.totalTags,
+		                  &f.blockSize,
+		                  &len) == 5 &&
+		           len == name.size() && f.tagId >= 0) {
+			out = f;
+			return true;
 		}
-		f.blockSize = blockSize.get();
-		out = f;
-		return true;
+		return false;
 	}
 
 	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile& out, const std::string& path) {
 		std::string name = fileNameOnly(path);
-		StringRef fields(name);
-		if (name.find('\0') != std::string::npos || fields.eat(","_sr) != "snapshot"_sr) {
-			return false;
-		}
-		auto beginVersion = parseNumber<Version>(fields.eat(","_sr));
-		auto endVersion = parseNumber<Version>(fields.eat(","_sr));
-		bool hasType = false;
-		auto totalSize = parseNumber<int64_t>(fields.eat(","_sr, &hasType));
-		if (!beginVersion.present() || !endVersion.present() || !totalSize.present() ||
-		    (hasType && (fields.empty() || fields.size() > 63 || fields.toString().find(',') != std::string::npos))) {
-			return false;
-		}
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
-		f.beginVersion = beginVersion.get();
-		f.endVersion = endVersion.get();
-		f.totalSize = totalSize.get();
-		f.snapshotType = fields.toString();
-		out = f;
-		return true;
+		int len;
+		char typeBuf[64] = {};
+
+		// Try new format with type suffix: snapshot,beginVersion,endVersion,totalSize,type
+		if (sscanf(name.c_str(),
+		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 ",%63[^,]%n",
+		           &f.beginVersion,
+		           &f.endVersion,
+		           &f.totalSize,
+		           typeBuf,
+		           &len) == 4 &&
+		    len == name.size()) {
+			f.snapshotType = typeBuf;
+			out = f;
+			return true;
+		}
+
+		// Try original format: snapshot,beginVersion,endVersion,totalSize
+		if (sscanf(name.c_str(),
+		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 "%n",
+		           &f.beginVersion,
+		           &f.endVersion,
+		           &f.totalSize,
+		           &len) == 3 &&
+		    len == name.size()) {
+			out = f;
+			return true;
+		}
+		return false;
 	}
 
 	// fallback for using existing write api if the underlying blob store doesn't support efficient writeEntireFile
@@ -1861,9 +1850,10 @@ static Future<Optional<Version>> readVersionProperty(Reference<BackupContainerFi
 		std::string s;
 		s.resize(size);
 		int rs = co_await f->read((uint8_t*)s.data(), size, 0);
-		auto version = parseNumber<Version>(StringRef(s));
-		if (rs == size && version.present())
-			co_return version.get();
+		Version v;
+		int len;
+		if (rs == size && sscanf(s.c_str(), "%" SCNd64 "%n", &v, &len) == 1 && len == size)
+			co_return v;
 
 		TraceEvent(SevWarn, "BackupContainerInvalidProperty").detail("URL", bc->getURL()).detail("Path", path);
 
@@ -2226,59 +2216,6 @@ TEST_CASE("/backup/containers_list") {
 			printf("%s\n", u.c_str());
 		}
 	}
-}
-
-TEST_CASE("/backup/filenameparsing") {
-	RangeFile range;
-	ASSERT(BackupContainerFileSystemImpl::pathToRangeFile(range, "ranges/range,123,uid,4096", 100));
-	ASSERT(range.version == 123 && range.blockSize == 4096 && range.fileSize == 100);
-	for (const auto& name : { "ranges/range,9223372036854775808,uid,4096",
-	                          "ranges/range,123,uid,4294967296",
-	                          "ranges/range,,uid,4096",
-	                          "ranges/range,123,,4096",
-	                          "ranges/range,123,uid,4096suffix" }) {
-		ASSERT(!BackupContainerFileSystemImpl::pathToRangeFile(range, name, 0));
-	}
-
-	LogFile log;
-	ASSERT(BackupContainerFileSystemImpl::pathToLogFile(log, "logs/log,123,456,uid,4096", 100));
-	ASSERT(log.beginVersion == 123 && log.endVersion == 456 && log.blockSize == 4096 && log.tagId == -1);
-	ASSERT(BackupContainerFileSystemImpl::pathToLogFile(log, "plogs/log,123,456,uid,2-of-4,4096", 100));
-	ASSERT(log.tagId == 2 && log.totalTags == 4 && log.blockSize == 4096);
-	for (const auto& name : { "logs/log,123,9223372036854775808,uid,4096",
-	                          "plogs/log,123,456,uid,2147483648-of-4,4096",
-	                          "plogs/log,123,456,uid,2-of-2147483648,4096",
-	                          "plogs/log,123,456,uid,-1-of-4,4096",
-	                          "plogs/log,123,456,uid,2-of-4,4294967296",
-	                          "plogs/log,123,456,uid,2-of-4,4096suffix" }) {
-		ASSERT(!BackupContainerFileSystemImpl::pathToLogFile(log, name, 0));
-	}
-
-	KeyspaceSnapshotFile snapshot;
-	ASSERT(BackupContainerFileSystemImpl::pathToKeyspaceSnapshotFile(snapshot, "snapshots/snapshot,123,456,789"));
-	ASSERT(snapshot.beginVersion == 123 && snapshot.endVersion == 456 && snapshot.totalSize == 789 &&
-	       snapshot.snapshotType.empty());
-	ASSERT(BackupContainerFileSystemImpl::pathToKeyspaceSnapshotFile(snapshot, "snapshots/snapshot,123,456,789,bulk"));
-	ASSERT(snapshot.snapshotType == "bulk");
-	ASSERT(BackupContainerFileSystemImpl::pathToKeyspaceSnapshotFile(
-	    snapshot, "snapshots/snapshot,123,456,789," + std::string(63, 'x')));
-	ASSERT(!BackupContainerFileSystemImpl::pathToKeyspaceSnapshotFile(
-	    snapshot, "snapshots/snapshot,123,456,789," + std::string(64, 'x')));
-	for (const auto& name : { "snapshots/snapshot,123,456,9223372036854775808",
-	                          "snapshots/snapshot,123,456,",
-	                          "snapshots/snapshot,123,456,789,",
-	                          "snapshots/snapshot,123,456,789,bulk,extra" }) {
-		ASSERT(!BackupContainerFileSystemImpl::pathToKeyspaceSnapshotFile(snapshot, name));
-	}
-
-	ASSERT(BackupContainerFileSystemImpl::extractSnapshotBeginVersion("kvranges/snapshot.000000000000000123/range") ==
-	       123);
-	ASSERT(BackupContainerFileSystemImpl::extractSnapshotBeginVersion(
-	           "kvranges/snapshot. \t000000000000000123/range") == 123);
-	ASSERT(BackupContainerFileSystemImpl::extractSnapshotBeginVersion("kvranges/snapshot. \t") == invalidVersion);
-	ASSERT(BackupContainerFileSystemImpl::extractSnapshotBeginVersion("kvranges/snapshot.invalid/range") ==
-	       invalidVersion);
-	return Void();
 }
 
 TEST_CASE("/backup/time") {

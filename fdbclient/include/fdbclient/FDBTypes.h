@@ -35,7 +35,6 @@
 
 #include "flow/FastRef.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/ParseNumber.h"
 #include "flow/flow.h"
 #include "fdbclient/ProcessClass.h"
 #include "fdbclient/ProcessData.h"
@@ -1515,7 +1514,7 @@ struct EncryptionAtRestModeDeprecated {
 		}
 
 		// A failed parsing returns 0 (DISABLED)
-		int num = parseNumberPrefix<int>(val.get()).orDefault(0);
+		int num = atoi(val.get().toString().c_str());
 		if (num < 0 || num >= END) {
 			return DISABLED;
 		}

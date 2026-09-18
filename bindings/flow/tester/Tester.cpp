@@ -28,7 +28,6 @@
 #include "bindings/flow/FDBLoanerTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "flow/DeterministicRandom.h"
-#include "flow/ParseNumber.h"
 #include "flow/TLSConfig.h"
 
 // Otherwise we have to type setupNetwork(), FDB::open(), etc.
@@ -1857,18 +1856,15 @@ int main(int argc, char** argv) {
 			flushAndExit(FDB_EXIT_SUCCESS);*/
 		}
 		StringRef prefix((const uint8_t*)argv[1], strlen(argv[1]));
-		auto apiVersion = parseNumberPrefix<int>(StringRef(static_cast<const char*>(argv[2])));
-		if (!apiVersion.present()) {
-			fprintf(stderr, "Invalid API version: %s\n", argv[2]);
-			return 1;
-		}
+		int apiVersion;
+		sscanf(argv[2], "%d", &apiVersion);
 		std::string clusterFilename;
 		if (argc > 3) {
 			clusterFilename = std::string(argv[3]);
 		}
 
 		// start test
-		startTest(Uncancellable(), clusterFilename, prefix, apiVersion.get());
+		startTest(Uncancellable(), clusterFilename, prefix, apiVersion);
 
 		// Run the network until someone tells us to stop
 		g_network->run();

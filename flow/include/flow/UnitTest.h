@@ -77,12 +77,10 @@ public:
 	// Get a parameter's value, will return !present() if parameter was not set
 	Optional<std::string> get(const std::string& name) const;
 
-	// Get a parameter's value as an integer, returning !present() if it was not set.
-	// Throws invalid_option_value if a present value is malformed or outside the int64_t range.
+	// Get a parameter's value as an integer, will return !present() if parameter was not set
 	Optional<int64_t> getInt(const std::string& name) const;
 
-	// Get a parameter's value parsed as a double, returning !present() if it was not set.
-	// Throws invalid_option_value if a present value is malformed or outside the double range.
+	// Get a parameter's value parsed as a double, will return !present() if parameter was not set
 	Optional<double> getDouble(const std::string& name) const;
 
 	// This is separate because it assumes data directory has already been set, and doesn't return an optional

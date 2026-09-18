@@ -24,7 +24,6 @@
 #include "flow/IAsyncFile.h"
 #include "flow/FaultInjection.h"
 #include "flow/Platform.h"
-#include "flow/ParseNumber.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
@@ -272,7 +271,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 		// Extract block size from the filename, if present
 		size_t lastComma = path.find_last_of(',');
 		if (lastComma != path.npos) {
-			blockSize = parseNumberPrefix<int>(StringRef(path).substr(lastComma + 1)).orDefault(0);
+			blockSize = atoi(path.substr(lastComma + 1).c_str());
 		}
 		if (blockSize <= 0) {
 			blockSize = deterministicRandom()->randomInt(1e4, 1e6);

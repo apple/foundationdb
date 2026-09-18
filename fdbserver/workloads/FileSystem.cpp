@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ParseNumber.h"
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/TesterInterface.h"
@@ -221,7 +220,11 @@ struct FileSystemWorkload : TestWorkload {
 		}
 	}
 
-	static int testKeyToInt(const KeyRef& p) { return parseNumberPrefix<int>(p).orDefault(0); }
+	static int testKeyToInt(const KeyRef& p) {
+		int x = 0;
+		sscanf(p.toString().c_str(), "%d", &x);
+		return x;
+	}
 
 	Future<Void> writeClient(Database cx, FileSystemWorkload* self) {
 		double clientBegin = now();

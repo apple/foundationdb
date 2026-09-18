@@ -21,27 +21,18 @@
 #include <algorithm>
 #include <cinttypes>
 #include <cstdio>
-#include <limits>
 #include <memory>
 
 #include <fmt/ranges.h>
 
 #include "flow/CoroUtils.h"
 #include "flow/DeterministicRandom.h"
-#include "flow/ParseNumber.h"
 #include "flow/Trace.h"
-#include "flow/UnitTest.h"
 #include "flow/genericactors.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
 
 namespace {
-
-template <class T>
-Optional<T> parseNumericOption(StringRef value) {
-	// Legacy options accept numeric prefixes, including "100000.0" for integers.
-	return parseNumberPrefix<T>(value);
-}
 
 constexpr char HEX_CHAR_LOOKUP[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
 
@@ -159,10 +150,10 @@ Value getOption(VectorRef<KeyValueRef> options, Key key, Value defaultValue) {
 int getOption(VectorRef<KeyValueRef> options, Key key, int defaultValue) {
 	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
-			auto r = parseNumericOption<int>(options[i].value);
-			if (r.present()) {
+			int r;
+			if (sscanf(options[i].value.toString().c_str(), "%d", &r)) {
 				options[i].value = ""_sr;
-				return r.get();
+				return r;
 			} else {
 				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
 				throw test_specification_invalid();
@@ -176,10 +167,10 @@ int getOption(VectorRef<KeyValueRef> options, Key key, int defaultValue) {
 uint64_t getOption(VectorRef<KeyValueRef> options, Key key, uint64_t defaultValue) {
 	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
-			auto r = parseNumericOption<uint64_t>(options[i].value);
-			if (r.present()) {
+			uint64_t r;
+			if (sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r)) {
 				options[i].value = ""_sr;
-				return r.get();
+				return r;
 			} else {
 				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
 				throw test_specification_invalid();
@@ -193,10 +184,10 @@ uint64_t getOption(VectorRef<KeyValueRef> options, Key key, uint64_t defaultValu
 int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue) {
 	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
-			auto r = parseNumericOption<int64_t>(options[i].value);
-			if (r.present()) {
+			int64_t r;
+			if (sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r)) {
 				options[i].value = ""_sr;
-				return r.get();
+				return r;
 			} else {
 				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
 				throw test_specification_invalid();
@@ -210,11 +201,10 @@ int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue)
 double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue) {
 	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
-			// Preserve the float rounding used by existing simulation configurations.
-			auto r = parseNumericOption<float>(options[i].value);
-			if (r.present()) {
+			float r;
+			if (sscanf(options[i].value.toString().c_str(), "%f", &r)) {
 				options[i].value = ""_sr;
-				return r.get();
+				return r;
 			}
 		}
 	}
@@ -255,66 +245,19 @@ std::vector<int> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<
 	for (int i = 0; i < options.size(); i++) {
 		if (options[i].key == key) {
 			std::vector<int> v;
-			auto appendValue = [&](StringRef value) {
-				auto parsed = parseNumericOption<int>(value);
-				if (!parsed.present()) {
-					TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
-					throw test_specification_invalid();
-				}
-				v.push_back(parsed.get());
-			};
 			int begin = 0;
 			for (int c = 0; c < options[i].value.size(); c++) {
 				if (options[i].value[c] == ',') {
-					appendValue(options[i].value.substr(begin, c - begin));
+					v.push_back(atoi((char*)options[i].value.begin() + begin));
 					begin = c + 1;
 				}
 			}
-			appendValue(options[i].value.substr(begin));
+			v.push_back(atoi((char*)options[i].value.begin() + begin));
 			options[i].value = ""_sr;
 			return v;
 		}
 	}
 	return defaultValue;
-}
-
-TEST_CASE("/fdbserver/WorkloadUtils/numericOptions") {
-	ASSERT_EQ(parseNumericOption<int>(" \t+0012 \n"_sr).get(), 12);
-	ASSERT_EQ(parseNumericOption<int>("100000.0"_sr).get(), 100000);
-	ASSERT_EQ(parseNumericOption<int>("12suffix"_sr).get(), 12);
-	ASSERT_EQ(parseNumericOption<int>("12\0suffix"_sr).get(), 12);
-	ASSERT_EQ(parseNumericOption<int64_t>("-9223372036854775808"_sr).get(), std::numeric_limits<int64_t>::min());
-	ASSERT_EQ(parseNumericOption<int64_t>("9223372036854775807"_sr).get(), std::numeric_limits<int64_t>::max());
-	ASSERT_EQ(parseNumericOption<uint64_t>("18446744073709551615"_sr).get(), std::numeric_limits<uint64_t>::max());
-	ASSERT_EQ(parseNumericOption<uint64_t>("-1"_sr).get(), std::numeric_limits<uint64_t>::max());
-	ASSERT_EQ(parseNumericOption<float>(" \t+1.25e2 \n"_sr).get(), 125.0f);
-	ASSERT_EQ(parseNumericOption<float>("1.25suffix"_sr).get(), 1.25f);
-	ASSERT(!parseNumericOption<int64_t>("9223372036854775808"_sr).present());
-	ASSERT(!parseNumericOption<int64_t>("-9223372036854775809"_sr).present());
-	ASSERT(!parseNumericOption<uint64_t>("18446744073709551616"_sr).present());
-	ASSERT(
-	    !parseNumericOption<int>(std::to_string(static_cast<int64_t>(std::numeric_limits<int>::max()) + 1)).present());
-	ASSERT(!parseNumericOption<float>("1e9999"_sr).present());
-	ASSERT(!parseNumericOption<float>("1e-9999"_sr).present());
-	for (StringRef text : { ""_sr, " \t"_sr, "+"_sr, "suffix12"_sr }) {
-		ASSERT(!parseNumericOption<int>(text).present());
-		ASSERT(!parseNumericOption<float>(text).present());
-	}
-
-	const uint8_t backing[] = { '1', ',', '2', '3', 0 };
-	Standalone<VectorRef<KeyValueRef>> options;
-	options.push_back(options.arena(), KeyValueRef("integers"_sr, StringRef(backing, 3)));
-	const std::vector<int> parsed = getOption(options, "integers"_sr, std::vector<int>{});
-	ASSERT(parsed == std::vector<int>({ 1, 2 }));
-	ASSERT(options[0].value.empty());
-
-	options.push_back(options.arena(), KeyValueRef("double"_sr, "0.1"_sr));
-	ASSERT_EQ(getOption(options, "double"_sr, 0.0), static_cast<double>(0.1f));
-	options.push_back(options.arena(), KeyValueRef("invalidDouble"_sr, "invalid"_sr));
-	ASSERT_EQ(getOption(options, "invalidDouble"_sr, 3.5), 3.5);
-	ASSERT(options[2].value == "invalid"_sr);
-
-	return Void();
 }
 
 bool hasOption(VectorRef<KeyValueRef> options, Key key) {

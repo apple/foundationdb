@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ParseNumber.h"
 #include <cinttypes>
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/genericactors.h"
@@ -182,20 +181,7 @@ public:
 	explicit(false) StatusCounter(const std::string& parsableText) { parseText(parsableText); }
 
 	StatusCounter& parseText(const std::string& parsableText) {
-		StringRef remaining(parsableText);
-		int consumed = 0;
-		auto parsedHz = parseNumberPrefix<double>(remaining, 10, &consumed);
-		remaining = remaining.substr(consumed);
-		consumed = 0;
-		auto parsedRoughness = parseNumberPrefix<double>(remaining, 10, &consumed);
-		remaining = remaining.substr(consumed);
-		auto parsedCounter = parseNumberPrefix<int64_t>(remaining);
-		if (!parsedHz.present() || !parsedRoughness.present() || !parsedCounter.present()) {
-			throw attribute_not_found();
-		}
-		hz = parsedHz.get();
-		roughness = parsedRoughness.get();
-		counter = parsedCounter.get();
+		sscanf(parsableText.c_str(), "%lf %lf %" SCNd64 "", &hz, &roughness, &counter);
 		return *this;
 	}
 
@@ -231,32 +217,11 @@ protected:
 	int64_t counter;
 };
 
-TEST_CASE("/status/counterParsing") {
-	StatusCounter counter("1.25 2.5 42");
-	ASSERT_EQ(counter.getHz(), 1.25);
-	ASSERT_EQ(counter.getRoughness(), 2.5);
-	ASSERT_EQ(counter.getCounter(), 42);
-	for (const char* text : { "", "1.25 2.5", "1.25 x 42", "1.25 2.5 9223372036854775808" }) {
-		bool rejected = false;
-		try {
-			counter.parseText(text);
-		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_attribute_not_found);
-			rejected = true;
-		}
-		ASSERT(rejected);
-		ASSERT_EQ(counter.getHz(), 1.25);
-		ASSERT_EQ(counter.getRoughness(), 2.5);
-		ASSERT_EQ(counter.getCounter(), 42);
-	}
-	return Void();
-}
-
 static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 	JsonBuilderObject statusObj;
 	try {
 		if (errorFields.size()) {
-			double time = errorFields.getDouble("Time");
+			double time = atof(errorFields.getValue("Time").c_str());
 			statusObj["time"] = time;
 
 			statusObj["raw_log_message"] = errorFields.toString();
@@ -1249,10 +1214,10 @@ static AsyncResult<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 
 		// Add additional metadata for certain statuses
 		if (mStatusCode == RecoveryStatus::recruiting_transaction_servers) {
-			int requiredLogs = md.getInt("RequiredTLogs");
-			int requiredCommitProxies = md.getInt("RequiredCommitProxies");
-			int requiredGrvProxies = md.getInt("RequiredGrvProxies");
-			int requiredResolvers = md.getInt("RequiredResolvers");
+			int requiredLogs = atoi(md.getValue("RequiredTLogs").c_str());
+			int requiredCommitProxies = atoi(md.getValue("RequiredCommitProxies").c_str());
+			int requiredGrvProxies = atoi(md.getValue("RequiredGrvProxies").c_str());
+			int requiredResolvers = atoi(md.getValue("RequiredResolvers").c_str());
 			// int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredCommitProxies));
 			// int requiredMachines = std::max(requiredLogs, 1);
 

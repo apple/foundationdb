@@ -29,7 +29,6 @@
 #include <unistd.h>
 #include <vector>
 #include <string>
-#include <string_view>
 #include <sstream>
 #include <iterator>
 #include <random>
@@ -89,8 +88,6 @@ void print_usage(const char* name);
 std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string path, int ifd);
 void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb_fd_set rfds, int* maxfd);
 uint64_t getRss(ProcessID id);
-// Reads the first two /proc/statm fields and converts resident pages to bytes. Leaves rss unchanged on failure.
-bool parseRss(std::string_view statm, long pageSize, uint64_t& rss);
 void kill_process(ProcessID id, bool wait = true, bool cleanup = true);
 
 struct Command;

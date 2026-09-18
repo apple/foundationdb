@@ -26,8 +26,6 @@
 #include "flow/Trace.h"
 #include "flow/Knobs.h"
 #include "flow/CodeProbe.h"
-#include "flow/ParseNumber.h"
-#include "flow/UnitTest.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include <cctype>
@@ -478,33 +476,6 @@ Future<Void> readHTTPData(HTTPData<std::string>* r,
 	}
 }
 
-static Optional<float> parseHTTPVersion(StringRef text, int* consumed = nullptr) {
-	if (!text.startsWith("HTTP/"_sr)) {
-		return {};
-	}
-	int versionLength = 0;
-	auto version = parseNumberPrefix<float>(text.substr(5), 10, &versionLength);
-	if (version.present() && consumed != nullptr) {
-		*consumed = 5 + versionLength;
-	}
-	return version;
-}
-
-static bool parseHTTPResponseLine(StringRef text, float& version, int& code) {
-	int versionLength = 0;
-	auto parsedVersion = parseHTTPVersion(text, &versionLength);
-	if (!parsedVersion.present()) {
-		return false;
-	}
-	auto parsedCode = parseNumberPrefix<int>(text.substr(versionLength));
-	if (!parsedCode.present()) {
-		return false;
-	}
-	version = parsedVersion.get();
-	code = parsedCode.get();
-	return true;
-}
-
 // Reads an HTTP request from a network connection
 // If the connection fails while being read the exception will emitted
 // If the response is not parsable or complete in some way, http_bad_response will be thrown
@@ -559,8 +530,9 @@ Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Reference<ICo
 		throw http_bad_response();
 	}
 
-	auto version = parseHTTPVersion(StringRef(httpVersion));
-	if (!version.present() || version.get() < 1.1) {
+	float version;
+	sscanf(httpVersion.c_str(), "HTTP/%f", &version);
+	if (version < 1.1) {
 		TraceEvent(SevWarn, "HTTPRequestHTTPVersionLessThan1_1")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
@@ -599,7 +571,8 @@ Future<Void> read_http_response(Reference<HTTP::IncomingResponse> r, Reference<I
 	// Read HTTP response line
 	size_t lineLen = co_await read_delimited_into_string(conn, "\r\n", &buf, pos);
 
-	if (!parseHTTPResponseLine(StringRef(buf).substr(pos, lineLen), r->version, r->code)) {
+	int reachedEnd = -1;
+	if (sscanf(buf.c_str() + pos, "HTTP/%f %d%n", &r->version, &r->code, &reachedEnd) < 2 || reachedEnd < 0) {
 		TraceEvent(SevWarn, "HTTPResponseParseFailure")
 		    .detail("Buffer", buf.substr(pos, std::min(lineLen, (size_t)100)))
 		    .detail("Pos", pos)
@@ -613,23 +586,6 @@ Future<Void> read_http_response(Reference<HTTP::IncomingResponse> r, Reference<I
 	bool skipCheckMD5 = r->code == 206 && FLOW_KNOBS->HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT;
 
 	co_await readHTTPData(&r->data, conn, &buf, &pos, header_only, skipCheckMD5);
-}
-
-TEST_CASE("/fdbrpc/HTTP/NumericFields") {
-	ASSERT(!parseHTTPVersion("not-http"_sr).present());
-	ASSERT(!parseHTTPVersion("HTTP/"_sr).present());
-	ASSERT(!parseHTTPVersion("HTTP/1e1000"_sr).present());
-	ASSERT(parseHTTPVersion("HTTP/1.1"_sr).get() == 1.1f);
-
-	float version = 0;
-	int code = 0;
-	ASSERT(parseHTTPResponseLine("HTTP/1.1 200 OK"_sr, version, code));
-	ASSERT(version == 1.1f && code == 200);
-	ASSERT(parseHTTPResponseLine("HTTP/1.0\t404 Not Found"_sr, version, code));
-	ASSERT(version == 1.0f && code == 404);
-	ASSERT(!parseHTTPResponseLine("HTTP/1.1 "_sr, version, code));
-	ASSERT(!parseHTTPResponseLine("HTTP/1.1 2147483648"_sr, version, code));
-	return Void();
 }
 
 Future<Void> HTTP::IncomingResponse::read(Reference<IConnection> conn, bool header_only) {

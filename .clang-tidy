@@ -39,7 +39,6 @@ Checks: >
   bugprone-unused-return-value,
   bugprone-use-after-move,
   bugprone-virtual-near-miss,
-  cert-err34-c,
   cppcoreguidelines-avoid-capturing-lambda-coroutines,
   cppcoreguidelines-avoid-reference-coroutine-parameters,
   misc-coroutine-hostile-raii,

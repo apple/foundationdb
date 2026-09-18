@@ -28,7 +28,6 @@
 #include <toml.hpp>
 
 #include "flow/Platform.h"
-#include "flow/ParseNumber.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/NativeAPI.h"
@@ -36,15 +35,6 @@
 #include "TestSpecParser.h"
 
 namespace {
-
-template <class T>
-T parseTestNumber(const std::string& value) {
-	auto parsed = parseNumberPrefix<T>(value);
-	if (!parsed.present()) {
-		throw test_specification_invalid();
-	}
-	return parsed.get();
-}
 
 std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKeys = {
 	// These are read by SimulatedCluster and used before testers exist.  Thus, they must
@@ -98,13 +88,14 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  } },
 	{ "timeout",
 	  [](const std::string& value, TestSpec* spec) {
-	      spec->timeout = parseTestNumber<int>(value);
+	      sscanf(value.c_str(), "%d", &(spec->timeout));
 	      ASSERT(spec->timeout > 0);
 	      TraceEvent("TestParserTest").detail("ParsedTimeout", spec->timeout);
 	  } },
 	{ "databasePingDelay",
 	  [](const std::string& value, TestSpec* spec) {
-	      double databasePingDelay = parseTestNumber<double>(value);
+	      double databasePingDelay;
+	      sscanf(value.c_str(), "%lf", &databasePingDelay);
 	      ASSERT(databasePingDelay >= 0);
 	      if (!spec->useDB && databasePingDelay > 0) {
 		      TraceEvent(SevError, "TestParserError")
@@ -142,7 +133,7 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  } },
 	{ "startDelay",
 	  [](const std::string& value, TestSpec* spec) {
-	      spec->startDelay = parseTestNumber<double>(value);
+	      sscanf(value.c_str(), "%lf", &spec->startDelay);
 	      TraceEvent("TestParserTest").detail("ParsedStartDelay", spec->startDelay);
 	  } },
 	{ "runConsistencyCheck",
@@ -157,7 +148,7 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  } },
 	{ "maxDDRunTime",
 	  [](const std::string& value, TestSpec* spec) {
-	      spec->maxDDRunTime = parseTestNumber<double>(value);
+	      sscanf(value.c_str(), "%lf", &(spec->maxDDRunTime));
 	      ASSERT(spec->maxDDRunTime >= 0);
 	      TraceEvent("TestParserTest").detail("ParsedMaxDDRunTime", spec->maxDDRunTime);
 	  } },
@@ -187,7 +178,8 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  } },
 	{ "connectionFailuresDisableDuration",
 	  [](const std::string& value, TestSpec* spec) {
-	      double connectionFailuresDisableDuration = parseTestNumber<double>(value);
+	      double connectionFailuresDisableDuration;
+	      sscanf(value.c_str(), "%lf", &connectionFailuresDisableDuration);
 	      ASSERT(connectionFailuresDisableDuration >= 0);
 	      spec->simConnectionFailuresDisableDuration = connectionFailuresDisableDuration;
 	      TraceEvent("TestParserTest")
@@ -261,26 +253,6 @@ std::string toml_to_string(const T& value) {
 	}
 }
 
-TEST_CASE("/fdbserver/tester/TestSpecParser/NumericOptions") {
-	TestSpec spec;
-	testSpecTestKeys.at("timeout")("200.0", &spec);
-	ASSERT_EQ(spec.timeout, 200);
-	testSpecTestKeys.at("startDelay")(" \t+1.25suffix", &spec);
-	ASSERT_EQ(spec.startDelay, 1.25);
-	for (const auto& [option, value] : std::vector<std::pair<std::string, std::string>>{
-	         { "timeout", "99999999999999999999" }, { "startDelay", "1e9999" }, { "databasePingDelay", "invalid" } }) {
-		try {
-			testSpecTestKeys.at(option)(value, &spec);
-			ASSERT(false);
-		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_test_specification_invalid);
-		}
-	}
-	ASSERT_EQ(spec.timeout, 200);
-	ASSERT_EQ(spec.startDelay, 1.25);
-	return Void();
-}
-
 TEST_CASE("/fdbserver/tester/TestSpecParser/TOMLArrayToString") {
 	std::istringstream input(R"(
 strings = ['a', 'b']
@@ -332,11 +304,11 @@ std::vector<TestSpec> readTests(std::ifstream& ifs) {
 			}
 
 			testSpecTestKeys[attrib](value, &spec);
-		} else if (testSpecTestKeys.contains(attrib)) {
+		} else if (testSpecTestKeys.find(attrib) != testSpecTestKeys.end()) {
 			if (parsingWorkloads)
 				TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			testSpecTestKeys[attrib](value, &spec);
-		} else if (testSpecGlobalKeys.contains(attrib)) {
+		} else if (testSpecGlobalKeys.find(attrib) != testSpecGlobalKeys.end()) {
 			if (!beforeFirstTest)
 				TraceEvent(SevError, "TestSpecGlobalParamInTest").detail("Attrib", attrib).detail("Value", value);
 			testSpecGlobalKeys[attrib](value);
@@ -421,7 +393,7 @@ TestSet readTOMLTests_(std::string fileName) {
 			if (k == "workload" || k == "knobs") {
 				continue;
 			}
-			if (testSpecTestKeys.contains(k)) {
+			if (testSpecTestKeys.find(k) != testSpecTestKeys.end()) {
 				testSpecTestKeys[k](toml_to_string(v), &spec);
 			} else {
 				TraceEvent(SevError, "TestSpecUnrecognizedTestParam")

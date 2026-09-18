@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ParseNumber.h"
 #include "boost/lexical_cast.hpp"
 
 #include "fdbcli/fdbcli.h"
@@ -122,12 +121,11 @@ Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std:
 		           (tokens.size() == 3 && tokencmp(tokens[1], "set"))) {
 			int64_t v;
 			if (tokens.size() == 3) {
-				auto parsed = parseNumber<int64_t>(tokens[2]);
-				if (!parsed.present()) {
+				int n = 0;
+				if (sscanf(tokens[2].toString().c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != tokens[2].size()) {
 					printUsage(tokens[0]);
 					co_return false;
 				}
-				v = parsed.get();
 			} else {
 				v = 0; // default version epoch
 			}

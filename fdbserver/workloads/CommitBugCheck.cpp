@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/ParseNumber.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
 
@@ -116,7 +115,7 @@ struct CommitBugWorkload : TestWorkload {
 					Optional<Value> val = co_await tr.get(key);
 					int num = 0;
 					if (val.present()) {
-						num = parseNumberPrefix<int>(val.get()).orDefault(0);
+						num = atoi(val.get().toString().c_str());
 						if (num != i) {
 							TraceEvent(SevError, "CommitBug2Failed").detail("Value", num).detail("Expected", i);
 							self->success = false;
