@@ -2484,7 +2484,11 @@ Future<Void> monitorCDCProxyAssignments(ClusterControllerData* self) {
 Future<Void> rebalanceCDCProxyAssignments(ClusterControllerData* self) {
 	while (true) {
 		co_await delay(std::max(1.0, SERVER_KNOBS->CDC_PROXY_REBALANCE_INTERVAL));
-		if (!SERVER_KNOBS->CDC_PROXY_REBALANCE_ENABLED || !self->db.recoveryData.isValid() ||
+		if (!SERVER_KNOBS->CDC_PROXY_REBALANCE_ENABLED) {
+			TraceEvent("CDCProxyRebalanceDisabled", self->id);
+			co_return;
+		}
+		if (!self->db.recoveryData.isValid() ||
 		    self->db.serverInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED ||
 		    !self->db.clientInfo->get().nativeCdcEnabled) {
 			continue;
