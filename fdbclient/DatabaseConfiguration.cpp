@@ -56,6 +56,8 @@ void DatabaseConfiguration::resetInternal() {
 	perpetualStorageWiggleSpeed = 0;
 	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
+	shardMetadataFormat = ShardMetadataFormat::UNSET;
+	shardMetadataMigration = ShardMetadataMigration::UNSET;
 }
 
 int toInt(ValueRef const& v) {
@@ -265,7 +267,15 @@ bool DatabaseConfiguration::isValid() const {
 	      // We cannot specify regions with three_datacenter replication
 	      LOG_TEST((perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1)) &&
 	      LOG_TEST(isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality)) &&
-	      LOG_TEST(storageMigrationType != StorageMigrationType::UNSET))) {
+	      LOG_TEST(storageMigrationType != StorageMigrationType::UNSET) &&
+	      // sharded-rocksdb maps shards to physical column families using the
+	      // shardId carried only by new-format (shard-encoded) location
+	      // metadata. Old-format metadata cannot describe those mappings, so
+	      // reject configuring original while the storage engine is
+	      // sharded-rocksdb (this also blocks rolling metadata back to
+	      // original without first migrating off sharded-rocksdb).
+	      LOG_TEST(!(shardMetadataFormat == ShardMetadataFormat::ORIGINAL &&
+	                 storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB)))) {
 		return false;
 	}
 #undef LOG_TEST
@@ -430,6 +440,16 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	if (perpetualStoreType.storeType() != KeyValueStoreType::END) {
 		result["perpetual_storage_wiggle_engine"] = perpetualStoreType.toString();
 	}
+	if (shardMetadataFormat != ShardMetadataFormat::UNSET) {
+		result[SHARD_METADATA_FORMAT_KEY] = (shardMetadataFormat == ShardMetadataFormat::ENCODED)
+		                                        ? SHARD_METADATA_FORMAT_ENCODED
+		                                        : SHARD_METADATA_FORMAT_ORIGINAL;
+	}
+	if (shardMetadataMigration != ShardMetadataMigration::UNSET) {
+		result[SHARD_METADATA_MIGRATION_KEY] = (shardMetadataMigration == ShardMetadataMigration::ENABLED)
+		                                           ? SHARD_METADATA_MIGRATION_ENABLED
+		                                           : SHARD_METADATA_MIGRATION_DISABLED;
+	}
 	result["storage_migration_type"] = storageMigrationType.toString();
 	return result;
 }
@@ -454,7 +474,8 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 			// For string values, some properties can set with a "<name>=<value>" syntax in "configure"
 			// Such properties are listed here:
 			static std::set<std::string> directSet = {
-				"storage_migration_type", "storage_engine", "log_engine", "perpetual_storage_wiggle_engine"
+				"storage_migration_type",          "storage_engine",          "log_engine",
+				"perpetual_storage_wiggle_engine", SHARD_METADATA_FORMAT_KEY, SHARD_METADATA_MIGRATION_KEY
 			};
 
 			if (directSet.contains(kv.first)) {
@@ -716,6 +737,22 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == "perpetual_storage_wiggle_engine"_sr) {
 		parse((&type), value);
 		perpetualStoreType = (KeyValueStoreType::StoreType)type;
+	} else if (ck == StringRef(SHARD_METADATA_FORMAT_KEY)) {
+		if (value == StringRef(SHARD_METADATA_FORMAT_ORIGINAL)) {
+			shardMetadataFormat = ShardMetadataFormat::ORIGINAL;
+		} else if (value == StringRef(SHARD_METADATA_FORMAT_ENCODED)) {
+			shardMetadataFormat = ShardMetadataFormat::ENCODED;
+		} else {
+			return false;
+		}
+	} else if (ck == StringRef(SHARD_METADATA_MIGRATION_KEY)) {
+		if (value == StringRef(SHARD_METADATA_MIGRATION_DISABLED)) {
+			shardMetadataMigration = ShardMetadataMigration::DISABLED;
+		} else if (value == StringRef(SHARD_METADATA_MIGRATION_ENABLED)) {
+			shardMetadataMigration = ShardMetadataMigration::ENABLED;
+		} else {
+			return false;
+		}
 	} else if (ck == "storage_migration_type"_sr) {
 		parse((&type), value);
 		storageMigrationType = (StorageMigrationType::MigrationType)type;
