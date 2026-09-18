@@ -3998,7 +3998,7 @@ Future<Void> cleanUpDataMove(Database occ,
 				                                                             cleanUpDataMoveParallelismLock,
 				                                                             keys,
 				                                                             ddEnabledState,
-				                                                             /*backgroundDelaySeconds=*/10));
+				                                                             /*delaySeconds=*/10));
 			} else {
 				TraceEvent(SevWarn, "CleanUpDataMoveNotFound", dataMoveId).errorUnsuppressed(e);
 			}

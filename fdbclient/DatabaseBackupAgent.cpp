@@ -827,7 +827,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 				if (nextVersionAfterBreak.present()) {
 					co_return nextVersionAfterBreak;
 				}
-				if (!isTimeoutOccurred && timer_monotonic() >= breakTime && lastKey.present()) {
+				if (!isTimeoutOccurred && g_network->timer_monotonic() >= breakTime && lastKey.present()) {
 					// timeout occurred
 					// continue to copy mutations with the
 					// same version before break because
@@ -879,7 +879,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		std::vector<Future<Void>> rc;
 		std::vector<Reference<FlowLock>> locks;
 		Version nextVersion = beginVersion;
-		double breakTime = timer_monotonic() + CLIENT_KNOBS->COPY_LOG_TASK_DURATION_SECONDS;
+		double breakTime = g_network->timer_monotonic() + CLIENT_KNOBS->COPY_LOG_TASK_DURATION_SECONDS;
 		int rangeN = 0;
 
 		while (true) {

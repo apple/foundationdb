@@ -158,6 +158,8 @@ struct ClientMetricWorkload : TestWorkload {
 						break;
 					}
 					++cnt;
+					// Independent writes must not inherit the previous transaction's retry backoff.
+					tr.fullReset();
 				} catch (Error& e) {
 					err = e;
 				}

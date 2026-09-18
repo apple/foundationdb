@@ -293,12 +293,12 @@ extern const KeyRef cdcMaxStreamIdKey;
 Value cdcMaxStreamIdValue(CDCStreamId streamId);
 CDCStreamId decodeCDCMaxStreamIdValue(ValueRef const& value);
 
-// "\xff/cdc/keys/[[CDCStreamId]]" := "[[KeyRange]]"
+// "\xff/cdc/keys/[[CDCStreamId]]" := "[[vector<KeyRange>]]"
 extern const KeyRangeRef cdcStreamKeys;
 Key cdcStreamKeyFor(CDCStreamId streamId);
 CDCStreamId decodeCDCStreamKey(KeyRef const& key);
-Value cdcStreamKeysValue(KeyRangeRef const& keys);
-KeyRange decodeCDCStreamKeysValue(ValueRef const& value);
+Value cdcStreamKeysValue(std::vector<KeyRange> const& ranges);
+std::vector<KeyRange> decodeCDCStreamKeysValue(ValueRef const& value);
 
 // "\xff/cdc/tagHistory/[[CDCStreamId]][[Version]][[Tag]]" := "" | commit versionstamp
 // Empty values use the key's version. A pending live retag stores its exact commit

@@ -28,8 +28,8 @@ CDCRoutingTable::CDCRoutingTable() {
 	tagsByRange.insert(allKeys, std::set<Tag>());
 }
 
-void CDCRoutingTable::updateRange(CDCStreamId streamId, KeyRangeRef const& keys) {
-	streams[streamId].keys = KeyRange(keys);
+void CDCRoutingTable::updateRanges(CDCStreamId streamId, std::vector<KeyRange> const& ranges) {
+	streams[streamId].ranges = ranges;
 }
 
 bool CDCRoutingTable::updateTag(CDCStreamId streamId, Version version, Tag tag) {
@@ -45,18 +45,20 @@ bool CDCRoutingTable::updateTag(CDCStreamId streamId, Version version, Tag tag) 
 void CDCRoutingTable::rebuildRanges() {
 	tagsByRange.insert(allKeys, std::set<Tag>());
 	for (const auto& [streamId, state] : streams) {
-		if (!state.keys.present() || !state.tag.present()) {
+		if (!state.tag.present()) {
 			continue;
 		}
-		for (auto range : tagsByRange.modify(state.keys.get())) {
-			range->value().insert(state.tag.get().second);
+		for (const auto& keys : state.ranges) {
+			for (auto range : tagsByRange.modify(keys)) {
+				range->value().insert(state.tag.get().second);
+			}
 		}
 	}
 	tagsByRange.coalesce(allKeys);
 }
 
-void CDCRoutingTable::setRange(CDCStreamId streamId, KeyRangeRef const& keys) {
-	updateRange(streamId, keys);
+void CDCRoutingTable::setRanges(CDCStreamId streamId, std::vector<KeyRange> const& ranges) {
+	updateRanges(streamId, ranges);
 	rebuildRanges();
 }
 
@@ -70,7 +72,7 @@ void CDCRoutingTable::reload(IKeyValueStore* txnStateStore) {
 	streams.clear();
 	const RangeResult streamRows = txnStateStore->readRange(cdcStreamKeys).get();
 	for (const auto& kv : streamRows) {
-		updateRange(decodeCDCStreamKey(kv.key), decodeCDCStreamKeysValue(kv.value));
+		updateRanges(decodeCDCStreamKey(kv.key), decodeCDCStreamKeysValue(kv.value));
 	}
 	const RangeResult tagHistoryRows = txnStateStore->readRange(cdcTagHistoryKeys).get();
 	for (const auto& kv : tagHistoryRows) {
@@ -101,9 +103,9 @@ TEST_CASE("/NativeCDC/RoutingTable") {
 	ASSERT(table.tagsForKey("b"_sr).empty());
 	ASSERT(table.tagsForRange(KeyRangeRef("b"_sr, "x"_sr)).empty());
 
-	table.setRange(1, KeyRangeRef("a"_sr, "m"_sr));
+	table.setRanges(1, { KeyRangeRef("a"_sr, "m"_sr) });
 	table.setTag(1, 100, ordersTag);
-	table.setRange(2, KeyRangeRef("g"_sr, "z"_sr));
+	table.setRanges(2, { KeyRangeRef("g"_sr, "z"_sr) });
 	table.setTag(2, 100, overlappingTag);
 
 	ASSERT_EQ(table.tagsForKey("b"_sr), std::set<Tag>{ ordersTag });
@@ -125,14 +127,14 @@ TEST_CASE("/NativeCDC/RoutingTable/MetadataOrdering") {
 	const Tag staleTag(tagLocalityCDC, 3);
 	const Tag replacementTag(tagLocalityCDC, 4);
 
-	table.setRange(1, KeyRangeRef("a"_sr, "m"_sr));
+	table.setRanges(1, { KeyRangeRef("a"_sr, "m"_sr) });
 	ASSERT(table.tagsForKey("b"_sr).empty());
 
 	table.setTag(2, 100, tagFirstTag);
 	ASSERT(table.tagsForKey("n"_sr).empty());
 
 	table.setTag(1, 100, rangeFirstTag);
-	table.setRange(2, KeyRangeRef("m"_sr, "z"_sr));
+	table.setRanges(2, { KeyRangeRef("m"_sr, "z"_sr) });
 	ASSERT_EQ(table.tagsForKey("b"_sr), std::set<Tag>{ rangeFirstTag });
 	ASSERT_EQ(table.tagsForKey("n"_sr), std::set<Tag>{ tagFirstTag });
 
@@ -149,18 +151,49 @@ TEST_CASE("/NativeCDC/RoutingTable/SharedTagRangeReplacement") {
 	CDCRoutingTable table;
 	const Tag sharedTag(tagLocalityCDC, 1);
 
-	table.setRange(1, KeyRangeRef("a"_sr, "m"_sr));
+	table.setRanges(1, { KeyRangeRef("a"_sr, "m"_sr) });
 	table.setTag(1, 100, sharedTag);
-	table.setRange(2, KeyRangeRef("g"_sr, "z"_sr));
+	table.setRanges(2, { KeyRangeRef("g"_sr, "z"_sr) });
 	table.setTag(2, 100, sharedTag);
 
 	ASSERT_EQ(table.tagsForKey("h"_sr), std::set<Tag>{ sharedTag });
 	ASSERT_EQ(table.tagsForRange(KeyRangeRef("a"_sr, "z"_sr)), std::set<Tag>{ sharedTag });
 
-	table.setRange(1, KeyRangeRef("n"_sr, "t"_sr));
+	table.setRanges(1, { KeyRangeRef("n"_sr, "t"_sr) });
 	ASSERT(table.tagsForKey("b"_sr).empty());
 	ASSERT_EQ(table.tagsForKey("h"_sr), std::set<Tag>{ sharedTag });
 	ASSERT_EQ(table.tagsForKey("p"_sr), std::set<Tag>{ sharedTag });
 
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/RoutingTable/DisjointRanges") {
+	CDCRoutingTable table;
+	const Tag sharedTag(tagLocalityCDC, 1);
+	const Tag gapTag(tagLocalityCDC, 2);
+	const Tag rotatedTag(tagLocalityCDC, 3);
+
+	table.setRanges(1, { KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("x"_sr, "z"_sr) });
+	table.setTag(1, 100, sharedTag);
+	ASSERT_EQ(table.tagsForKey("a"_sr), std::set<Tag>{ sharedTag });
+	ASSERT_EQ(table.tagsForKey("x"_sr), std::set<Tag>{ sharedTag });
+	ASSERT(table.tagsForKey("c"_sr).empty());
+	ASSERT(table.tagsForKey("m"_sr).empty());
+	ASSERT(table.tagsForKey("z"_sr).empty());
+	ASSERT(table.tagsForRange(KeyRangeRef("c"_sr, "x"_sr)).empty());
+	ASSERT_EQ(table.tagsForRange(KeyRangeRef("b"_sr, "y"_sr)), std::set<Tag>{ sharedTag });
+
+	table.setRanges(2, { KeyRangeRef("b"_sr, "d"_sr) });
+	table.setTag(2, 100, sharedTag);
+	table.setRanges(3, { KeyRangeRef("m"_sr, "q"_sr) });
+	table.setTag(3, 100, gapTag);
+	ASSERT_EQ(table.tagsForKey("b"_sr), std::set<Tag>{ sharedTag });
+	ASSERT_EQ(table.tagsForRange(KeyRangeRef("b"_sr, "y"_sr)), (std::set<Tag>{ sharedTag, gapTag }));
+
+	table.setTag(1, 200, rotatedTag);
+	ASSERT_EQ(table.tagsForKey("a"_sr), std::set<Tag>{ rotatedTag });
+	ASSERT_EQ(table.tagsForKey("b"_sr), (std::set<Tag>{ sharedTag, rotatedTag }));
+	ASSERT_EQ(table.tagsForKey("x"_sr), std::set<Tag>{ rotatedTag });
+	ASSERT_EQ(table.tagsForRange(KeyRangeRef("b"_sr, "y"_sr)), (std::set<Tag>{ sharedTag, gapTag, rotatedTag }));
 	return Void();
 }

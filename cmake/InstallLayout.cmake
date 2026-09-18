@@ -1,93 +1,5 @@
 include(FDBInstall)
 
-function(install_symlink_impl)
-  if (NOT WIN32)
-    set(options "")
-    set(one_value_options TO DESTINATION)
-    set(multi_value_options COMPONENTS)
-    cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
-
-    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/symlinks)
-    get_filename_component(fname ${SYM_DESTINATION} NAME)
-    get_filename_component(dest_dir ${SYM_DESTINATION} DIRECTORY)
-    set(sl ${CMAKE_CURRENT_BINARY_DIR}/symlinks/${fname})
-    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_TO} ${sl})
-    foreach(component IN LISTS SYM_COMPONENTS)
-      install(FILES ${sl} DESTINATION ${dest_dir} COMPONENT ${component})
-    endforeach()
-  endif()
-endfunction()
-
-function(install_symlink)
-  if(NOT WIN32 AND NOT OPEN_FOR_IDE)
-    set(options "")
-    set(one_value_options COMPONENT LINK_DIR FILE_DIR LINK_NAME FILE_NAME)
-    set(multi_value_options "")
-    cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
-
-    set(rel_path "")
-    string(REGEX MATCHALL "\\/" slashes "${IN_LINK_NAME}")
-    foreach(ignored IN LISTS slashes)
-      set(rel_path "../${rel_path}")
-    endforeach()
-    if("${IN_FILE_DIR}" MATCHES "bin")
-      if("${IN_LINK_DIR}" MATCHES "lib")
-        install_symlink_impl(
-          TO "../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "lib/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-tgz")
-        install_symlink_impl(
-          TO "../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "usr/lib64/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-el9"
-                     "${IN_COMPONENT}-deb")
-        install_symlink_impl(
-          TO "../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "usr/lib64/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-deb")
-      elseif("${IN_LINK_DIR}" MATCHES "bin")
-        install_symlink_impl(
-          TO "../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "bin/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-tgz")
-        install_symlink_impl(
-          TO "../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "usr/bin/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-el9"
-                     "${IN_COMPONENT}-deb")
-      elseif("${IN_LINK_DIR}" MATCHES "fdbmonitor")
-        install_symlink_impl(
-          TO "../../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "lib/foundationdb/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-tgz")
-        install_symlink_impl(
-          TO "../../${rel_path}bin/${IN_FILE_NAME}"
-          DESTINATION "usr/lib/foundationdb/${IN_LINK_NAME}"
-          COMPONENTS "${IN_COMPONENT}-el9"
-                     "${IN_COMPONENT}-deb")
-      else()
-        message(FATAL_ERROR "Unknown LINK_DIR ${IN_LINK_DIR}")
-      endif()
-    else()
-      message(FATAL_ERROR "Unknown FILE_DIR ${IN_FILE_DIR}")
-    endif()
-  endif()
-endfunction()
-
-function(symlink_files)
-  if (NOT WIN32)
-    set(options "")
-    set(one_value_options LOCATION SOURCE)
-    set(multi_value_options TARGETS)
-    cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
-
-    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
-    foreach(component IN LISTS SYM_TARGETS)
-      execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_SOURCE} ${CMAKE_BINARY_DIR}/${SYM_LOCATION}/${component} WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
-    endforeach()
-  endif()
-endfunction()
-
 fdb_install_packages(TGZ DEB EL9 VERSIONED)
 fdb_install_dirs(BIN SBIN LIB INCLUDE ETC LOG DATA)
 message(STATUS "FDB_INSTALL_DIRS -> ${FDB_INSTALL_DIRS}")
@@ -132,7 +44,7 @@ set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
 # User config
 ################################################################################
 
-set(GENERATE_DEBUG_PACKAGES "${FDB_RELEASE}" CACHE BOOL "Build debug rpm/deb packages (default: only ON for FDB_RELEASE)")
+set(GENERATE_DEBUG_PACKAGES ON CACHE BOOL "Build debug rpm/deb packages")
 
 ################################################################################
 # Alternatives config
@@ -230,6 +142,7 @@ string(REPLACE "-" "_" FDB_PACKAGE_VERSION ${FDB_VERSION})
 set(CPACK_RPM_PACKAGE_GROUP                                ${CURRENT_GIT_VERSION})
 set(CPACK_RPM_PACKAGE_LICENSE                              "Apache 2.0")
 set(CPACK_RPM_PACKAGE_NAME                                 "foundationdb")
+
 set(CPACK_RPM_CLIENTS-EL9_PACKAGE_NAME                     "${CPACK_RPM_PACKAGE_NAME}-clients")
 set(CPACK_RPM_CLIENTS-EL9_FILE_NAME                        "${CPACK_RPM_CLIENTS-EL9_PACKAGE_NAME}-${FDB_PACKAGE_VERSION}${package_version_postfix}.el9.${CMAKE_SYSTEM_PROCESSOR}.rpm")
 set(CPACK_RPM_CLIENTS-EL9_DEBUGINFO_FILE_NAME              "${CPACK_RPM_CLIENTS-EL9_PACKAGE_NAME}-${FDB_PACKAGE_VERSION}${package_version_postfix}.el9-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
@@ -261,6 +174,14 @@ set(CPACK_RPM_SERVER-VERSIONED_PACKAGE_REQUIRES            "${CPACK_COMPONENT_CL
 set(CPACK_RPM_SERVER-VERSIONED_POST_INSTALL_SCRIPT_FILE    ${CMAKE_BINARY_DIR}/packaging/multiversion/server/postinst-rpm)
 set(CPACK_RPM_SERVER-VERSIONED_PRE_UNINSTALL_SCRIPT_FILE   ${CMAKE_BINARY_DIR}/packaging/multiversion/server/prerm)
 
+# Avoid VERSIONED client package conflicting with main client package of same exact version,
+# due to the build-id links in /usr/lib/.build-id/
+set(CPACK_RPM_SPEC_MORE_DEFINE "
+%if \\\"%{name}\\\" == \\\"${CPACK_RPM_CLIENTS-VERSIONED_PACKAGE_NAME}\\\"
+%define _build_id_links none
+%endif
+")
+
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir")
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION data COMPONENT server)
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION log COMPONENT server)
@@ -273,8 +194,6 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/usr/lib64/cmake"
   "/etc/foundationdb"
   "/usr/lib64/pkgconfig"
-  "/usr/lib64/python2.7"
-  "/usr/lib64/python2.7/site-packages"
   "/var"
   "/var/log"
   "/var/lib"
@@ -286,10 +205,9 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/usr/lib/foundationdb"
   "/usr/lib/cmake"
   "/usr/lib/foundationdb-${FDB_VERSION}${FDB_BUILDTIME_STRING}/etc/foundationdb"
-  )
+)
 set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX "/usr/src")
 set(CPACK_RPM_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
-#set(CPACK_RPM_BUILD_SOURCE_FDB_INSTALL_DIRS_PREFIX /usr/src)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
 ################################################################################

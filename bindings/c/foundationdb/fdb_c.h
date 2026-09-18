@@ -213,7 +213,8 @@ typedef enum {
 typedef struct cdc_stream_info {
 	FDBKey name;
 	uint64_t stream_id;
-	FDBKeyRange key_range;
+	const FDBKeyRange* ranges;
+	int range_count;
 	int64_t min_version;
 } FDBCdcStreamInfo;
 
@@ -437,10 +438,8 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBData
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* db,
                                                                          uint8_t const* name,
                                                                          int name_length,
-                                                                         uint8_t const* begin_key,
-                                                                         int begin_key_length,
-                                                                         uint8_t const* end_key,
-                                                                         int end_key_length);
+                                                                         FDBKeyRange const* ranges,
+                                                                         int range_count);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* db,
                                                                        uint8_t const* name,

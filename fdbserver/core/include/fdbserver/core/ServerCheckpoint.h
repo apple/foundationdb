@@ -57,27 +57,5 @@ protected:
 	virtual ~ICheckpointReader() = default;
 };
 
-ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
-                                       const CheckpointAsKeyValues checkpointAsKeyValues,
-                                       UID logID);
-
-// Delete a checkpoint.
-Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
-
-// Fetches checkpoint to a local `dir`, `initialState` provides the checkpoint formats, location, restart point, etc.
-// If cFun is provided, the progress can be checkpointed.
-// Returns a CheckpointMetaData, which could contain KVS-specific results, e.g., the list of fetched checkpoint files.
-Future<CheckpointMetaData> fetchCheckpoint(Database cx,
-                                           CheckpointMetaData initialState,
-                                           std::string dir,
-                                           std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
-
-// Same as above, except that the checkpoint is fetched as key-value pairs.
-Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
-                                                 CheckpointMetaData initialState,
-                                                 std::string dir,
-                                                 std::vector<KeyRange> ranges,
-                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
-
 std::string serverCheckpointDir(const std::string& baseDir, const UID& checkpointId);
 std::string fetchedCheckpointDir(const std::string& baseDir, const UID& checkpointId);

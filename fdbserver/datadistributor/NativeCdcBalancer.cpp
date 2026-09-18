@@ -72,19 +72,21 @@ class NativeCdcLoadModel {
 	std::map<Tag, std::vector<int64_t>> tagPrefixes;
 	std::vector<int64_t> rangePrefix;
 	std::vector<int64_t> removableLoads;
-	std::vector<std::pair<size_t, size_t>> streamSegments;
+	std::vector<std::vector<std::pair<size_t, size_t>>> streamSegments;
 	bool complete = false;
 
 public:
 	explicit NativeCdcLoadModel(std::vector<NativeCdcTagState> states) : streams(std::move(states)) {
 		KeyRangeMap<std::set<size_t>> coveringStreams;
 		for (size_t i = 0; i < streams.size(); ++i) {
-			for (auto range : coveringStreams.modify(streams[i].keys)) {
-				range->value().insert(i);
+			for (const auto& keys : streams[i].ranges) {
+				for (auto range : coveringStreams.modify(keys)) {
+					range->value().insert(i);
+				}
 			}
 			tagOwners[streams[i].assignment.tag].insert(streams[i].proxyId);
 		}
-		streamSegments.resize(streams.size(), { std::numeric_limits<size_t>::max(), 0 });
+		streamSegments.resize(streams.size());
 		for (auto range : coveringStreams.ranges()) {
 			if (range.value().empty()) {
 				continue;
@@ -92,9 +94,12 @@ public:
 			Segment segment{ KeyRange(range.range()), range.value(), {}, {} };
 			for (size_t streamIndex : segment.streams) {
 				++segment.tagCounts[streams[streamIndex].assignment.tag];
-				auto& bounds = streamSegments[streamIndex];
-				bounds.first = std::min(bounds.first, segments.size());
-				bounds.second = segments.size() + 1;
+				auto& intervals = streamSegments[streamIndex];
+				if (!intervals.empty() && intervals.back().second == segments.size()) {
+					intervals.back().second = segments.size() + 1;
+				} else {
+					intervals.emplace_back(segments.size(), segments.size() + 1);
+				}
 			}
 			segments.push_back(std::move(segment));
 		}
@@ -183,8 +188,10 @@ public:
 			if (state.pending || version < state.assignment.version || version - state.assignment.version < cooldown) {
 				continue;
 			}
-			const auto [first, end] = streamSegments[i];
-			const int64_t streamLoad = rangePrefix[end] - rangePrefix[first];
+			int64_t streamLoad = 0;
+			for (const auto& [first, end] : streamSegments[i]) {
+				streamLoad += rangePrefix[end] - rangePrefix[first];
+			}
 			const int64_t sourceBefore = tagLoads.at(state.assignment.tag);
 			const int64_t sourceAfter = sourceBefore - removableLoads[i];
 			for (const Tag destination : destinations) {
@@ -197,7 +204,12 @@ public:
 					continue;
 				}
 				const auto prefix = tagPrefixes.find(destination);
-				const int64_t overlap = prefix == tagPrefixes.end() ? 0 : prefix->second[end] - prefix->second[first];
+				int64_t overlap = 0;
+				if (prefix != tagPrefixes.end()) {
+					for (const auto& [first, end] : streamSegments[i]) {
+						overlap += prefix->second[end] - prefix->second[first];
+					}
+				}
 				const int64_t destinationBefore = prefix == tagPrefixes.end() ? 0 : prefix->second.back();
 				int64_t destinationAfter = destinationBefore;
 				if (!addNativeCdcLoad(&destinationAfter, streamLoad - overlap)) {
@@ -560,7 +572,7 @@ NativeCdcTagState nativeCdcPolicyTestStream(CDCStreamId streamId,
                                             bool pending = false,
                                             Version assignedAt = 100) {
 	return NativeCdcTagState{ streamId,
-		                      keys,
+		                      { keys },
 		                      cdcTagHistoryKeyFor(streamId, assignedAt, Tag(tagLocalityCDC, tag)),
 		                      CDCTagHistoryEntry(streamId, assignedAt, Tag(tagLocalityCDC, tag)),
 		                      owner,
@@ -586,6 +598,29 @@ TEST_CASE("/NativeCDC/TagBalancing/DisjointThroughput") {
 	ASSERT(!model.chooseMove(1000, 2, 100, 0.5, 10000).present());
 	ASSERT(!model.chooseMove(1000, 2, 100, 0.2, 40000).present());
 	ASSERT(!model.chooseMove(1000, 2, 1000, 0.2, 10000).present());
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/MultipleRanges") {
+	auto split = nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0);
+	split.ranges.emplace_back(KeyRangeRef("c"_sr, "d"_sr));
+	NativeCdcLoadModel model({ split,
+	                           nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 1),
+	                           nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 0) });
+	ASSERT_EQ(model.segmentCount(), 4);
+	ASSERT(model.setSample(0, 40000000));
+	ASSERT(model.setSample(1, 1000000000));
+	ASSERT(model.setSample(2, 40000000));
+	ASSERT(model.setSample(3, 80000000));
+	ASSERT(model.finishSamples());
+	ASSERT_EQ(model.loads().at(Tag(tagLocalityCDC, 0)), 160000000);
+	ASSERT_EQ(model.loads().at(Tag(tagLocalityCDC, 1)), 1000000000);
+	const auto decision = model.chooseMove(1000, 3, 0, 0, 0);
+	ASSERT(decision.present());
+	ASSERT_EQ(model.stream(decision.get().streamIndex).streamId, 1);
+	ASSERT_EQ(decision.get().destination, Tag(tagLocalityCDC, 2));
+	ASSERT_EQ(decision.get().sourceAfter, 80000000);
+	ASSERT_EQ(decision.get().destinationAfter, 80000000);
 	return Void();
 }
 

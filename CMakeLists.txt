@@ -40,6 +40,9 @@ if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
   message(FATAL_ERROR "In-source builds are forbidden")
 endif()
 
+set(FDB_RELEASE           OFF CACHE BOOL "This is a building of a final release")
+set(FDB_RELEASE_CANDIDATE OFF CACHE BOOL "This is a building of a release candidate")
+
 set(OPEN_FOR_IDE
     OFF
     CACHE BOOL "Open this in an IDE (won't compile/link)")
@@ -54,34 +57,17 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
         Debug
         CACHE STRING "Choose the type of build" FORCE)
   else()
-    message(STATUS "Setting build type to 'Release' as none was specified")
+    message(STATUS "Setting build type to 'Release'")
     set(CMAKE_BUILD_TYPE
         Release
         CACHE STRING "Choose the type of build" FORCE)
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
-                                                 "MinSizeRel" "RelWithDebInfo")
   endif()
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
+                                               "MinSizeRel" "RelWithDebInfo")
 endif()
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
-
-option(USE_SCCACHE "Use sccache if found" ON)
-if(USE_SCCACHE)
-  find_package(sccache)
-endif()
-
-option(WITH_ACAC "Enable actor stack recording" OFF)
-if(WITH_ACAC)
-  message(STATUS "Build FoundationDB with AcAC support")
-  if(FDB_RELEASE OR FDB_RELEASE_CANDIDATE)
-    message(
-      FATAL_ERROR
-        "ACAC will cause severe slowdown of the system and SHOULD not be enabled in Release."
-    )
-  endif()
-  add_compile_definitions(WITH_ACAC)
-endif()
 
 option(FDB_MEMORY_TRACKER "Compile in the sampled per-call-site memory tracker (flow/MemoryTracker)" ON)
 if(NOT FDB_MEMORY_TRACKER)

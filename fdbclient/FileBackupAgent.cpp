@@ -5032,6 +5032,10 @@ void AccumulatedMutations::addChunk(int chunkNumber, const KeyValueRef& kv) {
 }
 
 bool AccumulatedMutations::isComplete() const {
+	return getCompleteMutations().present();
+}
+
+Optional<StringRef> AccumulatedMutations::getCompleteMutations() const {
 	if (lastChunkNumber >= 0) {
 		StringRefReader reader(serializedMutations, restore_corrupted_data());
 
@@ -5041,10 +5045,12 @@ bool AccumulatedMutations::isComplete() const {
 		}
 
 		uint32_t vLen = reader.consume<uint32_t>();
-		return vLen == reader.remainder().size();
+		if (vLen == reader.remainder().size()) {
+			return StringRef(serializedMutations);
+		}
 	}
 
-	return false;
+	return {};
 }
 
 // Returns true if a complete chunk contains any MutationRefs which intersect with any
@@ -5112,7 +5118,8 @@ std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, c
 
 		// If the mutations are incomplete or match one of the ranges, include in results.
 		if (!m.isComplete() || m.matchesAnyRange(filters)) {
-			output.insert(output.end(), m.kvs.begin(), m.kvs.end());
+			const auto& chunks = m.getChunks();
+			output.insert(output.end(), chunks.begin(), chunks.end());
 		}
 	}
 
