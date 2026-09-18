@@ -1,0 +1,31 @@
+[configuration]
+storageEngineExcludeTypes = [4, 5]
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = false
+native_cdc_tag_count = 2
+native_cdc_tag_balancing_enabled = false
+native_cdc_tag_sample_interval = 0.25
+
+[[test]]
+testTitle = 'NativeCdcRetagDisableRestart'
+runSetup = false
+runFailureWorkloads = false
+runConsistencyCheck = false
+waitForQuiescenceBegin = false
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 1
+    minStreamCount = 1
+    maxStreamCount = 1
+    keyCount = 4
+    writesPerRound = 1
+    rounds = 0
+    drainAfterRestart = true
+    testRetaggedRestart = true
+    operationTimeout = 180.0
