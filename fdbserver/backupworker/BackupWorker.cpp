@@ -595,6 +595,14 @@ Future<Void> monitorBackupProgress(BackupData* self) {
 		std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
 		std::map<UID, Version> savedLogVersions;
 		if (tagVersions.size() != self->totalTags) {
+			// A tag missing progress pins oldestBackupEpoch forever, so this retry can be a permanent wedge.
+			// Suppressed well above the 2.5s retry: a wedge holds this condition for the rest of the run.
+			TraceEvent(SevWarnAlways, "BackupWorkerEpochProgressIncomplete", self->myId)
+			    .suppressFor(60.0)
+			    .detail("RecruitedEpoch", self->recruitedEpoch)
+			    .detail("OldestBackupEpoch", self->oldestBackupEpoch)
+			    .detail("TagsWithProgress", tagVersions.size())
+			    .detail("TotalTags", self->totalTags);
 			co_await interval;
 			continue;
 		}
@@ -841,6 +849,10 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 // Uploads self->messages to cloud storage and updates savedVersion.
 Future<Void> uploadData(BackupData* self) {
 	Version popVersion = invalidVersion;
+
+	// A worker displaced before its first upload must still leave a record, or its epoch pins
+	// oldestBackupEpoch forever. savedVersion is startVersion - 1, so this advertises no data.
+	co_await saveProgress(self, self->savedVersion);
 
 	while (true) {
 		// Too large uploadDelay will delay popping tLog data for too long.
