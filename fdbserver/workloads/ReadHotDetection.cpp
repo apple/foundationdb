@@ -45,7 +45,9 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount)));
 	}
 
-	Future<Void> setup(Database const& cx) override {
+	Future<Void> setup(Database const& cx) override { return setupImpl(cx); }
+
+	Future<Void> setupImpl(Database cx) {
 		Standalone<StringRef> largeValue;
 		Standalone<StringRef> smallValue;
 		largeValue = randomString(largeValue.arena(), 100000);

@@ -742,7 +742,9 @@ struct BulkLoading : TestWorkload {
 		TraceEvent("BulkLoadingWorkLoadComplexTestComplete");
 	}
 
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		if (clientId != 0) {
 			co_return;
 		}

@@ -1289,15 +1289,19 @@ Future<Void> CDCProxy::rotateContendedPeek() {
 	co_await delay(SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT);
 }
 
-Future<CDCBufferTagPassResult> CDCProxy::materializeBufferSelection(Reference<CDCBufferedTag> tag,
-                                                                    Reference<IReplayPeekCursor> cursor,
-                                                                    Version throughVersion,
-                                                                    CDCBufferSelection const& selection,
-                                                                    int64_t rawPeekReservation,
-                                                                    FlowLock::Releaser& reservation,
-                                                                    int64_t bufferLimit,
-                                                                    Prefetch prefetch,
-                                                                    Future<Void> invalidated) {
+// The awaited buffer pass retains its selection and mutable permit reservation.
+Future<CDCBufferTagPassResult> CDCProxy::materializeBufferSelection(
+    Reference<CDCBufferedTag> tag,
+    Reference<IReplayPeekCursor> cursor,
+    Version throughVersion,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
+    CDCBufferSelection const& selection,
+    int64_t rawPeekReservation,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
+    FlowLock::Releaser& reservation,
+    int64_t bufferLimit,
+    Prefetch prefetch,
+    Future<Void> invalidated) {
 	const int64_t materializationReservation = reservation.remaining - rawPeekReservation;
 	ASSERT_GE(materializationReservation, 0);
 	if (selection.selectedBytes <= materializationReservation) {

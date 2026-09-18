@@ -164,7 +164,9 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		if (enabled) {
 			// Run lockActorCount number of actor concurrently.
 			// Each actor conducts (1) locking a range for a while and (2) unlocking the range.

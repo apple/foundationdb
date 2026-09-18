@@ -52,6 +52,7 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
+#include "flow/ParseNumber.h"
 #include "flow/serialize.h"
 
 #define SevDecodeInfo SevVerbose
@@ -346,11 +347,13 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 			break;
 
 		case OPT_BEGIN_VERSION_FILTER:
-			param->beginVersionFilter = std::atoll(args->OptionArg());
+			param->beginVersionFilter =
+			    parseNumberPrefix<Version>(StringRef(static_cast<const char*>(args->OptionArg()))).orDefault(0);
 			break;
 
 		case OPT_END_VERSION_FILTER:
-			param->endVersionFilter = std::atoll(args->OptionArg());
+			param->endVersionFilter =
+			    parseNumberPrefix<Version>(StringRef(static_cast<const char*>(args->OptionArg()))).orDefault(0);
 			break;
 
 		case OPT_CRASHONERROR:

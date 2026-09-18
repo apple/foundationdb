@@ -26,6 +26,7 @@
 #include "flow/ChaosMetrics.h"
 #include "flow/UnitTest.h"
 #include "flow/IConnection.h"
+#include "flow/ParseNumber.h"
 
 ChaosMetrics::ChaosMetrics() {
 	clear();
@@ -189,11 +190,24 @@ NetworkAddress NetworkAddress::parse(std::string const& s) {
 		}
 		return NetworkAddress(addr.get(), port, true, isTLS, fromHostname);
 	} else {
-		// TODO: Use IPAddress::parse
-		int a, b, c, d, port, count = -1;
-		if (sscanf(f.c_str(), "%d.%d.%d.%d:%d%n", &a, &b, &c, &d, &port, &count) < 5 || count != f.size())
+		StringRef remaining(f);
+		uint32_t ip = 0;
+		for (int component = 0; component < 4; ++component) {
+			int consumed = 0;
+			auto octet = parseNumberPrefix<int>(remaining, 10, &consumed);
+			const char separator = component == 3 ? ':' : '.';
+			if (!octet.present() || octet.get() < 0 || octet.get() > 255 || consumed == remaining.size() ||
+			    remaining[consumed] != separator) {
+				throw connection_string_invalid();
+			}
+			ip = (ip << 8) | static_cast<uint32_t>(octet.get());
+			remaining = remaining.substr(consumed + 1);
+		}
+		auto port = parseNumber<int>(remaining);
+		if (!port.present() || port.get() < 0 || port.get() > std::numeric_limits<uint16_t>::max()) {
 			throw connection_string_invalid();
-		return NetworkAddress((a << 24) + (b << 16) + (c << 8) + d, port, true, isTLS, fromHostname);
+		}
+		return NetworkAddress(ip, port.get(), true, isTLS, fromHostname);
 	}
 }
 
@@ -427,6 +441,19 @@ IUDPSocket::~IUDPSocket() = default;
 const std::vector<int> NetworkMetrics::starvationBins = { 1, 3500, 7000, 7500, 8500, 8900, 10500 };
 
 TEST_CASE("/flow/network/ipaddress") {
+	ASSERT(NetworkAddress::parse(" \t+127. +0.0. +1: +4800").toString() == "127.0.0.1:4800");
+	ASSERT(NetworkAddress::parse("255.255.255.255:65535").toString() == "255.255.255.255:65535");
+	for (const char* invalid : { "-1.0.0.1:4800",
+	                             "256.0.0.1:4800",
+	                             "9223372036854775808.0.0.1:4800",
+	                             "127.0.0.1:-1",
+	                             "127.0.0.1:65536",
+	                             "127.0.0.1:9223372036854775808",
+	                             "127.0.0.1:4800suffix",
+	                             "127.0.0.1:4800 " }) {
+		ASSERT(!NetworkAddress::parseOptional(invalid).present());
+	}
+
 	ASSERT(NetworkAddress::parse("[::1]:4800").toString() == "[::1]:4800");
 
 	{

@@ -36,6 +36,8 @@ Optional<double> parseAgeValue(StringRef token) {
 
 namespace fdb_cli {
 
+// The CLI retains the tokens and their backing line until this command finishes or is cancelled.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<bool> idempotencyIdsCommandActor(Database db, std::vector<StringRef> const& tokens) {
 	if (tokens.size() < 2 || tokens.size() > 3) {
 		printUsage(tokens[0]);

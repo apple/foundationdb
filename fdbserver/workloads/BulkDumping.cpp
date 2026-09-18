@@ -436,7 +436,7 @@ struct BulkDumping : TestWorkload {
 		}
 		for (const auto& [key, value] : newKvs) {
 			// newKvs should not contain keys outside the bulkDumpJobRange
-			ASSERT(keyOutsideDumpData.find(key) == keyOutsideDumpData.end() && bulkDumpJobRange.contains(key));
+			ASSERT(!keyOutsideDumpData.contains(key) && bulkDumpJobRange.contains(key));
 			if (self->keyContainedInRanges(key, ignoreRanges)) {
 				continue;
 			}
@@ -465,7 +465,9 @@ struct BulkDumping : TestWorkload {
 	// (9) Validate the loaded data in DB is same as the data in DB before dumping within the bulkdump job range and
 	// bulkload job range. Note that the bulkload job can be unretriable error. In this case, we ignore the error range;
 	// (10) Validate the bulk load job history.
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		if (clientId != 0) {
 			co_return;
 		}

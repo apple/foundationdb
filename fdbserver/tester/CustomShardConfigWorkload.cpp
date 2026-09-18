@@ -25,8 +25,7 @@
 #include "fdbclient/DataDistributionConfig.h"
 #include "fdbserver/tester/tester.h"
 
-Future<Void> customShardConfigWorkload(Database const& cxUnsafe) {
-	auto cx = cxUnsafe;
+static Future<Void> customShardConfigWorkloadImpl(Database cx) {
 	ReadYourWritesTransaction tr(cx);
 	bool verbose = (KEYBACKEDTYPES_DEBUG != 0);
 
@@ -131,4 +130,8 @@ Future<Void> customShardConfigWorkload(Database const& cxUnsafe) {
 		TraceEvent("KeyRangeConfigCommitError").error(err);
 		co_await tr.onError(err);
 	}
+}
+
+Future<Void> customShardConfigWorkload(Database const& cxUnsafe) {
+	return customShardConfigWorkloadImpl(cxUnsafe);
 }

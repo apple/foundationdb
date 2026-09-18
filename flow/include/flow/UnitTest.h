@@ -47,7 +47,8 @@
  * }
  *
  * The body of a TEST_CASE returns a Future<Void>. It may be an ordinary function
- * or a C++ coroutine using `co_await` and `co_return`.
+ * or a C++ coroutine using `co_await` and `co_return`. Each test body receives its
+ * own const copy of the parameters; a coroutine keeps that copy in its frame.
  *
  * Our tools for actually executing tests are external to flow (and use g_unittests to find test cases).
  * See the `UnitTestWorkload` class.
@@ -76,10 +77,12 @@ public:
 	// Get a parameter's value, will return !present() if parameter was not set
 	Optional<std::string> get(const std::string& name) const;
 
-	// Get a parameter's value as an integer, will return !present() if parameter was not set
+	// Get a parameter's value as an integer, returning !present() if it was not set.
+	// Throws invalid_option_value if a present value is malformed or outside the int64_t range.
 	Optional<int64_t> getInt(const std::string& name) const;
 
-	// Get a parameter's value parsed as a double, will return !present() if parameter was not set
+	// Get a parameter's value parsed as a double, returning !present() if it was not set.
+	// Throws invalid_option_value if a present value is malformed or outside the double range.
 	Optional<double> getDouble(const std::string& name) const;
 
 	// This is separate because it assumes data directory has already been set, and doesn't return an optional
@@ -120,16 +123,19 @@ extern bool noUnseed;
 
 #ifdef FLOW_DISABLE_UNIT_TESTS
 
-#define TEST_CASE(name) static Future<Void> FILE_UNIQUE_NAME(disabled_testcase_func)(const UnitTestParameters& params)
+#define TEST_CASE(name) static Future<Void> FILE_UNIQUE_NAME(disabled_testcase_func)(const UnitTestParameters params)
 
 #else
 
 #define TEST_CASE(name)                                                                                                \
-	static Future<Void> FILE_UNIQUE_NAME(testcase_func)(const UnitTestParameters& params);                             \
+	static Future<Void> FILE_UNIQUE_NAME(testcase_impl)(const UnitTestParameters params);                              \
+	static Future<Void> FILE_UNIQUE_NAME(testcase_func)(const UnitTestParameters& params) {                            \
+		return FILE_UNIQUE_NAME(testcase_impl)(params);                                                                \
+	}                                                                                                                  \
 	namespace {                                                                                                        \
 	static UnitTest FILE_UNIQUE_NAME(testcase)(name, __FILE__, __LINE__, &FILE_UNIQUE_NAME(testcase_func));            \
 	}                                                                                                                  \
-	static Future<Void> FILE_UNIQUE_NAME(testcase_func)(const UnitTestParameters& params)
+	static Future<Void> FILE_UNIQUE_NAME(testcase_impl)(const UnitTestParameters params)
 
 #endif
 

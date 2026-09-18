@@ -32,6 +32,7 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
 #include "flow/Hostname.h"
+#include "flow/ParseNumber.h"
 #include "flow/Util.h"
 #include "rte_memcpy.h"
 #include "flow/UnitTest.h"
@@ -138,10 +139,10 @@ std::string UID::toString() const {
 
 UID UID::fromString(std::string const& s) {
 	ASSERT_EQ(s.size(), 32);
-	uint64_t a = 0, b = 0;
-	int r = sscanf(s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b);
-	ASSERT_EQ(r, 2);
-	return UID(a, b);
+	auto a = parseNumber<uint64_t>(StringRef(s).substr(0, 16), 16);
+	auto b = parseNumber<uint64_t>(StringRef(s).substr(16), 16);
+	ASSERT(a.present() && b.present());
+	return UID(a.get(), b.get());
 }
 
 UID UID::fromStringThrowsOnFailure(std::string const& s) {
@@ -149,20 +150,31 @@ UID UID::fromStringThrowsOnFailure(std::string const& s) {
 		// invalid string size
 		throw operation_failed();
 	}
-	// Split into two 16-character hex strings and parse using strtoull
-	std::string first_half = s.substr(0, 16);
-	std::string second_half = s.substr(16, 16);
-
-	char* end1;
-	char* end2;
-	uint64_t a = strtoull(first_half.c_str(), &end1, 16);
-	uint64_t b = strtoull(second_half.c_str(), &end2, 16);
-
-	// Verify entire strings were parsed
-	if (end1 != first_half.c_str() + 16 || end2 != second_half.c_str() + 16) {
+	auto a = parseNumber<uint64_t>(StringRef(s).substr(0, 16), 16);
+	auto b = parseNumber<uint64_t>(StringRef(s).substr(16), 16);
+	if (!a.present() || !b.present()) {
 		throw operation_failed();
 	}
-	return UID(a, b);
+	return UID(a.get(), b.get());
+}
+
+TEST_CASE("/flow/UID/parse") {
+	const UID id(0, std::numeric_limits<uint64_t>::max());
+	ASSERT(UID::fromString(id.toString()) == id);
+	ASSERT(UID::fromStringThrowsOnFailure(id.toString()) == id);
+	ASSERT(UID::fromString("0123456789ABCDEFfedcba9876543210") == UID(0x0123456789abcdef, 0xfedcba9876543210));
+	std::string embeddedNul(32, '0');
+	embeddedNul[15] = '\0';
+	for (const std::string& invalid :
+	     { std::string(31, '0'), std::string(32, 'g'), std::string(31, '0') + "g", embeddedNul }) {
+		try {
+			(void)UID::fromStringThrowsOnFailure(invalid);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_operation_failed);
+		}
+	}
+	return Void();
 }
 
 std::string UID::shortString() const {

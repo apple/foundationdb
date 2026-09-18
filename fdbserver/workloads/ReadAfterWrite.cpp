@@ -105,7 +105,9 @@ struct ReadAfterWriteWorkload : KVWorkload {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		Future<Void> lifetime = benchmark(cx);
 		co_await delay(testDuration);
 	}

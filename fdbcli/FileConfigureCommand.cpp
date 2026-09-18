@@ -33,7 +33,9 @@
 #include "flow/ThreadHelper.h"
 namespace fdb_cli {
 
+// The configuration file is read into owned storage before suspension.
 Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
+                                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                        std::string const& filePath,
                                        bool isNewDatabase,
                                        bool force) {

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include <algorithm>
 #include <string_view>
 #include <tuple>
@@ -2495,7 +2496,7 @@ Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* commitDa
 		auto result = commitData->txnStateStore->readValue("log_anti_quorum"_sr.withPrefix(configKeysPrefix)).get();
 		int logAntiQuorum = 0;
 		if (result.present()) {
-			logAntiQuorum = atoi(result.get().toString().c_str());
+			logAntiQuorum = parseNumberPrefix<int>(result.get()).orDefault(0);
 		}
 		// FIXME: logAntiQuorum not supported, remove it later,
 		// In version2, we probably don't need this limitation, but this needs to be tested.

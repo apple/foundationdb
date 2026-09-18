@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/TesterInterface.h"
@@ -161,7 +162,9 @@ struct FileSystemWorkload : TestWorkload {
 		    .detail("FilesToSetUp", nodesToSetUp);
 	}
 
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		FileSystemOp* operation;
 		if (operationName == "deletionQuery")
 			operation = new ServerDeletionCountQuery();
@@ -218,11 +221,7 @@ struct FileSystemWorkload : TestWorkload {
 		}
 	}
 
-	static int testKeyToInt(const KeyRef& p) {
-		int x = 0;
-		sscanf(p.toString().c_str(), "%d", &x);
-		return x;
-	}
+	static int testKeyToInt(const KeyRef& p) { return parseNumberPrefix<int>(p).orDefault(0); }
 
 	Future<Void> writeClient(Database cx, FileSystemWorkload* self) {
 		double clientBegin = now();

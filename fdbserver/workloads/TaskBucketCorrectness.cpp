@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include "flow/UnitTest.h"
 #include "flow/Error.h"
 #include "fdbclient/Tuple.h"
@@ -76,8 +77,8 @@ struct SayHelloTaskFunc : TaskFuncBase {
 		if (!task->params["chained"_sr].compare("false"_sr)) {
 			co_await done->set(tr, taskBucket);
 		} else {
-			int subtaskCount = atoi(task->params["subtaskCount"_sr].toString().c_str());
-			int currTaskNumber = atoi(value.removePrefix("task_"_sr).toString().c_str());
+			int subtaskCount = parseNumberPrefix<int>(task->params["subtaskCount"_sr]).orDefault(0);
+			int currTaskNumber = parseNumberPrefix<int>(value.removePrefix("task_"_sr)).orDefault(0);
 			TraceEvent("TaskBucketCorrectnessSayHello")
 			    .detail("SubtaskCount", subtaskCount)
 			    .detail("CurrTaskNumber", currTaskNumber);
@@ -134,7 +135,7 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 
 		int subtaskCount = 1;
 		if (!task->params["chained"_sr].compare("false"_sr)) {
-			subtaskCount = atoi(task->params["subtaskCount"_sr].toString().c_str());
+			subtaskCount = parseNumberPrefix<int>(task->params["subtaskCount"_sr]).orDefault(0);
 		}
 		for (int i = 0; i < subtaskCount; ++i) {
 			auto new_task = makeReference<Task>(
@@ -253,7 +254,9 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		co_await allDone->onSetAddTask(tr, taskBucket, taskDone);
 	}
 
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Subspace taskSubspace("backup-agent"_sr);
 		auto taskBucket = makeReference<TaskBucket>(taskSubspace.get("tasks"_sr));
@@ -325,7 +328,9 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	Future<bool> check(Database const& cx) override {
+	Future<bool> check(Database const& cx) override { return checkImpl(cx); }
+
+	Future<bool> checkImpl(Database cx) {
 		bool ret = co_await runRYWTransaction(
 		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return checkSayHello(tr, subtaskCount); });
 		co_return ret;

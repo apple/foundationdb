@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
+#include <cmath>
+#include <limits>
+
 #include "boost/algorithm/string.hpp"
 
 #include "fdbcli/fdbcli.h"
@@ -31,8 +35,10 @@
 #include "flow/ThreadHelper.h"
 namespace fdb_cli {
 
+// The CLI retains the tokens and their backing line until this command finishes or is cancelled.
 Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                  Reference<ITransaction> tr,
+                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                  std::vector<StringRef> const& tokens,
                                  std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	ASSERT(!tokens.empty());
@@ -58,7 +64,7 @@ Future<bool> suspendCommandActor(Reference<IDatabase> db,
 		result = false;
 	} else {
 		for (int i = 2; i < tokens.size(); i++) {
-			if (!address_interface->count(tokens[i])) {
+			if (!address_interface->contains(tokens[i])) {
 				fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
 				result = false;
 				break;
@@ -66,11 +72,10 @@ Future<bool> suspendCommandActor(Reference<IDatabase> db,
 		}
 
 		if (result) {
-			double seconds{ 0 };
-			int n = 0;
+			auto seconds = parseNumber<double>(tokens[1]);
 			int i{ 0 };
-			auto secondsStr = tokens[1].toString();
-			if (sscanf(secondsStr.c_str(), "%lf%n", &seconds, &n) != 1 || n != secondsStr.size()) {
+			if (!seconds.present() || !std::isfinite(seconds.get()) ||
+			    seconds.get() < std::numeric_limits<int>::min() || seconds.get() > std::numeric_limits<int>::max()) {
 				printUsage(tokens[0]);
 				result = false;
 			} else {
@@ -79,8 +84,8 @@ Future<bool> suspendCommandActor(Reference<IDatabase> db,
 					addressesVec.push_back(tokens[i].toString());
 				}
 				addressesStr = boost::algorithm::join(addressesVec, ",");
-				int64_t suspendRequestSent =
-				    co_await safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, static_cast<int>(seconds)));
+				int64_t suspendRequestSent = co_await safeThreadFutureToFuture(
+				    db->rebootWorker(addressesStr, false, static_cast<int>(seconds.get())));
 				if (!suspendRequestSent) {
 					result = false;
 					fprintf(

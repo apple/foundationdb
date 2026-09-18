@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include <cinttypes>
 #include "fdbclient/NativeAPI.h"
 #include "pubsub.h"
@@ -26,9 +27,7 @@ Value uInt64ToValue(uint64_t v) {
 	return StringRef(format("%016llx", v));
 }
 uint64_t valueToUInt64(const StringRef& v) {
-	uint64_t x = 0;
-	sscanf(v.toString().c_str(), "%" SCNx64, &x);
-	return x;
+	return parseNumberPrefix<uint64_t>(v, 16).orDefault(0);
 }
 
 Key keyForInbox(uint64_t inbox) {

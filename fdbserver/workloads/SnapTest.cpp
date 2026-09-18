@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include <boost/lexical_cast.hpp>
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.h"
@@ -218,7 +219,13 @@ public: // workload functions
 			CSimpleIni ini;
 			ini.SetUnicode();
 			ini.LoadFile(restartInfoLocation.c_str());
-			bool backupFailed = atoi(ini.GetValue("RESTORE", "BackupFailed"));
+			const char* backupFailedText = ini.GetValue("RESTORE", "BackupFailed");
+			auto backupFailedValue =
+			    backupFailedText == nullptr ? Optional<int>() : parseNumberPrefix<int>(StringRef(backupFailedText));
+			if (!backupFailedValue.present()) {
+				throw test_specification_invalid();
+			}
+			bool backupFailed = backupFailedValue.get();
 			if (backupFailed) {
 				// since backup failed, skip the restore checking
 				TraceEvent(SevWarnAlways, "BackupFailedSkippingRestoreCheck").log();

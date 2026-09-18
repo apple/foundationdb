@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include <algorithm>
 
 #include "fdbclient/FDBTypes.h"
@@ -256,11 +257,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
-	static inline uint64_t valueToUInt64(const StringRef& v) {
-		long long unsigned int x = 0;
-		sscanf(v.toString().c_str(), "%llx", &x);
-		return x;
-	}
+	static inline uint64_t valueToUInt64(const StringRef& v) { return parseNumberPrefix<uint64_t>(v, 16).orDefault(0); }
 
 	inline Standalone<StringRef> getDatabaseName(int dbIndex) { return StringRef(format("DestroyDB%d", dbIndex)); }
 
@@ -269,11 +266,15 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return ManagementAPI::changeConfig(cx.getReference(), config, force);
 	}
 
-	Future<Void> setup(Database const& cx) override {
+	Future<Void> setup(Database const& cx) override { return setupImpl(cx); }
+
+	Future<Void> setupImpl(Database cx) {
 		co_await ManagementAPI::changeConfig(cx.getReference(), "single storage_migration_type=aggressive", true);
 	}
 
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		TraceEvent("ConfigureDatabase_Config").detail("Config", config.toString());
 		if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -314,7 +315,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		co_return false;
 	}
 
-	Future<bool> check(Database const& cx) override {
+	Future<bool> check(Database const& cx) override { return checkImpl(cx); }
+
+	Future<bool> checkImpl(Database cx) {
 		co_await delay(30.0);
 		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
 		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type

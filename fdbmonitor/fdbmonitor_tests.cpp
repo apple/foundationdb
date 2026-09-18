@@ -3,6 +3,7 @@
 #include <cassert>
 #include <string>
 #include <functional>
+#include <limits>
 
 namespace fdbmonitor {
 namespace tests {
@@ -154,6 +155,39 @@ void testEnvVarUtils() {
 	assert_msg(!EnvVarUtils::keyValueValid("=BAZ", "FOO=BAR =BAZ"), "Key must be non-empty");
 }
 
+void testRssParsing() {
+	uint64_t rss = 123;
+	assert_msg(parseRss("100 20 3 4 5 6 7\n", 4096, rss) && rss == 81920, "Resident pages must convert to bytes");
+	assert_msg(parseRss(" \t100 0\n", 4096, rss) && rss == 0, "Zero resident pages must be valid");
+	const char bounded[] = { '1', '0', '0', ' ', '2', '0' };
+	assert_msg(parseRss(std::string_view(bounded, 5), 4096, rss) && rss == 8192, "Parsing must honor the input length");
+	const uint64_t maxBytes = std::numeric_limits<uint64_t>::max();
+	assert_msg(parseRss("100 " + std::to_string(maxBytes), 1, rss) && rss == maxBytes,
+	           "The largest byte count must be valid");
+	const uint64_t maxPages = maxBytes / 4096;
+	assert_msg(parseRss("100 " + std::to_string(maxPages), 4096, rss) && rss == maxPages * 4096,
+	           "The largest whole-page byte count must be valid");
+	for (const char* invalid : { "",
+	                             " \t",
+	                             "100",
+	                             "100 ",
+	                             "x 20",
+	                             "100 x",
+	                             "100 2x",
+	                             "-1 20",
+	                             "100 -1",
+	                             "18446744073709551616 20",
+	                             "100 18446744073709551616" }) {
+		rss = 123;
+		assert_msg(!parseRss(invalid, 4096, rss) && rss == 123, "Invalid statm must leave RSS unchanged");
+	}
+	rss = 123;
+	assert_msg(!parseRss("100 " + std::to_string(maxPages + 1), 4096, rss) && rss == 123,
+	           "Resident byte-count overflow must be rejected");
+	assert_msg(!parseRss("100 20", 0, rss) && rss == 123, "Zero page size must be rejected");
+	assert_msg(!parseRss("100 20", -1, rss) && rss == 123, "Failed page-size lookup must be rejected");
+}
+
 } // namespace tests
 } // namespace fdbmonitor
 
@@ -162,4 +196,5 @@ int main(int argc, char** argv) {
 
 	testPathOps();
 	testEnvVarUtils();
+	testRssParsing();
 }

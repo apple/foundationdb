@@ -104,6 +104,8 @@ struct ReadWriteCommonImpl {
 		}
 	}
 
+	// The workload owns setup's mutable metrics and outlives its returned future.
+	// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	static Future<Void> setup(Database cx, ReadWriteCommon& self) {
 		if (!self.doSetup)
 			co_return;

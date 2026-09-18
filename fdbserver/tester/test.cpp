@@ -65,13 +65,9 @@ void throwIfError(const std::vector<Future<ErrorOr<T>>>& futures, std::string er
 	}
 }
 
-Future<DistributedTestResults> runWorkload(Database const& cx,
-                                           std::vector<TesterInterface> const& testers,
-                                           TestSpec const& spec) {
-	// C++20 coroutine safety: copy const& params to survive across suspend points
-	Database cxCopy = cx;
-	std::vector<TesterInterface> testersCopy = testers;
-	TestSpec specCopy = spec;
+static Future<DistributedTestResults> runWorkloadImpl(Database cxCopy,
+                                                      std::vector<TesterInterface> testersCopy,
+                                                      TestSpec specCopy) {
 	std::string name = printable(specCopy.title);
 
 	TraceEvent("TestRunning")
@@ -185,6 +181,12 @@ Future<DistributedTestResults> runWorkload(Database const& cx,
 		workload.stop.send(ReplyPromise<Void>());
 
 	co_return DistributedTestResults(aggregateMetrics(metricsResults), success, failure);
+}
+
+Future<DistributedTestResults> runWorkload(Database const& cx,
+                                           std::vector<TesterInterface> const& testers,
+                                           TestSpec const& spec) {
+	return runWorkloadImpl(cx, testers, spec);
 }
 
 // Sets the database configuration by running the ChangeConfig workload
@@ -875,29 +877,15 @@ Future<Void> runTests8(Reference<AsyncVar<Optional<struct ClusterControllerFullI
  *
  * \returns A future which will be set after all tests finished.
  */
-Future<Void> runTests(Reference<IClusterConnectionRecord> const& connRecordUnsafe,
-                      test_type_t const& whatToRunUnsafe,
-                      test_location_t const& atUnsafe,
-                      int const& minTestersExpectedUnsafe,
-                      std::string const& fileNameUnsafe,
-                      StringRef const& startingConfigurationUnsafe,
-                      LocalityData const& localityUnsafe,
-                      UnitTestParameters const& testOptionsUnsafe,
-                      bool const& restartingTestUnsafe) {
-	// C++20 coroutine safety: copy parameters that might bind to temporaries (default args).
-	// const& parameters only store the reference in the coroutine frame; temporaries are
-	// destroyed after the first suspend point, leaving dangling references.
-	// Just do this for all parameters, including ones that could be passed by value.
-	Reference<IClusterConnectionRecord> connRecord = connRecordUnsafe;
-	test_type_t whatToRun = whatToRunUnsafe;
-	test_location_t at = atUnsafe;
-	int minTestersExpected = minTestersExpectedUnsafe;
-	std::string fileName = fileNameUnsafe;
-	StringRef startingConfiguration = startingConfigurationUnsafe;
-	LocalityData locality = localityUnsafe;
-	UnitTestParameters testOptions = testOptionsUnsafe;
-	bool restartingTest = restartingTestUnsafe;
-
+static Future<Void> runTestsImpl(Reference<IClusterConnectionRecord> connRecord,
+                                 test_type_t whatToRun,
+                                 test_location_t at,
+                                 int minTestersExpected,
+                                 std::string fileName,
+                                 Standalone<StringRef> startingConfiguration,
+                                 LocalityData locality,
+                                 UnitTestParameters testOptions,
+                                 bool restartingTest) {
 	TestSet testSet;
 	std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup(nullptr);
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
@@ -1013,6 +1001,26 @@ Future<Void> runTests(Reference<IClusterConnectionRecord> const& connRecordUnsaf
 		          throw internal_error();
 	          })
 	    .run();
+}
+
+Future<Void> runTests(Reference<IClusterConnectionRecord> const& connRecordUnsafe,
+                      test_type_t const& whatToRunUnsafe,
+                      test_location_t const& atUnsafe,
+                      int const& minTestersExpectedUnsafe,
+                      std::string const& fileNameUnsafe,
+                      StringRef const& startingConfigurationUnsafe,
+                      LocalityData const& localityUnsafe,
+                      UnitTestParameters const& testOptionsUnsafe,
+                      bool const& restartingTestUnsafe) {
+	return runTestsImpl(connRecordUnsafe,
+	                    whatToRunUnsafe,
+	                    atUnsafe,
+	                    minTestersExpectedUnsafe,
+	                    fileNameUnsafe,
+	                    Standalone<StringRef>(startingConfigurationUnsafe),
+	                    localityUnsafe,
+	                    testOptionsUnsafe,
+	                    restartingTestUnsafe);
 }
 
 namespace {

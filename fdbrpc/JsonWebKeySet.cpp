@@ -356,24 +356,32 @@ Optional<PublicOrPrivateKey> parseRsaKey(StringRef b64n,
 		JWK_PARSE_ERROR_OSSL("RSA_set0_key()");
 		return {};
 	}
-	// set0 == ownership taken by rsa, no need to free
+	// Successful RSA_set0_key transfers ownership to rsa.
+	// NOLINTBEGIN(bugprone-unused-return-value)
 	n.release();
 	e.release();
 	d.release();
+	// NOLINTEND(bugprone-unused-return-value)
 	if (!isPublic) {
 		if (1 != ::RSA_set0_factors(rsa, p, q)) {
 			JWK_PARSE_ERROR_OSSL("RSA_set0_factors()");
 			return {};
 		}
+		// Successful RSA_set0_factors transfers ownership to rsa.
+		// NOLINTBEGIN(bugprone-unused-return-value)
 		p.release();
 		q.release();
+		// NOLINTEND(bugprone-unused-return-value)
 		if (1 != ::RSA_set0_crt_params(rsa, dp, dq, qi)) {
 			JWK_PARSE_ERROR_OSSL("RSA_set0_crt_params()");
 			return {};
 		}
+		// Successful RSA_set0_crt_params transfers ownership to rsa.
+		// NOLINTBEGIN(bugprone-unused-return-value)
 		dp.release();
 		dq.release();
 		qi.release();
+		// NOLINTEND(bugprone-unused-return-value)
 	}
 	auto pkey = AutoCPointer(::EVP_PKEY_new(), &::EVP_PKEY_free);
 	if (!pkey) {

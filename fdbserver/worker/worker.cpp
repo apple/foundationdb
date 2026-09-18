@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include <cstdlib>
 #include <map>
 #include <tuple>
@@ -1237,7 +1238,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		// Note that we don't need to calculate recovered peer in this case since all the recently closed peers are
 		// considered permanently closed peers.
 		for (const auto& address : FlowTransport::transport().getRecentClosedPeers()) {
-			if (allPeers.find(address) != allPeers.end()) {
+			if (allPeers.contains(address)) {
 				// We have checked this peer in the above for loop.
 				continue;
 			}
@@ -1491,7 +1492,13 @@ Future<Void> runProfiler(ProfilerRequest req) {
 bool checkHighMemory(int64_t threshold, bool* error) {
 #if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 	*error = false;
-	uint64_t page_size = sysconf(_SC_PAGESIZE);
+	const long pageSizeResult = sysconf(_SC_PAGESIZE);
+	if (pageSizeResult <= 0) {
+		TraceEvent("GetPageSizeFailure").log();
+		*error = true;
+		return false;
+	}
+	const uint64_t page_size = static_cast<uint64_t>(pageSizeResult);
 	int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
 		TraceEvent("OpenStatmFileFailure").log();
@@ -1502,15 +1509,23 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 	const int buf_sz = 256;
 	char stat_buf[buf_sz];
 	ssize_t stat_nread = read(fd, stat_buf, buf_sz);
-	if (stat_nread < 0) {
+	close(fd);
+	if (stat_nread <= 0) {
 		TraceEvent("ReadStatmFileFailure").log();
 		*error = true;
 		return false;
 	}
 
-	uint64_t vmsize, rss;
-	sscanf(stat_buf, "%lu %lu", &vmsize, &rss);
-	rss *= page_size;
+	StringRef statText(reinterpret_cast<const uint8_t*>(stat_buf), stat_nread);
+	int consumed = 0;
+	auto vmsize = parseNumberPrefix<uint64_t>(statText, 10, &consumed);
+	auto rssPages = parseNumberPrefix<uint64_t>(statText.substr(consumed));
+	if (!vmsize.present() || !rssPages.present() || rssPages.get() > std::numeric_limits<uint64_t>::max() / page_size) {
+		TraceEvent("ParseStatmFileFailure").log();
+		*error = true;
+		return false;
+	}
+	uint64_t rss = rssPages.get() * page_size;
 	if (rss >= threshold) {
 		return true;
 	}
@@ -2890,7 +2905,7 @@ public:
 	    lastSnapReq(lastSnapReq), snapReqMap(snapReqMap), snapReqResultMap(snapReqResultMap),
 	    lastSnapTime(lastSnapTime) {}
 
-	Future<Void> run(Future<Void> const& handleErrors) {
+	Future<Void> run(Future<Void> handleErrors) {
 		auto res = co_await race(interf.clientInterface.reboot.getFuture(),
 		                         serveServerDBInfoUpdates(),
 		                         serveFailureInjectionRequests(),

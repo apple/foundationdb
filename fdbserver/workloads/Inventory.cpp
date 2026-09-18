@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.h"
@@ -121,7 +122,7 @@ struct InventoryTestWorkload : TestWorkload {
 
 				std::map<Key, int> actualResults;
 				for (int i = 0; i < data.size(); i++)
-					actualResults[data[i].key] = atoi(data[i].value.toString().c_str());
+					actualResults[data[i].key] = parseNumberPrefix<int>(data[i].value).orDefault(0);
 				for (auto i = self->minExpectedResults.begin(); i != self->minExpectedResults.end(); ++i)
 					actualResults[i->first];
 				bool error = false;
@@ -155,7 +156,7 @@ struct InventoryTestWorkload : TestWorkload {
 
 	Future<Void> inventoryTestWrite(Transaction* tr, Key key) {
 		Optional<Value> val = co_await tr->get(key);
-		int count = !val.present() ? 0 : atoi(val.get().toString().c_str());
+		int count = !val.present() ? 0 : parseNumberPrefix<int>(val.get()).orDefault(0);
 		ASSERT(count >= 0 && count < 1000000);
 		tr->set(key, format("%d", count + 1));
 	}

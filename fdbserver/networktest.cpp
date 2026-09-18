@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include "fmt/format.h"
 #include "fdbserver/NetworkTest.h"
 #include "flow/ActorCollection.h"
@@ -219,6 +220,8 @@ static void networkTestnanosleep() {
 	return;
 }
 
+// The server list is parsed into owned addresses before suspension.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<Void> networkTestClient(std::string const& testServers) {
 	if (testServers == "nanosleep") {
 		networkTestnanosleep();
@@ -260,8 +263,8 @@ struct RandomIntRange {
 		if (high.empty()) {
 			high = low;
 		}
-		min = low.empty() ? 0 : atol(low.toString().c_str());
-		max = high.empty() ? 0 : atol(high.toString().c_str());
+		min = low.empty() ? 0 : parseNumberPrefix<int>(low).orDefault(0);
+		max = high.empty() ? 0 : parseNumberPrefix<int>(high).orDefault(0);
 		if (min > max) {
 			std::swap(min, max);
 		}

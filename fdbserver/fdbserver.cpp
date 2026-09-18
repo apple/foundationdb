@@ -22,6 +22,7 @@
 // a macro that makes boost interprocess break on Windows.
 #define BOOST_DATE_TIME_NO_LIB
 
+#include "flow/ParseNumber.h"
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -1340,11 +1341,13 @@ private:
 			}
 			case OPT_NUMTESTERS: {
 				const char* a = args.OptionArg();
-				if (!sscanf(a, "%d", &minTesterCount)) {
+				auto parsed = parseNumberPrefix<int>(StringRef(a));
+				if (!parsed.present()) {
 					fprintf(stderr, "ERROR: Could not parse numtesters `%s'\n", a);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
+				minTesterCount = parsed.get();
 				break;
 			}
 			case OPT_ROLLSIZE: {
@@ -1385,8 +1388,13 @@ private:
 			}
 #ifdef _WIN32
 			case OPT_PARENTPID: {
-				auto pid_str = args.OptionArg();
-				int parent_pid = atoi(pid_str);
+				const char* pid_str = args.OptionArg();
+				auto parsedPid = parseNumberPrefix<int>(StringRef(pid_str));
+				if (!parsedPid.present() || parsedPid.get() <= 0) {
+					fprintf(stderr, "ERROR: Invalid parent process id `%s'\n", pid_str);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				int parent_pid = parsedPid.get();
 				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
 				if (!pHandle) {
 					TraceEvent("ParentProcessOpenError").GetLastError();
@@ -1408,9 +1416,13 @@ private:
 				break;
 #else
 			case OPT_PARENTPID: {
-				auto pid_str = args.OptionArg();
-				int* parent_pid = new (int);
-				*parent_pid = atoi(pid_str);
+				const char* pid_str = args.OptionArg();
+				auto parsedPid = parseNumberPrefix<int>(StringRef(pid_str));
+				if (!parsedPid.present() || parsedPid.get() <= 0) {
+					fprintf(stderr, "ERROR: Invalid parent process id `%s'\n", pid_str);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				int* parent_pid = new int(parsedPid.get());
 				startThread(&parentWatcher, parent_pid, 0, "fdb-parentwatch");
 				break;
 			}
@@ -1564,11 +1576,13 @@ private:
 				break;
 			case OPT_IO_TRUST_SECONDS: {
 				const char* a = args.OptionArg();
-				if (!sscanf(a, "%lf", &fileIoTimeout)) {
+				auto parsed = parseNumberPrefix<double>(StringRef(a));
+				if (!parsed.present()) {
 					fprintf(stderr, "ERROR: Could not parse io_trust_seconds `%s'\n", a);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
+				fileIoTimeout = parsed.get();
 				break;
 			}
 			case OPT_IO_TRUST_WARN_ONLY:
@@ -2179,10 +2193,10 @@ int main(int argc, char* argv[]) {
 				int backupFailed = true;
 				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", nullptr);
 				if (isRestoringStr) {
-					isRestoring = atoi(isRestoringStr);
+					isRestoring = parseNumberPrefix<int>(StringRef(isRestoringStr)).orDefault(0);
 					const char* backupFailedStr = ini.GetValue("RESTORE", "BackupFailed", nullptr);
 					if (isRestoring && backupFailedStr) {
-						backupFailed = atoi(backupFailedStr);
+						backupFailed = parseNumberPrefix<int>(StringRef(backupFailedStr)).orDefault(0);
 					}
 				}
 				if (isRestoring && !backupFailed) {

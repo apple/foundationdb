@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cerrno>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <new>
 #include <numeric>
@@ -1154,6 +1156,25 @@ void usage() {
 	       "Maximum estimated GRV proxy queue delay in milliseconds. Set as transaction option in run mode.");
 }
 
+// Numeric options retain their historical prefix parsing and zero default for invalid input.
+static int parseIntegerArgument(const char* text) {
+	char* end = nullptr;
+	errno = 0;
+	const long long value = std::strtoll(text, &end, 10);
+	if (end == text || errno == ERANGE || value < std::numeric_limits<int>::min() ||
+	    value > std::numeric_limits<int>::max()) {
+		return 0;
+	}
+	return static_cast<int>(value);
+}
+
+static double parseDoubleArgument(const char* text) {
+	char* end = nullptr;
+	errno = 0;
+	const double value = std::strtod(text, &end);
+	return end == text || errno == ERANGE ? 0 : value;
+}
+
 /* parse benchmark parameters */
 int parseArguments(int argc, char* argv[], Arguments& args) {
 	int rc;
@@ -1245,7 +1266,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			usage();
 			return -1;
 		case 'a':
-			args.api_version = atoi(optarg);
+			args.api_version = parseIntegerArgument(optarg);
 			break;
 		case 'c': {
 			const char delim[] = ",";
@@ -1257,26 +1278,26 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			break;
 		}
 		case 'd':
-			args.num_databases = atoi(optarg);
+			args.num_databases = parseIntegerArgument(optarg);
 			break;
 		case 'p':
-			args.num_processes = atoi(optarg);
+			args.num_processes = parseIntegerArgument(optarg);
 			break;
 		case 't':
-			args.num_threads = atoi(optarg);
+			args.num_threads = parseIntegerArgument(optarg);
 			break;
 		case 'r':
-			args.rows = atoi(optarg);
+			args.rows = parseIntegerArgument(optarg);
 			args.row_digits = digits(args.rows);
 			break;
 		case 'l':
-			args.load_factor = atof(optarg);
+			args.load_factor = parseDoubleArgument(optarg);
 			break;
 		case 's':
-			args.seconds = atoi(optarg);
+			args.seconds = parseIntegerArgument(optarg);
 			break;
 		case 'i':
-			args.iteration = atoi(optarg);
+			args.iteration = parseIntegerArgument(optarg);
 			break;
 		case 'x':
 			rc = parseTransaction(args, optarg);
@@ -1284,7 +1305,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				return -1;
 			break;
 		case 'v':
-			args.verbose = atoi(optarg);
+			args.verbose = parseIntegerArgument(optarg);
 			break;
 		case 'z':
 			args.zipf = 1;
@@ -1311,23 +1332,23 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			}
 			break;
 		case ARG_ASYNC:
-			args.async_xacts = atoi(optarg);
+			args.async_xacts = parseIntegerArgument(optarg);
 			break;
 		case ARG_KEYLEN:
-			args.key_length = atoi(optarg);
+			args.key_length = parseIntegerArgument(optarg);
 			break;
 		case ARG_VALLEN:
-			args.value_length = atoi(optarg);
+			args.value_length = parseIntegerArgument(optarg);
 			break;
 		case ARG_TPS:
 		case ARG_TPSMAX:
-			args.tpsmax = atoi(optarg);
+			args.tpsmax = parseIntegerArgument(optarg);
 			break;
 		case ARG_TPSMIN:
-			args.tpsmin = atoi(optarg);
+			args.tpsmin = parseIntegerArgument(optarg);
 			break;
 		case ARG_TPSINTERVAL:
-			args.tpsinterval = atoi(optarg);
+			args.tpsinterval = parseIntegerArgument(optarg);
 			break;
 		case ARG_TPSCHANGE:
 			if (strcmp(optarg, "sin") == 0)
@@ -1342,7 +1363,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			}
 			break;
 		case ARG_SAMPLING:
-			args.sampling = atoi(optarg);
+			args.sampling = parseIntegerArgument(optarg);
 			break;
 		case ARG_VERSION:
 			logr.error("Version: {}", FDB_API_VERSION);
@@ -1399,11 +1420,11 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			}
 			break;
 		case ARG_TXNTRACE:
-			args.txntrace = atoi(optarg);
+			args.txntrace = parseIntegerArgument(optarg);
 			break;
 
 		case ARG_TXNTAGGING:
-			args.txntagging = atoi(optarg);
+			args.txntagging = parseIntegerArgument(optarg);
 			if (args.txntagging > 1000) {
 				args.txntagging = 1000;
 			}
@@ -1416,7 +1437,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			memcpy(args.txntagging_prefix, optarg, strlen(optarg));
 			break;
 		case ARG_CLIENT_THREADS_PER_VERSION:
-			args.client_threads_per_version = atoi(optarg);
+			args.client_threads_per_version = parseIntegerArgument(optarg);
 			break;
 		case ARG_DISABLE_CLIENT_BYPASS:
 			args.disable_client_bypass = true;
@@ -1477,16 +1498,16 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.private_key_pem = oss.str();
 		} break;
 		case ARG_TRANSACTION_TIMEOUT_TX:
-			args.transaction_timeout_tx = atoi(optarg);
+			args.transaction_timeout_tx = parseIntegerArgument(optarg);
 			break;
 		case ARG_TRANSACTION_TIMEOUT_DB:
-			args.transaction_timeout_db = atoi(optarg);
+			args.transaction_timeout_db = parseIntegerArgument(optarg);
 			break;
 		case ARG_MAX_GRV_QUEUE_DELAY:
-			args.max_grv_queue_delay_ms = atoi(optarg);
+			args.max_grv_queue_delay_ms = parseIntegerArgument(optarg);
 			break;
 		case ARG_WARMUP_SECONDS:
-			args.warmup_seconds = atoi(optarg);
+			args.warmup_seconds = parseIntegerArgument(optarg);
 			break;
 		}
 	}

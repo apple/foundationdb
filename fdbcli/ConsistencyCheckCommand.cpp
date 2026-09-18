@@ -30,7 +30,9 @@ namespace fdb_cli {
 
 const KeyRef consistencyCheckSpecialKey = "\xff\xff/management/consistency_check_suspended"_sr;
 
+// The CLI retains the tokens and their backing line until this command finishes or is cancelled.
 Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
+                                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                           std::vector<StringRef> const& tokens,
                                           bool intrans) {
 	// Here we do not proceed in a try-catch loop since the transaction is always supposed to succeed.

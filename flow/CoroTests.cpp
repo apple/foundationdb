@@ -2126,6 +2126,8 @@ void assertNoThrowOnCancelDestroyedAfterFirstWait(NoThrowOnCancelRecorder const&
 }
 
 template <typename T>
+// The test log outlives the awaited or explicitly cancelled coroutine.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<Void> simple_await_test(std::stringstream& ss, Future<T> f) {
 	ss << "start. ";
 	LifetimeLogger ll(ss, 0);
@@ -2138,6 +2140,8 @@ Future<Void> simple_await_test(std::stringstream& ss, Future<T> f) {
 	ss << "after co_return. ";
 }
 
+// The test log outlives the awaited or explicitly cancelled coroutine.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<Void> actor_cancel_test(std::stringstream& ss) {
 	ss << "start. ";
 
@@ -2161,6 +2165,8 @@ Future<Void> actor_cancel_test(std::stringstream& ss) {
 	ss << "after co_return. ";
 }
 
+// Test futures finish or cancel before their event recorder is destroyed.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<Void> noThrowOnCancelTest(NoThrowOnCancelRecorder& recorder, Future<Void> signal, NoThrowOnCancel = {}) {
 	recorder.record(NoThrowOnCancelEvent::Start);
 
@@ -2189,6 +2195,8 @@ Future<Void> noThrowOnCancelReentrantCancelTest(Future<Void>* result,
 	co_await signal;
 }
 
+// Test futures finish or cancel before their event recorder is destroyed.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<int> noThrowOnCancelValueTest(NoThrowOnCancelRecorder& recorder, Future<Void> signal, NoThrowOnCancel = {}) {
 	recorder.record(NoThrowOnCancelEvent::Start);
 
@@ -2200,6 +2208,8 @@ Future<int> noThrowOnCancelValueTest(NoThrowOnCancelRecorder& recorder, Future<V
 	co_return 42;
 }
 
+// Test futures finish or cancel before their event recorder is destroyed.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<Void> noThrowOnCancelSequentialAwaitsTest(NoThrowOnCancelRecorder& recorder,
                                                  Future<Void> firstSignal,
                                                  Future<Void> secondSignal,
@@ -2214,6 +2224,8 @@ Future<Void> noThrowOnCancelSequentialAwaitsTest(NoThrowOnCancelRecorder& record
 	recorder.record(NoThrowOnCancelEvent::AfterWait);
 }
 
+// Test futures finish or cancel before their event recorder is destroyed.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<int> noThrowOnCancelFutureStreamTest(NoThrowOnCancelRecorder& recorder,
                                             FutureStream<int> stream,
                                             NoThrowOnCancel = {}) {
@@ -2227,6 +2239,8 @@ Future<int> noThrowOnCancelFutureStreamTest(NoThrowOnCancelRecorder& recorder,
 	co_return value;
 }
 
+// Test futures finish or cancel before their event recorder is destroyed.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<int> noThrowOnCancelThreadFutureStreamTest(NoThrowOnCancelRecorder& recorder,
                                                   ThreadFutureStream<int> stream,
                                                   NoThrowOnCancel = {}) {
@@ -2240,6 +2254,8 @@ Future<int> noThrowOnCancelThreadFutureStreamTest(NoThrowOnCancelRecorder& recor
 	co_return value;
 }
 
+// The test log outlives the awaited or explicitly cancelled coroutine.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<Void> actor_throw_test(std::stringstream& ss) {
 	ss << "start. ";
 

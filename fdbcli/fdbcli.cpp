@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include "boost/lexical_cast.hpp"
 #include "fmt/format.h"
 #include "fdbclient/ClusterConnectionFile.h"
@@ -1311,13 +1312,12 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						double v;
-						int n = 0;
-						if (sscanf(tokens[1].toString().c_str(), "%lf%n", &v, &n) != 1 || n != tokens[1].size()) {
+						auto v = parseNumber<double>(tokens[1]);
+						if (!v.present()) {
 							printUsage(tokens[0]);
 							is_error = true;
 						} else {
-							co_await delay(v);
+							co_await delay(v.get());
 						}
 					}
 					continue;

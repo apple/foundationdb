@@ -55,6 +55,7 @@
 #include "fdbclient/ManagementAPI.h"
 
 #include "flow/Platform.h"
+#include "flow/ParseNumber.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -3037,20 +3038,24 @@ Version parseVersion(const char* str) {
 	StringRef s((const uint8_t*)str, strlen(str));
 
 	if (s.endsWith("days"_sr) || s.endsWith("d"_sr)) {
-		float days;
-		if (sscanf(str, "%f", &days) != 1) {
-			fprintf(stderr, "Could not parse version: %s\n", str);
-			flushAndExit(FDB_EXIT_ERROR);
+		auto days = parseNumberPrefix<float>(s);
+		if (days.present()) {
+			double version = (double)CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 24 * 3600 * -days.get();
+			if (version >= (double)std::numeric_limits<Version>::min() &&
+			    version < -(double)std::numeric_limits<Version>::min()) {
+				return static_cast<Version>(version);
+			}
 		}
-		return (double)CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 24 * 3600 * -days;
+	} else {
+		auto version = parseNumberPrefix<Version>(s);
+		if (version.present()) {
+			return version.get();
+		}
 	}
 
-	Version ver;
-	if (sscanf(str, "%" SCNd64, &ver) != 1) {
-		fprintf(stderr, "Could not parse version: %s\n", str);
-		flushAndExit(FDB_EXIT_ERROR);
-	}
-	return ver;
+	fprintf(stderr, "Could not parse version: %s\n", str);
+	flushAndExit(FDB_EXIT_ERROR);
+	return invalidVersion;
 }
 
 // Creates a connection to a cluster. Optionally prints an error if the connection fails.
@@ -3591,12 +3596,14 @@ int main(int argc, char* argv[]) {
 			case OPT_EXPIRE_MIN_RESTORABLE_DAYS:
 			case OPT_EXPIRE_DELETE_BEFORE_DAYS: {
 				const char* a = args->OptionArg();
-				long long ver = 0;
-				if (!sscanf(a, "%lld", &ver)) {
+				auto parsedVersion = parseNumberPrefix<Version>(StringRef(a));
+				if (!parsedVersion.present()) {
 					fprintf(stderr, "ERROR: Could not parse expiration version `%s'\n", a);
 					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
+
+				Version ver = parsedVersion.get();
 
 				// Interpret the value as days worth of versions relative to now (negative)
 				if (optId == OPT_EXPIRE_MIN_RESTORABLE_DAYS || optId == OPT_EXPIRE_DELETE_BEFORE_DAYS) {
@@ -3687,12 +3694,13 @@ int main(int argc, char* argv[]) {
 			case OPT_INITIAL_SNAPSHOT_INTERVAL:
 			case OPT_MOD_ACTIVE_INTERVAL: {
 				const char* a = args->OptionArg();
-				int seconds;
-				if (!sscanf(a, "%d", &seconds)) {
+				auto parsedSeconds = parseNumberPrefix<int>(StringRef(a));
+				if (!parsedSeconds.present()) {
 					fprintf(stderr, "ERROR: Could not parse snapshot interval `%s'\n", a);
 					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
+				int seconds = parsedSeconds.get();
 				if (optId == OPT_SNAPSHOTINTERVAL) {
 					snapshotIntervalSeconds = seconds;
 					modifyOptions.snapshotIntervalSeconds = seconds;
@@ -3780,44 +3788,46 @@ int main(int argc, char* argv[]) {
 			}
 			case OPT_ERRORLIMIT: {
 				const char* a = args->OptionArg();
-				if (!sscanf(a, "%d", &maxErrors)) {
+				auto parsedMaxErrors = parseNumberPrefix<int>(StringRef(a));
+				if (!parsedMaxErrors.present()) {
 					fprintf(stderr, "ERROR: Could not parse max number of errors `%s'\n", a);
 					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
+				maxErrors = parsedMaxErrors.get();
 				break;
 			}
 			case OPT_RESTORE_BEGIN_VERSION: {
 				const char* a = args->OptionArg();
-				long long ver = 0;
-				if (!sscanf(a, "%lld", &ver)) {
+				auto parsedVersion = parseNumberPrefix<Version>(StringRef(a));
+				if (!parsedVersion.present()) {
 					fprintf(stderr, "ERROR: Could not parse database beginVersion `%s'\n", a);
 					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
-				beginVersion = ver;
+				beginVersion = parsedVersion.get();
 				break;
 			}
 			case OPT_RESTORE_VERSION: {
 				const char* a = args->OptionArg();
-				long long ver = 0;
-				if (!sscanf(a, "%lld", &ver)) {
+				auto parsedVersion = parseNumberPrefix<Version>(StringRef(a));
+				if (!parsedVersion.present()) {
 					fprintf(stderr, "ERROR: Could not parse database version `%s'\n", a);
 					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
-				restoreVersion = ver;
+				restoreVersion = parsedVersion.get();
 				break;
 			}
 			case OPT_RESTORE_SNAPSHOT_VERSION: {
 				const char* a = args->OptionArg();
-				long long ver = 0;
-				if (!sscanf(a, "%lld", &ver)) {
+				auto parsedVersion = parseNumberPrefix<Version>(StringRef(a));
+				if (!parsedVersion.present()) {
 					fprintf(stderr, "ERROR: Could not parse database version `%s'\n", a);
 					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
-				snapshotVersion = ver;
+				snapshotVersion = parsedVersion.get();
 				break;
 			}
 			case OPT_RESTORE_USER_DATA: {
@@ -3834,8 +3844,8 @@ int main(int argc, char* argv[]) {
 			}
 #ifdef _WIN32
 			case OPT_PARENTPID: {
-				auto pid_str = args->OptionArg();
-				int parent_pid = atoi(pid_str);
+				const char* pid_str = args->OptionArg();
+				int parent_pid = parseNumberPrefix<int>(StringRef(pid_str)).orDefault(0);
 				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
 				if (!pHandle) {
 					TraceEvent("ParentProcessOpenError").GetLastError();

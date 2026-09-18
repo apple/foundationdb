@@ -24,6 +24,7 @@
 #endif // _WIN32
 
 #include "flow/Platform.h"
+#include "flow/ParseNumber.h"
 
 #include <algorithm>
 #include <iostream>
@@ -1527,7 +1528,8 @@ void initPdhStrings(SystemStatisticsState* state, std::string dataFolder) {
 			                    "PdhEnumObjectItems")) {
 				char* ptr = buf;
 				while (*ptr) {
-					if (isdigit(*ptr) && atoi(ptr) == storage_device.DeviceNumber) {
+					auto deviceNumber = parseNumberPrefix<int>(StringRef(static_cast<const char*>(ptr)));
+					if (isdigit(*ptr) && deviceNumber.present() && deviceNumber.get() == storage_device.DeviceNumber) {
 						state->pdhStrings.diskDevice = ptr;
 						break;
 					}
@@ -2913,7 +2915,10 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 	pthread_t t;
 	pthread_attr_t attr;
 
-	pthread_attr_init(&attr);
+	int attrError = pthread_attr_init(&attr);
+	if (attrError != 0) {
+		criticalError(FDB_EXIT_ERROR, "ThreadAttributesError", strerror(attrError));
+	}
 	if (stackSize != 0) {
 		if (pthread_attr_setstacksize(&attr, stackSize) != 0) {
 			// If setting the stack size fails the default stack size will be used, so failure to set
@@ -2926,8 +2931,13 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 	}
 
 	auto* args = new ThreadCreateArgs(func, arg);
-	pthread_create(&t, &attr, &runFunc, args);
+	int createError = pthread_create(&t, &attr, &runFunc, args);
 	pthread_attr_destroy(&attr);
+	if (createError != 0) {
+		delete args;
+		// Callers transfer thread-owned state without a failed-launch recovery path.
+		criticalError(FDB_EXIT_ERROR, "ThreadCreationError", strerror(createError));
+	}
 
 #if defined(__linux__)
 	if (name != nullptr) {

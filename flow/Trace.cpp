@@ -26,6 +26,9 @@
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/ProcessEvents.h"
+#include "flow/UnitTest.h"
+#include <cerrno>
+#include <cstdlib>
 #include <exception>
 #include <stdarg.h>
 #include <cctype>
@@ -1681,56 +1684,52 @@ TraceEventFields::Field& TraceEventFields::mutate(int index) {
 }
 
 namespace {
-void parseNumericValue(std::string const& s, double& outValue, bool permissive = false) {
-	double d = 0;
-	int consumed = 0;
-	int r = sscanf(s.c_str(), "%lf%n", &d, &consumed);
-	if (r == 1 && (consumed == s.size() || permissive)) {
-		outValue = d;
-		return;
+void checkNumericConversion(std::string const& s, const char* end, bool permissive, int conversionError) {
+	if (end == s.c_str() || (!permissive && end != s.c_str() + s.size())) {
+		throw attribute_not_found();
 	}
-
-	throw attribute_not_found();
+	if (conversionError == ERANGE) {
+		throw attribute_too_large();
+	}
 }
 
-void parseNumericValue(std::string const& s, int& outValue, bool permissive = false) {
-	long long int iLong = 0;
-	int consumed = 0;
-	int r = sscanf(s.c_str(), "%lld%n", &iLong, &consumed);
-	if (r == 1 && (consumed == s.size() || permissive)) {
-		if (std::numeric_limits<int>::min() <= iLong && iLong <= std::numeric_limits<int>::max()) {
-			outValue = (int)iLong; // Downcast definitely safe
-			return;
-		} else {
-			throw attribute_too_large();
-		}
-	}
-
-	throw attribute_not_found();
+void parseNumericValue(std::string const& s, double& outValue, bool permissive = false) {
+	char* end = nullptr;
+	errno = 0;
+	double d = std::strtod(s.c_str(), &end);
+	checkNumericConversion(s, end, permissive, errno);
+	outValue = d;
 }
 
 void parseNumericValue(std::string const& s, int64_t& outValue, bool permissive = false) {
-	long long int i = 0;
-	int consumed = 0;
-	int r = sscanf(s.c_str(), "%lld%n", &i, &consumed);
-	if (r == 1 && (consumed == s.size() || permissive)) {
-		outValue = i;
-		return;
+	char* end = nullptr;
+	errno = 0;
+	long long i = std::strtoll(s.c_str(), &end, 10);
+	checkNumericConversion(s, end, permissive, errno);
+	if (i < std::numeric_limits<int64_t>::min() || i > std::numeric_limits<int64_t>::max()) {
+		throw attribute_too_large();
 	}
+	outValue = i;
+}
 
-	throw attribute_not_found();
+void parseNumericValue(std::string const& s, int& outValue, bool permissive = false) {
+	int64_t i;
+	parseNumericValue(s, i, permissive);
+	if (i < std::numeric_limits<int>::min() || i > std::numeric_limits<int>::max()) {
+		throw attribute_too_large();
+	}
+	outValue = static_cast<int>(i);
 }
 
 void parseNumericValue(std::string const& s, uint64_t& outValue, bool permissive = false) {
-	unsigned long long int i = 0;
-	int consumed = 0;
-	int r = sscanf(s.c_str(), "%llu%n", &i, &consumed);
-	if (r == 1 && (consumed == s.size() || permissive)) {
-		outValue = i;
-		return;
+	char* end = nullptr;
+	errno = 0;
+	unsigned long long i = (std::strtoull)(s.c_str(), &end, 10);
+	checkNumericConversion(s, end, permissive, errno);
+	if (i > std::numeric_limits<uint64_t>::max()) {
+		throw attribute_too_large();
 	}
-
-	throw attribute_not_found();
+	outValue = i;
 }
 
 template <class T, bool tryError>
@@ -1757,6 +1756,72 @@ bool getNumericValue(TraceEventFields const& fields, std::string key, T& outValu
 			return false;
 		}
 	}
+}
+
+TEST_CASE("/flow/TraceEventFields/numericParsing") {
+	auto expectFailure = [](const std::string& text, auto initial, int errorCode, bool permissive = false) {
+		auto value = initial;
+		try {
+			parseNumericValue(text, value, permissive);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), errorCode);
+			ASSERT_EQ(value, initial);
+			return;
+		}
+		ASSERT(false);
+	};
+
+	int64_t signedValue = 0;
+	parseNumericValue(" \t+0012", signedValue);
+	ASSERT_EQ(signedValue, int64_t{ 12 });
+	parseNumericValue("-9223372036854775808", signedValue);
+	ASSERT_EQ(signedValue, std::numeric_limits<int64_t>::min());
+	parseNumericValue("9223372036854775807", signedValue);
+	ASSERT_EQ(signedValue, std::numeric_limits<int64_t>::max());
+	expectFailure("9223372036854775808", int64_t{ 123 }, error_code_attribute_too_large);
+	expectFailure("-9223372036854775809", int64_t{ 123 }, error_code_attribute_too_large);
+
+	int intValue = 0;
+	parseNumericValue(std::to_string(std::numeric_limits<int>::min()), intValue);
+	ASSERT_EQ(intValue, std::numeric_limits<int>::min());
+	parseNumericValue(std::to_string(std::numeric_limits<int>::max()), intValue);
+	ASSERT_EQ(intValue, std::numeric_limits<int>::max());
+	expectFailure(
+	    std::to_string(static_cast<int64_t>(std::numeric_limits<int>::max()) + 1), 123, error_code_attribute_too_large);
+
+	uint64_t unsignedValue = 0;
+	parseNumericValue(" \t+18446744073709551615", unsignedValue);
+	ASSERT_EQ(unsignedValue, std::numeric_limits<uint64_t>::max());
+	parseNumericValue("-1", unsignedValue);
+	ASSERT_EQ(unsignedValue, std::numeric_limits<uint64_t>::max());
+	expectFailure("18446744073709551616", uint64_t{ 123 }, error_code_attribute_too_large);
+
+	double doubleValue = 0;
+	parseNumericValue(" \t+1.25e2", doubleValue);
+	ASSERT_EQ(doubleValue, 125.0);
+	expectFailure("1e9999", 123.0, error_code_attribute_too_large);
+	expectFailure("1e-9999", 123.0, error_code_attribute_too_large);
+	expectFailure("", 123.0, error_code_attribute_not_found);
+	expectFailure(" \t", int64_t{ 123 }, error_code_attribute_not_found, true);
+	expectFailure("12suffix", 123, error_code_attribute_not_found);
+	parseNumericValue("12suffix", intValue, true);
+	ASSERT_EQ(intValue, 12);
+	expectFailure(std::string("12\0suffix", 9), 123, error_code_attribute_not_found);
+	parseNumericValue(std::string("12\0suffix", 9), intValue, true);
+	ASSERT_EQ(intValue, 12);
+	expectFailure("9223372036854775808suffix", int64_t{ 123 }, error_code_attribute_not_found);
+	expectFailure("9223372036854775808suffix", int64_t{ 123 }, error_code_attribute_too_large, true);
+
+	TraceEventFields fields;
+	fields.addField("overflow", "18446744073709551616");
+	unsignedValue = 123;
+	ASSERT(!fields.tryGetUint64("overflow", unsignedValue));
+	ASSERT_EQ(unsignedValue, uint64_t{ 123 });
+	fields.addField("number", "12suffix");
+	ASSERT(!fields.tryGetInt("number", intValue));
+	ASSERT_EQ(fields.getInt("number", true), 12);
+
+	return Void();
 }
 } // namespace
 

@@ -30,6 +30,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
+#include "flow/ParseNumber.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/network.h"
 
@@ -66,11 +67,19 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 #endif
 
 	// Read timezone offset in +/-HHMM format then convert to seconds
-	int tzHH;
-	int tzMM;
-	if (sscanf(timestamp.substr(19, 5).c_str(), "%3d%2d", &tzHH, &tzMM) != 2) {
+	StringRef timezone(timestamp);
+	if (timezone.size() < 24) {
 		return -1;
 	}
+	timezone = timezone.substr(19, 5);
+	int consumed = 0;
+	auto hours = parseNumberPrefix<int>(timezone.substr(0, 3), 10, &consumed);
+	auto minutes = parseNumberPrefix<int>(timezone.substr(consumed, 2));
+	if (!hours.present() || !minutes.present()) {
+		return -1;
+	}
+	int tzHH = hours.get();
+	int tzMM = minutes.get();
 	if (tzHH < 0) {
 		tzMM = -tzMM;
 	}
@@ -140,13 +149,28 @@ bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key) {
 }
 
 Version getVersionFromString(std::string const& value) {
-	Version version = invalidVersion;
-	int n = 0;
-	if (sscanf(value.c_str(), "%lld%n", (long long*)&version, &n) != 1 || n != value.size()) {
+	auto version = parseNumber<Version>(StringRef(value));
+	if (!version.present()) {
 		TraceEvent(SevWarnAlways, "GetVersionFromString").detail("InvalidVersion", value);
 		throw restore_invalid_version();
 	}
-	return version;
+	return version.get();
+}
+
+TEST_CASE("/backup/versionparsing") {
+	ASSERT(getVersionFromString("9223372036854775807") == std::numeric_limits<Version>::max());
+	ASSERT(getVersionFromString("-9223372036854775808") == std::numeric_limits<Version>::min());
+	for (const auto& value : { "", " ", "9223372036854775808", "-9223372036854775809", "123suffix", "123 " }) {
+		bool rejected = false;
+		try {
+			getVersionFromString(value);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_restore_invalid_version);
+			rejected = true;
+		}
+		ASSERT(rejected);
+	}
+	return Void();
 }
 
 // Transaction log data is stored by the FoundationDB core in the

@@ -62,6 +62,8 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class ReadLargeValueTest : public ITest {
+		// The enclosing workload retains this test and outlives its setup future.
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 		Future<Void> setupImpl(TransactionCostWorkload const& workload, Database cx) {
 			Transaction tr(cx);
 			while (true) {
@@ -148,6 +150,8 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class ReadRangeTest : public ITest {
+		// The enclosing workload retains this test and outlives its setup future.
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 		Future<Void> setupImpl(TransactionCostWorkload const& workload, Database cx) {
 			Transaction tr(cx);
 			while (true) {
@@ -181,6 +185,8 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class ReadMultipleValuesTest : public ITest {
+		// The enclosing workload retains this test and outlives its setup future.
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 		Future<Void> setupImpl(TransactionCostWorkload const& workload, Database cx) {
 			Transaction tr(cx);
 			while (true) {
@@ -218,6 +224,8 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class LargeReadRangeTest : public ITest {
+		// The enclosing workload retains this test and outlives its setup future.
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 		Future<Void> setupImpl(TransactionCostWorkload const& workload, Database cx) {
 			Transaction tr(cx);
 			while (true) {

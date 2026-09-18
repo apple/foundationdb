@@ -84,7 +84,9 @@ struct WatchAndWaitWorkload : TestWorkload {
 		m.push_back(retries.getMetric());
 	}
 
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		std::vector<Future<Void>> watches;
 		uint64_t endNode = (nodeCount * (clientId + 1)) / clientCount;
 		uint64_t startNode = (nodeCount * clientId) / clientCount;

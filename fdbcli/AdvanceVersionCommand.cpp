@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include "boost/lexical_cast.hpp"
 #include "fmt/format.h"
 #include "fdbcli/fdbcli.h"
@@ -37,12 +38,12 @@ Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<Str
 		printUsage(tokens[0]);
 		co_return false;
 	} else {
-		Version v;
-		int n = 0;
-		if (sscanf(tokens[1].toString().c_str(), "%" PRId64 "%n", &v, &n) != 1 || n != tokens[1].size()) {
+		auto parsed = parseNumber<Version>(tokens[1]);
+		if (!parsed.present()) {
 			printUsage(tokens[0]);
 			co_return false;
 		} else {
+			Version v = parsed.get();
 			Reference<ITransaction> tr = db->createTransaction();
 			while (true) {
 				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);

@@ -55,7 +55,9 @@ struct SaveAndKillWorkload : TestWorkload {
 		g_simulator->disableSwapsToAll();
 		return Void();
 	}
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		int i{ 0 };
 		co_await delay(deterministicRandom()->random01() * testDuration);
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
@@ -82,12 +84,12 @@ struct SaveAndKillWorkload : TestWorkload {
 		    g_simulator->currentlyRebootingProcesses;
 		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap;
 		for (const auto& [_, process] : rebootingProcesses) {
-			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() && !process->isSpawnedKVProcess()) {
+			if (!allProcessesMap.contains(process->dataFolder) && !process->isSpawnedKVProcess()) {
 				allProcessesMap[process->dataFolder] = process;
 			}
 		}
 		for (const auto& process : processes) {
-			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() && !process->isSpawnedKVProcess()) {
+			if (!allProcessesMap.contains(process->dataFolder) && !process->isSpawnedKVProcess()) {
 				allProcessesMap[process->dataFolder] = process;
 			}
 		}
@@ -99,7 +101,7 @@ struct SaveAndKillWorkload : TestWorkload {
 			std::string machineId = printable(process->locality.machineId());
 			const char* machineIdString = machineId.c_str();
 			if (!process->excludeFromRestarts) {
-				if (machines.find(machineId) == machines.end()) {
+				if (!machines.contains(machineId)) {
 					machines.insert(std::pair<std::string, int>(machineId, 1));
 					ini.SetValue("META", format("%d", j).c_str(), machineIdString);
 					ini.SetValue(

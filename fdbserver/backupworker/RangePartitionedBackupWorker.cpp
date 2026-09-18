@@ -391,8 +391,10 @@ Future<Version> pullPartitionMapFromTLog(RangePartitionedBackupData* self, Parti
 // Persist the (epoch, version) -> PartitionMap row to SS so older epoch backup workers can read it during
 // recovery. Multiple workers may call this concurrently for the same (epoch, version) but only one succeed in writing
 // to SS.
+// The partition map is serialized into owned storage before suspension.
 Future<Void> persistPartitionMapToSS(RangePartitionedBackupData* self,
                                      Version partitionMapVersion,
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                      PartitionMap const& partitionMap) {
 	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	Key key = backupPartitionMapHistoryKeyFor(self->backupEpoch, partitionMapVersion);
@@ -526,16 +528,20 @@ Future<Void> uploadPartitionList(RangePartitionedBackupData* self, PartitionMap 
 
 // Persists partitionMap to SS history (so that catch-up backup workers can find it during recovery) and writes the
 // partitionId_keyRange_Map file for every active backup container.
+// The partition-map owner awaits both persistence and upload before releasing it.
 Future<Void> persistAndUploadPartitionMap(RangePartitionedBackupData* self,
                                           Version pmVersion,
+                                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                           PartitionMap const& partitionMap) {
 	co_await persistPartitionMapToSS(self, pmVersion, partitionMap);
 	co_await uploadPartitionList(self, partitionMap);
 }
 
 // Updates local routing state to use the new partition map.
+// The partition map is read only before suspension.
 Future<Void> setActivePartitionMap(RangePartitionedBackupData* self,
                                    Version pmVersion,
+                                   // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                    PartitionMap const& partitionMap) {
 	self->logFolderBaseVersion = pmVersion;
 	ASSERT(partitionMap.contains(self->tag));

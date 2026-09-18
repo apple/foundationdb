@@ -22,6 +22,7 @@
 #include "flow/Hash3.h"
 #include "flow/UnitTest.h"
 #include "flow/Platform.h"
+#include "flow/ParseNumber.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
 
@@ -761,6 +762,9 @@ Reference<IReplicationPolicy> randomAcrossPolicy(LocalitySet const& serverSet) {
 }
 
 int testReplication() {
+	auto parseEnvInt = [](const char* value, int defaultValue) {
+		return value ? parseNumberPrefix<int>(StringRef(value)).orDefault(0) : defaultValue;
+	};
 	const char* testTotalEnv = getenv("REPLICATION_TESTTOTAL");
 	const char* debugLevelEnv = getenv("REPLICATION_DEBUGLEVEL");
 	const char* policyTotalEnv = getenv("REPLICATION_POLICYTOTAL");
@@ -773,16 +777,16 @@ int testReplication() {
 	const char* rateSampleEnv = getenv("REPLICATION_RATESAMPLE");
 	const char* policySampleEnv = getenv("REPLICATION_POLICYSAMPLE");
 	const char* policyMinEnv = getenv("REPLICATION_POLICYEXTRA");
-	int totalTests = testTotalEnv ? atoi(testTotalEnv) : 10000;
-	int skipTotal = skipTotalEnv ? atoi(skipTotalEnv) : 0;
-	int findBest = findBestEnv ? atoi(findBestEnv) : 0;
-	int policyIndexStatic = policyIndexEnv ? atoi(policyIndexEnv) : -1;
-	int policyTotal = policyTotalEnv ? atoi(policyTotalEnv) : 100;
-	bool stopOnError = stopOnErrorEnv ? (atoi(stopOnErrorEnv) > 0) : false;
-	bool validate = validateEnv ? (atoi(validateEnv) > 0) : true;
-	int rateSample = rateSampleEnv ? atoi(rateSampleEnv) : 1000;
-	int policySample = policySampleEnv ? atoi(policySampleEnv) : 100;
-	int policyMin = policyMinEnv ? atoi(policyMinEnv) : 2;
+	int totalTests = parseEnvInt(testTotalEnv, 10000);
+	int skipTotal = parseEnvInt(skipTotalEnv, 0);
+	int findBest = parseEnvInt(findBestEnv, 0);
+	int policyIndexStatic = parseEnvInt(policyIndexEnv, -1);
+	int policyTotal = parseEnvInt(policyTotalEnv, 100);
+	bool stopOnError = parseEnvInt(stopOnErrorEnv, 0) > 0;
+	bool validate = parseEnvInt(validateEnv, 1) > 0;
+	int rateSample = parseEnvInt(rateSampleEnv, 1000);
+	int policySample = parseEnvInt(policySampleEnv, 100);
+	int policyMin = parseEnvInt(policyMinEnv, 2);
 	int policyIndex, testCounter, alsoSize, debugBackup, maxAlsoSize;
 	std::vector<repTestType> serverIndexes;
 	Reference<LocalitySet> testServers;
@@ -791,7 +795,7 @@ int testReplication() {
 	int totalErrors = 0;
 
 	if (debugLevelEnv)
-		g_replicationdebug = atoi(debugLevelEnv);
+		g_replicationdebug = parseEnvInt(debugLevelEnv, 0);
 	debugBackup = g_replicationdebug;
 
 	testServers = createTestLocalityMap(serverIndexes,
@@ -869,7 +873,7 @@ int testReplication() {
 	}
 	if (g_replicationdebug >= 0)
 		printf("Succeeded in completing %d of %d policies\n", testCounter - totalErrors, totalTests);
-	if ((g_replicationdebug > 0) || ((reportCacheEnv) && (atoi(reportCacheEnv) > 0))) {
+	if ((g_replicationdebug > 0) || parseEnvInt(reportCacheEnv, 0) > 0) {
 		testServers->cacheReport();
 	}
 
@@ -881,7 +885,7 @@ void filterLocalityDataForPolicy(const std::set<std::string>& keys, LocalityData
 	for (auto iter = ld->_data.begin(); iter != ld->_data.end();) {
 		auto prev = iter;
 		iter++;
-		if (keys.find(prev->first.toString()) == keys.end()) {
+		if (!keys.contains(prev->first.toString())) {
 			ld->_data.erase(prev);
 		}
 	}

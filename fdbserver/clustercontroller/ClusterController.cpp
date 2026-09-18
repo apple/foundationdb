@@ -579,6 +579,8 @@ Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 	}
 }
 
+// Proxy endpoints are copied into owned failure futures before suspension.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<std::vector<int>> monitorCDCProxies(std::vector<CDCProxyInterface> const& cdcProxies) {
 	std::vector<Future<Void>> failures;
 	failures.reserve(cdcProxies.size());
@@ -614,9 +616,12 @@ bool containsCDCProxy(std::vector<CDCProxyInterface> const& proxies, UID proxyId
 	    proxies.begin(), proxies.end(), [proxyId](CDCProxyInterface const& proxy) { return proxy.id() == proxyId; });
 }
 
+// The recruitment loop retains both snapshots until this awaited replacement pass finishes.
 Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
                                      uint64_t recoveryCount,
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                      std::vector<CDCProxyInterface> const& monitoredProxies,
+                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                      std::vector<int> const& failedIndexes) {
 	if (!self->db.recoveryData.isValid() || self->db.recoveryData->cstate.myDBState.recoveryCount != recoveryCount) {
 		co_return;
@@ -3250,10 +3255,8 @@ Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 			// recovered.
 			bool hasRecoveredServer = false;
 			for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
-				if (self->degradationInfo.degradedServers.find(it->first) ==
-				        self->degradationInfo.degradedServers.end() &&
-				    self->degradationInfo.disconnectedServers.find(it->first) ==
-				        self->degradationInfo.disconnectedServers.end()) {
+				if (!self->degradationInfo.degradedServers.contains(it->first) &&
+				    !self->degradationInfo.disconnectedServers.contains(it->first)) {
 					self->excludedDegradedServers.erase(it++);
 					hasRecoveredServer = true;
 				} else {
@@ -4450,17 +4453,17 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 		req.disconnectedPeers.push_back(badPeer1);
 		req.disconnectedPeers.push_back(badPeer2);
 		data.updateWorkerHealth(req);
-		ASSERT(data.workerHealth.find(workerAddress) != data.workerHealth.end());
+		ASSERT(data.workerHealth.contains(workerAddress));
 		auto& health = data.workerHealth[workerAddress];
 		ASSERT_EQ(health.degradedPeers.size(), 2);
-		ASSERT(health.degradedPeers.find(badPeer1) != health.degradedPeers.end());
+		ASSERT(health.degradedPeers.contains(badPeer1));
 		ASSERT_EQ(health.degradedPeers[badPeer1].startTime, health.degradedPeers[badPeer1].lastRefreshTime);
-		ASSERT(health.degradedPeers.find(badPeer2) != health.degradedPeers.end());
+		ASSERT(health.degradedPeers.contains(badPeer2));
 		ASSERT_EQ(health.degradedPeers[badPeer2].startTime, health.degradedPeers[badPeer2].lastRefreshTime);
 		ASSERT_EQ(health.disconnectedPeers.size(), 2);
-		ASSERT(health.disconnectedPeers.find(badPeer1) != health.disconnectedPeers.end());
+		ASSERT(health.disconnectedPeers.contains(badPeer1));
 		ASSERT_EQ(health.disconnectedPeers[badPeer1].startTime, health.disconnectedPeers[badPeer1].lastRefreshTime);
-		ASSERT(health.disconnectedPeers.find(badPeer2) != health.disconnectedPeers.end());
+		ASSERT(health.disconnectedPeers.contains(badPeer2));
 		ASSERT_EQ(health.disconnectedPeers[badPeer2].startTime, health.disconnectedPeers[badPeer2].lastRefreshTime);
 	}
 
@@ -4479,23 +4482,23 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 		req.disconnectedPeers.push_back(badPeer1);
 		req.disconnectedPeers.push_back(badPeer3);
 		data.updateWorkerHealth(req);
-		ASSERT(data.workerHealth.find(workerAddress) != data.workerHealth.end());
+		ASSERT(data.workerHealth.contains(workerAddress));
 		auto& health = data.workerHealth[workerAddress];
 		ASSERT_EQ(health.degradedPeers.size(), 3);
-		ASSERT(health.degradedPeers.find(badPeer1) != health.degradedPeers.end());
+		ASSERT(health.degradedPeers.contains(badPeer1));
 		ASSERT_LT(health.degradedPeers[badPeer1].startTime, health.degradedPeers[badPeer1].lastRefreshTime);
-		ASSERT(health.degradedPeers.find(badPeer2) != health.degradedPeers.end());
+		ASSERT(health.degradedPeers.contains(badPeer2));
 		ASSERT_EQ(health.degradedPeers[badPeer2].startTime, health.degradedPeers[badPeer2].lastRefreshTime);
 		ASSERT_EQ(health.degradedPeers[badPeer2].startTime, health.degradedPeers[badPeer1].startTime);
-		ASSERT(health.degradedPeers.find(badPeer3) != health.degradedPeers.end());
+		ASSERT(health.degradedPeers.contains(badPeer3));
 		ASSERT_EQ(health.degradedPeers[badPeer3].startTime, health.degradedPeers[badPeer3].lastRefreshTime);
 		ASSERT_EQ(health.disconnectedPeers.size(), 3);
-		ASSERT(health.disconnectedPeers.find(badPeer1) != health.disconnectedPeers.end());
+		ASSERT(health.disconnectedPeers.contains(badPeer1));
 		ASSERT_LT(health.disconnectedPeers[badPeer1].startTime, health.disconnectedPeers[badPeer1].lastRefreshTime);
-		ASSERT(health.disconnectedPeers.find(badPeer2) != health.disconnectedPeers.end());
+		ASSERT(health.disconnectedPeers.contains(badPeer2));
 		ASSERT_EQ(health.disconnectedPeers[badPeer2].startTime, health.disconnectedPeers[badPeer2].lastRefreshTime);
 		ASSERT_EQ(health.disconnectedPeers[badPeer2].startTime, health.disconnectedPeers[badPeer1].startTime);
-		ASSERT(health.disconnectedPeers.find(badPeer3) != health.disconnectedPeers.end());
+		ASSERT(health.disconnectedPeers.contains(badPeer3));
 		ASSERT_EQ(health.disconnectedPeers[badPeer3].startTime, health.disconnectedPeers[badPeer3].lastRefreshTime);
 
 		previousStartTime = health.degradedPeers[badPeer3].startTime;
@@ -4509,14 +4512,14 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 		UpdateWorkerHealthRequest req;
 		req.address = workerAddress;
 		data.updateWorkerHealth(req);
-		ASSERT(data.workerHealth.find(workerAddress) != data.workerHealth.end());
+		ASSERT(data.workerHealth.contains(workerAddress));
 		auto& health = data.workerHealth[workerAddress];
 		ASSERT_EQ(health.degradedPeers.size(), 3);
-		ASSERT(health.degradedPeers.find(badPeer3) != health.degradedPeers.end());
+		ASSERT(health.degradedPeers.contains(badPeer3));
 		ASSERT_EQ(health.degradedPeers[badPeer3].startTime, previousStartTime);
 		ASSERT_EQ(health.degradedPeers[badPeer3].lastRefreshTime, previousRefreshTime);
 		ASSERT_EQ(health.disconnectedPeers.size(), 3);
-		ASSERT(health.disconnectedPeers.find(badPeer3) != health.disconnectedPeers.end());
+		ASSERT(health.disconnectedPeers.contains(badPeer3));
 		ASSERT_EQ(health.disconnectedPeers[badPeer3].startTime, previousStartTime);
 		ASSERT_EQ(health.disconnectedPeers[badPeer3].lastRefreshTime, previousRefreshTime);
 	}
@@ -4529,8 +4532,8 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 		req.recoveredPeers.push_back(badPeer1);
 		data.updateWorkerHealth(req);
 		auto& health = data.workerHealth[workerAddress];
-		ASSERT(health.degradedPeers.find(badPeer1) == health.degradedPeers.end());
-		ASSERT(health.disconnectedPeers.find(badPeer1) == health.disconnectedPeers.end());
+		ASSERT(!health.degradedPeers.contains(badPeer1));
+		ASSERT(!health.disconnectedPeers.contains(badPeer1));
 	}
 }
 
@@ -4574,12 +4577,11 @@ TEST_CASE("/fdbserver/clustercontroller/updateRecoveredWorkers") {
 	data.updateRecoveredWorkers();
 
 	ASSERT_EQ(data.workerHealth.size(), 1);
-	ASSERT(data.workerHealth.find(worker1) != data.workerHealth.end());
-	ASSERT(data.workerHealth[worker1].degradedPeers.find(badPeer1) != data.workerHealth[worker1].degradedPeers.end());
-	ASSERT(data.workerHealth[worker1].degradedPeers.find(badPeer2) == data.workerHealth[worker1].degradedPeers.end());
-	ASSERT(data.workerHealth[worker1].degradedPeers.find(disconnectedPeer3) !=
-	       data.workerHealth[worker1].degradedPeers.end());
-	ASSERT(data.workerHealth.find(worker2) == data.workerHealth.end());
+	ASSERT(data.workerHealth.contains(worker1));
+	ASSERT(data.workerHealth[worker1].degradedPeers.contains(badPeer1));
+	ASSERT(!data.workerHealth[worker1].degradedPeers.contains(badPeer2));
+	ASSERT(data.workerHealth[worker1].degradedPeers.contains(disconnectedPeer3));
+	ASSERT(!data.workerHealth.contains(worker2));
 
 	return Void();
 }
@@ -4617,7 +4619,7 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 			                                                  now() };
 		auto degradationInfo = data.getDegradationInfo();
 		ASSERT(degradationInfo.degradedServers.size() == 1);
-		ASSERT(degradationInfo.degradedServers.find(badPeer1) != degradationInfo.degradedServers.end());
+		ASSERT(degradationInfo.degradedServers.contains(badPeer1));
 		ASSERT(degradationInfo.disconnectedServers.empty());
 		data.workerHealth.clear();
 	}
@@ -4629,7 +4631,7 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 			                                                      now() };
 		auto degradationInfo = data.getDegradationInfo();
 		ASSERT(degradationInfo.disconnectedServers.size() == 1);
-		ASSERT(degradationInfo.disconnectedServers.find(badPeer1) != degradationInfo.disconnectedServers.end());
+		ASSERT(degradationInfo.disconnectedServers.contains(badPeer1));
 		ASSERT(degradationInfo.degradedServers.empty());
 		data.workerHealth.clear();
 	}
@@ -4647,11 +4649,10 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 			                                                      now() };
 		auto degradationInfo = data.getDegradationInfo();
 		ASSERT(degradationInfo.degradedServers.size() == 1);
-		ASSERT(degradationInfo.degradedServers.find(worker) != degradationInfo.degradedServers.end() ||
-		       degradationInfo.degradedServers.find(badPeer1) != degradationInfo.degradedServers.end());
+		ASSERT(degradationInfo.degradedServers.contains(worker) || degradationInfo.degradedServers.contains(badPeer1));
 		ASSERT(degradationInfo.disconnectedServers.size() == 1);
-		ASSERT(degradationInfo.disconnectedServers.find(worker) != degradationInfo.disconnectedServers.end() ||
-		       degradationInfo.disconnectedServers.find(badPeer2) != degradationInfo.disconnectedServers.end());
+		ASSERT(degradationInfo.disconnectedServers.contains(worker) ||
+		       degradationInfo.disconnectedServers.contains(badPeer2));
 		data.workerHealth.clear();
 	}
 
@@ -4678,9 +4679,9 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 			                                                      now() };
 		auto degradationInfo = data.getDegradationInfo();
 		ASSERT(degradationInfo.degradedServers.size() == 1);
-		ASSERT(degradationInfo.degradedServers.find(worker) != degradationInfo.degradedServers.end());
+		ASSERT(degradationInfo.degradedServers.contains(worker));
 		ASSERT(degradationInfo.disconnectedServers.size() == 1);
-		ASSERT(degradationInfo.disconnectedServers.find(worker) != degradationInfo.disconnectedServers.end());
+		ASSERT(degradationInfo.disconnectedServers.contains(worker));
 		data.workerHealth.clear();
 	}
 
@@ -4711,8 +4712,7 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 		data.workerHealth[badPeer4].disconnectedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
 			                                                      now() };
 		ASSERT(data.getDegradationInfo().disconnectedServers.size() == 1);
-		ASSERT(data.getDegradationInfo().disconnectedServers.find(worker) !=
-		       data.getDegradationInfo().disconnectedServers.end());
+		ASSERT(data.getDegradationInfo().disconnectedServers.contains(worker));
 		data.workerHealth.clear();
 	}
 

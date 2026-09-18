@@ -41,6 +41,8 @@ Future<Void> dumpStats(ConsistencyScanState* cs, Reference<ReadYourWritesTransac
 	co_return;
 }
 
+// The CLI retains the tokens and their backing line until this command finishes or is cancelled.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> const& tokens) {
 	// Skip the command token so start at begin+1
 	std::list<StringRef> args(tokens.begin() + 1, tokens.end());

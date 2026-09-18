@@ -19,6 +19,8 @@
  */
 
 #include <csignal>
+#include <charconv>
+#include <cctype>
 #include <limits>
 #include <sys/time.h>
 #ifndef _WIN32
@@ -417,6 +419,32 @@ std::unordered_map<ProcessID, std::unique_ptr<Command>> id_command;
 std::unordered_map<pid_t, ProcessID> pid_id;
 std::unordered_map<ProcessID, pid_t> id_pid;
 
+bool parseRss(std::string_view statm, long pageSize, uint64_t& rss) {
+	auto parsePages = [&statm](uint64_t& pages) {
+		while (!statm.empty() && std::isspace(static_cast<unsigned char>(statm.front()))) {
+			statm.remove_prefix(1);
+		}
+		if (statm.empty()) {
+			return false;
+		}
+		const char* end = statm.data() + statm.size();
+		auto result = std::from_chars(statm.data(), statm.data() + statm.size(), pages);
+		if (result.ec != std::errc() || (result.ptr != end && !std::isspace(static_cast<unsigned char>(*result.ptr)))) {
+			return false;
+		}
+		statm.remove_prefix(result.ptr - statm.data());
+		return true;
+	};
+	uint64_t sizePages;
+	uint64_t residentPages;
+	if (pageSize <= 0 || !parsePages(sizePages) || !parsePages(residentPages) ||
+	    residentPages > std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(pageSize)) {
+		return false;
+	}
+	rss = residentPages * static_cast<uint64_t>(pageSize);
+	return true;
+}
+
 // Return resident memory in bytes for the given process, or 0 if error.
 uint64_t getRss(ProcessID id) {
 #ifndef __linux__
@@ -431,14 +459,15 @@ uint64_t getRss(ProcessID id) {
 		log_msg(SevWarn, "Unable to open stat file for %s\n", id.c_str());
 		return 0;
 	}
-	long rss = 0;
-	int ret = fscanf(stat_file, "%*s%ld", &rss);
-	if (ret == 0) {
+	char stat_buf[256];
+	bool read = fgets(stat_buf, sizeof(stat_buf), stat_file) != nullptr;
+	fclose(stat_file);
+	uint64_t rss;
+	if (!read || !parseRss(stat_buf, sysconf(_SC_PAGESIZE), rss)) {
 		log_msg(SevWarn, "Unable to parse rss size for %s\n", id.c_str());
 		return 0;
 	}
-	fclose(stat_file);
-	return static_cast<uint64_t>(rss) * sysconf(_SC_PAGESIZE);
+	return rss;
 #endif
 }
 

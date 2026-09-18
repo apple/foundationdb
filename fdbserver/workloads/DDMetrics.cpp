@@ -38,8 +38,7 @@ struct DDMetricsWorkload : TestWorkload {
 		TraceEvent("GetHighPriorityReliocationsInFlight").detail("Stage", "ContactingMaster");
 		TraceEventFields md =
 		    co_await timeoutError(masterWorker.eventLogRequest.getReply(EventLogRequest("MovingData"_sr)), 1.0);
-		int relocations;
-		sscanf(md.getValue("UnhealthyRelocations").c_str(), "%d", &relocations);
+		int relocations = md.getInt("UnhealthyRelocations");
 		co_return relocations;
 	}
 

@@ -55,6 +55,18 @@ jobs:
           )
           ninja -v $PB_HEADERS
 
+      - name: Install clang-tidy with pointer-order checks
+        run: |
+          # The tool bundled in the build image is older than the pointer-order check.
+          # Keep its compiler and libc++ for the build; install only the packaged tidy tool.
+          dnf --disablerepo='*' --enablerepo=baseos,appstream \
+            --setopt=baseos.mirrorlist= --setopt=appstream.mirrorlist= \
+            --setopt=baseos.baseurl='https://dl.rockylinux.org/pub/rocky/9/BaseOS/$basearch/os/' \
+            --setopt=appstream.baseurl='https://dl.rockylinux.org/pub/rocky/9/AppStream/$basearch/os/' \
+            --setopt=timeout=15 --setopt=retries=1 install -y clang-tools-extra
+          /usr/bin/clang-tidy --version
+          /usr/bin/clang-tidy --list-checks | grep -q bugprone-nondeterministic-pointer-iteration-order
+
       - name: clang-tidy
         # clang-tidy is roughly as slow as compiling per-file, so check only touched files
         shell: bash
@@ -109,7 +121,7 @@ jobs:
               if [[ $FILE == fdbserver/*/*RocksDB*.cpp ]]; then
                 ninja -C build_output fdbserver/rocksdb-prefix/src/rocksdb-stamp/rocksdb-download
               fi
-              if ! clang-tidy -p build_output --warnings-as-errors='*' "$FILE"; then
+              if ! /usr/bin/clang-tidy -p build_output --warnings-as-errors='*' "$FILE"; then
                 PASSED=false
               fi
               echo

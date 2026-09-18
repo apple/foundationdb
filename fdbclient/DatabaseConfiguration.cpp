@@ -20,6 +20,7 @@
 
 #include <cstdio>
 #include "fdbclient/DatabaseConfiguration.h"
+#include "flow/ParseNumber.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "flow/ITrace.h"
@@ -59,22 +60,19 @@ void DatabaseConfiguration::resetInternal() {
 }
 
 int toInt(ValueRef const& v) {
-	return atoi(v.toString().c_str());
+	return parseNumberPrefix<int>(v).orDefault(0);
 }
 
 void parse(int* i, ValueRef const& v) {
-	// FIXME: Sanity checking
-	*i = atoi(v.toString().c_str());
+	*i = parseNumberPrefix<int>(v).orDefault(0);
 }
 
 void parse(int64_t* i, ValueRef const& v) {
-	// FIXME: Sanity checking
-	*i = atoll(v.toString().c_str());
+	*i = parseNumberPrefix<int64_t>(v).orDefault(0);
 }
 
 void parse(double* i, ValueRef const& v) {
-	// FIXME: Sanity checking
-	*i = atof(v.toString().c_str());
+	*i = parseNumberPrefix<double>(v).orDefault(0);
 }
 
 void parseReplicationPolicy(Reference<IReplicationPolicy>* policy, ValueRef const& v) {
@@ -888,7 +886,7 @@ bool DatabaseConfiguration::isOverridden(std::string key) const {
 	key = configKeysPrefix.toString() + std::move(key);
 
 	if (mutableConfiguration.present()) {
-		return mutableConfiguration.get().find(key) != mutableConfiguration.get().end();
+		return mutableConfiguration.get().contains(key);
 	}
 
 	const int keyLen = key.size();

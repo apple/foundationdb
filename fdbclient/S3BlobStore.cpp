@@ -545,11 +545,17 @@ void S3BlobStoreEndpoint::processRequestFailure(Reference<HTTP::IncomingResponse
 	}
 }
 
-Future<bool> S3BlobStoreEndpoint::preRetryCheck(std::string const& verb,
-                                                std::string const& resource,
-                                                ReusableConnection& rconn,
-                                                int requestTimeout,
-                                                bool& retryExtended) {
+// The strings are consumed before suspension; doRequest_impl retains its connection and retry state while awaiting us.
+Future<bool> S3BlobStoreEndpoint::preRetryCheck(
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
+    std::string const& verb,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
+    std::string const& resource,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
+    ReusableConnection& rconn,
+    int requestTimeout,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
+    bool& retryExtended) {
 	if (!isWriteRequest(verb) || !CLIENT_KNOBS->BACKUP_ALLOW_DRYRUN) {
 		co_return true;
 	}

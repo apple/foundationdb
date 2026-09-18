@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ParseNumber.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
@@ -112,8 +113,13 @@ Future<Void> httpKVRequestCallback(Reference<SimHTTPKVStore> kvStore,
 	ASSERT(req->data.headers.contains("UID"));
 	ASSERT(req->data.headers.contains("SeqNo"));
 
-	int clientId = atoi(req->data.headers["ClientID"].c_str());
-	int seqNo = atoi(req->data.headers["SeqNo"].c_str());
+	auto clientIdValue = parseNumberPrefix<int>(StringRef(req->data.headers["ClientID"]));
+	auto seqNoValue = parseNumberPrefix<int>(StringRef(req->data.headers["SeqNo"]));
+	if (!clientIdValue.present() || !seqNoValue.present()) {
+		throw http_request_failed();
+	}
+	int clientId = clientIdValue.get();
+	int seqNo = seqNoValue.get();
 
 	ASSERT(req->data.headers.contains("Content-Length"));
 	ASSERT_EQ(req->data.headers["Content-Length"], std::to_string(req->data.content.size()));
