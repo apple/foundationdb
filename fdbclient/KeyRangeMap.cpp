@@ -25,6 +25,10 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/UnitTest.h"
 
+#include <initializer_list>
+#include <type_traits>
+#include <utility>
+
 void KeyRangeActorMap::getRangesAffectedByInsertion(const KeyRangeRef& keys, std::vector<KeyRange>& affectedRanges) {
 	auto s = map.rangeContaining(keys.begin);
 	if (s.begin() != keys.begin && s.value().isValid() && !s.value().isReady())
@@ -316,6 +320,56 @@ Future<Void> krmSetRangeCoalescing(Reference<ReadYourWritesTransaction> const& t
                                    KeyRange const& maxRange,
                                    Value const& value) {
 	return holdWhile(tr, krmSetRangeCoalescing_(tr.getPtr(), mapPrefix, range, maxRange, value));
+}
+
+TEST_CASE("/keyrangemap/coalesced/singleKey") {
+	Arena arena;
+	const Key mapEnd = "z\x00"_sr;
+	CoalescedKeyRangeMap<int, int, KeyBytesMetric<int>> owning(0, mapEnd);
+	CoalescedKeyRefRangeMap<int, int, KeyBytesMetric<int>> arenaBacked(0, mapEnd);
+
+	auto check = [&](const auto& map, std::initializer_list<std::pair<KeyRef, int>> expected) {
+		auto actual = map.ranges().begin();
+		int expectedMetric = 0;
+		for (auto boundary = expected.begin(); boundary != expected.end(); ++boundary) {
+			ASSERT(actual != map.ranges().end());
+			ASSERT(actual.begin() == boundary->first);
+			ASSERT(actual.value() == boundary->second);
+			auto next = boundary + 1;
+			ASSERT(actual.end() == (next == expected.end() ? mapEnd : next->first));
+			using StoredKey = std::decay_t<decltype(actual.begin())>;
+			expectedMetric += boundary->first.size() + sizeof(MapPair<StoredKey, int>);
+			++actual;
+		}
+		ASSERT(actual == map.ranges().end());
+		ASSERT(map.sumRange(allKeys.begin, KeyRef(mapEnd)) == expectedMetric);
+	};
+	auto insertAndCheck = [&](KeyRef key, int value, std::initializer_list<std::pair<KeyRef, int>> expected) {
+		owning.insert(key, value);
+		arenaBacked.insert(key, value, arena);
+		check(owning, expected);
+		check(arenaBacked, expected);
+	};
+
+	// Split a range, repeat an insertion, and extend through the immediate successor.
+	insertAndCheck("b"_sr, 1, { { ""_sr, 0 }, { "b"_sr, 1 }, { "b\x00"_sr, 0 } });
+	insertAndCheck("b"_sr, 1, { { ""_sr, 0 }, { "b"_sr, 1 }, { "b\x00"_sr, 0 } });
+	insertAndCheck("b\x00"_sr, 1, { { ""_sr, 0 }, { "b"_sr, 1 }, { "b\x00\x00"_sr, 0 } });
+
+	// Overwrite a boundary, then coalesce with the left, right, and both neighbors.
+	insertAndCheck("b"_sr, 2, { { ""_sr, 0 }, { "b"_sr, 2 }, { "b\x00"_sr, 1 }, { "b\x00\x00"_sr, 0 } });
+	insertAndCheck("b"_sr, 0, { { ""_sr, 0 }, { "b\x00"_sr, 1 }, { "b\x00\x00"_sr, 0 } });
+	insertAndCheck("b"_sr, 1, { { ""_sr, 0 }, { "b"_sr, 1 }, { "b\x00\x00"_sr, 0 } });
+	insertAndCheck("b\x00"_sr, 0, { { ""_sr, 0 }, { "b"_sr, 1 }, { "b\x00"_sr, 0 } });
+	insertAndCheck("b"_sr, 0, { { ""_sr, 0 } });
+	insertAndCheck("c"_sr, 0, { { ""_sr, 0 } });
+
+	// Keep the beginning and end sentinels, including when keyAfter(key) equals mapEnd.
+	insertAndCheck(""_sr, 1, { { ""_sr, 1 }, { "\x00"_sr, 0 } });
+	insertAndCheck(""_sr, 0, { { ""_sr, 0 } });
+	insertAndCheck("z"_sr, 1, { { ""_sr, 0 }, { "z"_sr, 1 } });
+	insertAndCheck("z"_sr, 0, { { ""_sr, 0 } });
+	return Void();
 }
 
 TEST_CASE("/keyrangemap/decoderange/aligned") {
