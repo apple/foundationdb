@@ -13,7 +13,7 @@ For related information, also see:
  * :doc:`platforms` that affect the operation of FoundationDB.
  * :ref:`system-requirements` for OS/hardware requirements.
  * :doc:`anti-features` for limitations of the scope of the FoundationDB core.
- * :ref:`developer-guide-peformance-considerations` for how different workloads can limit performance.
+ * :ref:`developer-guide-performance-considerations` for how different workloads can limit performance.
  
 Design limitations
 ==================

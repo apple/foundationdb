@@ -224,7 +224,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 			try {
 				while (!self->conn) {
 					// sometimes do resolve and connect directly, other times simulate what rest kms connector does
-					// and resolve endpoints themself and then connect to one directly
+					// and resolve endpoints themselves and then connect to one directly
 					if (self->manualResolve) {
 						std::vector<NetworkAddress> addrs =
 						    co_await INetworkConnections::net()->resolveTCPEndpoint(self->hostname, self->service);

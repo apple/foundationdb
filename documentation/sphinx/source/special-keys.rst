@@ -83,7 +83,7 @@ Caveats
 ~~~~~~~
 
 #. ``\xff\xff/transaction/read_conflict_range/`` The conflict range for a read is sometimes not known until that read completes (e.g. range reads with limits, key selectors). When you read from these special keys, the returned future first blocks until all pending reads are complete so it can give an accurate response.
-#. ``\xff\xff/transaction/write_conflict_range/`` The conflict range range for a ``set_versionstamped_key`` atomic op is not known until commit time. You'll get an approximate range (the actual range will be a subset of the approximate range) until the precise range is known.
+#. ``\xff\xff/transaction/write_conflict_range/`` The conflict range for a ``set_versionstamped_key`` atomic op is not known until commit time. You'll get an approximate range (the actual range will be a subset of the approximate range) until the precise range is known.
 #. ``\xff\xff/transaction/conflicting_keys/`` Since using this feature costs server (i.e., commit proxy and resolver) resources, it's disabled by default. You must opt in by setting the ``report_conflicting_keys`` transaction option.
 
 Metrics module

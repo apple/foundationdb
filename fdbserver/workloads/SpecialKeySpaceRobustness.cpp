@@ -130,7 +130,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			}
 		}
 		tx->reset();
-		// "Exclude" same address multiple times, and only the first excluson should trigger a system metadata update.
+		// "Exclude" same address multiple times, and only the first exclusion should trigger a system metadata update.
 		{
 			Error err;
 			try {
@@ -380,7 +380,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			}
 		}
 		// test lock and unlock
-		// maske sure we lock the database
+		// make sure we lock the database
 		while (true) {
 			Error err;
 			try {

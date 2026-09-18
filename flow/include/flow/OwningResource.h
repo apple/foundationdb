@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_OWNING_REOSURCE_H
-#define FLOW_OWNING_REOSURCE_H
+#ifndef FLOW_OWNING_RESOURCE_H
+#define FLOW_OWNING_RESOURCE_H
 
 #include "flow/Arena.h"
 #include "flow/Error.h"
@@ -154,4 +154,4 @@ public:
 	T& operator*() const { return *(this->operator->()); }
 };
 
-#endif // FLOW_OWNING_REOSURCE_H
+#endif // FLOW_OWNING_RESOURCE_H

@@ -6,7 +6,7 @@ FoundationDB contains many dtrace probes that can be inspected during
 runtime with tools like bcc and SystemTap. All of them are in the
 ``foundationdb`` provider namespace.
 
-``FDB_TRACE_PROBE`` is simply an alias to the varias ``DTRACE_PROBE``
+``FDB_TRACE_PROBE`` is simply an alias to the various ``DTRACE_PROBE``
 macros.
 
 Probes

@@ -576,7 +576,7 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 		throw platform_error();
 	}
 
-	PERFORMACE_INFORMATION perf;
+	PERFORMANCE_INFORMATION perf;
 	if (!GetPerformanceInfo(&perf, sizeof(perf))) {
 		TraceEvent(SevError, "WindowsGetMemPerformanceInfo").GetLastError();
 		throw platform_error();
@@ -3273,7 +3273,7 @@ void outOfMemory() {
 	TraceEvent("MemSample")
 	    .detail("Count", memSampleSize)
 	    .detail("TotalSize", memSampleSize * ((int)(sizeof(void*) + sizeof(uint32_t) + sizeof(size_t))))
-	    .detail("SapmleCount", memSampleSize)
+	    .detail("SampleCount", memSampleSize)
 	    .detail("Hash", "memSamples")
 	    .detail("Bt", "na");
 	TRACEALLOCATOR(16);
@@ -3496,7 +3496,7 @@ ImageInfo getImageInfo() {
 
 size_t raw_backtrace(void** addresses, int maxStackDepth) {
 #if !defined(__APPLE__)
-	// absl::GetStackTrace doesn't have an implementation for MacOS.
+	// absl::GetStackTrace doesn't have an implementation for macOS.
 	return absl::GetStackTrace(addresses, maxStackDepth, 0);
 #else
 	return backtrace(addresses, maxStackDepth);
