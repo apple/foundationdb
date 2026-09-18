@@ -420,7 +420,8 @@ public:
 					continue;
 				}
 
-				int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
+				int64_t loadBytes =
+				    self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty, req.rankOnWorstMember);
 				if (req.storageQueueAware) {
 					Optional<int64_t> storageQueueSize = self->teams[currentIndex]->getLongestStorageQueueSize();
 					if (!storageQueueSize.present()) {
@@ -476,7 +477,7 @@ public:
 		int64_t bestLoadBytes = 0;
 		bool wigglingBestOption = false; // best option contains server in paused wiggle state
 		for (int i = 0; i < candidates.size(); i++) {
-			int64_t loadBytes = candidates[i]->getLoadBytes(true, req.inflightPenalty);
+			int64_t loadBytes = candidates[i]->getLoadBytes(true, req.inflightPenalty, req.rankOnWorstMember);
 			if (!bestOption.present() || req.lessCompare(bestOption.get(), candidates[i], bestLoadBytes, loadBytes)) {
 
 				// bestOption doesn't contain wiggling SS while current team does. Don't replace bestOption
@@ -7124,6 +7125,258 @@ public:
 		ASSERT_LT(resTeam.get()->getMinAvailableSpaceRatio(), 0.5);
 	}
 
+	// One nearly-full member is invisible to destination ranking. getLoadBytes scores a team by default on
+	// getLoadAverage() -- the mean across members -- so at replication factor 3 a server carrying three
+	// times its share lifts its team's score by only about a third, and availableSpaceMultiplier is
+	// exactly 1.0 for any team whose worst member is above AVAILABLE_SPACE_RATIO_CUTOFF. A team holding
+	// one server near the alert threshold therefore ranks ahead of a uniformly-loaded team that has more
+	// room on every member.
+	//
+	// This fixture is drawn from a production incident: a host driven to ~22 % free stayed a preferred
+	// destination for the whole of a migration, well above the level operators alert on and 4.5x the cutoff,
+	// because its excess was divided across the team. Ranking a team by its fullest member rather
+	// than its mean should fail this case; update the expectation rather than deleting it.
+	static Future<Void> GetTeam_OneFullMemberHiddenByTeamMean() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		int processSize = 6;
+		int teamSize = 3;
+		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		const int64_t MB = 1024LL * 1024;
+		const int64_t capacity = 10000 * MB;
+
+		// Team A, servers 1-3: one member at 22.5% free carrying most of the data, two nearly empty.
+		GetStorageMetricsReply crowded;
+		crowded.capacity.bytes = capacity;
+		crowded.available.bytes = 2250 * MB; // 22.5% free, i.e. past the point operators are paged
+		crowded.load.bytes = 7750 * MB;
+
+		GetStorageMetricsReply empty;
+		empty.capacity.bytes = capacity;
+		empty.available.bytes = 9900 * MB;
+		empty.load.bytes = 100 * MB;
+
+		// Team B, servers 4-6: every member has more room than team A's worst, and none is near full.
+		GetStorageMetricsReply even;
+		even.capacity.bytes = capacity;
+		even.available.bytes = 6000 * MB; // 60% free on all three
+		even.load.bytes = 4000 * MB;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(4, 0), UID(5, 0), UID(6, 0) }), IsInitialTeam::True);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		collection->server_info[UID(1, 0)]->setMetrics(crowded);
+		collection->server_info[UID(2, 0)]->setMetrics(empty);
+		collection->server_info[UID(3, 0)]->setMetrics(empty);
+		for (int id = 4; id <= 6; ++id) {
+			collection->server_info[UID(id, 0)]->setMetrics(even);
+		}
+
+		// Without this the eligibility survey never runs and the case asserts nothing.
+		collection->teamPivots.lastPivotValuesUpdate = -100;
+
+		Reference<TCTeamInfo> crowdedTeam = collection->teams[0];
+		Reference<TCTeamInfo> evenTeam = collection->teams[1];
+
+		// The mean hides the crowded member: (7750 + 100 + 100)/3 = 2650 MB against 4000 MB.
+		ASSERT_LT(crowdedTeam->getLoadBytes(false), evenTeam->getLoadBytes(false));
+
+		// Yet its worst member has far less room, and is the one that would page.
+		ASSERT_LT(crowdedTeam->getMinAvailableSpaceRatio(false), evenTeam->getMinAvailableSpaceRatio(false));
+
+		// Free space contributes nothing to the score: both multipliers are exactly 1.0, because both
+		// teams' worst members sit above AVAILABLE_SPACE_RATIO_CUTOFF.
+		ASSERT_GT(crowdedTeam->getMinAvailableSpaceRatio(false), SERVER_KNOBS->AVAILABLE_SPACE_RATIO_CUTOFF);
+		ASSERT_EQ(crowdedTeam->getLoadBytes(false), (7750 + 100 + 100) / 3 * MB);
+		ASSERT_EQ(evenTeam->getLoadBytes(false), 4000 * MB);
+
+		// So asking for the least-utilized destination returns the team containing the nearly-full server.
+		GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
+		                   PreferLowerDiskUtil::True,
+		                   TeamMustHaveShards::False,
+		                   PreferLowerReadUtil::False,
+		                   PreferWithinShardLimit::False);
+		co_await collection->getTeam(req);
+
+		const auto& [resTeam, srcFound] = req.reply.getFuture().get();
+		ASSERT(resTeam.present());
+		auto ids = resTeam.get()->getServerIDs();
+		const std::set<UID> selected(ids.begin(), ids.end());
+		ASSERT(selected == std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }));
+	}
+
+	// Same fixture as GetTeam_OneFullMemberHiddenByTeamMean, with the request asking to be ranked on its
+	// worst member. The nearly-full member then raises its team's score instead of hiding inside the mean,
+	// and the uniformly-loaded team wins.
+	static Future<Void> GetTeam_WorstMemberRankingExposesFullMember() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		int processSize = 6;
+		int teamSize = 3;
+		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		const int64_t MB = 1024LL * 1024;
+		const int64_t capacity = 10000 * MB;
+
+		GetStorageMetricsReply crowded;
+		crowded.capacity.bytes = capacity;
+		crowded.available.bytes = 2250 * MB; // 22.5% free
+		crowded.load.bytes = 7750 * MB;
+
+		GetStorageMetricsReply empty;
+		empty.capacity.bytes = capacity;
+		empty.available.bytes = 9900 * MB;
+		empty.load.bytes = 100 * MB;
+
+		GetStorageMetricsReply even;
+		even.capacity.bytes = capacity;
+		even.available.bytes = 6000 * MB; // 60% free on all three
+		even.load.bytes = 4000 * MB;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(4, 0), UID(5, 0), UID(6, 0) }), IsInitialTeam::True);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		collection->server_info[UID(1, 0)]->setMetrics(crowded);
+		collection->server_info[UID(2, 0)]->setMetrics(empty);
+		collection->server_info[UID(3, 0)]->setMetrics(empty);
+		for (int id = 4; id <= 6; ++id) {
+			collection->server_info[UID(id, 0)]->setMetrics(even);
+		}
+		collection->teamPivots.lastPivotValuesUpdate = -100;
+
+		Reference<TCTeamInfo> crowdedTeam = collection->teams[0];
+		Reference<TCTeamInfo> evenTeam = collection->teams[1];
+
+		// Ranked on the mean, the crowded team scores lower, i.e. looks like the better destination.
+		ASSERT_LT(crowdedTeam->getLoadBytes(false), evenTeam->getLoadBytes(false));
+		// Ranked on its worst member, the full server carries its own weight and the ordering inverts.
+		ASSERT_GT(crowdedTeam->getLoadBytes(false, 1.0, true), evenTeam->getLoadBytes(false, 1.0, true));
+		// The even team's members are equally loaded, so its worst member is its mean either way.
+		ASSERT_EQ(evenTeam->getLoadBytes(false, 1.0, true), evenTeam->getLoadBytes(false));
+
+		GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
+		                   PreferLowerDiskUtil::True,
+		                   TeamMustHaveShards::False,
+		                   PreferLowerReadUtil::False,
+		                   PreferWithinShardLimit::False);
+		req.rankOnWorstMember = true;
+		co_await collection->getTeam(req);
+
+		const auto& [resTeam, srcFound] = req.reply.getFuture().get();
+		ASSERT(resTeam.present());
+		auto ids = resTeam.get()->getServerIDs();
+		const std::set<UID> selected(ids.begin(), ids.end());
+		ASSERT(selected == std::set<UID>({ UID(4, 0), UID(5, 0), UID(6, 0) }));
+	}
+
+	// Places `rounds` shards by repeatedly asking for the least-utilized destination and charging the chosen
+	// team's members, then returns the fullest server's bytes alongside an even share of what was actually
+	// placed, so a caller can tell concentration from ordinary growth. Server 1 sits in six of the seven
+	// teams and servers 6-8 in one; returns early if nothing is eligible any more.
+	static Future<std::pair<int64_t, int64_t>> peakAfterPlacement(bool rankOnWorstMember, int rounds) {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		const int processSize = 10;
+		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
+
+		const int64_t MB = 1024LL * 1024;
+		const int64_t capacity = 10000 * MB;
+		const int64_t shard = 100 * MB;
+
+		// zoneid is id % 5, so every team below spans three distinct zones.
+		std::vector<std::set<UID>> teams = { { UID(1, 0), UID(2, 0), UID(3, 0) }, { UID(1, 0), UID(2, 0), UID(4, 0) },
+			                                 { UID(1, 0), UID(2, 0), UID(5, 0) }, { UID(1, 0), UID(3, 0), UID(4, 0) },
+			                                 { UID(1, 0), UID(3, 0), UID(5, 0) }, { UID(1, 0), UID(4, 0), UID(5, 0) },
+			                                 { UID(6, 0), UID(7, 0), UID(8, 0) } };
+		for (const auto& t : teams) {
+			collection->addTeam(t, IsInitialTeam::True);
+		}
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		std::map<UID, int64_t> used;
+		for (int id = 1; id <= processSize; ++id) {
+			used[UID(id, 0)] = 0;
+		}
+		auto publish = [&](UID id) {
+			GetStorageMetricsReply m;
+			m.capacity.bytes = capacity;
+			m.load.bytes = used[id];
+			m.available.bytes = capacity - used[id];
+			collection->server_info[id]->setMetrics(m);
+		};
+		for (int id = 1; id <= processSize; ++id) {
+			publish(UID(id, 0));
+		}
+
+		int placed = 0;
+		for (int i = 0; i < rounds; i++) {
+			// Force the eligibility survey, or it is computed once and never sees the updated metrics.
+			collection->teamPivots.lastPivotValuesUpdate = -100;
+			GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
+			                   PreferLowerDiskUtil::True,
+			                   TeamMustHaveShards::False,
+			                   PreferLowerReadUtil::False,
+			                   PreferWithinShardLimit::False);
+			req.rankOnWorstMember = rankOnWorstMember;
+			co_await collection->getTeam(req);
+			const auto& [resTeam, srcFound] = req.reply.getFuture().get();
+			if (!resTeam.present()) {
+				break;
+			}
+			for (const UID& id : resTeam.get()->getServerIDs()) {
+				used[id] += shard;
+				publish(id);
+			}
+			placed++;
+		}
+
+		// Guards the regime, not just the arithmetic: if the fixture is scaled up until the cluster runs
+		// out of room, every configuration is driven to the eligibility floor instead and the peaks
+		// compare equal, which reads as "the ranking made no difference" rather than as a broken fixture.
+		ASSERT_GT(placed, rounds / 2);
+
+		int64_t peak = 0;
+		std::set<UID> inTeams;
+		for (const auto& t : teams) {
+			inTeams.insert(t.begin(), t.end());
+		}
+		for (const UID& id : inTeams) {
+			peak = std::max(peak, used[id]);
+		}
+		co_return std::make_pair(peak, placed * shard * 3 / (int64_t)inTeams.size());
+	}
+
+	// In the incident this models, each individual placement was defensible and the skew accumulated over
+	// thousands of them, so a single getTeam assertion cannot show either the defect or the fix. This repeats
+	// placement against lopsided team membership -- one server in six of seven teams, the ratio an exclusion
+	// leaves behind -- and measures how full that server ends up.
+	//
+	// Ranking on the team mean divides its excess by the replication factor, so it keeps being chosen and
+	// finishes well past an even share of what was placed. Ranking the same request on the worst member
+	// removes that division and lowers the peak. The run is deliberately left far from full, which is also
+	// the regime where the existing free-space multiplier is provably no help: every server is above the
+	// cutoff, so all teams take an identical multiplier of exactly 1.0.
+	static Future<Void> GetTeam_RepeatedPlacementConcentratesOnSharedMember() {
+		const int rounds = 40;
+		auto [peakMean, evenShare] = co_await peakAfterPlacement(false, rounds);
+		auto [peakWorst, evenShareWorst] = co_await peakAfterPlacement(true, rounds);
+
+		TraceEvent("RepeatedPlacementPeak")
+		    .detail("PeakOnTeamMean", peakMean)
+		    .detail("PeakOnWorstMember", peakWorst)
+		    .detail("EvenShare", evenShare);
+
+		// Equal shares means both runs placed the same count, so the peaks are comparable.
+		ASSERT_EQ(evenShare, evenShareWorst);
+		// The shared member absorbs materially more than an even share of what was placed.
+		ASSERT_GT(peakMean, evenShare);
+		// Ranking the request on its worst member lowers the peak.
+		ASSERT_LT(peakWorst, peakMean);
+	}
+
 	// A destination team must be *fully* healthy, so during a migration a brand-new empty server whose
 	// teams all still contain an excluded member has no eligible destination team and receives nothing,
 	// however much free space it has: DD prefers a half-full healthy team to an empty unhealthy one.
@@ -7883,6 +8136,18 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 
 TEST_CASE("/DataDistribution/GetTeam/FreeSpaceIgnoredAboveCutoff") {
 	co_await DDTeamCollectionUnitTest::GetTeam_FreeSpaceIgnoredAboveCutoff();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/OneFullMemberHiddenByTeamMean") {
+	co_await DDTeamCollectionUnitTest::GetTeam_OneFullMemberHiddenByTeamMean();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/WorstMemberRankingExposesFullMember") {
+	co_await DDTeamCollectionUnitTest::GetTeam_WorstMemberRankingExposesFullMember();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/RepeatedPlacementConcentratesOnSharedMember") {
+	co_await DDTeamCollectionUnitTest::GetTeam_RepeatedPlacementConcentratesOnSharedMember();
 }
 
 TEST_CASE("/DataDistribution/GetTeam/UnhealthyTeamStrandsEmptyServer") {
