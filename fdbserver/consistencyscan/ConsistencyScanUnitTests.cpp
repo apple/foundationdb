@@ -18,17 +18,15 @@
  * limitations under the License.
  */
 
+#include "../../fdbclient/include/fdbclient/StorageServerInterface.h"
+
 #include <algorithm>
 
 #include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "flow/UnitTest.h"
 
 namespace {
-
-// Builds a StorageServerInterface with real, registered endpoints. checkRangeReplies() consults
-// g_simulator->getProcessByAddress(interface.address()) when running in simulation, which asserts if the
-// address isn't a known simulated process; initEndpoints() binds the interface to whatever process/transport
-// is actually running the test (real or simulated), so it's safe to use in either mode.
+// Builds a StorageServerInterface for passing into the unit tests.
 StorageServerInterface makeTestSSI() {
 	StorageServerInterface ssi;
 	ssi.initEndpoints();
@@ -37,6 +35,7 @@ StorageServerInterface makeTestSSI() {
 
 GetKeyValuesReply makeReply(std::vector<std::pair<KeyRef, ValueRef>> const& kvs, bool more) {
 	GetKeyValuesReply reply;
+	reply.data.reserve(reply.arena, kvs.size());
 	for (auto const& kv : kvs) {
 		reply.data.push_back(reply.arena, KeyValueRef(kv.first, kv.second));
 	}
@@ -45,17 +44,16 @@ GetKeyValuesReply makeReply(std::vector<std::pair<KeyRef, ValueRef>> const& kvs,
 	return reply;
 }
 
-// Simulates a single storage server answering a firstGreaterThan(cursor) (or, if cursor is absent,
-// firstGreaterOrEqual(range.begin)) request against its own ground-truth data, returning up to
-// pageSize entries and setting `more` according to whether any of its own data is left unread.
-GetKeyValuesReply pageFrom(std::vector<KeyValueRef> const& data, Optional<KeyRef> const& cursor, size_t pageSize) {
+// Simulates a single storage server answering page read, starting from firstGreaterThan(lastReadKey) if set or
+// from the beggining if absent.
+GetKeyValuesReply pageFrom(std::vector<KeyValueRef> const& data, Optional<KeyRef> const& lastReadKey, size_t pageSize) {
 	size_t startIdx = 0;
-	if (cursor.present()) {
-		while (startIdx < data.size() && data[startIdx].key <= cursor.get()) {
+	if (lastReadKey.present()) {
+		while (startIdx < data.size() && data[startIdx].key <= lastReadKey.get()) {
 			startIdx++;
 		}
 	}
-	size_t endIdx = std::min(data.size(), startIdx + pageSize);
+	const size_t endIdx = std::min(data.size(), startIdx + pageSize);
 	GetKeyValuesReply reply;
 	for (size_t i = startIdx; i < endIdx; i++) {
 		reply.data.push_back(reply.arena, data[i]);
@@ -65,19 +63,17 @@ GetKeyValuesReply pageFrom(std::vector<KeyValueRef> const& data, Optional<KeyRef
 	return reply;
 }
 
-// Reverse counterpart of pageFrom() above: `cursor`, if present, is an exclusive upper bound (only keys
-// strictly less than it are eligible), matching how readFromAllStorageServers() resumes a backward read.
-// Entries are returned in descending order, as a real storage server does for a negative-limit read.
+// Reverse counterpart of pageFrom() above
 GetKeyValuesReply pageFromReverse(std::vector<KeyValueRef> const& data,
-                                  Optional<KeyRef> const& cursor,
+                                  Optional<KeyRef> const& lastReadKey,
                                   size_t pageSize) {
 	size_t endIdx = data.size(); // exclusive
-	if (cursor.present()) {
-		while (endIdx > 0 && data[endIdx - 1].key >= cursor.get()) {
+	if (lastReadKey.present()) {
+		while (endIdx > 0 && data[endIdx - 1].key >= lastReadKey.get()) {
 			endIdx--;
 		}
 	}
-	size_t startIdx = endIdx >= pageSize ? endIdx - pageSize : 0;
+	const size_t startIdx = endIdx >= pageSize ? endIdx - pageSize : 0;
 	GetKeyValuesReply reply;
 	for (size_t i = endIdx; i > startIdx; i--) {
 		reply.data.push_back(reply.arena, data[i - 1]);
@@ -87,6 +83,81 @@ GetKeyValuesReply pageFromReverse(std::vector<KeyValueRef> const& data,
 	return reply;
 }
 
+// Drives checkRangeReplies() across multiple rounds the way checkDataConsistency() does: each round
+// pages every server's ground-truth data independently (so the two servers' page boundaries drift out
+// of sync with each other, exactly like real, differently-sized replies would), feeds the replies
+// through checkRangeReplies(), and resumes the next round from the returned nextKey. This validates
+// that the *cumulative* unique/mismatch counts across all rounds land exactly on the errors that were
+// planted below, neither over- nor undercounting.
+void simulateConsistencyScan(const std::vector<KeyValueRef>& serverAData,
+                             const std::vector<KeyValueRef>& serverBData,
+                             const size_t pageSize,
+                             const Reverse reverse,
+                             const int uniqueA,
+                             const int uniqueB,
+                             const int mismatched) {
+	std::vector servers = { makeTestSSI(), makeTestSSI() };
+	KeyRangeRef range(""_sr, "\xff\xff"_sr);
+
+	std::vector<int64_t> totalUniqueRefKeys(servers.size(), 0);
+	std::vector<int64_t> totalUniqueCmpKeys(servers.size(), 0);
+	std::vector<int64_t> totalMismatchedValues(servers.size(), 0);
+
+	Optional<KeyRef> nextKey;
+	int maxExpectedRounds = serverAData.size() + serverBData.size() + 1;
+	int round = 0;
+	for (; round < maxExpectedRounds; round++) {
+		KeySelector begin;
+		std::vector<ErrorOr<GetKeyValuesReply>> replies;
+		replies.reserve(servers.size());
+		if (reverse) {
+			begin = nextKey.present() ? firstGreaterOrEqual(nextKey.get()) : firstGreaterOrEqual(range.end);
+			replies.push_back(ErrorOr<GetKeyValuesReply>(pageFromReverse(serverAData, nextKey, pageSize)));
+			replies.push_back(ErrorOr<GetKeyValuesReply>(pageFromReverse(serverBData, nextKey, pageSize)));
+		} else {
+			begin = nextKey.present() ? firstGreaterThan(nextKey.get()) : firstGreaterOrEqual(range.begin);
+			replies.push_back(ErrorOr<GetKeyValuesReply>(pageFrom(serverAData, nextKey, pageSize)));
+			replies.push_back(ErrorOr<GetKeyValuesReply>(pageFrom(serverBData, nextKey, pageSize)));
+		}
+
+		RangeConsistencyResult result =
+		    checkRangeReplies(servers, replies, range, begin, reverse);
+		for (int i = 0; i < result.uniqueRefKeys.size(); i++) {
+			totalUniqueRefKeys[i] += result.uniqueRefKeys[i];
+			totalUniqueCmpKeys[i] += result.uniqueCmpKeys[i];
+			totalMismatchedValues[i] += result.mismatchedValues[i];
+		}
+
+		if (!result.nextKey.present()) {
+			break;
+		}
+		nextKey = result.nextKey;
+	}
+	ASSERT(round <
+	       maxExpectedRounds); // otherwise pagination never converged -- likely a bug in the test, or a real regression
+
+	ASSERT_EQ(totalUniqueRefKeys[1], uniqueA);
+	ASSERT_EQ(totalUniqueCmpKeys[1], uniqueB);
+	ASSERT_EQ(totalMismatchedValues[1], mismatched);
+}
+
+// Run simulateConsistencyScan() across all meaningful configurations. This means scanning in both forward
+// and reverse order, with either servers as the reference, and with as many page sizes as make sense
+void simulateAllConsistencyScans(const std::vector<KeyValueRef>& serverAData,
+                                 const std::vector<KeyValueRef>& serverBData,
+                                 const int uniqueA,
+                                 const int uniqueB,
+                                 const int mismatched) {
+
+	// Check all the different page sizes and both forward and reverse
+	for (size_t pageSize = 1; pageSize < serverAData.size() || pageSize < serverBData.size(); pageSize++) {
+		simulateConsistencyScan(serverAData, serverBData, pageSize, Reverse(false), uniqueA, uniqueB, mismatched);
+		simulateConsistencyScan(serverBData, serverAData, pageSize, Reverse(false), uniqueB, uniqueA, mismatched);
+		simulateConsistencyScan(serverAData, serverBData, pageSize, Reverse(true), uniqueA, uniqueB, mismatched);
+		simulateConsistencyScan(serverBData, serverAData, pageSize, Reverse(true), uniqueB, uniqueA, mismatched);
+	}
+}
+
 } // namespace
 
 // Two servers agree on every key they both actually read ("b" and "c"), but server 0's reply happened to
@@ -94,9 +165,9 @@ GetKeyValuesReply pageFromReverse(std::vector<KeyValueRef> const& data,
 // result.nextKey (the minimum last-read key among servers still reporting more data) rather than treating
 // server 1's shorter raw reply as containing missing/unique keys.
 TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/MisalignedPaginationNotOverreported") {
-	std::vector<StorageServerInterface> servers = { makeTestSSI(), makeTestSSI() };
-	KeyRangeRef range("a"_sr, "z"_sr);
-	KeySelector begin = firstGreaterOrEqual(range.begin);
+	const std::vector servers = { makeTestSSI(), makeTestSSI() };
+	const KeyRangeRef range("a"_sr, "z"_sr);
+	const KeySelector begin = firstGreaterOrEqual(range.begin);
 
 	std::vector<ErrorOr<GetKeyValuesReply>> replies;
 	replies.push_back(ErrorOr<GetKeyValuesReply>(
@@ -104,7 +175,7 @@ TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/MisalignedPaginationNotO
 	              /*more=*/true)));
 	replies.push_back(ErrorOr<GetKeyValuesReply>(makeReply({ { "b"_sr, "1"_sr }, { "c"_sr, "1"_sr } }, /*more=*/true)));
 
-	RangeConsistencyResult result = checkRangeReplies(servers, replies, range, begin, /*performQuiescentChecks=*/false);
+	RangeConsistencyResult result = checkRangeReplies(servers, replies, range, begin);
 
 	ASSERT_EQ(result.firstValidServer, 0);
 	ASSERT(result.nextKey.present());
@@ -122,9 +193,9 @@ TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/MisalignedPaginationNotO
 // Positive control for the test above: within the bounded comparison window, server 1 is actually missing "c"
 // (a genuine gap, not just an artifact of pagination), so checkRangeReplies() should still catch it.
 TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/GenuineMissingKeyStillDetected") {
-	std::vector<StorageServerInterface> servers = { makeTestSSI(), makeTestSSI() };
-	KeyRangeRef range("a"_sr, "z"_sr);
-	KeySelector begin = firstGreaterOrEqual(range.begin);
+	const std::vector<StorageServerInterface> servers = { makeTestSSI(), makeTestSSI() };
+	const KeyRangeRef range("a"_sr, "z"_sr);
+	const KeySelector begin = firstGreaterOrEqual(range.begin);
 
 	std::vector<ErrorOr<GetKeyValuesReply>> replies;
 	replies.push_back(ErrorOr<GetKeyValuesReply>(
@@ -132,7 +203,8 @@ TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/GenuineMissingKeyStillDe
 	replies.push_back(
 	    ErrorOr<GetKeyValuesReply>(makeReply({ { "b"_sr, "1"_sr }, { "d"_sr, "1"_sr } }, /*more=*/false)));
 
-	RangeConsistencyResult result = checkRangeReplies(servers, replies, range, begin, /*performQuiescentChecks=*/false);
+	const RangeConsistencyResult result =
+	    checkRangeReplies(servers, replies, range, begin);
 
 	ASSERT_EQ(result.firstValidServer, 0);
 	ASSERT(!result.nextKey.present()); // neither server reported more data
@@ -148,9 +220,9 @@ TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/GenuineMissingKeyStillDe
 // should conclude that "d", "e", "f" are genuinely unique to server 0 (not just a pagination artifact,
 // since server 1 truly has no more data coming), and that the range is complete.
 TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/TrailingUniqueKeysMarkRangeComplete") {
-	std::vector<StorageServerInterface> servers = { makeTestSSI(), makeTestSSI() };
-	KeyRangeRef range("a"_sr, "z"_sr);
-	KeySelector begin = firstGreaterOrEqual(range.begin);
+	const std::vector<StorageServerInterface> servers = { makeTestSSI(), makeTestSSI() };
+	const KeyRangeRef range("a"_sr, "z"_sr);
+	const KeySelector begin = firstGreaterOrEqual(range.begin);
 
 	std::vector<ErrorOr<GetKeyValuesReply>> replies;
 	replies.push_back(ErrorOr<GetKeyValuesReply>(makeReply({ { "a"_sr, "1"_sr },
@@ -163,7 +235,8 @@ TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/TrailingUniqueKeysMarkRa
 	replies.push_back(ErrorOr<GetKeyValuesReply>(
 	    makeReply({ { "a"_sr, "1"_sr }, { "b"_sr, "1"_sr }, { "c"_sr, "1"_sr } }, /*more=*/false)));
 
-	RangeConsistencyResult result = checkRangeReplies(servers, replies, range, begin, /*performQuiescentChecks=*/false);
+	const RangeConsistencyResult result =
+	    checkRangeReplies(servers, replies, range, begin);
 
 	ASSERT_EQ(result.uniqueRefKeys[1], 3); // d, e, f: really gone, not just unread, since server 1 is done
 	ASSERT_EQ(result.uniqueCmpKeys[1], 0);
@@ -178,120 +251,99 @@ TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/TrailingUniqueKeysMarkRa
 	co_return;
 }
 
-// Drives checkRangeReplies() across multiple rounds the way checkDataConsistency() does: each round
-// pages every server's ground-truth data independently (so the two servers' page boundaries drift out
-// of sync with each other, exactly like real, differently-sized replies would), feeds the replies
-// through checkRangeReplies(), and resumes the next round from the returned nextKey. This validates
-// that the *cumulative* unique/mismatch counts across all rounds land exactly on the errors that were
-// planted below -- no more (the overreporting bug this refactor fixed) and no less (silently swallowing
-// a real error).
-TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/MultiRoundPaginationMatchesPlantedErrors") {
-	std::vector<StorageServerInterface> servers = { makeTestSSI(), makeTestSSI() };
-	std::vector<KeyValueRef> serverAData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr }, { "c"_sr, "v"_sr },
-		                                     { "d"_sr, "v"_sr }, { "e"_sr, "v"_sr }, { "f"_sr, "v"_sr },
-		                                     { "g"_sr, "v"_sr }, { "h"_sr, "v"_sr }, { "i"_sr, "v"_sr },
-		                                     { "j"_sr, "v"_sr } };
-	// Server B is missing "d" (unique to A), has an extra "ee" that A doesn't have (unique to B), and
-	// disagrees with A on the value of "h". Everything else matches exactly. Since B is missing one key
-	// and has one extra key on either side of "d"/"ee", its page boundaries desync from and then resync
-	// with A's as pagination proceeds -- the scenario this refactor was meant to handle correctly.
-	std::vector<KeyValueRef> serverBData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr },  { "c"_sr, "v"_sr },
-		                                     { "e"_sr, "v"_sr }, { "ee"_sr, "v"_sr }, { "f"_sr, "v"_sr },
-		                                     { "g"_sr, "v"_sr }, { "h"_sr, "X"_sr },  { "i"_sr, "v"_sr },
-		                                     { "j"_sr, "v"_sr } };
-	std::vector<std::vector<KeyValueRef>> serverData = { serverAData, serverBData };
-	KeyRangeRef range("a"_sr, "z"_sr);
-	constexpr size_t pageSize = 3;
+TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/OneUniqueValue") {
+	const std::vector<KeyValueRef> serverAData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr }, { "c"_sr, "v"_sr },
+		                                           { "d"_sr, "v"_sr }, { "e"_sr, "v"_sr }, { "f"_sr, "v"_sr },
+		                                           { "g"_sr, "v"_sr }, { "h"_sr, "v"_sr }, { "i"_sr, "v"_sr },
+		                                           { "j"_sr, "v"_sr } };
+	// Server B is missing "d" (unique to A). Everything else is the same
+	const std::vector<KeyValueRef> serverBData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr }, { "c"_sr, "v"_sr },
+		                                           { "e"_sr, "v"_sr }, { "f"_sr, "v"_sr }, { "g"_sr, "v"_sr },
+		                                           { "h"_sr, "v"_sr }, { "i"_sr, "v"_sr }, { "j"_sr, "v"_sr } };
 
-	std::vector<int64_t> totalUniqueRefKeys(servers.size(), 0);
-	std::vector<int64_t> totalUniqueCmpKeys(servers.size(), 0);
-	std::vector<int64_t> totalMismatchedValues(servers.size(), 0);
-
-	Optional<KeyRef> cursor;
-	int round = 0;
-	for (; round < 20; round++) {
-		KeySelector begin = cursor.present() ? firstGreaterThan(cursor.get()) : firstGreaterOrEqual(range.begin);
-		std::vector<ErrorOr<GetKeyValuesReply>> replies;
-		replies.reserve(serverData.size());
-		for (auto const& data : serverData) {
-			replies.push_back(ErrorOr<GetKeyValuesReply>(pageFrom(data, cursor, pageSize)));
-		}
-
-		RangeConsistencyResult result =
-		    checkRangeReplies(servers, replies, range, begin, /*performQuiescentChecks=*/false);
-		for (int i = 0; i < result.uniqueRefKeys.size(); i++) {
-			totalUniqueRefKeys[i] += result.uniqueRefKeys[i];
-			totalUniqueCmpKeys[i] += result.uniqueCmpKeys[i];
-			totalMismatchedValues[i] += result.mismatchedValues[i];
-		}
-
-		if (!result.nextKey.present()) {
-			break;
-		}
-		cursor = result.nextKey;
-	}
-	ASSERT(round < 20); // otherwise pagination never converged -- likely a bug in the test, or a real regression
-
-	ASSERT_EQ(totalUniqueRefKeys[1], 1); // "d"
-	ASSERT_EQ(totalUniqueCmpKeys[1], 1); // "ee"
-	ASSERT_EQ(totalMismatchedValues[1], 1); // "h"
-
+	simulateAllConsistencyScans(serverAData, serverBData, 1, 0, 0);
 	co_return;
 }
 
-// Reverse counterpart of the test above: same planted errors, but paginated backward (descending), the way
-// readFromAllStorageServers()/checkRangeReplies() page when called with Reverse::True -- e.g. by
-// ConsistencyCheckUrgent when CONSISTENCY_CHECK_BACKWARD_READ is set. Validates that the cumulative
-// unique/mismatch counts land exactly on the planted errors when merging descending-sorted replies, which
-// exercises the reverse-specific comparisons in diffReplies()/checkRangeReplies() (bound direction, "least
-// progress" server selection, etc.) that the forward test above can't reach.
-TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/ReverseMultiRoundPaginationMatchesPlantedErrors") {
-	std::vector<StorageServerInterface> servers = { makeTestSSI(), makeTestSSI() };
-	std::vector<KeyValueRef> serverAData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr }, { "c"_sr, "v"_sr },
-		                                     { "d"_sr, "v"_sr }, { "e"_sr, "v"_sr }, { "f"_sr, "v"_sr },
-		                                     { "g"_sr, "v"_sr }, { "h"_sr, "v"_sr }, { "i"_sr, "v"_sr },
-		                                     { "j"_sr, "v"_sr } };
-	// Same planted errors as the forward test: B is missing "d", has an extra "ee", and disagrees on "h".
-	std::vector<KeyValueRef> serverBData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr },  { "c"_sr, "v"_sr },
-		                                     { "e"_sr, "v"_sr }, { "ee"_sr, "v"_sr }, { "f"_sr, "v"_sr },
-		                                     { "g"_sr, "v"_sr }, { "h"_sr, "X"_sr },  { "i"_sr, "v"_sr },
-		                                     { "j"_sr, "v"_sr } };
-	std::vector<std::vector<KeyValueRef>> serverData = { serverAData, serverBData };
-	KeyRangeRef range("a"_sr, "z"_sr);
-	constexpr size_t pageSize = 3;
+TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/OneMismatchedValue") {
+	const std::vector<KeyValueRef> serverAData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr }, { "c"_sr, "v"_sr },
+		                                           { "d"_sr, "v"_sr }, { "e"_sr, "v"_sr }, { "f"_sr, "v"_sr },
+		                                           { "g"_sr, "v"_sr }, { "h"_sr, "v"_sr }, { "i"_sr, "v"_sr },
+		                                           { "j"_sr, "v"_sr } };
+	// Server B disagrees on "h". Everything else is the same
+	const std::vector<KeyValueRef> serverBData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr }, { "c"_sr, "v"_sr },
+		                                           { "d"_sr, "v"_sr }, { "e"_sr, "v"_sr }, { "f"_sr, "v"_sr },
+		                                           { "g"_sr, "v"_sr }, { "h"_sr, "X"_sr }, { "i"_sr, "v"_sr },
+		                                           { "j"_sr, "v"_sr } };
 
-	std::vector<int64_t> totalUniqueRefKeys(servers.size(), 0);
-	std::vector<int64_t> totalUniqueCmpKeys(servers.size(), 0);
-	std::vector<int64_t> totalMismatchedValues(servers.size(), 0);
+	simulateAllConsistencyScans(serverAData, serverBData, 0, 0, 1);
+	co_return;
+}
 
-	Optional<KeyRef> cursor; // exclusive upper bound; absent means "start from range.end"
-	int round = 0;
-	for (; round < 20; round++) {
-		KeySelector begin = cursor.present() ? firstGreaterOrEqual(cursor.get()) : firstGreaterOrEqual(range.end);
-		std::vector<ErrorOr<GetKeyValuesReply>> replies;
-		replies.reserve(serverData.size());
-		for (auto const& data : serverData) {
-			replies.push_back(ErrorOr<GetKeyValuesReply>(pageFromReverse(data, cursor, pageSize)));
-		}
+TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/MissingMiddleKeys") {
+	const std::vector<KeyValueRef> serverAData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr }, { "c"_sr, "v"_sr },
+		                                           { "d"_sr, "v"_sr }, { "e"_sr, "v"_sr }, { "f"_sr, "v"_sr },
+		                                           { "g"_sr, "v"_sr }, { "h"_sr, "v"_sr }, { "i"_sr, "v"_sr },
+		                                           { "j"_sr, "v"_sr } };
+	// Server B is missing keys d, e, and f.
+	const std::vector<KeyValueRef> serverBData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr }, { "c"_sr, "v"_sr },
+		                                           { "g"_sr, "v"_sr }, { "h"_sr, "v"_sr }, { "i"_sr, "v"_sr },
+		                                           { "j"_sr, "v"_sr } };
 
-		RangeConsistencyResult result =
-		    checkRangeReplies(servers, replies, range, begin, /*performQuiescentChecks=*/false, Reverse::True);
-		for (int i = 0; i < result.uniqueRefKeys.size(); i++) {
-			totalUniqueRefKeys[i] += result.uniqueRefKeys[i];
-			totalUniqueCmpKeys[i] += result.uniqueCmpKeys[i];
-			totalMismatchedValues[i] += result.mismatchedValues[i];
-		}
+	simulateAllConsistencyScans(serverAData, serverBData, 3, 0, 0);
+	co_return;
+}
 
-		if (!result.nextKey.present()) {
-			break;
-		}
-		cursor = result.nextKey;
-	}
-	ASSERT(round < 20); // otherwise pagination never converged -- likely a bug in the test, or a real regression
+TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/TruncatedKeys") {
+	const std::vector<KeyValueRef> serverAData = { { "a"_sr, "v"_sr }, { "b"_sr, "v"_sr }, { "c"_sr, "v"_sr },
+		                                           { "d"_sr, "v"_sr }, { "e"_sr, "v"_sr }, { "f"_sr, "v"_sr },
+		                                           { "g"_sr, "v"_sr }, { "h"_sr, "v"_sr }, { "i"_sr, "v"_sr },
+		                                           { "j"_sr, "v"_sr } };
+	// Server B is missing everything after "e".
+	const std::vector<KeyValueRef> serverBData = {
+		{ "a"_sr, "v"_sr }, { "b"_sr, "v"_sr }, { "c"_sr, "v"_sr }, { "d"_sr, "v"_sr }, { "e"_sr, "v"_sr }
+	};
 
-	ASSERT_EQ(totalUniqueRefKeys[1], 1); // "d"
-	ASSERT_EQ(totalUniqueCmpKeys[1], 1); // "ee"
-	ASSERT_EQ(totalMismatchedValues[1], 1); // "h"
+	simulateAllConsistencyScans(serverAData, serverBData, 5, 0, 0);
+	co_return;
+}
 
+TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/EntirelyDistinctKeys") {
+	// Servers A and B alternate, and they each have a completely distinct set of keys
+	const std::vector<KeyValueRef> serverAData = { { "a"_sr, "v"_sr }, { "c"_sr, "v"_sr }, { "e"_sr, "v"_sr },
+		                                           { "g"_sr, "v"_sr }, { "i"_sr, "v"_sr }, { "j"_sr, "v"_sr } };
+	const std::vector<KeyValueRef> serverBData = {
+		{ "b"_sr, "v"_sr }, { "d"_sr, "v"_sr }, { "f"_sr, "v"_sr }, { "h"_sr, "X"_sr }, { "k"_sr, "v"_sr }
+	};
+
+	simulateAllConsistencyScans(serverAData, serverBData, serverAData.size(), serverBData.size(), 0);
+	co_return;
+}
+
+TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/TupleEncodedKeys") {
+	const std::vector<KeyValueRef> serverAData = { { ""_sr, "v"_sr },
+		                                           { "\x01 bytes\x00"_sr, "v"_sr },
+		                                           { "\x02 unicode\x00"_sr, "v"_sr },
+		                                           { "\x13\xff"_sr, "v"_sr },
+		                                           { "\x14"_sr, "v"_sr },
+		                                           { "\x15\x01"_sr, "v"_sr },
+		                                           { "\x15\x02\x01 abc\x00"_sr, "v"_sr },
+		                                           { "\x15\x02\x01 abc\x00\x14"_sr, "v"_sr },
+		                                           { "\xff/keyServers/a"_sr, "v"_sr },
+		                                           { "\xff/keyServers/b"_sr, "v"_sr } };
+	// Different value for \x01bytes\x00. \x02unicode\x00 is spelled wrong (missing "i"), leading to unique keys on both
+	// servers. Extra key \x15\x01\x14, but missing \x15\x02\x01abc\x00 and \xff/keyServers/b. That means 1 mismatched
+	// value, 3 unique keys on A, and 2 unique keys on B
+	const std::vector<KeyValueRef> serverBData = { { ""_sr, "v"_sr },
+		                                           { "\x01 bytes\x00"_sr, "X"_sr },
+		                                           { "\x02 uncode\x00"_sr, "v"_sr },
+		                                           { "\x13\xff"_sr, "v"_sr },
+		                                           { "\x14"_sr, "v"_sr },
+		                                           { "\x15\x01"_sr, "v"_sr },
+		                                           { "\x15\x01\x04"_sr, "v"_sr },
+		                                           { "\x15\x02\x01 abc\x00\x14"_sr, "v"_sr },
+		                                           { "\xff/keyServers/a"_sr, "v"_sr } };
+
+	simulateAllConsistencyScans(serverAData, serverBData, 3, 2, 1);
 	co_return;
 }

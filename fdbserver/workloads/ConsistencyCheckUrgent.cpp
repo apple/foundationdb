@@ -311,16 +311,13 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			int64_t shardReadAmount = 0;
 			int64_t shardKeyCompared = 0;
 			bool valueAvailableToCheck = true;
-			// Occasionally page through the shard backward (descending) instead of forward, so this checker
-			// also exercises the reverse-read path storage servers use for real reverse getRange() calls,
-			// which has its own (independent) opportunities to disagree across replicas.
-			Reverse reverse(g_network->isSimulated() && SERVER_KNOBS->CONSISTENCY_CHECK_BACKWARD_READ);
-			KeySelector begin = reverse ? firstGreaterOrEqual(range.end) : firstGreaterOrEqual(range.begin);
+			Reverse reverse(SERVER_KNOBS->CONSISTENCY_CHECK_BACKWARD_READ);
+			KeySelector cursor = reverse ? firstGreaterOrEqual(range.end) : firstGreaterOrEqual(range.begin);
 			while (true) {
 				Error err;
 				try {
 					std::vector<ErrorOr<GetKeyValuesReply>> readReplies =
-					    co_await readFromAllStorageServers(cx, storageServerInterfaces, range, begin, reverse);
+					    co_await readFromAllStorageServers(cx, storageServerInterfaces, range, cursor, reverse);
 
 					for (int j = 0; j < readReplies.size(); j++) {
 						ErrorOr<GetKeyValuesReply> rangeResult = readReplies[j];
@@ -346,10 +343,13 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 						}
 					}
 
+					// FIXME: it seems like we should be able to move this after the if(!valueAvailableToCheck) thing
+					// We've also already checked that none of the replies were failed, so the only place we should
+					// actually get an error should be a legitimate failure. I think
 					RangeConsistencyResult rangeConsistencyResult;
 					if (valueAvailableToCheck) {
 						rangeConsistencyResult =
-						    checkRangeReplies(storageServerInterfaces, readReplies, range, begin, false, reverse);
+						    checkRangeReplies(storageServerInterfaces, readReplies, range, cursor, reverse);
 						if (!rangeConsistencyResult.success) {
 							// checkRangeReplies() sets success = false both when it detects a dead storage
 							// server (e.g. during a forced recovery) and when it detects a genuine data
@@ -393,17 +393,10 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					ASSERT(rangeConsistencyResult.firstValidServer >= 0);
 					if (rangeConsistencyResult.nextKey.present()) {
 						if (reverse) {
-							// nextKey is the smallest key that every server still reporting more data has
-							// actually read so far; resume just below it (excluding it, since it was already
-							// compared this round), mirroring the forward case's firstGreaterThan() below.
-							// Unlike the forward case, there's no sentinel value to assert against here:
-							// allKeys.end ("\xff\xff") can never be a real stored key, but allKeys.begin ("")
-							// is an ordinary, legal one -- nextKey (always sourced from an actual returned row)
-							// can legitimately equal it if a real key happens to live there.
-							begin = firstGreaterOrEqual(rangeConsistencyResult.nextKey.get());
+							cursor = firstGreaterOrEqual(rangeConsistencyResult.nextKey.get());
 						} else {
-							begin = firstGreaterThan(rangeConsistencyResult.nextKey.get());
-							ASSERT(begin.getKey() != allKeys.end);
+							cursor = firstGreaterThan(rangeConsistencyResult.nextKey.get());
+							ASSERT(cursor.getKey() != allKeys.end);
 						}
 					} else {
 						break;

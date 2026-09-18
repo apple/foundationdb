@@ -43,9 +43,6 @@ Future<bool> getKeyLocations(Database cx,
                              Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise,
                              bool performQuiescentChecks,
                              bool* success);
-// Shared by callers (currently ConsistencyCheckUrgent) that need to read a range from a fixed
-// set of storage servers and compare the replies themselves, outside of the checkDataConsistency/
-// consistencyCheckReadData path above that consistencyScanCore also uses.
 struct RangeConsistencyResult {
 	int firstValidServer;
 	std::vector<int64_t> uniqueRefKeys;
@@ -55,14 +52,14 @@ struct RangeConsistencyResult {
 	Optional<KeyRef> lastReadKey;
 	int64_t totalReadAmount;
 	bool success;
-	// Set (along with success = false) when the disagreement looks like it's due to a storage server that
-	// isn't actually alive (e.g. mid forced-recovery), rather than a genuine data inconsistency. Callers
-	// should treat this as a signal to retry rather than as a real consistency failure.
-	bool isFailed;
+	// Set (along with success = false) when the disagreement looks like it's due to a read failure
+	// from a storage server that may not actually be alive, rather than a genuine data inconsistency.
+	// Callers should treat this as a signal to retry rather than as a real consistency failure.
+	bool readFailed;
 
 	explicit RangeConsistencyResult(const size_t serverCount)
 	  : firstValidServer(-1), uniqueRefKeys(serverCount), uniqueCmpKeys(serverCount), mismatchedValues(serverCount),
-	    totalReadAmount(0), success(true), isFailed(false) {}
+	    totalReadAmount(0), success(true), readFailed(false) {}
 
 	explicit RangeConsistencyResult() : RangeConsistencyResult(0) {}
 };
@@ -71,15 +68,17 @@ inline bool isSuccessReply(const ErrorOr<GetKeyValuesReply>& reply) {
 }
 Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
     Database cx,
-    std::vector<StorageServerInterface> storageServerInterfaces,
+    const std::vector<StorageServerInterface>& storageServerInterfaces,
     KeyRangeRef range,
     KeySelector cursor,
-    Reverse reverse = Reverse::False);
+    Reverse reverse = Reverse::False,
+    Optional<Version> version = Optional<Version>(),
+    Optional<ReadOptions> readOptions = Optional<ReadOptions>(),
+    bool buggifyLimits = false);
 RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterface>& storageServerInterfaces,
                                          const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,
                                          KeyRangeRef range,
                                          KeySelector begin,
-                                         bool performQuiescentChecks,
                                          Reverse reverse = Reverse::False);
 Future<Void> checkDataConsistency(Database cx,
                                   VectorRef<KeyValueRef> keyLocations,

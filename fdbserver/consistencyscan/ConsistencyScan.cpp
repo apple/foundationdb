@@ -202,51 +202,46 @@ Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<ReadYo
 	co_return storageServerInterfaces;
 }
 
-// The result of diffing two GetKeyValuesReply's against each other. Shared by consistencyCheckReadData()
-// (used by the always-on background ConsistencyScan) and checkRangeReplies() below (used by the
-// checkDataConsistency/ConsistencyCheckUrgent one-shot verification workloads) -- they have different
-// needs around reporting/failure handling, but the same underlying merge-diff algorithm.
+// Whether a key is "beyond" some optional bound key. Here, boundKey represents some watermark
+// through a scan that may or may not be in reverse. If the scan consumed the entire range, then
+// there is no bound key, and this should always return false. Otherwise, it needs to return
+// if the key is greater than the bound (for forward scans) or less than the bound (for reverse).
+bool isKeyBeyond(const KeyRef& key, const Optional<KeyRef>& boundKey, const Reverse reverse) {
+	return boundKey.present() && (reverse ? key < boundKey.get() : key > boundKey.get());
+}
+
+// The result of diffing two GetKeyValuesReplies against each other. Of the replies from the replicas
+// one gets selected to be the "reference" replica arbitrarily, and all others are compared against it.
 struct ReplyDiff {
-	// The number of keys unique to `current`, i.e. not present in `reference`.
 	int64_t currentUniques = 0;
-	// The number of keys unique to `reference`, i.e. not present in `current`.
 	int64_t referenceUniques = 0;
-	// The number of keys present in both replies but with different values.
 	int64_t valueMismatches = 0;
-	// The number of keys present in both replies with matching values.
 	int64_t matchingKVPairs = 0;
-	// The last-seen key unique to `current` (only meaningful if currentUniques > 0).
-	KeyRef currentUniqueKey;
-	// The last-seen key unique to `reference` (only meaningful if referenceUniques > 0).
-	KeyRef referenceUniqueKey;
-	// The last-seen key with mismatched values (only meaningful if valueMismatches > 0).
-	KeyRef valueMismatchKey;
+	// These optionals are example keys included for logging. They are only set if their
+	// corresponding counters are greater than 0.
+	Optional<KeyRef> currentUniqueKey;
+	Optional<KeyRef> referenceUniqueKey;
+	Optional<KeyRef> valueMismatchKey;
 };
 
 // Merges `current` and `reference`, counting keys unique to either side and value mismatches on keys
-// present in both. Both replies must be sorted the same way: ascending if `reverse` is False (the normal
-// case), descending if `reverse` is True (as storage servers return data for a negative-limit/backward
-// read -- see readFromAllStorageServers()). If `boundKey` is present, keys beyond it are ignored on both
-// sides -- this is what lets two replies that were paginated to different cutoff points (e.g. because one
-// storage server's reply happened to fill up a few keys earlier than another's) be compared without
-// treating that misalignment as spurious missing/unique keys. "Beyond" means past boundKey in the
-// direction of iteration, i.e. greater than it when ascending, less than it when descending.
+// present in both. Both replies must be sorted the same way (matching the `reverse` parameter)
+// If `boundKey` is present, keys beyond it are ignored on both sides. This is what lets two replies
+// that were paginated to different cutoff points be compared without resulting in missing or unique keys.
+// This should never happen in a fully consistent cluster, but it can happen if some servers are missing
+// keys present on other servers.
 ReplyDiff diffReplies(const GetKeyValuesReply& current,
                       const GetKeyValuesReply& reference,
                       Optional<KeyRef> boundKey,
-                      Reverse reverse = Reverse::False) {
+                      const Reverse reverse = Reverse::False) {
 	ReplyDiff diff;
 	int currentI = 0;
 	int referenceI = 0;
 	while (currentI < current.data.size() && referenceI < reference.data.size()) {
 		KeyValueRef currentKV = current.data[currentI];
 		KeyValueRef referenceKV = reference.data[referenceI];
-		bool currentBeyondBound =
-		    boundKey.present() && (reverse ? currentKV.key < boundKey.get() : currentKV.key > boundKey.get());
-		bool referenceBeyondBound =
-		    boundKey.present() && (reverse ? referenceKV.key < boundKey.get() : referenceKV.key > boundKey.get());
-		if (currentBeyondBound || referenceBeyondBound) {
-			// We have exceeded the minimum key reached across all servers. Stop checking
+		if (isKeyBeyond(currentKV.key, boundKey, reverse) || isKeyBeyond(referenceKV.key, boundKey, reverse)) {
+			// We have exceeded the boundary key on at least one server. Stop checking
 			break;
 		}
 		if (currentKV.key == referenceKV.key) {
@@ -269,19 +264,14 @@ ReplyDiff diffReplies(const GetKeyValuesReply& current,
 		}
 	}
 
-	// At this point, we've consumed all of either the current or reference reply through boundKey (if
-	// set) or the end (if boundKey is not set). Any remaining data (through boundKey) in either array is
-	// unique to that server.
-	while (referenceI < reference.data.size() &&
-	       (!boundKey.present() || (reverse ? reference.data[referenceI].key >= boundKey.get()
-	                                        : reference.data[referenceI].key <= boundKey.get()))) {
+	// At this point, we've consumed one (or both) of the replies through boundKey.
+	// Any data present on either reply (but not beyond boundKey) must be unique.
+	while (referenceI < reference.data.size() && !isKeyBeyond(reference.data[referenceI].key, boundKey, reverse)) {
 		diff.referenceUniqueKey = reference.data[referenceI].key;
 		diff.referenceUniques++;
 		referenceI++;
 	}
-	while (currentI < current.data.size() &&
-	       (!boundKey.present() ||
-	        (reverse ? current.data[currentI].key >= boundKey.get() : current.data[currentI].key <= boundKey.get()))) {
+	while (currentI < current.data.size() && !isKeyBeyond(current.data[currentI].key, boundKey, reverse)) {
 		diff.currentUniqueKey = current.data[currentI].key;
 		diff.currentUniques++;
 		currentI++;
@@ -340,24 +330,6 @@ Future<int> consistencyCheckReadData(UID myId,
                                      Optional<KeyRef>* nextKey,
                                      Optional<Version> consistencyCheckStartVersion) {
 	ASSERT(!range.empty());
-	GetKeyValuesRequest req;
-	req.begin = firstGreaterOrEqual(range.begin);
-	req.end = firstGreaterOrEqual(range.end);
-	req.limit = 1e4;
-	req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-	req.version = version;
-	req.tags = TagSet();
-
-	// buggify read limits in simulation
-	if (g_network->isSimulated() && buggify(0.01)) {
-		if (deterministicRandom()->coinflip()) {
-			req.limit = deterministicRandom()->randomInt(2, 10);
-		}
-		if (deterministicRandom()->coinflip()) {
-			req.limitBytes /= deterministicRandom()->randomInt(2, 100);
-			req.limitBytes = std::max<int>(1, req.limitBytes);
-		}
-	}
 
 	// Set read options to minimize interference with live traffic
 	// TODO: also use batch priority transaction?
@@ -366,24 +338,30 @@ Future<int> consistencyCheckReadData(UID myId,
 	readOptions.type = ReadType::LOW;
 	readOptions.consistencyCheckStartVersion = consistencyCheckStartVersion;
 
-	req.options = readOptions;
-
 	DisabledTraceEvent("ConsistencyCheck_ReadDataStart", myId)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("Servers", storageServerInterfaces->size());
 
-	// Try getting the entries in the specified range
-
-	for (int j = 0; j < storageServerInterfaces->size(); j++) {
-		resetReply(req);
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-			cx->getLatestCommitVersion((*storageServerInterfaces)[j], req.version, req.ssLatestCommitVersions);
-		}
-		keyValueFutures->push_back((*storageServerInterfaces)[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+	// Issue the requests and wait for all replies via the shared helper -- this reads at `version` (rather
+	// than a freshly fetched one) so that later rounds of the caller's scan keep comparing at the same
+	// transaction-consistent version, and buggifies req.limit/req.limitBytes as this function always has.
+	std::vector<ErrorOr<GetKeyValuesReply>> readReplies =
+	    co_await readFromAllStorageServers(cx,
+	                                       *storageServerInterfaces,
+	                                       range,
+	                                       firstGreaterOrEqual(range.begin),
+	                                       Reverse::False,
+	                                       version,
+	                                       readOptions,
+	                                       /*buggifyLimits=*/g_network->isSimulated());
+	// The rest of this function (and this function's own caller, afterwards) expects to find replies here as
+	// Futures it can .get() -- readFromAllStorageServers() has already waited for them, so just wrap each
+	// resolved value back into an already-set Future rather than changing that established contract.
+	keyValueFutures->reserve(readReplies.size());
+	for (ErrorOr<GetKeyValuesReply>& reply : readReplies) {
+		keyValueFutures->push_back(reply);
 	}
-
-	co_await waitForAll(*keyValueFutures);
 
 	bool expectInjected =
 	    storageServerInterfaces->size() > 1 && g_network->isSimulated() && consistencyCheckStartVersion.present() &&
@@ -478,15 +456,15 @@ Future<int> consistencyCheckReadData(UID myId,
 
 				// Be especially verbose if in simulation
 				if (g_network->isSimulated()) {
-					fmt::print("MISMATCH AT VERSION {0}\n", req.version);
+					fmt::print("MISMATCH AT VERSION {0}\n", version);
 					printReplyMismatchDebug(j,
 					                        (*storageServerInterfaces)[j],
 					                        current,
 					                        firstValidServer->get(),
 					                        (*storageServerInterfaces)[firstValidServer->get()],
 					                        reference,
-					                        req.begin.getKey(),
-					                        req.end.getKey());
+					                        range.begin,
+					                        range.end);
 				}
 
 				bool isTss = (*storageServerInterfaces)[j].isTss() ||
@@ -566,9 +544,9 @@ Future<int> consistencyCheckReadData(UID myId,
 				    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id())
 				    .detail(format("StorageServer%d", firstValidServer->get()).c_str(),
 				            (*storageServerInterfaces)[firstValidServer->get()].id())
-				    .detail("ShardBegin", req.begin.getKey())
-				    .detail("ShardEnd", req.end.getKey())
-				    .detail("VersionNumber", req.version)
+				    .detail("ShardBegin", range.begin)
+				    .detail("ShardEnd", range.end)
+				    .detail("VersionNumber", version)
 				    .detail(format("Server%dUniques", j).c_str(), diff.currentUniques)
 				    .detail(format("Server%dUniqueKey", j).c_str(), diff.currentUniqueKey)
 				    .detail(format("Server%dUniques", firstValidServer->get()).c_str(), diff.referenceUniques)
@@ -588,7 +566,7 @@ Future<int> consistencyCheckReadData(UID myId,
 					TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption", myId)
 					    .detail("CorruptionType",
 					            fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get())
-					    .detail("Version", req.version);
+					    .detail("Version", version);
 					fdbSimulationPolicyState().updateConsistencyScanState(
 					    FDBSimConsistencyScanState::Enabled_InjectCorruption,
 					    FDBSimConsistencyScanState::Enabled_FoundCorruption);
@@ -1483,21 +1461,28 @@ void testFailure(std::string message, bool performQuiescentChecks, bool* success
 	failEvent.detail("Reason", "Consistency check: " + message);
 }
 
-// Reads a single range from every storage server in storageServerInterfaces at the same (current) read
-// version. Used by callers that need to compare replies themselves via checkRangeReplies() below. `cursor`
-// is the resumption point from a prior round: for a forward read it's a lower-bound KeySelector (advances
-// upward, terminates at range.end); for a backward (reverse) read it's an upper-bound KeySelector (shrinks
-// downward, terminates at range.begin), matching how NativeAPI's own reverse getRange() pages. In reverse
-// mode, the storage servers return data sorted descending (see storageserver.cpp's readRange()), so
-// callers must pass `reverse` through to diffReplies()/checkRangeReplies() as well.
+// Reads a single range from every storage server in storageServerInterfaces at the same read version.
+// Used by callers that need to compare replies themselves via checkRangeReplies() below. `cursor` is the
+// resumption point from a prior round: for a forward read it's a lower-bound KeySelector (advances upward,
+// terminates at range.end); for a backward (reverse) read it's an upper-bound KeySelector (shrinks
+// downward, terminates at range.begin).
+//
+// The `readOptions`, if present, are attached to the request as-is. Of note, this is used to set
+// consistencyCheckStartVersion so storage servers know to inject corruption.
+//
+// If `buggifyLimits` is set, then this randomizes req.limit/req.limitBytes in simulation to exercise
+// pagination more thoroughly. Even if this
 Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
     Database cx,
-    std::vector<StorageServerInterface> storageServerInterfaces,
+    const std::vector<StorageServerInterface>& storageServerInterfaces,
     KeyRangeRef range,
     KeySelector cursor,
-    Reverse reverse) {
-	// Get the min version of the storage servers
-	Version version = co_await getStorageServerReadVersion(cx);
+    Reverse reverse,
+    Optional<Version> version,
+    Optional<ReadOptions> readOptions,
+    bool buggifyLimits) {
+	// Get the current DB read version, unless the caller already committed to one
+	Version readVersion = version.present() ? version.get() : co_await getStorageServerReadVersion(cx);
 
 	GetKeyValuesRequest req;
 	if (reverse) {
@@ -1510,8 +1495,23 @@ Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
 		req.limit = 1e4;
 	}
 	req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-	req.version = version;
+	req.version = readVersion;
 	req.tags = TagSet();
+	if (readOptions.present()) {
+		req.options = readOptions;
+	}
+
+	// buggify read limits in simulation, preserving the sign convention (and thus direction) set above
+	if (buggifyLimits && buggify(0.01)) {
+		if (deterministicRandom()->coinflip()) {
+			int64_t limit = deterministicRandom()->randomInt(2, 10);
+			req.limit = reverse ? -limit : limit;
+		}
+		if (deterministicRandom()->coinflip()) {
+			req.limitBytes /= deterministicRandom()->randomInt(2, 100);
+			req.limitBytes = std::max<int>(1, req.limitBytes);
+		}
+	}
 
 	// Try getting the entries in the specified range
 	std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
@@ -1543,7 +1543,6 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
                                          const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,
                                          KeyRangeRef range,
                                          KeySelector begin,
-                                         bool performQuiescentChecks,
                                          Reverse reverse) {
 	RangeConsistencyResult result(readReplies.size());
 
@@ -1567,15 +1566,12 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 			result.totalReadAmount += rangeReply.data.expectedSize();
 
 			allNoMore &= !rangeReply.more;
-			Optional<KeyRef> lastKeyInRange;
+			Optional<KeyRef> lastKeyInReply;
 			if (!rangeReply.data.empty()) {
-				lastKeyInRange = rangeReply.data[rangeReply.data.size() - 1].key;
-			}
-			bool extendsFurther =
-			    maxReadKey.present() && lastKeyInRange.present() &&
-			    (reverse ? lastKeyInRange.get() < maxReadKey.get() : lastKeyInRange.get() > maxReadKey.get());
-			if (!maxReadKey.present() || extendsFurther) {
-				maxReadKey = lastKeyInRange;
+				lastKeyInReply = rangeReply.data[rangeReply.data.size() - 1].key;
+				if (!maxReadKey.present() || isKeyBeyond(lastKeyInReply.get(), maxReadKey, reverse)) {
+					maxReadKey = lastKeyInReply;
+				}
 			}
 
 			if (result.firstValidServer < 0) {
@@ -1586,16 +1582,15 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 				// A reply reporting more data ought to always have at least one key (that's what a
 				// resumption cursor would be based on), but tolerate the combination defensively rather
 				// than asserting/crashing over what should be an SS-side contract violation.
-				if (rangeReply.more && lastKeyInRange.present()) {
-					result.nextKey = lastKeyInRange;
+				if (rangeReply.more && lastKeyInReply.present()) {
+					result.nextKey = lastKeyInReply;
 				}
-			} else if (rangeReply.more && lastKeyInRange.present()) {
-				bool leastProgress =
-				    result.nextKey.present() && (reverse ? lastKeyInRange.get() > result.nextKey.get()
-				                                         : lastKeyInRange.get() < result.nextKey.get());
-				if (!result.nextKey.present() || leastProgress) {
-					result.nextKey = lastKeyInRange;
-				}
+			} else if (rangeReply.more && lastKeyInReply.present() &&
+			           (!result.nextKey.present() || isKeyBeyond(result.nextKey.get(), lastKeyInReply, reverse))) {
+				// Keep track in nextKey the key in the replies that has made the least progress, i.e., the reply
+				// with "more" data that has the least-advanced final key. This serves as a water-mark as the
+				// furthest we have gone.
+				result.nextKey = lastKeyInReply;
 			}
 		}
 	}
@@ -1626,6 +1621,7 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 				result.uniqueCmpKeys[j] = diff.currentUniques;
 				result.mismatchedValues[j] = diff.valueMismatches;
 
+				// FIXME: is this actually necessary?
 				// The raw current.data != reference.data check above can trip merely because the two
 				// replies were paginated to different cutoff points (see result.nextKey above), even
 				// though both servers fully agree on every key either of them actually read. That's not
@@ -1707,7 +1703,7 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 					    .detail("ShardBegin", printable(range.begin))
 					    .detail("ShardEnd", printable(range.end));
 					result.success = false;
-					result.isFailed = true;
+					result.readFailed = true;
 					return result;
 				}
 			}
@@ -2340,9 +2336,9 @@ Future<Void> checkDataConsistency(Database cx,
 					// stop a few keys earlier than another's, even though both are otherwise consistent -- as a
 					// spurious set of "missing"/unique keys.
 					RangeConsistencyResult rangeConsistencyResult =
-					    checkRangeReplies(storageServerInterfaces, readReplies, range, begin, performQuiescentChecks);
+					    checkRangeReplies(storageServerInterfaces, readReplies, range, begin);
 					if (!rangeConsistencyResult.success) {
-						if (rangeConsistencyResult.isFailed) {
+						if (rangeConsistencyResult.readFailed) {
 							// A storage server looks dead (e.g. mid forced-recovery). Retry this same batch
 							// rather than failing the check, mirroring the old wrong_shard_server()-triggered
 							// retry below.
