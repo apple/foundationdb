@@ -152,7 +152,8 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 				                                                  self->ddContext.lock,
 				                                                  {},
 				                                                  self->ddContext.ddEnabledState.get(),
-				                                                  SkipDDModeCheck::True)));
+				                                                  SkipDDModeCheck::True,
+				                                                  self->ddContext.configuration)));
 				std::cout << "Finish read real InitialDataDistribution: server size "
 				          << self->realInitDD->allServers.size() << ", shard size: " << self->realInitDD->shards.size()
 				          << std::endl;
@@ -246,7 +247,8 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		                                     self->ddContext.lock,
 		                                     {},
 		                                     self->ddContext.ddEnabledState.get(),
-		                                     SkipDDModeCheck::True)
+		                                     SkipDDModeCheck::True,
+		                                     self->ddContext.configuration)
 		        .get();
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
@@ -332,7 +334,8 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		                                                self->ddContext.lock,
 		                                                {},
 		                                                self->ddContext.ddEnabledState.get(),
-		                                                SkipDDModeCheck::True)
+		                                                SkipDDModeCheck::True,
+		                                                self->ddContext.configuration)
 		                   .get();
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
@@ -442,7 +445,8 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		                                                self->ddContext.lock,
 		                                                {},
 		                                                self->ddContext.ddEnabledState.get(),
-		                                                SkipDDModeCheck::True)
+		                                                SkipDDModeCheck::True,
+		                                                self->ddContext.configuration)
 		                   .get();
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
