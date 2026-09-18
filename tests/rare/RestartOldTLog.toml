@@ -1,0 +1,30 @@
+testClass = "RestartOldTLog"
+
+[configuration]
+config = 'single'
+generateFearless = false
+machineCount = 15
+processesPerMachine = 2
+
+# Churn generations so that the cluster controller is left advertising completed ones.
+[[test]]
+testTitle = 'CreateOldGenerations'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    testDuration = 30.0
+
+# Restart one of those completed generations' TLogs on an otherwise quiescent cluster.
+[[test]]
+testTitle = 'RestartOldTLog'
+
+    [[test.workload]]
+    testName = 'RestartOldTLog'
+    startDelay = 5.0
+    searchTimeout = 60.0
+    refreshTimeout = 120.0
