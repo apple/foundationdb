@@ -744,6 +744,9 @@ public:
 	double MIN_CONFIRM_INTERVAL;
 	double ENFORCED_MIN_RECOVERY_DURATION;
 	double REQUIRED_MIN_RECOVERY_DURATION;
+	double DEGRADED_MULTI_REGION_MIN_STALL_SECONDS; // How long the remote region's log set must be missing after
+	                                                // accepting commits before status reports degraded_multi_region.
+	                                                // Filters out the transient window of a normal recovery.
 	bool ALWAYS_CAUSAL_READ_RISKY;
 	int MAX_COMMIT_UPDATES;
 	double MAX_PROXY_COMPUTE;

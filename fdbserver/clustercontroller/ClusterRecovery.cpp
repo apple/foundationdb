@@ -514,6 +514,10 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 	DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
 	DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
+	// Start of the current remote-region stall, if any. Kept across loop iterations so that
+	// re-emissions of the event on unrelated core-state changes do not reset the reported stall
+	// start; status derives the elapsed duration from this timestamp.
+	Optional<double> remoteLogsMissingSince;
 	while (true) {
 		DBCoreState newState;
 		self->logSystem->toCoreState(newState);
@@ -580,6 +584,37 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			    .detail("Status", RecoveryStatus::names[RecoveryStatus::all_logs_recruited])
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 		}
+
+		// "Degraded multi-region": with usableRegions > 1 the remote region's log set has not been
+		// recruited (allLogs == false). oldTLogData is deliberately not a discriminator: when the
+		// remote region is down, old generations cannot be purged (finalUpdate requires allLogs),
+		// so oldTLogData stays non-empty precisely in this stalled state.
+		//
+		// Gate on ACCEPTING_COMMITS: a missing remote log set is a transient recruiting artifact
+		// during normal recovery, so the stall must not start accumulating before the cluster
+		// accepts commits, or a slow-but-healthy recovery trips degraded_multi_region.
+		bool remoteRegionLogsMissing =
+		    configuration.usableRegions > 1 && !allLogs && self->recoveryState >= RecoveryState::ACCEPTING_COMMITS;
+		if (remoteRegionLogsMissing && !remoteLogsMissingSince.present()) {
+			remoteLogsMissingSince = now();
+		} else if (!remoteRegionLogsMissing) {
+			remoteLogsMissingSince = Optional<double>();
+		}
+		// Carry the absolute time the stall began rather than a pre-computed duration: status derives
+		// how long the stall has lasted when it reads this event, so the event does not have to be
+		// re-emitted periodically just to keep a duration field fresh. Format as a string because
+		// numeric trace fields are emitted with "%g" (six significant digits), which is far too coarse
+		// for an absolute timestamp.
+		double remoteRegionStallStartSeconds = remoteLogsMissingSince.present() ? remoteLogsMissingSince.get() : 0.0;
+		TraceEvent(
+		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME).c_str(),
+		    self->dbgid)
+		    .detail("RemoteRegionLogsMissing", remoteRegionLogsMissing)
+		    .detail("AllLogs", allLogs)
+		    .detail("OldTLogDataSize", newState.oldTLogData.size())
+		    .detail("UsableRegions", configuration.usableRegions)
+		    .detail("RemoteRegionStallStartSeconds", format("%.6f", remoteRegionStallStartSeconds))
+		    .trackLatest(self->clusterRecoveryRemoteRegionStallEventHolder->trackingKey);
 
 		self->registrationTrigger.trigger();
 
@@ -2099,6 +2134,8 @@ const std::string& getRecoveryEventName(ClusterRecoveryEventType type) {
 		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryAvailable" });
 		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME,
 		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryMetrics" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_REMOTE_REGION_STALL_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryRemoteRegionStall" });
 	}
 
 	auto iter = recoveryEventNameMap.find(type);
