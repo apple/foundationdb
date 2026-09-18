@@ -561,7 +561,17 @@ void LogSystem::toCoreState(DBCoreState& newState) const {
 	}
 
 	newState.oldTLogData.clear();
+	// Retain a generation while recovery still needs it, or while a backup worker does.
 	if (!storageRecovered() || !remoteLogPrefixRecovered()) {
+		if (oldLogData.size()) {
+			// Which clause retains: an oldTLogData that never empties makes FULLY_RECOVERED unreachable, silently.
+			TraceEvent("BWToCoreRetainReason", dbgid)
+			    .detail("Generations", oldLogData.size())
+			    .detail("StorageRecovered", storageRecovered())
+			    .detail("RemoteLogPrefixRecovered", remoteLogPrefixRecovered())
+			    .detail("Epoch", epoch)
+			    .detail("OldestBackupEpoch", oldestBackupEpoch);
+		}
 		for (const auto& oldData : oldLogData) {
 			newState.oldTLogData.push_back(toOldTLogCoreData(oldData));
 			TraceEvent("BWToCore")
@@ -2880,8 +2890,15 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 		if (oldLogGen.recoverAt <= 0) {
 			// When we have an invalid recover at value, it's possible that the previous generations' recover at is not
 			// properly recorded in cstate. Therefore, we skip tracking old tlog generation recovery.
+			// Self-perpetuating: this also freezes recoveredVersion, so the offending generation is never purged.
 			oldGenerationRecoverAtVersions.clear();
-			TraceEvent("DisableTrackingOldGenerationRecovery").log();
+			TraceEvent("DisableTrackingOldGenerationRecovery", logSystem->dbgid)
+			    .detail("Generations", logSystem->oldLogData.size())
+			    .detail("RecoverAt", oldLogGen.recoverAt)
+			    .detail("Epoch", oldLogGen.epoch)
+			    .detail("EpochBegin", oldLogGen.epochBegin)
+			    .detail("EpochEnd", oldLogGen.epochEnd)
+			    .detail("RecoveryCount", recoveryCount);
 			break;
 		}
 		oldGenerationRecoverAtVersions.push_back(oldLogGen.recoverAt);
