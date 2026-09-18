@@ -11201,8 +11201,6 @@ struct KVSource {
 		for (auto& p : prefixes) {
 			prefixesSorted.push_back(&p);
 		}
-		// The comparator orders by prefix bytes, independent of pointer values.
-		// NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
 		std::sort(prefixesSorted.begin(), prefixesSorted.end(), [](const Prefix* a, const Prefix* b) {
 			return KeyRef((uint8_t*)a->begin(), a->size()) < KeyRef((uint8_t*)b->begin(), b->size());
 		});

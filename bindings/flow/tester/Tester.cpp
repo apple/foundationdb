@@ -1514,7 +1514,7 @@ struct AtomicOPFunc : InstructionFunc {
 		Standalone<StringRef> s3 = co_await items[2].value;
 		Standalone<StringRef> value = Tuple::unpack(s3).getString(0);
 
-		ASSERT(optionInfo.contains(op.toString()));
+		ASSERT(optionInfo.find(op.toString()) != optionInfo.end());
 
 		FDBMutationType atomicOp = optionInfo[op.toString()];
 

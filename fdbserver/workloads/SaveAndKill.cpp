@@ -84,12 +84,12 @@ struct SaveAndKillWorkload : TestWorkload {
 		    g_simulator->currentlyRebootingProcesses;
 		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap;
 		for (const auto& [_, process] : rebootingProcesses) {
-			if (!allProcessesMap.contains(process->dataFolder) && !process->isSpawnedKVProcess()) {
+			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() && !process->isSpawnedKVProcess()) {
 				allProcessesMap[process->dataFolder] = process;
 			}
 		}
 		for (const auto& process : processes) {
-			if (!allProcessesMap.contains(process->dataFolder) && !process->isSpawnedKVProcess()) {
+			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() && !process->isSpawnedKVProcess()) {
 				allProcessesMap[process->dataFolder] = process;
 			}
 		}
@@ -101,7 +101,7 @@ struct SaveAndKillWorkload : TestWorkload {
 			std::string machineId = printable(process->locality.machineId());
 			const char* machineIdString = machineId.c_str();
 			if (!process->excludeFromRestarts) {
-				if (!machines.contains(machineId)) {
+				if (machines.find(machineId) == machines.end()) {
 					machines.insert(std::pair<std::string, int>(machineId, 1));
 					ini.SetValue("META", format("%d", j).c_str(), machineIdString);
 					ini.SetValue(

@@ -44,7 +44,7 @@ struct IDispatched {
 #define REGISTER_DISPATCHED(Type, Instance, Key, Func)                                                                 \
 	struct Type##Instance {                                                                                            \
 		Type##Instance() {                                                                                             \
-			ASSERT(!Type::dispatches().contains(Key));                                                                 \
+			ASSERT(Type::dispatches().find(Key) == Type::dispatches().end());                                          \
 			Type::dispatches()[Key] = Func;                                                                            \
 		}                                                                                                              \
 	};                                                                                                                 \
@@ -52,8 +52,8 @@ struct IDispatched {
 #define REGISTER_DISPATCHED_ALIAS(Type, Instance, Target, Alias)                                                       \
 	struct Type##Instance {                                                                                            \
 		Type##Instance() {                                                                                             \
-			ASSERT(!Type::dispatches().contains(Alias));                                                               \
-			ASSERT(Type::dispatches().contains(Target));                                                               \
+			ASSERT(Type::dispatches().find(Alias) == Type::dispatches().end());                                        \
+			ASSERT(Type::dispatches().find(Target) != Type::dispatches().end());                                       \
 			Type::dispatches()[Alias] = Type::dispatches()[Target];                                                    \
 		}                                                                                                              \
 	};                                                                                                                 \

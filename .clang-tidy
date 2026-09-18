@@ -15,7 +15,6 @@ Checks: >
   bugprone-macro-repeated-side-effects,
   bugprone-misplaced-widening-cast,
   bugprone-move-forwarding-reference,
-  bugprone-nondeterministic-pointer-iteration-order,
   bugprone-posix-return,
   bugprone-redundant-branch-condition,
   bugprone-return-const-ref-from-parameter,

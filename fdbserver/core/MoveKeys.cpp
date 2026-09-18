@@ -257,7 +257,7 @@ Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID
 			continue;
 		}
 		CheckpointMetaData checkpoint = decodeCheckpointValue(value.get());
-		ASSERT(checkpointIds.contains(checkpoint.checkpointID));
+		ASSERT(checkpointIds.find(checkpoint.checkpointID) != checkpointIds.end());
 		const Key key = checkpointKeyFor(checkpoint.checkpointID);
 		checkpoint.setState(CheckpointMetaData::Deleting);
 		tr->set(key, checkpointValue(checkpoint));

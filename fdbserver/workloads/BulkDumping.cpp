@@ -436,7 +436,7 @@ struct BulkDumping : TestWorkload {
 		}
 		for (const auto& [key, value] : newKvs) {
 			// newKvs should not contain keys outside the bulkDumpJobRange
-			ASSERT(!keyOutsideDumpData.contains(key) && bulkDumpJobRange.contains(key));
+			ASSERT(keyOutsideDumpData.find(key) == keyOutsideDumpData.end() && bulkDumpJobRange.contains(key));
 			if (self->keyContainedInRanges(key, ignoreRanges)) {
 				continue;
 			}

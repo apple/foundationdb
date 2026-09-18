@@ -74,7 +74,7 @@ Future<bool> hotRangeCommandActor(Database localdb,
 		}
 		Key address = tokens[1];
 		// At present we only support one process(IP:Port) at a time
-		if (!storage_interface->contains(address.toString())) {
+		if (!storage_interface->count(address.toString())) {
 			fprintf(stderr, "ERROR: storage process `%s' not recognized.\n", printable(address).c_str());
 			co_return false;
 		}

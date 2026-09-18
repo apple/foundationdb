@@ -578,7 +578,7 @@ struct RangeLocking : TestWorkload {
 		std::map<Key, Value> currentKvsInDB;
 		currentKvsInDB = co_await self->getKVSFromDB(self, cx);
 		for (const auto& [key, value] : currentKvsInDB) {
-			if (!self->kvs.contains(key)) {
+			if (self->kvs.find(key) == self->kvs.end()) {
 				TraceEvent(SevError, "RangeLockWorkLoadHistory")
 				    .detail("Ops", "CheckDBUniqueKey")
 				    .detail("Key", key)
@@ -596,7 +596,7 @@ struct RangeLocking : TestWorkload {
 			}
 		}
 		for (const auto& [key, value] : self->kvs) {
-			if (!currentKvsInDB.contains(key)) {
+			if (currentKvsInDB.find(key) == currentKvsInDB.end()) {
 				TraceEvent(SevError, "RangeLockWorkLoadHistory")
 				    .detail("Ops", "CheckMemoryUniqueKey")
 				    .detail("Key", key)

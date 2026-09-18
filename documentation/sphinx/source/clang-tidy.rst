@@ -10,11 +10,11 @@ This guide explains how to run ``clang-tidy`` locally so you can fix issues befo
 What clang-tidy checks
 ======================
 
-FoundationDB configures 58 named checks in the ``.clang-tidy`` file at the repository root. The
+FoundationDB configures 57 named checks in the ``.clang-tidy`` file at the repository root. The
 active set depends on the clang-tidy version and can be inspected with ``clang-tidy --list-checks``.
 The intent is to enable more as we go forward. Here are some example rules:
 
-* **38 Bugprone rules** -- catch potential runtime errors, including unsafe self-assignment, forwarding constructors that hide copy or move constructors, narrow accumulation initializers, mismatched argument comments, obvious infinite loops, chained comparisons, swapped arguments, integer division in floating-point calculations, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, incorrect erase/remove calls, ignored return values, incorrect POSIX error checks, and pointer-dependent iteration order
+* **37 Bugprone rules** -- catch potential runtime errors, including unsafe self-assignment, forwarding constructors that hide copy or move constructors, narrow accumulation initializers, mismatched argument comments, obvious infinite loops, chained comparisons, swapped arguments, integer division in floating-point calculations, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, incorrect erase/remove calls, ignored return values, and incorrect POSIX error checks
 * **2 C++ Core Guidelines rules** -- catch unsafe captures in coroutine lambdas and borrowed coroutine parameters (``cppcoreguidelines-avoid-capturing-lambda-coroutines`` and ``cppcoreguidelines-avoid-reference-coroutine-parameters``)
 * **2 Misc rules** -- catch redundant expressions and RAII objects held across coroutine suspension points
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
@@ -39,13 +39,6 @@ intentional uncancellable helpers need different treatment from cancellable work
 arguments in coroutine frames. A synchronous forwarding wrapper can preserve an
 interface that accepts references while its coroutine implementation takes values.
 Copying a ``StringRef`` or ``KeyRef`` still does not retain the referenced bytes.
-
-``bugprone-nondeterministic-pointer-iteration-order`` helps protect simulation
-reproducibility. It checks some pointer-keyed unordered-container iterations and
-pointer sorting; it is not a complete determinism analysis. This check requires
-LLVM 20 or newer. CI installs the packaged ``clang-tidy`` separately from the
-build image's compiler so that the warning is active without changing the compiler
-or C++ standard library.
 
 Basic examples of ``clang-tidy`` style and performance improvement changes:
 

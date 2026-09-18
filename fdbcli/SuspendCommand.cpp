@@ -60,7 +60,7 @@ Future<bool> suspendCommandActor(Reference<IDatabase> db,
 		result = false;
 	} else {
 		for (int i = 2; i < tokens.size(); i++) {
-			if (!address_interface->contains(tokens[i])) {
+			if (!address_interface->count(tokens[i])) {
 				fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
 				result = false;
 				break;
