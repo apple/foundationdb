@@ -67,9 +67,9 @@ Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, std::ve
 // Split points fix physical delivery partitions. Consumption remains one complete,
 // commit-version-ordered feed with one cursor and one durable acknowledgement.
 Future<CDCStreamId> registerNativeCdcOrderedStreamClient(Database cx,
-                                                      Key name,
-                                                      std::vector<KeyRange> ranges,
-                                                      std::vector<Key> splitPoints);
+                                                         Key name,
+                                                         std::vector<KeyRange> ranges,
+                                                         std::vector<Key> splitPoints);
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);
 
