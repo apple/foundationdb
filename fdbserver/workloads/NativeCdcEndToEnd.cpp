@@ -829,9 +829,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 		ASSERT(primed);
 		// Leave this stream unacknowledged so its old tag data must remain readable by the new owner.
-		Future<CDCConsumeReply> pending;
-		co_await timeoutError(startBlockedConsume(cx, firstId, streams[0].consumer, source, &pending),
-		                      operationTimeout);
+		Future<CDCConsumeReply> pending = streams[0].consumer->consume();
+		ASSERT(!pending.isReady());
 
 		std::vector<UID> availableProxies{ proxies[0].id(), proxies[1].id() };
 		ASSERT(co_await timeoutError(rebalanceNativeCdcProxyAssignments(cx, availableProxies, [] { return true; }),
