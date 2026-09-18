@@ -161,7 +161,14 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 	                            Optional<Version> replayFrom = {}) {
 		Version previous = replayFrom.present() ? replayFrom.get() : consumer->position().lastConsumedVersion;
 		while (previous < target) {
+			TraceEvent("NativeCdcOrderedConsumeBegin")
+			    .detail("Cursor", consumer->position().lastConsumedVersion)
+			    .detail("Target", target);
 			CDCConsumeReply reply = co_await consumer->consume();
+			TraceEvent("NativeCdcOrderedConsumeReply")
+			    .detail("Through", reply.lastConsumedVersion)
+			    .detail("Versions", reply.mutations.size())
+			    .detail("Target", target);
 			ASSERT_GT(reply.lastConsumedVersion, previous);
 			ASSERT_EQ(consumer->position().lastConsumedVersion, reply.lastConsumedVersion);
 			for (const auto& versioned : reply.mutations) {
