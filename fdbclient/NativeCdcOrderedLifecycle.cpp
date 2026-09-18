@@ -113,6 +113,7 @@ Future<Optional<NativeCdcOrderedSnapshot>> readNativeCdcOrderedSnapshot(Database
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			co_return co_await readNativeCdcOrderedSnapshot(&tr, logicalId);
 		} catch (Error& error) {
 			err = error;

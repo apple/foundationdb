@@ -1465,6 +1465,8 @@ Future<Void> NativeCdcConsumer::initialize(Reference<NativeCdcConsumer> self) {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			// Retention pressure must not throttle the metadata reads needed to resume draining CDC.
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			if (!self->internalPartition &&
 			    (co_await tr.get(cdcOrderedParentKeyFor(self->currentPosition.streamId))).present()) {
 				throw client_invalid_operation();
@@ -1522,6 +1524,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeOrdered(Reference<NativeCdcCon
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			const Optional<Value> value = co_await tr.get(cdcOrderedStreamKeyFor(self->currentPosition.streamId));
 			if (!value.present() || !ordered->sameMetadata(decodeCDCOrderedStreamValue(value.get()))) {
 				throw client_invalid_operation();
