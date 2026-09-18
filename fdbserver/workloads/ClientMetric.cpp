@@ -145,19 +145,12 @@ struct ClientMetricWorkload : TestWorkload {
 	Future<Void> writeRandomKeys(Database cx, int total) {
 		int cnt = 0;
 		Transaction tr(cx);
-		bool startNewTransaction = false;
 		try {
 			while (true) {
 				Error err;
 				try {
 					co_await delay(0.001);
-					if (startNewTransaction) {
-						// Independent writes must not inherit the previous transaction's retry backoff.
-						tr.fullReset();
-						startNewTransaction = false;
-					} else {
-						tr.reset();
-					}
+					tr.reset();
 					tr.set(Key(deterministicRandom()->randomAlphaNumeric(10)),
 					       Value(Key(deterministicRandom()->randomAlphaNumeric(10))));
 					co_await tr.commit();
@@ -165,7 +158,8 @@ struct ClientMetricWorkload : TestWorkload {
 						break;
 					}
 					++cnt;
-					startNewTransaction = true;
+					// Independent writes must not inherit the previous transaction's retry backoff.
+					tr.fullReset();
 				} catch (Error& e) {
 					err = e;
 				}
