@@ -36,6 +36,7 @@
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/core/WorkerInterface.h"
+#include "flow/Buggify.h"
 #include "flow/Error.h"
 
 #include "flow/IRandom.h"
@@ -1048,6 +1049,13 @@ Future<Void> monitorBackupPause(Database cx,
 	}
 }
 
+// Nothing else in simulation fails a worker draining an older generation's range, so the recovery that repairs such a
+// range would otherwise never be exercised. The delay is short because such a worker often finishes within a second.
+static Future<Void> buggifyOldEpochWorkerFailure() {
+	co_await delay(deterministicRandom()->random01() * 0.5);
+	throw io_error();
+}
+
 Future<Void> backupWorker(BackupInterface interf,
                           InitializeBackupRequest req,
                           Reference<AsyncVar<ServerDBInfo> const> db) {
@@ -1077,6 +1085,10 @@ Future<Void> backupWorker(BackupInterface interf,
 		                                 &self.paused,
 		                                 /*pausedEvent=*/"BackupWorkerPaused",
 		                                 /*resumedEvent=*/"BackupWorkerResumed"));
+
+		if (req.backupEpoch != req.recruitedEpoch && buggify()) {
+			addActor.send(buggifyOldEpochWorkerFailure());
+		}
 
 		// If the worker is on an old epoch and all backups starts a version >= the endVersion
 		bool exitEarly = co_await shouldBackupWorkerExitEarly(&self);
