@@ -117,9 +117,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override { return runTest(cx); }
 
-	Future<bool> check(Database const& cx) override { return checkImpl(cx); }
-
-	Future<bool> checkImpl(Database cx) {
+	Future<bool> check(Database const& cx) override {
 		if (expectedPrefixes != allocatedPrefixes.size()) {
 			TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
 			    .detail("Reason", "Incorrect Number of Prefixes Allocated")

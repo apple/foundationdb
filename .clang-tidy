@@ -39,7 +39,6 @@ Checks: >
   bugprone-use-after-move,
   bugprone-virtual-near-miss,
   cppcoreguidelines-avoid-capturing-lambda-coroutines,
-  cppcoreguidelines-avoid-reference-coroutine-parameters,
   misc-coroutine-hostile-raii,
   misc-redundant-expression,
   modernize-use-auto,

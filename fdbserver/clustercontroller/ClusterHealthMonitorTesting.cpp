@@ -74,8 +74,6 @@ public:
 		latestTLogEventsByName[std::move(eventName)] = std::move(latestEvents);
 	}
 
-	// The fake provider reads the name and produces its result without suspending.
-	// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	AsyncResult<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override {
 		auto it = latestEventsByName.find(eventName);
 		if (it == latestEventsByName.end()) {
@@ -90,8 +88,6 @@ public:
 
 	AsyncResult<Optional<bool>> areAllCoordinatorsReachable() const override { co_return allCoordinatorsReachable; }
 
-	// The fake provider reads the name and produces its result without suspending.
-	// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override {
 		auto it = latestRatekeeperEventsByName.find(eventName);
 		if (it != latestRatekeeperEventsByName.end()) {
@@ -100,8 +96,6 @@ public:
 		co_return co_await getLatestEvents(eventName);
 	}
 
-	// The fake provider reads the name and produces its result without suspending.
-	// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override {
 		auto it = latestDataDistributorEventsByName.find(eventName);
 		if (it != latestDataDistributorEventsByName.end()) {
@@ -110,8 +104,6 @@ public:
 		co_return co_await getLatestEvents(eventName);
 	}
 
-	// The fake provider reads the name and produces its result without suspending.
-	// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	AsyncResult<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const override {
 		auto it = latestStorageServerEventsByName.find(eventName);
 		if (it == latestStorageServerEventsByName.end()) {
@@ -120,8 +112,6 @@ public:
 		co_return it->second;
 	}
 
-	// The fake provider reads the name and produces its result without suspending.
-	// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	AsyncResult<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const override {
 		auto it = latestTLogEventsByName.find(eventName);
 		if (it == latestTLogEventsByName.end()) {

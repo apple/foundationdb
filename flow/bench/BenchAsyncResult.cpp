@@ -43,14 +43,10 @@ struct ExpensivePayload {
 	}
 };
 
-// This eager coroutine copies the payload into its result without suspending.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<ExpensivePayload> returnFuturePayload(ExpensivePayload const& payload) {
 	co_return payload;
 }
 
-// This eager coroutine copies the payload into its result without suspending.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 AsyncResult<ExpensivePayload> returnAsyncResultPayload(ExpensivePayload const& payload) {
 	co_return payload;
 }

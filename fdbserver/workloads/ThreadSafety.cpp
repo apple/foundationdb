@@ -137,9 +137,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		std::vector<ThreadInfo*> threadInfo;
 
 		Reference<IDatabase> dbRef =

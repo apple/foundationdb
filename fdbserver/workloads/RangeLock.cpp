@@ -827,9 +827,7 @@ struct RangeLocking : TestWorkload {
 		ASSERT(remainingLocks.empty());
 	}
 
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			co_return;
 		}

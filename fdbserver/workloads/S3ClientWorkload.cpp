@@ -153,9 +153,7 @@ private:
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return startImpl(); }
-
-	Future<Void> startImpl() {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			// Our simulation test can trigger multiple same workloads at the same time
 			// Only run one time workload in the simulation

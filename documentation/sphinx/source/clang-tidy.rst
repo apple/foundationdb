@@ -10,12 +10,12 @@ This guide explains how to run ``clang-tidy`` locally so you can fix issues befo
 What clang-tidy checks
 ======================
 
-FoundationDB configures 57 named checks in the ``.clang-tidy`` file at the repository root. The
+FoundationDB configures 56 named checks in the ``.clang-tidy`` file at the repository root. The
 active set depends on the clang-tidy version and can be inspected with ``clang-tidy --list-checks``.
 The intent is to enable more as we go forward. Here are some example rules:
 
 * **37 Bugprone rules** -- catch potential runtime errors, including unsafe self-assignment, forwarding constructors that hide copy or move constructors, narrow accumulation initializers, mismatched argument comments, obvious infinite loops, chained comparisons, swapped arguments, integer division in floating-point calculations, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, incorrect erase/remove calls, ignored return values, and incorrect POSIX error checks
-* **2 C++ Core Guidelines rules** -- catch unsafe captures in coroutine lambdas and borrowed coroutine parameters (``cppcoreguidelines-avoid-capturing-lambda-coroutines`` and ``cppcoreguidelines-avoid-reference-coroutine-parameters``)
+* **1 C++ Core Guidelines rule** -- catch unsafe captures in coroutine lambdas (``cppcoreguidelines-avoid-capturing-lambda-coroutines``)
 * **2 Misc rules** -- catch redundant expressions and RAII objects held across coroutine suspension points
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
 * **5 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, repeated vector growth in simple loops, pointless moves, and move constructors that copy movable members (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-inefficient-vector-operation``, ``performance-move-const-arg``, ``performance-move-constructor-init``)
@@ -34,11 +34,6 @@ reference before releasing the old one use documented, check-specific
 ``bugprone-unused-return-value`` retains the standard checked-function list and
 also checks ``pthread_create``. It does not diagnose every discarded Flow future:
 intentional uncancellable helpers need different treatment from cancellable work.
-
-``cppcoreguidelines-avoid-reference-coroutine-parameters`` encourages owning
-arguments in coroutine frames. A synchronous forwarding wrapper can preserve an
-interface that accepts references while its coroutine implementation takes values.
-Copying a ``StringRef`` or ``KeyRef`` still does not retain the referenced bytes.
 
 Basic examples of ``clang-tidy`` style and performance improvement changes:
 

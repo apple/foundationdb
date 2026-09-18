@@ -39,9 +39,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceRobustnessWorkload* self) { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		// Only use one client to avoid potential conflicts on changing cluster configuration
 		if (clientId == 0)
 			co_await managementApiCorrectnessActor(cx, this);

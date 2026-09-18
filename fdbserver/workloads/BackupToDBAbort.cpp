@@ -92,9 +92,7 @@ struct BackupToDBAbort : TestWorkload {
 		}
 	}
 
-	Future<bool> check(const Database& cx) override { return checkImpl(cx); }
-
-	Future<bool> checkImpl(Database cx) {
+	Future<bool> check(const Database& cx) override {
 		TraceEvent("BDBA_UnlockPrimary").log();
 		// Too much of the tester framework expects the primary database to be unlocked, so we unlock it
 		// once all of the workloads have finished.

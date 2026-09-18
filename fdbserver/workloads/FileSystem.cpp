@@ -161,9 +161,7 @@ struct FileSystemWorkload : TestWorkload {
 		    .detail("FilesToSetUp", nodesToSetUp);
 	}
 
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		FileSystemOp* operation;
 		if (operationName == "deletionQuery")
 			operation = new ServerDeletionCountQuery();

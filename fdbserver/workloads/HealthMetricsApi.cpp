@@ -63,9 +63,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		maxAllowedStaleness = getOption(options, "maxAllowedStaleness"_sr, 60.0);
 	}
 
-	Future<Void> setup(Database const& cx) override { return setupImpl(cx); }
-
-	Future<Void> setupImpl(Database cx) {
+	Future<Void> setup(Database const& cx) override {
 		if (!sendDetailedHealthMetrics) {
 			// Internally cached health metrics time out after this knob.  Wait
 			// an extra second to avoid any off-by-1 ">" vs ">=" type issues.
@@ -74,9 +72,9 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			cx->healthMetrics.tLogQueue.clear();
 		}
 	}
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) { co_await timeout(healthMetricsChecker(cx), testDuration, Void()); }
+	Future<Void> start(Database const& cx) override {
+		co_await timeout(healthMetricsChecker(cx), testDuration, Void());
+	}
 
 	Future<bool> check(Database const& cx) override {
 		if (!gotMetrics) {

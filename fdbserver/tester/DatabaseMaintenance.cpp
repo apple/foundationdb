@@ -153,7 +153,7 @@ std::string toHTML(const StringRef& binaryString) {
 
 } // namespace
 
-static Future<Void> dumpDatabaseImpl(Database cx, std::string outputFilename, KeyRange range) {
+Future<Void> dumpDatabase(Database const& cx, std::string const& outputFilename, KeyRange const& range) {
 	try {
 		Transaction tr(cx);
 		while (true) {
@@ -194,10 +194,6 @@ static Future<Void> dumpDatabaseImpl(Database cx, std::string outputFilename, Ke
 		TraceEvent(SevError, "DumpDatabaseError").error(e).detail("Filename", outputFilename);
 		throw;
 	}
-}
-
-Future<Void> dumpDatabase(Database const& cx, std::string const& outputFilename, KeyRange const& range) {
-	return dumpDatabaseImpl(cx, outputFilename, range);
 }
 
 std::vector<PerfMetric> aggregateMetrics(std::vector<std::vector<PerfMetric>> metrics) {

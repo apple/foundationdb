@@ -451,7 +451,7 @@ public:
 	                                   ReusableConnection& rconn,
 	                                   int requestTimeout,
 	                                   bool& retryExtended) {
-		return true;
+		co_return true;
 	}
 
 	// Do an HTTP request to the blob store, read the response. Handles connection, retry, and authentication.

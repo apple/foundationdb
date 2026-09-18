@@ -31,10 +31,8 @@
 #include "flow/ThreadHelper.h"
 namespace fdb_cli {
 
-// The CLI retains the tokens and their backing line until this command finishes or is cancelled.
 Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                  Reference<ITransaction> tr,
-                                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                  std::vector<StringRef> const& tokens,
                                  std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	ASSERT(!tokens.empty());

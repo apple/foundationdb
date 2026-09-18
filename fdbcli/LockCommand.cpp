@@ -60,8 +60,6 @@ namespace fdb_cli {
 
 const KeyRef lockSpecialKey = "\xff\xff/management/db_locked"_sr;
 
-// The CLI retains the tokens and their backing line until this command finishes or is cancelled.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens) {
 	if (tokens.size() != 1) {
 		printUsage(tokens[0]);

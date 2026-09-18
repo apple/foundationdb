@@ -219,8 +219,6 @@ static void networkTestnanosleep() {
 	return;
 }
 
-// The server list is parsed into owned addresses before suspension.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<Void> networkTestClient(std::string const& testServers) {
 	if (testServers == "nanosleep") {
 		networkTestnanosleep();

@@ -327,8 +327,6 @@ class DDTxnProcessorImpl {
 	//
 	// serverKeys entries are left in place — they drain naturally as DD
 	// moves shards using the old path.
-	// The initialization loop retains this transaction while awaiting metadata rewrites.
-	// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	static Future<bool> rewriteShardEncodedMetadata(Transaction& tr, UID distributorId) {
 		TraceEvent(SevInfo, "DDInitShardEncodeOff", distributorId)
 		    .detail("KnobValue", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);

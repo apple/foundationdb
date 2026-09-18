@@ -301,7 +301,7 @@ Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 Future<bool> hotRangeCommandActor(Database localDb,
                                   Reference<IDatabase> db,
                                   std::vector<StringRef> const& tokens,
-                                  std::map<std::string, StorageServerInterface>* storage_interface);
+                                  std::map<std::string, StorageServerInterface>* const& storage_interface);
 
 // maintenance command
 Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);

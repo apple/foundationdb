@@ -57,9 +57,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		return alreadyAdded < 1 && work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
 	}
 
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		if (enabled) {
 			// Get the database configuration so as to use proper team size
 			Transaction tr(cx);

@@ -227,8 +227,6 @@ AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string
 	return latestEventOnWorkers(workers, eventName);
 }
 
-// The event name is copied into the request helper before suspension.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestRatekeeperEvents(std::string const& eventName) const {
 	if (!ratekeeperWorker.present()) {
 		co_return LatestWorkerEvents();
@@ -236,9 +234,7 @@ AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestRatekeeperEvents(s
 	co_return co_await latestEventOnWorker(ratekeeperWorker.get(), eventName);
 }
 
-// The event name is copied into the request helper before suspension.
 AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestDataDistributorEvents(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
     std::string const& eventName) const {
 	if (!dataDistributorWorker.present()) {
 		co_return LatestWorkerEvents();

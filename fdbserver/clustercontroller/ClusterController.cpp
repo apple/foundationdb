@@ -579,8 +579,6 @@ Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 	}
 }
 
-// Proxy endpoints are copied into owned failure futures before suspension.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<std::vector<int>> monitorCDCProxies(std::vector<CDCProxyInterface> const& cdcProxies) {
 	std::vector<Future<Void>> failures;
 	failures.reserve(cdcProxies.size());
@@ -616,12 +614,9 @@ bool containsCDCProxy(std::vector<CDCProxyInterface> const& proxies, UID proxyId
 	    proxies.begin(), proxies.end(), [proxyId](CDCProxyInterface const& proxy) { return proxy.id() == proxyId; });
 }
 
-// The recruitment loop retains both snapshots until this awaited replacement pass finishes.
 Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
                                      uint64_t recoveryCount,
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                      std::vector<CDCProxyInterface> const& monitoredProxies,
-                                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                      std::vector<int> const& failedIndexes) {
 	if (!self->db.recoveryData.isValid() || self->db.recoveryData->cstate.myDBState.recoveryCount != recoveryCount) {
 		co_return;

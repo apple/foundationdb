@@ -51,12 +51,10 @@ ReadHotSubRangeRequest::SplitType parseSplitType(const std::string& typeStr) {
 
 namespace fdb_cli {
 
-// The CLI retains the tokens and their backing line until this command finishes or is cancelled.
 Future<bool> hotRangeCommandActor(Database localdb,
                                   Reference<IDatabase> db,
-                                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                   std::vector<StringRef> const& tokens,
-                                  std::map<std::string, StorageServerInterface>* storage_interface) {
+                                  std::map<std::string, StorageServerInterface>* const& storage_interface) {
 
 	if (tokens.size() == 1) {
 		// initialize storage interfaces

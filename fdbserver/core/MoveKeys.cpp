@@ -1610,12 +1610,9 @@ static Optional<DecodedKeyServersState> decodeKeyServersState(RangeResult const&
 // owns the FlowLock slot). Returns the interfaces plus the read version at
 // which they were fetched — the read version is what waitForShardReady()
 // needs (see finishMoveKeys where we save it before dropping the txn).
-// Both server lists are consumed into owned containers before suspension.
 static Future<std::pair<std::vector<StorageServerInterface>, Version>> buildKeysDestServerInterfaces(
     Transaction* tr,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
     std::vector<UID> const& dest,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
     std::vector<UID> const& completeSrc,
     bool hasRemote) {
 	std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
@@ -1651,14 +1648,10 @@ static Future<std::pair<std::vector<StorageServerInterface>, Version>> buildKeys
 // populated) when only TSS is slow, so subsequent iterations can skip it.
 // Returns `destSize - (SSes not ready)`; the caller retries if not equal to
 // `destSize`. `keys` is only used for tracing.
-// The pending move retains these snapshots until this awaited phase finishes.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 static Future<int> waitForKeysDestServers(std::vector<StorageServerInterface> const& storageServerInterfaces,
                                           int destSize,
-                                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                           KeyRange const& keys,
                                           Version readVersion,
-                                          // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                           std::map<UID, StorageServerInterface> const& tssMapping,
                                           int* waitForTSSCounter,
                                           std::unordered_set<UID>* tssToIgnore,
@@ -1753,17 +1746,13 @@ static Future<int> waitForKeysDestServers(std::vector<StorageServerInterface> co
 // change during the wait; the caller retries via retryAfterPostWaitChange().
 // `currentKeys` and `endKey` are in/out because a KRM boundary re-truncation
 // can shorten them.
-// The pending move retains these snapshots until this awaited phase finishes.
 static Future<bool> reverifyKeysDestAndCommit(Transaction* tr,
                                               MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState,
                                               KeyRange* currentKeys,
                                               Key* endKey,
-                                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                               std::vector<UID> const& dest,
-                                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                               std::set<UID> const& allServers,
-                                              // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                               KeyRange const& keys,
                                               UID relocationIntervalId,
                                               FinishMoveRetryBudget* retryBudget,
@@ -2515,23 +2504,17 @@ struct DecodedShardsKeyServers {
 // running the per-sub-range AUDIT_DATAMOVE_PRE_CHECK when enabled. On a
 // stamp mismatch, sets *cancelDataMove=true and throws retry() so the outer
 // loop enters the cancel path. `dataMove` is only used for tracing.
-// The pending move retains its metadata and read arenas throughout this awaited phase.
-static Future<DecodedShardsKeyServers> decodeAndPreCheckShards(
-    Database occ,
-    Transaction* tr,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
-    RangeResult const& UIDtoTagMap,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
-    RangeResult const& keyServers,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
-    std::vector<UID> const& destServers,
-    UID dataMoveId,
-    bool runPreCheck,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
-    DataMoveMetaData const& dataMove,
-    UID relocationIntervalId,
-    Severity sevDm,
-    bool* cancelDataMove) {
+static Future<DecodedShardsKeyServers> decodeAndPreCheckShards(Database occ,
+                                                               Transaction* tr,
+                                                               RangeResult const& UIDtoTagMap,
+                                                               RangeResult const& keyServers,
+                                                               std::vector<UID> const& destServers,
+                                                               UID dataMoveId,
+                                                               bool runPreCheck,
+                                                               DataMoveMetaData const& dataMove,
+                                                               UID relocationIntervalId,
+                                                               Severity sevDm,
+                                                               bool* cancelDataMove) {
 	std::vector<UID> completeSrc;
 	std::unordered_set<UID> allServers;
 
@@ -2593,12 +2576,9 @@ static Future<DecodedShardsKeyServers> decodeAndPreCheckShards(
 // finishMoveShards analog of buildKeysDestServerInterfaces. Only difference:
 // a missing serverList entry throws retry() rather than asserting — shards
 // tolerates the SS-removed race by re-reading dataMove and starting over.
-// Both server lists are consumed into owned containers before suspension.
 static Future<std::pair<std::vector<StorageServerInterface>, Version>> buildShardsDestServerInterfaces(
     Transaction* tr,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
     std::vector<UID> const& destServers,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
     std::vector<UID> const& completeSrc,
     bool hasRemote) {
 	std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
@@ -2642,15 +2622,10 @@ static Future<std::pair<std::vector<StorageServerInterface>, Version>> buildShar
 // count for the caller's ready-versus-target comparison; also fills
 // `readyServers_out` and `tssCount_out` for the caller's post-wait
 // tracing.
-// The pending move retains these snapshots until this awaited phase finishes.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 static Future<int> waitForShardsDestServers(std::vector<StorageServerInterface> const& storageServerInterfaces,
-                                            // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                             std::vector<UID> const& newDestinationIds,
-                                            // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                             KeyRange const& range,
                                             Version readVersion,
-                                            // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                             std::map<UID, StorageServerInterface> const& tssMapping,
                                             bool* skipTss,
                                             double* ssReadyTime,
@@ -2659,7 +2634,6 @@ static Future<int> waitForShardsDestServers(std::vector<StorageServerInterface> 
                                             UID dataMoveId,
                                             UID relocationIntervalId,
                                             Severity sevDm,
-                                            // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
                                             DataMoveMetaData const& dataMove) {
 	std::vector<Future<Void>> serverReady; // only for count below
 	std::vector<Future<Void>> tssReady; // for waiting in parallel with tss
@@ -2739,26 +2713,22 @@ enum class ReverifyShardsResult { RetryLoop, PartialCommitted, FullyCommitted };
 // the outer loop skips the per-sub-range AUDIT precheck on the next attempt.
 // `cancelDataMove` is set on bulk-load-outdated so the outer catch enters
 // the cancel path.
-// The pending move retains these snapshots until this awaited phase finishes.
-static Future<ReverifyShardsResult> reverifyShardsAndCommit(
-    Transaction* tr,
-    Database occ,
-    MoveKeysLock lock,
-    const DDEnabledState* ddEnabledState,
-    UID dataMoveId,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
-    std::vector<UID> const& destServers,
-    KeyRange* range,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
-    std::unordered_set<UID> const& allServers,
-    Optional<BulkLoadTaskState> bulkLoadTaskState,
-    DataMoveMetaData* postWaitDataMove_out,
-    UID relocationIntervalId,
-    Severity sevDm,
-    FinishMoveRetryBudget* retryBudget,
-    bool* runPreCheck,
-    bool* cancelDataMove,
-    TxnCounters* counters) {
+static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
+                                                            Database occ,
+                                                            MoveKeysLock lock,
+                                                            const DDEnabledState* ddEnabledState,
+                                                            UID dataMoveId,
+                                                            std::vector<UID> const& destServers,
+                                                            KeyRange* range,
+                                                            std::unordered_set<UID> const& allServers,
+                                                            Optional<BulkLoadTaskState> bulkLoadTaskState,
+                                                            DataMoveMetaData* postWaitDataMove_out,
+                                                            UID relocationIntervalId,
+                                                            Severity sevDm,
+                                                            FinishMoveRetryBudget* retryBudget,
+                                                            bool* runPreCheck,
+                                                            bool* cancelDataMove,
+                                                            TxnCounters* counters) {
 	tr->trState->taskID = TaskPriority::MoveKeys;
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

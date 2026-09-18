@@ -42,8 +42,8 @@ WorkerEvents filterEmptyEvents(WorkerEvents const& events) {
 }
 
 Future<Level> fetchSpaceLevel(LatestWorkerEvents eventsAndErrors,
-                              std::string availableBytesField,
-                              std::string totalBytesField,
+                              std::string const& availableBytesField,
+                              std::string const& totalBytesField,
                               double interventionThreshold,
                               double criticalInterventionThreshold,
                               char const* failureTraceEventName) {

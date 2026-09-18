@@ -253,9 +253,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		co_await allDone->onSetAddTask(tr, taskBucket, taskDone);
 	}
 
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Subspace taskSubspace("backup-agent"_sr);
 		auto taskBucket = makeReference<TaskBucket>(taskSubspace.get("tasks"_sr));
@@ -327,9 +325,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	Future<bool> check(Database const& cx) override { return checkImpl(cx); }
-
-	Future<bool> checkImpl(Database cx) {
+	Future<bool> check(Database const& cx) override {
 		bool ret = co_await runRYWTransaction(
 		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return checkSayHello(tr, subtaskCount); });
 		co_return ret;

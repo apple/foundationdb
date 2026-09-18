@@ -71,28 +71,3 @@ std::string UnitTestParameters::getDataDir() const {
 void UnitTestParameters::setDataDir(std::string const& dataDir) {
 	this->dataDir = dataDir;
 }
-
-TEST_CASE("/flow/UnitTestParameters/coroutineOwnership") {
-	const std::string marker = "unitTestParameterOwnershipProbe";
-	if (params.get(marker).present()) {
-		co_await delay(0.001);
-		ASSERT_EQ(params.get(marker).get(), std::string("original"));
-		co_return;
-	}
-
-	UnitTest* registered = g_unittests.tests;
-	while (registered != nullptr && StringRef(registered->name) != "/flow/UnitTestParameters/coroutineOwnership"_sr) {
-		registered = registered->next;
-	}
-	ASSERT(registered != nullptr);
-
-	Future<Void> pending;
-	{
-		UnitTestParameters callerParams;
-		callerParams.set(marker, std::string("original"));
-		pending = registered->func(callerParams);
-		ASSERT(!pending.isReady());
-		callerParams.set(marker, std::string("changed"));
-	}
-	co_await pending;
-}

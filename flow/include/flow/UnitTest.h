@@ -47,8 +47,7 @@
  * }
  *
  * The body of a TEST_CASE returns a Future<Void>. It may be an ordinary function
- * or a C++ coroutine using `co_await` and `co_return`. Each test body receives its
- * own const copy of the parameters; a coroutine keeps that copy in its frame.
+ * or a C++ coroutine using `co_await` and `co_return`.
  *
  * Our tools for actually executing tests are external to flow (and use g_unittests to find test cases).
  * See the `UnitTestWorkload` class.
@@ -121,19 +120,16 @@ extern bool noUnseed;
 
 #ifdef FLOW_DISABLE_UNIT_TESTS
 
-#define TEST_CASE(name) static Future<Void> FILE_UNIQUE_NAME(disabled_testcase_func)(const UnitTestParameters params)
+#define TEST_CASE(name) static Future<Void> FILE_UNIQUE_NAME(disabled_testcase_func)(const UnitTestParameters& params)
 
 #else
 
 #define TEST_CASE(name)                                                                                                \
-	static Future<Void> FILE_UNIQUE_NAME(testcase_impl)(const UnitTestParameters params);                              \
-	static Future<Void> FILE_UNIQUE_NAME(testcase_func)(const UnitTestParameters& params) {                            \
-		return FILE_UNIQUE_NAME(testcase_impl)(params);                                                                \
-	}                                                                                                                  \
+	static Future<Void> FILE_UNIQUE_NAME(testcase_func)(const UnitTestParameters& params);                             \
 	namespace {                                                                                                        \
 	static UnitTest FILE_UNIQUE_NAME(testcase)(name, __FILE__, __LINE__, &FILE_UNIQUE_NAME(testcase_func));            \
 	}                                                                                                                  \
-	static Future<Void> FILE_UNIQUE_NAME(testcase_impl)(const UnitTestParameters params)
+	static Future<Void> FILE_UNIQUE_NAME(testcase_func)(const UnitTestParameters& params)
 
 #endif
 

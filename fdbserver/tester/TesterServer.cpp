@@ -527,11 +527,21 @@ Future<Void> testerServerWorkload(WorkloadRequest work,
 
 } // namespace
 
-static Future<Void> testerServerCoreImpl(TesterInterface interfCopy,
-                                         Reference<IClusterConnectionRecord> ccrCopy,
-                                         Reference<AsyncVar<struct ServerDBInfo> const> dbInfoCopy,
-                                         LocalityData localityCopy,
-                                         Optional<std::string> expectedWorkLoadCopy) {
+Future<Void> testerServerCore(TesterInterface const& interf,
+                              Reference<IClusterConnectionRecord> const& ccr,
+                              Reference<AsyncVar<struct ServerDBInfo> const> const& dbInfo,
+                              LocalityData const& locality,
+                              Optional<std::string> const& expectedWorkLoad) {
+	// C++20 coroutine safety: const& parameters only store the reference in the coroutine frame,
+	// not the object. The referred-to object may be destroyed after the coroutine suspends
+	// (e.g. local variables in a caller's if-block, or temporaries from default arguments).
+	// Copy all const& parameters to ensure they survive across suspend points.
+	TesterInterface interfCopy = interf;
+	Reference<IClusterConnectionRecord> ccrCopy = ccr;
+	Reference<AsyncVar<struct ServerDBInfo> const> dbInfoCopy = dbInfo;
+	LocalityData localityCopy = locality;
+	Optional<std::string> expectedWorkLoadCopy = expectedWorkLoad;
+
 	PromiseStream<Future<Void>> addWorkload;
 	Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
 
@@ -615,12 +625,4 @@ static Future<Void> testerServerCoreImpl(TesterInterface interfCopy,
 		}
 	}
 	co_return;
-}
-
-Future<Void> testerServerCore(TesterInterface const& interf,
-                              Reference<IClusterConnectionRecord> const& ccr,
-                              Reference<AsyncVar<struct ServerDBInfo> const> const& dbInfo,
-                              LocalityData const& locality,
-                              Optional<std::string> const& expectedWorkLoad) {
-	return testerServerCoreImpl(interf, ccr, dbInfo, locality, expectedWorkLoad);
 }

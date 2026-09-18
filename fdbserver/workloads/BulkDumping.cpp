@@ -465,9 +465,7 @@ struct BulkDumping : TestWorkload {
 	// (9) Validate the loaded data in DB is same as the data in DB before dumping within the bulkdump job range and
 	// bulkload job range. Note that the bulkload job can be unretriable error. In this case, we ignore the error range;
 	// (10) Validate the bulk load job history.
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			co_return;
 		}
