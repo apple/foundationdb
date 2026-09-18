@@ -42,6 +42,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/hex.hpp>
+#include <algorithm>
 #include "flow/IAsyncFile.h"
 #include "flow/Hostname.h"
 #include "flow/UnitTest.h"
@@ -53,6 +54,28 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 using namespace rapidxml;
+
+static constexpr const char* multipartUploadTokenHeader = "x-amz-meta-fdb-multipart-upload-token";
+
+void S3BlobStoreEndpoint::rememberMultipartUploadToken(std::string const& uploadID, std::string const& token) {
+	if (!multipartUploadTokens.contains(uploadID) && multipartUploadTokens.size() == maxTrackedMultipartUploads) {
+		auto oldest =
+		    std::min_element(multipartUploadTokens.begin(),
+		                     multipartUploadTokens.end(),
+		                     [](auto const& a, auto const& b) { return a.second.sequence < b.second.sequence; });
+		multipartUploadTokens.erase(oldest);
+	}
+	multipartUploadTokens[uploadID] = { token, nextMultipartUploadSequence++ };
+}
+
+Optional<std::string> S3BlobStoreEndpoint::multipartUploadToken(std::string const& uploadID) const {
+	auto it = multipartUploadTokens.find(uploadID);
+	return it == multipartUploadTokens.end() ? Optional<std::string>() : Optional<std::string>(it->second.token);
+}
+
+void S3BlobStoreEndpoint::forgetMultipartUploadToken(std::string const& uploadID) {
+	multipartUploadTokens.erase(uploadID);
+}
 
 json_spirit::mObject S3BlobStoreEndpoint::Stats::getJSON() {
 	json_spirit::mObject o;
@@ -2073,6 +2096,9 @@ ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStore
 	state std::string resource = bstore->constructResourcePath(bucket, object);
 	resource += "?uploads";
 	state HTTP::Headers headers;
+	state std::string token =
+	    (g_network->isSimulated() ? debugRandom() : nondeterministicRandom())->randomUniqueID().toString();
+	headers[multipartUploadTokenHeader] = token;
 	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
 		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
 	Reference<HTTP::IncomingResponse> r = wait(bstore->doRequest("POST", resource, headers, nullptr, 0, { 200 }));
@@ -2089,6 +2115,7 @@ ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStore
 		if (result != nullptr && strcmp(result->name(), "InitiateMultipartUploadResult") == 0) {
 			xml_node<>* id = result->first_node("UploadId");
 			if (id != nullptr) {
+				bstore->rememberMultipartUploadToken(id->value(), token);
 				return id->value();
 			}
 		}
@@ -2153,11 +2180,61 @@ Future<std::string> S3BlobStoreEndpoint::uploadPart(std::string const& bucket,
 	                       contentMD5);
 }
 
+enum class MultipartCompletionStatus { Success, NoSuchUpload, Failure };
+
+static MultipartCompletionStatus parseMultipartCompletionResponse(int code, std::string const& body) {
+	if (code == 404) {
+		return parseErrorCodeFromS3(body) == "NoSuchUpload" ? MultipartCompletionStatus::NoSuchUpload
+		                                                    : MultipartCompletionStatus::Failure;
+	}
+	if (code != 200) {
+		return MultipartCompletionStatus::Failure;
+	}
+
+	try {
+		std::string content = body; // rapidxml modifies its input
+		xml_document<> doc;
+		doc.parse<0>(content.data());
+		xml_node<>* result = doc.first_node();
+		if (result != nullptr && strcmp(result->name(), "CompleteMultipartUploadResult") == 0 &&
+		    result->first_node("ETag") != nullptr && result->first_node("ETag")->value_size() > 0) {
+			return MultipartCompletionStatus::Success;
+		}
+	} catch (const rapidxml::parse_error&) {
+	}
+	return parseErrorCodeFromS3(body) == "NoSuchUpload" ? MultipartCompletionStatus::NoSuchUpload
+	                                                    : MultipartCompletionStatus::Failure;
+}
+
+static bool multipartObjectMatches(HTTP::IncomingResponse const& response,
+                                   std::string const& token,
+                                   int64_t totalSize) {
+	if (response.code != 200) {
+		return false;
+	}
+	auto it = response.data.headers.find(multipartUploadTokenHeader);
+	return it != response.data.headers.end() && it->second == token &&
+	       (totalSize <= 0 || response.data.contentLen == totalSize);
+}
+
+ACTOR static Future<bool> completedMultipartObjectMatches(Reference<S3BlobStoreEndpoint> bstore,
+                                                          std::string bucket,
+                                                          std::string object,
+                                                          std::string token,
+                                                          int64_t totalSize) {
+	wait(bstore->requestRateRead->getAllowance(1));
+	state HTTP::Headers headers;
+	state std::string resource = bstore->constructResourcePath(bucket, object);
+	Reference<HTTP::IncomingResponse> r = wait(bstore->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
+	return multipartObjectMatches(*r, token, totalSize);
+}
+
 ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore,
                                               std::string bucket,
                                               std::string object,
                                               std::string uploadID,
-                                              S3BlobStoreEndpoint::MultiPartSetT parts) {
+                                              S3BlobStoreEndpoint::MultiPartSetT parts,
+                                              int64_t totalSize) {
 	state UnsentPacketQueue part_list; // NonCopyable state var so must be declared at top of actor
 	wait(bstore->requestRateWrite->getAllowance(1));
 
@@ -2171,26 +2248,61 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 	state HTTP::Headers headers;
 	PacketWriter pw(part_list.getWriteBuffer(manifest.size()), nullptr, Unversioned());
 	pw.serializeBytes(manifest);
-	Reference<HTTP::IncomingResponse> r =
-	    wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), { 200 }));
-	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then
-	// the next retry will see error 400.  That could be detected and handled gracefully by HEAD'ing the object before
-	// upload to get its (possibly nonexistent) eTag, then if an error 400 is seen then retrieve the eTag again and if
-	// it has changed then consider the finish complete.
-	return Void();
+	state Optional<std::string> token = bstore->multipartUploadToken(uploadID);
+	state Optional<Error> completionError;
+	state MultipartCompletionStatus status = MultipartCompletionStatus::Failure;
+	try {
+		Reference<HTTP::IncomingResponse> r =
+		    wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), { 200, 404 }));
+		status = parseMultipartCompletionResponse(r->code, r->data.content);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled || e.code() == error_code_broken_promise) {
+			throw;
+		}
+		completionError = e;
+	}
+
+	if (status == MultipartCompletionStatus::Success) {
+		bstore->forgetMultipartUploadToken(uploadID);
+		return Void();
+	}
+
+	if (token.present() && (status == MultipartCompletionStatus::NoSuchUpload || completionError.present())) {
+		try {
+			bool matches = wait(completedMultipartObjectMatches(bstore, bucket, object, token.get(), totalSize));
+			if (matches) {
+				bstore->forgetMultipartUploadToken(uploadID);
+				TraceEvent("S3MultipartCompletionReconciled").detail("Bucket", bucket).detail("Object", object);
+				return Void();
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled || e.code() == error_code_broken_promise) {
+				throw;
+			}
+			// A failed HEAD cannot establish that the object belongs to this upload.
+		}
+	}
+
+	if (completionError.present()) {
+		throw completionError.get();
+	}
+	throw http_request_failed();
 }
 
 Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucket,
                                                         std::string const& object,
                                                         std::string const& uploadID,
-                                                        MultiPartSetT const& parts) {
-	return finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID, parts);
+                                                        MultiPartSetT const& parts,
+                                                        int64_t totalSize) {
+	return finishMultiPartUpload_impl(
+	    Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID, parts, totalSize);
 }
 
 ACTOR Future<Void> abortMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore,
                                              std::string bucket,
                                              std::string object,
                                              std::string uploadID) {
+	bstore->forgetMultipartUploadToken(uploadID);
 	wait(bstore->requestRateWrite->getAllowance(1));
 
 	std::string resource = bstore->constructResourcePath(bucket, object);
@@ -2480,5 +2592,42 @@ TEST_CASE("/backup/s3/parseErrorCodeFromS3") {
 		ASSERT(parseErrorCodeFromS3("Internal Server Error") == "");
 	}
 
+	return Void();
+}
+
+TEST_CASE("/backup/s3/multipartCompletionResponse") {
+	const std::string success = "<CompleteMultipartUploadResult><ETag>\"etag\"</ETag>"
+	                            "</CompleteMultipartUploadResult>";
+	const std::string noSuchUpload = "<Error><Code>NoSuchUpload</Code></Error>";
+	const std::string invalidPart = "<Error><Code>InvalidPart</Code></Error>";
+
+	ASSERT(parseMultipartCompletionResponse(200, success) == MultipartCompletionStatus::Success);
+	ASSERT(parseMultipartCompletionResponse(200, noSuchUpload) == MultipartCompletionStatus::NoSuchUpload);
+	ASSERT(parseMultipartCompletionResponse(200, invalidPart) == MultipartCompletionStatus::Failure);
+	ASSERT(parseMultipartCompletionResponse(404, noSuchUpload) == MultipartCompletionStatus::NoSuchUpload);
+	ASSERT(parseMultipartCompletionResponse(404, invalidPart) == MultipartCompletionStatus::Failure);
+	ASSERT(parseMultipartCompletionResponse(200, "<CompleteMultipartUploadResult/>") ==
+	       MultipartCompletionStatus::Failure);
+	ASSERT(parseMultipartCompletionResponse(200,
+	                                        "<CompleteMultipartUploadResult><ETag/></CompleteMultipartUploadResult>") ==
+	       MultipartCompletionStatus::Failure);
+	ASSERT(parseMultipartCompletionResponse(200, "<CompleteMultipartUploadResult") ==
+	       MultipartCompletionStatus::Failure);
+	return Void();
+}
+
+TEST_CASE("/backup/s3/multipartCompletionIdentity") {
+	HTTP::IncomingResponse response;
+	response.code = 404;
+	response.data.contentLen = 10;
+	response.data.headers[multipartUploadTokenHeader] = "our-upload";
+	ASSERT(!multipartObjectMatches(response, "our-upload", 10));
+
+	response.code = 200;
+	ASSERT(multipartObjectMatches(response, "our-upload", 10));
+	ASSERT(!multipartObjectMatches(response, "other-upload", 10));
+	ASSERT(!multipartObjectMatches(response, "our-upload", 11));
+	response.data.headers.erase(multipartUploadTokenHeader);
+	ASSERT(!multipartObjectMatches(response, "our-upload", 10));
 	return Void();
 }
