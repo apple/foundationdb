@@ -607,7 +607,7 @@ class CDCProxy {
 	Future<Void> monitorAcknowledgedDataPops();
 	void reconcileStreams();
 	Future<Void> consume(CDCConsumeRequest request);
-	Future<CDCConsumeReply> consumeReply(Reference<CDCBufferedStream> stream, CDCCursor cursor);
+	Future<CDCConsumeReply> consumeReply(Reference<CDCBufferedStream> stream, CDCCursor cursor, int64_t replyByteLimit);
 	Future<Void> acknowledge(CDCAckRequest request);
 	Future<Void> registerStream(CDCRegisterStreamRequest request);
 	Future<Void> removeStream(CDCRemoveStreamRequest request);
@@ -2049,7 +2049,8 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 				stream->activeConsume.clear();
 			}
 		});
-		CDCConsumeReply reply = co_await lease->waitForReply(consumeReply(stream, request.cursor));
+		CDCConsumeReply reply =
+		    co_await lease->waitForReply(consumeReply(stream, request.cursor, request.replyByteLimit));
 		// Record proof before send(), whose callbacks may run synchronously. Empty or capped replies do not
 		// extend the speculative horizon; neither does replaying an already issued cursor.
 		const bool armed = stream->readAhead.issueReply(reply.lastConsumedVersion,
@@ -2068,7 +2069,15 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 	}
 }
 
-Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stream, CDCCursor cursor) {
+Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stream,
+                                               CDCCursor cursor,
+                                               int64_t requestedLimit) {
+	if (requestedLimit < 0) {
+		throw client_invalid_operation();
+	}
+	const int64_t replyByteLimit = requestedLimit == 0
+	                                   ? SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES
+	                                   : std::min<int64_t>(requestedLimit, SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES);
 	const CDCStreamReadState metadata =
 	    co_await readCDCStreamState(cx, cursor.streamId, id, true, PrioritizeDrain::True);
 	if (stream->tooOld) {
@@ -2133,11 +2142,8 @@ Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stre
 		if (versioned.version > replyThrough) {
 			break;
 		}
-		if (!selectCDCConsumeReplyVersion(&selection,
-		                                  begin,
-		                                  versioned.version,
-		                                  estimatedCDCConsumeVersionBytes(versioned),
-		                                  SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES)) {
+		if (!selectCDCConsumeReplyVersion(
+		        &selection, begin, versioned.version, estimatedCDCConsumeVersionBytes(versioned), replyByteLimit)) {
 			break;
 		}
 		// Retain the already-accounted stream arena instead of copying mutation payloads for every reply.
@@ -2149,7 +2155,7 @@ Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stre
 		TraceEvent(SevWarn, "CDCProxyConsumeVersionExceedsReplyLimit", id)
 		    .detail("StreamId", stream->streamId)
 		    .detail("Version", begin)
-		    .detail("ReplyLimit", SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES);
+		    .detail("ReplyLimit", replyByteLimit);
 		throw server_overloaded();
 	}
 	reply.lastConsumedVersion = selectedCDCConsumeReplyThrough(selection, replyThrough);

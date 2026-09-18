@@ -231,6 +231,18 @@ ThreadFuture<CDCStreamId> ThreadSafeDatabase::registerNativeCdcStream(const KeyR
 	});
 }
 
+ThreadFuture<CDCStreamId> ThreadSafeDatabase::registerNativeCdcOrderedStream(const KeyRef& name,
+                                                                             const std::vector<KeyRange>& ranges,
+                                                                             const std::vector<Key>& splitPoints) {
+	DatabaseContext* db = this->db;
+	Key nameCopy(name);
+	return onMainThread([db, nameCopy, ranges, splitPoints]() -> Future<CDCStreamId> {
+		db->checkDeferredError();
+		return registerNativeCdcOrderedStreamClient(
+		    Database(Reference<DatabaseContext>::addRef(db)), nameCopy, ranges, splitPoints);
+	});
+}
+
 ThreadFuture<Void> ThreadSafeDatabase::removeNativeCdcStream(const KeyRef& name) {
 	DatabaseContext* db = this->db;
 	Key nameCopy(name);

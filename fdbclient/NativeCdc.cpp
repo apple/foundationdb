@@ -31,8 +31,12 @@
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
 #include "NativeCdcInternal.h"
+#include "NativeCdcOrderedMetadata.h"
+#include "NativeCdcOrderedMerge.h"
+#include "NativeCdcOrderedLifecycle.h"
 #include "flow/CodeProbe.h"
 #include "flow/Error.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 
@@ -80,7 +84,7 @@ public:
 
 	bool hasStreams(Tag tag) const { return tagStreamCounts.contains(tag.id); }
 
-	std::pair<CDCStreamId, Tag> allocate(int tagCount) const {
+	std::pair<CDCStreamId, Tag> allocate(int tagCount, std::set<Tag> const& excluded = {}) const {
 		if (sawStream && maxStreamId == std::numeric_limits<CDCStreamId>::max()) {
 			throw operation_failed();
 		}
@@ -97,6 +101,9 @@ public:
 		int64_t leastWriteRate = std::numeric_limits<int64_t>::max();
 		CDCTagId selectedTagId = 0;
 		for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(tagCount); ++tagId) {
+			if (excluded.contains(Tag(tagLocalityCDC, static_cast<CDCTagId>(tagId)))) {
+				continue;
+			}
 			auto count = tagStreamCounts.find(static_cast<CDCTagId>(tagId));
 			const uint32_t streamCount = count == tagStreamCounts.end() ? 0 : count->second;
 			const int64_t writeRate = completeLoad && streamCount > 0 ? tagWriteRates.at(tagId) : 0;
@@ -107,6 +114,9 @@ public:
 			}
 		}
 		CODE_PROBE(completeLoad, "Native CDC registration places streams using fresh producer throughput");
+		if (leastStreams == std::numeric_limits<uint32_t>::max()) {
+			throw client_invalid_operation();
+		}
 		return { streamId, Tag(tagLocalityCDC, selectedTagId) };
 	}
 };
@@ -477,6 +487,9 @@ Future<Optional<CDCProxyInterface>> getNativeCdcStreamProxyForRemoval(Database c
 }
 
 Future<Void> removeNativeCdcStreamById(Database cx, Key name, CDCStreamId streamId) {
+	if (co_await removeNativeCdcOrderedStream(cx, name, streamId)) {
+		co_return;
+	}
 	while (true) {
 		Optional<CDCProxyInterface> proxy = co_await getNativeCdcStreamProxyForRemoval(cx, name, streamId);
 		if (!proxy.present()) {
@@ -855,6 +868,12 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx) {
 			std::vector<NativeCdcStreamInfo> result;
 			result.reserve(names.size());
 			for (auto& [name, streamId] : names) {
+				const auto ordered = co_await readNativeCdcOrderedSnapshot(&tr, streamId);
+				if (ordered.present()) {
+					result.push_back(NativeCdcStreamInfo{
+					    std::move(name), streamId, ordered.get().metadata.ranges(), ordered.get().minVersion });
+					continue;
+				}
 				auto ranges = streamRanges.find(streamId);
 				auto minVersion = minVersions.find(streamId);
 				if (ranges != streamRanges.end() && minVersion != minVersions.end()) {
@@ -942,6 +961,11 @@ Future<Version> acknowledgeNativeCdcStream(Database cx,
 				CODE_PROBE(true, "Native CDC preserves a durable duplicate acknowledgement");
 				co_return minVersion;
 			}
+			if ((co_await tr.get(cdcOrderedParentKeyFor(streamId))).present()) {
+				// Only an aggregate acknowledgement may advance a partition. The duplicate
+				// case above remains valid for its subsequent proxy notification.
+				throw client_invalid_operation();
+			}
 
 			const Version readVersion = co_await tr.getReadVersion();
 			if (consumedThrough > readVersion && consumedThrough > knownAvailableThrough) {
@@ -956,6 +980,84 @@ Future<Version> acknowledgeNativeCdcStream(Database cx,
 			err = e;
 		}
 		co_await tr.onError(err);
+	}
+}
+
+Future<CDCStreamId> registerNativeCdcOrderedStreamClient(Database cx,
+                                                         Key name,
+                                                         std::vector<KeyRange> ranges,
+                                                         std::vector<Key> splitPoints) {
+	normalizeNativeCdcStreamRanges(name, ranges);
+	const auto partitionRanges = nativeCdcOrderedPartitionRanges(ranges, splitPoints);
+	Transaction tr(cx);
+	while (true) {
+		Error error;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			const Key nameKey = cdcStreamNameKeyFor(name);
+			const Optional<Value> existing = co_await tr.get(nameKey);
+			if (existing.present()) {
+				const CDCStreamId streamId = decodeCDCStreamNameValue(existing.get());
+				const auto snapshot = co_await readNativeCdcOrderedSnapshot(&tr, streamId);
+				if (!snapshot.present() || snapshot.get().metadata.ranges() != ranges ||
+				    snapshot.get().metadata.splitPoints() != splitPoints) {
+					throw client_invalid_operation();
+				}
+				co_return streamId;
+			}
+			const ClientDBInfo clientInfo = cx->clientInfo->get();
+			validateNativeCdcEnabled(clientInfo.nativeCdcEnabled);
+			if (!validNativeCdcTagCount(clientInfo.nativeCdcTagCount) ||
+			    partitionRanges.size() > clientInfo.nativeCdcTagCount) {
+				throw client_invalid_operation();
+			}
+			if (clientInfo.cdcProxies.empty()) {
+				tr.reset();
+				co_await cx->clientInfo->onChange();
+				continue;
+			}
+			NativeCdcIdentifierAllocator allocator;
+			co_await observeNativeCdcMetadata(&tr, &allocator);
+			const CDCStreamId logicalId = allocator.allocate(clientInfo.nativeCdcTagCount).first;
+			allocator.observeStreamId(logicalId);
+			const Version registrationVersion = co_await tr.getReadVersion();
+			std::vector<CDCStreamId> partitions;
+			std::set<Tag> selectedTags;
+			for (size_t i = 0; i < partitionRanges.size(); ++i) {
+				const auto [streamId, tag] = allocator.allocate(clientInfo.nativeCdcTagCount, selectedTags);
+				Optional<UID> sharedOwner;
+				if (allocator.hasStreams(tag)) {
+					sharedOwner = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
+				}
+				const UID owner = sharedOwner.present() ? sharedOwner.get()
+				                                        : clientInfo.cdcProxies[i % clientInfo.cdcProxies.size()].id();
+				tr.set(cdcStreamKeyFor(streamId), cdcStreamKeysValue(partitionRanges[i]));
+				tr.set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
+				tr.set(cdcProxyKeyFor(streamId, owner), Value());
+				tr.set(cdcOrderedParentKeyFor(streamId), cdcOrderedParentValue(logicalId));
+				tr.atomicOp(cdcMinVersionKeyFor(streamId),
+				            cdcVersionstampedMinVersionValue(),
+				            MutationRef::SetVersionstampedValue);
+				if (!sharedOwner.present()) {
+					tr.set(cdcTagOwnerKeyFor(tag), cdcTagOwnerValue(streamId));
+				}
+				partitions.push_back(streamId);
+				selectedTags.insert(tag);
+				allocator.observeStreamId(streamId);
+				allocator.observeTag(tag);
+			}
+			tr.set(nameKey, cdcStreamNameValue(logicalId));
+			tr.set(cdcMaxStreamIdKey, cdcMaxStreamIdValue(partitions.back()));
+			tr.set(cdcOrderedStreamKeyFor(logicalId),
+			       cdcOrderedStreamValue(NativeCdcOrderedMetadata(ranges, splitPoints, partitions)));
+			signalNativeCdcProxyAssignmentChange(&tr);
+			co_await tr.commit();
+			co_return logicalId;
+		} catch (Error& e) {
+			error = e;
+		}
+		co_await tr.onError(error);
 	}
 }
 
@@ -1037,7 +1139,9 @@ Future<NativeCdcStatus> getNativeCdcStatus(Database cx) {
 			                          cdcProxyKeys,
 			                          cdcTagHistoryKeys,
 			                          cdcRetiredTagPopKeys,
-			                          cdcRetiredTagPopVersionKeys }) {
+			                          cdcRetiredTagPopVersionKeys,
+			                          cdcOrderedStreamKeys,
+			                          cdcOrderedParentKeys }) {
 				metadata.push_back(readNativeCdcStatusRange(&tr, keys));
 			}
 			co_await waitForAll(metadata);
@@ -1068,6 +1172,56 @@ Future<NativeCdcStatus> getNativeCdcStatus(Database cx) {
 				const auto history = decodeCDCTagHistoryKey(entry.key);
 				streams[history.streamId].tags.push_back(history.tag);
 			}
+			for (const auto& entry : metadata[8].get()) {
+				streams[decodeCDCOrderedParentKey(entry.key)].orderedParent = decodeCDCOrderedParentValue(entry.value);
+			}
+			for (const auto& entry : metadata[7].get()) {
+				const CDCStreamId logicalId = decodeCDCOrderedStreamKey(entry.key);
+				const auto group = decodeCDCOrderedStreamValue(entry.value);
+				const auto partitionRanges = nativeCdcOrderedPartitionRanges(group.ranges(), group.splitPoints());
+				auto& parent = streams[logicalId];
+				if (!parent.info.ranges.empty() || parent.owner.present() || !parent.tags.empty() ||
+				    parent.info.minVersion != invalidVersion || parent.orderedParent.present()) {
+					result.metadataComplete = false;
+				}
+				parent.info.ranges = group.ranges();
+				parent.partitions = group.partitions();
+				bool commonMinimum = true;
+				for (size_t i = 0; i < group.partitions().size(); ++i) {
+					const CDCStreamId childId = group.partitions()[i];
+					if (childId == logicalId) {
+						result.metadataComplete = false;
+						commonMinimum = false;
+						continue;
+					}
+					auto& child = streams[childId];
+					if (child.orderedParent != Optional<CDCStreamId>(logicalId) || !child.info.name.empty() ||
+					    child.info.ranges != partitionRanges[i]) {
+						result.metadataComplete = false;
+					}
+					child.info.name = parent.info.name;
+					if (i == 0) {
+						parent.info.minVersion = child.info.minVersion;
+					} else if (child.info.minVersion != parent.info.minVersion) {
+						commonMinimum = false;
+					}
+					parent.tags.insert(parent.tags.end(), child.tags.begin(), child.tags.end());
+				}
+				if (!commonMinimum) {
+					parent.info.minVersion = invalidVersion;
+					result.metadataComplete = false;
+				}
+			}
+			for (const auto& [streamId, stream] : streams) {
+				if (stream.orderedParent.present()) {
+					const auto parent = streams.find(stream.orderedParent.get());
+					if (parent == streams.end() ||
+					    std::find(parent->second.partitions.begin(), parent->second.partitions.end(), streamId) ==
+					        parent->second.partitions.end()) {
+						result.metadataComplete = false;
+					}
+				}
+			}
 
 			std::map<Tag, NativeCdcTagStatus> tags;
 			std::set<Tag> incompleteTags;
@@ -1080,6 +1234,10 @@ Future<NativeCdcStatus> getNativeCdcStatus(Database cx) {
 					result.metadataComplete = false;
 				}
 				for (const Tag& tag : stream.tags) {
+					// Logical parents summarize their children; only physical rows retain log history.
+					if (!stream.partitions.empty()) {
+						continue;
+					}
 					auto& status = tags[tag];
 					status.tag = tag;
 					if (stream.info.minVersion == invalidVersion) {
@@ -1146,6 +1304,19 @@ Future<NativeCdcStatus> getNativeCdcStatus(Database cx) {
 			}
 		}
 	}
+	std::map<CDCStreamId, bool> publishedOwners;
+	for (const auto& stream : result.streams) {
+		publishedOwners.emplace(stream.info.streamId, stream.ownerPublished);
+	}
+	for (auto& stream : result.streams) {
+		if (!stream.partitions.empty()) {
+			stream.ownerPublished =
+			    std::all_of(stream.partitions.begin(), stream.partitions.end(), [&](CDCStreamId child) {
+				    const auto owner = publishedOwners.find(child);
+				    return owner != publishedOwners.end() && owner->second;
+			    });
+		}
+	}
 	std::vector<Future<NativeCdcProxyStatus>> samples;
 	samples.reserve(clientInfo.cdcProxies.size());
 	for (const auto& proxy : clientInfo.cdcProxies) {
@@ -1193,6 +1364,285 @@ Future<NativeCdcRemoveResult> removeNativeCdcStreamGuarded(Database cx, Key name
 	co_return NativeCdcRemoveResult::Removed;
 }
 
+class NativeCdcConsumer::OrderedState : public ReferenceCounted<NativeCdcConsumer::OrderedState> {
+	friend class NativeCdcConsumer;
+	NativeCdcOrderedMetadata metadata;
+	NativeCdcOrderedMerge merge;
+	std::vector<Reference<NativeCdcConsumer>> children;
+	std::vector<Optional<UID>> owners;
+	std::vector<size_t> readIndexes;
+	std::vector<Future<CDCConsumeReply>> reads;
+	int64_t childReplyByteLimit;
+	int64_t aggregateReplyByteLimit;
+	bool resetPending = false;
+
+	void cancelReads() {
+		for (auto& read : reads) {
+			read.cancel();
+		}
+		reads.clear();
+		readIndexes.clear();
+	}
+
+	bool sameMetadata(NativeCdcOrderedMetadata const& current) const {
+		return metadata.ranges() == current.ranges() && metadata.splitPoints() == current.splitPoints() &&
+		       metadata.partitions() == current.partitions();
+	}
+
+	void resetChildren(Database cx, Version position, Version acknowledged) {
+		cancelReads();
+		std::vector<UID> identities;
+		for (const auto& child : children) {
+			identities.push_back(child->consumerId);
+		}
+		children.clear();
+		owners.assign(metadata.partitions().size(), Optional<UID>());
+		merge.reset(position);
+		for (size_t i = 0; i < metadata.partitions().size(); ++i) {
+			auto child =
+			    makeReference<NativeCdcConsumer>(cx, CDCCursor(metadata.partitions()[i], position), acknowledged);
+			child->internalPartition = true;
+			child->initialized = true;
+			child->knownAvailableThrough = acknowledged;
+			child->replyByteLimit = childReplyByteLimit;
+			if (i < identities.size()) {
+				// Replacing the local object isolates canceled coroutines; retaining the
+				// RPC identity supersedes any abandoned long poll still on the proxy.
+				child->consumerId = identities[i];
+			}
+			children.push_back(std::move(child));
+		}
+		resetPending = false;
+	}
+
+	bool ownerChanged(Database cx) const {
+		const auto& info = cx->clientInfo->get();
+		for (size_t i = 0; i < children.size(); ++i) {
+			if (!owners[i].present()) {
+				continue;
+			}
+			const auto assigned = info.streamToCDCProxyId.find(metadata.partitions()[i]);
+			if (assigned == info.streamToCDCProxyId.end() || assigned->second != owners[i].get() ||
+			    !containsNativeCdcProxy(info, owners[i].get()) ||
+			    (children[i]->deliveryProxyId.present() && children[i]->deliveryProxyId.get() != owners[i].get())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+public:
+	OrderedState(NativeCdcOrderedMetadata metadata, Version position, int64_t bufferBytes, int64_t replyBytes)
+	  : metadata(std::move(metadata)), merge(this->metadata.partitions().size(), position, bufferBytes),
+	    childReplyByteLimit(bufferBytes / (2 * this->metadata.partitions().size())),
+	    aggregateReplyByteLimit(replyBytes) {
+		if (childReplyByteLimit <= 0 || aggregateReplyByteLimit <= 0) {
+			throw invalid_option_value();
+		}
+	}
+	~OrderedState() { cancelReads(); }
+};
+
+NativeCdcConsumer::NativeCdcConsumer(Database cx, CDCCursor position)
+  : cx(cx), currentPosition(position), lastAcknowledgedVersion(position.lastConsumedVersion) {}
+
+NativeCdcConsumer::NativeCdcConsumer(Database cx, CDCCursor position, Version lastAcknowledgedVersion)
+  : cx(cx), currentPosition(position), lastAcknowledgedVersion(lastAcknowledgedVersion) {}
+
+NativeCdcConsumer::~NativeCdcConsumer() = default;
+
+Future<Void> NativeCdcConsumer::initialize(Reference<NativeCdcConsumer> self) {
+	if (self->initialized && (!self->ordered.isValid() || !self->ordered->resetPending)) {
+		co_return;
+	}
+	if (self->currentPosition.streamId == 0 || self->currentPosition.lastConsumedVersion < invalidVersion ||
+	    self->currentPosition.lastConsumedVersion == std::numeric_limits<Version>::max()) {
+		throw client_invalid_operation();
+	}
+	Transaction tr(self->cx);
+	while (true) {
+		Error error;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			if (!self->internalPartition &&
+			    (co_await tr.get(cdcOrderedParentKeyFor(self->currentPosition.streamId))).present()) {
+				throw client_invalid_operation();
+			}
+			const Optional<NativeCdcOrderedSnapshot> snapshot =
+			    co_await readNativeCdcOrderedSnapshot(&tr, self->currentPosition.streamId);
+			if (!snapshot.present()) {
+				if (self->ordered.isValid()) {
+					throw client_invalid_operation();
+				}
+				self->initialized = true;
+				co_return;
+			}
+			const Version acknowledged = snapshot.get().minVersion - 1;
+			const bool resetting = self->ordered.isValid();
+			Version position = self->currentPosition.lastConsumedVersion;
+			if (resetting || position == invalidVersion) {
+				position = acknowledged;
+			} else if (position < acknowledged) {
+				throw transaction_too_old();
+			}
+			if (resetting) {
+				if (!self->ordered->sameMetadata(snapshot.get().metadata)) {
+					throw client_invalid_operation();
+				}
+			} else {
+				self->ordered = makeReference<OrderedState>(snapshot.get().metadata,
+				                                            position,
+				                                            CLIENT_KNOBS->NATIVE_CDC_ORDERED_BUFFER_BYTES,
+				                                            CLIENT_KNOBS->NATIVE_CDC_ORDERED_REPLY_BYTES);
+			}
+			self->ordered->resetChildren(self->cx, position, acknowledged);
+			self->currentPosition.lastConsumedVersion = position;
+			self->lastAcknowledgedVersion = acknowledged;
+			// A supplied checkpoint is not proof of delivery. Each physical owner
+			// validates it on consume; acknowledgement retains its read-version guard.
+			self->knownAvailableThrough = acknowledged;
+			self->initialized = true;
+			co_return;
+		} catch (Error& caught) {
+			error = caught;
+		}
+		co_await tr.onError(error);
+	}
+}
+
+Future<CDCConsumeReply> NativeCdcConsumer::consumeOrdered(Reference<NativeCdcConsumer> self) {
+	Reference<OrderedState> ordered = self->ordered;
+	// A bounded suffix may already be ready locally. Validate the logical stream
+	// before returning it so a consume started after removal cannot bypass the
+	// metadata check that every physical consume performs.
+	Transaction tr(self->cx);
+	while (true) {
+		Error error;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			const Optional<Value> value = co_await tr.get(cdcOrderedStreamKeyFor(self->currentPosition.streamId));
+			if (!value.present() || !ordered->sameMetadata(decodeCDCOrderedStreamValue(value.get()))) {
+				throw client_invalid_operation();
+			}
+			break;
+		} catch (Error& caught) {
+			error = caught;
+		}
+		co_await tr.onError(error);
+	}
+	while (true) {
+		if (ordered->resetPending) {
+			co_await initialize(self);
+		}
+		if (ordered->ownerChanged(self->cx)) {
+			ordered->resetPending = true;
+			continue;
+		}
+		CDCConsumeReply ready = ordered->merge.next(ordered->aggregateReplyByteLimit);
+		if (ready.lastConsumedVersion > self->currentPosition.lastConsumedVersion) {
+			self->currentPosition.lastConsumedVersion = ready.lastConsumedVersion;
+			self->knownAvailableThrough = ready.lastConsumedVersion;
+			co_return ready;
+		}
+		ASSERT(ordered->reads.empty());
+		for (size_t i = 0; i < ordered->children.size(); ++i) {
+			if (!ordered->merge.needsRead(i)) {
+				continue;
+			}
+			const CDCProxyInterface proxy =
+			    co_await getNativeCdcStreamProxy(self->cx, ordered->metadata.partitions()[i]);
+			if (ordered->owners[i].present() && ordered->owners[i].get() != proxy.id()) {
+				ordered->resetPending = true;
+				break;
+			}
+			ordered->owners[i] = proxy.id();
+			ordered->readIndexes.push_back(i);
+			ordered->reads.push_back(ordered->children[i]->consume());
+		}
+		if (ordered->resetPending || ordered->ownerChanged(self->cx)) {
+			ordered->cancelReads();
+			ordered->resetPending = true;
+			continue;
+		}
+		ASSERT(!ordered->reads.empty());
+		Future<std::vector<CDCConsumeReply>> all = getAll(ordered->reads);
+		while (true) {
+			Future<Void> changed = self->cx->clientInfo->onChange();
+			if (ordered->ownerChanged(self->cx)) {
+				ordered->resetPending = true;
+				break;
+			}
+			auto result = co_await race(all, changed);
+			if (result.index() == 0) {
+				break;
+			}
+		}
+		if (ordered->resetPending || ordered->ownerChanged(self->cx)) {
+			all.cancel();
+			ordered->cancelReads();
+			ordered->resetPending = true;
+			continue;
+		}
+		std::vector<CDCConsumeReply> replies = co_await all;
+		for (size_t i = 0; i < replies.size(); ++i) {
+			const size_t partition = ordered->readIndexes[i];
+			ASSERT(ordered->children[partition]->deliveryProxyId.present());
+			ordered->merge.accept(partition, std::move(replies[i]));
+		}
+		ordered->reads.clear();
+		ordered->readIndexes.clear();
+	}
+}
+
+namespace {
+
+Future<Void> notifyOrderedNativeCdcAcknowledgement(Database cx, CDCStreamId child, Version acknowledged) {
+	while (true) {
+		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, child);
+		try {
+			Future<Void> changed = cx->clientInfo->onChange();
+			auto result =
+			    co_await race(throwErrorOr(proxy.ack.tryGetReply(CDCAckRequest(child, acknowledged))), changed);
+			if (result.index() == 0) {
+				co_return;
+			}
+		} catch (Error& error) {
+			if (!retryNativeCdcProxyRequest(error)) {
+				throw;
+			}
+		}
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, cx->taskID);
+	}
+}
+
+} // namespace
+
+Future<Void> NativeCdcConsumer::acknowledgeOrdered(Reference<NativeCdcConsumer> self) {
+	Reference<OrderedState> ordered = self->ordered;
+	const Version acknowledged = self->currentPosition.lastConsumedVersion;
+	const Version minimum = co_await acknowledgeNativeCdcOrderedStream(
+	    self->cx, self->currentPosition.streamId, ordered->metadata, acknowledged, self->knownAvailableThrough);
+	self->lastAcknowledgedVersion = minimum - 1;
+	for (const auto& child : ordered->children) {
+		child->lastAcknowledgedVersion = self->lastAcknowledgedVersion;
+	}
+	if (self->lastAcknowledgedVersion > self->currentPosition.lastConsumedVersion) {
+		ordered->resetPending = true;
+	}
+	std::vector<Future<Void>> notifications;
+	ScopeExit cancelNotifications([&notifications]() {
+		for (auto& notification : notifications) {
+			notification.cancel();
+		}
+	});
+	for (const CDCStreamId child : ordered->metadata.partitions()) {
+		notifications.push_back(notifyOrderedNativeCdcAcknowledgement(self->cx, child, acknowledged));
+	}
+	co_await waitForAll(notifications);
+}
+
 Future<Reference<NativeCdcConsumer>> createNativeCdcConsumer(Database cx, Key name) {
 	const CDCStreamId streamId = co_await getNativeCdcStreamId(cx, name);
 	co_return makeReference<NativeCdcConsumer>(cx, CDCCursor(streamId, invalidVersion), invalidVersion);
@@ -1203,7 +1653,21 @@ Reference<NativeCdcConsumer> resumeNativeCdcConsumer(Database cx, CDCCursor posi
 }
 
 Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsumer> self) {
+	bool completed = false;
+	ScopeExit finishOperation([&self, &completed]() {
+		self->operationOutstanding = false;
+		if (!completed && self->ordered.isValid()) {
+			self->ordered->cancelReads();
+			self->ordered->resetPending = true;
+		}
+	});
 	try {
+		co_await initialize(self);
+		if (self->ordered.isValid()) {
+			CDCConsumeReply reply = co_await consumeOrdered(self);
+			completed = true;
+			co_return reply;
+		}
 		while (true) {
 			CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
 			if (rewindUnacknowledgedCursorAfterProxyReplacement(
@@ -1212,8 +1676,8 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 				CODE_PROBE(true, "Native CDC consumer rewinds unacknowledged cursor after proxy replacement");
 			}
 			try {
-				CDCConsumeReply reply = co_await throwErrorOr(
-				    proxy.consume.tryGetReply(CDCConsumeRequest(self->currentPosition, self->consumerId)));
+				CDCConsumeReply reply = co_await throwErrorOr(proxy.consume.tryGetReply(
+				    CDCConsumeRequest(self->currentPosition, self->consumerId, self->replyByteLimit)));
 				if (reply.lastConsumedVersion == self->currentPosition.lastConsumedVersion && reply.mutations.empty()) {
 					// The server lease bounds abandoned long polls. Renew it transparently so the public consume
 					// operation remains a long poll without accumulating server actors after client cancellation.
@@ -1223,6 +1687,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 				self->knownAvailableThrough = reply.lastConsumedVersion;
 				self->currentPosition.lastConsumedVersion = reply.lastConsumedVersion;
 				self->operationOutstanding = false;
+				completed = true;
 				co_return reply;
 			} catch (Error& error) {
 				if (!retryNativeCdcProxyRequest(error)) {
@@ -1248,10 +1713,24 @@ Future<CDCConsumeReply> NativeCdcConsumer::consume() {
 }
 
 Future<Void> NativeCdcConsumer::acknowledgeImpl(Reference<NativeCdcConsumer> self) {
+	bool completed = false;
+	ScopeExit finishOperation([&self, &completed]() {
+		self->operationOutstanding = false;
+		if (!completed && self->ordered.isValid()) {
+			self->ordered->cancelReads();
+			self->ordered->resetPending = true;
+		}
+	});
 	try {
+		co_await initialize(self);
 		if (self->currentPosition.streamId == 0 || self->currentPosition.lastConsumedVersion < 0 ||
 		    self->currentPosition.lastConsumedVersion == std::numeric_limits<Version>::max()) {
 			throw client_invalid_operation();
+		}
+		if (self->ordered.isValid()) {
+			co_await acknowledgeOrdered(self);
+			completed = true;
+			co_return;
 		}
 		const Version acknowledgedVersion = self->currentPosition.lastConsumedVersion;
 		const Version durableMinVersion = co_await acknowledgeNativeCdcStream(
@@ -1270,6 +1749,7 @@ Future<Void> NativeCdcConsumer::acknowledgeImpl(Reference<NativeCdcConsumer> sel
 				                            proxyChanged);
 				if (result.index() == 0) {
 					self->operationOutstanding = false;
+					completed = true;
 					co_return;
 				}
 			} catch (Error& error) {

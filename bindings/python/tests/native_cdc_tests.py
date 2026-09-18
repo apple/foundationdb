@@ -316,6 +316,12 @@ class NativeCdcTests(unittest.TestCase):
         )
 
     def test_multi_range_union_filtering_and_resume(self):
+        self.check_multi_range_union_filtering_and_resume(ordered=False)
+
+    def test_ordered_aggregate_filtering_and_resume(self):
+        self.check_multi_range_union_filtering_and_resume(ordered=True)
+
+    def check_multi_range_union_filtering_and_resume(self, ordered):
         first = fdb.CdcKeyRange(self.prefix + b"a\x00", self.prefix + b"c\xff")
         second = fdb.CdcKeyRange(self.prefix + b"x\x00", self.prefix + b"z\xff")
         split = self.prefix + b"b"
@@ -325,12 +331,19 @@ class NativeCdcTests(unittest.TestCase):
             (first.begin_key, split),
             first,
         )
+        split_points = [second.begin_key] if ordered else None
         stream_id = wait(
-            self.db.register_cdc_stream(self.name, ranges=(r for r in ranges))
+            self.db.register_cdc_stream(
+                self.name, ranges=(r for r in ranges), split_points=split_points
+            )
         )
         self.addCleanup(lambda: wait(self.db.remove_cdc_stream(self.name)))
         self.assertEqual(
-            wait(self.db.register_cdc_stream(self.name, ranges=(first, second))),
+            wait(
+                self.db.register_cdc_stream(
+                    self.name, ranges=(first, second), split_points=split_points
+                )
+            ),
             stream_id,
         )
         info = self.stream_info()
@@ -386,6 +399,85 @@ class NativeCdcTests(unittest.TestCase):
             )
             wait(resumed.acknowledge())
             self.assertEqual(self.stream_info().ranges, (first, second))
+
+    def test_ordered_registration_marshals_binary_split_points(self):
+        impl = fdb.impl
+        expected = [self.prefix + b"b\x00\xff", self.prefix + b"m\x00"]
+        seen = []
+
+        def register(db, name, name_length, ranges, range_count, points, point_count):
+            seen.append(
+                (
+                    name[:name_length],
+                    tuple(
+                        (
+                            ctypes.string_at(
+                                ranges[i].begin_key, ranges[i].begin_key_length
+                            ),
+                            ctypes.string_at(
+                                ranges[i].end_key, ranges[i].end_key_length
+                            ),
+                        )
+                        for i in range(range_count)
+                    ),
+                    tuple(
+                        ctypes.string_at(points[i].key, points[i].key_length)
+                        for i in range(point_count)
+                    ),
+                )
+            )
+            return 123
+
+        with mock.patch.object(impl, "_require_cdc_api_version"):
+            with mock.patch.object(
+                self.db.capi, "fdb_database_register_cdc_ordered_stream", register
+            ):
+                with mock.patch.object(impl, "FutureUInt64") as future:
+                    self.db.register_cdc_stream(
+                        self.name,
+                        self.begin,
+                        self.end,
+                        split_points=(point for point in expected),
+                    )
+                    self.db.register_cdc_stream(
+                        self.name, self.begin, self.end, split_points=[]
+                    )
+                    self.assertEqual(
+                        future.call_args_list, [mock.call(123), mock.call(123)]
+                    )
+        self.assertEqual(
+            seen,
+            [
+                (self.name, ((self.begin, self.end),), tuple(expected)),
+                (self.name, ((self.begin, self.end),), ()),
+            ],
+        )
+
+    def test_missing_ordered_symbol_preserves_ordinary_cdc(self):
+        impl = fdb.impl
+        capi = impl._capi
+
+        class WithoutOrderedSymbol:
+            def __getattr__(self, name):
+                if name == "fdb_database_register_cdc_ordered_stream":
+                    raise AttributeError(name)
+                return getattr(capi, name)
+
+        older = WithoutOrderedSymbol()
+        with mock.patch.object(impl, "_capi", older):
+            with mock.patch.object(self.db, "capi", older):
+                with mock.patch.object(impl, "_cdc_c_api_initialized", False):
+                    self.assertGreater(self.register(), 0)
+                    self.assertTrue(impl._cdc_c_api_initialized)
+                    with self.assertRaises(fdb.FDBError) as raised:
+                        self.db.register_cdc_stream(
+                            self.name, self.begin, self.end, split_points=[]
+                        )
+                    self.assertEqual(raised.exception.code, 2108)
+                    with wait(self.db.create_cdc_consumer(self.name)) as consumer:
+                        self.assertEqual(
+                            consumer.get_position().last_consumed_version, -1
+                        )
 
     def test_native_errors_propagate(self):
         with self.assertRaises(fdb.FDBError):
@@ -463,6 +555,7 @@ class LegacyApiTests(unittest.TestCase):
         operations = (
             lambda: self.db.register_cdc_stream(b"legacy", b"a", b"z"),
             lambda: self.db.register_cdc_stream(b"legacy", ranges=((b"a", b"z"),)),
+            lambda: self.db.register_cdc_stream(b"legacy", b"a", b"z", split_points=[]),
             lambda: self.db.remove_cdc_stream(b"legacy"),
             lambda: self.db.list_cdc_streams(),
             lambda: self.db.create_cdc_consumer(b"legacy"),

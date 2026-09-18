@@ -441,6 +441,14 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_register_cdc_stream(FDBData
                                                                          FDBKeyRange const* ranges,
                                                                          int range_count);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_register_cdc_ordered_stream(FDBDatabase* db,
+                                                                                 uint8_t const* name,
+                                                                                 int name_length,
+                                                                                 FDBKeyRange const* ranges,
+                                                                                 int range_count,
+                                                                                 FDBKey const* split_points,
+                                                                                 int split_point_count);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* db,
                                                                        uint8_t const* name,
                                                                        int name_length);

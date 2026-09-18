@@ -121,16 +121,18 @@ struct CDCConsumeRequest {
 	ReplyPromise<CDCConsumeReply> reply;
 	// Stable across one consumer's RPC retries; absent for legacy or direct callers.
 	Optional<UID> consumerId;
+	// Zero uses the server limit. Ordered consumers reserve a bounded share per partition.
+	int64_t replyByteLimit = 0;
 
 	CDCConsumeRequest() = default;
-	explicit CDCConsumeRequest(CDCCursor cursor, Optional<UID> consumerId = {})
-	  : cursor(cursor), consumerId(consumerId) {}
+	explicit CDCConsumeRequest(CDCCursor cursor, Optional<UID> consumerId = {}, int64_t replyByteLimit = 0)
+	  : cursor(cursor), consumerId(consumerId), replyByteLimit(replyByteLimit) {}
 
 	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, cursor, reply, consumerId);
+		serializer(ar, cursor, reply, consumerId, replyByteLimit);
 	}
 };
 

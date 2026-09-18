@@ -1422,11 +1422,16 @@ class Database(_TransactionCreator):
     def get_client_status(self):
         return Key(self.capi.fdb_database_get_client_status(self.dpointer))
 
-    def register_cdc_stream(self, name, begin_key=None, end_key=None, *, ranges=None):
+    def register_cdc_stream(
+        self, name, begin_key=None, end_key=None, *, ranges=None, split_points=None
+    ):
         """Register a named CDC range union and return its stream ID future.
 
         Supply either begin_key and end_key, or ranges as an iterable of
         (begin_key, end_key) pairs. The native client canonicalizes the union.
+        Explicit split_points register fixed partitions whose complete version
+        groups are merged in the client. None preserves ordinary registration;
+        an empty iterable registers an ordered stream with one partition.
         """
         _require_cdc_api_version()
         name = keyToBytes(name)
@@ -1449,6 +1454,32 @@ class Database(_TransactionCreator):
                 for begin, end in ranges
             )
         )
+        if split_points is not None:
+            register_ordered = getattr(
+                self.capi, "fdb_database_register_cdc_ordered_stream", None
+            )
+            if register_ordered is None:
+                raise FDBError(2108)  # unsupported_operation
+            split_points = [keyToBytes(point) for point in split_points]
+            native_split_points = (KeyStruct * len(split_points))(
+                *(
+                    KeyStruct(
+                        ctypes.cast(point, ctypes.POINTER(ctypes.c_byte)), len(point)
+                    )
+                    for point in split_points
+                )
+            )
+            return FutureUInt64(
+                register_ordered(
+                    self.dpointer,
+                    name,
+                    len(name),
+                    native_ranges,
+                    len(ranges),
+                    native_split_points,
+                    len(split_points),
+                )
+            )
         return FutureUInt64(
             self.capi.fdb_database_register_cdc_stream(
                 self.dpointer,
@@ -2350,6 +2381,19 @@ def _init_cdc_c_api():
         function.restype = restype
         if restype is ctypes.c_int:
             function.errcheck = check_error_code
+
+    register_ordered = getattr(_capi, "fdb_database_register_cdc_ordered_stream", None)
+    if register_ordered is not None:
+        register_ordered.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.POINTER(KeyRangeStruct),
+            ctypes.c_int,
+            ctypes.POINTER(KeyStruct),
+            ctypes.c_int,
+        ]
+        register_ordered.restype = ctypes.c_void_p
 
 
 if hasattr(ctypes.pythonapi, "Py_IncRef"):
