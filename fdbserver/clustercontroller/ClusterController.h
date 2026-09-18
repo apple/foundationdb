@@ -1546,14 +1546,18 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = recruitment::machineClassFitness(it.second.details.processClass, role);
+			// Candidates must not be worse than the already-accepted minWorker. Usage is
+			// deliberately not part of this check: gating on it empties the pool whenever the
+			// desired count exceeds the number of least-used equal-fitness processes (e.g.
+			// every stateless process, when some of them already host the master or cluster
+			// controller). Spreading across processes is instead provided by the bucket
+			// ordering on `used` in the fill loop below.
 			if (workerAvailable(it.second, checkStable) &&
 			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    it.second.details.interf.locality.dcId() == dcId &&
-			    (!minWorker.present() ||
-			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
-			      (fitness < minWorker.get().fitness ||
-			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
+			    (!minWorker.present() || (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
+			                              fitness <= minWorker.get().fitness))) {
 				auto sharing = preferredSharing.find(it.first);
 				fitness_workers[{ fitness,
 				                  id_used[it.first],
@@ -2256,16 +2260,47 @@ public:
 		RoleFitness secondFitness(secondDetails, role, secondUsed);
 
 		if (!(firstFitness == secondFitness)) {
+			auto describe = [&](const std::vector<WorkerDetails>& details,
+			                    const std::map<Optional<Standalone<StringRef>>, int>& used) {
+				std::string s;
+				// Cap the dump so the trace event stays well under the size limit.
+				const int n = std::min<int>(details.size(), 8);
+				for (int i = 0; i < n; i++) {
+					auto pid = details[i].interf.locality.processId();
+					auto u = used.find(pid);
+					s += "(" + pid.get().toString() + ",fit=" +
+					     std::to_string((int)recruitment::machineClassFitness(details[i].processClass, role)) +
+					     ",used=" + (u != used.end() ? std::to_string(u->second) : std::string("?")) + ") ";
+				}
+				if ((int)details.size() > n) {
+					s += "...(" + std::to_string(details.size()) + " total)";
+				}
+				return s;
+			};
 			TraceEvent(SevError, "NonDeterministicRecruitment")
 			    .detail("FirstFitness", firstFitness.toString())
 			    .detail("SecondFitness", secondFitness.toString())
-			    .detail("ClusterRole", role);
+			    .detail("ClusterRole", role)
+			    .detail("FirstWorkers", describe(firstDetails, firstUsed))
+			    .detail("SecondWorkers", describe(secondDetails, secondUsed));
 		}
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
+		// The determinism check below re-runs recruitment and compares the result against the first
+		// pass. Recruitment deliberately randomizes (randomShuffle/randomChoice among equal candidates),
+		// so both passes must start from the same RNG state or they would trivially disagree. Seed the
+		// generator before the first pass, then reseed it from the same value before the replay, so both
+		// passes draw an identical random sequence. This is simulation-only; production runs are unaffected
+		// because the generator there is not seeded deterministically.
+		uint64_t seed = 0;
+		if (g_network->isSimulated()) {
+			seed = deterministicRandom()->randomUInt64();
+			deterministicRandom()->resetSeed(seed);
+		}
 		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, true);
 		if (g_network->isSimulated()) {
+			deterministicRandom()->resetSeed(seed);
 			try {
 				// FIXME: The logic to pick a satellite in a remote region is not
 				// deterministic and can therefore break this nondeterminism check.
