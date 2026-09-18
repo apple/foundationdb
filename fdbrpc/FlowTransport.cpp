@@ -2587,7 +2587,7 @@ TEST_CASE("noSim/fdbrpc/FlowTransport/PacketLimitOnSend") {
 	TransportData transport(1, WLTOKEN_FIRST_AVAILABLE, nullptr);
 	NetworkAddress address(IPAddress(0x7f000001), 45000, true, false);
 	Endpoint endpoint(NetworkAddressList{ address, {} }, UID(1, 2));
-	Reference<Peer> peer = makeReference<Peer>(&transport, address);
+	auto peer = makeReference<Peer>(&transport, address);
 	sendPacket(&transport, peer, SerializeSource<StringRef>("ok"_sr), endpoint, false);
 	PacketBuffer* const tail = peer->unsent.getWriteBuffer();
 	uint32_t acceptedLength;
@@ -2626,7 +2626,7 @@ TEST_CASE("noSim/fdbrpc/FlowTransport/PacketLimitOnSend") {
 	sendPacket(&transport, peer, SerializeSource<StringRef>("again"_sr), endpoint, false);
 	ASSERT_GT(tail->bytes_written, previousLength);
 
-	Reference<Peer> emptyPeer = makeReference<Peer>(&transport, address);
+	auto emptyPeer = makeReference<Peer>(&transport, address);
 	bool emptyRejected = false;
 	try {
 		sendPacket(&transport, emptyPeer, SerializeSource<StringRef>(StringRef(oversized)), endpoint, true);
