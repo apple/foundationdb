@@ -425,18 +425,23 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 	}
 
 	Future<Void> run(Database cx) {
+		auto phase = [](const char* name) { TraceEvent("NativeCdcOrderedPhase").detail("Phase", name); };
+		phase("WaitForProxies");
 		co_await waitForProxies(cx);
 		const std::vector<KeyRange> ranges{ selectedRange() };
 		const std::vector<Key> splitPoints{ key("m"_sr), key("t"_sr) };
+		phase("OrdinaryRegistration");
 		const CDCStreamId ordinaryId = co_await registerNativeCdcStreamClient(cx, name, ranges);
 		co_await expectRegistrationCollision(registerNativeCdcOrderedStreamClient(cx, name, ranges, splitPoints));
 		ASSERT_EQ(co_await registerNativeCdcStreamClient(cx, name, ranges), ordinaryId);
 		co_await removeNativeCdcStreamClient(cx, name);
+		phase("OrderedRegistration");
 		const CDCStreamId streamId = co_await registerNativeCdcOrderedStreamClient(cx, name, ranges, splitPoints);
 		ASSERT_NE(streamId, ordinaryId);
 		co_await expectRegistrationCollision(registerNativeCdcStreamClient(cx, name, ranges));
 		ASSERT_EQ(co_await registerNativeCdcOrderedStreamClient(cx, name, ranges, splitPoints), streamId);
 		const std::vector<CDCStreamId> partitions = co_await readPartitions(cx, streamId);
+		phase("WaitForOwners");
 		const CDCProxyInterface originalOwner = co_await waitForOwners(cx, partitions);
 		const auto listed = co_await listNativeCdcStreamsClient(cx);
 		ASSERT_EQ(listed.size(), 1);
@@ -446,23 +451,28 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		ASSERT_EQ(consumer->position().streamId, streamId);
 		Keyspace view;
 		std::set<Version> observed;
+		phase("InitialConsumption");
 		const Version initial = co_await writeStep(cx, 0);
 		expectedVersions.emplace(initial, expectedMutations(writeMutations(0)));
 		co_await consumeThrough(consumer, initial, &view, &observed);
 		co_await verifyKeyspace(cx, view);
+		phase("InitialAcknowledgement");
 		co_await consumer->acknowledge();
 		const CDCCursor checkpoint = consumer->position();
 		const Keyspace checkpointView = view;
 		co_await verifyCommonMinimum(cx, partitions, checkpoint.lastConsumedVersion + 1);
+		phase("Status");
 		co_await verifyStatus(cx, streamId, partitions, checkpoint.lastConsumedVersion + 1);
 
 		// Neither middle nor right receives this version. Their certified empty
 		// progress must allow the ordered consumer to return the left mutation.
+		phase("QuietPartitions");
 		const Version quiet = co_await writeStep(cx, 1);
 		ASSERT_GT(quiet, checkpoint.lastConsumedVersion);
 		expectedVersions.emplace(quiet, expectedMutations(writeMutations(1)));
 		co_await consumeThrough(consumer, quiet, &view, &observed);
 		co_await verifyKeyspace(cx, view);
+		phase("MixedMutations");
 		const Version mixed = co_await writeStep(cx, 2);
 		ASSERT_GT(mixed, quiet);
 		expectedVersions.emplace(mixed, expectedMutations(writeMutations(2)));
@@ -470,11 +480,13 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		co_await verifyKeyspace(cx, view);
 		ASSERT_EQ(observed.size(), 3);
 		co_await verifyCommonMinimum(cx, partitions, checkpoint.lastConsumedVersion + 1);
+		phase("IndependentAcknowledgement");
 		co_await verifyIndependentAcknowledgementRejected(
 		    cx, partitions, checkpoint.lastConsumedVersion + 1, consumer->position().lastConsumedVersion);
 
 		// A canceled operation invalidates the aggregate's speculative position.
 		// Reusing the same object must replay every unacknowledged complete version.
+		phase("CancellationReplay");
 		Future<CDCConsumeReply> cancelled = consumer->consume();
 		ASSERT(!cancelled.isReady());
 		cancelled.cancel();
@@ -487,6 +499,7 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		co_await verifyCommonMinimum(cx, partitions, checkpoint.lastConsumedVersion + 1);
 
 		if (testOwnerReplacement) {
+			phase("OwnerReplacement");
 			co_await replaceOwner(cx, originalOwner, partitions);
 			view = checkpointView;
 			observed.clear();
@@ -496,6 +509,7 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 			co_await verifyKeyspace(cx, view);
 			co_await verifyCommonMinimum(cx, partitions, checkpoint.lastConsumedVersion + 1);
 		}
+		phase("ScalarResume");
 		consumer = Reference<NativeCdcConsumer>();
 		consumer = resumeNativeCdcConsumer(cx, checkpoint);
 		view = checkpointView;
@@ -506,13 +520,17 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		co_await verifyKeyspace(cx, view);
 		co_await consumer->acknowledge();
 		co_await verifyCommonMinimum(cx, partitions, consumer->position().lastConsumedVersion + 1);
+		phase("StaleResume");
 		Reference<NativeCdcConsumer> stale = resumeNativeCdcConsumer(cx, checkpoint);
 		co_await expectConsumerError(stale, error_code_transaction_too_old);
+		phase("Removal");
 		co_await removeNativeCdcStreamClient(cx, name);
 		co_await expectConsumerError(consumer, error_code_client_invalid_operation);
 		co_await expectConsumerError(consumer, error_code_client_invalid_operation, true);
+		phase("Cleanup");
 		co_await waitForCleanup(cx, streamId, partitions);
 		ASSERT((co_await listNativeCdcStreamsClient(cx)).empty());
+		phase("Complete");
 		completed = true;
 	}
 

@@ -1460,6 +1460,7 @@ Future<Void> NativeCdcConsumer::initialize(Reference<NativeCdcConsumer> self) {
 		throw client_invalid_operation();
 	}
 	Transaction tr(self->cx);
+	Optional<NativeCdcOrderedSnapshot> snapshot;
 	while (true) {
 		Error error;
 		try {
@@ -1471,46 +1472,47 @@ Future<Void> NativeCdcConsumer::initialize(Reference<NativeCdcConsumer> self) {
 			    (co_await tr.get(cdcOrderedParentKeyFor(self->currentPosition.streamId))).present()) {
 				throw client_invalid_operation();
 			}
-			const Optional<NativeCdcOrderedSnapshot> snapshot =
-			    co_await readNativeCdcOrderedSnapshot(&tr, self->currentPosition.streamId);
-			if (!snapshot.present()) {
-				if (self->ordered.isValid()) {
-					throw client_invalid_operation();
-				}
-				self->initialized = true;
-				co_return;
-			}
-			const Version acknowledged = snapshot.get().minVersion - 1;
-			const bool resetting = self->ordered.isValid();
-			Version position = self->currentPosition.lastConsumedVersion;
-			if (resetting || position == invalidVersion) {
-				position = acknowledged;
-			} else if (position < acknowledged) {
-				throw transaction_too_old();
-			}
-			if (resetting) {
-				if (!self->ordered->sameMetadata(snapshot.get().metadata)) {
-					throw client_invalid_operation();
-				}
-			} else {
-				self->ordered = makeReference<OrderedState>(snapshot.get().metadata,
-				                                            position,
-				                                            CLIENT_KNOBS->NATIVE_CDC_ORDERED_BUFFER_BYTES,
-				                                            CLIENT_KNOBS->NATIVE_CDC_ORDERED_REPLY_BYTES);
-			}
-			self->ordered->resetChildren(self->cx, position, acknowledged);
-			self->currentPosition.lastConsumedVersion = position;
-			self->lastAcknowledgedVersion = acknowledged;
-			// A supplied checkpoint is not proof of delivery. Each physical owner
-			// validates it on consume; acknowledgement retains its read-version guard.
-			self->knownAvailableThrough = acknowledged;
-			self->initialized = true;
-			co_return;
+			snapshot = co_await readNativeCdcOrderedSnapshot(&tr, self->currentPosition.streamId);
+			break;
 		} catch (Error& caught) {
 			error = caught;
 		}
 		co_await tr.onError(error);
 	}
+	if (!snapshot.present()) {
+		if (self->ordered.isValid()) {
+			throw client_invalid_operation();
+		}
+		self->initialized = true;
+		co_return;
+	}
+	const Version acknowledged = snapshot.get().minVersion - 1;
+	const bool resetting = self->ordered.isValid();
+	Version position = self->currentPosition.lastConsumedVersion;
+	if (resetting || position == invalidVersion) {
+		position = acknowledged;
+	} else if (position < acknowledged) {
+		// A stale caller checkpoint is permanent; retrying the metadata transaction cannot repair it.
+		throw transaction_too_old();
+	}
+	if (resetting) {
+		if (!self->ordered->sameMetadata(snapshot.get().metadata)) {
+			throw client_invalid_operation();
+		}
+	} else {
+		self->ordered = makeReference<OrderedState>(snapshot.get().metadata,
+		                                            position,
+		                                            CLIENT_KNOBS->NATIVE_CDC_ORDERED_BUFFER_BYTES,
+		                                            CLIENT_KNOBS->NATIVE_CDC_ORDERED_REPLY_BYTES);
+	}
+	self->ordered->resetChildren(self->cx, position, acknowledged);
+	self->currentPosition.lastConsumedVersion = position;
+	self->lastAcknowledgedVersion = acknowledged;
+	// A supplied checkpoint is not proof of delivery. Each physical owner
+	// validates it on consume; acknowledgement retains its read-version guard.
+	self->knownAvailableThrough = acknowledged;
+	self->initialized = true;
+	co_return;
 }
 
 Future<CDCConsumeReply> NativeCdcConsumer::consumeOrdered(Reference<NativeCdcConsumer> self) {
