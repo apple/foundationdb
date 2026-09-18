@@ -2306,8 +2306,8 @@ static Future<Void> readRequestServer(CommitProxyInterface proxy,
 		GetKeyServerLocationsRequest req = co_await proxy.getKeyServersLocations.getFuture();
 		// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 		if (commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
-		         SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE ||
-		     (g_network->isSimulated() && buggify(0.001)))) {
+		    SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE ||
+		    (g_network->isSimulated() && buggify(0.001))) {
 			++commitData->stats.keyServerLocationErrors;
 			req.reply.sendError(commit_proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyLocationRequestThresholdExceeded").suppressFor(60);
