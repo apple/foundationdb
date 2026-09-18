@@ -267,7 +267,7 @@ Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
                                           size_t pos) {
 	size_t sPos = pos;
 	int lookBack = strlen(delim) - 1;
-	ASSERT(lookBack >= 0);
+	ASSERT_GE(lookBack, 0);
 
 	while (true) {
 		size_t endPos = buf->find(delim, sPos);

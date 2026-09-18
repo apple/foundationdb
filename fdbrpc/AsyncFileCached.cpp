@@ -265,7 +265,7 @@ Future<Void> AsyncFileCached::flush() {
 		if (!f.isReady())
 			i++;
 	}
-	ASSERT(flushable.size() <= debug_count);
+	ASSERT_LE(flushable.size(), debug_count);
 
 	return waitForAll(unflushed);
 }
