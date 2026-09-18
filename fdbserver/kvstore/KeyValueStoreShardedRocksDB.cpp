@@ -44,7 +44,7 @@
 
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
+#include "fdbserver/checkpoint/RocksDBCheckpointUtils.h"
 #include "RocksDBCommon.h"
 
 #ifdef WITH_ROCKSDB

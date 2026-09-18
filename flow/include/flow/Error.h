@@ -159,7 +159,7 @@ void assert_impl(char const* a_nm,
                  bool (*compare)(T const&, U const&),
                  char const* file,
                  int line) {
-	if (!compare(a, b)) {
+	if (!(compare(a, b) || isAssertDisabled(line))) [[unlikely]] {
 		throw internal_error_impl(a_nm, Traceable<T>::toString(a), opName, b_nm, Traceable<U>::toString(b), file, line);
 	}
 }

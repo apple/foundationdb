@@ -1,0 +1,43 @@
+[configuration]
+buggify = true
+faultInjection = true
+
+[[knobs]]
+enable_native_cdc = true
+# Keep injected lost initialization replies within the workload's operation deadline.
+cc_recovery_init_req_max_timeout = 30.0
+# More active streams than tags exercise retention shared with a lagging consumer.
+native_cdc_tag_count = 2
+# Small replies exercise shared-tag buffering within the buggified 10 KB proxy buffer.
+maximum_peek_bytes = 1000
+
+[[test]]
+testTitle = 'NativeCdcBuggify'
+useDB = true
+waitForQuiescenceEnd = false
+timeout = 600
+# Keep failures bounded by Attrition while BUGGIFY varies internal timing and limits.
+connectionFailuresDisableDuration = 1000000
+runFailureWorkloads = false
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 6
+    minStreamCount = 3
+    maxStreamCount = 8
+    keyCount = 16
+    writesPerRound = 5
+    rounds = 20
+    drainProbability = 0.25
+    delayBetweenRounds = 0.5
+    operationTimeout = 500.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 1
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 20.0
+    waitForVersion = true
+    allowFaultInjection = false
+    killDc = false

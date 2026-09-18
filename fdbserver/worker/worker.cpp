@@ -19,6 +19,7 @@
  */
 
 #include <cstdlib>
+#include <map>
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 #include <unordered_map>
@@ -29,6 +30,7 @@
 #include "flow/Buggify.h"
 #include "flow/CodeProbe.h"
 #include "flow/IAsyncFile.h"
+#include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/ProcessInterface.h"
@@ -1962,6 +1964,21 @@ bool skipInitRspInSim(const UID workerInterfID, const bool allowDropInSim) {
 	return skip;
 }
 
+Promise<TLogInterface> cacheLogRouterInitialization(WorkerCache<TLogInterface>& cache,
+                                                    InitializeLogRouterRequest const& request) {
+	Promise<TLogInterface> ready;
+	cache.set(request.reqId, ready.getFuture());
+	return ready;
+}
+
+bool replyToCachedLogRouter(WorkerCache<TLogInterface>& cache, InitializeLogRouterRequest const& request) {
+	if (!cache.exists(request.reqId)) {
+		return false;
+	}
+	forwardPromise(Uncancellable{}, request.reply, cache.get(request.reqId));
+	return true;
+}
+
 #ifdef FLOW_GRPC_ENABLED
 Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionRecord> ccr) {
 	if (GrpcServer::instance() == nullptr) {
@@ -2628,7 +2645,7 @@ class WorkerServerCore {
 		while (true) {
 			InitializeLogRouterRequest req = co_await interf.logRouter.getFuture();
 
-			if (!logRouterCache.exists(req.reqId)) {
+			if (!replyToCachedLogRouter(logRouterCache, req)) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = recruitment::LogRouter;
 				TLogInterface recruited(locality);
@@ -2650,19 +2667,18 @@ class WorkerServerCore {
 				DUMPTOKEN(recruited.enablePopRequest);
 				DUMPTOKEN(recruited.snapRequest);
 
-				ReplyPromise<TLogInterface> logRouterReady = req.reply;
-				logRouterCache.set(req.reqId, logRouterReady.getFuture());
+				Promise<TLogInterface> logRouterReady = cacheLogRouterInitialization(logRouterCache, req);
 				Future<Void> logRouterProcess = logRouter(recruited, req, dbInfo);
 				logRouterProcess = logRouterCache.removeOnReady(req.reqId, logRouterProcess);
 				errorForwarders.add(
 				    zombie(recruited, forwardError(errors, Role::LOG_ROUTER, recruited.id(), logRouterProcess)));
 
 				TraceEvent("LogRouterInitRequest", req.reqId).detail("LogRouterId", recruited.id());
+				// A lost response must not leave duplicate requests waiting on that response's promise.
+				logRouterReady.send(recruited);
 				if (!skipInitRspInSim(interf.id(), req.allowDropInSim)) {
-					logRouterReady.send(recruited);
+					req.reply.send(recruited);
 				}
-			} else {
-				forwardPromise(Uncancellable{}, req.reply, logRouterCache.get(req.reqId));
 			}
 		}
 	}

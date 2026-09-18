@@ -72,17 +72,17 @@ struct CDCRegisterStreamReply {
 struct CDCRegisterStreamRequest {
 	constexpr static FileIdentifier file_identifier = 1269096;
 	Key name;
-	KeyRange keys;
+	std::vector<KeyRange> ranges;
 	ReplyPromise<CDCRegisterStreamReply> reply;
 
 	CDCRegisterStreamRequest() = default;
-	CDCRegisterStreamRequest(Key name, KeyRange keys) : name(name), keys(keys) {}
+	CDCRegisterStreamRequest(Key name, std::vector<KeyRange> ranges) : name(name), ranges(std::move(ranges)) {}
 
 	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, name, keys, reply);
+		serializer(ar, name, ranges, reply);
 	}
 };
 
@@ -119,15 +119,18 @@ struct CDCConsumeRequest {
 	constexpr static FileIdentifier file_identifier = 8178243;
 	CDCCursor cursor;
 	ReplyPromise<CDCConsumeReply> reply;
+	// Stable across one consumer's RPC retries; absent for legacy or direct callers.
+	Optional<UID> consumerId;
 
 	CDCConsumeRequest() = default;
-	explicit CDCConsumeRequest(CDCCursor cursor) : cursor(cursor) {}
+	explicit CDCConsumeRequest(CDCCursor cursor, Optional<UID> consumerId = {})
+	  : cursor(cursor), consumerId(consumerId) {}
 
 	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, cursor, reply);
+		serializer(ar, cursor, reply, consumerId);
 	}
 };
 

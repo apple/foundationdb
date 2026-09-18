@@ -42,6 +42,8 @@
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
+#include "fdbserver/checkpoint/BulkSstFiles.h"
+#include "fdbserver/checkpoint/Checkpoint.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
@@ -55,8 +57,7 @@
 #include "MappedKeyPlan.h"
 #include "ReadLatencySamples.h"
 #include "fdbserver/core/RecoveryState.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
-#include "fdbserver/core/ServerCheckpoint.h"
+#include "fdbserver/checkpoint/RocksDBCheckpointUtils.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/storageserver/StorageCorruptionBug.h"
 #include "fdbserver/core/StorageMetrics.h"
@@ -884,12 +885,6 @@ private:
 	VersionedData versionedData;
 	std::map<Version, Standalone<VerUpdateRef>> mutationLog; // versions (durableVersion, version]
 
-	using WatchMapKey = Key;
-	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
-	using WatchMapValue = Reference<ServerWatchMetadata>;
-	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
-	WatchMap_t watchMap; // keep track of server watches
-
 public:
 	struct PendingNewShard {
 		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(format("%016llx", shardId)), range(range) {}
@@ -1194,6 +1189,8 @@ public:
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	Database cx;
 
+	// counters must be declared before every member that can own an actor (actors, watchMap, …): cancelling those
+	// actors runs CountedSection destructors that touch these counters, so counters must outlive them
 	struct Counters : CommonStorageCounters {
 
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
@@ -1349,6 +1346,14 @@ public:
 		}
 	} counters;
 
+private:
+	using WatchMapKey = Key;
+	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
+	using WatchMapValue = Reference<ServerWatchMetadata>;
+	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
+	WatchMap_t watchMap; // keep track of server watches
+
+public:
 	class GetValueQuery {
 	public:
 		GetValueQuery(GetValueRequest request, Counters& counters)
@@ -11214,9 +11219,10 @@ Future<Void> updateStorage(StorageServer* data) {
 		++data->counters.kvCommits;
 		recentCommitStats.back().seqId = data->counters.kvCommits.getValue();
 
-		// If the mutation bytes budget was not fully used then wait some time before the next commit
-		durableDelay =
-		    (bytesLeft > 0) ? delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage) : Void();
+		// Batch only while both budgets have capacity; otherwise keep draining pending mutations.
+		durableDelay = (bytesLeft > 0 && clearRangesLeft > 0)
+		                   ? delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage)
+		                   : Void();
 
 		recentCommitStats.back().whenCommit = now();
 		try {
