@@ -1111,34 +1111,31 @@ Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<Data
 	}
 }
 
-// Replace a task with two tasks covering the same manifests, halving the key range each covers.
+// Derive the two tasks that replace an unplaceable one, each covering half its key range and the manifests
+// belonging to that half. Returns an empty Optional if the task cannot be narrowed: it holds a single
+// manifest, or no manifest boundary falls strictly inside its range.
 //
 // This is the recovery for a placement failure the task's range itself causes: src is the union of the
 // owners of every shard the range spans, and a destination team must be disjoint from src, so a range
 // spanning enough of the fleet has no legal destination. Re-dispatch cannot clear that, because every
 // attempt presents the same range and recomputes the same src. Narrower ranges span fewer shards and so
-// have narrower src.
+// have narrower src. Halving bounds recursion without a counter.
 //
-// The children's ranges tile the parent's and both writes land in one transaction, so no version exists in
-// which the parent's range is unowned, or owned by anything but tasks whose union is the parent. That is
-// the difference from erasing the task and relying on something to rebuild it, which drops the range's data
-// if nothing does. Because the job's manifests tile the key space, splitting the manifest list at the same
-// key that splits the range gives each child exactly the manifests covering its own range.
-//
-// Returns false without writing anything if the task cannot be narrowed -- it holds a single manifest, or no
-// manifest boundary falls inside its range -- and also if the parent turns out to be no longer ours, which is
-// not a statement about the range. Halving bounds recursion without a counter.
-Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskState parent) {
+// The children's ranges tile the parent's, so the caller must write both in a single transaction: then no
+// version exists in which the parent's range is unowned, or owned by anything but tasks whose union is the
+// parent -- that is the difference from erasing the task and relying on something to rebuild it, which drops
+// the range's data if nothing does.
+Optional<std::vector<BulkLoadTaskState>> deriveSplitBulkLoadTasks(const BulkLoadTaskState& parent, UID logId) {
 	std::vector<BulkLoadManifest> manifests = parent.getManifests();
 	if (manifests.size() < 2) {
 		// A single manifest is as narrow as a task gets, and a manifest can span an arbitrarily wide range,
 		// so this is reachable with a range covering the whole key space. Nothing here can place it: the
 		// cluster needs servers outside src, or the manifest needs to have been dumped more finely.
-		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", logId)
 		    .detail("Reason", "Task holds a single manifest and cannot be narrowed")
 		    .detail("TaskRange", parent.getRange())
 		    .detail("TaskID", parent.getTaskId());
-		co_return false;
+		return {};
 	}
 	std::sort(manifests.begin(), manifests.end(), [](BulkLoadManifest const& a, BulkLoadManifest const& b) {
 		return a.getBeginKey() < b.getBeginKey();
@@ -1169,12 +1166,12 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	}
 	if (insideBoundaries.empty()) {
 		// Every manifest boundary is outside the parent's clipped range, so the range cannot be cut at one.
-		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadTaskSplitDeclined", logId)
 		    .detail("Reason", "No manifest split point lies inside the task's range")
 		    .detail("TaskRange", parent.getRange())
 		    .detail("TaskID", parent.getTaskId())
 		    .detail("ManifestCount", manifests.size());
-		co_return false;
+		return {};
 	}
 	int const half = insideBoundaries[insideBoundaries.size() / 2];
 	// The parent's range starts at or after its first manifest's begin key, so that key can never be
@@ -1201,7 +1198,7 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	ASSERT(children[0].getRange().begin == parent.getRange().begin);
 	ASSERT(children[0].getRange().end == children[1].getRange().begin);
 	ASSERT(children[1].getRange().end == parent.getRange().end);
-	// The writes below must be issued in ascending key order, so keep the guard next to the reason.
+	// The caller must issue the writes in ascending key order, so keep the guard next to the reason.
 	// krmSetRange reads oldValue at Snapshot::True on a plain Transaction, which has no read-your-writes,
 	// so each call is blind to the previous one's mutations and only their order makes the result correct.
 	// Each call emits clear(range); set(begin, value); set(end, oldValue). Ascending, the second call's
@@ -1210,6 +1207,18 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 	// lands last and republishes the parent over the second child's range -- precisely the state the
 	// tiling comment above says cannot exist.
 	ASSERT(children[0].getRange().begin < children[1].getRange().begin);
+	return children;
+}
+
+// Install the derived children in place of the parent, in one transaction. Returns false without writing
+// anything if the task cannot be narrowed, and also if the parent turns out to be no longer ours, which is
+// not a statement about the range.
+Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskState parent) {
+	Optional<std::vector<BulkLoadTaskState>> derived = deriveSplitBulkLoadTasks(parent, self->ddId);
+	if (!derived.present()) {
+		co_return false;
+	}
+	std::vector<BulkLoadTaskState> const& children = derived.get();
 
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
@@ -1230,7 +1239,7 @@ Future<bool> splitBulkLoadTask(Reference<DataDistributor> self, BulkLoadTaskStat
 			    .detail("CommitVersion", tr.getCommittedVersion())
 			    .detail("TaskRange", parent.getRange())
 			    .detail("TaskID", parent.getTaskId())
-			    .detail("ManifestCount", manifests.size())
+			    .detail("ManifestCount", parent.getManifests().size())
 			    .detail("FirstRange", children[0].getRange())
 			    .detail("FirstTaskID", children[0].getTaskId())
 			    .detail("SecondRange", children[1].getRange())
@@ -5961,4 +5970,108 @@ TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	self->shardsAffectedByTeamFailure->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
 	self->shardsAffectedByTeamFailure->check();
 	co_return;
+}
+
+namespace {
+
+// Only the key range matters to deriveSplitBulkLoadTasks(). The remaining fields are whatever satisfies
+// BulkLoadManifest::isValid(), which the constructor asserts.
+BulkLoadManifest splitTestManifest(KeyRef begin, KeyRef end) {
+	return BulkLoadManifest(BulkLoadFileSet("root", "relative", "0-manifest.txt", "0-data.sst", "", {}),
+	                        begin,
+	                        end,
+	                        /*version=*/1,
+	                        /*bytes=*/1,
+	                        /*keyCount=*/1,
+	                        BulkLoadByteSampleSetting(0, "hashlittle2", 250, 100, 0.5),
+	                        BulkLoadType::SST,
+	                        BulkLoadTransportMethod::CP);
+}
+
+BulkLoadTaskState splitTestTask(const std::vector<KeyRange>& manifestRanges, const KeyRange& taskRange) {
+	BulkLoadManifestSet set(manifestRanges.size());
+	for (const auto& range : manifestRanges) {
+		ASSERT(set.addManifest(splitTestManifest(range.begin, range.end)));
+	}
+	return BulkLoadTaskState(deterministicRandom()->randomUniqueID(), set, taskRange);
+}
+
+} // namespace
+
+TEST_CASE("/DataDistribution/BulkLoad/DeriveSplitTasks") {
+	// The children tile the parent and partition its manifests, and inherit its job.
+	{
+		auto parent = splitTestTask({ KeyRangeRef("a"_sr, "c"_sr),
+		                              KeyRangeRef("c"_sr, "e"_sr),
+		                              KeyRangeRef("e"_sr, "g"_sr),
+		                              KeyRangeRef("g"_sr, "i"_sr) },
+		                            KeyRangeRef("a"_sr, "i"_sr));
+		auto children = deriveSplitBulkLoadTasks(parent, UID()).get();
+		ASSERT_EQ(children.size(), 2);
+		ASSERT(children[0].getRange().begin == parent.getRange().begin);
+		ASSERT(children[0].getRange().end == children[1].getRange().begin);
+		ASSERT(children[1].getRange().end == parent.getRange().end);
+		ASSERT_EQ(children[0].getManifests().size() + children[1].getManifests().size(), parent.getManifests().size());
+		ASSERT(children[0].getJobId() == parent.getJobId());
+		ASSERT(children[1].getJobId() == parent.getJobId());
+	}
+
+	// The cut falls on a manifest boundary, so neither child is handed a range whose data lives in the
+	// other's manifests.
+	{
+		auto parent =
+		    splitTestTask({ KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("c"_sr, "e"_sr) }, KeyRangeRef("a"_sr, "e"_sr));
+		auto children = deriveSplitBulkLoadTasks(parent, UID()).get();
+		ASSERT(children[0].getRange() == KeyRangeRef("a"_sr, "c"_sr));
+		ASSERT(children[1].getRange() == KeyRangeRef("c"_sr, "e"_sr));
+	}
+
+	// A single manifest is as narrow as a task gets. Declining is terminal for the task -- the caller marks
+	// it Error rather than re-dispatching it.
+	{
+		auto parent = splitTestTask({ KeyRangeRef("a"_sr, "z"_sr) }, KeyRangeRef("a"_sr, "z"_sr));
+		ASSERT(!deriveSplitBulkLoadTasks(parent, UID()).present());
+	}
+
+	// REGRESSION: a task at a job-range edge holds manifests whose boundaries lie outside its clipped
+	// range. The cut must come from the boundaries strictly inside that range: here the manifest midpoint
+	// is "c", below the parent's own begin key.
+	{
+		auto parent =
+		    splitTestTask({ KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("c"_sr, "e"_sr), KeyRangeRef("e"_sr, "g"_sr) },
+		                  KeyRangeRef("d"_sr, "f"_sr));
+		auto children = deriveSplitBulkLoadTasks(parent, UID()).get();
+		ASSERT(children[0].getRange() == KeyRangeRef("d"_sr, "e"_sr));
+		ASSERT(children[1].getRange() == KeyRangeRef("e"_sr, "f"_sr));
+	}
+
+	// Every boundary outside the clipped range leaves nothing to cut at, so the task declines rather than
+	// producing an empty child.
+	{
+		auto parent =
+		    splitTestTask({ KeyRangeRef("a"_sr, "e"_sr), KeyRangeRef("e"_sr, "i"_sr) }, KeyRangeRef("f"_sr, "h"_sr));
+		ASSERT(!deriveSplitBulkLoadTasks(parent, UID()).present());
+	}
+
+	// Halving terminates: each child holds strictly fewer manifests than its parent, so repeated splitting
+	// of the lower child reaches a single manifest and declines.
+	{
+		StringRef const boundaries = "abcdefghi"_sr;
+		std::vector<KeyRange> ranges;
+		for (int i = 0; i + 1 < boundaries.size(); i++) {
+			ranges.push_back(KeyRangeRef(boundaries.substr(i, 1), boundaries.substr(i + 1, 1)));
+		}
+		BulkLoadTaskState task = splitTestTask(ranges, KeyRangeRef(ranges.front().begin, ranges.back().end));
+		while (true) {
+			Optional<std::vector<BulkLoadTaskState>> children = deriveSplitBulkLoadTasks(task, UID());
+			if (!children.present()) {
+				break;
+			}
+			ASSERT_LT(children.get()[0].getManifests().size(), task.getManifests().size());
+			task = children.get()[0];
+		}
+		ASSERT_EQ(task.getManifests().size(), 1);
+	}
+
+	return Void();
 }
