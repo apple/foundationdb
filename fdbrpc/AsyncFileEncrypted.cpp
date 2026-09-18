@@ -155,7 +155,7 @@ public:
 
 AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode, int encryptionBlockSize)
   : file(file), mode(mode), currentBlock(0), encryptionBlockSize(encryptionBlockSize) {
-	ASSERT(encryptionBlockSize > 0);
+	ASSERT_GT(encryptionBlockSize, 0);
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (mode == Mode::APPEND_ONLY) {
 		writeBuffer = std::vector<unsigned char>(encryptionBlockSize, 0);
@@ -176,7 +176,7 @@ int64_t AsyncFileEncrypted::rawToLogicalSize(int64_t rawSize, int blockSize) {
 	const int64_t trailing = rawSize % rawBlockSize;
 	int64_t logical = fullBlocks * blockSize;
 	if (trailing > 0) {
-		ASSERT(trailing > GCM_TAG_LEN);
+		ASSERT_GT(trailing, GCM_TAG_LEN);
 		logical += trailing - GCM_TAG_LEN;
 	}
 	return logical;

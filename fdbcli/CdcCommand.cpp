@@ -62,8 +62,14 @@ json_spirit::mObject statusJson(const NativeCdcStatus& status) {
 		json_spirit::mObject entry;
 		entry["stream_id"] = std::to_string(stream.info.streamId);
 		entry["name"] = stream.info.name.printable();
-		entry["range_begin"] = stream.info.keys.begin.printable();
-		entry["range_end"] = stream.info.keys.end.printable();
+		json_spirit::mArray ranges;
+		for (const auto& range : stream.info.ranges) {
+			json_spirit::mObject keys;
+			keys["range_begin"] = range.begin.printable();
+			keys["range_end"] = range.end.printable();
+			ranges.push_back(keys);
+		}
+		entry["ranges"] = ranges;
 		entry["min_version"] = versionJson(stream.info.minVersion);
 		entry["acknowledgement_lag_versions"] = versionJson(acknowledgementLag(status, stream));
 		entry["owner_proxy_id"] =
@@ -160,10 +166,12 @@ void printCdcStatus(const NativeCdcStatus& status) {
 		fmt::println("  Retention metadata is drained. Physical TLog disk reclamation is not certified.");
 	}
 	for (const auto& stream : status.streams) {
-		fmt::println("  Stream {}: name=\"{}\", range={}",
-		             stream.info.streamId,
-		             stream.info.name.printable(),
-		             stream.info.keys.toString());
+		fmt::println("  Stream {}: name=\"{}\"", stream.info.streamId, stream.info.name.printable());
+		fmt::print("    ranges:");
+		for (const auto& range : stream.info.ranges) {
+			fmt::print(" {}", range.toString());
+		}
+		fmt::println("");
 		fmt::println("    minimum version={}, acknowledgement lag={} versions, owner={} ({})",
 		             versionText(stream.info.minVersion),
 		             versionText(acknowledgementLag(status, stream)),

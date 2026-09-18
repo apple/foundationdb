@@ -3,29 +3,29 @@
 ## Objective
 
 Native Change Data Capture (CDC) provides a FoundationDB-native mechanism for
-reading committed mutations for a registered key range. A client registers a
-named stream, creates a consumer for that name, consumes batches of mutations,
-and acknowledges processed versions. The implementation persists enough state
-to retain unread TLog data and to resume stream service after CDC proxy failure
-or transaction-system recovery.
+reading committed mutations for a registered set of key ranges. A client
+registers a named stream, creates a consumer for that name, consumes batches of
+mutations, and acknowledges processed versions. The implementation persists
+enough state to retain unread TLog data and to resume stream service after CDC
+proxy failure or transaction-system recovery.
 
 ## Background
 
-This design describes the native C++ interface, its C binding, and its server
-implementation. The feature is disabled by default behind `ENABLE_NATIVE_CDC`;
+This design describes the native C++ interface, its C and Python bindings, and
+its server implementation. The feature is disabled by default behind `ENABLE_NATIVE_CDC`;
 the native CDC workloads explicitly enable it, and simulation may randomly
-enable it. The client interface is exposed through the native C++ API and C
-binding; it does not expose an external protocol compatibility guarantee.
+enable it. The client interface is exposed through the native C++ API and C and
+Python bindings; it does not expose an external protocol compatibility guarantee.
 
 The implementation uses the following terms:
 
-* A **stream** is a durable named registration for a fixed user key range.
+* A **stream** is a durable named registration for a fixed set of user key ranges.
 * A **cursor** identifies one stream and the version through which a consumer
   has read.
 * A **CDC tag** is a TLog tag with locality `tagLocalityCDC`. Commit proxies
   append these tags to mutations covered by registered streams.
 * A **CDC proxy** reads tagged TLog mutation streams, filters mutations to a
-  registered range, serves consumers, and coordinates acknowledgement-driven
+  registered range set, serves consumers, and coordinates acknowledgement-driven
   log popping.
 
 CDC is not implemented as a storage server change feed. It captures mutations
@@ -36,12 +36,11 @@ and release its own log history without changing user data storage.
 
 Native CDC is intended to provide:
 
-* Durable, named registrations for single key ranges in normal user key
-  space. The initial API intentionally registers exactly one half-open
-  `[begin, end)` range per stream; callers that need multiple disjoint ranges
-  register multiple streams.
+* Durable, named registrations for non-empty sets of half-open `[begin, end)`
+  ranges in normal user key space. A stream captures the union of its ranges
+  and excludes the gaps between them.
 * A consumer API in which a client only needs a stream name after
-  registration, rather than repeating its registered range on every read.
+  registration, rather than repeating its registered ranges on every read.
 * Ordered mutation batches identified by FoundationDB commit versions.
 * Durable acknowledgements that determine how much CDC-tagged TLog history may
   be popped.
@@ -81,11 +80,11 @@ The current implementation does not attempt to provide:
   arbitrary application state. Such an API would be useful for queue-like
   transactional asynchronous processing pipelines, but the initial interface
   leaves that composition to the consumer.
-* Dynamic stream range changes. A name is registered for one range; changing a
-  range requires removing and registering a stream.
+* Dynamic stream range changes. A name is registered for an immutable range
+  set; changing membership requires removing and registering a stream.
 * Throughput-aware assignment of streams across CDC proxies.
 * Throughput-aware movement of streams between CDC tags.
-* Language-specific bindings beyond the C API.
+* Language-specific bindings beyond the C and Python APIs.
 
 ## Client interface
 
@@ -95,12 +94,13 @@ value types and the thread-safe surface shared with language bindings are in
 roles are in the private `fdbclient/NativeCdcInternal.h`; cursor and wire
 request types are in `fdbclient/CDCProxyInterface.h`. The public C binding is
 declared in `bindings/c/foundationdb/fdb_c.h` and documented in
-`documentation/sphinx/source/api-c.rst`.
+`documentation/sphinx/source/api-c.rst`. The Python binding is documented in
+`documentation/sphinx/source/api-python.rst`.
 `CDCStreamId` is a `uint64_t` typedef. CDC tag IDs are 16-bit, so one
 configured tag pool can contain at most 65,536 distinct tags.
 
 ```cpp
-Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, KeyRange keys);
+Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, std::vector<KeyRange> ranges);
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);
 
@@ -108,9 +108,11 @@ Future<Reference<NativeCdcConsumer>> createNativeCdcConsumer(Database cx, Key na
 Reference<NativeCdcConsumer> resumeNativeCdcConsumer(Database cx, CDCCursor position);
 ```
 
-`registerNativeCdcStreamClient()` accepts exactly one `KeyRange`. The range is
-interpreted with FoundationDB's usual half-open `[begin, end)` semantics.
-Multi-range registration is not part of the initial API.
+`registerNativeCdcStreamClient()` accepts a non-empty vector of `KeyRange`
+values, each interpreted with FoundationDB's usual half-open `[begin, end)`
+semantics. Registration sorts the ranges and merges overlaps, duplicates, and
+adjacent intervals into a canonical union. All ranges share one stream identity,
+CDC tag assignment, proxy owner, cursor, and durable acknowledgement watermark.
 Registration and removal are low-rate control-plane operations intended for
 stable stream lifecycles, not per-request stream churn. The initial
 implementation does not define a supported registrations-per-second target:
@@ -123,7 +125,7 @@ A stream registration contains:
 struct NativeCdcStreamInfo {
 	Key name;
 	CDCStreamId streamId;
-	KeyRange keys;
+	std::vector<KeyRange> ranges;
 	Version minVersion;
 };
 ```
@@ -175,7 +177,8 @@ struct CDCConsumeReply {
 A typical consumer loop is:
 
 ```cpp
-co_await registerNativeCdcStreamClient(db, "orders"_sr, KeyRangeRef("order/"_sr, "order0"_sr));
+co_await registerNativeCdcStreamClient(
+    db, "orders"_sr, { KeyRangeRef("order/"_sr, "order0"_sr), KeyRangeRef("payment/"_sr, "payment0"_sr) });
 Reference<NativeCdcConsumer> consumer = co_await createNativeCdcConsumer(db, "orders"_sr);
 
 while (true) {
@@ -220,17 +223,20 @@ version.
 
 ### Registration and removal semantics
 
-`registerNativeCdcStreamClient()` accepts a non-empty stream name and a
-non-empty range entirely within normal user keys. Registration of an existing
-name with the same range is idempotent. Registering an existing name with a
-different range is rejected.
+`registerNativeCdcStreamClient()` accepts a non-empty stream name and between
+1 and 1,024 non-empty ranges entirely within normal user keys. The encoded
+canonical range set must fit within FoundationDB's value-size limit.
+Registration of an existing name with the same canonical union is idempotent,
+regardless of input order, duplication, overlap, or adjacent subdivisions.
+Registering an existing name with a different union is rejected. Listing a
+stream returns its canonical ranges in key order.
 
 Registration establishes an initial minimum version using the registration
 transaction's commit version. Mutations committed after the registration has
 become visible are routed to the stream's CDC tag. The initial minimum version
 also supplies the first retention watermark for its TLog history.
 When CDC admission is disabled, this gate applies only to creation of a new
-name. Repeating an existing same-name/same-range registration remains
+name. Repeating an existing same-name/same-range-set registration remains
 idempotent, including repair of a missing durable owner, so an administrator can
 still drain state created while the feature was enabled.
 
@@ -244,9 +250,18 @@ will never be assigned again.
 
 ### Consumption and expiration
 
-Consumption is ordered by commit version. Mutations from a clear range are
-intersected with the stream's registered range before being returned; a
-single-key mutation is returned only if its key is within that range.
+Consumption is ordered by commit version. A single-key mutation is returned
+only if its key is in one of the registered ranges. A clear range is intersected
+with every selected interval it overlaps and emits one clear for each non-empty
+intersection, in key order. These fragments remain in the original mutation
+position relative to other mutations from the same commit version. For example,
+a stream selecting `[a,c)` and `[x,z)` returns `[b,c)` and `[x,y)` for a clear
+of `[b,y)`, and never clears the unselected gap `[c,x)`.
+
+A single cursor and acknowledgement cover all selected ranges. The consumer
+must process every range through the acknowledged version; a slow range holds
+back retention for the whole stream. Consumers that need independent progress
+or lifecycle management should use separate streams.
 
 For an active stream, unacknowledged CDC mutations are retained by its durable
 minimum version: TLogs must not pop tagged data that the stream may still
@@ -312,7 +327,7 @@ consumers.
 
 CDC proxies do not participate in committing user transactions. They consume
 the extra tagged log streams, buffer readable results, filter shared tagged
-data back to each stream's registered range, and pop data after durable
+data back to each stream's registered range set, and pop data after durable
 acknowledgement permits it.
 
 The cluster controller recruits CDC proxies, publishes their interfaces, and
@@ -335,7 +350,7 @@ in transaction state:
 | --- | --- | --- |
 | `\xff/cdc/name/<name>` | `CDCStreamId` | Resolves a user-visible name to its durable stream identity. |
 | `\xff/cdc/maxStreamId` | `CDCStreamId` | Allocates monotonic stream identifiers. |
-| `\xff/cdc/keys/<streamId>` | `KeyRange` | Stores the immutable registered range for an active stream. |
+| `\xff/cdc/keys/<streamId>` | `std::vector<KeyRange>` | Stores the canonical immutable registered range set for an active stream. |
 | `\xff/cdc/tagHistory/<streamId>/<version>/<tag>` | empty | Records the CDC tag assignment history used for routing and historical reads. |
 | `\xff/cdc/proxies/<streamId>/<proxyId>` | empty | Stores the CDC proxy assigned to an active stream. |
 | `\xff/cdc/proxyAssignmentChange` | version/change signal | Wakes ownership monitoring when durable assignments change. |
@@ -376,15 +391,16 @@ actual final pop to perform.
 
 Registration runs as a durable metadata transaction:
 
-1. It validates the stream name and registered normal key range.
+1. It validates the stream name, range count, normal key ranges, and encoded
+   metadata size, and canonicalizes the range union.
 2. It checks whether the name is already registered and applies the idempotent
-   same-name/same-range rule, even when admission is disabled.
+   same-name/same-range-set rule, even when admission is disabled.
 3. For a new name, it validates the feature knob.
 4. It allocates a new monotonically increasing `CDCStreamId`.
 5. It selects a CDC tag using current active stream counts. The allocator uses
    the least populated tag among `NATIVE_CDC_TAG_COUNT` tags (256 by default),
    choosing the lowest tag ID on a tie.
-6. It records the stream name, range, initial tag history entry, and
+6. It records the stream name, canonical ranges, initial tag history entry, and
    versionstamped initial minimum version.
 7. It records an available CDC proxy owner and signals assignment monitoring.
 
@@ -449,7 +465,7 @@ assigns proxy `P1`.
 Registration writes:
 
 * Transaction state `\xff/cdc/name/orders -> 7`.
-* Transaction state `\xff/cdc/keys/7 -> ["order/", "order0")`.
+* Transaction state `\xff/cdc/keys/7 -> { ["order/", "order0") }`.
 * Transaction state `\xff/cdc/tagHistory/7/995/tagLocalityCDC:3 -> empty`.
 * Transaction state `\xff/cdc/proxies/7/P1 -> empty` and the assignment-change
   signal.
@@ -457,7 +473,7 @@ Registration writes:
 
 If the consumer later acknowledges mutations through version `1200`,
 `\xff\x02/cdc/minVersion/7` advances to `1201`. If the stream is then removed
-at version `1500`, removal deletes the active name, range, proxy, tag-history,
+at version `1500`, removal deletes the active name, ranges, proxy, tag-history,
 and `minVersion` rows, and writes retired final-pop work for
 `tagLocalityCDC:3`: a transaction-state `\xff/cdc/retiredTagPop/<tag>` marker
 and a storage-backed `\xff\x02/cdc/retiredTagPopVersion/<tag>` watermark for
@@ -482,7 +498,7 @@ proxy processing.
 The cost of a broad clear range is proportional to the number of CDC stream
 ranges and tags it intersects, not to the number of keys in the cleared range.
 The logged CDC payload remains a clear-range mutation on each relevant tag, and
-the CDC proxy later clips that clear to the consumer's registered range. A
+the CDC proxy later clips that clear to the consumer's registered ranges. A
 clear that spans many CDC ranges can therefore add many CDC tag destinations
 and later produce many per-stream clipped clears. Commit-proxy and CDC-proxy
 metrics should make this visible by reporting CDC routing matches, CDC tag
@@ -491,8 +507,9 @@ fanout, filtered bytes, and consumer lag.
 A shared CDC tag is a multiplexed log stream. A mutation routed because of
 stream A may be read by the proxy serving stream B if both share the tag.
 Consequently, the CDC proxy filters every read mutation against B's registered
-range before returning it to B's consumer. Filtering also clips clear ranges
-to the stream range.
+range set before returning it to B's consumer. Filtering splits clear ranges
+at unselected gaps. A clear intersecting multiple ranges of one stream receives
+that stream's CDC tag only once.
 
 Shared-tag false positives are expected, especially when
 `NATIVE_CDC_TAG_COUNT` is small or active streams are unevenly distributed. The
@@ -524,14 +541,14 @@ mapping for the normally configured IDs.
 
 A CDC proxy owns a set of active stream IDs. For each owned stream it loads:
 
-* The registered key range.
+* The canonical registered key ranges.
 * The durable minimum required version.
 * Its current CDC tag and versioned tag history.
 
 The proxy reads data from TLogs through `LogSystemConsumer::peekSingle()`.
 When a stream has historical assignments, the proxy uses the history to select
 the tag appropriate for the version interval it is reading. It filters
-mutations to the registered range and stores versioned mutation batches in a
+mutations to the registered range set and stores versioned mutation batches in a
 per-stream in-memory buffer.
 
 All raw peek windows and stream buffers owned by one CDC proxy share a
@@ -559,9 +576,10 @@ TLog retention are the source of resumability, while the proxy buffer is a
 delivery optimization.
 
 One tagged TLog message can match many overlapping streams. The proxy estimates
-that expansion per stream and commit version, materializes only a subset that
-fits the current bounded pass, and reopens the tag cursor for the remaining
-streams. It never requests raw-plus-retained permits beyond
+that expansion, including clear fragments across disjoint ranges, per stream
+and commit version, materializes only a subset that fits the current bounded
+pass, and reopens the tag cursor for the remaining streams. It never requests
+raw-plus-retained permits beyond
 `CDC_PROXY_BUFFER_BYTES`. If the filtered mutations for one stream at one
 commit version exceed the capacity remaining after the raw peek reservation,
 that consume fails with `server_overloaded`; operators must configure the
@@ -585,7 +603,9 @@ default) and contains only complete commit-version groups. If more buffered
 data is available, the reply stops before the next version and advances
 `lastConsumedVersion` only through the delivered prefix, including any empty
 version gap before that next mutation. If one complete filtered version cannot
-fit in the reply budget, the consume fails with `server_overloaded`.
+fit in the reply budget, the consume fails with `server_overloaded`. The bound
+applies to the combined mutations across every selected range; a version is
+never split by range to fit a reply.
 The owning proxy accepts a cursor only when the position has already been
 delivered by that owner or is covered by the stream's durable acknowledgement
 watermark. A fabricated or otherwise unproven cursor is rejected instead of
@@ -643,7 +663,7 @@ metadata scan.
 
 ### Removing a stream
 
-Removing a stream eliminates its active name, range, tag history, minimum
+Removing a stream eliminates its active name, ranges, tag history, minimum
 version, and ownership rows. Removal must not unconditionally pop each tag in
 the removed history: a different live stream may share a tag and still need
 older data.
@@ -735,6 +755,14 @@ cluster role.
 
 ## Rollout and migration considerations
 
+Native CDC is unreleased. The multi-range metadata and client interfaces replace
+the earlier single-range representation without a compatibility decoder or API
+overload. Test deployments using the earlier representation must remove their
+streams and finish retired cleanup before upgrading. Upgrade every CDC-capable
+server binary and client before registering streams in the new format; mixed
+old and new CDC implementations are unsupported, and existing cursors do not
+bridge that change.
+
 ### Feature gating
 
 `ENABLE_NATIVE_CDC` defaults to false. In simulation it may be randomly enabled
@@ -780,7 +808,7 @@ The implementation is structured around the following properties:
   reuse of a removed stream name cannot cause an existing consumer to read a
   new stream.
 * **Range correctness:** CDC proxies return only mutations within a stream's
-  registered range, even when its tag is shared with other streams.
+  registered range union, even when its tag is shared with other streams.
 * **Acknowledgement monotonicity:** durable minimum required versions advance
   only forward.
 * **Shared-tag retention:** tagged data is popped no farther than the minimum
@@ -823,7 +851,7 @@ policy simple.
   response to load. A future implementation can use versioned tag history to
   make such changes without losing the ability to read earlier tagged data.
 * The CDC client surface does not yet provide language-specific bindings beyond
-  the C API or a higher-level consumer checkpoint abstraction. Administrative
+  the C and Python APIs or a higher-level consumer checkpoint abstraction. Administrative
   status and identity-guarded removal are available through `fdbcli`.
 
 These improvements must preserve the acknowledgement and retired-pop
@@ -867,7 +895,13 @@ The basic native CDC workload covers:
 
 * Registering, listing, consuming, acknowledging, and removing streams.
 * Name-based consumer creation, including end-to-end clear-range clipping.
-* Rejection of incompatible same-name registrations.
+* Canonical multi-range registration, equivalent same-name registrations, and
+  rejection of incompatible same-name registrations.
+* Gap exclusion for shared-tag mutations, ordered clear splitting across
+  disjoint intervals, and replay of a complete unacknowledged multi-range
+  version after proxy replacement using one cursor and acknowledgement.
+* Multi-range unread history retained across transaction-system recovery and
+  new commits routed through the recovered range metadata.
 * Targeted CDC proxy termination, durable reassignment, and recovery of stream
   service, including independent publication when two proxies fail together.
 * Errors for stale consume and acknowledgement requests after removal.

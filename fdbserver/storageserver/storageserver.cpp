@@ -885,12 +885,6 @@ private:
 	VersionedData versionedData;
 	std::map<Version, Standalone<VerUpdateRef>> mutationLog; // versions (durableVersion, version]
 
-	using WatchMapKey = Key;
-	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
-	using WatchMapValue = Reference<ServerWatchMetadata>;
-	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
-	WatchMap_t watchMap; // keep track of server watches
-
 public:
 	struct PendingNewShard {
 		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(format("%016llx", shardId)), range(range) {}
@@ -1195,6 +1189,8 @@ public:
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	Database cx;
 
+	// counters must be declared before every member that can own an actor (actors, watchMap, …): cancelling those
+	// actors runs CountedSection destructors that touch these counters, so counters must outlive them
 	struct Counters : CommonStorageCounters {
 
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
@@ -1350,6 +1346,14 @@ public:
 		}
 	} counters;
 
+private:
+	using WatchMapKey = Key;
+	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
+	using WatchMapValue = Reference<ServerWatchMetadata>;
+	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
+	WatchMap_t watchMap; // keep track of server watches
+
+public:
 	class GetValueQuery {
 	public:
 		GetValueQuery(GetValueRequest request, Counters& counters)
