@@ -2251,10 +2251,23 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 	state Optional<std::string> token = bstore->multipartUploadToken(uploadID);
 	state Optional<Error> completionError;
 	state MultipartCompletionStatus status = MultipartCompletionStatus::Failure;
+	state Reference<HTTP::IncomingResponse> r;
 	try {
-		Reference<HTTP::IncomingResponse> r =
-		    wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), { 200, 404 }));
+		wait(store(r, bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), { 200, 404 })));
 		status = parseMultipartCompletionResponse(r->code, r->data.content);
+		if (r->code == 200 && status != MultipartCompletionStatus::Success) {
+			// S3 returns 200 as soon as it begins processing CompleteMultipartUpload rather than when it
+			// succeeds, and reports the real outcome in the body.
+			TraceEvent("S3MultipartCompletionFalseSuccess")
+			    .setMaxEventLength(12000)
+			    .detail("Bucket", bucket)
+			    .detail("Object", object)
+			    .detail("UploadID", uploadID)
+			    .detail("ResponseCode", r->code)
+			    .detail("S3ErrorCode", parseErrorCodeFromS3(r->data.content))
+			    .setMaxFieldLength(10000)
+			    .detail("HttpResponseContent", r->data.content);
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_broken_promise) {
 			throw;
@@ -2272,7 +2285,14 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 			bool matches = wait(completedMultipartObjectMatches(bstore, bucket, object, token.get(), totalSize));
 			if (matches) {
 				bstore->forgetMultipartUploadToken(uploadID);
-				TraceEvent("S3MultipartCompletionReconciled").detail("Bucket", bucket).detail("Object", object);
+				TraceEvent("S3MultipartCompletionReconciled")
+				    .detail("Bucket", bucket)
+				    .detail("Object", object)
+				    .detail("UploadID", uploadID)
+				    .detail("ResponseCode", r.isValid() ? r->code : 0)
+				    .detail("S3ErrorCode", r.isValid() ? parseErrorCodeFromS3(r->data.content) : "")
+				    .detail("MultipartCompletionStatus", status)
+				    .detail("CompletionError", completionError.present() ? completionError.get().name() : "");
 				return Void();
 			}
 		} catch (Error& e) {
@@ -2600,10 +2620,12 @@ TEST_CASE("/backup/s3/multipartCompletionResponse") {
 	                            "</CompleteMultipartUploadResult>";
 	const std::string noSuchUpload = "<Error><Code>NoSuchUpload</Code></Error>";
 	const std::string invalidPart = "<Error><Code>InvalidPart</Code></Error>";
+	const std::string internalError = "<Error><Code>InternalError</Code></Error>";
 
 	ASSERT(parseMultipartCompletionResponse(200, success) == MultipartCompletionStatus::Success);
 	ASSERT(parseMultipartCompletionResponse(200, noSuchUpload) == MultipartCompletionStatus::NoSuchUpload);
 	ASSERT(parseMultipartCompletionResponse(200, invalidPart) == MultipartCompletionStatus::Failure);
+	ASSERT(parseMultipartCompletionResponse(200, internalError) == MultipartCompletionStatus::Failure);
 	ASSERT(parseMultipartCompletionResponse(404, noSuchUpload) == MultipartCompletionStatus::NoSuchUpload);
 	ASSERT(parseMultipartCompletionResponse(404, invalidPart) == MultipartCompletionStatus::Failure);
 	ASSERT(parseMultipartCompletionResponse(200, "<CompleteMultipartUploadResult/>") ==
