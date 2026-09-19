@@ -7272,6 +7272,67 @@ public:
 		ASSERT(selected == std::set<UID>({ UID(4, 0), UID(5, 0), UID(6, 0) }));
 	}
 
+	// Worst-member ranking competes against inflightPenalty, and on the exclude path that penalty is 500.
+	// The two signals are on wildly different timescales: accumulated bytes move over hours, in-flight bytes
+	// over seconds, and the fast one is weighted 500x. So the ranking only decides between candidates whose
+	// in-flight load is comparable; a small asymmetry the other way erases a large difference in fill.
+	//
+	// Pinned here because it bounds what the change can achieve in production, where in-flight is never zero
+	// mid-exclude, and because the accumulation test deliberately runs with no in-flight at all.
+	static Future<Void> GetTeam_InFlightPenaltyCanOutweighWorstMemberRanking() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, 6);
+
+		const int64_t MB = 1024LL * 1024;
+		const int64_t capacity = 10000 * MB;
+
+		GetStorageMetricsReply crowded;
+		crowded.capacity.bytes = capacity;
+		crowded.available.bytes = 2250 * MB;
+		crowded.load.bytes = 7750 * MB;
+
+		GetStorageMetricsReply empty;
+		empty.capacity.bytes = capacity;
+		empty.available.bytes = 9900 * MB;
+		empty.load.bytes = 100 * MB;
+
+		GetStorageMetricsReply even;
+		even.capacity.bytes = capacity;
+		even.available.bytes = 6000 * MB;
+		even.load.bytes = 4000 * MB;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(4, 0), UID(5, 0), UID(6, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(1, 0)]->setMetrics(crowded);
+		collection->server_info[UID(2, 0)]->setMetrics(empty);
+		collection->server_info[UID(3, 0)]->setMetrics(empty);
+		for (int id = 4; id <= 6; ++id) {
+			collection->server_info[UID(id, 0)]->setMetrics(even);
+		}
+
+		Reference<TCTeamInfo> crowdedTeam = collection->teams[0];
+		Reference<TCTeamInfo> evenTeam = collection->teams[1];
+		const double penalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
+
+		// addDataInFlightToTeam charges every member, and getDataInFlightToTeam sums them back, so the
+		// argument is the per-server in-flight bytes the score ultimately sees.
+		crowdedTeam->addDataInFlightToTeam(200 * MB);
+		evenTeam->addDataInFlightToTeam(200 * MB);
+
+		// Symmetric in-flight cancels, so the 3750 MB gap between the teams' fullest members still decides.
+		ASSERT_GT(crowdedTeam->getLoadBytes(true, penalty, true), evenTeam->getLoadBytes(true, penalty, true));
+
+		// 3750 MB of fill is worth 7.5 MB of in-flight at this penalty. Past that the crowded team scores
+		// lower again -- it looks like the better destination despite holding a member near the disk limit.
+		evenTeam->addDataInFlightToTeam(16 * MB);
+		ASSERT_LT(crowdedTeam->getLoadBytes(true, penalty, true), evenTeam->getLoadBytes(true, penalty, true));
+
+		// Ranking on the mean is defeated by the same asymmetry, so this is not a regression the flag
+		// introduces; it is a ceiling the flag does not lift.
+		ASSERT_LT(crowdedTeam->getLoadBytes(true, penalty), evenTeam->getLoadBytes(true, penalty));
+		co_return;
+	}
+
 	// Places `rounds` shards by repeatedly asking for the least-utilized destination and charging the chosen
 	// team's members, then returns the fullest server's bytes alongside an even share of what was actually
 	// placed, so a caller can tell concentration from ordinary growth. Server 1 sits in six of the seven
@@ -8144,6 +8205,10 @@ TEST_CASE("/DataDistribution/GetTeam/OneFullMemberHiddenByTeamMean") {
 
 TEST_CASE("/DataDistribution/GetTeam/WorstMemberRankingExposesFullMember") {
 	co_await DDTeamCollectionUnitTest::GetTeam_WorstMemberRankingExposesFullMember();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/InFlightPenaltyCanOutweighWorstMemberRanking") {
+	co_await DDTeamCollectionUnitTest::GetTeam_InFlightPenaltyCanOutweighWorstMemberRanking();
 }
 
 TEST_CASE("/DataDistribution/GetTeam/RepeatedPlacementConcentratesOnSharedMember") {
