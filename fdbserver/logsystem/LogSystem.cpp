@@ -607,6 +607,15 @@ void LogSystem::coreStateWritten(DBCoreState const& newState) {
 	}
 }
 
+namespace {
+
+Future<Void> probeOldEpochBackupWorkerFailure(Future<Void> failure) {
+	co_await failure;
+	CODE_PROBE(true, "Old-generation backup worker failure forced a recovery");
+}
+
+} // namespace
+
 Future<Void> LogSystem::onError() const {
 	// Never returns normally, but throws an error if the subsystem stops working
 	while (true) {
@@ -654,6 +663,26 @@ Future<Void> LogSystem::onError() const {
 			}
 		}
 
+		// Monitored unconditionally, unlike the old log routers below: only a recovery re-recruits an unfinished
+		// range, so losing one of these workers otherwise pins oldestBackupEpoch and FULLY_RECOVERED is never reached.
+		for (auto& old : oldLogData) {
+			for (auto& logSet : old.tLogs) {
+				for (const auto& worker : logSet->backupWorkers) {
+					if (worker->get().present()) {
+						backupFailed.push_back(probeOldEpochBackupWorkerFailure(
+						    waitFailureClient(worker->get().interf().waitFailure,
+						                      /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
+						                      /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
+						                          SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+						                      /* trace */ true,
+						                      /* traceMsg */ "OldEpochBackupWorkerFailed"_sr)));
+					} else {
+						changes.push_back(worker->onChange());
+					}
+				}
+			}
+		}
+
 		if (!recoveryCompleteWrittenToCoreState.get()) {
 			failed.insert(failed.end(), routerFailed.begin(), routerFailed.end());
 			routerFailed.clear();
@@ -672,8 +701,6 @@ Future<Void> LogSystem::onError() const {
 						}
 					}
 				}
-				// Old-generation backup workers are stateless and persist their progress. A failure can retain
-				// this generation, but must not restart transaction-system recovery.
 			}
 		}
 
