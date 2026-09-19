@@ -293,6 +293,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
 	init( INFLIGHT_PENALTY_UNHEALTHY,                          500.0 );
 	init( INFLIGHT_PENALTY_ONE_LEFT,                          1000.0 );
+	init( DD_RANK_UNHEALTHY_DEST_ON_WORST_MEMBER,                true ); if( randomize && buggify() ) DD_RANK_UNHEALTHY_DEST_ON_WORST_MEMBER = false;
 	init( USE_OLD_NEEDED_SERVERS,                              false );
 
 	init( PRIORITY_RECOVER_MOVE,                                 110 );

@@ -166,6 +166,10 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
+	// Rank destinations for re-replication / exclude data moves by their fullest member rather than their
+	// mean, so a host that is filling stops being chosen while it still has room. False restores the
+	// previous behaviour.
+	bool DD_RANK_UNHEALTHY_DEST_ON_WORST_MEMBER;
 	bool USE_OLD_NEEDED_SERVERS;
 
 	// Higher priorities are executed first

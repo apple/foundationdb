@@ -63,7 +63,11 @@ struct IDataDistributionTeam {
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual Optional<int64_t> getLongestStorageQueueSize() const = 0;
 	virtual Optional<int> getMaxOngoingBulkLoadTaskCount() const = 0;
-	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+	// rankOnWorstMember scores a team by its fullest member instead of its mean, so one member running
+	// out of room is visible to the caller rather than divided by the replication factor.
+	virtual int64_t getLoadBytes(bool includeInFlight = true,
+	                             double inflightPenalty = 1.0,
+	                             bool rankOnWorstMember = false) const = 0;
 	virtual int64_t getReadInFlightToTeam() const = 0;
 	virtual double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual double getAverageCPU() const = 0;
@@ -150,6 +154,9 @@ struct GetTeamRequest {
 	Optional<KeyRange> keys;
 	bool storageQueueAware = false;
 	bool wantTrueBestIfMoveout = false;
+	// Rank candidate destinations by their fullest member rather than their mean. Set only on paths that
+	// must not pile data onto a member that is already filling, the way inflightPenalty is.
+	bool rankOnWorstMember = false;
 
 	// completeSources have all shards in the key range being considered for movement, src have at least 1 shard in the
 	// key range for movement. From the point of set, completeSources is the Intersection set of several <server_lists>,
