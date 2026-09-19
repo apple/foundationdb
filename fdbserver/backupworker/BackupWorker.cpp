@@ -1053,7 +1053,7 @@ Future<Void> monitorBackupPause(Database cx,
 // range would otherwise never be exercised. The delay is short because such a worker often finishes within a second.
 static Future<Void> buggifyOldEpochWorkerFailure() {
 	co_await delay(deterministicRandom()->random01() * 0.5);
-	throw io_error();
+	throw io_error().asInjectedFault();
 }
 
 Future<Void> backupWorker(BackupInterface interf,
