@@ -25,6 +25,7 @@
 #include <vector>
 #include <functional>
 #include <memory>
+#include <type_traits>
 
 #ifndef DLLEXPORT
 #if defined(_MSC_VER)
@@ -81,7 +82,8 @@ class GenericPromise {
 	std::shared_ptr<FDBPromise> impl;
 
 public:
-	template <class Ptr>
+	template <class Ptr,
+	          typename std::enable_if<std::is_constructible<std::shared_ptr<FDBPromise>, Ptr&&>::value, int>::type = 0>
 	explicit GenericPromise(Ptr&& impl) : impl(std::forward<Ptr>(impl)) {}
 	void send(T val) { impl->send(&val); }
 };

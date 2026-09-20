@@ -615,6 +615,8 @@ public:
 		if (sav)
 			sav->delref();
 	}
+	// Acquiring the incoming reference first keeps the shared state alive during self-assignment.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	void operator=(const ThreadFuture<T>& rhs) {
 		if (rhs.sav)
 			rhs.sav->addref();

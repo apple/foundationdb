@@ -4731,8 +4731,7 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 		data.workerHealth[badPeer4].disconnectedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
 			                                                      now() };
 		ASSERT(data.getDegradationInfo().disconnectedServers.size() == 1);
-		ASSERT(data.getDegradationInfo().disconnectedServers.find(worker) !=
-		       data.getDegradationInfo().disconnectedServers.end());
+		ASSERT(data.getDegradationInfo().disconnectedServers.contains(worker));
 		data.workerHealth.clear();
 	}
 

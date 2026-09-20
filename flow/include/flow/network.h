@@ -87,6 +87,8 @@ struct NetworkMetrics {
 	}
 
 	// Since networkBusyness is atomic we need to redefine copy assignment operator
+	// All fields support self-assignment; the array is copied element by element.
+	// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 	NetworkMetrics& operator=(const NetworkMetrics& rhs) {
 		for (int i = 0; i < SLOW_EVENT_BINS; i++) {
 			countSlowEvents[i] = rhs.countSlowEvents[i];
