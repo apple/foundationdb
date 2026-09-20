@@ -533,7 +533,10 @@ and cap each reply at the smaller of `MAXIMUM_PEEK_BYTES` and
 budget plus one reply-sized materialization window before issuing a peek.
 It marks these delivery cursors with the same per-reply limit; recovery
 cursors remain uncapped so that transaction-system replay is not constrained
-by a delivery memory knob. The pass retains the aggregate raw reservation
+by a delivery memory knob. If materialization needs a larger window, the reader
+releases its cursor and reservation before retrying with the full required
+reservation. Competing readers cannot hold partial reservations while waiting
+for each other to release capacity. The pass retains the aggregate raw reservation
 while filtering and copying, then releases it and transfers
 only accepted filtered bytes to the stream buffers. Acknowledgement or stream
 removal releases those retained permits. The usable retained-batch capacity is
