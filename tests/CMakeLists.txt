@@ -498,6 +498,11 @@ if(WITH_PYTHON)
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
     )
     set_tests_properties(command_line_argument_test PROPERTIES ENVIRONMENT "FDB_CLUSTER_FILE=${CMAKE_BINARY_DIR}/fdb.cluster")
+    add_test(
+      NAME mkcert_cli_test
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_mkcert.py $<TARGET_FILE:mkcert>
+    )
+    set_tests_properties(mkcert_cli_test PROPERTIES TIMEOUT 60)
   endif()
 
   verify_testing()
