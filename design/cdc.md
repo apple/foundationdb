@@ -438,7 +438,8 @@ still scans global metadata when the representative is absent or invalid.
 
 ### Throughput-aware placement and live retagging
 
-`NATIVE_CDC_TAG_BALANCING_ENABLED` enables an opt-in data-distributor controller.
+`NATIVE_CDC_TAG_BALANCING_ENABLED` defaults to `true` and enables the
+data-distributor controller when native CDC admission is enabled.
 It measures producer writes with the existing storage-server range metrics,
 not consumer read traffic. The controller divides registered ranges into
 disjoint segments and counts each tag once per segment. Candidate moves use
@@ -841,8 +842,10 @@ new allocation but is not a rollback mechanism for already durable CDC state.
 Live tag balancing has an additional compatibility gate: every process that
 may serve CDC must support commit-stamped history values before
 `NATIVE_CDC_TAG_BALANCING_ENABLED` is enabled. The original `withNativeCdc`
-capability alone does not establish this. The knob is opt-in, not automatic
-capability negotiation. To return to pre-retag CDC binaries, first disable new
+capability alone does not establish this. Balancing defaults to enabled and does
+not negotiate this capability automatically. Keep the knob explicitly disabled
+throughout a mixed-version rollout until all CDC-serving and recovery binaries
+support retagging. To return to pre-retag CDC binaries, first disable new
 moves, acknowledge or remove streams with pending transitions, and wait until
 all retained history rows have canonical empty values. Keep retag-capable
 replacement binaries available until that state is verified; disabling the
@@ -899,7 +902,7 @@ production tail latency, or throughput with balancing enabled versus disabled.
 
 ## Current limitations and future work
 
-The opt-in controller makes tag decisions from bounded sampled producer load.
+The controller makes tag decisions from bounded sampled producer load.
 It does not establish an unrestricted stream-count or throughput envelope.
 
 * Producer-write metrics are estimates with the storage-metrics sampling window
@@ -1013,10 +1016,11 @@ stream while another shared-tag stream is behind must not pop the unread
 mutations needed by the remaining consumer.
 
 The simulation configurations enable CDC explicitly when testing these
-behaviors, while the default-disabled knob and randomized simulation admission
-exercise the requirement that clusters without active or pending CDC work do
-not recruit CDC proxies or retain CDC TLog tags. The data distributor retains
-a low-rate metadata-generation check for pending-history finalization.
+behaviors, while the default-disabled `ENABLE_NATIVE_CDC` knob and randomized
+simulation admission exercise the requirement that clusters without active or
+pending CDC work do not recruit CDC proxies or retain CDC TLog tags. The data
+distributor retains a low-rate metadata-generation check for pending-history
+finalization.
 
 ## Observability and supportability considerations
 

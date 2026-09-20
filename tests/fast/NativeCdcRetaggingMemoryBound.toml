@@ -10,7 +10,6 @@ faultInjection = false
 [[knobs]]
 enable_native_cdc = true
 native_cdc_tag_count = 2
-native_cdc_tag_balancing_enabled = true
 # Fixture commits the retag; suppress load-driven moves while retaining normal finalization.
 native_cdc_tag_min_bytes_per_second_improvement = 1000000000
 native_cdc_tag_sample_interval = 0.25
