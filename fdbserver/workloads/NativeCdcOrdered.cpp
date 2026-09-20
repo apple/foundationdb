@@ -433,7 +433,7 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		ASSERT_EQ(co_await registerNativeCdcOrderedStreamClient(cx, name, ranges, splitPoints), streamId);
 		const std::vector<CDCStreamId> partitions = co_await readPartitions(cx, streamId);
 		phase("WaitForOwners");
-		const CDCProxyInterface originalOwner = co_await waitForOwners(cx, partitions);
+		co_await waitForOwners(cx, partitions);
 		const auto listed = co_await listNativeCdcStreamsClient(cx);
 		ASSERT_EQ(listed.size(), 1);
 		ASSERT_EQ(listed.front().streamId, streamId);
@@ -491,7 +491,8 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 
 		if (testOwnerReplacement) {
 			phase("OwnerReplacement");
-			co_await replaceOwner(cx, originalOwner, partitions);
+			const CDCProxyInterface owner = co_await waitForOwners(cx, partitions);
+			co_await replaceOwner(cx, owner, partitions);
 			view = checkpointView;
 			observed.clear();
 			co_await consumeThrough(consumer, mixed, &view, &observed, checkpoint.lastConsumedVersion);
