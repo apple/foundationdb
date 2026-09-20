@@ -95,6 +95,23 @@ FDBKeyRange copyNativeCdcKeyRange(Arena& arena, KeyRangeRef source) {
 	return FDBKeyRange{ begin.begin(), begin.size(), end.begin(), end.size() };
 }
 
+std::vector<Key> copyNativeCdcSplitPoints(FDBKey const* splitPoints, int splitPointCount) {
+	if (splitPointCount < 0 || splitPointCount >= NATIVE_CDC_MAX_ORDERED_PARTITIONS ||
+	    (splitPointCount > 0 && splitPoints == nullptr)) {
+		throw client_invalid_operation();
+	}
+	std::vector<Key> result;
+	result.reserve(splitPointCount);
+	for (int i = 0; i < splitPointCount; ++i) {
+		const auto& splitPoint = splitPoints[i];
+		if (splitPoint.key_length < 0 || (splitPoint.key_length > 0 && splitPoint.key == nullptr)) {
+			throw client_invalid_operation();
+		}
+		result.emplace_back(KeyRef(splitPoint.key, splitPoint.key_length));
+	}
+	return result;
+}
+
 std::vector<KeyRange> copyNativeCdcRanges(FDBKeyRange const* ranges, int rangeCount) {
 	if (rangeCount <= 0 || rangeCount > NATIVE_CDC_MAX_RANGES || ranges == nullptr) {
 		throw client_invalid_operation();
@@ -600,6 +617,23 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_register_cdc_stream(FDBDatabase* db
 	    if (name_length <= 0 || name == nullptr) { throw client_invalid_operation(); } auto rangesCopy =
 	        copyNativeCdcRanges(ranges, range_count);
 	    return (FDBFuture*)(DB(db)->registerNativeCdcStream(KeyRef(name, name_length), rangesCopy).extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_register_cdc_ordered_stream(FDBDatabase* db,
+                                                                         uint8_t const* name,
+                                                                         int name_length,
+                                                                         FDBKeyRange const* ranges,
+                                                                         int range_count,
+                                                                         FDBKey const* split_points,
+                                                                         int split_point_count) {
+	RETURN_FUTURE_ON_ERROR(
+	    CDCStreamId,
+	    if (name_length <= 0 || name == nullptr) { throw client_invalid_operation(); } auto rangesCopy =
+	        copyNativeCdcRanges(ranges, range_count);
+	    auto splitPointsCopy = copyNativeCdcSplitPoints(split_points, split_point_count);
+	    return (FDBFuture*)(DB(db)
+	                            ->registerNativeCdcOrderedStream(KeyRef(name, name_length), rangesCopy, splitPointsCopy)
+	                            .extractPtr()););
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* db, uint8_t const* name, int name_length) {
