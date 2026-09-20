@@ -977,21 +977,23 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_EQ(extraState.state.assignment.tag, otherTag);
 		siblingWriterStop.send(Void());
 		co_await siblingWriter;
-		co_await waitForRetagLoad(cx, originalTag);
 		CODE_PROBE(true, "Native CDC registration chooses a measured cooler tag despite a larger stream count");
 
-		// Both candidates now have the same source and an idle destination; their predicted peak improvements tie.
-		// The existing stream ID wins over the newly registered stream, exercising a return to a previously used tag.
+		// Replica-local load windows can disagree even after one reports zero. Keep the hot sibling pending so
+		// measured balancing must return the acknowledged stream, independently of load estimates or tie-breaking.
+		const RetagSnapshot siblingState = co_await readRetagSnapshot(cx, sibling);
+		ASSERT_EQ(siblingState.state.assignment.tag, originalTag);
+		const RetagSnapshot pendingSibling = co_await commitRetagFixture(cx, sibling, siblingState, otherTag, 16, {});
 		Promise<Void> secondWriterStop;
 		Promise<Void> secondConsumerStop;
-		Future<Void> secondWriter = writeRetagTraffic(cx, { moved, extra }, ledgers, secondWriterStop.getFuture());
+		Future<Void> secondWriter = writeRetagTraffic(cx, { moved, sibling }, ledgers, secondWriterStop.getFuture());
 		Future<Void> secondConsumer =
 		    consumeRetagTraffic(streams[moved].consumer, ledgers[moved], secondConsumerStop.getFuture());
-		const auto secondMove = co_await waitForPendingRetag(cx, { moved, extra }, otherTag);
+		const auto secondMove = co_await waitForPendingRetag(cx, { moved, sibling }, otherTag);
 		ASSERT_EQ(secondMove.first, moved);
 		const CDCTagHistoryEntry secondAssignment = secondMove.second.state.assignment;
 		ASSERT_EQ(secondAssignment.tag, originalTag);
-		co_await writeRetagMarkers(cx, { moved, extra }, ledgers);
+		co_await writeRetagMarkers(cx, { moved, sibling }, ledgers);
 		secondWriterStop.send(Void());
 		co_await secondWriter;
 		secondConsumerStop.send(Void());
@@ -1010,8 +1012,15 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ledgers[moved]->verifyBoundary(interleaved.state.assignment.version);
 		co_await waitForCanonicalRetag(cx, moved, interleaved.state.assignment);
 
+		co_await writeRetagMarkers(cx, { extra }, ledgers);
 		const RetagSnapshot lagging = co_await readRetagSnapshot(cx, sibling);
 		ASSERT_EQ(lagging.state.minVersion, initial[sibling].state.minVersion);
+		ASSERT(lagging.state.pending);
+		ASSERT_EQ(lagging.history.size(), 2);
+		ASSERT_EQ(lagging.history.front().tag, originalTag);
+		ASSERT_EQ(lagging.history.front().version, initial[sibling].state.assignment.version);
+		ASSERT_EQ(lagging.state.assignment.tag, pendingSibling.state.assignment.tag);
+		ASSERT_EQ(lagging.state.assignment.version, pendingSibling.state.assignment.version);
 		ledgers[sibling]->allowReplay();
 		streams[sibling].consumer = resumeNativeCdcConsumer(cx, CDCCursor(lagging.state.streamId, invalidVersion));
 		for (int i = 0; i < static_cast<int>(streams.size()); ++i) {
@@ -1019,6 +1028,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				co_await drainRetagMarkers(i, ledgers[i], true);
 			}
 		}
+		ledgers[sibling]->verifyBoundary(pendingSibling.state.assignment.version);
 		CODE_PROBE(true, "Native CDC repeated retag cleanup preserves an unacknowledged shared tag sibling");
 		for (const auto& stream : streams) {
 			co_await timeoutError(removeNativeCdcStreamClient(cx, stream.name), operationTimeout);

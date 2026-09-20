@@ -638,6 +638,35 @@ TEST_CASE("/NativeCDC/TagBalancing/DisjointThroughput") {
 	return Void();
 }
 
+TEST_CASE("/NativeCDC/TagBalancing/NonzeroDestinationBreaksTie") {
+	auto model = nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 1),
+	                                        nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 0),
+	                                        nativeCdcPolicyTestStream(5, KeyRangeRef("e"_sr, "f"_sr), 1) },
+	                                      { 3728000, 2796000, 2796000 });
+	const auto decision = model.chooseMove(1000, 2, 0, 0.1, 100);
+	ASSERT(decision.present());
+	ASSERT_EQ(model.stream(decision.get().streamIndex).streamId, 5);
+	ASSERT_EQ(decision.get().destination, Tag(tagLocalityCDC, 0));
+	ASSERT_EQ(decision.get().sourceAfter, 3728000);
+	ASSERT_EQ(decision.get().destinationAfter, 5592000);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/PendingPartnerContributesLoad") {
+	auto model =
+	    nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 1, UID(1, 1), true),
+	                               nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 1) },
+	                             { 3728000, 2796000 });
+	const auto decision = model.chooseMove(1000, 2, 0, 0.1, 100);
+	ASSERT(decision.present());
+	ASSERT_EQ(model.stream(decision.get().streamIndex).streamId, 3);
+	ASSERT_EQ(decision.get().destination, Tag(tagLocalityCDC, 0));
+	ASSERT_EQ(decision.get().sourceBefore, 6524000);
+	ASSERT_EQ(decision.get().sourceAfter, 3728000);
+	ASSERT_EQ(decision.get().destinationAfter, 2796000);
+	return Void();
+}
+
 TEST_CASE("/NativeCDC/TagBalancing/MultipleRanges") {
 	auto split = nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0);
 	split.ranges.emplace_back(KeyRangeRef("c"_sr, "d"_sr));
