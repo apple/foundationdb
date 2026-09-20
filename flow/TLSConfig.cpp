@@ -1007,8 +1007,7 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx, const N
 			    .detail("Rule", rule.toString());
 		}
 	} else {
-		TraceEvent(SevInfo, "TLSPolicySuccess")
-		    .suppressFor(1.0)
+		TraceEvent(SevDebug, "TLSPolicySuccess")
 		    .detail("PeerAddress", peerAddress)
 		    .detail("Reason", verifier.getSuccessReason());
 	}
