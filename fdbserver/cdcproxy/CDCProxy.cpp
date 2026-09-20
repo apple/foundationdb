@@ -32,6 +32,7 @@
 #include "fdbclient/SystemData.h"
 #include "NativeCdcInternal.h"
 #include "fdbserver/cdcproxy/CDCProxy.h"
+#include "fdbserver/cdcproxy/CDCProxyTest.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
@@ -178,6 +179,7 @@ struct CDCBufferedBatch {
 struct CDCBufferedTag : ReferenceCounted<CDCBufferedTag> {
 	Tag tag;
 	bool active = true;
+	int64_t nextPassReservation = 0;
 	std::set<CDCStreamId> streamIds;
 	AsyncTrigger refresh;
 	AsyncTrigger stopped;
@@ -1305,22 +1307,17 @@ Future<CDCBufferTagPassResult> CDCProxy::materializeBufferSelection(Reference<CD
 	} else {
 		CODE_PROBE(
 		    true, "CDC proxy materializes one stream batch larger than its peek reservation", probe::decoration::rare);
-		const int64_t additionalBytes = selection.selectedBytes - materializationReservation;
-		if (prefetch && (bufferLock.waiters() != 0 || bufferLock.available() < additionalBytes)) {
-			co_return CDCBufferTagPassResult::RETRY;
+		if (auto test = CDCProxyMaterializationTest::get()) {
+			// Poll shared simulation state without running callbacks in another simulated process.
+			while (test->holdExpansion(id, tag->tag, reservation.remaining)) {
+				co_await delay(0.01);
+			}
 		}
-		auto exactCapacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, additionalBytes),
-		                                   logSystem->onChange(),
-		                                   tag->stopped.onTrigger(),
-		                                   tag->refresh.onTrigger());
-		if (exactCapacity.index() == 1 || exactCapacity.index() == 3) {
-			co_return CDCBufferTagPassResult::RETRY;
-		}
-		if (exactCapacity.index() == 2) {
-			co_return CDCBufferTagPassResult::STOP;
-		}
-		reservation.remaining += additionalBytes;
-		recordBufferUsage();
+		// Two readers can exhaust the budget with initial reservations and then both wait for an expansion.
+		// Drop this cursor and reservation before reacquiring the full amount in one request.
+		tag->nextPassReservation = rawPeekReservation + selection.selectedBytes;
+		ASSERT_LE(tag->nextPassReservation, bufferLimit);
+		co_return CDCBufferTagPassResult::RETRY;
 	}
 	if (!tag->active) {
 		co_return CDCBufferTagPassResult::STOP;
@@ -1358,6 +1355,7 @@ Future<CDCBufferTagPassResult> CDCProxy::materializeBufferSelection(Reference<CD
 	reservation.remaining = 0;
 	ASSERT_LE(bufferedBytes, bufferLimit);
 	ASSERT_LE(bufferLock.activePermits(), bufferLimit);
+	tag->nextPassReservation = 0;
 	advanceTagBufferedThrough(tag, throughVersion, selection.selectedStreamIds);
 	// Every raw cursor arena is covered by rawPeekReservation only for this pass. Reopen from the shared minimum
 	// after releasing it so no cursor response remains live outside the proxy memory budget.
@@ -1413,7 +1411,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagCursor(Reference<CDCBufferedTa
 	const int64_t rawPeekReservation = limits.get().rawReplyBytes;
 	const int64_t hardBufferedBatchLimit = limits.get().hardBufferedBytes;
 	const int64_t preferredBufferedBatch = limits.get().preferredBufferedBytes;
-	const int64_t passReservation = limits.get().reservationBytes;
+	const int64_t passReservation = std::max(limits.get().reservationBytes, tag->nextPassReservation);
 	if (prefetch && (bufferLock.waiters() != 0 || bufferLock.available() < passReservation)) {
 		co_return CDCBufferTagPassResult::RETRY;
 	}
@@ -1939,6 +1937,9 @@ Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stre
 	auto buffered =
 	    co_await race(waitForBufferedVersion(stream, begin), delay(SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT));
 	if (buffered.index() == 1) {
+		if (auto test = CDCProxyMaterializationTest::get()) {
+			test->recordLeaseExpiry(id);
+		}
 		CODE_PROBE(true, "CDC proxy expires an idle consume lease");
 		CDCConsumeReply reply;
 		reply.lastConsumedVersion = cursor.lastConsumedVersion;
