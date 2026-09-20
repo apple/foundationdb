@@ -47,30 +47,60 @@ bool addNativeCdcLoad(int64_t* total, int64_t value) {
 	return true;
 }
 
+struct NativeCdcRetagDecision {
+	size_t streamIndex;
+	Tag destination;
+	int64_t sourceBefore;
+	int64_t destinationBefore;
+	int64_t sourceAfter;
+	int64_t destinationAfter;
+	int64_t improvement;
+};
+
 class NativeCdcLoadModel {
 	struct Segment {
 		KeyRange keys;
-		std::set<Tag> tags;
+		std::set<size_t> streams;
+		std::map<Tag, int> tagCounts;
 		Optional<int64_t> load;
 	};
 
+	std::vector<NativeCdcTagState> streams;
 	std::vector<Segment> segments;
+	std::map<Tag, std::set<UID>> tagOwners;
 	std::map<Tag, int64_t> tagLoads;
+	std::map<Tag, std::vector<int64_t>> tagPrefixes;
+	std::vector<int64_t> rangePrefix;
+	std::vector<int64_t> removableLoads;
+	std::vector<std::vector<std::pair<size_t, size_t>>> streamSegments;
 	bool complete = false;
 
-	explicit NativeCdcLoadModel(std::vector<NativeCdcTagState> const& states) {
-		KeyRangeMap<std::set<Tag>> coveringTags;
-		for (const auto& state : states) {
-			for (const auto& keys : state.ranges) {
-				for (auto range : coveringTags.modify(keys)) {
-					range->value().insert(state.assignment.tag);
+	explicit NativeCdcLoadModel(std::vector<NativeCdcTagState> states) : streams(std::move(states)) {
+		KeyRangeMap<std::set<size_t>> coveringStreams;
+		for (size_t i = 0; i < streams.size(); ++i) {
+			for (const auto& keys : streams[i].ranges) {
+				for (auto range : coveringStreams.modify(keys)) {
+					range->value().insert(i);
 				}
 			}
+			tagOwners[streams[i].assignment.tag].insert(streams[i].proxyId);
 		}
-		for (auto range : coveringTags.ranges()) {
-			if (!range.value().empty()) {
-				segments.push_back(Segment{ KeyRange(range.range()), range.value(), {} });
+		streamSegments.resize(streams.size());
+		for (auto range : coveringStreams.ranges()) {
+			if (range.value().empty()) {
+				continue;
 			}
+			Segment segment{ KeyRange(range.range()), range.value(), {}, {} };
+			for (size_t streamIndex : segment.streams) {
+				++segment.tagCounts[streams[streamIndex].assignment.tag];
+				auto& intervals = streamSegments[streamIndex];
+				if (!intervals.empty() && intervals.back().second == segments.size()) {
+					intervals.back().second = segments.size() + 1;
+				} else {
+					intervals.emplace_back(segments.size(), segments.size() + 1);
+				}
+			}
+			segments.push_back(std::move(segment));
 		}
 	}
 
@@ -80,8 +110,8 @@ public:
 			return {};
 		}
 		if (!states.empty()) {
-			// M ranges have at most 2M-1 nonempty segments, each containing at most N tags.
-			// Bound coverage memberships before constructing the segment sets.
+			// M ranges have at most 2M-1 nonempty segments, each covering at most N streams or tags.
+			// Bound both coverage memberships and tag-prefix entries before copying any coverage sets.
 			const uint64_t maxRanges = static_cast<uint64_t>(maxEntries) / states.size() / 2;
 			uint64_t ranges = 0;
 			for (const auto& state : states) {
@@ -96,6 +126,7 @@ public:
 
 	size_t segmentCount() const { return segments.size(); }
 	KeyRange const& segmentKeys(size_t index) const { return segments[index].keys; }
+	NativeCdcTagState const& stream(size_t index) const { return streams[index]; }
 	std::map<Tag, int64_t> const& loads() const {
 		ASSERT(complete);
 		return tagLoads;
@@ -111,19 +142,119 @@ public:
 	}
 
 	bool finishSamples() {
+		rangePrefix.assign(1, 0);
+		removableLoads.assign(streams.size(), 0);
+		tagPrefixes.clear();
 		tagLoads.clear();
+		for (const auto& [tag, owners] : tagOwners) {
+			tagPrefixes[tag].push_back(0);
+		}
 		for (const auto& segment : segments) {
 			if (!segment.load.present()) {
 				return false;
 			}
-			for (Tag tag : segment.tags) {
-				if (!addNativeCdcLoad(&tagLoads[tag], segment.load.get())) {
+			int64_t rangeLoad = rangePrefix.back();
+			if (!addNativeCdcLoad(&rangeLoad, segment.load.get())) {
+				return false;
+			}
+			rangePrefix.push_back(rangeLoad);
+			for (auto& [tag, prefix] : tagPrefixes) {
+				int64_t tagLoad = prefix.back();
+				if (segment.tagCounts.contains(tag) && !addNativeCdcLoad(&tagLoad, segment.load.get())) {
+					return false;
+				}
+				prefix.push_back(tagLoad);
+			}
+			for (const size_t streamIndex : segment.streams) {
+				const Tag tag = streams[streamIndex].assignment.tag;
+				if (segment.tagCounts.at(tag) == 1 &&
+				    !addNativeCdcLoad(&removableLoads[streamIndex], segment.load.get())) {
 					return false;
 				}
 			}
 		}
+		for (const auto& [tag, prefix] : tagPrefixes) {
+			tagLoads[tag] = prefix.back();
+		}
 		complete = true;
 		return true;
+	}
+
+	Optional<NativeCdcRetagDecision> chooseMove(Version version,
+	                                            int tagCount,
+	                                            Version cooldown,
+	                                            double minRelativeImprovement,
+	                                            int64_t minBytesPerSecondImprovement) const {
+		ASSERT(complete);
+		std::vector<Tag> destinations;
+		for (const auto& [tag, owners] : tagOwners) {
+			if (tag.id < tagCount) {
+				destinations.push_back(tag);
+			}
+		}
+		// Every unused tag has the same predicted cost; only its deterministic tie-break matters.
+		for (int tagId = 0; tagId < tagCount; ++tagId) {
+			const Tag tag(tagLocalityCDC, static_cast<uint16_t>(tagId));
+			if (!tagOwners.contains(tag)) {
+				destinations.push_back(tag);
+				break;
+			}
+		}
+
+		Optional<NativeCdcRetagDecision> best;
+		for (size_t i = 0; i < streams.size(); ++i) {
+			const auto& state = streams[i];
+			if (state.pending || version < state.assignment.version || version - state.assignment.version < cooldown) {
+				continue;
+			}
+			int64_t streamLoad = 0;
+			for (const auto& [first, end] : streamSegments[i]) {
+				streamLoad += rangePrefix[end] - rangePrefix[first];
+			}
+			const int64_t sourceBefore = tagLoads.at(state.assignment.tag);
+			const int64_t sourceAfter = sourceBefore - removableLoads[i];
+			for (const Tag destination : destinations) {
+				if (destination == state.assignment.tag) {
+					continue;
+				}
+				const auto owners = tagOwners.find(destination);
+				if (owners != tagOwners.end() &&
+				    (owners->second.size() != 1 || !owners->second.contains(state.proxyId))) {
+					continue;
+				}
+				const auto prefix = tagPrefixes.find(destination);
+				int64_t overlap = 0;
+				if (prefix != tagPrefixes.end()) {
+					for (const auto& [first, end] : streamSegments[i]) {
+						overlap += prefix->second[end] - prefix->second[first];
+					}
+				}
+				const int64_t destinationBefore = prefix == tagPrefixes.end() ? 0 : prefix->second.back();
+				int64_t destinationAfter = destinationBefore;
+				if (!addNativeCdcLoad(&destinationAfter, streamLoad - overlap)) {
+					continue;
+				}
+				const int64_t before = std::max(sourceBefore, destinationBefore);
+				const int64_t after = std::max(sourceAfter, destinationAfter);
+				if (after >= before) {
+					continue;
+				}
+				const int64_t improvement = before - after;
+				if (static_cast<long double>(improvement) < static_cast<long double>(before) * minRelativeImprovement ||
+				    static_cast<long double>(improvement) <
+				        static_cast<long double>(minBytesPerSecondImprovement) * 1000) {
+					continue;
+				}
+				if (!best.present() || improvement > best.get().improvement ||
+				    (improvement == best.get().improvement &&
+				     std::make_pair(state.streamId, destination.id) <
+				         std::make_pair(streams[best.get().streamIndex].streamId, best.get().destination.id))) {
+					best = NativeCdcRetagDecision{ i,           destination,      sourceBefore, destinationBefore,
+						                           sourceAfter, destinationAfter, improvement };
+				}
+			}
+		}
+		return best;
 	}
 };
 
@@ -143,7 +274,13 @@ bool validNativeCdcBalancerKnobs() {
 	       std::isfinite(SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_TIMEOUT) &&
 	       SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_TIMEOUT > 0 &&
 	       std::isfinite(SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_MAX_AGE) &&
-	       SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_MAX_AGE > 0 && SERVER_KNOBS->VERSIONS_PER_SECOND > 0;
+	       SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_MAX_AGE > 0 &&
+	       std::isfinite(SERVER_KNOBS->NATIVE_CDC_TAG_MOVE_COOLDOWN) &&
+	       SERVER_KNOBS->NATIVE_CDC_TAG_MOVE_COOLDOWN >= 0 &&
+	       std::isfinite(SERVER_KNOBS->NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT) &&
+	       SERVER_KNOBS->NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT >= 0 &&
+	       SERVER_KNOBS->NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT <= 1 &&
+	       SERVER_KNOBS->NATIVE_CDC_TAG_MIN_BYTES_PER_SECOND_IMPROVEMENT >= 0 && SERVER_KNOBS->VERSIONS_PER_SECOND > 0;
 }
 
 Future<Void> sampleNativeCdcRanges(Database cx, NativeCdcLoadModel* model, size_t* nextSegment) {
@@ -176,10 +313,42 @@ struct NativeCdcMetadataSnapshot {
 	std::vector<NativeCdcTagState> streams;
 };
 
+class NativeCdcCleanupProgress {
+	Optional<Value> assignmentChange;
+	Key next = cdcStreamKeys.begin;
+	bool cycleComplete = false;
+	bool sawPending = false;
+	bool rescan = false;
+
+	bool sameGeneration(ValueRef generation) const {
+		return assignmentChange.present() && assignmentChange.get() == generation;
+	}
+
+public:
+	bool needsScan(ValueRef generation) const {
+		return !sameGeneration(generation) || !cycleComplete || sawPending || rescan;
+	}
+
+	Key begin() const { return cycleComplete ? Key(cdcStreamKeys.begin) : next; }
+
+	void scanned(Value generation, Key nextBegin, bool lastPage, bool pagePending) {
+		const bool continuing = assignmentChange.present() && !cycleComplete;
+		sawPending = (continuing && sawPending) || pagePending;
+		rescan = continuing && (rescan || !sameGeneration(generation));
+		assignmentChange = std::move(generation);
+		next = std::move(nextBegin);
+		cycleComplete = lastPage;
+	}
+
+	// Churn requires another traversal, not a restart that can starve later pages.
+	void changed() { rescan = true; }
+};
+
 class NativeCdcBalancer {
 	Database cx;
 	MoveKeysLock lock;
 	const DDEnabledState* ddEnabledState;
+	NativeCdcCleanupProgress cleanupProgress;
 
 	bool samplingEnabled() const {
 		return SERVER_KNOBS->NATIVE_CDC_TAG_BALANCING_ENABLED && cx->clientInfo->get().nativeCdcEnabled;
@@ -204,6 +373,63 @@ class NativeCdcBalancer {
 				const Version version = co_await tr.getReadVersion();
 				co_return Optional<NativeCdcMetadataSnapshot>(
 				    NativeCdcMetadataSnapshot{ generation, version, std::move(states.get()) });
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
+	Future<bool> finishPendingPage() {
+		constexpr int cleanupPageSize = 100;
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				const Optional<Value> change = co_await tr.get(cdcProxyAssignmentChangeKey);
+				const Value generation = change.present() ? change.get() : Value();
+				if (!cleanupProgress.needsScan(generation)) {
+					co_return false;
+				}
+				const Key begin = cleanupProgress.begin();
+				const RangeResult page = co_await tr.getRange(KeyRangeRef(begin, cdcStreamKeys.end), cleanupPageSize);
+				std::vector<Future<Optional<NativeCdcTagState>>> reads;
+				for (const auto& row : page) {
+					reads.push_back(readNativeCdcTagState(&tr, decodeCDCStreamKey(row.key)));
+				}
+				const std::vector<Optional<NativeCdcTagState>> states = co_await getAll(reads);
+				int finished = 0;
+				bool pagePending = false;
+				for (const auto& state : states) {
+					if (!state.present()) {
+						// Incomplete ownership/metadata is not evidence that all transitions have drained.
+						pagePending = true;
+						continue;
+					}
+					pagePending = pagePending || state.get().pending;
+					if (state.get().pending && (co_await finishNativeCdcRetag(&tr, state.get()))) {
+						++finished;
+					}
+				}
+				if (finished == 0) {
+					cleanupProgress.scanned(generation,
+					                        page.more ? keyAfter(page.back().key) : Key(cdcStreamKeys.end),
+					                        !page.more,
+					                        pagePending);
+					co_return false;
+				}
+				co_await checkMoveKeysLock(&tr, lock, ddEnabledState);
+				co_await tr.commit();
+				cleanupProgress.scanned(generation,
+				                        page.more ? keyAfter(page.back().key) : Key(cdcStreamKeys.end),
+				                        !page.more,
+				                        pagePending);
+				cleanupProgress.changed();
+				CODE_PROBE(true, "Native CDC DD finishes acknowledged tag transitions");
+				TraceEvent("NativeCdcTagTransitionsFinished", lock.myOwner).detail("Streams", finished);
+				co_return true;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -260,8 +486,42 @@ class NativeCdcBalancer {
 		}
 	}
 
+	Future<Void> applyMove(NativeCdcMetadataSnapshot const& snapshot,
+	                       Version validThrough,
+	                       NativeCdcTagState const& state,
+	                       NativeCdcRetagDecision decision) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				if (!(co_await currentGeneration(&tr, snapshot.assignmentChange, snapshot.version, validThrough)) ||
+				    !(co_await retagNativeCdcStream(&tr, state, decision.destination))) {
+					co_return;
+				}
+				co_await checkMoveKeysLock(&tr, lock, ddEnabledState);
+				co_await tr.commit();
+				CODE_PROBE(true, "Native CDC DD retags a stream using producer throughput");
+				TraceEvent("NativeCdcTagRebalanced", lock.myOwner)
+				    .detail("StreamId", state.streamId)
+				    .detail("SourceTag", state.assignment.tag)
+				    .detail("DestinationTag", decision.destination)
+				    .detail("SourceBytesPerKSecond", decision.sourceBefore)
+				    .detail("DestinationBytesPerKSecond", decision.destinationBefore)
+				    .detail("PredictedSourceBytesPerKSecond", decision.sourceAfter)
+				    .detail("PredictedDestinationBytesPerKSecond", decision.destinationAfter);
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+	}
+
 	Future<Void> runPass() {
-		if (!samplingEnabled()) {
+		// Cleanup has its own bounded cursor: the admission/sampling envelope must not strand existing history.
+		if ((co_await finishPendingPage()) || !samplingEnabled()) {
 			co_return;
 		}
 		if (!validNativeCdcBalancerKnobs()) {
@@ -298,7 +558,18 @@ class NativeCdcBalancer {
 			TraceEvent("NativeCdcTagSamplingIncomplete", lock.myOwner).detail("Segments", model.segmentCount());
 			co_return;
 		}
-		co_await publishLoads(snapshot.get(), validThrough, model);
+		if (!(co_await publishLoads(snapshot.get(), validThrough, model))) {
+			co_return;
+		}
+		const Optional<NativeCdcRetagDecision> decision =
+		    model.chooseMove(snapshot.get().version,
+		                     tagCount,
+		                     nativeCdcDurationVersions(SERVER_KNOBS->NATIVE_CDC_TAG_MOVE_COOLDOWN),
+		                     SERVER_KNOBS->NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT,
+		                     SERVER_KNOBS->NATIVE_CDC_TAG_MIN_BYTES_PER_SECOND_IMPROVEMENT);
+		if (decision.present()) {
+			co_await applyMove(snapshot.get(), validThrough, model.stream(decision.get().streamIndex), decision.get());
+		}
 	}
 
 public:
@@ -323,8 +594,131 @@ public:
 	}
 };
 
-NativeCdcTagState nativeCdcPolicyTestStream(CDCStreamId streamId, KeyRange keys, uint16_t tag) {
-	return NativeCdcTagState{ streamId, { keys }, CDCTagHistoryEntry(streamId, 100, Tag(tagLocalityCDC, tag)) };
+NativeCdcTagState nativeCdcPolicyTestStream(CDCStreamId streamId,
+                                            KeyRange keys,
+                                            uint16_t tag,
+                                            UID owner = UID(1, 1),
+                                            bool pending = false,
+                                            Version assignedAt = 100) {
+	return NativeCdcTagState{ streamId,
+		                      { keys },
+		                      cdcTagHistoryKeyFor(streamId, assignedAt, Tag(tagLocalityCDC, tag)),
+		                      CDCTagHistoryEntry(streamId, assignedAt, Tag(tagLocalityCDC, tag)),
+		                      owner,
+		                      assignedAt,
+		                      pending };
+}
+
+NativeCdcLoadModel nativeCdcPolicyTestModel(std::vector<NativeCdcTagState> const& streams,
+                                            std::vector<int64_t> const& samples) {
+	auto model = NativeCdcLoadModel::create(streams, SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES).get();
+	ASSERT_EQ(model.segmentCount(), samples.size());
+	for (size_t i = 0; i < samples.size(); ++i) {
+		ASSERT(model.setSample(i, samples[i]));
+	}
+	ASSERT(model.finishSamples());
+	return model;
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/DisjointThroughput") {
+	auto model = nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0),
+	                                        nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 0),
+	                                        nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 1) },
+	                                      { 40000000, 40000000, 1000000 });
+	ASSERT_EQ(model.segmentCount(), 3);
+	const auto decision = model.chooseMove(1000, 2, 100, 0.2, 10000);
+	ASSERT(decision.present());
+	ASSERT_EQ(model.stream(decision.get().streamIndex).streamId, 1);
+	ASSERT_EQ(decision.get().destination, Tag(tagLocalityCDC, 1));
+	ASSERT_EQ(decision.get().sourceAfter, 40000000);
+	ASSERT_EQ(decision.get().destinationAfter, 41000000);
+	ASSERT(!model.chooseMove(1000, 2, 100, 0.5, 10000).present());
+	ASSERT(!model.chooseMove(1000, 2, 100, 0.2, 40000).present());
+	ASSERT(!model.chooseMove(1000, 2, 1000, 0.2, 10000).present());
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/NonzeroDestinationBreaksTie") {
+	auto model = nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 1),
+	                                        nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 0),
+	                                        nativeCdcPolicyTestStream(5, KeyRangeRef("e"_sr, "f"_sr), 1) },
+	                                      { 3728000, 2796000, 2796000 });
+	const auto decision = model.chooseMove(1000, 2, 0, 0.1, 100);
+	ASSERT(decision.present());
+	ASSERT_EQ(model.stream(decision.get().streamIndex).streamId, 5);
+	ASSERT_EQ(decision.get().destination, Tag(tagLocalityCDC, 0));
+	ASSERT_EQ(decision.get().sourceAfter, 3728000);
+	ASSERT_EQ(decision.get().destinationAfter, 5592000);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/PendingPartnerContributesLoad") {
+	auto model =
+	    nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 1, UID(1, 1), true),
+	                               nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 1) },
+	                             { 3728000, 2796000 });
+	const auto decision = model.chooseMove(1000, 2, 0, 0.1, 100);
+	ASSERT(decision.present());
+	ASSERT_EQ(model.stream(decision.get().streamIndex).streamId, 3);
+	ASSERT_EQ(decision.get().destination, Tag(tagLocalityCDC, 0));
+	ASSERT_EQ(decision.get().sourceBefore, 6524000);
+	ASSERT_EQ(decision.get().sourceAfter, 3728000);
+	ASSERT_EQ(decision.get().destinationAfter, 2796000);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/MultipleRanges") {
+	auto split = nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0);
+	split.ranges.emplace_back(KeyRangeRef("c"_sr, "d"_sr));
+	auto model = nativeCdcPolicyTestModel({ split,
+	                                        nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 1),
+	                                        nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 0) },
+	                                      { 40000000, 1000000000, 40000000, 80000000 });
+	ASSERT_EQ(model.segmentCount(), 4);
+	ASSERT_EQ(model.loads().at(Tag(tagLocalityCDC, 0)), 160000000);
+	ASSERT_EQ(model.loads().at(Tag(tagLocalityCDC, 1)), 1000000000);
+	const auto decision = model.chooseMove(1000, 3, 0, 0, 0);
+	ASSERT(decision.present());
+	ASSERT_EQ(model.stream(decision.get().streamIndex).streamId, 1);
+	ASSERT_EQ(decision.get().destination, Tag(tagLocalityCDC, 2));
+	ASSERT_EQ(decision.get().sourceAfter, 80000000);
+	ASSERT_EQ(decision.get().destinationAfter, 80000000);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/Overlap") {
+	auto identical = nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0),
+	                                            nativeCdcPolicyTestStream(2, KeyRangeRef("a"_sr, "b"_sr), 0) },
+	                                          { 40000000 });
+	ASSERT_EQ(identical.segmentCount(), 1);
+	ASSERT_EQ(identical.loads().at(Tag(tagLocalityCDC, 0)), 40000000);
+	ASSERT(!identical.chooseMove(1000, 2, 0, 0, 0).present());
+
+	auto partial = nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "d"_sr), 0),
+	                                          nativeCdcPolicyTestStream(2, KeyRangeRef("c"_sr, "f"_sr), 0),
+	                                          nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 1) },
+	                                        { 2000000, 3000000, 5000000 });
+	ASSERT_EQ(partial.segmentCount(), 3);
+	const auto decision = partial.chooseMove(1000, 2, 0, 0.1, 1000);
+	ASSERT(decision.present());
+	ASSERT_EQ(partial.stream(decision.get().streamIndex).streamId, 1);
+	ASSERT_EQ(decision.get().sourceAfter, 8000000);
+	ASSERT_EQ(decision.get().destinationAfter, 5000000);
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/OwnerAndPending") {
+	auto model =
+	    nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0, UID(1, 1), true),
+	                               nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 0),
+	                               nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 1, UID(2, 2)) },
+	                             { 40000000, 40000000, 1000000 });
+	ASSERT(!model.chooseMove(1000, 2, 0, 0.2, 10000).present());
+	const auto decision = model.chooseMove(1000, 4, 0, 0.2, 10000);
+	ASSERT(decision.present());
+	ASSERT_EQ(model.stream(decision.get().streamIndex).streamId, 2);
+	ASSERT_EQ(decision.get().destination, Tag(tagLocalityCDC, 2));
+	return Void();
 }
 
 TEST_CASE("/NativeCDC/TagBalancing/IncompleteAndZeroSamples") {
@@ -336,25 +730,10 @@ TEST_CASE("/NativeCDC/TagBalancing/IncompleteAndZeroSamples") {
 	ASSERT(model.setSample(0, 0));
 	ASSERT(model.finishSamples());
 	ASSERT_EQ(model.loads().at(Tag(tagLocalityCDC, 0)), 0);
+	ASSERT(!model.chooseMove(1000, 2, 0, 0, 0).present());
 	int64_t total = std::numeric_limits<int64_t>::max() - 1;
 	ASSERT(!addNativeCdcLoad(&total, 2));
 	ASSERT(addNativeCdcLoad(&total, 1));
-	return Void();
-}
-
-TEST_CASE("/NativeCDC/TagBalancing/OverlappingTagLoads") {
-	auto model = NativeCdcLoadModel::create({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "d"_sr), 0),
-	                                          nativeCdcPolicyTestStream(2, KeyRangeRef("c"_sr, "f"_sr), 0),
-	                                          nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 1) },
-	                                        18)
-	                 .get();
-	ASSERT_EQ(model.segmentCount(), 3);
-	ASSERT(model.setSample(0, 2000));
-	ASSERT(model.setSample(1, 3000));
-	ASSERT(model.setSample(2, 5000));
-	ASSERT(model.finishSamples());
-	ASSERT_EQ(model.loads().at(Tag(tagLocalityCDC, 0)), 10000);
-	ASSERT_EQ(model.loads().at(Tag(tagLocalityCDC, 1)), 3000);
 	return Void();
 }
 
@@ -381,6 +760,52 @@ TEST_CASE("/NativeCDC/TagBalancing/ModelEntryBudget") {
 	ASSERT(!NativeCdcLoadModel::create(streams, 0).present());
 	ASSERT(!NativeCdcLoadModel::create(streams, -1).present());
 	ASSERT(NativeCdcLoadModel::create(streams, std::numeric_limits<int64_t>::max()).present());
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/CleanupPaging") {
+	NativeCdcCleanupProgress progress;
+	const Value firstGeneration = "first"_sr;
+	const Value secondGeneration = "second"_sr;
+	const Key nextPage = keyAfter(cdcStreamKeyFor(100));
+	ASSERT(progress.needsScan(firstGeneration));
+	ASSERT_EQ(progress.begin(), cdcStreamKeys.begin);
+	progress.scanned(firstGeneration, nextPage, false, false);
+	ASSERT(progress.needsScan(firstGeneration));
+	ASSERT_EQ(progress.begin(), nextPage);
+	progress.scanned(firstGeneration, cdcStreamKeys.end, true, true);
+	// Acknowledgements do not change the assignment generation, so pending cycles must repeat.
+	ASSERT(progress.needsScan(firstGeneration));
+	ASSERT_EQ(progress.begin(), cdcStreamKeys.begin);
+	progress.scanned(firstGeneration, cdcStreamKeys.end, true, false);
+	ASSERT(!progress.needsScan(firstGeneration));
+	ASSERT(progress.needsScan(secondGeneration));
+	ASSERT_EQ(progress.begin(), cdcStreamKeys.begin);
+	progress.changed();
+	ASSERT(progress.needsScan(firstGeneration));
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/CleanupProgressAcrossChurn") {
+	NativeCdcCleanupProgress progress;
+	const Value firstGeneration = "first"_sr;
+	const Value secondGeneration = "second"_sr;
+	const Value thirdGeneration = "third"_sr;
+	const Key secondPage = keyAfter(cdcStreamKeyFor(100));
+	const Key thirdPage = keyAfter(cdcStreamKeyFor(200));
+	progress.scanned(firstGeneration, secondPage, false, true);
+	progress.changed(); // A successful cleanup on the first page changes the generation.
+	ASSERT(progress.needsScan(secondGeneration));
+	ASSERT_EQ(progress.begin(), secondPage);
+	progress.scanned(secondGeneration, thirdPage, false, true);
+	progress.changed();
+	ASSERT(progress.needsScan(thirdGeneration));
+	ASSERT_EQ(progress.begin(), thirdPage);
+	progress.scanned(thirdGeneration, cdcStreamKeys.end, true, false);
+	ASSERT(progress.needsScan(thirdGeneration));
+	ASSERT_EQ(progress.begin(), cdcStreamKeys.begin);
+	progress.scanned(thirdGeneration, cdcStreamKeys.end, true, false);
+	ASSERT(!progress.needsScan(thirdGeneration));
 	return Void();
 }
 

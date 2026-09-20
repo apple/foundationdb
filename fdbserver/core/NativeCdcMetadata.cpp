@@ -249,16 +249,34 @@ Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAlloca
 
 Future<Optional<NativeCdcTagState>> readNativeCdcTagStateImpl(Transaction* tr, CDCStreamId streamId) {
 	Future<Optional<Value>> keysFuture = tr->get(cdcStreamKeyFor(streamId));
+	Future<Optional<Value>> minimumFuture = tr->get(cdcMinVersionKeyFor(streamId));
+	Future<Optional<UID>> ownerFuture = getNativeCdcProxyAssignment(tr, streamId);
 	Future<RangeResult> historyFuture =
-	    tr->getRange(cdcTagHistoryRangeFor(streamId), 2, Snapshot::False, Reverse::True);
+	    tr->getRange(cdcTagHistoryRangeFor(streamId), 3, Snapshot::False, Reverse::True);
 	const Optional<Value> keys = co_await keysFuture;
+	const Optional<Value> minimum = co_await minimumFuture;
+	const Optional<UID> owner = co_await ownerFuture;
 	const RangeResult history = co_await historyFuture;
-	if (!keys.present() || history.size() != 1 || history.more || !history.front().value.empty()) {
+	if (!keys.present() || !minimum.present() || !owner.present() || history.empty() || history.more ||
+	    history.size() > 2) {
 		co_return Optional<NativeCdcTagState>();
 	}
-	co_return NativeCdcTagState{ streamId,
-		                         decodeCDCStreamKeysValue(keys.get()),
-		                         decodeCDCTagHistoryKey(history.front().key) };
+	NativeCdcTagState state;
+	state.streamId = streamId;
+	state.ranges = decodeCDCStreamKeysValue(keys.get());
+	state.historyKey = history.front().key;
+	state.assignment = decodeCDCTagHistoryEntry(history.front().key, history.front().value);
+	state.proxyId = owner.get();
+	state.minVersion = decodeCDCMinVersionValue(minimum.get());
+	state.pending = history.size() > 1 || !history.front().value.empty();
+	co_return state;
+}
+
+bool sameNativeCdcTagState(NativeCdcTagState const& current, NativeCdcTagState const& expected) {
+	return current.streamId == expected.streamId && current.ranges == expected.ranges &&
+	       current.historyKey == expected.historyKey && current.proxyId == expected.proxyId &&
+	       current.assignment.version == expected.assignment.version &&
+	       current.assignment.tag == expected.assignment.tag;
 }
 
 } // namespace
@@ -290,6 +308,60 @@ Future<Optional<std::vector<NativeCdcTagState>>> readNativeCdcTagStates(Transact
 		result.push_back(state.get());
 	}
 	co_return Optional<std::vector<NativeCdcTagState>>(std::move(result));
+}
+
+Future<bool> retagNativeCdcStream(Transaction* tr, NativeCdcTagState expected, Tag destination) {
+	Optional<NativeCdcTagState> current = co_await readNativeCdcTagState(tr, expected.streamId);
+	if (!current.present() || !sameNativeCdcTagState(current.get(), expected) || current.get().pending ||
+	    destination.locality != tagLocalityCDC || destination == current.get().assignment.tag) {
+		co_return false;
+	}
+	const Optional<UID> destinationOwner = co_await getNativeCdcProxyAssignmentForTag(tr, destination);
+	if (destinationOwner.present() && destinationOwner.get() != current.get().proxyId) {
+		co_return false;
+	}
+	const Version readVersion = co_await tr->getReadVersion();
+	const auto& clientInfo = tr->getDatabase()->clientInfo->get();
+	if (!clientInfo.nativeCdcEnabled || !validNativeCdcTagCount(clientInfo.nativeCdcTagCount) ||
+	    destination.id >= clientInfo.nativeCdcTagCount) {
+		co_return false;
+	}
+	const Key historyKey = cdcTagHistoryKeyFor(expected.streamId, readVersion, destination);
+	if (historyKey <= current.get().historyKey) {
+		co_return false;
+	}
+	// The key orders assignments, while the value supplies the exact routing
+	// cutover. A read-version boundary could skip writes before this commit.
+	tr->atomicOp(historyKey, cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
+	signalNativeCdcProxyAssignmentChange(tr);
+	co_return true;
+}
+
+Future<bool> finishNativeCdcRetag(Transaction* tr, NativeCdcTagState expected) {
+	const Optional<NativeCdcTagState> current = co_await readNativeCdcTagState(tr, expected.streamId);
+	if (!current.present() || !sameNativeCdcTagState(current.get(), expected) || !current.get().pending ||
+	    current.get().minVersion < current.get().assignment.version) {
+		co_return false;
+	}
+	const RangeResult history = co_await tr->getRange(cdcTagHistoryRangeFor(expected.streamId), 3);
+	if (history.more || history.empty() || history.size() > 2 || history.back().key != current.get().historyKey) {
+		co_return false;
+	}
+	std::set<Tag> retiredTags;
+	for (const auto& row : history) {
+		const Tag tag = decodeCDCTagHistoryEntry(row.key, row.value).tag;
+		if (tag != current.get().assignment.tag) {
+			retiredTags.insert(tag);
+		}
+	}
+	tr->clear(cdcTagHistoryRangeFor(expected.streamId));
+	tr->set(cdcTagHistoryKeyFor(expected.streamId, current.get().assignment.version, current.get().assignment.tag),
+	        Value());
+	for (const Tag tag : retiredTags) {
+		retireNativeCdcTag(tr, tag);
+	}
+	signalNativeCdcProxyAssignmentChange(tr);
+	co_return true;
 }
 
 Future<NativeCdcRegistrationResult> prepareNativeCdcStreamRegistration(Transaction* tr,

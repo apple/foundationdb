@@ -25,17 +25,26 @@
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
 
-// A durable snapshot of the registered ranges and their current tag.
+// A durable snapshot used to fence a sampled balancing decision.
 struct NativeCdcTagState {
 	CDCStreamId streamId = 0;
 	std::vector<KeyRange> ranges;
+	Key historyKey;
 	CDCTagHistoryEntry assignment;
+	UID proxyId;
+	Version minVersion = invalidVersion;
+	bool pending = false;
 };
 
 // An absent result means the bounded snapshot is incomplete; it must not be used
 // as an empty or zero-load configuration.
 Future<Optional<NativeCdcTagState>> readNativeCdcTagState(Transaction* tr, CDCStreamId streamId);
 Future<Optional<std::vector<NativeCdcTagState>>> readNativeCdcTagStates(Transaction* tr, int maxStreams);
+// These helpers revalidate the durable identity and prepare mutations without
+// committing. The caller must fence its controller ownership in this transaction.
+Future<bool> retagNativeCdcStream(Transaction* tr, NativeCdcTagState expected, Tag destination);
+Future<bool> finishNativeCdcRetag(Transaction* tr, NativeCdcTagState expected);
+
 struct NativeCdcRegistrationResult {
 	CDCStreamId streamId;
 	// Describes only mutations prepared by this helper, not unrelated caller mutations.

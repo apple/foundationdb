@@ -193,6 +193,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( NATIVE_CDC_TAG_SAMPLE_INTERVAL,                        30.0 );
 	init( NATIVE_CDC_TAG_SAMPLE_TIMEOUT,                          5.0 );
 	init( NATIVE_CDC_TAG_SAMPLE_MAX_AGE,                         90.0 );
+	init( NATIVE_CDC_TAG_MOVE_COOLDOWN,                         300.0 );
+	init( NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT,                0.2 );
+	init( NATIVE_CDC_TAG_MIN_BYTES_PER_SECOND_IMPROVEMENT,      10000 );
 	init( NATIVE_CDC_TAG_MAX_STREAMS,                            1000 );
 	init( NATIVE_CDC_TAG_MODEL_MAX_ENTRIES,                   2000000 );
 	init( NATIVE_CDC_TAG_SAMPLE_CONCURRENCY,                        8 );

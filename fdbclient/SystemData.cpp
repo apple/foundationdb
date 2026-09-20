@@ -886,6 +886,21 @@ CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key) {
 	return CDCTagHistoryEntry(streamId, bigEndian64(encodedVersion), tag);
 }
 
+CDCTagHistoryEntry decodeCDCTagHistoryEntry(KeyRef const& key, ValueRef const& value) {
+	CDCTagHistoryEntry result = decodeCDCTagHistoryKey(key);
+	if (!value.empty()) {
+		if (value.size() != sizeof(Version) + sizeof(uint16_t)) {
+			throw serialization_failed();
+		}
+		const Version committedVersion = decodeCDCMinVersionValue(value);
+		if (committedVersion <= result.version) {
+			throw serialization_failed();
+		}
+		result.version = committedVersion;
+	}
+	return result;
+}
+
 Key cdcTagLoadKeyFor(Tag tag) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(cdcTagLoadKeys.begin);
@@ -2010,6 +2025,20 @@ TEST_CASE("/SystemData/NativeCDC") {
 	const Key laterTagHistoryKey = cdcTagHistoryKeyFor(streamId, 256, Tag(tagLocalityCDC, 0));
 	ASSERT(earlierTagHistoryKey < laterTagHistoryKey);
 	ASSERT(cdcTagHistoryRangeFor(streamId).contains(laterTagHistoryKey));
+	ASSERT_EQ(decodeCDCTagHistoryEntry(tagHistoryKey, ValueRef()).version, minVersion);
+	const Value committedBoundary = BinaryWriter::toValue(Versionstamp(minVersion + 20, 3), Unversioned());
+	const CDCTagHistoryEntry committedHistory = decodeCDCTagHistoryEntry(tagHistoryKey, committedBoundary);
+	ASSERT_EQ(committedHistory.version, minVersion + 20);
+	ASSERT_EQ(committedHistory.tag, tag);
+	ASSERT_EQ(committedHistory.streamId, streamId);
+	bool invalidBoundaryRejected = false;
+	try {
+		decodeCDCTagHistoryEntry(tagHistoryKey, BinaryWriter::toValue(Versionstamp(minVersion, 0), Unversioned()));
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_serialization_failed);
+		invalidBoundaryRejected = true;
+	}
+	ASSERT(invalidBoundaryRejected);
 
 	const CDCTagLoadSample sample{ "assignment"_sr, minVersion, minVersion + 100, 123000 };
 	const CDCTagLoadSample decodedSample = decodeCDCTagLoadValue(cdcTagLoadValue(sample));

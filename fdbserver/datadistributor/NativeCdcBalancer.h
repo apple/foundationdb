@@ -23,7 +23,8 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/MoveKeys.h"
 
-// The DD epoch fences publication of advisory producer-load samples.
+// The DD epoch fences mutations. Disabling balancing leaves acknowledged
+// transition cleanup active, so previously persisted history can still drain.
 Future<Void> nativeCdcBalancer(Database cx,
                                MoveKeysLock lock,
                                const DDEnabledState* ddEnabledState,
