@@ -310,7 +310,11 @@ so concurrent reads cannot each request the full client budget. A logical
 reply is limited by `NATIVE_CDC_ORDERED_REPLY_BYTES` (10 MiB by default) and
 never splits a commit-version group. A single physical version group that
 cannot fit its RPC quota, or a merged group that cannot fit the logical reply
-limit, fails with `server_overloaded`. The retained-memory accounting estimates
+limit, fails with `server_overloaded`. A physical consume also fails with
+`server_overloaded` when unacknowledged proxy buffers leave insufficient room
+for its next read, since partitions cannot acknowledge independently to release
+that capacity. These failures preserve the group's durable acknowledgement.
+The retained-memory accounting estimates
 records and payload bytes; transport and allocator overhead and batches still
 held by the application are additional memory.
 

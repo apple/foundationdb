@@ -127,15 +127,25 @@ public:
 // A transport retry supersedes only requests from the same logical consumer.
 class CDCConsumeLease : public ReferenceCounted<CDCConsumeLease> {
 	Optional<UID> consumerId;
+	bool bounded;
 	Promise<Void> superseded;
 
 public:
-	explicit CDCConsumeLease(Optional<UID> consumerId) : consumerId(consumerId) {}
+	explicit CDCConsumeLease(Optional<UID> consumerId, bool bounded = false)
+	  : consumerId(consumerId), bounded(bounded) {}
 
 	bool belongsTo(Optional<UID> other) const {
 		return consumerId.present() && consumerId.get().isValid() && consumerId == other;
 	}
+	bool isBounded() const { return bounded; }
 	void supersede() { superseded.send(Void()); }
+	bool rejectBufferPressure() {
+		if (!bounded || !superseded.canBeSet()) {
+			return false;
+		}
+		superseded.sendError(server_overloaded());
+		return true;
+	}
 
 	Future<CDCConsumeReply> waitForReply(Future<CDCConsumeReply> reply) {
 		// Coroutine parameters can outlive completion while the caller retains its result future.
@@ -511,6 +521,7 @@ class CDCProxy {
 	CoalescedTrigger popAcknowledgedDataRequests;
 	AsyncTrigger popLogSystemChanged;
 	AsyncTrigger peekCapacityContended;
+	AsyncTrigger bufferCapacityChanged;
 	FlowLock bufferLock;
 	int64_t bufferedBytes = 0;
 	int64_t totalBufferedMutationBytes = 0;
@@ -544,6 +555,8 @@ class CDCProxy {
 	void reconcileStreamMetadata(Reference<CDCBufferedStream> stream, CDCStreamReadState const& metadata);
 	void markTagStreamsBufferLimitExceeded(Reference<CDCBufferedTag> tag, Version begin, int replyByteLimit);
 	void markTagStreamsRawReplyBudgetExceeded(Reference<CDCBufferedTag> tag, Version begin, int64_t retainedReplyCount);
+	bool rejectBoundedTagConsumes(Reference<CDCBufferedTag> tag);
+	Future<Void> waitForBoundedCapacityChange(Reference<CDCBufferedTag> tag);
 	void attachStreamToTags(Reference<CDCBufferedStream> stream);
 	void detachStreamFromTags(CDCStreamId streamId, std::vector<CDCTagInterval> const& intervals);
 	void detachStreamFromTags(Reference<CDCBufferedStream> stream);
@@ -1463,6 +1476,37 @@ Future<Void> CDCProxy::rotateContendedPeek() {
 	co_await delay(SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT);
 }
 
+bool CDCProxy::rejectBoundedTagConsumes(Reference<CDCBufferedTag> tag) {
+	std::vector<Reference<CDCConsumeLease>> blocked;
+	for (const CDCStreamId streamId : tag->streamIds) {
+		auto stream = streams.find(streamId);
+		if (stream != streams.end() && stream->second->readDemand > 0 && stream->second->activeConsume.isValid() &&
+		    nextTagReadVersionForStream(tag, stream->second).present()) {
+			blocked.push_back(stream->second->activeConsume);
+		}
+	}
+	bool rejected = false;
+	// Error callbacks release demand synchronously and may refresh or detach this tag.
+	for (auto const& lease : blocked) {
+		rejected = lease->rejectBufferPressure() || rejected;
+	}
+	return rejected;
+}
+
+Future<Void> CDCProxy::waitForBoundedCapacityChange(Reference<CDCBufferedTag> tag) {
+	while (true) {
+		co_await bufferCapacityChanged.onTrigger();
+		for (const CDCStreamId streamId : tag->streamIds) {
+			auto stream = streams.find(streamId);
+			if (stream != streams.end() && stream->second->readDemand > 0 && stream->second->activeConsume.isValid() &&
+			    stream->second->activeConsume->isBounded() &&
+			    nextTagReadVersionForStream(tag, stream->second).present()) {
+				co_return;
+			}
+		}
+	}
+}
+
 Future<CDCBufferTagPassResult> CDCProxy::materializeBufferSelection(Reference<CDCBufferedTag> tag,
                                                                     Reference<IReplayPeekCursor> cursor,
                                                                     Version throughVersion,
@@ -1530,6 +1574,9 @@ Future<CDCBufferTagPassResult> CDCProxy::materializeBufferSelection(Reference<CD
 	ASSERT_LE(bufferLock.activePermits(), bufferLimit);
 	tag->nextPassReservation = 0;
 	advanceTagBufferedThrough(tag, throughVersion, selection.selectedStreamIds);
+	if (acceptedBytes > 0) {
+		bufferCapacityChanged.trigger();
+	}
 	// Every raw cursor arena is covered by rawPeekReservation only for this pass. Reopen from the shared minimum
 	// after releasing it so no cursor response remains live outside the proxy memory budget.
 	co_return CDCBufferTagPassResult::RETRY;
@@ -1587,6 +1634,11 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagCursor(Reference<CDCBufferedTa
 	if (prefetch && (bufferLock.waiters() != 0 || bufferLock.available() < passReservation)) {
 		co_return CDCBufferTagPassResult::RETRY;
 	}
+	// Ordered partitions cannot acknowledge independently. Waiting for retained bytes to be acknowledged can
+	// therefore deadlock their aggregate consume; fail this bounded request without poisoning the stream.
+	if (bufferedBytes > bufferLimit - passReservation && rejectBoundedTagConsumes(tag)) {
+		co_return CDCBufferTagPassResult::RETRY;
+	}
 	if (bufferLock.available() < passReservation) {
 		CODE_PROBE(true, "CDC proxy applies shared buffer backpressure");
 		peekCapacityContended.trigger();
@@ -1594,8 +1646,9 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagCursor(Reference<CDCBufferedTa
 	auto capacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, passReservation),
 	                              logSystemChanged,
 	                              tag->stopped.onTrigger(),
-	                              tagChanged);
-	if (capacity.index() == 1 || capacity.index() == 3) {
+	                              tagChanged,
+	                              waitForBoundedCapacityChange(tag));
+	if (capacity.index() == 1 || capacity.index() == 3 || capacity.index() == 4) {
 		co_return CDCBufferTagPassResult::RETRY;
 	}
 	if (capacity.index() == 2) {
@@ -1999,8 +2052,12 @@ Future<Void> CDCProxy::waitForBufferedVersion(Reference<CDCBufferedStream> strea
 		co_return;
 	}
 
-	changeStreamReadDemand(stream, 1);
 	ScopeExit releaseReadDemand([this, stream]() { changeStreamReadDemand(stream, -1); });
+	changeStreamReadDemand(stream, 1);
+	if (stream->activeConsume.isValid() && stream->activeConsume->isBounded()) {
+		// A bounded consume can join an ordinary reader already waiting at the same tag frontier.
+		bufferCapacityChanged.trigger();
+	}
 	while (stream->active && !stream->bufferLimitExceeded && stream->bufferedThrough < version) {
 		co_await stream->changed.onTrigger();
 	}
@@ -2041,7 +2098,7 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 			auto previous = stream->activeConsume;
 			previous->supersede();
 		}
-		auto lease = makeReference<CDCConsumeLease>(request.consumerId);
+		auto lease = makeReference<CDCConsumeLease>(request.consumerId, request.replyByteLimit > 0);
 		stream->activeConsume = lease;
 		ScopeExit releaseStreamConsume([stream, lease]() {
 			if (stream->activeConsume == lease) {
@@ -2640,6 +2697,90 @@ class CDCProxyPrefetchTest {
 	}
 
 public:
+	static Future<CDCConsumeReply> waitForTestReply(CDCProxy* proxy, Reference<CDCBufferedStream> stream) {
+		co_await proxy->waitForBufferedVersion(stream, 100);
+		co_return CDCConsumeReply();
+	}
+
+	static Future<Void> boundedCapacity(bool retainedAfterWait, bool cancel = false, bool consumeAfterWait = false) {
+		CDCProxyPrefetchTest test;
+		auto bounded = test.addStream(1);
+		auto ordinary = test.addStream(2);
+		bounded->readAhead.cancel();
+		ordinary->readAhead.cancel();
+		bounded->activeConsume = makeReference<CDCConsumeLease>(Optional<UID>(), true);
+		ordinary->activeConsume = makeReference<CDCConsumeLease>(Optional<UID>());
+		Future<CDCConsumeReply> boundedReply;
+		if (!consumeAfterWait) {
+			boundedReply = bounded->activeConsume->waitForReply(waitForTestReply(&test.proxy, bounded));
+		}
+		auto ordinaryReply = ordinary->activeConsume->waitForReply(waitForTestReply(&test.proxy, ordinary));
+		const int64_t limit = SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES;
+		const int64_t peek = std::min<int64_t>(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, limit / 2);
+		const int64_t pass = calculateBufferPassLimits(limit, peek, 1).get().reservationBytes;
+		const int64_t retained = limit - pass + 1;
+		co_await test.proxy.bufferLock.take(TaskPriority::TLogPeekReply, limit);
+		FlowLock::Releaser held(test.proxy.bufferLock, limit);
+		if (!retainedAfterWait) {
+			test.proxy.bufferedBytes = retained;
+			held.release(limit - retained);
+		}
+		auto cursor = makeReference<CDCPrefetchTestCursor>(Void());
+		auto work = test.proxy.bufferTagCursor(test.tag, 100, cursor, Never(), Prefetch::False);
+		if (retainedAfterWait || consumeAfterWait) {
+			ASSERT(!work.isReady());
+			ASSERT_EQ(test.proxy.bufferLock.waiters(), 1);
+			if (cancel) {
+				boundedReply.cancel();
+				bounded->activeConsume.clear();
+				ASSERT_EQ(bounded->readDemand, 0);
+			}
+			if (consumeAfterWait) {
+				boundedReply = bounded->activeConsume->waitForReply(waitForTestReply(&test.proxy, bounded));
+			} else {
+				test.proxy.bufferedBytes = retained;
+				held.release(limit - retained);
+				test.proxy.bufferCapacityChanged.trigger();
+			}
+			if (!cancel) {
+				co_await work;
+				ASSERT_EQ(test.proxy.bufferLock.waiters(), 0);
+				work = test.proxy.bufferTagCursor(test.tag, 100, cursor, Never(), Prefetch::False);
+			}
+		}
+		if (cancel) {
+			ASSERT(!work.isReady()); // The remaining ordinary consume still applies normal backpressure.
+			work.cancel();
+		} else {
+			co_await work;
+			ASSERT(boundedReply.isError());
+			ASSERT_EQ(boundedReply.getError().code(), error_code_server_overloaded);
+			ASSERT_EQ(bounded->readDemand, 0);
+		}
+		ASSERT(!ordinaryReply.isReady());
+		ASSERT_EQ(ordinary->readDemand, 1);
+		ASSERT(!bounded->bufferLimitExceeded);
+		ASSERT_EQ(bounded->minVersion, 1);
+		ASSERT_EQ(bounded->bufferedThrough, 99);
+		ASSERT_EQ(cursor->fetchCount(), 0);
+		ASSERT_EQ(test.proxy.bufferLock.waiters(), 0);
+
+		// A fresh request succeeds once the retained data is released; overload is not stream state.
+		test.proxy.bufferedBytes = 0;
+		held.release(held.remaining);
+		bounded->activeConsume = makeReference<CDCConsumeLease>(Optional<UID>(), true);
+		boundedReply = bounded->activeConsume->waitForReply(waitForTestReply(&test.proxy, bounded));
+		co_await test.proxy.bufferTagCursor(test.tag, 100, cursor, Never(), Prefetch::False);
+		co_await boundedReply;
+		co_await ordinaryReply;
+		ASSERT_EQ(bounded->minVersion, 1);
+		ASSERT_EQ(bounded->readDemand, 0);
+		ASSERT_EQ(ordinary->readDemand, 0);
+		test.proxy.clearBufferedMutations(bounded);
+		test.proxy.clearBufferedMutations(ordinary);
+		ASSERT_EQ(test.proxy.bufferLock.activePermits(), 0);
+	}
+
 	static Future<Void> sameFrontierDemand(bool release, bool expire = false) {
 		CDCProxyPrefetchTest test;
 		auto stream = test.addStream(1);
@@ -3003,6 +3144,19 @@ public:
 };
 
 } // namespace
+
+TEST_CASE("/NativeCDC/BoundedConsumeRetainedCapacity") {
+	return CDCProxyPrefetchTest::boundedCapacity(false);
+}
+TEST_CASE("/NativeCDC/BoundedConsumeRetainedCapacityAfterWait") {
+	return CDCProxyPrefetchTest::boundedCapacity(true);
+}
+TEST_CASE("/NativeCDC/BoundedConsumeCapacityCancellation") {
+	return CDCProxyPrefetchTest::boundedCapacity(true, true);
+}
+TEST_CASE("/NativeCDC/BoundedConsumeJoinsCapacityWait") {
+	return CDCProxyPrefetchTest::boundedCapacity(false, false, true);
+}
 
 TEST_CASE("/NativeCDC/PrefetchCreditLifecycle") {
 	CDCStreamReadAhead credit;

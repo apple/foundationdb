@@ -465,6 +465,8 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_resume_cdc_consumer(FDBData
 
 DLLEXPORT void fdb_cdc_consumer_destroy(FDBCdcConsumer* consumer);
 
+/* Ordered consumes report server_overloaded when a complete version exceeds a reply limit or
+ * unacknowledged proxy buffers block another partition's read. The durable group acknowledgement is unchanged. */
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_cdc_consumer_consume(FDBCdcConsumer* consumer);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_cdc_consumer_acknowledge(FDBCdcConsumer* consumer);

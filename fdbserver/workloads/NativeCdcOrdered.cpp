@@ -37,6 +37,7 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 
 	double operationTimeout;
 	bool testOwnerReplacement;
+	bool testBufferBackpressure;
 	bool completed = false;
 	std::map<Version, Mutations> expectedVersions;
 	const Key name = "native-cdc-ordered"_sr;
@@ -445,6 +446,21 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		phase("InitialConsumption");
 		const Version initial = co_await writeStep(cx, 0);
 		expectedVersions.emplace(initial, expectedMutations(writeMutations(0)));
+		if (testBufferBackpressure) {
+			const Version minimum = listed.front().minVersion;
+			// Two of these three partitions share a proxy. Its first retained reply leaves too little room
+			// for the other reader, while the aggregate cannot acknowledge until every partition replies.
+			co_await expectError(consumeThrough(consumer, initial, &view, &observed), error_code_server_overloaded);
+			co_await verifyCommonMinimum(cx, partitions, minimum);
+			// Retrying the same consumer must preserve its durable floor and cancel abandoned child reads.
+			co_await expectError(consumeThrough(consumer, initial, &view, &observed, minimum - 1),
+			                     error_code_server_overloaded);
+			co_await verifyCommonMinimum(cx, partitions, minimum);
+			co_await removeNativeCdcStreamClient(cx, name);
+			co_await waitForCleanup(cx, streamId, partitions);
+			completed = true;
+			co_return;
+		}
 		co_await consumeThrough(consumer, initial, &view, &observed);
 		co_await verifyKeyspace(cx, view);
 		phase("InitialAcknowledgement");
@@ -547,6 +563,7 @@ public:
 	explicit NativeCdcOrderedWorkload(WorkloadContext const& context) : TestWorkload(context) {
 		operationTimeout = getOption(options, "operationTimeout"_sr, 180.0);
 		testOwnerReplacement = getOption(options, "testOwnerReplacement"_sr, true);
+		testBufferBackpressure = getOption(options, "testBufferBackpressure"_sr, false);
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomRangeLock"); }

@@ -52,6 +52,8 @@ public:
 	~NativeCdcConsumer();
 
 	// Operations advance shared delivery state; only one may be outstanding.
+	// Ordered consumes can fail with server_overloaded when a complete version exceeds a reply limit or
+	// unacknowledged proxy buffers block another partition's read. The durable group acknowledgement is unchanged.
 	Future<CDCConsumeReply> consume();
 	Future<Void> acknowledge();
 	const CDCCursor& position() const { return currentPosition; }

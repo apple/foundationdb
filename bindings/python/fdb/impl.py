@@ -1659,6 +1659,9 @@ class CdcConsumer(_FDBBase):
 
         Consumption advances the delivered cursor, not durable retention. Do not
         consume again until the previous reply has been durably processed.
+        Ordered consumption can fail with server_overloaded if a complete group
+        exceeds a reply limit or retained proxy buffers block a partition read.
+        These failures leave the durable group acknowledgement unchanged.
         """
         with self._lock:
             self._check_open()

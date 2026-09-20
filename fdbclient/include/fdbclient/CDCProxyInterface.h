@@ -140,7 +140,8 @@ struct CDCConsumeRequest {
 	ReplyPromise<CDCConsumeReply> reply;
 	// Stable across one consumer's RPC retries; absent for legacy or direct callers.
 	Optional<UID> consumerId;
-	// Zero uses the server limit. Ordered consumers reserve a bounded share per partition.
+	// Zero uses the server limit. A positive quota also fails with server_overloaded when retained proxy
+	// buffers block the read, since ordered partitions cannot independently acknowledge to free capacity.
 	int64_t replyByteLimit = 0;
 
 	CDCConsumeRequest() = default;
