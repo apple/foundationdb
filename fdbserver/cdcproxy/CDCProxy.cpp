@@ -608,13 +608,15 @@ class CDCProxy {
 	Future<Void> monitorAcknowledgedDataPops();
 	void reconcileStreams();
 	Future<Void> consume(CDCConsumeRequest request);
-	Future<CDCConsumeReply> consumeReply(Reference<CDCBufferedStream> stream, CDCCursor cursor);
+	Future<CDCConsumeReply> consumeReply(Reference<CDCBufferedStream> stream, CDCCursor cursor, int64_t replyByteLimit);
 	Future<Void> acknowledge(CDCAckRequest request);
 	Future<Void> registerStream(CDCRegisterStreamRequest request);
+	Future<Void> registerOrderedStream(CDCRegisterOrderedStreamRequest request);
 	Future<Void> removeStream(CDCRemoveStreamRequest request);
 	Future<Void> serveConsumeRequests(FutureStream<CDCConsumeRequest> requests);
 	Future<Void> serveAcknowledgeRequests(FutureStream<CDCAckRequest> requests);
 	Future<Void> serveRegisterStreamRequests(FutureStream<CDCRegisterStreamRequest> requests);
+	Future<Void> serveRegisterOrderedStreamRequests(FutureStream<CDCRegisterOrderedStreamRequest> requests);
 	Future<Void> serveRemoveStreamRequests(FutureStream<CDCRemoveStreamRequest> requests);
 	Future<Void> serveStatusRequests(FutureStream<GetCDCProxyStatusRequest> requests);
 	Future<Void> serveHaltForTestingRequests(FutureStream<HaltCDCProxyRequest> requests);
@@ -2046,7 +2048,8 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 				stream->activeConsume.clear();
 			}
 		});
-		CDCConsumeReply reply = co_await lease->waitForReply(consumeReply(stream, request.cursor));
+		CDCConsumeReply reply =
+		    co_await lease->waitForReply(consumeReply(stream, request.cursor, request.replyByteLimit));
 		// Record proof before send(), whose callbacks may run synchronously. Empty or capped replies do not
 		// extend the speculative horizon; neither does replaying an already issued cursor.
 		const bool armed = stream->readAhead.issueReply(reply.lastConsumedVersion,
@@ -2065,7 +2068,15 @@ Future<Void> CDCProxy::consume(CDCConsumeRequest request) {
 	}
 }
 
-Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stream, CDCCursor cursor) {
+Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stream,
+                                               CDCCursor cursor,
+                                               int64_t requestedLimit) {
+	if (requestedLimit < 0) {
+		throw client_invalid_operation();
+	}
+	const int64_t replyByteLimit = requestedLimit == 0
+	                                   ? SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES
+	                                   : std::min<int64_t>(requestedLimit, SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES);
 	const CDCStreamReadState metadata =
 	    co_await readCDCStreamState(cx, cursor.streamId, id, true, PrioritizeDrain::True);
 	if (stream->tooOld) {
@@ -2130,11 +2141,8 @@ Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stre
 		if (versioned.version > replyThrough) {
 			break;
 		}
-		if (!selectCDCConsumeReplyVersion(&selection,
-		                                  begin,
-		                                  versioned.version,
-		                                  estimatedCDCConsumeVersionBytes(versioned),
-		                                  SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES)) {
+		if (!selectCDCConsumeReplyVersion(
+		        &selection, begin, versioned.version, estimatedCDCConsumeVersionBytes(versioned), replyByteLimit)) {
 			break;
 		}
 		// Retain the already-accounted stream arena instead of copying mutation payloads for every reply.
@@ -2146,7 +2154,7 @@ Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stre
 		TraceEvent(SevWarn, "CDCProxyConsumeVersionExceedsReplyLimit", id)
 		    .detail("StreamId", stream->streamId)
 		    .detail("Version", begin)
-		    .detail("ReplyLimit", SERVER_KNOBS->CDC_PROXY_CONSUME_REPLY_BYTES);
+		    .detail("ReplyLimit", replyByteLimit);
 		throw server_overloaded();
 	}
 	reply.lastConsumedVersion = selectedCDCConsumeReplyThrough(selection, replyThrough);
@@ -2202,8 +2210,26 @@ Future<Void> CDCProxy::registerStream(CDCRegisterStreamRequest request) {
 	}
 }
 
+Future<Void> CDCProxy::registerOrderedStream(CDCRegisterOrderedStreamRequest request) {
+	try {
+		const CDCStreamId streamId =
+		    co_await registerNativeCdcOrderedStream(cx, request.name, request.ranges, request.splitPoints);
+		request.reply.send(CDCRegisterStreamReply(streamId));
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		request.reply.sendError(e);
+	}
+}
+
 Future<Void> CDCProxy::removeStream(CDCRemoveStreamRequest request) {
 	try {
+		if (co_await removeNativeCdcOrderedStream(cx, request.name, request.streamId)) {
+			requestAcknowledgedDataPop();
+			request.reply.send(Void());
+			co_return;
+		}
 		const bool removed = co_await removeNativeCdcStream(cx, request.name, request.streamId, id);
 		if (removed) {
 			auto stream = streams.find(request.streamId);
@@ -2239,6 +2265,13 @@ Future<Void> CDCProxy::serveRegisterStreamRequests(FutureStream<CDCRegisterStrea
 	while (true) {
 		CDCRegisterStreamRequest request = co_await requests;
 		actors.add(registerStream(std::move(request)));
+	}
+}
+
+Future<Void> CDCProxy::serveRegisterOrderedStreamRequests(FutureStream<CDCRegisterOrderedStreamRequest> requests) {
+	while (true) {
+		CDCRegisterOrderedStreamRequest request = co_await requests;
+		actors.add(registerOrderedStream(std::move(request)));
 	}
 }
 
@@ -2469,6 +2502,7 @@ Future<Void> CDCProxy::run(CDCProxyInterface proxy, uint64_t recoveryCount) {
 	actors.add(serveConsumeRequests(proxy.consume.getFuture()));
 	actors.add(serveAcknowledgeRequests(proxy.ack.getFuture()));
 	actors.add(serveRegisterStreamRequests(proxy.registerStream.getFuture()));
+	actors.add(serveRegisterOrderedStreamRequests(proxy.registerOrderedStream.getFuture()));
 	actors.add(serveRemoveStreamRequests(proxy.removeStream.getFuture()));
 	actors.add(serveStatusRequests(proxy.getStatus.getFuture()));
 	actors.add(serveHaltForTestingRequests(proxy.haltForTesting.getFuture()));

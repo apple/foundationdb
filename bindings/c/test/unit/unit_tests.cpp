@@ -2002,7 +2002,30 @@ TEST_CASE("CDC C binding rejects invalid registration ranges") {
 	}
 }
 
-TEST_CASE("CDC C binding end-to-end") {
+TEST_CASE("CDC C binding rejects invalid ordered registration boundaries") {
+	const uint8_t name[] = "invalid-ordered-cdc-stream";
+	const uint8_t begin[] = "a";
+	const uint8_t end[] = "z";
+	const uint8_t split[] = "m";
+	FDBKeyRange range{ begin, 1, end, 1 };
+	FDBKey point{ split, 1 };
+	auto checkInvalid = [&](FDBKey const* points, int count) {
+		FDBFuture* future =
+		    fdb_database_register_cdc_ordered_stream(db, name, sizeof(name) - 1, &range, 1, points, count);
+		REQUIRE(future != nullptr);
+		fdb_check(fdb_future_block_until_ready(future));
+		CHECK(fdb_future_get_error(future) == 2000); // client_invalid_operation
+		fdb_future_destroy(future);
+	};
+	checkInvalid(&point, -1);
+	checkInvalid(&point, 64);
+	checkInvalid(nullptr, 1);
+	for (FDBKey invalid : { FDBKey{ split, -1 }, FDBKey{ nullptr, 1 } }) {
+		checkInvalid(&invalid, 1);
+	}
+}
+
+void testCdcEndToEnd(bool ordered) {
 	using FuturePtr = std::unique_ptr<FDBFuture, decltype(&fdb_future_destroy)>;
 	using ConsumerPtr = std::unique_ptr<FDBCdcConsumer, decltype(&fdb_cdc_consumer_destroy)>;
 
@@ -2133,12 +2156,24 @@ TEST_CASE("CDC C binding end-to-end") {
 		                                    static_cast<int>(endInput.size()) } };
 	// Repeated intervals must not duplicate delivered mutations.
 	rangesInput.push_back(rangesInput.back());
-	auto registerFuture = ownFuture(fdb_database_register_cdc_stream(db,
+	std::string splitInput = secondRangeBegin;
+	FDBKey splitPoint{ reinterpret_cast<uint8_t const*>(splitInput.data()), static_cast<int>(splitInput.size()) };
+	auto registerFuture =
+	    ownFuture(ordered ? fdb_database_register_cdc_ordered_stream(db,
 	                                                                 reinterpret_cast<uint8_t const*>(nameInput.data()),
 	                                                                 nameInput.size(),
 	                                                                 rangesInput.data(),
-	                                                                 rangesInput.size()));
+	                                                                 rangesInput.size(),
+	                                                                 &splitPoint,
+	                                                                 1)
+	                      : fdb_database_register_cdc_stream(db,
+	                                                         reinterpret_cast<uint8_t const*>(nameInput.data()),
+	                                                         nameInput.size(),
+	                                                         rangesInput.data(),
+	                                                         rangesInput.size()));
 	REQUIRE(registerFuture != nullptr);
+	std::fill(splitInput.begin(), splitInput.end(), 'x');
+	splitPoint = FDBKey{ nullptr, -1 };
 	std::fill(nameInput.begin(), nameInput.end(), 'x');
 	std::fill(beginInput.begin(), beginInput.end(), 'x');
 	std::fill(endInput.begin(), endInput.end(), 'x');
@@ -2268,6 +2303,14 @@ TEST_CASE("CDC C binding end-to-end") {
 	for (int i = 0; i < streamCount; ++i) {
 		CHECK(extractString(streams[i].name) != streamName);
 	}
+}
+
+TEST_CASE("CDC C binding end-to-end") {
+	testCdcEndToEnd(false);
+}
+
+TEST_CASE("CDC C binding ordered aggregate end-to-end") {
+	testCdcEndToEnd(true);
 }
 
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
