@@ -323,6 +323,21 @@ Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag);
 KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId);
 CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key);
 
+// Advisory producer-write samples. The assignment generation invalidates every
+// comparison when registrations, tag histories, or durable ownership change.
+struct CDCTagLoadSample {
+	Value assignmentChange;
+	Version sampleVersion = invalidVersion;
+	Version validThrough = invalidVersion;
+	int64_t bytesWrittenPerKSecond = 0;
+};
+
+extern const KeyRangeRef cdcTagLoadKeys;
+Key cdcTagLoadKeyFor(Tag tag);
+Tag decodeCDCTagLoadKey(KeyRef const& key);
+Value cdcTagLoadValue(CDCTagLoadSample const& sample);
+CDCTagLoadSample decodeCDCTagLoadValue(ValueRef const& value);
+
 // "\xff\x02/cdc/tagOwner/[[Tag]]" := "[[CDCStreamId]]"
 // Derived lookup hint, not authoritative ownership. Validate the stream is active
 // on this tag and read its durable proxy assignment in the same transaction.

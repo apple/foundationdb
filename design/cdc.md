@@ -374,6 +374,7 @@ than transaction state:
 | --- | --- | --- |
 | `\xff\x02/cdc/minVersion/<streamId>` | `Version` | Earliest version that an active stream may still require. |
 | `\xff\x02/cdc/retiredTagPopVersion/<tag>` | `Version` | Final pop watermark required after a stream using a tag is removed. |
+| `\xff\x02/cdc/tagLoad/<tag>` | assignment generation, sample version, expiry version, sampled write rate | Advisory producer-load estimate used for placement. |
 | `\xff\x02/cdc/tagOwner/<tag>` | `CDCStreamId` | Derived representative stream used to look up a current tag's proxy owner. |
 
 The initial `minVersion` is written with a versionstamp at stream
@@ -397,9 +398,11 @@ Registration runs as a durable metadata transaction:
    same-name/same-range-set rule, even when admission is disabled.
 3. For a new name, it validates the feature knob.
 4. It allocates a new monotonically increasing `CDCStreamId`.
-5. It selects a CDC tag using current active stream counts. The allocator uses
-   the least populated tag among `NATIVE_CDC_TAG_COUNT` tags (256 by default),
-   choosing the lowest tag ID on a tie.
+5. It selects a CDC tag from `NATIVE_CDC_TAG_COUNT` tags (256 by default).
+   With fresh, complete write-load samples for the current assignment generation,
+   it chooses the least-loaded tag, breaking ties by stream count then tag ID.
+   Otherwise it uses the least populated tag, breaking ties by tag ID. An unused
+   tag has zero current load; an occupied tag without a sample has unknown load.
 6. It records the stream name, canonical ranges, initial tag history entry, and
    versionstamped initial minimum version.
 7. It records an available CDC proxy owner and signals assignment monitoring.
@@ -427,6 +430,34 @@ and can be discarded and rebuilt. Existing streams need no eager migration;
 validation also rejects stale representatives left by older metadata writers.
 The allocator's stream-count scan remains necessary, and ownership discovery
 still scans global metadata when the representative is absent or invalid.
+
+### Throughput-aware initial placement
+
+When native CDC admission and `NATIVE_CDC_TAG_BALANCING_ENABLED` are enabled,
+the data distributor samples producer writes using storage-server range metrics.
+Both sampling and load-aware registration are advisory: existing streams retain
+their original tags. The sampling knob defaults to enabled; native CDC admission
+remains disabled by default.
+
+Registered ranges are divided into disjoint segments, and each tag is counted
+once per segment so overlapping streams do not inflate a shared tag's load.
+The model bounds projected coverage entries by
+`2 * streamCount * totalRangeCount` before construction. The default
+`NATIVE_CDC_TAG_MODEL_MAX_ENTRIES` budget is 2,000,000 entries; this is a
+conservative entry bound, not an exact resident-memory bound.
+
+Sampling also limits streams, shards, request concurrency, and elapsed time.
+The default interval is 30 seconds and sample lifetime is 90 seconds. Partial,
+failed, expired, or previous-generation samples never imply zero load.
+Publication revalidates both the assignment generation and data-distributor
+lock. Registration, removal, and proxy ownership changes invalidate existing
+comparisons. Registrations use stream counts until every occupied eligible tag
+has a fresh sample from the current generation.
+
+`NativeCdcInitialPlacement` drives real producer writes, verifies a colder tag
+wins despite having more streams, and checks delivery through the new stream.
+Storage metrics remain write-cost estimates with their existing sampling and
+range-clear attribution semantics; they do not measure exact tagged TLog bytes.
 
 ### Metadata lifecycle example
 
@@ -808,9 +839,9 @@ The design records tag history and proxy ownership in forms that support more
 complete load balancing, but the first implementation intentionally keeps
 policy simple.
 
-* Tag selection is based on active stream counts, not observed byte or mutation
-  throughput. Data distribution could make equally counted tags very
-  different in cost.
+* Producer-write metrics are estimates with the storage-metrics sampling window.
+  Missing or stale comparisons fall back to active stream counts. Initial
+  placement does not rebalance existing streams after their loads change.
 * Registration selects an available CDC proxy without balancing aggregate
   proxy throughput, buffer memory, lag, or number of active readers.
 * Assignment mutations use one coalescing change key that wakes a full durable
