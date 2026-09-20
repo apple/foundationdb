@@ -579,8 +579,6 @@ private:
 
 	void closeSocket() {
 		boost::system::error_code error;
-		// The same error is returned through the output parameter and checked below.
-		// NOLINTNEXTLINE(bugprone-unused-return-value)
 		socket.close(error);
 		if (error) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
@@ -728,8 +726,6 @@ public:
 
 	void bind(NetworkAddress const& addr) override {
 		boost::system::error_code ec;
-		// The same error is returned through the output parameter and checked below.
-		// NOLINTNEXTLINE(bugprone-unused-return-value)
 		socket.bind(udpEndpoint(addr), ec);
 		if (ec) {
 			Error x;
@@ -763,8 +759,6 @@ private:
 
 	void closeSocket() {
 		boost::system::error_code error;
-		// The same error is returned through the output parameter and checked below.
-		// NOLINTNEXTLINE(bugprone-unused-return-value)
 		socket.close(error);
 		if (error) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
@@ -871,8 +865,6 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 
 	void action(Handshake& h) {
 		try {
-			// Each operation returns the same error through h.err, which gates the next operation.
-			// NOLINTBEGIN(bugprone-unused-return-value)
 			h.socket.next_layer().non_blocking(false, h.err);
 			if (!h.err.failed()) {
 				h.socket.handshake(h.type, h.err);
@@ -880,7 +872,6 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			if (!h.err.failed()) {
 				h.socket.next_layer().non_blocking(true, h.err);
 			}
-			// NOLINTEND(bugprone-unused-return-value)
 			if (h.err.failed()) {
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
@@ -1289,15 +1280,12 @@ private:
 	}
 
 	void closeSocket() {
-		// Teardown is best effort; errors cannot leave the connection usable.
-		// NOLINTBEGIN(bugprone-unused-return-value)
 		boost::system::error_code cancelError;
 		socket.cancel(cancelError);
 		boost::system::error_code closeError;
 		socket.close(closeError);
 		boost::system::error_code shutdownError;
 		ssl_sock.shutdown(shutdownError);
-		// NOLINTEND(bugprone-unused-return-value)
 	}
 
 	void onReadError(const boost::system::error_code& error) {

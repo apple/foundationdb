@@ -423,8 +423,7 @@ struct JVM {
 		auto clazz = getClass("com/apple/foundationdb/testing/Promise");
 		auto res = env->NewObject(clazz, getMethod(clazz, "<init>", "(J)V"), reinterpret_cast<jlong>(p.get()));
 		checkException();
-		// The Java promise owns the native state until JavaPromise::send deletes it.
-		p.release(); // NOLINT(bugprone-unused-return-value)
+		p.release();
 		return res;
 	}
 

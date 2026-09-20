@@ -51,8 +51,6 @@ public:
 		const bool wasNonBlocking = self->socket.non_blocking();
 		boost::system::error_code err;
 		if (!wasNonBlocking) {
-			// The error is checked through the output parameter.
-			// NOLINTNEXTLINE(bugprone-unused-return-value)
 			self->socket.non_blocking(true, err);
 			if (err) {
 				throw connection_failed();
@@ -64,8 +62,6 @@ public:
 
 		boost::system::error_code restoreErr;
 		if (!wasNonBlocking) {
-			// The error is checked through the output parameter.
-			// NOLINTNEXTLINE(bugprone-unused-return-value)
 			self->socket.non_blocking(false, restoreErr);
 		}
 		if (restoreErr || (err && err != boost::asio::error::would_block && err != boost::asio::error::try_again)) {
@@ -98,8 +94,6 @@ public:
 			address = boost::asio::ip::address_v4(ip.toV4());
 		}
 		boost::system::error_code err;
-		// The error is checked through the output parameter.
-		// NOLINTNEXTLINE(bugprone-unused-return-value)
 		socket.connect(ip::tcp::endpoint(address, toAddr.port), err);
 		if (err) {
 			co_return Reference<IConnection>();
