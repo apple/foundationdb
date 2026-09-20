@@ -399,33 +399,16 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		}
 	}
 
-	static Future<Void> expectConsumerError(Reference<NativeCdcConsumer> consumer, int code, bool acknowledge = false) {
+	template <class T>
+	static Future<Void> expectError(Future<T> operation, int code) {
 		bool failed = false;
 		try {
-			if (acknowledge) {
-				co_await consumer->acknowledge();
-			} else {
-				co_await consumer->consume();
-			}
+			co_await operation;
 		} catch (Error& error) {
 			if (error.code() == error_code_actor_cancelled) {
 				throw;
 			}
 			ASSERT_EQ(error.code(), code);
-			failed = true;
-		}
-		ASSERT(failed);
-	}
-
-	static Future<Void> expectRegistrationCollision(Future<CDCStreamId> registration) {
-		bool failed = false;
-		try {
-			co_await registration;
-		} catch (Error& error) {
-			if (error.code() == error_code_actor_cancelled) {
-				throw;
-			}
-			ASSERT_EQ(error.code(), error_code_client_invalid_operation);
 			failed = true;
 		}
 		ASSERT(failed);
@@ -439,13 +422,14 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		const std::vector<Key> splitPoints{ key("m"_sr), key("t"_sr) };
 		phase("OrdinaryRegistration");
 		const CDCStreamId ordinaryId = co_await registerNativeCdcStreamClient(cx, name, ranges);
-		co_await expectRegistrationCollision(registerNativeCdcOrderedStreamClient(cx, name, ranges, splitPoints));
+		co_await expectError(registerNativeCdcOrderedStreamClient(cx, name, ranges, splitPoints),
+		                     error_code_client_invalid_operation);
 		ASSERT_EQ(co_await registerNativeCdcStreamClient(cx, name, ranges), ordinaryId);
 		co_await removeNativeCdcStreamClient(cx, name);
 		phase("OrderedRegistration");
 		const CDCStreamId streamId = co_await registerNativeCdcOrderedStreamClient(cx, name, ranges, splitPoints);
 		ASSERT_NE(streamId, ordinaryId);
-		co_await expectRegistrationCollision(registerNativeCdcStreamClient(cx, name, ranges));
+		co_await expectError(registerNativeCdcStreamClient(cx, name, ranges), error_code_client_invalid_operation);
 		ASSERT_EQ(co_await registerNativeCdcOrderedStreamClient(cx, name, ranges, splitPoints), streamId);
 		const std::vector<CDCStreamId> partitions = co_await readPartitions(cx, streamId);
 		phase("WaitForOwners");
@@ -529,11 +513,11 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		co_await verifyCommonMinimum(cx, partitions, consumer->position().lastConsumedVersion + 1);
 		phase("StaleResume");
 		Reference<NativeCdcConsumer> stale = resumeNativeCdcConsumer(cx, checkpoint);
-		co_await expectConsumerError(stale, error_code_transaction_too_old);
+		co_await expectError(stale->consume(), error_code_transaction_too_old);
 		phase("Removal");
 		co_await removeNativeCdcStreamClient(cx, name);
-		co_await expectConsumerError(consumer, error_code_client_invalid_operation);
-		co_await expectConsumerError(consumer, error_code_client_invalid_operation, true);
+		co_await expectError(consumer->consume(), error_code_client_invalid_operation);
+		co_await expectError(consumer->acknowledge(), error_code_client_invalid_operation);
 		phase("Cleanup");
 		co_await waitForCleanup(cx, streamId, partitions);
 		ASSERT((co_await listNativeCdcStreamsClient(cx)).empty());

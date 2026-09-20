@@ -144,6 +144,46 @@ Future<Tag> getNativeCdcCurrentTag(Transaction* tr, CDCStreamId streamId) {
 	co_return decodeCDCTagHistoryKey(history.front().key).tag;
 }
 
+Future<Void> readNativeCdcCurrentTags(Transaction* tr,
+                                      std::unordered_map<CDCStreamId, Tag>* currentTags,
+                                      NativeCdcIdentifierAllocator* allocator = nullptr) {
+	std::set<CDCStreamId> activeStreamIds;
+	Key begin = cdcStreamKeys.begin;
+	while (begin < cdcStreamKeys.end) {
+		RangeResult streams = co_await tr->getRange(KeyRangeRef(begin, cdcStreamKeys.end), CLIENT_KNOBS->TOO_MANY);
+		for (const auto& kv : streams) {
+			const CDCStreamId streamId = decodeCDCStreamKey(kv.key);
+			activeStreamIds.insert(streamId);
+			if (allocator) {
+				allocator->observeStreamId(streamId);
+			}
+		}
+		if (!streams.more) {
+			break;
+		}
+		begin = keyAfter(streams.back().key);
+	}
+
+	begin = cdcTagHistoryKeys.begin;
+	while (begin < cdcTagHistoryKeys.end) {
+		RangeResult histories =
+		    co_await tr->getRange(KeyRangeRef(begin, cdcTagHistoryKeys.end), CLIENT_KNOBS->TOO_MANY);
+		for (const auto& kv : histories) {
+			const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(kv.key);
+			if (allocator) {
+				allocator->observeStreamId(history.streamId);
+			}
+			if (activeStreamIds.contains(history.streamId)) {
+				(*currentTags)[history.streamId] = history.tag;
+			}
+		}
+		if (!histories.more) {
+			break;
+		}
+		begin = keyAfter(histories.back().key);
+	}
+}
+
 Future<Optional<UID>> getNativeCdcProxyAssignmentForTag(Transaction* tr, Tag targetTag) {
 	const Key ownerKey = cdcTagOwnerKeyFor(targetTag);
 	Optional<Value> indexedStream = co_await tr->get(ownerKey);
@@ -167,36 +207,8 @@ Future<Optional<UID>> getNativeCdcProxyAssignmentForTag(Transaction* tr, Tag tar
 		tr->clear(ownerKey);
 	}
 
-	std::set<CDCStreamId> activeStreamIds;
-	Key begin = cdcStreamKeys.begin;
-	while (begin < cdcStreamKeys.end) {
-		RangeResult streams = co_await tr->getRange(KeyRangeRef(begin, cdcStreamKeys.end), CLIENT_KNOBS->TOO_MANY);
-		for (const auto& stream : streams) {
-			activeStreamIds.insert(decodeCDCStreamKey(stream.key));
-		}
-		if (!streams.more) {
-			break;
-		}
-		begin = keyAfter(streams.back().key);
-	}
-
 	std::unordered_map<CDCStreamId, Tag> currentTags;
-	begin = cdcTagHistoryKeys.begin;
-	while (begin < cdcTagHistoryKeys.end) {
-		RangeResult histories =
-		    co_await tr->getRange(KeyRangeRef(begin, cdcTagHistoryKeys.end), CLIENT_KNOBS->TOO_MANY);
-		for (const auto& history : histories) {
-			const CDCTagHistoryEntry decoded = decodeCDCTagHistoryKey(history.key);
-			if (activeStreamIds.contains(decoded.streamId)) {
-				currentTags[decoded.streamId] = decoded.tag;
-			}
-		}
-		if (!histories.more) {
-			break;
-		}
-		begin = keyAfter(histories.back().key);
-	}
-
+	co_await readNativeCdcCurrentTags(tr, &currentTags);
 	for (const auto& [streamId, tag] : currentTags) {
 		if (tag == targetTag) {
 			Optional<UID> proxyId = co_await getNativeCdcProxyAssignment(tr, streamId);
@@ -208,6 +220,14 @@ Future<Optional<UID>> getNativeCdcProxyAssignmentForTag(Transaction* tr, Tag tar
 		}
 	}
 	co_return Optional<UID>();
+}
+
+void retireNativeCdcTag(Transaction* tr, Tag tag) {
+	// Dropping a history row must retain its final-pop obligation, including
+	// when another stream still protects the same tag or recovery intervenes.
+	tr->set(cdcRetiredTagPopKeyFor(tag), Value());
+	tr->atomicOp(
+	    cdcRetiredTagPopVersionKeyFor(tag), cdcVersionstampedMinVersionValue(), MutationRef::SetVersionstampedValue);
 }
 
 void signalNativeCdcProxyAssignmentChange(Transaction* tr) {
@@ -224,45 +244,15 @@ Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAlloca
 		allocator->observeStreamId(decodeCDCMaxStreamIdValue(maxStreamId.get()));
 	}
 
-	std::set<CDCStreamId> activeStreamIds;
-	Key begin = cdcStreamKeys.begin;
-	while (begin < cdcStreamKeys.end) {
-		RangeResult streams = co_await tr->getRange(KeyRangeRef(begin, cdcStreamKeys.end), CLIENT_KNOBS->TOO_MANY);
-		for (const auto& kv : streams) {
-			const CDCStreamId streamId = decodeCDCStreamKey(kv.key);
-			activeStreamIds.insert(streamId);
-			allocator->observeStreamId(streamId);
-		}
-		if (!streams.more) {
-			break;
-		}
-		begin = keyAfter(streams.back().key);
-	}
-
 	std::unordered_map<CDCStreamId, Tag> currentTags;
-	begin = cdcTagHistoryKeys.begin;
-	while (begin < cdcTagHistoryKeys.end) {
-		RangeResult histories =
-		    co_await tr->getRange(KeyRangeRef(begin, cdcTagHistoryKeys.end), CLIENT_KNOBS->TOO_MANY);
-		for (const auto& kv : histories) {
-			const CDCTagHistoryEntry history = decodeCDCTagHistoryKey(kv.key);
-			allocator->observeStreamId(history.streamId);
-			if (activeStreamIds.contains(history.streamId)) {
-				currentTags[history.streamId] = history.tag;
-			}
-		}
-		if (!histories.more) {
-			break;
-		}
-		begin = keyAfter(histories.back().key);
-	}
+	co_await readNativeCdcCurrentTags(tr, &currentTags, allocator);
 	for (const auto& tagAssignment : currentTags) {
 		allocator->observeTag(tagAssignment.second);
 	}
 	if (!currentTags.empty()) {
 		const Value generation = (co_await tr->get(cdcProxyAssignmentChangeKey)).orDefault(Value());
 		const Version readVersion = co_await tr->getReadVersion();
-		begin = cdcTagLoadKeys.begin;
+		Key begin = cdcTagLoadKeys.begin;
 		while (begin < cdcTagLoadKeys.end) {
 			RangeResult samples = co_await tr->getRange(KeyRangeRef(begin, cdcTagLoadKeys.end), CLIENT_KNOBS->TOO_MANY);
 			for (const auto& sample : samples) {
@@ -388,12 +378,7 @@ Future<bool> finishNativeCdcRetag(Transaction* tr, NativeCdcTagState expected) {
 	tr->set(cdcTagHistoryKeyFor(expected.streamId, current.get().assignment.version, current.get().assignment.tag),
 	        Value());
 	for (const Tag tag : retiredTags) {
-		// Dropping a history row must retain its final-pop obligation, including
-		// when another stream still protects the same tag or recovery intervenes.
-		tr->set(cdcRetiredTagPopKeyFor(tag), Value());
-		tr->atomicOp(cdcRetiredTagPopVersionKeyFor(tag),
-		             cdcVersionstampedMinVersionValue(),
-		             MutationRef::SetVersionstampedValue);
+		retireNativeCdcTag(tr, tag);
 	}
 	signalNativeCdcProxyAssignmentChange(tr);
 	co_return true;
@@ -648,10 +633,7 @@ Future<bool> removeNativeCdcOrderedStream(Database cx, Key name, CDCStreamId exp
 						tr.clear(ownerKey);
 					}
 				}
-				tr.set(cdcRetiredTagPopKeyFor(tag), Value());
-				tr.atomicOp(cdcRetiredTagPopVersionKeyFor(tag),
-				            cdcVersionstampedMinVersionValue(),
-				            MutationRef::SetVersionstampedValue);
+				retireNativeCdcTag(&tr, tag);
 			}
 			tr.clear(nameKey);
 			tr.clear(cdcOrderedStreamKeyFor(expectedId));
@@ -662,9 +644,7 @@ Future<bool> removeNativeCdcOrderedStream(Database cx, Key name, CDCStreamId exp
 				tr.clear(cdcMinVersionKeyFor(child));
 				tr.clear(cdcOrderedParentKeyFor(child));
 			}
-			tr.set(cdcProxyAssignmentChangeKey,
-			       BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),
-			                             IncludeVersion(ProtocolVersion::withNativeCdc())));
+			signalNativeCdcProxyAssignmentChange(&tr);
 			co_await tr.commit();
 			CODE_PROBE(true, "Ordered native CDC removal retires all partition tags atomically");
 			TraceEvent("NativeCdcOrderedStreamRemoved")
@@ -733,10 +713,7 @@ Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, 
 				if (indexedStream.present() && decodeCDCTagOwnerValue(indexedStream.get()) == streamId) {
 					tr.clear(ownerKey);
 				}
-				tr.set(cdcRetiredTagPopKeyFor(tag), Value());
-				tr.atomicOp(cdcRetiredTagPopVersionKeyFor(tag),
-				            cdcVersionstampedMinVersionValue(),
-				            MutationRef::SetVersionstampedValue);
+				retireNativeCdcTag(&tr, tag);
 			}
 			tr.clear(cdcTagHistoryRangeFor(streamId));
 			tr.clear(cdcMinVersionKeyFor(streamId));

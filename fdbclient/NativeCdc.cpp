@@ -789,11 +789,6 @@ class NativeCdcConsumer::OrderedState : public ReferenceCounted<NativeCdcConsume
 		readIndexes.clear();
 	}
 
-	bool sameMetadata(NativeCdcOrderedMetadata const& current) const {
-		return metadata.ranges() == current.ranges() && metadata.splitPoints() == current.splitPoints() &&
-		       metadata.partitions() == current.partitions();
-	}
-
 	void resetChildren(Database cx, Version position, Version acknowledged) {
 		cancelReads();
 		std::vector<UID> identities;
@@ -901,7 +896,7 @@ Future<Void> NativeCdcConsumer::initialize(Reference<NativeCdcConsumer> self) {
 		throw transaction_too_old();
 	}
 	if (resetting) {
-		if (!self->ordered->sameMetadata(snapshot.get().metadata)) {
+		if (self->ordered->metadata != snapshot.get().metadata) {
 			throw client_invalid_operation();
 		}
 	} else {
@@ -933,7 +928,7 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeOrdered(Reference<NativeCdcCon
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			const Optional<Value> value = co_await tr.get(cdcOrderedStreamKeyFor(self->currentPosition.streamId));
-			if (!value.present() || !ordered->sameMetadata(decodeCDCOrderedStreamValue(value.get()))) {
+			if (!value.present() || ordered->metadata != decodeCDCOrderedStreamValue(value.get())) {
 				throw client_invalid_operation();
 			}
 			break;
@@ -1008,13 +1003,13 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeOrdered(Reference<NativeCdcCon
 
 namespace {
 
-Future<Void> notifyOrderedNativeCdcAcknowledgement(Database cx, CDCStreamId child, Version acknowledged) {
+Future<Void> notifyNativeCdcAcknowledgement(Database cx, CDCStreamId streamId, Version acknowledged) {
 	while (true) {
-		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, child);
+		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(cx, streamId);
 		try {
 			Future<Void> changed = cx->clientInfo->onChange();
 			auto result =
-			    co_await race(throwErrorOr(proxy.ack.tryGetReply(CDCAckRequest(child, acknowledged))), changed);
+			    co_await race(throwErrorOr(proxy.ack.tryGetReply(CDCAckRequest(streamId, acknowledged))), changed);
 			if (result.index() == 0) {
 				co_return;
 			}
@@ -1048,7 +1043,7 @@ Future<Void> NativeCdcConsumer::acknowledgeOrdered(Reference<NativeCdcConsumer> 
 		}
 	});
 	for (const CDCStreamId child : ordered->metadata.partitions()) {
-		notifications.push_back(notifyOrderedNativeCdcAcknowledgement(self->cx, child, acknowledged));
+		notifications.push_back(notifyNativeCdcAcknowledgement(self->cx, child, acknowledged));
 	}
 	co_await waitForAll(notifications);
 }
@@ -1071,45 +1066,39 @@ Future<CDCConsumeReply> NativeCdcConsumer::consumeImpl(Reference<NativeCdcConsum
 			self->ordered->resetPending = true;
 		}
 	});
-	try {
-		co_await initialize(self);
-		if (self->ordered.isValid()) {
-			CDCConsumeReply reply = co_await consumeOrdered(self);
+	co_await initialize(self);
+	if (self->ordered.isValid()) {
+		CDCConsumeReply reply = co_await consumeOrdered(self);
+		completed = true;
+		co_return reply;
+	}
+	while (true) {
+		CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
+		if (rewindUnacknowledgedCursorAfterProxyReplacement(
+		        &self->currentPosition, self->lastAcknowledgedVersion, &self->deliveryProxyId, proxy.id())) {
+			self->knownAvailableThrough = self->lastAcknowledgedVersion;
+			CODE_PROBE(true, "Native CDC consumer rewinds unacknowledged cursor after proxy replacement");
+		}
+		try {
+			CDCConsumeReply reply = co_await throwErrorOr(proxy.consume.tryGetReply(
+			    CDCConsumeRequest(self->currentPosition, self->consumerId, self->replyByteLimit)));
+			if (reply.lastConsumedVersion == self->currentPosition.lastConsumedVersion && reply.mutations.empty()) {
+				// The server lease bounds abandoned long polls. Renew it transparently so the public consume
+				// operation remains a long poll without accumulating server actors after client cancellation.
+				CODE_PROBE(true, "Native CDC consume renews an idle server lease");
+				continue;
+			}
+			self->knownAvailableThrough = reply.lastConsumedVersion;
+			self->currentPosition.lastConsumedVersion = reply.lastConsumedVersion;
 			completed = true;
 			co_return reply;
-		}
-		while (true) {
-			CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
-			if (rewindUnacknowledgedCursorAfterProxyReplacement(
-			        &self->currentPosition, self->lastAcknowledgedVersion, &self->deliveryProxyId, proxy.id())) {
-				self->knownAvailableThrough = self->lastAcknowledgedVersion;
-				CODE_PROBE(true, "Native CDC consumer rewinds unacknowledged cursor after proxy replacement");
+		} catch (Error& error) {
+			if (!retryNativeCdcProxyRequest(error)) {
+				throw;
 			}
-			try {
-				CDCConsumeReply reply = co_await throwErrorOr(proxy.consume.tryGetReply(
-				    CDCConsumeRequest(self->currentPosition, self->consumerId, self->replyByteLimit)));
-				if (reply.lastConsumedVersion == self->currentPosition.lastConsumedVersion && reply.mutations.empty()) {
-					// The server lease bounds abandoned long polls. Renew it transparently so the public consume
-					// operation remains a long poll without accumulating server actors after client cancellation.
-					CODE_PROBE(true, "Native CDC consume renews an idle server lease");
-					continue;
-				}
-				self->knownAvailableThrough = reply.lastConsumedVersion;
-				self->currentPosition.lastConsumedVersion = reply.lastConsumedVersion;
-				self->operationOutstanding = false;
-				completed = true;
-				co_return reply;
-			} catch (Error& error) {
-				if (!retryNativeCdcProxyRequest(error)) {
-					throw;
-				}
-				CODE_PROBE(true, "Native CDC consume retries after proxy request failure");
-			}
-			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
+			CODE_PROBE(true, "Native CDC consume retries after proxy request failure");
 		}
-	} catch (Error&) {
-		self->operationOutstanding = false;
-		throw;
+		co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
 	}
 }
 
@@ -1131,48 +1120,26 @@ Future<Void> NativeCdcConsumer::acknowledgeImpl(Reference<NativeCdcConsumer> sel
 			self->ordered->resetPending = true;
 		}
 	});
-	try {
-		co_await initialize(self);
-		if (self->currentPosition.streamId == 0 || self->currentPosition.lastConsumedVersion < 0 ||
-		    self->currentPosition.lastConsumedVersion == std::numeric_limits<Version>::max()) {
-			throw client_invalid_operation();
-		}
-		if (self->ordered.isValid()) {
-			co_await acknowledgeOrdered(self);
-			completed = true;
-			co_return;
-		}
-		const Version acknowledgedVersion = self->currentPosition.lastConsumedVersion;
-		const Version durableMinVersion = co_await acknowledgeNativeCdcStream(
-		    self->cx, self->currentPosition.streamId, acknowledgedVersion, self->knownAvailableThrough);
-		self->lastAcknowledgedVersion = std::max(self->lastAcknowledgedVersion, durableMinVersion - 1);
-		// The durable transaction completes before the proxy RPC. FoundationDB's
-		// transaction ordering guarantees the proxy's subsequent metadata read
-		// observes this acknowledgement.
-
-		while (true) {
-			CDCProxyInterface proxy = co_await getNativeCdcStreamProxy(self->cx, self->currentPosition.streamId);
-			try {
-				Future<Void> proxyChanged = self->cx->clientInfo->onChange();
-				auto result = co_await race(throwErrorOr(proxy.ack.tryGetReply(
-				                                CDCAckRequest(self->currentPosition.streamId, acknowledgedVersion))),
-				                            proxyChanged);
-				if (result.index() == 0) {
-					self->operationOutstanding = false;
-					completed = true;
-					co_return;
-				}
-			} catch (Error& error) {
-				if (!retryNativeCdcProxyRequest(error)) {
-					throw;
-				}
-			}
-			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, self->cx->taskID);
-		}
-	} catch (Error&) {
-		self->operationOutstanding = false;
-		throw;
+	co_await initialize(self);
+	if (self->currentPosition.streamId == 0 || self->currentPosition.lastConsumedVersion < 0 ||
+	    self->currentPosition.lastConsumedVersion == std::numeric_limits<Version>::max()) {
+		throw client_invalid_operation();
 	}
+	if (self->ordered.isValid()) {
+		co_await acknowledgeOrdered(self);
+		completed = true;
+		co_return;
+	}
+	const Version acknowledgedVersion = self->currentPosition.lastConsumedVersion;
+	const Version durableMinVersion = co_await acknowledgeNativeCdcStream(
+	    self->cx, self->currentPosition.streamId, acknowledgedVersion, self->knownAvailableThrough);
+	self->lastAcknowledgedVersion = std::max(self->lastAcknowledgedVersion, durableMinVersion - 1);
+	// The durable transaction completes before the proxy RPC. FoundationDB's
+	// transaction ordering guarantees the proxy's subsequent metadata read
+	// observes this acknowledgement.
+
+	co_await notifyNativeCdcAcknowledgement(self->cx, self->currentPosition.streamId, acknowledgedVersion);
+	completed = true;
 }
 
 Future<Void> NativeCdcConsumer::acknowledge() {
