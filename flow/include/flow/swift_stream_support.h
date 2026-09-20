@@ -46,7 +46,7 @@ public:
 	void set(const void* _Nonnull pointerToContinuationInstance, FutureStream<T> fs, const void* _Nonnull thisPointer) {
 		// Verify Swift did not make a copy of the `self` value for this method
 		// call.
-		assert(this == thisPointer);
+		ASSERT_ABORT(this == thisPointer);
 
 		// FIXME: Propagate `SwiftCC` to Swift using forward
 		// 		  interop, without relying on passing it via a `void *`

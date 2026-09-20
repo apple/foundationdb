@@ -1593,7 +1593,6 @@ Future<Void> registerMockS3Server_impl(std::string ip, std::string port) {
 		TraceEvent(SevError, "MockS3ServerRegistrationFailed")
 		    .error(e)
 		    .detail("Address", serverKey)
-		    .detail("ErrorCode", e.code())
 		    .detail("ErrorName", e.name());
 		throw;
 	}

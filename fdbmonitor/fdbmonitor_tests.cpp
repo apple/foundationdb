@@ -1,6 +1,6 @@
 #include "fdbmonitor.h"
 
-#include <cassert>
+#include <cstdlib>
 #include <string>
 #include <functional>
 
@@ -125,27 +125,30 @@ void testPathOps() {
 	    testPathFunction2("parentDirectory", parentDirectory, "foo/./../foo2/./bar//", true, joinPath(cwd, "foo2/"));
 
 	printf("%d errors.\n", errors);
-	assert(errors == 0);
+	assert_msg(errors == 0, "Path operation tests failed");
 }
 
 void testEnvVarUtils() {
 	// Ensure key-value extraction works
 	const std::pair<std::string, std::string> keyValuePair1{ "FOO", "BAR" };
-	assert(keyValuePair1 == EnvVarUtils::extractKeyAndValue("FOO=BAR"));
+	assert_msg(keyValuePair1 == EnvVarUtils::extractKeyAndValue("FOO=BAR"), "Failed to extract FOO=BAR");
 	const std::pair<std::string, std::string> keyValuePair2{ "x", "y" };
-	assert(keyValuePair2 == EnvVarUtils::extractKeyAndValue("x=y"));
+	assert_msg(keyValuePair2 == EnvVarUtils::extractKeyAndValue("x=y"), "Failed to extract x=y");
 	const std::pair<std::string, std::string> keyValuePair3{ "MALLOC_CONF",
 		                                                     "prof:true,lg_prof_interval:30,prof_prefix:jeprof.out" };
-	assert(keyValuePair3 ==
-	       EnvVarUtils::extractKeyAndValue("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out"));
+	assert_msg(keyValuePair3 ==
+	               EnvVarUtils::extractKeyAndValue("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out"),
+	           "Failed to extract MALLOC_CONF");
 
 	// Ensure key-value validation passes for good inputs
-	assert(EnvVarUtils::keyValueValid("FOO=BAR", "FOO=BAR"));
-	assert(EnvVarUtils::keyValueValid("x=y", "FOO=BAR x=y"));
-	assert(EnvVarUtils::keyValueValid("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out",
-	                                  "MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out"));
-	assert(EnvVarUtils::keyValueValid("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out",
-	                                  "MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out FOO=BAR"));
+	assert_msg(EnvVarUtils::keyValueValid("FOO=BAR", "FOO=BAR"), "FOO=BAR should be valid");
+	assert_msg(EnvVarUtils::keyValueValid("x=y", "FOO=BAR x=y"), "x=y should be valid in a list");
+	assert_msg(EnvVarUtils::keyValueValid("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out",
+	                                      "MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out"),
+	           "MALLOC_CONF should be valid");
+	assert_msg(EnvVarUtils::keyValueValid("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out",
+	                                      "MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out FOO=BAR"),
+	           "MALLOC_CONF should be valid in a list");
 
 	// Ensure key-value validation fails for bad inputs
 	assert_msg(!EnvVarUtils::keyValueValid("", "FOO=BAR ="), "Key-Value can not be empty");

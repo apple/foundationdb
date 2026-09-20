@@ -153,7 +153,7 @@ class DDTeamCollectionImpl {
 					start = now();
 				}
 			} catch (Error& e) {
-				TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId).detail("Error", e.what());
+				TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId).error(e);
 			}
 		}
 	}
@@ -5337,7 +5337,7 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 	for (auto& [_, machine] : machine_info) {
 		if (machine->serversOnMachine.empty()) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
-			    .detail("Machine", machine->machineID.toString())
+			    .detail("MachineID", machine->machineID.toString())
 			    .detail("NumServersOnMachine", 0);
 			continue;
 		}
@@ -5348,7 +5348,7 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 		auto& locality = representativeServer->getLastKnownInterface().locality;
 		if (!isValidLocality(configuration.storagePolicy, locality)) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
-			    .detail("Machine", machine->machineID.toString())
+			    .detail("MachineID", machine->machineID.toString())
 			    .detail("InvalidLocality", locality.toString());
 			continue;
 		}

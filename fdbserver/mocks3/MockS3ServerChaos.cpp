@@ -345,7 +345,6 @@ Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 		TraceEvent(SevError, "MockS3ChaosServerRegistrationFailed")
 		    .error(e)
 		    .detail("Address", serverKey)
-		    .detail("ErrorCode", e.code())
 		    .detail("ErrorName", e.name());
 		throw;
 	}

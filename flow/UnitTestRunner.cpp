@@ -328,7 +328,7 @@ Future<Void> runTests(const UnitTestRunnerOptions& options,
 		    .detail("Name", test->name)
 		    .detail("File", test->file)
 		    .detail("Line", test->line)
-		    .detail("Rand", deterministicRandom()->randomInt(0, 100001));
+		    .detail("Rand", debugRandom()->randomInt(0, 100001));
 
 		Error resultCode = success();
 		double startNow = now();

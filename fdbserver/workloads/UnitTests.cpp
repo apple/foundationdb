@@ -215,7 +215,7 @@ struct UnitTestWorkload : TestWorkload {
 			    .detail("Name", test->name)
 			    .detail("File", test->file)
 			    .detail("Line", test->line)
-			    .detail("Rand", deterministicRandom()->randomInt(0, 100001));
+			    .detail("Rand", debugRandom()->randomInt(0, 100001));
 
 			Error result = success();
 			double start_now = now();
