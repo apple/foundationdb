@@ -373,16 +373,11 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await addStream(cx, KeyRange(KeyRangeRef(keyForIndex(0), keyForIndex(keyCount))));
 	}
 
-	Future<Void> initializeThroughputRetaggingStreams(Database cx) {
-		for (int i = 0; i < 4; ++i) {
+	Future<Void> initializeRetaggingStreams(Database cx) {
+		for (int i = 0; i < initialStreamCount; ++i) {
 			const Key key = keyForIndex(i);
-			co_await addStream(cx, KeyRange(KeyRangeRef(key, keyAfter(key))));
-		}
-	}
-
-	Future<Void> initializeRetaggingMemoryStreams(Database cx) {
-		for (int i = 0; i < 2; ++i) {
-			co_await addStream(cx, KeyRange(KeyRangeRef(keyForIndex(i), keyForIndex(i + 1))));
+			const Key end = testRetaggingMemoryBound ? keyForIndex(i + 1) : keyAfter(key);
+			co_await addStream(cx, KeyRange(KeyRangeRef(key, end)));
 		}
 	}
 
@@ -406,18 +401,13 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<RetagSnapshot> readRetagSnapshot(Database cx, int index, int maxStreams = 16) {
-		Transaction tr(cx);
-		while (true) {
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				co_return co_await readRetagSnapshot(&tr, index, maxStreams);
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
-		}
+		RetagSnapshot result;
+		co_await cx.run([this, &result, index, maxStreams](Transaction* tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			result = co_await readRetagSnapshot(tr, index, maxStreams);
+		});
+		co_return result;
 	}
 
 	Future<Version> writeRetagMarkers(Database cx,
@@ -529,24 +519,18 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 	Future<Void> waitForRetagLoad(Database cx, Tag coldTag, Optional<Tag> hotTag = Optional<Tag>()) {
 		const double deadline = now() + operationTimeout;
-		Transaction tr(cx);
-		while (true) {
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				if (co_await retagLoadReady(&tr, coldTag, hotTag)) {
+		co_await cx.run([this, coldTag, hotTag, deadline](Transaction* tr) -> Future<Void> {
+			while (true) {
+				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				if (co_await retagLoadReady(tr, coldTag, hotTag)) {
 					co_return;
 				}
 				ASSERT_LT(now(), deadline);
-				tr.reset();
+				tr->reset();
 				co_await delay(0.05);
-				continue;
-			} catch (Error& e) {
-				err = e;
 			}
-			co_await tr.onError(err);
-		}
+		});
 	}
 
 	Future<Void> addStreamWithRetagLoad(Database cx, KeyRange keys, Tag coldTag, Tag hotTag) {
@@ -716,20 +700,12 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> assertRetagRejected(Database cx, NativeCdcTagState expected, Tag destination) {
-		Transaction tr(cx);
-		while (true) {
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				const bool prepared = co_await retagNativeCdcStream(&tr, expected, destination);
-				ASSERT(!prepared);
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
-		}
+		co_await cx.run([expected = std::move(expected), destination](Transaction* tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			const bool prepared = co_await retagNativeCdcStream(tr, expected, destination);
+			ASSERT(!prepared);
+		});
 	}
 
 	Future<RetagSnapshot> retagAcrossConcurrentWrite(Database cx,
@@ -973,24 +949,14 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_EQ(recovered.state.minVersion, held.state.minVersion);
 		co_await drainRetagMarkers(moved, ledgers[moved], true);
 		co_await waitForCanonicalRetag(cx, moved, firstAssignment);
-		{
-			Transaction tr(cx);
-			while (true) {
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					const Optional<Value> retired = co_await tr.get(cdcRetiredTagPopKeyFor(originalTag));
-					const Optional<Value> watermark = co_await tr.get(cdcRetiredTagPopVersionKeyFor(originalTag));
-					ASSERT(retired.present() && watermark.present());
-					ASSERT_GE(decodeCDCMinVersionValue(watermark.get()), firstAssignment.version);
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
-			}
-		}
+		co_await cx.run([originalTag, firstAssignment](Transaction* tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			const Optional<Value> retired = co_await tr->get(cdcRetiredTagPopKeyFor(originalTag));
+			const Optional<Value> watermark = co_await tr->get(cdcRetiredTagPopVersionKeyFor(originalTag));
+			ASSERT(retired.present() && watermark.present());
+			ASSERT_GE(decodeCDCMinVersionValue(watermark.get()), firstAssignment.version);
+		});
 		CODE_PROBE(true, "Native CDC pending retag survives owner replacement and transaction system recovery");
 
 		// A sole hot stream cannot improve the peak by moving. Its tag now has one stream while the idle tag has three,
@@ -2780,52 +2746,37 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		stream.consumer = consumer;
 		streams.push_back(std::move(stream));
 
-		Transaction tr(cx);
-		while (true) {
-			Error err;
-			try {
-				const Optional<Value> fixture = co_await tr.get("native-cdc-e2e/restart-retag-state"_sr);
-				ASSERT(fixture.present());
-				RetagRestartMarkers markers;
-				BinaryReader reader(fixture.get(), Unversioned());
-				reader >> markers.streamId >> markers.before >> markers.cutover >> markers.after >> markers.oldTag >>
-				    markers.newTag;
-				ASSERT_EQ(markers.streamId, consumer->position().streamId);
-				const RetagSnapshot pending = co_await readRetagSnapshot(cx, 0);
-				ASSERT(pending.state.pending);
-				ASSERT_EQ(pending.history.size(), 2);
-				ASSERT_EQ(pending.history.front().tag, markers.oldTag);
-				ASSERT_EQ(pending.state.assignment.tag, markers.newTag);
-				ASSERT_EQ(pending.state.assignment.version, markers.cutover);
-				ASSERT_LT(pending.state.minVersion, markers.cutover);
-				co_return markers;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
-		}
+		RetagRestartMarkers markers;
+		co_await cx.run([this, &markers, &consumer, &cx](Transaction* tr) -> Future<Void> {
+			const Optional<Value> fixture = co_await tr->get("native-cdc-e2e/restart-retag-state"_sr);
+			ASSERT(fixture.present());
+			BinaryReader reader(fixture.get(), Unversioned());
+			reader >> markers.streamId >> markers.before >> markers.cutover >> markers.after >> markers.oldTag >>
+			    markers.newTag;
+			ASSERT_EQ(markers.streamId, consumer->position().streamId);
+			const RetagSnapshot pending = co_await readRetagSnapshot(cx, 0);
+			ASSERT(pending.state.pending);
+			ASSERT_EQ(pending.history.size(), 2);
+			ASSERT_EQ(pending.history.front().tag, markers.oldTag);
+			ASSERT_EQ(pending.state.assignment.tag, markers.newTag);
+			ASSERT_EQ(pending.state.assignment.version, markers.cutover);
+			ASSERT_LT(pending.state.minVersion, markers.cutover);
+		});
+		co_return markers;
 	}
 
 	Future<Void> finishRetaggedRestartState(Database cx, RetagRestartMarkers markers) {
 		const RetagSnapshot acknowledged = co_await readRetagSnapshot(cx, 0);
 		co_await waitForCanonicalRetag(cx, 0, acknowledged.state.assignment);
-		Transaction tr(cx);
-		while (true) {
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				const RetagSnapshot completed = co_await readRetagSnapshot(&tr, 0, 1);
-				ASSERT(!completed.state.pending);
-				ASSERT_EQ(completed.state.assignment.version, markers.cutover);
-				const bool prepared = co_await retagNativeCdcStream(&tr, completed.state, markers.oldTag);
-				ASSERT(!prepared);
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
-		}
+		co_await cx.run([this, markers](Transaction* tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			const RetagSnapshot completed = co_await readRetagSnapshot(tr, 0, 1);
+			ASSERT(!completed.state.pending);
+			ASSERT_EQ(completed.state.assignment.version, markers.cutover);
+			const bool prepared = co_await retagNativeCdcStream(tr, completed.state, markers.oldTag);
+			ASSERT(!prepared);
+		});
 		CODE_PROBE(true,
 		           "Native CDC disabled admission and balancing finish pending retags without admitting new moves");
 	}
@@ -3167,11 +3118,8 @@ public:
 		if (prepareRestartDrain) {
 			return prepareRestartDrainSetup(cx);
 		}
-		if (testThroughputRetagging) {
-			return initializeThroughputRetaggingStreams(cx);
-		}
-		if (testRetaggingMemoryBound) {
-			return initializeRetaggingMemoryStreams(cx);
+		if (testThroughputRetagging || testRetaggingMemoryBound) {
+			return initializeRetaggingStreams(cx);
 		}
 		if (testRetiredSharedTagSnapshot) {
 			return Void();

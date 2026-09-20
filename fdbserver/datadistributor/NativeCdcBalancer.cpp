@@ -609,17 +609,23 @@ NativeCdcTagState nativeCdcPolicyTestStream(CDCStreamId streamId,
 		                      pending };
 }
 
-TEST_CASE("/NativeCDC/TagBalancing/DisjointThroughput") {
-	auto model = NativeCdcLoadModel::create({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0),
-	                                          nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 0),
-	                                          nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 1) },
-	                                        SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES)
-	                 .get();
-	ASSERT_EQ(model.segmentCount(), 3);
-	ASSERT(model.setSample(0, 40000000));
-	ASSERT(model.setSample(1, 40000000));
-	ASSERT(model.setSample(2, 1000000));
+NativeCdcLoadModel nativeCdcPolicyTestModel(std::vector<NativeCdcTagState> const& streams,
+                                            std::vector<int64_t> const& samples) {
+	auto model = NativeCdcLoadModel::create(streams, SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES).get();
+	ASSERT_EQ(model.segmentCount(), samples.size());
+	for (size_t i = 0; i < samples.size(); ++i) {
+		ASSERT(model.setSample(i, samples[i]));
+	}
 	ASSERT(model.finishSamples());
+	return model;
+}
+
+TEST_CASE("/NativeCDC/TagBalancing/DisjointThroughput") {
+	auto model = nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0),
+	                                        nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 0),
+	                                        nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 1) },
+	                                      { 40000000, 40000000, 1000000 });
+	ASSERT_EQ(model.segmentCount(), 3);
 	const auto decision = model.chooseMove(1000, 2, 100, 0.2, 10000);
 	ASSERT(decision.present());
 	ASSERT_EQ(model.stream(decision.get().streamIndex).streamId, 1);
@@ -635,17 +641,11 @@ TEST_CASE("/NativeCDC/TagBalancing/DisjointThroughput") {
 TEST_CASE("/NativeCDC/TagBalancing/MultipleRanges") {
 	auto split = nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0);
 	split.ranges.emplace_back(KeyRangeRef("c"_sr, "d"_sr));
-	auto model = NativeCdcLoadModel::create({ split,
-	                                          nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 1),
-	                                          nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 0) },
-	                                        SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES)
-	                 .get();
+	auto model = nativeCdcPolicyTestModel({ split,
+	                                        nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 1),
+	                                        nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 0) },
+	                                      { 40000000, 1000000000, 40000000, 80000000 });
 	ASSERT_EQ(model.segmentCount(), 4);
-	ASSERT(model.setSample(0, 40000000));
-	ASSERT(model.setSample(1, 1000000000));
-	ASSERT(model.setSample(2, 40000000));
-	ASSERT(model.setSample(3, 80000000));
-	ASSERT(model.finishSamples());
 	ASSERT_EQ(model.loads().at(Tag(tagLocalityCDC, 0)), 160000000);
 	ASSERT_EQ(model.loads().at(Tag(tagLocalityCDC, 1)), 1000000000);
 	const auto decision = model.chooseMove(1000, 3, 0, 0, 0);
@@ -658,26 +658,18 @@ TEST_CASE("/NativeCDC/TagBalancing/MultipleRanges") {
 }
 
 TEST_CASE("/NativeCDC/TagBalancing/Overlap") {
-	auto identical = NativeCdcLoadModel::create({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0),
-	                                              nativeCdcPolicyTestStream(2, KeyRangeRef("a"_sr, "b"_sr), 0) },
-	                                            SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES)
-	                     .get();
+	auto identical = nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0),
+	                                            nativeCdcPolicyTestStream(2, KeyRangeRef("a"_sr, "b"_sr), 0) },
+	                                          { 40000000 });
 	ASSERT_EQ(identical.segmentCount(), 1);
-	ASSERT(identical.setSample(0, 40000000));
-	ASSERT(identical.finishSamples());
 	ASSERT_EQ(identical.loads().at(Tag(tagLocalityCDC, 0)), 40000000);
 	ASSERT(!identical.chooseMove(1000, 2, 0, 0, 0).present());
 
-	auto partial = NativeCdcLoadModel::create({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "d"_sr), 0),
-	                                            nativeCdcPolicyTestStream(2, KeyRangeRef("c"_sr, "f"_sr), 0),
-	                                            nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 1) },
-	                                          SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES)
-	                   .get();
+	auto partial = nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "d"_sr), 0),
+	                                          nativeCdcPolicyTestStream(2, KeyRangeRef("c"_sr, "f"_sr), 0),
+	                                          nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 1) },
+	                                        { 2000000, 3000000, 5000000 });
 	ASSERT_EQ(partial.segmentCount(), 3);
-	ASSERT(partial.setSample(0, 2000000));
-	ASSERT(partial.setSample(1, 3000000));
-	ASSERT(partial.setSample(2, 5000000));
-	ASSERT(partial.finishSamples());
 	const auto decision = partial.chooseMove(1000, 2, 0, 0.1, 1000);
 	ASSERT(decision.present());
 	ASSERT_EQ(partial.stream(decision.get().streamIndex).streamId, 1);
@@ -688,15 +680,10 @@ TEST_CASE("/NativeCDC/TagBalancing/Overlap") {
 
 TEST_CASE("/NativeCDC/TagBalancing/OwnerAndPending") {
 	auto model =
-	    NativeCdcLoadModel::create({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0, UID(1, 1), true),
-	                                 nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 0),
-	                                 nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 1, UID(2, 2)) },
-	                               SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES)
-	        .get();
-	ASSERT(model.setSample(0, 40000000));
-	ASSERT(model.setSample(1, 40000000));
-	ASSERT(model.setSample(2, 1000000));
-	ASSERT(model.finishSamples());
+	    nativeCdcPolicyTestModel({ nativeCdcPolicyTestStream(1, KeyRangeRef("a"_sr, "b"_sr), 0, UID(1, 1), true),
+	                               nativeCdcPolicyTestStream(2, KeyRangeRef("b"_sr, "c"_sr), 0),
+	                               nativeCdcPolicyTestStream(3, KeyRangeRef("x"_sr, "y"_sr), 1, UID(2, 2)) },
+	                             { 40000000, 40000000, 1000000 });
 	ASSERT(!model.chooseMove(1000, 2, 0, 0.2, 10000).present());
 	const auto decision = model.chooseMove(1000, 4, 0, 0.2, 10000);
 	ASSERT(decision.present());

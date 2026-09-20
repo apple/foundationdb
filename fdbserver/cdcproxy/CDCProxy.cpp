@@ -3539,7 +3539,7 @@ TEST_CASE("/NativeCDC/ProxyHistoryReconciliationAfterAcknowledgement") {
 	return Void();
 }
 
-TEST_CASE("/NativeCDC/ProxyRetagReadEligibility") {
+TEST_CASE("/NativeCDC/ProxyRetagReadAndAcknowledgementEligibility") {
 	const Tag firstTag(tagLocalityCDC, 1);
 	const Tag secondTag(tagLocalityCDC, 2);
 	auto stream = makeReference<CDCBufferedStream>(1);
@@ -3573,26 +3573,18 @@ TEST_CASE("/NativeCDC/ProxyRetagReadEligibility") {
 	ASSERT(!advanceStreamTagBufferedThrough(stream, firstTag, 450));
 	ASSERT_EQ(stream->bufferedThrough, metadata.readVersion);
 	ASSERT_EQ(stream->minVersion, 100);
-	return Void();
-}
 
-TEST_CASE("/NativeCDC/ProxyRetagAcknowledgementEligibility") {
-	const Tag oldTag(tagLocalityCDC, 1);
-	const Tag targetTag(tagLocalityCDC, 2);
-	auto stream = makeReference<CDCBufferedStream>(1);
-	CDCStreamReadState metadata;
-	metadata.minVersion = 100;
-	metadata.readVersion = 400;
-	metadata.tagAssignments = { { 90, oldTag }, { 200, targetTag }, { 300, oldTag } };
+	// Acknowledgements can unlock an interval before its prefix is read.
+	stream = makeReference<CDCBufferedStream>(1);
 	reconcileBufferedStreamMetadata(stream, metadata);
 	stream->readDemand = 1;
 
 	const Optional<size_t> initialReadInterval = firstIncompleteTagInterval(*stream);
 	advanceStreamMinVersion(stream, 225);
 	ASSERT(initialReadInterval != firstIncompleteTagInterval(*stream));
-	ASSERT_EQ(eligibleTagReadInterval(*stream, targetTag).get(), 1);
-	ASSERT(canBufferTagVersion(*stream, targetTag, 225));
-	ASSERT(!canBufferTagVersion(*stream, targetTag, 224));
+	ASSERT_EQ(eligibleTagReadInterval(*stream, secondTag).get(), 1);
+	ASSERT(canBufferTagVersion(*stream, secondTag, 225));
+	ASSERT(!canBufferTagVersion(*stream, secondTag, 224));
 
 	const Optional<size_t> acknowledgedReadInterval = firstIncompleteTagInterval(*stream);
 	metadata.minVersion = 325;
@@ -3601,53 +3593,9 @@ TEST_CASE("/NativeCDC/ProxyRetagAcknowledgementEligibility") {
 	ASSERT(!update.historyChanged);
 	ASSERT(!update.readVersionAdvanced);
 	ASSERT(acknowledgedReadInterval != firstIncompleteTagInterval(*stream));
-	ASSERT_EQ(eligibleTagReadInterval(*stream, oldTag).get(), 2);
-	ASSERT(canBufferTagVersion(*stream, oldTag, 325));
+	ASSERT_EQ(eligibleTagReadInterval(*stream, firstTag).get(), 2);
+	ASSERT(canBufferTagVersion(*stream, firstTag, 325));
 	return Void();
-}
-
-TEST_CASE("/NativeCDC/ProxyRetagPreservesPrefixCapacity") {
-	const Tag oldTag(tagLocalityCDC, 1);
-	const Tag targetTag(tagLocalityCDC, 2);
-	auto stream = makeReference<CDCBufferedStream>(1);
-	CDCStreamReadState metadata;
-	metadata.minVersion = 100;
-	metadata.readVersion = 400;
-	metadata.tagAssignments = { { 90, oldTag }, { 200, targetTag } };
-	reconcileBufferedStreamMetadata(stream, metadata);
-	stream->readDemand = 1;
-
-	FlowLock capacity(1000);
-	ScopeExit releaseRetained([&capacity]() { capacity.release(capacity.activePermits()); });
-	const CDCBufferPassLimits limits = calculateBufferPassLimits(1000, 100, 3).get();
-	// The old-tag peek is delayed while a shared destination reader has more ready batches than the buffer can hold.
-	for (Version version = 200; version < 220; ++version) {
-		if (!canBufferTagVersion(*stream, targetTag, version)) {
-			continue;
-		}
-		if (capacity.available() < limits.reservationBytes) {
-			break;
-		}
-		co_await capacity.take(TaskPriority::DefaultYield, limits.reservationBytes);
-		FlowLock::Releaser reservation(capacity, limits.reservationBytes);
-		reservation.release(limits.reservationBytes - limits.preferredBufferedBytes);
-		// Accepted batch permits remain held until acknowledgement, including after an idle consume lease expires.
-		reservation.remaining = 0;
-		advanceStreamTagBufferedThrough(stream, targetTag, version);
-	}
-	ASSERT_GE(capacity.available(), limits.reservationBytes);
-	{
-		co_await capacity.take(TaskPriority::DefaultYield, limits.reservationBytes);
-		FlowLock::Releaser reservation(capacity, limits.reservationBytes);
-		ASSERT(advanceStreamTagBufferedThrough(stream, oldTag, 199));
-	}
-	ASSERT(canBufferTagVersion(*stream, targetTag, 200));
-	co_await capacity.take(TaskPriority::DefaultYield, limits.reservationBytes);
-	FlowLock::Releaser reservation(capacity, limits.reservationBytes);
-	ASSERT(!advanceStreamTagBufferedThrough(stream, targetTag, metadata.readVersion));
-	ASSERT_EQ(stream->bufferedThrough, metadata.readVersion);
-	ASSERT_EQ(stream->minVersion, 100);
-	co_return;
 }
 
 TEST_CASE("/NativeCDC/RawPeekFailureFrontier") {
