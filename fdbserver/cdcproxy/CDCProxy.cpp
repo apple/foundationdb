@@ -31,6 +31,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "NativeCdcInternal.h"
+#include "fdbserver/core/NativeCdcMetadata.h"
 #include "fdbserver/cdcproxy/CDCProxy.h"
 #include "fdbserver/cdcproxy/CDCProxyTest.h"
 #include "fdbserver/core/Knobs.h"

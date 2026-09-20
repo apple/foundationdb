@@ -27,7 +27,7 @@
 #include <vector>
 
 #include "NativeCdcBalancer.h"
-#include "NativeCdcInternal.h"
+#include "fdbserver/core/NativeCdcMetadata.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/StorageServerInterface.h"

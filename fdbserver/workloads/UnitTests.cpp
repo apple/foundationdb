@@ -54,6 +54,7 @@ void forceLinkMockS3ServerTests();
 void forceLinkAuditUtilsTests();
 void forceLinkShardsAffectedByTeamFailureTests();
 void forceLinkNativeCdcBalancerTests();
+void forceLinkNativeCdcMetadataTests();
 void forceLinkClusterHealthMonitorTests();
 void forceLinkGrvQueueDelayTests();
 void forceLinkGrvProxyStarvationTests();
@@ -134,6 +135,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkAuditUtilsTests();
 		forceLinkShardsAffectedByTeamFailureTests();
 		forceLinkNativeCdcBalancerTests();
+		forceLinkNativeCdcMetadataTests();
 		forceLinkClusterHealthMonitorTests();
 		forceLinkGrvQueueDelayTests();
 		forceLinkGrvProxyStarvationTests();
