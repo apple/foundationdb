@@ -139,10 +139,10 @@ class NativeCdcInitialPlacementWorkload : public TestWorkload {
 	}
 
 	Future<Void> run(Database cx) {
-		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 2);
 		const KeyRange coldRange(KeyRangeRef(coldKey, keyAfter(coldKey)));
 		const KeyRange hotRange(KeyRangeRef(hotKey, keyAfter(hotKey)));
 		const CDCStreamId cold = co_await registerNativeCdcStreamClient(cx, coldName, { coldRange });
+		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 2);
 		const CDCStreamId hot = co_await registerNativeCdcStreamClient(cx, hotName, { hotRange });
 		const CDCStreamId duplicate = co_await registerNativeCdcStreamClient(cx, duplicateName, { coldRange });
 		const Tag coldTag = co_await readTag(cx, cold);
