@@ -7333,11 +7333,76 @@ public:
 		co_return;
 	}
 
+	// The companion to GetTeam_InFlightPenaltyCanOutweighWorstMemberRanking, at the scale that matters. The
+	// penalty only wins while the fill gap is small: because it multiplies a quantity bounded by move
+	// concurrency, while the gap this ranking reads grows without bound as a host fills, the ranking gains
+	// authority exactly as the problem gets worse. Here the gap is the one seen in production -- a member at
+	// 22.5 % free against members at 62 % on a 12 TiB host -- and it takes nearly 10 GB of per-server
+	// in-flight asymmetry to overturn, which is orders of magnitude beyond a team's share of in-flight work.
+	static Future<Void> GetTeam_WorstMemberRankingHoldsAtProductionScale() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, 6);
+
+		const int64_t MB = 1024LL * 1024;
+		const int64_t capacity = 12582912 * MB; // 12 TiB
+
+		GetStorageMetricsReply crowded;
+		crowded.capacity.bytes = capacity;
+		crowded.load.bytes = 9750000 * MB; // 22.5% free
+		crowded.available.bytes = capacity - crowded.load.bytes;
+
+		GetStorageMetricsReply empty;
+		empty.capacity.bytes = capacity;
+		empty.load.bytes = 100 * MB;
+		empty.available.bytes = capacity - empty.load.bytes;
+
+		GetStorageMetricsReply even;
+		even.capacity.bytes = capacity;
+		even.load.bytes = 4800000 * MB; // 61.9% free
+		even.available.bytes = capacity - even.load.bytes;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(4, 0), UID(5, 0), UID(6, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(1, 0)]->setMetrics(crowded);
+		collection->server_info[UID(2, 0)]->setMetrics(empty);
+		collection->server_info[UID(3, 0)]->setMetrics(empty);
+		for (int id = 4; id <= 6; ++id) {
+			collection->server_info[UID(id, 0)]->setMetrics(even);
+		}
+
+		Reference<TCTeamInfo> crowdedTeam = collection->teams[0];
+		Reference<TCTeamInfo> evenTeam = collection->teams[1];
+		const double penalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
+
+		crowdedTeam->addDataInFlightToTeam(200 * MB);
+		evenTeam->addDataInFlightToTeam(200 * MB);
+		ASSERT_GT(crowdedTeam->getLoadBytes(true, penalty, true), evenTeam->getLoadBytes(true, penalty, true));
+
+		// A whole team's worth of in-flight work, and then some, still does not overturn it.
+		evenTeam->addDataInFlightToTeam(512 * MB);
+		ASSERT_GT(crowdedTeam->getLoadBytes(true, penalty, true), evenTeam->getLoadBytes(true, penalty, true));
+
+		// The boundary is near 9900 MB per server; past it the penalty wins again, as at fixture scale.
+		evenTeam->addDataInFlightToTeam(12000 * MB);
+		ASSERT_LT(crowdedTeam->getLoadBytes(true, penalty, true), evenTeam->getLoadBytes(true, penalty, true));
+
+		// Ranking on the mean never sees the full member at all, at any in-flight level.
+		ASSERT_LT(crowdedTeam->getLoadBytes(false, penalty), evenTeam->getLoadBytes(false, penalty));
+		co_return;
+	}
+
 	// Places `rounds` shards by repeatedly asking for the least-utilized destination and charging the chosen
 	// team's members, then returns the fullest server's bytes alongside an even share of what was actually
 	// placed, so a caller can tell concentration from ordinary growth. Server 1 sits in six of the seven
-	// teams and servers 6-8 in one; returns early if nothing is eligible any more.
-	static Future<std::pair<int64_t, int64_t>> peakAfterPlacement(bool rankOnWorstMember, int rounds) {
+	// teams and servers 6-8 in one; returns early if nothing is eligible any more. `unfed` counts in-team
+	// servers that received nothing, which is how the two rankings differ in the shape of what they leave
+	// behind rather than just the height of the peak.
+	struct PlacementOutcome {
+		int64_t peak;
+		int64_t evenShare;
+		int unfed;
+	};
+	static Future<PlacementOutcome> peakAfterPlacement(bool rankOnWorstMember, int rounds) {
 		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		const int processSize = 10;
 		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
@@ -7404,10 +7469,14 @@ public:
 		for (const auto& t : teams) {
 			inTeams.insert(t.begin(), t.end());
 		}
+		int unfed = 0;
 		for (const UID& id : inTeams) {
 			peak = std::max(peak, used[id]);
+			if (used[id] == 0) {
+				unfed++;
+			}
 		}
-		co_return std::make_pair(peak, placed * shard * 3 / (int64_t)inTeams.size());
+		co_return PlacementOutcome{ peak, placed * shard * 3 / (int64_t)inTeams.size(), unfed };
 	}
 
 	// In the incident this models, each individual placement was defensible and the skew accumulated over
@@ -7422,8 +7491,8 @@ public:
 	// cutoff, so all teams take an identical multiplier of exactly 1.0.
 	static Future<Void> GetTeam_RepeatedPlacementConcentratesOnSharedMember() {
 		const int rounds = 40;
-		auto [peakMean, evenShare] = co_await peakAfterPlacement(false, rounds);
-		auto [peakWorst, evenShareWorst] = co_await peakAfterPlacement(true, rounds);
+		auto [peakMean, evenShare, unfedMean] = co_await peakAfterPlacement(false, rounds);
+		auto [peakWorst, evenShareWorst, unfedWorst] = co_await peakAfterPlacement(true, rounds);
 
 		TraceEvent("RepeatedPlacementPeak")
 		    .detail("PeakOnTeamMean", peakMean)
@@ -7436,6 +7505,30 @@ public:
 		ASSERT_GT(peakMean, evenShare);
 		// Ranking the request on its worst member lowers the peak.
 		ASSERT_LT(peakWorst, peakMean);
+	}
+
+	// Scoring by the worst member alone is not enough: every team sharing that member scores identically, and
+	// a single key keeps the incumbent on a tie, so one of those teams absorbs the writes while the emptier
+	// members of the others are never chosen. Breaking the tie on the mean separates them, which recovers the
+	// lower peak *and* keeps every server in a team being written to.
+	//
+	// Without the tie-break this fixture leaves two of its eight in-team servers with nothing.
+	static Future<Void> GetTeam_WorstMemberRankingSpreadsAcrossTiedTeams() {
+		const int rounds = 40;
+		auto [peakMean, evenShare, unfedMean] = co_await peakAfterPlacement(false, rounds);
+		auto [peakWorst, evenShareWorst, unfedWorst] = co_await peakAfterPlacement(true, rounds);
+
+		TraceEvent("RepeatedPlacementSpread")
+		    .detail("PeakOnTeamMean", peakMean)
+		    .detail("PeakOnWorstMember", peakWorst)
+		    .detail("UnfedOnTeamMean", unfedMean)
+		    .detail("UnfedOnWorstMember", unfedWorst);
+
+		// The lower peak is still the point of the change.
+		ASSERT_LT(peakWorst, peakMean);
+		// And it is not bought by starving anyone: both rankings write to every server that belongs to a team.
+		ASSERT_EQ(unfedMean, 0);
+		ASSERT_EQ(unfedWorst, 0);
 	}
 
 	// A destination team must be *fully* healthy, so during a migration a brand-new empty server whose
@@ -8209,6 +8302,14 @@ TEST_CASE("/DataDistribution/GetTeam/WorstMemberRankingExposesFullMember") {
 
 TEST_CASE("/DataDistribution/GetTeam/InFlightPenaltyCanOutweighWorstMemberRanking") {
 	co_await DDTeamCollectionUnitTest::GetTeam_InFlightPenaltyCanOutweighWorstMemberRanking();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/WorstMemberRankingHoldsAtProductionScale") {
+	co_await DDTeamCollectionUnitTest::GetTeam_WorstMemberRankingHoldsAtProductionScale();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/WorstMemberRankingSpreadsAcrossTiedTeams") {
+	co_await DDTeamCollectionUnitTest::GetTeam_WorstMemberRankingSpreadsAcrossTiedTeams();
 }
 
 TEST_CASE("/DataDistribution/GetTeam/RepeatedPlacementConcentratesOnSharedMember") {

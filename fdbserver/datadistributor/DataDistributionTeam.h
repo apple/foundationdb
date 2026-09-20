@@ -198,7 +198,17 @@ struct GetTeamRequest {
 		if (forReadBalance) {
 			res = preferLowerReadUtil ? greaterReadLoad(a, b) : lessReadLoad(a, b);
 		}
-		return res == 0 ? lessCompareByLoad(aLoadBytes, bLoadBytes) : res < 0;
+		if (res != 0) {
+			return res < 0;
+		}
+		// Scoring by the worst member makes every team sharing that member score identically -- the same
+		// integer, not merely a close one. A single key would then always keep the incumbent, so one of those
+		// teams would absorb the writes and the emptier members of the rest would never be chosen. The mean
+		// separates them, and only ever acts on an exact tie in the primary key.
+		if (rankOnWorstMember && aLoadBytes == bLoadBytes) {
+			return lessCompareByLoad(a->getLoadBytes(true, inflightPenalty), b->getLoadBytes(true, inflightPenalty));
+		}
+		return lessCompareByLoad(aLoadBytes, bLoadBytes);
 	}
 
 	std::string getDesc() const {
