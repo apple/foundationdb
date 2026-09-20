@@ -14,10 +14,15 @@ native_cdc_tag_balancing_enabled = true
 native_cdc_tag_sample_interval = 0.5
 native_cdc_tag_sample_timeout = 5.0
 native_cdc_tag_sample_max_age = 30.0
+# Keep producer measurement deterministic within this focused test window.
+storage_metrics_average_interval = 1.0
+storage_metrics_average_interval_per_kseconds = 1000.0
+bytes_written_units_per_sample = 1
 
 [[test]]
 testTitle = 'NativeCdcInitialPlacement'
 useDB = true
+runFailureWorkloads = false
 waitForQuiescenceEnd = false
 connectionFailuresDisableDuration = 1000000
 timeout = 300
