@@ -402,6 +402,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 	Future<RetagSnapshot> readRetagSnapshot(Database cx, int index, int maxStreams = 16) {
 		RetagSnapshot result;
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) Database::run owns the closure.
 		co_await cx.run([this, &result, index, maxStreams](Transaction* tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -519,6 +520,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 
 	Future<Void> waitForRetagLoad(Database cx, Tag coldTag, Optional<Tag> hotTag = Optional<Tag>()) {
 		const double deadline = now() + operationTimeout;
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) Database::run owns the closure.
 		co_await cx.run([this, coldTag, hotTag, deadline](Transaction* tr) -> Future<Void> {
 			while (true) {
 				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -700,6 +702,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> assertRetagRejected(Database cx, NativeCdcTagState expected, Tag destination) {
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) Database::run owns the closure.
 		co_await cx.run([expected = std::move(expected), destination](Transaction* tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -949,6 +952,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_EQ(recovered.state.minVersion, held.state.minVersion);
 		co_await drainRetagMarkers(moved, ledgers[moved], true);
 		co_await waitForCanonicalRetag(cx, moved, firstAssignment);
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) Database::run owns the closure.
 		co_await cx.run([originalTag, firstAssignment](Transaction* tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -2747,6 +2751,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		streams.push_back(std::move(stream));
 
 		RetagRestartMarkers markers;
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) Database::run owns the closure.
 		co_await cx.run([this, &markers, &consumer, &cx](Transaction* tr) -> Future<Void> {
 			const Optional<Value> fixture = co_await tr->get("native-cdc-e2e/restart-retag-state"_sr);
 			ASSERT(fixture.present());
@@ -2768,6 +2773,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	Future<Void> finishRetaggedRestartState(Database cx, RetagRestartMarkers markers) {
 		const RetagSnapshot acknowledged = co_await readRetagSnapshot(cx, 0);
 		co_await waitForCanonicalRetag(cx, 0, acknowledged.state.assignment);
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) Database::run owns the closure.
 		co_await cx.run([this, markers](Transaction* tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
