@@ -21,6 +21,8 @@
 #ifndef SWIFT_STREAM_SUPPORT_H
 #define SWIFT_STREAM_SUPPORT_H
 
+#ifdef WITH_SWIFT
+
 #include "swift.h"
 #include "flow.h"
 #include "unsafe_swift_compat.h"
@@ -152,5 +154,7 @@ public:
 		// TODO(swift): implement
 	}
 };
+
+#endif /* WITH_SWIFT */
 
 #endif
