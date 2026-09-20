@@ -77,8 +77,6 @@ public:
 		while (self->readBuffer.empty()) {
 			readAvailable(self);
 			if (self->readBuffer.empty()) {
-				// Give the external peer wall-clock time; simulated delay alone cannot wait for it.
-				// ast-grep-ignore: fdb-no-blocking-sleep-in-coroutine
 				threadSleep(0.01);
 				co_await delayJittered(0.1);
 			}

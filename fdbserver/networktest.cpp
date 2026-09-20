@@ -548,8 +548,6 @@ struct P2PNetworkTest {
 			} catch (Error& e) {
 				printf("Server: handshake error %s\n", e.what());
 			}
-			// Keep the one-shot TLS benchmark quiescent on this thread after its handshake.
-			// ast-grep-ignore: fdb-no-blocking-sleep-in-coroutine
 			threadSleep(11.0);
 			co_return;
 		}
