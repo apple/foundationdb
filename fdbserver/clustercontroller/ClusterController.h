@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <compare>
+#include <set>
 #include <utility>
 
 #include "fdbclient/DatabaseContext.h"
@@ -1283,9 +1284,15 @@ public:
 					                                         exclusionWorkerIds);
 
 					if (g_network->isSimulated()) {
+						// The comparison below validates the TLog method, not recruitment, so its draws must
+						// not leak into the shared stream: the replay pass of the determinism check would
+						// otherwise continue from a different stream and report a divergence the
+						// recruitment did not cause.
+						uint64_t entryFingerprint = deterministicRandom()->peek();
 						try {
 							auto testWorkers = getWorkersForTlogsBackup(
 							    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
+							deterministicRandom()->resetSeed(entryFingerprint);
 							RoleFitness testFitness(testWorkers, recruitment::TLog, testUsed);
 							RoleFitness fitness(workers, recruitment::TLog, id_used);
 
@@ -1320,6 +1327,7 @@ public:
 								ASSERT(false);
 							}
 						} catch (Error& e) {
+							deterministicRandom()->resetSeed(entryFingerprint);
 							ASSERT(false); // Simulation only validation should not throw errors
 						}
 					}
@@ -1340,9 +1348,14 @@ public:
 			    getWorkersForTlogsSimple(conf, required, desired, id_used, checkStable, dcIds, exclusionWorkerIds);
 
 			if (g_network->isSimulated()) {
+				// The comparison below validates the TLog method, not recruitment, so its draws must not
+				// leak into the shared stream: the replay pass of the determinism check would otherwise
+				// continue from a different stream and report a divergence the recruitment did not cause.
+				uint64_t entryFingerprint = deterministicRandom()->peek();
 				try {
 					auto testWorkers = getWorkersForTlogsBackup(
 					    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
+					deterministicRandom()->resetSeed(entryFingerprint);
 					RoleFitness testFitness(testWorkers, recruitment::TLog, testUsed);
 					RoleFitness fitness(workers, recruitment::TLog, id_used);
 					// backup recruitment is not required to use degraded processes that have better fitness
@@ -1362,6 +1375,7 @@ public:
 						ASSERT(false);
 					}
 				} catch (Error& e) {
+					deterministicRandom()->resetSeed(entryFingerprint);
 					ASSERT(false); // Simulation only validation should not throw errors
 				}
 			}
@@ -2238,28 +2252,36 @@ public:
 	                    recruitment::ClusterRole role,
 	                    std::string description) {
 		std::vector<WorkerDetails> firstDetails;
+		std::set<Optional<Standalone<StringRef>>> firstPids;
 		for (auto& worker : first) {
 			auto w = id_worker.find(worker.locality.processId());
 			ASSERT(w != id_worker.end());
 			auto const& [_, workerInfo] = *w;
 			ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses(), workerInfo.details.interf.locality));
 			firstDetails.push_back(workerInfo.details);
+			firstPids.insert(worker.locality.processId());
 			//TraceEvent("CompareAddressesFirst").detail(description.c_str(), w->second.details.interf.address());
 		}
 		RoleFitness firstFitness(firstDetails, role, firstUsed);
 
 		std::vector<WorkerDetails> secondDetails;
+		std::set<Optional<Standalone<StringRef>>> secondPids;
 		for (auto& worker : second) {
 			auto w = id_worker.find(worker.locality.processId());
 			ASSERT(w != id_worker.end());
 			auto const& [_, workerInfo] = *w;
 			ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses(), workerInfo.details.interf.locality));
 			secondDetails.push_back(workerInfo.details);
+			secondPids.insert(worker.locality.processId());
 			//TraceEvent("CompareAddressesSecond").detail(description.c_str(), w->second.details.interf.address());
 		}
 		RoleFitness secondFitness(secondDetails, role, secondUsed);
 
-		if (!(firstFitness == secondFitness)) {
+		// Compare the recruited process sets as well as the fitness summary: the summary alone can
+		// coincide for different sets, which would hide the divergence here and instead surface
+		// against a later role whose fitness is computed from the usage this role left behind.
+		bool sameWorkerSet = firstPids == secondPids;
+		if (!sameWorkerSet || !(firstFitness == secondFitness)) {
 			auto describe = [&](const std::vector<WorkerDetails>& details,
 			                    const std::map<Optional<Standalone<StringRef>>, int>& used) {
 				std::string s;
@@ -2268,7 +2290,7 @@ public:
 				for (int i = 0; i < n; i++) {
 					auto pid = details[i].interf.locality.processId();
 					auto u = used.find(pid);
-					s += "(" + pid.get().toString() + ",fit=" +
+					s += "(" + (pid.present() ? pid.get().toString() : std::string("[not set]")) + ",fit=" +
 					     std::to_string((int)recruitment::machineClassFitness(details[i].processClass, role)) +
 					     ",used=" + (u != used.end() ? std::to_string(u->second) : std::string("?")) + ") ";
 				}
@@ -2278,6 +2300,8 @@ public:
 				return s;
 			};
 			TraceEvent(SevError, "NonDeterministicRecruitment")
+			    .detail("Kind", sameWorkerSet ? "Fitness" : "WorkerSet")
+			    .detail("Description", description)
 			    .detail("FirstFitness", firstFitness.toString())
 			    .detail("SecondFitness", secondFitness.toString())
 			    .detail("ClusterRole", role)
@@ -2337,12 +2361,12 @@ public:
 					               secondUsed,
 					               recruitment::TLog,
 					               "Satellite");
+					// Each role is compared against the usage map as it stood when that role was
+					// recruited: roles recruited later (grv proxies, resolvers) must not leak their
+					// usage into the comparison of an earlier role, which would compare it against a
+					// placement it never produced and blame it for a later divergence.
 					updateIdUsed(rep.commitProxies, firstUsed);
 					updateIdUsed(compare.commitProxies, secondUsed);
-					updateIdUsed(rep.grvProxies, firstUsed);
-					updateIdUsed(compare.grvProxies, secondUsed);
-					updateIdUsed(rep.resolvers, firstUsed);
-					updateIdUsed(compare.resolvers, secondUsed);
 					compareWorkers(req.configuration,
 					               rep.commitProxies,
 					               firstUsed,
@@ -2350,6 +2374,8 @@ public:
 					               secondUsed,
 					               recruitment::CommitProxy,
 					               "CommitProxy");
+					updateIdUsed(rep.grvProxies, firstUsed);
+					updateIdUsed(compare.grvProxies, secondUsed);
 					compareWorkers(req.configuration,
 					               rep.grvProxies,
 					               firstUsed,
@@ -2357,6 +2383,8 @@ public:
 					               secondUsed,
 					               recruitment::GrvProxy,
 					               "GrvProxy");
+					updateIdUsed(rep.resolvers, firstUsed);
+					updateIdUsed(compare.resolvers, secondUsed);
 					compareWorkers(req.configuration,
 					               rep.resolvers,
 					               firstUsed,
