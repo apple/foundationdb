@@ -81,7 +81,7 @@ CDCStreamId decodeOrderedKey(KeyRef prefix, KeyRef key) {
 		throw serialization_failed();
 	}
 	BinaryReader reader(key.removePrefix(prefix), Unversioned());
-	const CDCStreamId streamId = readScalar<CDCStreamId>(reader);
+	const auto streamId = readScalar<CDCStreamId>(reader);
 	if (streamId == 0) {
 		throw serialization_failed();
 	}
@@ -265,7 +265,7 @@ CDCStreamId decodeCDCOrderedParentValue(ValueRef value) {
 	}
 	BinaryReader reader(value, Unversioned());
 	readSchema(reader);
-	const CDCStreamId logicalId = readScalar<CDCStreamId>(reader);
+	const auto logicalId = readScalar<CDCStreamId>(reader);
 	if (logicalId == 0) {
 		throw serialization_failed();
 	}

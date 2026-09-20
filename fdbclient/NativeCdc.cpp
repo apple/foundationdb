@@ -792,6 +792,7 @@ class NativeCdcConsumer::OrderedState : public ReferenceCounted<NativeCdcConsume
 	void resetChildren(Database cx, Version position, Version acknowledged) {
 		cancelReads();
 		std::vector<UID> identities;
+		identities.reserve(children.size());
 		for (const auto& child : children) {
 			identities.push_back(child->consumerId);
 		}
