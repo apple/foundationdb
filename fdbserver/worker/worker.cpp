@@ -2087,6 +2087,8 @@ class WorkerServerCore {
 			flushTraceFileVoid();
 			setProfilingEnabled(0);
 			g_network->stop();
+			// The network has stopped, so process suspension cannot depend on its event loop.
+			// ast-grep-ignore: fdb-no-blocking-sleep-in-coroutine
 			threadSleep(req.waitForDuration);
 		}
 		if (rebootReq.checkData) {

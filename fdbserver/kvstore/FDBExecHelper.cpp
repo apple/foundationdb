@@ -233,6 +233,8 @@ Future<int> spawnProcess(std::string path,
 				// child process has not completed yet
 				if (isSync || g_network->isSimulated()) {
 					// synchronously sleep
+					// Synchronous and simulated execution must wait without advancing other actors.
+					// ast-grep-ignore: fdb-no-blocking-sleep-in-coroutine
 					threadSleep(0.1);
 				} else {
 					// yield for other actors to run
