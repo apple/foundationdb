@@ -2908,8 +2908,12 @@ public:
 		selection.selectedStreamIds.insert(1);
 		selection.selectedBytes = passLimit.preferredBufferedBytes + 1;
 		auto cursor = makeReference<CDCPrefetchTestCursor>(Void());
-		co_await test.proxy.materializeBufferSelection(
+		auto work = test.proxy.materializeBufferSelection(
 		    test.tag, cursor, 100, selection, passLimit.rawReplyBytes, reservation, limit, Never());
+		// Waiting for an incremental reservation would deadlock against the other reader's held capacity.
+		ASSERT(work.isReady());
+		ASSERT(work.get() == CDCBufferTagPassResult::RETRY);
+		ASSERT_EQ(test.tag->nextPassReservation, passLimit.rawReplyBytes + selection.selectedBytes);
 		ASSERT_EQ(test.proxy.bufferLock.waiters(), 0);
 		ASSERT_EQ(test.proxy.bufferLock.activePermits(), limit);
 		ASSERT(stream->mutations.empty());
@@ -3044,6 +3048,9 @@ TEST_CASE("/NativeCDC/PrefetchDeclinesQueuedCapacity") {
 	return CDCProxyPrefetchTest::capacity(true);
 }
 TEST_CASE("/NativeCDC/PrefetchDeclinesExtraCapacity") {
+	return CDCProxyPrefetchTest::extraCapacity();
+}
+TEST_CASE("/NativeCDC/DemandRetriesExpandedReservation") {
 	return CDCProxyPrefetchTest::extraCapacity();
 }
 TEST_CASE("/NativeCDC/PrefetchRefreshCancels") {
