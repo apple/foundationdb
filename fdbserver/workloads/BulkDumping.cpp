@@ -499,6 +499,9 @@ struct BulkDumping : TestWorkload {
 			co_await setKeys(cx, kvs);
 		}
 
+		// We should either be running a dump and using that Job ID, or skipping the dump and running a pre-provided job ID.
+		ASSERT(sourceJobId.empty() == runDump);
+
 		// Cleanup any leftover state from previous test iterations BEFORE starting work
 		// This ensures we start clean even if a previous iteration timed out or crashed
 		if (bulkLoadTransportMethod == BulkLoadTransportMethod::BLOBSTORE && g_network->isSimulated()) {
