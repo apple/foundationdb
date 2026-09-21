@@ -477,15 +477,15 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				    .suppressFor(10.0)
 				    .detail("PeerAddr", lastAddress)
 				    .detail("PeerAddress", lastAddress);
+				continue;
 			}
 			if (peer->lastLoggedTime <= 0.0) {
 				peer->lastLoggedTime = peer->lastConnectTime;
 			}
 
-			if (peer && (peer->pingLatencies.getPopulationSize() >= 10 || peer->connectFailedCount > 0 ||
-			             peer->timeoutCount > 0)) {
+			if (now() - peer->lastLoggedTime >= 30.0 && (peer->pingLatencies.getPopulationSize() >= 10 ||
+			                                             peer->connectFailedCount > 0 || peer->timeoutCount > 0)) {
 				TraceEvent("PingLatency")
-				    .suppressFor(30.0)
 				    .detail("Elapsed", now() - peer->lastLoggedTime)
 				    .detail("PeerAddr", lastAddress)
 				    .detail("PeerAddress", lastAddress)
