@@ -69,7 +69,7 @@ struct LogfileTracer : ITracer {
 		for (const auto& event : span.events) {
 			TraceEvent(SevInfo, "TracingSpanEvent", span.context.traceID)
 			    .detail("Name", event.name)
-			    .detail("Time", event.time);
+			    .detail("SpanEventTime", event.time);
 			for (const auto& [key, value] : event.attributes) {
 				TraceEvent(SevInfo, "TracingSpanEventAttribute", span.context.traceID)
 				    .detail("Key", key)

@@ -2209,9 +2209,7 @@ Future<Void> commitBatch(ProxyCommitData* pCommitData,
 		if (err.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid)
-		    .detail("Stage", context.stage)
-		    .detail("ErrorCode", err.code());
+		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid).error(err).detail("Stage", context.stage);
 		throw failed_to_progress();
 	}
 }
