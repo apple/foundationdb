@@ -336,6 +336,32 @@ void LogSystem::stopRejoins() {
 	rejoins = Future<Void>();
 }
 
+// A completed generation stays advertised through ServerDBInfo for as long as this log system lives, even
+// after purgeOldRecoveredGenerationsCoreState() drops it from the coordinated state, because readers may
+// still be replaying it. If such a TLog restarts it returns at the same address with fresh endpoint tokens,
+// so the advertised interface must be replaced: at low replication factors a reader has no other source for
+// that generation's data, and would peek a dead endpoint forever.
+bool LogSystem::updateOldGenerationTLog(const TLogInterface& tlog) {
+	for (const auto& generation : oldLogData) {
+		for (const auto& logSet : generation.tLogs) {
+			for (const auto& logServer : logSet->logServers) {
+				if (logServer->get().id() != tlog.id()) {
+					continue;
+				}
+				if (logServer->get().present() &&
+				    logServer->get().interf().commit.getEndpoint() == tlog.commit.getEndpoint()) {
+					return false;
+				}
+				TLogInterface interf = tlog;
+				filterLocalityDataForPolicyDcAndProcess(logSet->tLogPolicy, &interf.filteredLocality);
+				logServer->setUnconditional(OptionalInterface<TLogInterface>(interf));
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 void LogSystem::addref() {
 	ReferenceCounted<LogSystem>::addref();
 }

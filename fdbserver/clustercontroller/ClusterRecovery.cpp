@@ -502,6 +502,14 @@ Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 		TLogRejoinRequest req = co_await self->clusterController.tlogRejoin.getFuture();
 		TraceEvent(SevDebug, "TLogRejoinRequestHandler")
 		    .detail("MasterLifeTime", self->dbInfo->get().masterLifetime.toString());
+		// A restarted TLog rejoins exactly once per master lifetime, so this is the only chance to pick up its
+		// new endpoints.
+		if (self->logSystem->updateOldGenerationTLog(req.myInterface)) {
+			TraceEvent("OldGenerationTLogRejoined", self->dbgid)
+			    .detail("TLog", req.myInterface.id())
+			    .detail("Address", req.myInterface.address());
+			self->registrationTrigger.trigger();
+		}
 		req.reply.send(true);
 	}
 }
@@ -510,7 +518,6 @@ Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
                                Reference<AsyncVar<Reference<LogSystem>>> oldLogSystems,
                                Future<Void> minRecoveryDuration) {
-	Future<Void> rejoinRequests = Never();
 	DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
 	DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
@@ -585,7 +592,9 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 
 		if (finalUpdate) {
 			oldLogSystems->get()->stopRejoins();
-			rejoinRequests = rejoinRequestHandler(self);
+			// Must outlive this actor: rejoins keep arriving for as long as this cluster controller advertises
+			// generations, and an unanswered one leaves the rejoining TLog re-sending forever.
+			self->addActor.send(reportErrors(rejoinRequestHandler(self), "RejoinRequestHandler", self->dbgid));
 			co_return;
 		}
 
