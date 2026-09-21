@@ -189,6 +189,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CDC_PROXY_FAILURE_COALESCE_DELAY,                       0.0 );
 	init( CDC_PROXY_POP_MIN_INTERVAL,                             0.1 ); if( randomize && buggify() ) CDC_PROXY_POP_MIN_INTERVAL = 0.01;
 	init( CDC_PROXY_POP_SCAN_INTERVAL,                            5.0 ); if( randomize && buggify() ) CDC_PROXY_POP_SCAN_INTERVAL = 0.1;
+	init( NATIVE_CDC_RETAG_CLEANUP_INTERVAL,                     30.0 );
 	init( NATIVE_CDC_TAG_BALANCING_ENABLED,                      true );
 	init( NATIVE_CDC_LIVE_RETAGGING_ENABLED,                    false );
 	init( NATIVE_CDC_TAG_SAMPLE_INTERVAL,                        30.0 );

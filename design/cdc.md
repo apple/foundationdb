@@ -488,8 +488,10 @@ rows until the durable minimum required version reaches `C`. It then atomically
 replaces them with one canonical empty-valued target row at `C` and records
 retired-pop work for the old tag. The existing shared-tag, recovery, and final-pop
 checks govern physical cleanup. This keeps history bounded even when a consumer
-stops acknowledging. Periodic reconciliation finishes pending moves after an
-acknowledgement even if its notification RPC was lost.
+stops acknowledging. A separate cleanup worker pages through durable streams;
+`NATIVE_CDC_RETAG_CLEANUP_INTERVAL` defaults to 30 seconds. Assignment changes
+trigger another traversal without restarting one in progress. Pending histories
+are revisited even when an acknowledgement notification is lost.
 
 Disabling balancing stops sampling and new moves, but not finalization of
 pending histories or retired cleanup. Disabling CDC admission also stops new
@@ -887,6 +889,15 @@ The implementation is structured around the following properties:
 * **Recovery retention:** active CDC tag history is included in recovery's
   required log data, and pending cleanup retains CDC proxy availability until
   it has been completed.
+
+`NativeCdcRetagCompatibility` commits synthetic retags around intervening user
+writes, verifies replay after proxy replacement and transaction-system recovery,
+and checks shared-tag retention and returning to an old tag. It covers the
+reader/cleanup contract without a load-driven move policy.
+`NativeCdcRetaggingMemoryBound` verifies a pending retag with a 4.5 KiB proxy
+budget and competing reader reservations, then acknowledges and checks history
+finalization and retired cleanup. Neither fixture qualifies simultaneous
+mixed-version processes or throughput under balancing.
 
 ### Retagging resource regression
 

@@ -316,42 +316,10 @@ struct NativeCdcMetadataSnapshot {
 	std::vector<NativeCdcTagState> streams;
 };
 
-class NativeCdcCleanupProgress {
-	Optional<Value> assignmentChange;
-	Key next = cdcStreamKeys.begin;
-	bool cycleComplete = false;
-	bool sawPending = false;
-	bool rescan = false;
-
-	bool sameGeneration(ValueRef generation) const {
-		return assignmentChange.present() && assignmentChange.get() == generation;
-	}
-
-public:
-	bool needsScan(ValueRef generation) const {
-		return !sameGeneration(generation) || !cycleComplete || sawPending || rescan;
-	}
-
-	Key begin() const { return cycleComplete ? Key(cdcStreamKeys.begin) : next; }
-
-	void scanned(Value generation, Key nextBegin, bool lastPage, bool pagePending) {
-		const bool continuing = assignmentChange.present() && !cycleComplete;
-		sawPending = (continuing && sawPending) || pagePending;
-		rescan = continuing && (rescan || !sameGeneration(generation));
-		assignmentChange = std::move(generation);
-		next = std::move(nextBegin);
-		cycleComplete = lastPage;
-	}
-
-	// Churn requires another traversal, not a restart that can starve later pages.
-	void changed() { rescan = true; }
-};
-
 class NativeCdcBalancer {
 	Database cx;
 	MoveKeysLock lock;
 	const DDEnabledState* ddEnabledState;
-	NativeCdcCleanupProgress cleanupProgress;
 
 	bool samplingEnabled() const {
 		return SERVER_KNOBS->NATIVE_CDC_TAG_BALANCING_ENABLED && cx->clientInfo->get().nativeCdcEnabled;
@@ -376,63 +344,6 @@ class NativeCdcBalancer {
 				const Version version = co_await tr.getReadVersion();
 				co_return Optional<NativeCdcMetadataSnapshot>(
 				    NativeCdcMetadataSnapshot{ generation, version, std::move(states.get()) });
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
-		}
-	}
-
-	Future<bool> finishPendingPage() {
-		constexpr int cleanupPageSize = 100;
-		Transaction tr(cx);
-		while (true) {
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				const Optional<Value> change = co_await tr.get(cdcProxyAssignmentChangeKey);
-				const Value generation = change.present() ? change.get() : Value();
-				if (!cleanupProgress.needsScan(generation)) {
-					co_return false;
-				}
-				const Key begin = cleanupProgress.begin();
-				const RangeResult page = co_await tr.getRange(KeyRangeRef(begin, cdcStreamKeys.end), cleanupPageSize);
-				std::vector<Future<Optional<NativeCdcTagState>>> reads;
-				for (const auto& row : page) {
-					reads.push_back(readNativeCdcTagState(&tr, decodeCDCStreamKey(row.key)));
-				}
-				const std::vector<Optional<NativeCdcTagState>> states = co_await getAll(reads);
-				int finished = 0;
-				bool pagePending = false;
-				for (const auto& state : states) {
-					if (!state.present()) {
-						// Incomplete ownership/metadata is not evidence that all transitions have drained.
-						pagePending = true;
-						continue;
-					}
-					pagePending = pagePending || state.get().pending;
-					if (state.get().pending && (co_await finishNativeCdcRetag(&tr, state.get()))) {
-						++finished;
-					}
-				}
-				if (finished == 0) {
-					cleanupProgress.scanned(generation,
-					                        page.more ? keyAfter(page.back().key) : Key(cdcStreamKeys.end),
-					                        !page.more,
-					                        pagePending);
-					co_return false;
-				}
-				co_await checkMoveKeysLock(&tr, lock, ddEnabledState);
-				co_await tr.commit();
-				cleanupProgress.scanned(generation,
-				                        page.more ? keyAfter(page.back().key) : Key(cdcStreamKeys.end),
-				                        !page.more,
-				                        pagePending);
-				cleanupProgress.changed();
-				CODE_PROBE(true, "Native CDC DD finishes acknowledged tag transitions");
-				TraceEvent("NativeCdcTagTransitionsFinished", lock.myOwner).detail("Streams", finished);
-				co_return true;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -524,8 +435,7 @@ class NativeCdcBalancer {
 	}
 
 	Future<Void> runPass() {
-		// Cleanup has its own bounded cursor: the admission/sampling envelope must not strand existing history.
-		if ((co_await finishPendingPage()) || !samplingEnabled()) {
+		if (!samplingEnabled()) {
 			co_return;
 		}
 		if (!validNativeCdcSamplingKnobs()) {
@@ -771,52 +681,6 @@ TEST_CASE("/NativeCDC/TagBalancing/ModelEntryBudget") {
 	ASSERT(!NativeCdcLoadModel::create(streams, 0).present());
 	ASSERT(!NativeCdcLoadModel::create(streams, -1).present());
 	ASSERT(NativeCdcLoadModel::create(streams, std::numeric_limits<int64_t>::max()).present());
-	return Void();
-}
-
-TEST_CASE("/NativeCDC/TagBalancing/CleanupPaging") {
-	NativeCdcCleanupProgress progress;
-	const Value firstGeneration = "first"_sr;
-	const Value secondGeneration = "second"_sr;
-	const Key nextPage = keyAfter(cdcStreamKeyFor(100));
-	ASSERT(progress.needsScan(firstGeneration));
-	ASSERT_EQ(progress.begin(), cdcStreamKeys.begin);
-	progress.scanned(firstGeneration, nextPage, false, false);
-	ASSERT(progress.needsScan(firstGeneration));
-	ASSERT_EQ(progress.begin(), nextPage);
-	progress.scanned(firstGeneration, cdcStreamKeys.end, true, true);
-	// Acknowledgements do not change the assignment generation, so pending cycles must repeat.
-	ASSERT(progress.needsScan(firstGeneration));
-	ASSERT_EQ(progress.begin(), cdcStreamKeys.begin);
-	progress.scanned(firstGeneration, cdcStreamKeys.end, true, false);
-	ASSERT(!progress.needsScan(firstGeneration));
-	ASSERT(progress.needsScan(secondGeneration));
-	ASSERT_EQ(progress.begin(), cdcStreamKeys.begin);
-	progress.changed();
-	ASSERT(progress.needsScan(firstGeneration));
-	return Void();
-}
-
-TEST_CASE("/NativeCDC/TagBalancing/CleanupProgressAcrossChurn") {
-	NativeCdcCleanupProgress progress;
-	const Value firstGeneration = "first"_sr;
-	const Value secondGeneration = "second"_sr;
-	const Value thirdGeneration = "third"_sr;
-	const Key secondPage = keyAfter(cdcStreamKeyFor(100));
-	const Key thirdPage = keyAfter(cdcStreamKeyFor(200));
-	progress.scanned(firstGeneration, secondPage, false, true);
-	progress.changed(); // A successful cleanup on the first page changes the generation.
-	ASSERT(progress.needsScan(secondGeneration));
-	ASSERT_EQ(progress.begin(), secondPage);
-	progress.scanned(secondGeneration, thirdPage, false, true);
-	progress.changed();
-	ASSERT(progress.needsScan(thirdGeneration));
-	ASSERT_EQ(progress.begin(), thirdPage);
-	progress.scanned(thirdGeneration, cdcStreamKeys.end, true, false);
-	ASSERT(progress.needsScan(thirdGeneration));
-	ASSERT_EQ(progress.begin(), cdcStreamKeys.begin);
-	progress.scanned(thirdGeneration, cdcStreamKeys.end, true, false);
-	ASSERT(!progress.needsScan(thirdGeneration));
 	return Void();
 }
 

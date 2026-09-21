@@ -25,7 +25,7 @@
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
 
-// A durable snapshot used to fence a sampled balancing decision.
+// A durable snapshot used to validate tag transitions and their finalization.
 struct NativeCdcTagState {
 	CDCStreamId streamId = 0;
 	std::vector<KeyRange> ranges;
