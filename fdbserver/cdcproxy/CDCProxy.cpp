@@ -32,7 +32,6 @@
 #include "fdbclient/SystemData.h"
 #include "NativeCdcInternal.h"
 #include "fdbserver/cdcproxy/CDCProxy.h"
-#include "fdbserver/cdcproxy/CDCProxyTest.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
@@ -1307,12 +1306,6 @@ Future<CDCBufferTagPassResult> CDCProxy::materializeBufferSelection(Reference<CD
 	} else {
 		CODE_PROBE(
 		    true, "CDC proxy materializes one stream batch larger than its peek reservation", probe::decoration::rare);
-		if (auto test = CDCProxyMaterializationTest::get()) {
-			// Poll shared simulation state without running callbacks in another simulated process.
-			while (test->holdExpansion(id, tag->tag, reservation.remaining)) {
-				co_await delay(0.01);
-			}
-		}
 		// Two readers can exhaust the budget with initial reservations and then both wait for an expansion.
 		// Drop this cursor and reservation before reacquiring the full amount in one request.
 		tag->nextPassReservation = rawPeekReservation + selection.selectedBytes;
@@ -1937,9 +1930,6 @@ Future<CDCConsumeReply> CDCProxy::consumeReply(Reference<CDCBufferedStream> stre
 	auto buffered =
 	    co_await race(waitForBufferedVersion(stream, begin), delay(SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT));
 	if (buffered.index() == 1) {
-		if (auto test = CDCProxyMaterializationTest::get()) {
-			test->recordLeaseExpiry(id);
-		}
 		CODE_PROBE(true, "CDC proxy expires an idle consume lease");
 		CDCConsumeReply reply;
 		reply.lastConsumedVersion = cursor.lastConsumedVersion;
@@ -2721,7 +2711,7 @@ public:
 		co_return;
 	}
 
-	static Future<Void> extraCapacity() {
+	static Future<Void> extraCapacity(Prefetch prefetch) {
 		CDCProxyPrefetchTest test;
 		auto stream = test.addStream(1);
 		const int64_t limit = SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES;
@@ -2741,8 +2731,12 @@ public:
 		selection.selectedStreamIds.insert(1);
 		selection.selectedBytes = passLimit.preferredBufferedBytes + 1;
 		auto cursor = makeReference<CDCPrefetchTestCursor>(Void());
-		co_await test.proxy.materializeBufferSelection(
-		    test.tag, cursor, 100, selection, passLimit.rawReplyBytes, reservation, limit, Prefetch::True, Never());
+		auto work = test.proxy.materializeBufferSelection(
+		    test.tag, cursor, 100, selection, passLimit.rawReplyBytes, reservation, limit, prefetch, Never());
+		// Waiting for an incremental reservation would deadlock against the other reader's held capacity.
+		ASSERT(work.isReady());
+		ASSERT(work.get() == CDCBufferTagPassResult::RETRY);
+		ASSERT_EQ(test.tag->nextPassReservation, passLimit.rawReplyBytes + selection.selectedBytes);
 		ASSERT_EQ(test.proxy.bufferLock.waiters(), 0);
 		ASSERT_EQ(test.proxy.bufferLock.activePermits(), limit);
 		ASSERT(stream->mutations.empty());
@@ -2873,7 +2867,10 @@ TEST_CASE("/NativeCDC/PrefetchDeclinesQueuedCapacity") {
 	return CDCProxyPrefetchTest::capacity(true);
 }
 TEST_CASE("/NativeCDC/PrefetchDeclinesExtraCapacity") {
-	return CDCProxyPrefetchTest::extraCapacity();
+	return CDCProxyPrefetchTest::extraCapacity(Prefetch::True);
+}
+TEST_CASE("/NativeCDC/DemandRetriesExpandedReservation") {
+	return CDCProxyPrefetchTest::extraCapacity(Prefetch::False);
 }
 TEST_CASE("/NativeCDC/PrefetchRefreshCancels") {
 	return CDCProxyPrefetchTest::interrupted(0);
