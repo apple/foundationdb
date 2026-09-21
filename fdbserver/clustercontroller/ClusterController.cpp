@@ -2593,6 +2593,13 @@ Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
 		}
 
 		co_await onChange;
+		// React on the next event loop turn instead of in the caller's stack. The body above updates
+		// worker priorities and completes pending worker registrations, whose continuations can draw
+		// from the deterministic generator; doing that inside whatever called desiredDcIds.set() puts
+		// those draws inside unrelated work. The recruitment determinism check is one such caller: a
+		// draw that only happens on its first pass makes the replay pick different (equally fit)
+		// workers and fail the check.
+		co_await delay(0);
 	}
 }
 
