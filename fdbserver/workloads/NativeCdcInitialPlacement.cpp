@@ -25,6 +25,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/NativeCdcMetadata.h"
 #include "fdbserver/tester/workloads.h"
 #include "flow/CodeProbe.h"
@@ -82,23 +83,24 @@ class NativeCdcInitialPlacementWorkload : public TestWorkload {
 		}
 	}
 
-	static Future<bool> usableLoad(Transaction* tr, Tag coldTag, Tag hotTag) {
+	static Future<Optional<Version>> usableLoadVersion(Transaction* tr, Tag coldTag, Tag hotTag) {
 		const Value generation = (co_await tr->get(cdcProxyAssignmentChangeKey)).orDefault(Value());
 		const Version version = co_await tr->getReadVersion();
 		const Optional<Value> coldValue = co_await tr->get(cdcTagLoadKeyFor(coldTag));
 		const Optional<Value> hotValue = co_await tr->get(cdcTagLoadKeyFor(hotTag));
 		if (!coldValue.present() || !hotValue.present()) {
-			co_return false;
+			co_return Optional<Version>();
 		}
 		const auto cold = decodeCDCTagLoadValue(coldValue.get());
 		const auto hot = decodeCDCTagLoadValue(hotValue.get());
 		for (const auto& sample : { cold, hot }) {
 			if (sample.assignmentChange != generation || sample.sampleVersion < 0 || sample.sampleVersion > version ||
 			    sample.validThrough < version || sample.bytesWrittenPerKSecond < 0) {
-				co_return false;
+				co_return Optional<Version>();
 			}
 		}
-		co_return hot.bytesWrittenPerKSecond > cold.bytesWrittenPerKSecond;
+		co_return hot.bytesWrittenPerKSecond > cold.bytesWrittenPerKSecond ? Optional<Version>(hot.sampleVersion)
+		                                                                   : Optional<Version>();
 	}
 
 	Future<CDCStreamId> registerWithLoad(Database cx, Tag coldTag, Tag hotTag) {
@@ -117,7 +119,8 @@ class NativeCdcInitialPlacementWorkload : public TestWorkload {
 					co_return streamId;
 				}
 				// Guard the actual registration snapshot: a separate readiness check can expire on recovery.
-				if (!(co_await usableLoad(&tr, coldTag, hotTag)) || cx->clientInfo->get().cdcProxies.empty()) {
+				if (!(co_await usableLoadVersion(&tr, coldTag, hotTag)).present() ||
+				    cx->clientInfo->get().cdcProxies.empty()) {
 					tr.reset();
 					co_await delay(0.1);
 					continue;
@@ -136,6 +139,48 @@ class NativeCdcInitialPlacementWorkload : public TestWorkload {
 			}
 			co_await tr.onError(error);
 		}
+	}
+
+	Future<Void> verifyLiveMovesDisabled(Database cx,
+	                                     std::vector<std::pair<CDCStreamId, Tag>> assignments,
+	                                     Tag coldTag,
+	                                     Tag hotTag) {
+		ASSERT(SERVER_KNOBS->NATIVE_CDC_TAG_BALANCING_ENABLED);
+		ASSERT(!SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED);
+		// Two disjoint hot ranges now share the old cold tag; moving the placed stream would reduce its load.
+		Future<Void> firstProducer = produceHotWrites(cx, coldKey);
+		Future<Void> secondProducer = produceHotWrites(cx, placedKey);
+		Transaction tr(cx);
+		Version previousSample = invalidVersion;
+		int sampledPasses = 0;
+		while (sampledPasses < 3) {
+			ASSERT(!firstProducer.isReady());
+			ASSERT(!secondProducer.isReady());
+			for (const auto& [streamId, tag] : assignments) {
+				ASSERT_EQ(co_await readTag(cx, streamId), tag);
+			}
+			Error error;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				const Optional<Version> sample = co_await usableLoadVersion(&tr, hotTag, coldTag);
+				if (sample.present() && sample.get() > previousSample) {
+					previousSample = sample.get();
+					++sampledPasses;
+				}
+				tr.reset();
+				co_await delay(SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_INTERVAL);
+			} catch (Error& e) {
+				error = e;
+			}
+			if (error.isValid()) {
+				co_await tr.onError(error);
+			}
+		}
+		for (const auto& [streamId, tag] : assignments) {
+			ASSERT_EQ(co_await readTag(cx, streamId), tag);
+		}
+		CODE_PROBE(true, "Native CDC placement samples do not enable live retagging");
 	}
 
 	Future<Void> run(Database cx) {
@@ -157,6 +202,12 @@ class NativeCdcInitialPlacementWorkload : public TestWorkload {
 		ASSERT_EQ(co_await readTag(cx, cold), coldTag);
 		ASSERT_EQ(co_await readTag(cx, duplicate), coldTag);
 		ASSERT_EQ(co_await readTag(cx, hot), hotTag);
+		co_await timeoutError(
+		    verifyLiveMovesDisabled(cx,
+		                            { { cold, coldTag }, { hot, hotTag }, { duplicate, coldTag }, { placed, coldTag } },
+		                            coldTag,
+		                            hotTag),
+		    operationTimeout);
 		Reference<NativeCdcConsumer> consumer = co_await createNativeCdcConsumer(cx, placedName);
 		const Value marker = "placed-stream-delivery"_sr;
 		const Version committed = co_await writeValue(cx, placedKey, marker);

@@ -7,6 +7,7 @@ faultInjection = false
 enable_native_cdc = false
 native_cdc_tag_count = 2
 native_cdc_tag_balancing_enabled = false
+native_cdc_live_retagging_enabled = false
 native_cdc_tag_sample_interval = 0.25
 
 [[test]]

@@ -438,9 +438,12 @@ still scans global metadata when the representative is absent or invalid.
 
 ### Throughput-aware placement and live retagging
 
-`NATIVE_CDC_TAG_BALANCING_ENABLED` defaults to `true` and enables the
-data-distributor controller when native CDC admission is enabled.
-It measures producer writes with the existing storage-server range metrics,
+`NATIVE_CDC_TAG_BALANCING_ENABLED` defaults to `true` and enables producer-load
+sampling for initial placement when native CDC admission is enabled. Moving an
+existing stream additionally requires `NATIVE_CDC_LIVE_RETAGGING_ENABLED`, which
+defaults to `false`. Pending-history finalization and retired-tag cleanup remain
+active when admission, sampling, or live retagging is disabled.
+The controller measures producer writes with the existing storage-server range metrics,
 not consumer read traffic. The controller divides registered ranges into
 disjoint segments and counts each tag once per segment. Candidate moves use
 the marginal load removed from the source tag and added to the destination;
@@ -840,17 +843,23 @@ consumed or removed and retired cleanup has completed. Disabling the knob stops
 new allocation but is not a rollback mechanism for already durable CDC state.
 
 Live tag balancing has an additional compatibility gate: every process that
-may serve CDC must support commit-stamped history values before
-`NATIVE_CDC_TAG_BALANCING_ENABLED` is enabled. The original `withNativeCdc`
-capability alone does not establish this. Balancing defaults to enabled and does
-not negotiate this capability automatically. Keep the knob explicitly disabled
-throughout a mixed-version rollout until all CDC-serving and recovery binaries
-support retagging. To return to pre-retag CDC binaries, first disable new
-moves, acknowledge or remove streams with pending transitions, and wait until
-all retained history rows have canonical empty values. Keep retag-capable
-replacement binaries available until that state is verified; disabling the
-knob alone does not make an older replacement safe. Downgrading to a binary
-without CDC still requires the complete stream and retired-work drain above.
+may serve CDC, including readers and recovery binaries, must support
+commit-stamped history values before `NATIVE_CDC_LIVE_RETAGGING_ENABLED` is
+enabled. The original `withNativeCdc` capability alone does not establish this,
+and this capability is not negotiated automatically. Live retagging defaults
+to disabled; leave it disabled throughout a mixed-version rollout. Initial
+placement can continue sampling with `NATIVE_CDC_TAG_BALANCING_ENABLED` enabled.
+
+A release that includes retag-aware readers, routing, recovery, retention, and
+cleanup can safely retain pending transitions when rolling back from a later
+balancing implementation. Such a rollback disables new moves while existing
+consumers advance and cleanup drains their history. To return to pre-retag CDC
+binaries, first disable new moves, acknowledge or remove streams with pending
+transitions, and wait until all retained history rows have canonical empty
+values. Keep retag-capable replacement binaries available until that state is
+verified; disabling the knob alone does not make an older replacement safe.
+Downgrading to a binary without CDC still requires the complete stream and
+retired-work drain above.
 
 ## Correctness properties
 
@@ -893,8 +902,9 @@ During a bounded acknowledgement pause, the test rereads actual TLog payloads
 on both tags, records their logical retained bytes and age, and verifies that
 they remain readable. It then acknowledges through the measured history and
 waits for TLog pop completion, history finalization, and retired metadata
-cleanup. This checks logical retention, not physical disk reclamation or an
-unconditional retention bound for an indefinitely paused consumer.
+cleanup, with production live retagging disabled throughout. This checks logical
+retention, not physical disk reclamation or an unconditional retention bound for
+an indefinitely paused consumer.
 
 This deterministic regression complements the producer-load retagging fixture.
 It does not qualify oscillating traffic during forced hot-shard relocation,

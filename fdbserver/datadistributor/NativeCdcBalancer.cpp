@@ -266,7 +266,7 @@ Version nativeCdcDurationVersions(double seconds) {
 	return static_cast<Version>(versions);
 }
 
-bool validNativeCdcBalancerKnobs() {
+bool validNativeCdcSamplingKnobs() {
 	return SERVER_KNOBS->NATIVE_CDC_TAG_MAX_STREAMS > 0 &&
 	       SERVER_KNOBS->NATIVE_CDC_TAG_MAX_STREAMS < std::numeric_limits<int>::max() &&
 	       SERVER_KNOBS->NATIVE_CDC_TAG_MODEL_MAX_ENTRIES > 0 && SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_CONCURRENCY > 0 &&
@@ -274,13 +274,16 @@ bool validNativeCdcBalancerKnobs() {
 	       std::isfinite(SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_TIMEOUT) &&
 	       SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_TIMEOUT > 0 &&
 	       std::isfinite(SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_MAX_AGE) &&
-	       SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_MAX_AGE > 0 &&
-	       std::isfinite(SERVER_KNOBS->NATIVE_CDC_TAG_MOVE_COOLDOWN) &&
+	       SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_MAX_AGE > 0 && SERVER_KNOBS->VERSIONS_PER_SECOND > 0;
+}
+
+bool validNativeCdcMoveKnobs() {
+	return std::isfinite(SERVER_KNOBS->NATIVE_CDC_TAG_MOVE_COOLDOWN) &&
 	       SERVER_KNOBS->NATIVE_CDC_TAG_MOVE_COOLDOWN >= 0 &&
 	       std::isfinite(SERVER_KNOBS->NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT) &&
 	       SERVER_KNOBS->NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT >= 0 &&
 	       SERVER_KNOBS->NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT <= 1 &&
-	       SERVER_KNOBS->NATIVE_CDC_TAG_MIN_BYTES_PER_SECOND_IMPROVEMENT >= 0 && SERVER_KNOBS->VERSIONS_PER_SECOND > 0;
+	       SERVER_KNOBS->NATIVE_CDC_TAG_MIN_BYTES_PER_SECOND_IMPROVEMENT >= 0;
 }
 
 Future<Void> sampleNativeCdcRanges(Database cx, NativeCdcLoadModel* model, size_t* nextSegment) {
@@ -497,6 +500,7 @@ class NativeCdcBalancer {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				if (!(co_await currentGeneration(&tr, snapshot.assignmentChange, snapshot.version, validThrough)) ||
+				    !SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED ||
 				    !(co_await retagNativeCdcStream(&tr, state, decision.destination))) {
 					co_return;
 				}
@@ -524,7 +528,7 @@ class NativeCdcBalancer {
 		if ((co_await finishPendingPage()) || !samplingEnabled()) {
 			co_return;
 		}
-		if (!validNativeCdcBalancerKnobs()) {
+		if (!validNativeCdcSamplingKnobs()) {
 			TraceEvent(SevWarn, "NativeCdcTagBalancerInvalidKnobs", lock.myOwner);
 			co_return;
 		}
@@ -559,6 +563,13 @@ class NativeCdcBalancer {
 			co_return;
 		}
 		if (!(co_await publishLoads(snapshot.get(), validThrough, model))) {
+			co_return;
+		}
+		if (!SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED) {
+			co_return;
+		}
+		if (!validNativeCdcMoveKnobs()) {
+			TraceEvent(SevWarn, "NativeCdcTagMoveInvalidKnobs", lock.myOwner);
 			co_return;
 		}
 		const Optional<NativeCdcRetagDecision> decision =

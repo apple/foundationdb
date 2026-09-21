@@ -907,6 +907,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> validateRetaggingMemoryBound(Database cx) {
+		ASSERT(!SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED);
 		ASSERT_EQ(streams.size(), 2);
 		const RetagSnapshot original = co_await readRetagSnapshot(cx, 0);
 		const RetagSnapshot destination = co_await readRetagSnapshot(cx, 1);
@@ -1005,6 +1006,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> validateThroughputRetagging(Database cx) {
+		ASSERT(SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED);
 		ASSERT_EQ(streams.size(), 4);
 		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 2);
 		std::vector<Reference<RetagMarkerLedger>> ledgers;
@@ -2919,6 +2921,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> finishRetaggedRestartState(Database cx, RetagRestartMarkers markers) {
+		ASSERT(!SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED);
 		const RetagSnapshot acknowledged = co_await readRetagSnapshot(cx, 0);
 		co_await waitForCanonicalRetag(cx, 0, acknowledged.state.assignment);
 		// NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) Database::run owns the closure.
