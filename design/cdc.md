@@ -430,12 +430,20 @@ still scans global metadata when the representative is absent or invalid.
 
 ### Balancing ownership between live CDC proxies
 
+Live CDC proxies can own unequal numbers of active streams. The balancer reduces
+this stream-count skew while preserving ownership of each shared current-tag
+group. It does not balance producer bytes, filtering cost, or consumer lag, and
+cannot divide one hot stream among proxies. Groups with mixed owners are left
+unchanged; repairing their ownership is outside this policy. Throughput-aware
+proxy placement needs measured load and a separate policy; the opt-in
+tag-retagging controller can inform a later version.
+
 `CDC_PROXY_REBALANCE_ENABLED` is disabled by default. When enabled, the cluster
 controller makes at most one live ownership move per
 `CDC_PROXY_REBALANCE_INTERVAL` (60 seconds by default) while fully recovered.
 It groups active streams by their current CDC tag and moves a complete group
 only when that strictly reduces the stream-count difference between two
-published proxies. A group with mixed owners is never moved. The controller
+published proxies. The controller
 skips a pass when the metadata exceeds 512 active streams or assignments, or
 2,048 tag-history rows, or one MiB in any of those three ranges. Each pass has
 a five-second transaction timeout and at most three attempts. It skips
@@ -450,11 +458,6 @@ reload from durable acknowledgement watermarks. Clients may replay delivered
 but unacknowledged mutations, as with proxy replacement. Tag routing, stream
 identities, acknowledgement, and safe-pop metadata do not change. Disabling the
 balancer or CDC admission stops future moves without requiring a stream drain.
-
-This policy balances the number of streams, not producer bytes, filtering cost,
-or consumer lag. One hot stream cannot be divided among proxies by moving its
-whole tag group. Throughput-aware proxy placement needs measured load and a
-separate policy; the opt-in tag-retagging controller can inform a later version.
 
 ### Metadata lifecycle example
 
