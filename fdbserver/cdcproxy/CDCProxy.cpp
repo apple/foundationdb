@@ -178,6 +178,7 @@ struct CDCBufferedBatch {
 struct CDCBufferedTag : ReferenceCounted<CDCBufferedTag> {
 	Tag tag;
 	bool active = true;
+	int64_t nextPassReservation = 0;
 	std::set<CDCStreamId> streamIds;
 	AsyncTrigger refresh;
 	AsyncTrigger stopped;
@@ -1305,22 +1306,11 @@ Future<CDCBufferTagPassResult> CDCProxy::materializeBufferSelection(Reference<CD
 	} else {
 		CODE_PROBE(
 		    true, "CDC proxy materializes one stream batch larger than its peek reservation", probe::decoration::rare);
-		const int64_t additionalBytes = selection.selectedBytes - materializationReservation;
-		if (prefetch && (bufferLock.waiters() != 0 || bufferLock.available() < additionalBytes)) {
-			co_return CDCBufferTagPassResult::RETRY;
-		}
-		auto exactCapacity = co_await race(bufferLock.take(TaskPriority::TLogPeekReply, additionalBytes),
-		                                   logSystem->onChange(),
-		                                   tag->stopped.onTrigger(),
-		                                   tag->refresh.onTrigger());
-		if (exactCapacity.index() == 1 || exactCapacity.index() == 3) {
-			co_return CDCBufferTagPassResult::RETRY;
-		}
-		if (exactCapacity.index() == 2) {
-			co_return CDCBufferTagPassResult::STOP;
-		}
-		reservation.remaining += additionalBytes;
-		recordBufferUsage();
+		// Two readers can exhaust the budget with initial reservations and then both wait for an expansion.
+		// Drop this cursor and reservation before reacquiring the full amount in one request.
+		tag->nextPassReservation = rawPeekReservation + selection.selectedBytes;
+		ASSERT_LE(tag->nextPassReservation, bufferLimit);
+		co_return CDCBufferTagPassResult::RETRY;
 	}
 	if (!tag->active) {
 		co_return CDCBufferTagPassResult::STOP;
@@ -1358,6 +1348,7 @@ Future<CDCBufferTagPassResult> CDCProxy::materializeBufferSelection(Reference<CD
 	reservation.remaining = 0;
 	ASSERT_LE(bufferedBytes, bufferLimit);
 	ASSERT_LE(bufferLock.activePermits(), bufferLimit);
+	tag->nextPassReservation = 0;
 	advanceTagBufferedThrough(tag, throughVersion, selection.selectedStreamIds);
 	// Every raw cursor arena is covered by rawPeekReservation only for this pass. Reopen from the shared minimum
 	// after releasing it so no cursor response remains live outside the proxy memory budget.
@@ -1413,7 +1404,7 @@ Future<CDCBufferTagPassResult> CDCProxy::bufferTagCursor(Reference<CDCBufferedTa
 	const int64_t rawPeekReservation = limits.get().rawReplyBytes;
 	const int64_t hardBufferedBatchLimit = limits.get().hardBufferedBytes;
 	const int64_t preferredBufferedBatch = limits.get().preferredBufferedBytes;
-	const int64_t passReservation = limits.get().reservationBytes;
+	const int64_t passReservation = std::max(limits.get().reservationBytes, tag->nextPassReservation);
 	if (prefetch && (bufferLock.waiters() != 0 || bufferLock.available() < passReservation)) {
 		co_return CDCBufferTagPassResult::RETRY;
 	}
@@ -2720,7 +2711,7 @@ public:
 		co_return;
 	}
 
-	static Future<Void> extraCapacity() {
+	static Future<Void> extraCapacity(Prefetch prefetch) {
 		CDCProxyPrefetchTest test;
 		auto stream = test.addStream(1);
 		const int64_t limit = SERVER_KNOBS->CDC_PROXY_BUFFER_BYTES;
@@ -2740,8 +2731,12 @@ public:
 		selection.selectedStreamIds.insert(1);
 		selection.selectedBytes = passLimit.preferredBufferedBytes + 1;
 		auto cursor = makeReference<CDCPrefetchTestCursor>(Void());
-		co_await test.proxy.materializeBufferSelection(
-		    test.tag, cursor, 100, selection, passLimit.rawReplyBytes, reservation, limit, Prefetch::True, Never());
+		auto work = test.proxy.materializeBufferSelection(
+		    test.tag, cursor, 100, selection, passLimit.rawReplyBytes, reservation, limit, prefetch, Never());
+		// Waiting for an incremental reservation would deadlock against the other reader's held capacity.
+		ASSERT(work.isReady());
+		ASSERT(work.get() == CDCBufferTagPassResult::RETRY);
+		ASSERT_EQ(test.tag->nextPassReservation, passLimit.rawReplyBytes + selection.selectedBytes);
 		ASSERT_EQ(test.proxy.bufferLock.waiters(), 0);
 		ASSERT_EQ(test.proxy.bufferLock.activePermits(), limit);
 		ASSERT(stream->mutations.empty());
@@ -2872,7 +2867,10 @@ TEST_CASE("/NativeCDC/PrefetchDeclinesQueuedCapacity") {
 	return CDCProxyPrefetchTest::capacity(true);
 }
 TEST_CASE("/NativeCDC/PrefetchDeclinesExtraCapacity") {
-	return CDCProxyPrefetchTest::extraCapacity();
+	return CDCProxyPrefetchTest::extraCapacity(Prefetch::True);
+}
+TEST_CASE("/NativeCDC/DemandRetriesExpandedReservation") {
+	return CDCProxyPrefetchTest::extraCapacity(Prefetch::False);
 }
 TEST_CASE("/NativeCDC/PrefetchRefreshCancels") {
 	return CDCProxyPrefetchTest::interrupted(0);
