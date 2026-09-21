@@ -12,6 +12,8 @@ worker_health_monitor_interval = 10
 cc_enable_worker_health_monitor = true
 cc_health_trigger_recovery = true
 cc_enable_remote_tlog_degradation_monitoring = true
+# Clogged links can be reported as disconnected instead of degraded.
+cc_enable_remote_tlog_disconnect_monitoring = true
 gray_failure_allow_remote_ss_to_complain = true
 cc_worker_health_checking_interval = 45
 cc_min_degradation_interval = 30

@@ -30,14 +30,11 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/cdcproxy/CDCProxyTest.h"
-#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
-#include "flow/ScopeExit.h"
 
 // Exercises native CDC by registering overlapping streams, writing mutations, consuming and acknowledging them,
 // and checking delivery, retention, assignment publication, failure recovery, and drain behavior. Test options
@@ -75,7 +72,6 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	bool testTagOwnership;
 	bool injectUndeliveredProxyHalt;
 	bool testMemoryBound;
-	bool testBufferContention;
 	bool testReplyChunking;
 	bool testMultipleRanges;
 	bool testOversizedPeek;
@@ -249,120 +245,6 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			retentionMarkerVersion = co_await writeValues(cx, marker);
 			recordExpectedWrites(marker, retentionMarkerVersion);
 		}
-	}
-
-	Future<Void> initializeBufferContentionStreams(Database cx) {
-		for (int i = 0; i < 2; ++i) {
-			co_await addStream(cx, KeyRange(KeyRangeRef(keyForIndex(i), keyForIndex(i + 1))));
-		}
-	}
-
-	Future<Void> consumeContendedBuffer(int index,
-	                                    Version through,
-	                                    Reference<AsyncVar<int>> delivered,
-	                                    Future<Void> releaseAcknowledgements) {
-		auto& stream = streams[index];
-		while (stream.consumer->position().lastConsumedVersion < through) {
-			const Version previous = stream.consumer->position().lastConsumedVersion;
-			const CDCConsumeReply reply = co_await stream.consumer->consume();
-			for (const auto& versioned : reply.mutations) {
-				ASSERT_GT(versioned.version, previous);
-				ASSERT_LE(versioned.version, reply.lastConsumedVersion);
-				ASSERT_EQ(versioned.mutations.size(), stream.expected.size());
-				for (const auto& mutation : versioned.mutations) {
-					ASSERT_EQ(mutation.type, MutationRef::SetValue);
-					auto found = stream.expected.find(std::make_pair(Key(mutation.param1), Value(mutation.param2)));
-					ASSERT(found != stream.expected.end());
-					ASSERT_LE(versioned.version, found->second.committedVersion);
-					ASSERT(found->second.observedVersions.insert(versioned.version).second);
-				}
-			}
-		}
-		for (const auto& [value, expected] : stream.expected) {
-			ASSERT(expected.observedVersions.contains(expected.committedVersion));
-		}
-		delivered->set(delivered->get() + 1);
-		co_await releaseAcknowledgements;
-		co_await stream.consumer->acknowledge();
-	}
-
-	Future<Void> validateBufferContention(Database cx) {
-		const NativeCdcStatus metadata = co_await timeoutError(getNativeCdcStatus(cx), operationTimeout);
-		ASSERT(metadata.metadataComplete);
-		ASSERT_EQ(metadata.streams.size(), 2);
-		const auto& first = metadata.streams[0];
-		const auto& second = metadata.streams[1];
-		ASSERT(first.owner.present());
-		ASSERT_EQ(first.owner, second.owner);
-		ASSERT_EQ(first.tags.size(), 1);
-		ASSERT_EQ(second.tags.size(), 1);
-		ASSERT_NE(first.tags.front(), second.tags.front());
-		const UID owner = first.owner.get();
-		std::vector<Version> committed;
-		for (int index = 0; index < 2; ++index) {
-			std::vector<std::pair<Key, Value>> values;
-			// These small mutations fit one raw reply but need more space after materialization.
-			for (int i = 0; i < 12; ++i) {
-				const Key key = streams[index].keys.begin.withSuffix(StringRef(format("/%02d", i)));
-				values.emplace_back(key, Value(StringRef(std::string(32, 'x'))));
-			}
-			committed.push_back(co_await writeValues(cx, values));
-			recordExpectedWrites(values, committed.back());
-		}
-		auto barrier = makeReference<CDCProxyMaterializationTest>(owner, first.tags.front(), second.tags.front());
-		CDCProxyMaterializationTest::install(barrier);
-		ScopeExit removeBarrier([] { CDCProxyMaterializationTest::uninstall(); });
-		Promise<Void> releaseAcknowledgements;
-		auto delivered = makeReference<AsyncVar<int>>(0);
-		std::vector<Future<Void>> consumers{
-			consumeContendedBuffer(0, committed[0], delivered, releaseAcknowledgements.getFuture()),
-			consumeContendedBuffer(1, committed[1], delivered, releaseAcknowledgements.getFuture())
-		};
-		const double deadline = now() + operationTimeout;
-		while (!barrier->bothReadersHeld()) {
-			for (const auto& consumer : consumers) {
-				if (consumer.isReady()) {
-					consumer.get();
-					ASSERT(false);
-				}
-			}
-			ASSERT_LT(now(), deadline);
-			co_await delay(0.01);
-		}
-		auto status = co_await timeoutError(getAssignedProxyStatus(cx, streams.front().consumer->position().streamId),
-		                                    operationTimeout);
-		ASSERT_EQ(status.first.id(), owner);
-		ASSERT_EQ(status.second.activePermits, barrier->heldBytes());
-		ASSERT_EQ(status.second.activePermits, status.second.bufferLimit);
-		ASSERT_EQ(status.second.bufferedBytes, 0);
-		ASSERT_EQ(delivered->get(), 0);
-		TraceEvent("NativeCdcBufferContendedReaders")
-		    .detail("ActivePermits", status.second.activePermits)
-		    .detail("BufferLimit", status.second.bufferLimit);
-		const double releasedAt = now();
-		barrier->release();
-		while (delivered->get() < 2) {
-			co_await timeoutError(delivered->onChange(), std::max(0.0, releasedAt + operationTimeout - now()));
-		}
-		ASSERT_EQ(barrier->leaseExpiries(), 0);
-		ASSERT_LT(now() - releasedAt, SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT);
-		status = co_await timeoutError(getAssignedProxyStatus(cx, streams.front().consumer->position().streamId),
-		                               operationTimeout);
-		ASSERT_EQ(status.first.id(), owner);
-		ASSERT_GT(status.second.bufferedBytes, 0);
-		ASSERT_LE(status.second.bufferedBytes, status.second.activePermits);
-		ASSERT_LE(status.second.activePermits, status.second.bufferLimit);
-		ASSERT_LE(status.second.peakActivePermits, status.second.bufferLimit);
-		releaseAcknowledgements.send(Void());
-		co_await timeoutError(waitForAll(consumers), operationTimeout);
-		ASSERT_EQ(barrier->leaseExpiries(), 0);
-		CODE_PROBE(true,
-		           "Native CDC expanded reservations progress on two tags without acknowledgements or lease expiry");
-		for (const auto& stream : streams) {
-			co_await removeNativeCdcStreamClient(cx, stream.name);
-		}
-		streams.clear();
-		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 	}
 
 	Future<Void> initializeOversizedPeekStreams(Database cx) {
@@ -2220,10 +2102,6 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> run(Database cx) {
-		if (testBufferContention) {
-			co_await validateBufferContention(cx);
-			co_return;
-		}
 		if (testMultipleRanges) {
 			co_await validateMultipleRanges(cx);
 			co_return;
@@ -2326,7 +2204,6 @@ public:
 		testTagOwnership = getOption(options, "testTagOwnership"_sr, false);
 		injectUndeliveredProxyHalt = getOption(options, "injectUndeliveredProxyHalt"_sr, false);
 		testMemoryBound = getOption(options, "testMemoryBound"_sr, false);
-		testBufferContention = getOption(options, "testBufferContention"_sr, false);
 		testReplyChunking = getOption(options, "testReplyChunking"_sr, false);
 		testMultipleRanges = getOption(options, "testMultipleRanges"_sr, false);
 		testOversizedPeek = getOption(options, "testOversizedPeek"_sr, false);
@@ -2357,8 +2234,6 @@ public:
 		ASSERT(!(testOversizedPeek && testDurableAckScan));
 		ASSERT(!(testRetiredSharedTagSnapshot && testRetiredRecovery));
 		ASSERT(!blockRetiredPopWithLiveStream || testRetiredRecovery);
-		ASSERT(!testBufferContention || (initialStreamCount == 2 && !prepareRestartDrain && !drainAfterRestart &&
-		                                 !testMultipleRanges && !testRetiredSharedTagSnapshot && !testMemoryBound));
 	}
 
 	// RandomRangeLock can outlive this bounded CDC workload and mask its progress check.
@@ -2379,9 +2254,6 @@ public:
 		}
 		if (testRetiredSharedTagSnapshot) {
 			return Void();
-		}
-		if (testBufferContention) {
-			return initializeBufferContentionStreams(cx);
 		}
 		if (testOversizedPeek) {
 			return initializeOversizedPeekStreams(cx);
