@@ -194,6 +194,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	bool blockRetiredPopWithLiveStream;
 	bool testRetiredSharedTagSnapshot;
 	bool testThroughputRetagging;
+	bool testRetagCompatibility;
 	bool testRetaggingMemoryBound;
 	bool prepareRestartDrain;
 	bool drainAfterRestart;
@@ -907,6 +908,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> validateRetaggingMemoryBound(Database cx) {
+		ASSERT(!SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED);
 		ASSERT_EQ(streams.size(), 2);
 		const RetagSnapshot original = co_await readRetagSnapshot(cx, 0);
 		const RetagSnapshot destination = co_await readRetagSnapshot(cx, 1);
@@ -1004,7 +1006,85 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
 	}
 
+	Future<Void> validateRetagCompatibility(Database cx) {
+		ASSERT_EQ(streams.size(), 4);
+		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 2);
+		std::vector<Reference<RetagMarkerLedger>> ledgers;
+		std::vector<RetagSnapshot> initial;
+		for (int i = 0; i < static_cast<int>(streams.size()); ++i) {
+			ledgers.push_back(makeReference<RetagMarkerLedger>(streams[i].keys.begin));
+			initial.push_back(co_await readRetagSnapshot(cx, i));
+			ASSERT(!initial.back().state.pending);
+			ASSERT_EQ(initial.back().state.proxyId, initial.front().state.proxyId);
+		}
+		const Tag originalTag = initial.front().state.assignment.tag;
+		const Tag destination(tagLocalityCDC, originalTag.id == 0 ? 1 : 0);
+		int sibling = -1;
+		for (int i = 1; i < static_cast<int>(streams.size()); ++i) {
+			if (initial[i].state.assignment.tag == originalTag) {
+				sibling = i;
+				break;
+			}
+		}
+		ASSERT_GE(sibling, 0);
+		co_await writeRetagMarkers(cx, { 0, 1, 2, 3 }, ledgers);
+		const RetagSnapshot pending = co_await retagAcrossConcurrentWrite(cx, 0, destination, ledgers);
+		co_await writeRetagMarkers(cx, { 0, 1, 2, 3 }, ledgers);
+		co_await drainRetagMarkers(0, ledgers[0], false);
+		ledgers[0]->verifyBoundary(pending.state.assignment.version);
+		const RetagSnapshot unacknowledged = co_await readRetagSnapshot(cx, 0);
+		ASSERT_EQ(unacknowledged.history.size(), 2);
+
+		const CDCProxyInterface originalOwner =
+		    co_await timeoutError(waitForAssignedProxy(cx, pending.state.streamId), operationTimeout);
+		ledgers[0]->allowReplay();
+		const int previousReplays = ledgers[0]->replayCount();
+		co_await timeoutError(haltProxyUntilReplaced(cx, originalOwner, false), operationTimeout);
+		co_await timeoutError(waitForAssignedProxy(cx, pending.state.streamId, originalOwner.id()), operationTimeout);
+		co_await forceTransactionSystemRecovery();
+		co_await writeRetagMarkers(cx, { 0, sibling }, ledgers);
+		co_await drainRetagMarkers(0, ledgers[0], false);
+		ASSERT_GT(ledgers[0]->replayCount(), previousReplays);
+		ledgers[0]->verifyBoundary(pending.state.assignment.version);
+		const RetagSnapshot recovered = co_await readRetagSnapshot(cx, 0);
+		ASSERT_EQ(recovered.state.minVersion, initial[0].state.minVersion);
+		co_await drainRetagMarkers(0, ledgers[0], true);
+		co_await waitForCanonicalRetag(cx, 0, pending.state.assignment);
+		CODE_PROBE(true, "Native CDC compatibility reader replays both retag intervals after recovery");
+
+		// An unacknowledged sibling still protects the retired tag after this stream's transition is canonical.
+		const RetagSnapshot lagging = co_await readRetagSnapshot(cx, sibling);
+		ASSERT_EQ(lagging.state.minVersion, initial[sibling].state.minVersion);
+		ASSERT_EQ(lagging.state.assignment.tag, originalTag);
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) Database::run owns the closure.
+		co_await cx.run([originalTag, pending](Transaction* tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			const Optional<Value> retired = co_await tr->get(cdcRetiredTagPopKeyFor(originalTag));
+			const Optional<Value> watermark = co_await tr->get(cdcRetiredTagPopVersionKeyFor(originalTag));
+			ASSERT(retired.present() && watermark.present());
+			ASSERT_GE(decodeCDCMinVersionValue(watermark.get()), pending.state.assignment.version);
+		});
+		const RetagSnapshot returned = co_await retagAcrossConcurrentWrite(cx, 0, originalTag, ledgers);
+		co_await writeRetagMarkers(cx, { 0 }, ledgers);
+		co_await drainRetagMarkers(0, ledgers[0], true);
+		ledgers[0]->verifyBoundary(returned.state.assignment.version);
+		co_await waitForCanonicalRetag(cx, 0, returned.state.assignment);
+		for (int i = 1; i < static_cast<int>(streams.size()); ++i) {
+			co_await drainRetagMarkers(i, ledgers[i], true);
+		}
+		CODE_PROBE(true,
+		           "Native CDC retag compatibility preserves shared-tag data and supports returning to an old tag");
+		for (const auto& stream : streams) {
+			co_await timeoutError(removeNativeCdcStreamClient(cx, stream.name), operationTimeout);
+		}
+		streams.clear();
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+		co_await timeoutError(waitForFullyRecovered(), operationTimeout);
+	}
+
 	Future<Void> validateThroughputRetagging(Database cx) {
+		ASSERT(SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED);
 		ASSERT_EQ(streams.size(), 4);
 		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 2);
 		std::vector<Reference<RetagMarkerLedger>> ledgers;
@@ -2919,6 +2999,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> finishRetaggedRestartState(Database cx, RetagRestartMarkers markers) {
+		ASSERT(!SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED);
 		const RetagSnapshot acknowledged = co_await readRetagSnapshot(cx, 0);
 		co_await waitForCanonicalRetag(cx, 0, acknowledged.state.assignment);
 		// NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) Database::run owns the closure.
@@ -3101,6 +3182,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> run(Database cx) {
+		if (testRetagCompatibility) {
+			co_await validateRetagCompatibility(cx);
+			co_return;
+		}
 		if (testThroughputRetagging) {
 			co_await validateThroughputRetagging(cx);
 			co_return;
@@ -3225,6 +3310,7 @@ public:
 		blockRetiredPopWithLiveStream = getOption(options, "blockRetiredPopWithLiveStream"_sr, false);
 		testRetiredSharedTagSnapshot = getOption(options, "testRetiredSharedTagSnapshot"_sr, false);
 		testThroughputRetagging = getOption(options, "testThroughputRetagging"_sr, false);
+		testRetagCompatibility = getOption(options, "testRetagCompatibility"_sr, false);
 		testRetaggingMemoryBound = getOption(options, "testRetaggingMemoryBound"_sr, false);
 		prepareRestartDrain = getOption(options, "prepareRestartDrain"_sr, false);
 		drainAfterRestart = getOption(options, "drainAfterRestart"_sr, false);
@@ -3247,17 +3333,24 @@ public:
 		ASSERT_GE(retentionValidationDelay, 0.0);
 		ASSERT(!(prepareRestartDrain && drainAfterRestart));
 		ASSERT(!testRetaggedRestart || prepareRestartDrain || drainAfterRestart);
-		ASSERT(!testRetagTransactionRetries || testThroughputRetagging || testRetaggedRestart);
+		ASSERT(!testRetagTransactionRetries || testThroughputRetagging || testRetagCompatibility ||
+		       testRetaggedRestart);
 		ASSERT(!(testReplyChunking && (testOversizedPeek || testDurableAckScan)));
 		ASSERT(!(testOversizedPeek && testDurableAckScan));
 		ASSERT(!(testRetiredSharedTagSnapshot && testRetiredRecovery));
 		ASSERT(!(testThroughputRetagging && testMemoryBound));
-		ASSERT(!testRetaggingMemoryBound || (!testThroughputRetagging && !testMemoryBound && !prepareRestartDrain &&
-		                                     !drainAfterRestart && initialStreamCount == 2 && keyCount >= 2));
+		ASSERT(!(testRetagCompatibility && (testThroughputRetagging || testMemoryBound)));
+		ASSERT(!testRetaggingMemoryBound ||
+		       (!testThroughputRetagging && !testRetagCompatibility && !testMemoryBound && !prepareRestartDrain &&
+		        !drainAfterRestart && initialStreamCount == 2 && keyCount >= 2));
 		ASSERT(!testThroughputRetagging ||
 		       (initialStreamCount == 4 && maxStreamCount >= 5 && keyCount >= 5 && memoryTestValueBytes >= 32 &&
 		        delayBetweenRounds > 0 && !prepareRestartDrain && !drainAfterRestart && !testRetiredSharedTagSnapshot &&
 		        !testOversizedPeek && !testReplyChunking && !testDurableAckScan));
+		ASSERT(!testRetagCompatibility ||
+		       (initialStreamCount == 4 && keyCount >= 4 && memoryTestValueBytes >= 32 && !prepareRestartDrain &&
+		        !drainAfterRestart && !testRetiredSharedTagSnapshot && !testOversizedPeek && !testReplyChunking &&
+		        !testDurableAckScan));
 		ASSERT(!blockRetiredPopWithLiveStream || testRetiredRecovery);
 		ASSERT(!testBufferContention || (initialStreamCount == 2 && !prepareRestartDrain && !drainAfterRestart &&
 		                                 !testMultipleRanges && !testRetiredSharedTagSnapshot && !testMemoryBound));
@@ -3279,7 +3372,7 @@ public:
 		if (prepareRestartDrain) {
 			return prepareRestartDrainSetup(cx);
 		}
-		if (testThroughputRetagging || testRetaggingMemoryBound) {
+		if (testThroughputRetagging || testRetagCompatibility || testRetaggingMemoryBound) {
 			return initializeRetaggingStreams(cx);
 		}
 		if (testRetiredSharedTagSnapshot) {

@@ -54,6 +54,7 @@ void forceLinkMockS3ServerTests();
 void forceLinkAuditUtilsTests();
 void forceLinkShardsAffectedByTeamFailureTests();
 void forceLinkNativeCdcBalancerTests();
+void forceLinkNativeCdcRetagCleanupTests();
 void forceLinkNativeCdcMetadataTests();
 void forceLinkNativeCdcOrderedMergeTests();
 void forceLinkNativeCdcOrderedMetadataTests();
@@ -137,6 +138,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkAuditUtilsTests();
 		forceLinkShardsAffectedByTeamFailureTests();
 		forceLinkNativeCdcBalancerTests();
+		forceLinkNativeCdcRetagCleanupTests();
 		forceLinkNativeCdcMetadataTests();
 		forceLinkNativeCdcOrderedMergeTests();
 		forceLinkNativeCdcOrderedMetadataTests();
