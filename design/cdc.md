@@ -955,7 +955,7 @@ bound.
 
 This admission check does not replace the retagging rollout requirement:
 CDC-serving and log-recovery binaries must still understand commit-stamped
-histories before balancing is enabled. Keep ordered-capable clients and proxies
+histories before live retagging is enabled. Keep ordered-capable clients and proxies
 available to drain and remove ordered streams before a rollback. Removing an
 ordered name starts ordinary retired-tag cleanup for every child; the logical
 metadata disappearing alone does not establish physical log reclamation.
