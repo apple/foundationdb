@@ -225,12 +225,13 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
   add_fdb_test(TEST_FILES fast/RangeLocking.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcEndToEnd.toml)
-  add_fdb_test(TEST_FILES fast/NativeCdcInitialPlacement.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcBuggify.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcAssignmentPublication.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcSharedTag.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcRetiredSharedTagSnapshot.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcMemoryBound.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcRetagCompatibility.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcRetaggingMemoryBound.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcBufferContention.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcReplyChunking.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcMultipleRanges.toml)
@@ -243,6 +244,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES fast/NativeCdcDisableRestart-1.toml
     fast/NativeCdcDisableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES fast/NativeCdcRetagDisableRestart-1.toml
+    fast/NativeCdcRetagDisableRestart-2.toml)
   add_fdb_test(TEST_FILES fast/RangeLockCycle.toml)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
   add_fdb_test(TEST_FILES fast/ReportConflictingKeys.toml)

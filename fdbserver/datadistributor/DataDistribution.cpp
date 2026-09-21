@@ -43,7 +43,7 @@
 #include "DDTeamCollection.h"
 #include "DataDistribution.h"
 #include "DDRelocationQueue.h"
-#include "NativeCdcBalancer.h"
+#include "NativeCdcRetagCleanup.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.h"
@@ -3051,7 +3051,7 @@ Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> readyToS
 }
 
 void addDataDistributionActors(Reference<DataDistributor> self, std::vector<Future<Void>>& actors) {
-	actors.push_back(nativeCdcBalancer(
+	actors.push_back(nativeCdcRetagCleanup(
 	    self->txnProcessor->context(), self->lock, self->context->ddEnabledState.get(), self->initialized.getFuture()));
 	if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
 		TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)

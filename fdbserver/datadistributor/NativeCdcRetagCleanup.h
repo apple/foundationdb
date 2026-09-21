@@ -1,5 +1,5 @@
 /*
- * NativeCdcBalancer.h
+ * NativeCdcRetagCleanup.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,10 +23,11 @@
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/core/MoveKeys.h"
 
-// The DD epoch fences publication of advisory producer-load samples.
-Future<Void> nativeCdcBalancer(Database cx,
-                               MoveKeysLock lock,
-                               const DDEnabledState* ddEnabledState,
-                               Future<Void> initialized);
+// The DD epoch fences finalization of acknowledged transitions. Cleanup remains
+// active while CDC admission and production of new transitions are disabled.
+Future<Void> nativeCdcRetagCleanup(Database cx,
+                                   MoveKeysLock lock,
+                                   const DDEnabledState* ddEnabledState,
+                                   Future<Void> initialized);
 
-void forceLinkNativeCdcBalancerTests();
+void forceLinkNativeCdcRetagCleanupTests();

@@ -351,19 +351,26 @@ in transaction state:
 | `\xff/cdc/name/<name>` | `CDCStreamId` | Resolves a user-visible name to its durable stream identity. |
 | `\xff/cdc/maxStreamId` | `CDCStreamId` | Allocates monotonic stream identifiers. |
 | `\xff/cdc/keys/<streamId>` | `std::vector<KeyRange>` | Stores the canonical immutable registered range set for an active stream. |
-| `\xff/cdc/tagHistory/<streamId>/<version>/<tag>` | empty | Records the CDC tag assignment history used for routing and historical reads. |
+| `\xff/cdc/tagHistory/<streamId>/<version>/<tag>` | empty or commit versionstamp | Records initial assignments and exact committed live-retag boundaries. |
 | `\xff/cdc/proxies/<streamId>/<proxyId>` | empty | Stores the CDC proxy assigned to an active stream. |
 | `\xff/cdc/proxyAssignmentChange` | version/change signal | Wakes ownership monitoring when durable assignments change. |
 | `\xff/cdc/retiredTagPop/<tag>` | empty | Retains recovery-visible pending final-pop work after removal. |
 
 Tag history is versioned so the data model can support a stream moving between
 tags without forgetting which old log streams may still contain unread
-mutations. The initial implementation writes the initial assignment and reads
-the history; dynamic throughput-driven reassignment is future work. The initial
-history entry uses the registration transaction's read version as a
+mutations. Production writers currently create only the initial assignment;
+throughput-driven reassignment is future work. The initial history entry uses
+the registration transaction's read version as a
 conservative inclusive lower bound. The versionstamped `minVersion` uses the
 commit version, and the proxy starts at the maximum of those two values, so the
 earlier history boundary cannot expose pre-registration mutations.
+
+A live retag preserves that key layout, but writes a ten-byte commit
+versionstamp in the value. Its key uses the transaction read version only to
+order successive assignments; readers use the committed version from the value
+as the exact cutover. Empty values retain their original interpretation. A
+retag transaction reads and revalidates its previous history, so its read version
+is later than that history key and the key order remains monotonic.
 
 ### Storage-backed system data
 
@@ -374,7 +381,6 @@ than transaction state:
 | --- | --- | --- |
 | `\xff\x02/cdc/minVersion/<streamId>` | `Version` | Earliest version that an active stream may still require. |
 | `\xff\x02/cdc/retiredTagPopVersion/<tag>` | `Version` | Final pop watermark required after a stream using a tag is removed. |
-| `\xff\x02/cdc/tagLoad/<tag>` | assignment generation, sample version, expiry version, sampled write rate | Advisory producer-load estimate used for placement. |
 | `\xff\x02/cdc/tagOwner/<tag>` | `CDCStreamId` | Derived representative stream used to look up a current tag's proxy owner. |
 
 The initial `minVersion` is written with a versionstamp at stream
@@ -398,11 +404,9 @@ Registration runs as a durable metadata transaction:
    same-name/same-range-set rule, even when admission is disabled.
 3. For a new name, it validates the feature knob.
 4. It allocates a new monotonically increasing `CDCStreamId`.
-5. It selects a CDC tag from `NATIVE_CDC_TAG_COUNT` tags (256 by default).
-   With fresh, complete write-load samples for the current assignment generation,
-   it chooses the least-loaded tag, breaking ties by stream count then tag ID.
-   Otherwise it uses the least populated tag, breaking ties by tag ID. An unused
-   tag has zero current load; an occupied tag without a sample has unknown load.
+5. It selects a CDC tag using current active stream counts. The allocator uses
+   the least populated tag among `NATIVE_CDC_TAG_COUNT` tags (256 by default),
+   choosing the lowest tag ID on a tie.
 6. It records the stream name, canonical ranges, initial tag history entry, and
    versionstamped initial minimum version.
 7. It records an available CDC proxy owner and signals assignment monitoring.
@@ -431,33 +435,31 @@ validation also rejects stale representatives left by older metadata writers.
 The allocator's stream-count scan remains necessary, and ownership discovery
 still scans global metadata when the representative is absent or invalid.
 
-### Throughput-aware initial placement
+### Retag compatibility and cleanup
 
-When native CDC admission and `NATIVE_CDC_TAG_BALANCING_ENABLED` are enabled,
-the data distributor samples producer writes using storage-server range metrics.
-Both sampling and load-aware registration are advisory: existing streams retain
-their original tags. The sampling knob defaults to enabled; native CDC admission
-remains disabled by default.
+A committed target history row at version `C` divides delivery into the old tag
+below `C` and the target tag starting at `C`. Consumers refresh history even
+when the owner has not changed. Delivery is bounded by the metadata snapshot's
+read version, so an old-tag read cannot skip across a cutover that committed
+after that snapshot. Existing unacknowledged delivery positions remain valid
+on the same owner. Recovery retains both required tagged log intervals.
 
-Registered ranges are divided into disjoint segments, and each tag is counted
-once per segment so overlapping streams do not inflate a shared tag's load.
-The model bounds projected coverage entries by
-`2 * streamCount * totalRangeCount` before construction. The default
-`NATIVE_CDC_TAG_MODEL_MAX_ENTRIES` budget is 2,000,000 entries; this is a
-conservative entry bound, not an exact resident-memory bound.
+Each stream has at most one pending move. Both history rows remain until its
+durable minimum required version reaches `C`. The data distributor then
+atomically replaces them with one canonical empty-valued target row at `C`
+and records retired-pop work for the old tag. Shared-tag acknowledgement,
+recovery, and final-pop checks still govern physical cleanup.
 
-Sampling also limits streams, shards, request concurrency, and elapsed time.
-The default interval is 30 seconds and sample lifetime is 90 seconds. Partial,
-failed, expired, or previous-generation samples never imply zero load.
-Publication revalidates both the assignment generation and data-distributor
-lock. Registration, removal, and proxy ownership changes invalidate existing
-comparisons. Registrations use stream counts until every occupied eligible tag
-has a fresh sample from the current generation.
+The cleanup worker pages through durable streams independently of admission
+or any future sampling/move policy. `NATIVE_CDC_RETAG_CLEANUP_INTERVAL` defaults
+to 30 seconds. Assignment changes trigger another traversal without restarting
+an in-progress traversal, and pending histories are revisited even when an
+acknowledgement notification is lost. Disabling CDC admission still allows
+existing streams and transitions to drain or be removed.
 
-`NativeCdcInitialPlacement` drives real producer writes, verifies a colder tag
-wins despite having more streams, and checks delivery through the new stream.
-Storage metrics remain write-cost estimates with their existing sampling and
-range-clear attribution semantics; they do not measure exact tagged TLog bytes.
+This compatibility foundation does not schedule new retags. Its transactional
+writer helper is exercised by simulation fixtures to create future-format
+histories, including writes between the metadata read and commit versions.
 
 ### Metadata lifecycle example
 
@@ -806,6 +808,17 @@ rollback must keep CDC-capable binaries available until those records have been
 consumed or removed and retired cleanup has completed. Disabling the knob stops
 new allocation but is not a rollback mechanism for already durable CDC state.
 
+Retag activation requires every process that may serve or recover CDC to
+understand commit-stamped history values. The original `withNativeCdc`
+capability alone does not establish this. This foundation can read, recover,
+and finalize those values without enabling a production writer, so a later
+patch can add move policy while preserving rollback to the foundation.
+Rolling back to a binary without this foundation requires disabling new moves,
+acknowledging or removing streams with pending transitions, and verifying that
+all retained history rows have canonical empty values. Keep compatible
+replacement binaries available until that state is verified. Disabling a
+writer does not itself make older readers safe.
+
 ## Correctness properties
 
 The implementation is structured around the following properties:
@@ -839,9 +852,9 @@ The design records tag history and proxy ownership in forms that support more
 complete load balancing, but the first implementation intentionally keeps
 policy simple.
 
-* Producer-write metrics are estimates with the storage-metrics sampling window.
-  Missing or stale comparisons fall back to active stream counts. Initial
-  placement does not rebalance existing streams after their loads change.
+* Tag selection is based on active stream counts, not observed byte or mutation
+  throughput. Data distribution could make equally counted tags very
+  different in cost.
 * Registration selects an available CDC proxy without balancing aggregate
   proxy throughput, buffer memory, lag, or number of active readers.
 * Assignment mutations use one coalescing change key that wakes a full durable
@@ -854,8 +867,9 @@ policy simple.
   size and lifetime limits until these paths are sharded or incrementally
   maintained.
 * There is no background process that changes a live stream's CDC tag in
-  response to load. A future implementation can use versioned tag history to
-  make such changes without losing the ability to read earlier tagged data.
+  response to load. Commit-stamped history readers, recovery, and cleanup are
+  present so a future policy can make such changes without losing earlier
+  tagged data.
 * The CDC client surface does not yet provide language-specific bindings beyond
   the C and Python APIs or a higher-level consumer checkpoint abstraction. Administrative
   status and identity-guarded removal are available through `fdbcli`.
@@ -926,7 +940,20 @@ Unit coverage checks the CDC recovery-recruitment truth table with the feature
 enabled and disabled, both with and without durable CDC state. The process-static
 knob transition is covered by a paired restart simulation that creates durable
 CDC work while enabled, restarts with registration disabled, and drains the
-existing stream and its retired state.
+existing stream and its retired state. A separate paired restart preserves a
+pending retag, consumes exact-version mutations from both sides of the cutover,
+and verifies acknowledgement-driven finalization with admission disabled.
+The same pair can run the writer phase with a newer binary and the drain phase
+with the compatibility foundation to test persisted-state rollback.
+
+`NativeCdcRetagCompatibility` commits synthetic retags around intervening user
+writes, verifies replay after proxy replacement and transaction-system recovery,
+and checks shared-tag retention and returning to an old tag. It covers the
+reader/cleanup contract without a load-driven move policy.
+`NativeCdcRetaggingMemoryBound` verifies a pending retag with a 4.5 KiB proxy
+budget and competing reader reservations, then acknowledges and checks history
+finalization and retired cleanup. Neither fixture qualifies simultaneous
+mixed-version processes or throughput under balancing.
 
 The shared-tag workload forces streams to share routing tags and verifies both
 range filtering and acknowledgement coordination. In particular, removing one
@@ -936,7 +963,8 @@ mutations needed by the remaining consumer.
 The simulation configurations enable CDC explicitly when testing these
 behaviors, while the default-disabled knob and randomized simulation admission
 exercise the requirement that clusters without active or pending CDC work do
-not carry CDC service overhead.
+not recruit CDC proxies or retain CDC TLog tags. The data distributor retains
+a low-rate metadata-generation check for pending-history finalization.
 
 ## Observability and supportability considerations
 
