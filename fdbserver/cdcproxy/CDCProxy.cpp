@@ -2975,7 +2975,7 @@ public:
 		co_await timeoutError(firstDemand && secondDemand, 5.0);
 		ASSERT_EQ(firstRetryCursor->fetchCount(), 1);
 		ASSERT_EQ(secondRetryCursor->fetchCount(), 1);
-		for (auto stream : { first, second }) {
+		for (const auto& stream : { first, second }) {
 			ASSERT_EQ(stream->bufferedThrough, 100);
 			ASSERT_EQ(stream->minVersion, 1);
 			ASSERT_EQ(stream->mutations.size(), 1);
