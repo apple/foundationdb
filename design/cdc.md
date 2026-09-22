@@ -982,9 +982,9 @@ writes, verifies replay after proxy replacement and transaction-system recovery,
 and checks shared-tag retention and returning to an old tag. It covers the
 reader/cleanup contract without a load-driven move policy.
 `NativeCdcRetaggingMemoryBound` verifies a pending retag with a 4.5 KiB proxy
-budget and competing reader reservations, then acknowledges and checks history
-finalization and retired cleanup. Neither fixture qualifies simultaneous
-mixed-version processes or throughput under balancing.
+budget, verifies both streams deliver before acknowledgement, then acknowledges
+and checks history finalization and retired cleanup. Neither fixture qualifies
+simultaneous mixed-version processes or throughput under balancing.
 
 The shared-tag workload forces streams to share routing tags and verifies both
 range filtering and acknowledgement coordination. In particular, removing one

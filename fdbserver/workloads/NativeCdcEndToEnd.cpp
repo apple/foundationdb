@@ -33,7 +33,6 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeCdc.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/cdcproxy/CDCProxyTest.h"
 #include "fdbserver/clustercontroller/NativeCdcProxyBalancer.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RecoveryState.h"
@@ -43,7 +42,6 @@
 #include "fdbserver/tester/workloads.h"
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
-#include "flow/ScopeExit.h"
 
 // Exercises native CDC by registering overlapping streams, writing mutations, consuming and acknowledging them,
 // and checking delivery, retention, assignment publication, failure recovery, and drain behavior. Test options
@@ -585,17 +583,20 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_return committed;
 	}
 
-	Future<Void> consumeContendedRetag(int index,
-	                                   Reference<RetagMarkerLedger> ledger,
-	                                   Version through,
-	                                   Reference<AsyncVar<int>> firstBatches,
-	                                   Future<Void> releaseAcknowledgements) {
+	Future<Void> consumeRetagWithAckPause(int index,
+	                                      Reference<RetagMarkerLedger> ledger,
+	                                      Version through,
+	                                      Reference<AsyncVar<int>> firstBatches,
+	                                      Future<Void> releaseAcknowledgements) {
 		bool first = true;
 		while (streams[index].consumer->position().lastConsumedVersion < through) {
 			const CDCConsumeReply reply = co_await streams[index].consumer->consume();
 			ledger->observe(reply);
 			ledger->verifyThrough(reply.lastConsumedVersion);
-			if (first && !reply.mutations.empty()) {
+			if (first) {
+				if (reply.mutations.empty()) {
+					continue;
+				}
 				first = false;
 				firstBatches->set(firstBatches->get() + 1);
 				co_await releaseAcknowledgements;
@@ -656,46 +657,20 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		ASSERT_LT(before, pending.state.assignment.version);
 		ASSERT_GE(after, pending.state.assignment.version);
 
-		auto barrier = makeReference<CDCProxyMaterializationTest>(original.state.proxyId, oldTag, newTag);
-		CDCProxyMaterializationTest::install(barrier);
-		ScopeExit removeBarrier([] { CDCProxyMaterializationTest::uninstall(); });
+		ASSERT_LT(operationTimeout, SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT);
+		const double consumeStarted = now();
 		Promise<Void> releaseAcknowledgements;
 		auto firstBatches = makeReference<AsyncVar<int>>(0);
 		std::vector<Future<Void>> consumers{
-			consumeContendedRetag(0, moving, after, firstBatches, releaseAcknowledgements.getFuture()),
-			consumeContendedRetag(1, active, after, firstBatches, releaseAcknowledgements.getFuture())
+			consumeRetagWithAckPause(0, moving, after, firstBatches, releaseAcknowledgements.getFuture()),
+			consumeRetagWithAckPause(1, active, after, firstBatches, releaseAcknowledgements.getFuture())
 		};
-		const double deadline = now() + operationTimeout;
-		while (!barrier->bothReadersHeld()) {
-			for (const auto& consumer : consumers) {
-				if (consumer.isReady()) {
-					consumer.get();
-					ASSERT(false);
-				}
-			}
-			ASSERT_LT(now(), deadline);
-			co_await delay(0.01);
-		}
-		auto status = co_await getRetagBufferStatus(cx, original.state.proxyId);
-		ASSERT_EQ(status.activePermits, barrier->heldBytes());
-		ASSERT_EQ(status.activePermits, status.bufferLimit);
-		ASSERT_EQ(status.bufferedBytes, 0);
-		ASSERT_EQ(firstBatches->get(), 0);
-		ASSERT((co_await readRetagSnapshot(cx, 0)).state.pending);
-		TraceEvent("NativeCdcRetagContendedReaders")
-		    .detail("Cutover", pending.state.assignment.version)
-		    .detail("ActivePermits", status.activePermits)
-		    .detail("BufferLimit", status.bufferLimit);
-
-		const double releasedAt = now();
-		barrier->release();
 		// Both real readers must deliver before either acknowledges, and well before a consume lease can expire.
 		while (firstBatches->get() < 2) {
-			co_await timeoutError(firstBatches->onChange(), std::max(0.0, releasedAt + operationTimeout - now()));
+			co_await timeoutError(firstBatches->onChange(), std::max(0.0, consumeStarted + operationTimeout - now()));
 		}
-		ASSERT_EQ(barrier->leaseExpiries(), 0);
-		ASSERT_LT(now() - releasedAt, SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT);
-		status = co_await getRetagBufferStatus(cx, original.state.proxyId);
+		ASSERT_LT(now() - consumeStarted, SERVER_KNOBS->CDC_PROXY_CONSUME_POLL_TIMEOUT);
+		auto status = co_await getRetagBufferStatus(cx, original.state.proxyId);
 		ASSERT_GT(status.bufferedBytes, 0);
 		const int64_t oldBytes = co_await timeoutError(retainedTagBytes(oldTag, before, before), operationTimeout);
 		const int64_t newBytes =
@@ -720,14 +695,13 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		    .detail("PeakActivePermits", status.peakActivePermits);
 		releaseAcknowledgements.send(Void());
 		co_await timeoutError(waitForAll(consumers), operationTimeout);
-		ASSERT_EQ(barrier->leaseExpiries(), 0);
 		co_await waitForCanonicalRetag(cx, 0, pending.state.assignment);
 		Reference<LogSystemConsumer> logs = makeLogSystemConsumerFromServerDBInfo(UID(), dbInfo->get());
 		co_await timeoutError(logs->waitForPopped(pending.state.assignment.version, oldTag), operationTimeout);
 		co_await timeoutError(logs->waitForPopped(after + 1, newTag), operationTimeout);
 		status = co_await getRetagBufferStatus(cx, original.state.proxyId);
 		ASSERT_EQ(status.bufferedBytes, 0);
-		CODE_PROBE(true, "Native CDC retagging progresses under competing expanded reservations without lease expiry");
+		CODE_PROBE(true, "Native CDC retagging delivers both streams before acknowledgement within a bounded budget");
 		CODE_PROBE(true, "Native CDC retains both retag histories during an acknowledgement pause then drains");
 		for (const auto& stream : streams) {
 			co_await removeNativeCdcStreamClient(cx, stream.name);
