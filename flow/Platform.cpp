@@ -3722,25 +3722,15 @@ void registerCrashHandlerCallback(void (*f)()) {
 }
 
 #ifdef __linux__
-// Stack facts for this thread, sampled at registerCrashHandler time because reading
-// /proc/self/maps from a signal handler is not async-signal-safe -- and this handler
-// can run with the allocator's locks held, so it must not call malloc.
-//
-// g_reportedStack{Low,High} is what pthread_attr_getstack claims, which for the
-// initial thread is the mapped top paired with an RLIMIT_STACK-sized length. Code
-// that treats that range as safe to dereference (see captureFramesFP in
-// flow/MemoryTracker.cpp) is trusting mostly unmapped address space. A SIGSEGV whose
-// fault address falls inside the reported range is therefore direct evidence of that
-// bug rather than of a wild pointer.
+// Sampled at registration time, not in the handler: reading /proc/self/maps needs
+// malloc, and the handler can run with the allocator's locks held.
 uintptr_t g_reportedStackLow = 0;
 uintptr_t g_reportedStackHigh = 0;
 uintptr_t g_mainStackMappedLow = 0;
 uintptr_t g_mainStackMappedHigh = 0;
 uint64_t g_stackRlimit = 0;
 
-// Fault address of the signal being handled, stashed by crashHandlerSigInfo so
-// crashHandler keeps its plain sa_handler signature (siginfo_t is only visible in
-// this Linux block).
+// Global because crashHandler keeps its plain sa_handler signature.
 uintptr_t g_faultAddress = 0;
 bool g_faultAddressValid = false;
 
@@ -3750,8 +3740,7 @@ void sampleMainStackExtent() {
 		g_stackRlimit = rl.rlim_cur;
 	}
 
-	// Mirrors initStackBoundsForThread in flow/MemoryTracker.cpp so the recorded
-	// range is the one that code's bounds check actually uses.
+	// Must match initStackBoundsForThread in flow/MemoryTracker.cpp.
 	pthread_attr_t attr;
 	if (pthread_getattr_np(pthread_self(), &attr) == 0) {
 		void* base = nullptr;
@@ -3813,9 +3802,8 @@ void crashHandler(int sig) {
 		TraceEvent te(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated");
 		te.detail("Signal", sig).detail("Name", strsignal(sig)).detail("Trace", backtrace);
 		if (g_faultAddressValid) {
-			// A fault address inside the reported stack range means something treated
-			// unmapped address space as stack; the mapped extent shows how much of that
-			// range was never backed.
+			// FaultInReportedStack separates a wild pointer from stack bounds that reach
+			// below what is mapped.
 			te.detail("FaultAddress", format("0x%zx", (size_t)g_faultAddress))
 			    .detail("ReportedStackLow", format("0x%zx", (size_t)g_reportedStackLow))
 			    .detail("ReportedStackHigh", format("0x%zx", (size_t)g_reportedStackHigh))
