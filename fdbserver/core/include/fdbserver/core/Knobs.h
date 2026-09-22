@@ -80,6 +80,8 @@ public:
 	double CDC_PROXY_FAILURE_COALESCE_DELAY; // Disabled by default; simulations can force a multi-failure batch.
 	double CDC_PROXY_POP_MIN_INTERVAL;
 	double CDC_PROXY_POP_SCAN_INTERVAL;
+	bool CDC_PROXY_REBALANCE_ENABLED;
+	double CDC_PROXY_REBALANCE_INTERVAL;
 	int APPLY_MUTATION_BYTES;
 	double BUGGIFY_RECOVER_MEMORY_LIMIT;
 	double BUGGIFY_WORKER_REMOVED_MAX_LAG;
