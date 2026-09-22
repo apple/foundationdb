@@ -531,7 +531,9 @@ Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		bool allLogs =
 		    newState.tLogs.size() ==
 		    configuration.expectedLogSets(!self->primaryDcId.empty() ? self->primaryDcId[0] : Optional<Key>());
-		// Anti-quorum recovery must still permit removing a lost region while its old history remains durable.
+		// Anti-quorum permits STORAGE_RECOVERED before remote catch-up, so a lost region can be removed.
+		// Until catch-up or reconfiguration makes old history unnecessary, retain it in coordinator state and
+		// defer FULLY_RECOVERED and old-role retirement; initialization alone does not prove durable catch-up.
 		bool storageRecovered = newState.oldTLogData.empty() || self->logSystem->storageRecovered();
 		bool finalUpdate = newState.oldTLogData.empty() && allLogs;
 		TraceEvent("TrackTLogRecovery")

@@ -368,9 +368,11 @@ struct LogSystem : ReferenceCounted<LogSystem> {
 	// Convert LogSystem to DBCoreState and override input newState as return value
 	void toCoreState(DBCoreState& newState) const;
 
-	// The storage/backup recovery policy can be satisfied before remote logs have copied their old prefix.
+	// The storage/backup recovery policy can be satisfied before remote logs have copied their old generations' data.
+	// This permits STORAGE_RECOVERED under anti-quorum, but does not make old log history safe to discard.
 	bool storageRecovered() const;
 	bool remoteStorageRecovered() const;
+	// Waits for durable remote TLog progress through the current local start version, not remote storage recovery.
 	// Requires every expected current log set. The returned future is shared by this recovery.
 	Future<Void> onRemoteLogPrefixDurable();
 

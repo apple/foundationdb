@@ -2458,6 +2458,8 @@ public:
 		std::vector<WorkerDetails> backup_workers;
 		std::set<NetworkAddress> backup_addresses;
 
+		// Old TLog roles retire after terminal recovery; their exclusion does not require another recovery.
+		// Excluded current TLogs still need a replacement transaction system.
 		for (auto& logSet : dbi.logSystemConfig.tLogs) {
 			for (auto& it : logSet.tLogs) {
 				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
