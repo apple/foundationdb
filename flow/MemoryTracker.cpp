@@ -149,17 +149,28 @@ __attribute__((no_instrument_function, noinline)) int captureFramesFP(void** out
 		initStackBoundsForThread();
 	}
 	void** fp = static_cast<void**>(__builtin_frame_address(0));
-	// Fallback for threads where pthread_getattr_np failed: ±8 MB around
-	// the initial frame.
-	// Caveat: this may need to be constrained more tightly to deal with
-	// smaller stacks.
-	uintptr_t lo = gStackLow ? gStackLow : reinterpret_cast<uintptr_t>(fp);
-	uintptr_t hi = gStackHigh ? gStackHigh : reinterpret_cast<uintptr_t>(fp) + (8u << 20);
+	uintptr_t base = reinterpret_cast<uintptr_t>(fp);
+	// Floor the walk at the live frame. The walk only ascends (see the monotonic
+	// check below), and gStackLow on its own is not a safe floor: for the initial
+	// thread pthread_attr_getstack reports the mapped top paired with an
+	// RLIMIT_STACK-sized length, so its base sits megabytes below the first byte
+	// the kernel has actually mapped. Taking the higher of the two also makes a
+	// frame pointer on some other stack (a libcoroutine stack, say) fail the
+	// bounds test immediately rather than being walked against this thread's range.
+	uintptr_t lo = std::max(gStackLow, base);
+	// Fallback for threads where pthread_getattr_np failed: 8 MB above the initial frame.
+	uintptr_t hi = gStackHigh ? gStackHigh : base + (8u << 20);
+	if (hi < 16 || hi - 16 < lo) {
+		return 0;
+	}
 	int n = 0;
 	while (fp && n < max) {
 		uintptr_t a = reinterpret_cast<uintptr_t>(fp);
-		// Reject out-of-stack or misaligned fp before dereferencing.
-		if (a < lo || a + 16 > hi) {
+		// Reject out-of-stack or misaligned fp before dereferencing. The upper bound
+		// is a subtraction rather than `a + 16 > hi` because that addition wraps for
+		// an `a` within 16 bytes of the top of the address space, which let a garbage
+		// frame pointer there pass both bounds tests and fault on fp[1] below.
+		if (a < lo || a > hi - 16) {
 			break;
 		}
 		if (a & (sizeof(void*) - 1)) {
