@@ -33,11 +33,11 @@ StorageServerInterface makeTestSSI() {
 	return ssi;
 }
 
-GetKeyValuesReply makeReply(std::vector<std::pair<KeyRef, ValueRef>> const& kvs, bool more) {
+GetKeyValuesReply makeReply(std::vector<KeyValueRef> const& kvs, bool more) {
 	GetKeyValuesReply reply;
 	reply.data.reserve(reply.arena, kvs.size());
 	for (auto const& kv : kvs) {
-		reply.data.push_back(reply.arena, KeyValueRef(kv.first, kv.second));
+		reply.data.push_back(reply.arena, kv);
 	}
 	reply.more = more;
 	reply.version = 1;
@@ -102,6 +102,7 @@ void simulateConsistencyScan(const std::vector<KeyValueRef>& serverAData,
 	std::vector<int64_t> totalUniqueRefKeys(servers.size(), 0);
 	std::vector<int64_t> totalUniqueCmpKeys(servers.size(), 0);
 	std::vector<int64_t> totalMismatchedValues(servers.size(), 0);
+	int64_t issues = 0;
 
 	Optional<KeyRef> nextKey;
 	int maxExpectedRounds = serverAData.size() + serverBData.size() + 1;
@@ -126,6 +127,8 @@ void simulateConsistencyScan(const std::vector<KeyValueRef>& serverAData,
 			totalUniqueCmpKeys[i] += result.uniqueCmpKeys[i];
 			totalMismatchedValues[i] += result.mismatchedValues[i];
 		}
+		issues += result.issues;
+		ASSERT_EQ(result.issues == 0, result.success);
 
 		if (!result.nextKey.present()) {
 			break;
@@ -138,6 +141,7 @@ void simulateConsistencyScan(const std::vector<KeyValueRef>& serverAData,
 	ASSERT_EQ(totalUniqueRefKeys[1], uniqueA);
 	ASSERT_EQ(totalUniqueCmpKeys[1], uniqueB);
 	ASSERT_EQ(totalMismatchedValues[1], mismatched);
+	ASSERT_EQ(issues, uniqueA + uniqueB + mismatched);
 }
 
 // Run simulateConsistencyScan() across all meaningful configurations. This means scanning in both forward
@@ -182,7 +186,7 @@ TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/MisalignedPaginationNotO
 	ASSERT_EQ(result.uniqueRefKeys[1], 0);
 	ASSERT_EQ(result.uniqueCmpKeys[1], 0);
 	ASSERT_EQ(result.mismatchedValues[1], 0);
-	ASSERT(!result.mismatchedMoreReplies[1]);
+	ASSERT_EQ(result.issues, 0);
 	ASSERT(result.success);
 	ASSERT(result.allSucceeded);
 	ASSERT(!result.readFailed);
@@ -240,12 +244,59 @@ TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/TrailingUniqueKeysMarkRa
 	ASSERT_EQ(result.uniqueRefKeys[1], 3); // d, e, f: really gone, not just unread, since server 1 is done
 	ASSERT_EQ(result.uniqueCmpKeys[1], 0);
 	ASSERT_EQ(result.mismatchedValues[1], 0);
+	ASSERT_EQ(result.issues, 3);
 	// Neither server reported more data, so there's nothing left to page through. In particular, the
 	// implementation must not fall back to server 1's own last key ("c") as a next-page cursor just
 	// because its raw reply happened to be shorter than server 0's -- that would erroneously suggest more
 	// data remains to compare, when in fact the range is already fully accounted for.
 	ASSERT(!result.nextKey.present());
 	ASSERT(!result.success); // a real, permanent discrepancy -- this should still be reported as a failure
+
+	co_return;
+}
+
+TEST_CASE("/fdbserver/consistencyscan/checkRangeReplies/MoreDifferenceCaughtInSubsequentRead") {
+	const std::vector<StorageServerInterface> servers = { makeTestSSI(), makeTestSSI() };
+	const KeyRangeRef range("a"_sr, "z"_sr);
+	const KeySelector begin = firstGreaterOrEqual(range.begin);
+
+	// Compare two replies that differ only in that one returns "more = true" and the other "more = false".
+	// This is arguably a sign or corruption, but also arguably a pagination artifact. On the one hand,
+	// having this difference would imply that there are differences between the servers. But on the other,
+	// we will catch this anyway when the consistency check moves on to the next range
+	std::vector<KeyValueRef> reply1Data = {
+		{ "a"_sr, "1"_sr }, { "b"_sr, "2"_sr }, { "c"_sr, "3"_sr }, { "d"_sr, "4"_sr }, { "e"_sr, "5"_sr }
+	};
+	std::vector<ErrorOr<GetKeyValuesReply>> replies1;
+	replies1.push_back(ErrorOr<GetKeyValuesReply>(makeReply(reply1Data, /*more=*/false)));
+	replies1.push_back(ErrorOr<GetKeyValuesReply>(makeReply(reply1Data, /*more=*/true)));
+
+	const RangeConsistencyResult result1 = checkRangeReplies(servers, replies1, range, begin);
+	// No actual error reported because the servers returned identical data
+	ASSERT_EQ(result1.uniqueRefKeys[1], 0);
+	ASSERT_EQ(result1.uniqueCmpKeys[1], 0);
+	ASSERT_EQ(result1.mismatchedValues[1], 0);
+	ASSERT_EQ(result1.issues, 0);
+	ASSERT(result1.success);
+	// As server2 has more data, we expect the next key to be present and point to the last key
+	ASSERT(result1.nextKey.present());
+	ASSERT_EQ(result1.nextKey.get(), "e"_sr);
+
+	// On a subsequent iteration, server1 should return nothing, as it said it had no more data.
+	// Meanwhile, server2 said it did have something, so we should find and report those.
+	std::vector<ErrorOr<GetKeyValuesReply>> replies2;
+	replies2.push_back(ErrorOr<GetKeyValuesReply>(makeReply({}, /*more=*/false)));
+	replies2.push_back(
+	    ErrorOr<GetKeyValuesReply>(makeReply({ { "f"_sr, "6"_sr }, { "g"_sr, "7"_sr } }, /*more=*/false)));
+
+	const RangeConsistencyResult result2 = checkRangeReplies(servers, replies2, range, begin);
+	// Report the extra keys as an error
+	ASSERT_EQ(result2.uniqueRefKeys[1], 0);
+	ASSERT_EQ(result2.uniqueCmpKeys[1], 2);
+	ASSERT_EQ(result2.mismatchedValues[1], 0);
+	ASSERT(!result2.success);
+	ASSERT_EQ(result2.issues, 2);
+	ASSERT(!result2.nextKey.present());
 
 	co_return;
 }

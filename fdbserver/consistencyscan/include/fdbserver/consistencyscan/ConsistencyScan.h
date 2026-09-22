@@ -48,13 +48,13 @@ struct RangeConsistencyResult {
 	std::vector<int64_t> uniqueRefKeys;
 	std::vector<int64_t> uniqueCmpKeys;
 	std::vector<int64_t> mismatchedValues;
-	std::vector<bool> mismatchedMoreReplies;
 	// The key to resume iteration from. This is the final key that can be guaranteed to have been
 	// checked on all storage servers.
 	Optional<KeyRef> nextKey;
 	int64_t totalReadAmount;
-	bool success;
 	bool allSucceeded;
+	bool success;
+	int64_t issues;
 	// Set (along with success = false) when the disagreement looks like it's due to a read failure
 	// from a storage server that may not actually be alive, rather than a genuine data inconsistency.
 	// Callers should treat this as a signal to retry rather than as a real consistency failure.
@@ -63,8 +63,7 @@ struct RangeConsistencyResult {
 
 	explicit RangeConsistencyResult(const size_t serverCount)
 	  : firstValidServer(-1), uniqueRefKeys(serverCount), uniqueCmpKeys(serverCount), mismatchedValues(serverCount),
-	    mismatchedMoreReplies(serverCount), totalReadAmount(0), success(true), allSucceeded(true), readFailed(false),
-	    foundInjected(false) {}
+	    totalReadAmount(0), allSucceeded(true), success(true), issues(0), readFailed(false), foundInjected(false) {}
 
 	explicit RangeConsistencyResult() : RangeConsistencyResult(0) {}
 };

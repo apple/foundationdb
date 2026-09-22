@@ -394,19 +394,13 @@ Future<int64_t> consistencyCheckReadData(UID myId,
 	}
 
 	if (!rangeConsistencyResult.success) {
-		int64_t issues = 0;
-		for (size_t i = 0; i < storageServerInterfaces->size(); i++) {
-			issues += rangeConsistencyResult.uniqueCmpKeys[i] + rangeConsistencyResult.uniqueRefKeys[i] +
-			          rangeConsistencyResult.mismatchedValues[i] +
-			          (rangeConsistencyResult.mismatchedMoreReplies[i] ? 1 : 0);
-		}
-		if (issues == 0) {
+		if (rangeConsistencyResult.issues == 0) {
 			// The only case where we don't count any issues but the result is not successful
 			// should be on a failed read. Report wrong_shard_server()
 			ASSERT(rangeConsistencyResult.readFailed);
 			throw wrong_shard_server();
 		}
-		co_return issues;
+		co_return rangeConsistencyResult.issues;
 	}
 
 	if (expectInjected && !rangeConsistencyResult.foundInjected) {
@@ -796,7 +790,7 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 
 							// throttle always includes replicated bytes read in total read bytes for throttling
 							totalReadBytesFromStorageServers += replicatedBytesReadThisLoop;
-							if (!failedRequest.present() && !newErrors) {
+							if (!failedRequest.present()) {
 								ASSERT(firstValidServer.present());
 								GetKeyValuesReply rangeResult = keyValueFutures[firstValidServer.get()].get().get();
 								logicalBytesRead += rangeResult.data.expectedSize();
@@ -807,41 +801,13 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 									break;
 								}
 								// Resume from consistencyCheckNextKey (the minimum last key among replies
-								// still reporting more data), not the reference server's own raw last key --
-								// otherwise, if the reference server happened to page further than another
-								// replica before the two were compared, the region between the bound and the
-								// reference server's own last key would never be read by any future round,
-								// silently skipping a comparison rather than just deferring it.
+								// still reporting more data). This represents the maximum key that we
+								// can progress to without skipping any individual key
 								statsCurrentRound.lastEndKey = keyAfter(consistencyCheckNextKey.get());
 								targetRange = KeyRangeRef(statsCurrentRound.lastEndKey, targetRange.end);
 								if (targetRange.empty()) {
 									noMoreRecords = targetRange.end == allKeys.end;
 									break;
-								}
-							} else if (!failedRequest.present() && newErrors) {
-								// responses will disagree on the next key, just take the max of the possible ones to
-								// ensure we can make progress past this corruption
-								Key nextKey = statsCurrentRound.lastEndKey;
-								GetKeyValuesReply rangeResult = keyValueFutures[firstValidServer.g].get().get();
-								for (int i = 0; i < storageServerInterfaces.size(); i++) {
-									GetKeyValuesReply rangeResult = keyValueFutures[i].get().get();
-									if (i == firstValidServer.get()) {
-										logicalBytesRead += rangeResult.data.expectedSize();
-									}
-									Key storageNextKey = (rangeResult.more && !rangeResult.data.empty())
-									                         ? keyAfter(rangeResult.data.back().key)
-									                         : targetRange.end;
-									if (storageNextKey > nextKey) {
-										nextKey = storageNextKey;
-									}
-								}
-								replicatedBytesRead += replicatedBytesReadThisLoop;
-								statsCurrentRound.lastEndKey = nextKey;
-								if (nextKey == targetRange.end) {
-									noMoreRecords = nextKey == allKeys.end;
-									break;
-								} else {
-									targetRange = KeyRangeRef(nextKey, targetRange.end);
 								}
 							} else {
 								// transaction too old expected here for large shards
@@ -1355,7 +1321,7 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
                                          KeySelector begin,
                                          Reverse reverse,
                                          UID myId,
-                                         bool expectInjected) {
+                                         const bool expectInjected) {
 	RangeConsistencyResult result(readReplies.size());
 
 	// The bounds of the request actually issued for this round (as opposed to `range`, which is the whole
@@ -1433,9 +1399,18 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 		// trigger even if both servers had identical data. That shouldn't be allowed by the API
 		// (as the read options determine the limits), but if it did happen or if the API changes,
 		// we wouldn't want to report that as a consistency violation.
+		//
+		// Note that the most extreme version of this is that both servers return identical data, but
+		// one has more set to true while the other has it set to false. This would represent an
+		// inconsistency (the one with "more" has keys that the one without it does not), but we will
+		// report that in the next iteration.
 		ReplyDiff diff = diffReplies(current, reference, result.nextKey, reverse);
-		if (current.more == reference.more && diff.currentUniques == 0 && diff.referenceUniques == 0 &&
-		    diff.valueMismatches == 0) {
+		if (diff.currentUniques == 0 && diff.referenceUniques == 0 && diff.valueMismatches == 0) {
+			if (current.more != reference.more && expectInjected &&
+			    fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+			        FDBSimConsistencyScanCorruptionType::FlipMoreFlag) {
+				result.foundInjected = true;
+			}
 			continue;
 		}
 
@@ -1443,7 +1418,7 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 		result.uniqueRefKeys[j] = diff.referenceUniques;
 		result.uniqueCmpKeys[j] = diff.currentUniques;
 		result.mismatchedValues[j] = diff.valueMismatches;
-		result.mismatchedMoreReplies[j] = current.more != reference.more;
+		result.issues += diff.referenceUniques + diff.currentUniques + diff.valueMismatches;
 
 		// Be especially verbose if in simulation
 		if (g_network->isSimulated()) {
@@ -1468,7 +1443,7 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 		// in the killed region returned first with a higher version, and a later
 		// response from a different region returned with a lower version (because
 		// of the rollback of the forced recovery). In this case, we should not fail
-		// the test. So we double check both process are live.
+		// the test. So we double-check both process are live.
 		bool isFailed =
 		    g_network->isSimulated() &&
 		    (g_simulator->getProcessByAddress(storageServerInterfaces[j].address())->failed ||
@@ -1477,55 +1452,59 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 		     g_simulator->getProcessByAddress(storageServerInterfaces[result.firstValidServer].address())
 		         ->locality.dcId());
 
+		bool matchedInjected = false;
 		if (!isTss && !isFailed && expectInjected) {
-			// Ensure the only corruption we see is the one that was expected to be injected
+			// Ensure the only corruption we see is the one that was expected to be injected.
 			ASSERT(fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.present());
 			if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
 			    FDBSimConsistencyScanCorruptionType::FlipMoreFlag) {
 				// only more flag should be different
-				expectInjected = (current.more != reference.more && diff.currentUniques == 0 &&
-				                  diff.referenceUniques == 0 && diff.valueMismatches == 0);
+				matchedInjected = false;
 			} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
 			           FDBSimConsistencyScanCorruptionType::AddToEmpty) {
-				expectInjected = (current.more == reference.more && current.data.size() + reference.data.size() == 1);
-				if (expectInjected) {
+				matchedInjected = (current.more == reference.more && current.data.size() + reference.data.size() == 1);
+				if (matchedInjected) {
 					KeyValueRef& kv = current.data.empty() ? reference.data[0] : current.data[0];
-					expectInjected = kv.key == fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get() &&
-					                 kv.value == "consistencyCheckCorruptValue"_sr;
+					matchedInjected = kv.key == fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get() &&
+					                  kv.value == "consistencyCheckCorruptValue"_sr;
 				}
 			} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
 			           FDBSimConsistencyScanCorruptionType::RemoveLastRow) {
-				expectInjected = (current.more == reference.more && diff.valueMismatches == 0 &&
-				                  diff.currentUniques + diff.referenceUniques == 1 &&
-				                  std::abs(current.data.size() - reference.data.size()) == 1);
-				if (expectInjected) {
+				matchedInjected = (current.more == reference.more && diff.valueMismatches == 0 &&
+				                   diff.currentUniques + diff.referenceUniques == 1 &&
+				                   std::abs(current.data.size() - reference.data.size()) == 1);
+				if (matchedInjected) {
 					// make sure the unique was the last key
 					for (int i = 0; i < current.data.size() && i < reference.data.size(); i++) {
 						if (current.data[i] != reference.data[i]) {
-							expectInjected = false;
+							matchedInjected = false;
 							break;
 						}
 					}
 				}
 			} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
 			           FDBSimConsistencyScanCorruptionType::ChangeFirstValue) {
-				expectInjected =
+				matchedInjected =
 				    (current.more == reference.more && diff.valueMismatches == 1 && diff.currentUniques == 0 &&
 				     diff.referenceUniques == 0 && diff.valueMismatchKey == current.data[0].key &&
 				     std::abs(current.data[0].value.size() - reference.data[0].value.size()) == 1);
-				if (expectInjected) {
+				if (matchedInjected) {
 					// make sure the value difference was just truncating the last byte
 					Value shorter = current.data[0].value < reference.data[0].value ? current.data[0].value
 					                                                                : reference.data[0].value;
 					Value longer = current.data[0].value < reference.data[0].value ? reference.data[0].value
 					                                                               : current.data[0].value;
-					expectInjected = (shorter == longer.substr(0, shorter.size()));
+					matchedInjected = (shorter == longer.substr(0, shorter.size()));
 				}
 			} else {
 				ASSERT(false);
 			}
 		}
-		TraceEvent(isExpectedTSSMismatch || isFailed || expectInjected ? SevWarn : SevError,
+		if (matchedInjected) {
+			result.foundInjected = true;
+		}
+
+		TraceEvent(isExpectedTSSMismatch || isFailed || (expectInjected && matchedInjected) ? SevWarn : SevError,
 		           "ConsistencyCheck_DataInconsistent",
 		           myId)
 		    .setMaxEventLength(-1)
@@ -1548,28 +1527,11 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 		    .detail(format("Server%dHasMore", j).c_str(), current.more)
 		    .detail(format("Server%dHasMore", result.firstValidServer).c_str(), reference.more)
 		    .detail("IsTSS", isTss ? "True" : "False")
-		    .detail("IsInjected", expectInjected ? "True" : "False");
-
-		if (expectInjected) {
-			result.foundInjected = true;
-			CODE_PROBE(true, "consistency check detected injected corruption");
-			// we found the injected corruption, clear the state
-			TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption", myId)
-			    .detail("CorruptionType", fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get())
-			    .detail("Version", version);
-			fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
-			                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
-		}
+		    .detail("IsInjected", matchedInjected ? "True" : "False");
 
 		if (!isExpectedTSSMismatch && !isFailed) {
-			// Found a mismatch. Exit early.
-			// We may want to fix this and report all errors, but some care needs to be taken around
-			// catching expected injected errors and TSS failures, as the state machine is a bit
-			// complicated.
 			result.success = false;
-			return result;
-		}
-		if (isFailed) {
+		} else if (isFailed) {
 			// If the storage servers are not live, we should retry. Report the read failure and let
 			// the caller decide whether to throw wrong_shard_server()
 			TraceEvent("ConsistencyCheck_StorageServerUnavailable", myId)
@@ -1579,10 +1541,21 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 			    .detail("ShardEnd", printable(range.end));
 			result.success = false;
 			result.readFailed = true;
-			return result;
 		}
 	}
 
+	if (expectInjected && result.foundInjected) {
+		// We found the expected injected fault. Log so and clear the state.
+		// Note that this is done outside the loop rather than the first time we see such an error. This is
+		// because the same injected fault can be seen multiple times in a single run if the reference server
+		// is the one that returned the injected corruption.
+		CODE_PROBE(true, "consistency check detected injected corruption");
+		TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption", myId)
+		    .detail("CorruptionType", fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get())
+		    .detail("Version", version);
+		fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
+		                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
+	}
 	return result;
 }
 
@@ -2218,6 +2191,9 @@ Future<Void> checkDataConsistency(Database cx,
 					RangeConsistencyResult rangeConsistencyResult =
 					    checkRangeReplies(storageServerInterfaces, readReplies, range, begin, Reverse::False);
 					if (!rangeConsistencyResult.success) {
+						if (rangeConsistencyResult.issues > 0) {
+							testFailure("Data inconsistent", performQuiescentChecks, success, true);
+						}
 						if (rangeConsistencyResult.readFailed) {
 							// A storage server looks dead (e.g. mid forced-recovery). Retry this same batch
 							// rather than failing the check, mirroring the old wrong_shard_server()-triggered
@@ -2225,7 +2201,6 @@ Future<Void> checkDataConsistency(Database cx,
 							co_await delay(1.0);
 							continue;
 						}
-						testFailure("Data inconsistent", performQuiescentChecks, success, true);
 					}
 					dataConsistencyCheckTimeForThisShard += (now() - dataConsistencyCheckBeginTime);
 
