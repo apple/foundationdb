@@ -18,13 +18,14 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_NETWORKTEST_H
-#define FDBSERVER_NETWORKTEST_H
+#ifndef FDBRPC_TESTS_NETWORKTEST_H
+#define FDBRPC_TESTS_NETWORKTEST_H
 #pragma once
 
-#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "flow/FileIdentifier.h"
+
+constexpr int WLTOKEN_NETWORKTEST = WLTOKEN_FIRST_AVAILABLE;
 
 struct NetworkTestInterface {
 	RequestStream<struct NetworkTestRequest> test;
@@ -35,9 +36,9 @@ struct NetworkTestInterface {
 
 struct NetworkTestReply {
 	constexpr static FileIdentifier file_identifier = 14465374;
-	Value value;
+	Standalone<StringRef> value;
 	NetworkTestReply() = default;
-	explicit NetworkTestReply(Value value) : value(value) {}
+	explicit NetworkTestReply(Standalone<StringRef> value) : value(value) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, value);
@@ -46,11 +47,11 @@ struct NetworkTestReply {
 
 struct NetworkTestRequest {
 	constexpr static FileIdentifier file_identifier = 4146513;
-	Key key;
+	Standalone<StringRef> key;
 	uint32_t replySize;
 	ReplyPromise<struct NetworkTestReply> reply;
 	NetworkTestRequest() = default;
-	NetworkTestRequest(Key key, uint32_t replySize) : key(key), replySize(replySize) {}
+	NetworkTestRequest(Standalone<StringRef> key, uint32_t replySize) : key(key), replySize(replySize) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, replySize, reply);
@@ -60,5 +61,34 @@ struct NetworkTestRequest {
 Future<Void> networkTestServer();
 
 Future<Void> networkTestClient(std::string const& testServers);
+
+class NetworkTestIntRange {
+public:
+	NetworkTestIntRange() = default;
+	NetworkTestIntRange(int low, int high);
+
+	int get() const;
+	int maximum() const { return max; }
+	std::string toString() const;
+
+private:
+	int min = 0;
+	int max = 0;
+};
+
+struct P2PNetworkTestOptions {
+	std::vector<NetworkAddress> listenerAddresses;
+	std::vector<NetworkAddress> remoteAddresses;
+	int connectionsOut = 1;
+	NetworkTestIntRange requestBytes{ 50, 100 };
+	NetworkTestIntRange replyBytes{ 500, 1000 };
+	NetworkTestIntRange requests{ 10, 10000 };
+	NetworkTestIntRange idleMilliseconds;
+	NetworkTestIntRange waitReadMilliseconds;
+	NetworkTestIntRange waitWriteMilliseconds;
+	double targetDuration = 0.0;
+};
+
+Future<Void> networkTestP2P(P2PNetworkTestOptions options, bool oneshot);
 
 #endif
