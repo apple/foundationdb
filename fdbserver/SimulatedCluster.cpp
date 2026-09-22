@@ -608,7 +608,7 @@ public:
 	}
 
 	TestConfig() = default;
-	explicit(false) TestConfig(const BasicTestConfig& config) : BasicTestConfig(config) {}
+	explicit TestConfig(const BasicTestConfig& config) : BasicTestConfig(config) {}
 };
 
 template <class T>

@@ -362,7 +362,7 @@ public:
 	// A factory of a table property collector that marks a SST file as need-compaction when the number of range
 	// deletions exceeds the threshold.
 	// @param numRangeDeletionsAllowed,  triggers compaction range deletion count exceeds numRangeDeletionsAllowed.
-	explicit(false) CompactOnRangeDeletionCollectorFactory(uint64_t numRangeDeletionsAllowed)
+	explicit CompactOnRangeDeletionCollectorFactory(uint64_t numRangeDeletionsAllowed)
 	  : threshold(numRangeDeletionsAllowed), numFilesMarkedForCompaction(0) {}
 
 	~CompactOnRangeDeletionCollectorFactory() override = default;
@@ -2515,7 +2515,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		struct DeleteVisitor : public rocksdb::WriteBatch::Handler {
 			std::vector<std::pair<uint32_t, KeyRange>>* deletes;
 
-			explicit(false) DeleteVisitor(std::vector<std::pair<uint32_t, KeyRange>>* deletes) : deletes(deletes) {
+			explicit DeleteVisitor(std::vector<std::pair<uint32_t, KeyRange>>* deletes) : deletes(deletes) {
 				ASSERT(deletes);
 			}
 

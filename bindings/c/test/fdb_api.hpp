@@ -345,7 +345,7 @@ class Result {
 	friend class Transaction;
 	std::shared_ptr<native::FDBResult> r;
 
-	Result(native::FDBResult* result) {
+	explicit Result(native::FDBResult* result) {
 		if (result)
 			r = std::shared_ptr<native::FDBResult>(result, &native::fdb_result_destroy);
 	}
@@ -377,7 +377,7 @@ protected:
 	friend std::hash<Future>;
 	std::shared_ptr<native::FDBFuture> f;
 
-	Future(native::FDBFuture* future) {
+	explicit(false) Future(native::FDBFuture* future) {
 		if (future)
 			f = std::shared_ptr<native::FDBFuture>(future, &native::fdb_future_destroy);
 	}
@@ -473,7 +473,7 @@ class TypedFuture : public Future {
 	using Future::get;
 	using Future::getNothrow;
 	using Future::then;
-	TypedFuture(const Future& f) noexcept : Future(f) {}
+	explicit TypedFuture(const Future& f) noexcept : Future(f) {}
 
 public:
 	using ContainedType = typename VarTraits::Type;
@@ -686,7 +686,7 @@ class Database : public IDatabaseOps {
 public:
 	Database(const Database&) noexcept = default;
 	Database& operator=(const Database&) noexcept = default;
-	Database(const std::string& cluster_file_path) : db(nullptr) {
+	explicit Database(const std::string& cluster_file_path) : db(nullptr) {
 		auto db_raw = static_cast<native::FDBDatabase*>(nullptr);
 		if (auto err = Error(native::fdb_create_database(cluster_file_path.c_str(), &db_raw)))
 			throwError(fmt::format("Failed to create database with '{}': ", cluster_file_path), err);
