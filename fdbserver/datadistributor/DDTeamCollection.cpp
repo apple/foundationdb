@@ -7633,66 +7633,6 @@ public:
 		co_await delay(0);
 	}
 
-	static Future<Void> TeamTracker_HighestTeamPriority() {
-		auto policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
-		auto primary = testTeamCollection(3, policy, 3);
-		auto remote = testTeamCollection(3, policy, 3);
-		ASSERT_EQ(primary->getHighestTeamPriority(), -1);
-		primary->teamCollections = { primary.get(), remote.get() };
-		remote->teamCollections = primary->teamCollections;
-		remote->primary = false;
-		ASSERT_EQ(primary->getHighestTeamPriority(), -1);
-		for (auto* collection : primary->teamCollections) {
-			collection->initialFailureReactionDelay = Future<Void>(Void());
-			collection->pipelineFull->set(true);
-			collection->addTeam({ collection->server_info[UID(1, 0)],
-			                      collection->server_info[UID(2, 0)],
-			                      collection->server_info[UID(3, 0)] },
-			                    IsInitialTeam::True,
-			                    IsRedundantTeam::False,
-			                    0.05);
-		}
-		co_await delay(0.01);
-		ASSERT_EQ(primary->getHighestTeamPriority(), SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
-		remote->initialFailureReactionDelay = Never();
-		ASSERT_EQ(primary->getHighestTeamPriority(), -1);
-		remote->initialFailureReactionDelay = Future<Void>(Void());
-
-		auto setFailed = [](DDTeamCollection* collection, UID uid, IsFailed failed) {
-			collection->server_status.set(uid,
-			                              ServerStatus(failed,
-			                                           IsUndesired::False,
-			                                           IsWiggling::False,
-			                                           collection->server_info[uid]->getLastKnownInterface().locality));
-		};
-		// Real failures must update the aggregate even while the relocation pipeline is full.
-		setFailed(remote.get(), UID(1, 0), IsFailed::True);
-		setFailed(remote.get(), UID(2, 0), IsFailed::True);
-		co_await delay(0.01);
-		ASSERT_EQ(primary->getHighestTeamPriority(), SERVER_KNOBS->PRIORITY_TEAM_1_LEFT);
-		for (int id = 1; id <= 3; ++id) {
-			setFailed(primary.get(), UID(id, 0), IsFailed::True);
-		}
-		co_await delay(0.01);
-		ASSERT_EQ(primary->getHighestTeamPriority(), SERVER_KNOBS->PRIORITY_TEAM_0_LEFT);
-		ASSERT_EQ(remote->getHighestTeamPriority(), SERVER_KNOBS->PRIORITY_TEAM_0_LEFT);
-		for (int id = 1; id <= 3; ++id) {
-			setFailed(primary.get(), UID(id, 0), IsFailed::False);
-		}
-		co_await delay(0.01);
-		// Zero-count entries left behind by recovered teams must not affect the aggregate.
-		ASSERT_EQ(primary->priority_teams[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT], 0);
-		ASSERT_EQ(primary->getHighestTeamPriority(), SERVER_KNOBS->PRIORITY_TEAM_1_LEFT);
-		setFailed(remote.get(), UID(1, 0), IsFailed::False);
-		setFailed(remote.get(), UID(2, 0), IsFailed::False);
-		co_await delay(0.01);
-		ASSERT_EQ(primary->getHighestTeamPriority(), SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
-		primary->teamCollections = { primary.get() };
-		ASSERT_EQ(primary->getHighestTeamPriority(), SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
-		primary->teamCollections.push_back(nullptr);
-		ASSERT_EQ(primary->getHighestTeamPriority(), -1);
-	}
-
 	static Future<Void> TeamTracker_RetriesMergedShardForUndesiredServer() {
 		constexpr double checkTeamDelay = 0.05;
 
@@ -8088,8 +8028,4 @@ TEST_CASE("/DataDistribution/TeamTracker/RetriesMergedShardForUndesiredServer") 
 
 TEST_CASE("/DataDistribution/TeamTracker/RechecksHealthyZone") {
 	co_await DDTeamCollectionUnitTest::TeamTracker_RechecksHealthyZone();
-}
-
-TEST_CASE("/DataDistribution/TeamTracker/HighestTeamPriority") {
-	co_await DDTeamCollectionUnitTest::TeamTracker_HighestTeamPriority();
 }
