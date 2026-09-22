@@ -892,7 +892,7 @@ RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
 
 class RocksDBCheckpointByteSampleReader : public ICheckpointByteSampleReader {
 public:
-	explicit(false) RocksDBCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
+	explicit RocksDBCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
 	~RocksDBCheckpointByteSampleReader() override = default;
 
 	KeyValue next() override;
