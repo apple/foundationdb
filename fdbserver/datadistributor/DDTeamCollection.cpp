@@ -3681,6 +3681,10 @@ public:
 							highestPriority = std::max(highestPriority, it.first);
 						}
 					}
+					auto teamCount = [self](int priority) {
+						auto it = self->priority_teams.find(priority);
+						return it == self->priority_teams.end() ? 0 : it->second;
+					};
 
 					TraceEvent("TotalDataInFlight", self->distributorId)
 					    .detail("Primary", self->primary)
@@ -3690,6 +3694,9 @@ public:
 					    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 					    .detail("ZeroHealthy", self->zeroOptimalTeams.get())
 					    .detail("HighestPriority", highestPriority)
+					    .detail("TeamsHealthy", teamCount(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY))
+					    .detail("Teams1Left", teamCount(SERVER_KNOBS->PRIORITY_TEAM_1_LEFT))
+					    .detail("Teams2Left", teamCount(SERVER_KNOBS->PRIORITY_TEAM_2_LEFT))
 					    .trackLatest(self->primary ? "TotalDataInFlight"
 					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
 					                                                             // lifetime is controlled by
