@@ -714,6 +714,7 @@ public:
 			    .detail("TotalBytes", 0)
 			    .detail("UnhealthyServers", 0)
 			    .detail("HighestPriority", 0)
+			    .detail("HighestTeamPriority", -1)
 			    .trackLatest(self->totalDataInFlightEventHolder->trackingKey);
 			TraceEvent("TotalDataInFlight", self->ddId)
 			    .detail("Primary", false)

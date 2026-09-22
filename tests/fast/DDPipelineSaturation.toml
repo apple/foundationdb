@@ -20,6 +20,7 @@
 storageEngineExcludeTypes = [5]
 
 [[knobs]]
+cluster_health_metric_enable = true
 dd_max_pipeline_moves = 20
 min_shard_bytes = 10000
 shard_bytes_per_sqrt_bytes = 0
