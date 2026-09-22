@@ -339,7 +339,7 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationF
 	// Uninitialized, old-format, empty, and unavailable team summaries must not fabricate health.
 	TraceEventFields oldFormat;
 	oldFormat.addField("HighestPriority", "0");
-	for (auto fields : { teamMetrics(-1), oldFormat, TraceEventFields() }) {
+	for (const auto& fields : { teamMetrics(-1), oldFormat, TraceEventFields() }) {
 		provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(fields));
 		level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 		ASSERT_EQ(level, Level::METRICS_MISSING);
