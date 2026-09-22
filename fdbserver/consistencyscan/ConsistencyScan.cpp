@@ -393,9 +393,6 @@ Future<int64_t> consistencyCheckReadData(UID myId,
 		*firstValidServer = rangeConsistencyResult.firstValidServer;
 	}
 
-	if (rangeConsistencyResult.readFailed) {
-		throw wrong_shard_server();
-	}
 	if (!rangeConsistencyResult.success) {
 		int64_t issues = 0;
 		for (size_t i = 0; i < storageServerInterfaces->size(); i++) {
@@ -403,7 +400,12 @@ Future<int64_t> consistencyCheckReadData(UID myId,
 			          rangeConsistencyResult.mismatchedValues[i] +
 			          (rangeConsistencyResult.mismatchedMoreReplies[i] ? 1 : 0);
 		}
-		ASSERT(issues > 0);
+		if (issues == 0) {
+			// The only case where we don't count any issues but the result is not successful
+			// should be on a failed read. Report wrong_shard_server()
+			ASSERT(rangeConsistencyResult.readFailed);
+			throw wrong_shard_server();
+		}
 		co_return issues;
 	}
 
@@ -799,37 +801,28 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 								GetKeyValuesReply rangeResult = keyValueFutures[firstValidServer.get()].get().get();
 								logicalBytesRead += rangeResult.data.expectedSize();
 								replicatedBytesRead += replicatedBytesReadThisLoop;
-								if (!rangeResult.more) {
+								if (!consistencyCheckNextKey.present()) {
 									statsCurrentRound.lastEndKey = targetRange.end;
 									noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
 									break;
-								} else if (!consistencyCheckNextKey.present()) {
-									// Shouldn't happen per the storage server contract (more=true implies at
-									// least one row was returned), but avoid crashing the always-on background
-									// scan over it -- treat it the way a more=true-with-no-data reply is already
-									// treated in the newErrors branch below: there's nothing usable to resume
-									// from, so consider this range read to its end.
-									statsCurrentRound.lastEndKey = targetRange.end;
-									noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
+								}
+								// Resume from consistencyCheckNextKey (the minimum last key among replies
+								// still reporting more data), not the reference server's own raw last key --
+								// otherwise, if the reference server happened to page further than another
+								// replica before the two were compared, the region between the bound and the
+								// reference server's own last key would never be read by any future round,
+								// silently skipping a comparison rather than just deferring it.
+								statsCurrentRound.lastEndKey = keyAfter(consistencyCheckNextKey.get());
+								targetRange = KeyRangeRef(statsCurrentRound.lastEndKey, targetRange.end);
+								if (targetRange.empty()) {
+									noMoreRecords = targetRange.end == allKeys.end;
 									break;
-								} else {
-									// Resume from consistencyCheckNextKey (the minimum last key among replies
-									// still reporting more data), not the reference server's own raw last key --
-									// otherwise, if the reference server happened to page further than another
-									// replica before the two were compared, the region between the bound and the
-									// reference server's own last key would never be read by any future round,
-									// silently skipping a comparison rather than just deferring it.
-									statsCurrentRound.lastEndKey = keyAfter(consistencyCheckNextKey.get());
-									targetRange = KeyRangeRef(statsCurrentRound.lastEndKey, targetRange.end);
-									if (targetRange.empty()) {
-										noMoreRecords = targetRange.end == allKeys.end;
-										break;
-									}
 								}
 							} else if (!failedRequest.present() && newErrors) {
 								// responses will disagree on the next key, just take the max of the possible ones to
 								// ensure we can make progress past this corruption
 								Key nextKey = statsCurrentRound.lastEndKey;
+								GetKeyValuesReply rangeResult = keyValueFutures[firstValidServer.g].get().get();
 								for (int i = 0; i < storageServerInterfaces.size(); i++) {
 									GetKeyValuesReply rangeResult = keyValueFutures[i].get().get();
 									if (i == firstValidServer.get()) {
@@ -1554,8 +1547,8 @@ RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterfac
 		    .detail("MatchingKVPairs", diff.matchingKVPairs)
 		    .detail(format("Server%dHasMore", j).c_str(), current.more)
 		    .detail(format("Server%dHasMore", result.firstValidServer).c_str(), reference.more)
-		    .detail("IsTSS", isTss)
-		    .detail("IsInjected", expectInjected);
+		    .detail("IsTSS", isTss ? "True" : "False")
+		    .detail("IsInjected", expectInjected ? "True" : "False");
 
 		if (expectInjected) {
 			result.foundInjected = true;
@@ -2179,7 +2172,7 @@ Future<Void> checkDataConsistency(Database cx,
 					                                       begin,
 					                                       Reverse::False,
 					                                       Optional<Version>(),
-					                                       ReadOptions(ReadType::LOW),
+					                                       ReadOptions(ReadType::LOW, CacheResult::False),
 					                                       /*buggifyLimits=*/g_network->isSimulated());
 
 					// If the data is not available and we aren't relocating this shard
@@ -2208,7 +2201,7 @@ Future<Void> checkDataConsistency(Database cx,
 								*success = false;
 								co_return;
 							}
-							// All shards should be available in quiscence
+							// All shards should be available in quiescence
 							if (performQuiescentChecks && !storageServerInterfaces[i].isTss()) {
 								testFailure(
 								    "Storage server unavailable", performQuiescentChecks, success, failureIsError);
@@ -2223,7 +2216,7 @@ Future<Void> checkDataConsistency(Database cx,
 					// stop a few keys earlier than another's, even though both are otherwise consistent -- as a
 					// spurious set of "missing"/unique keys.
 					RangeConsistencyResult rangeConsistencyResult =
-					    checkRangeReplies(storageServerInterfaces, readReplies, range, begin);
+					    checkRangeReplies(storageServerInterfaces, readReplies, range, begin, Reverse::False);
 					if (!rangeConsistencyResult.success) {
 						if (rangeConsistencyResult.readFailed) {
 							// A storage server looks dead (e.g. mid forced-recovery). Retry this same batch
@@ -2243,7 +2236,17 @@ Future<Void> checkDataConsistency(Database cx,
 
 						// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 						// shard size estimate
+						int countedKeys = 0;
 						for (int k = 0; k < data.size(); k++) {
+							if (isKeyBeyond(data[k].key, rangeConsistencyResult.nextKey, Reverse::False)) {
+								// We will resume the next round from nextKey (if set), and we don't want to double
+								// count anything. On a consistent cluster, there shouldn't be any such keys,
+								// but it is possible on a cluster with inconsistencies (including TSS-only
+								// inconsistencies) or if the storage server contract were only slightly modified
+								// to allow server-driven early termination.
+								break;
+							}
+							countedKeys++;
 							ByteSampleInfo sampleInfo = isKeyValueInSample(data[k]);
 							shardBytes += sampleInfo.size;
 
@@ -2263,16 +2266,20 @@ Future<Void> checkDataConsistency(Database cx,
 									splitBytes = sampledBytes;
 								}
 
-								/*TraceEvent("ConsistencyCheck_ByteSample").detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
-								  .detail("SampledBytes", sampleInfo.sampledSize).detail("Key",
-								  printable(data[k].key)).detail("KeySize", data[k].key.size()).detail("ValueSize",
-								  data[k].value.size());*/
+								DisabledTraceEvent("ConsistencyCheck_ByteSample")
+								    .detail("ShardBegin", printable(range.begin))
+								    .detail("ShardEnd", printable(range.end))
+								    .detail("SampledBytes", sampleInfo.sampledSize)
+								    .detail("Key", printable(data[k].key))
+								    .detail("KeySize", data[k].key.size())
+								    .detail("ValueSize", data[k].value.size());
 
 								// In data distribution, the splitting process ignores the first key in a shard.
 								// Thus, we shouldn't consider it when validating the upper bound of estimated shard
 								// sizes
-								if (k == 0)
+								if (k == 0) {
 									firstKeySampledBytes += sampleInfo.sampledSize;
+								}
 
 								sampledKeys++;
 
@@ -2287,8 +2294,8 @@ Future<Void> checkDataConsistency(Database cx,
 							}
 						}
 
-						// Accumulate number of keys in this shard
-						shardKeys += data.size();
+						// Accumulate the number of keys read from this shard
+						shardKeys += countedKeys;
 					}
 					// after requesting each shard, enforce rate limit based on how much data will likely be read
 					if (rateLimitForThisRound > 0) {
