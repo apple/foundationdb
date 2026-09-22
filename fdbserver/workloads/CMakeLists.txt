@@ -14,6 +14,7 @@ target_include_directories(fdbserver_workloads PRIVATE
   ${CMAKE_SOURCE_DIR}/fdbclient)
 target_link_libraries(fdbserver_workloads PRIVATE
   fdbserver_cdcproxy
+  fdbserver_clustercontroller
   fdbserver_consistencyscan
   fdbserver_core
   fdbserver_checkpoint

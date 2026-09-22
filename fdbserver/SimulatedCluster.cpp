@@ -874,7 +874,7 @@ Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionR
 				if (g_network->isSimulated() && e.code() != error_code_io_timeout &&
 				    (bool)g_network->global(INetwork::enASIOTimedOut)) {
 					TraceEvent(SevError, "IOTimeoutErrorSuppressed")
-					    .detail("ErrorCode", e.code())
+					    .detail("ObservedErrorCode", e.code())
 					    .detail("RandomId", randomId)
 					    .backtrace();
 				}

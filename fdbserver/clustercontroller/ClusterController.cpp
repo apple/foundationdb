@@ -45,6 +45,7 @@
 #include "fdbserver/core/CoordinatedState.h"
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/clustercontroller/ClusterController.h"
+#include "fdbserver/clustercontroller/NativeCdcProxyBalancer.h"
 #include "ClusterController.h"
 #include "ClusterRecovery.h"
 #include "fdbserver/core/DataDistributorInterface.h"
@@ -1479,6 +1480,14 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	}
 
 	if (req.recoveryState == RecoveryState::FULLY_RECOVERED) {
+		// Retaining old role advertisements must not interrupt an otherwise completed recovery.
+		if (!req.logSystemConfig.oldTLogs.empty()) {
+			TraceEvent(SevError, "FullyRecoveredWithOldTLogs", self->id)
+			    .detail("MasterId", req.id)
+			    .detail("RecoveryCount", req.recoveryCount)
+			    .detail("OldLogGenerations", req.logSystemConfig.oldTLogs.size());
+		}
+		ASSERT_WE_THINK(req.logSystemConfig.oldTLogs.empty());
 		self->db.unfinishedRecoveries = 0;
 	}
 
@@ -2477,6 +2486,58 @@ Future<Void> monitorCDCProxyAssignmentsPass(ClusterControllerData* self) {
 Future<Void> monitorCDCProxyAssignments(ClusterControllerData* self) {
 	while (true) {
 		co_await monitorCDCProxyAssignmentsPass(self);
+	}
+}
+
+Future<Void> rebalanceCDCProxyAssignments(ClusterControllerData* self) {
+	while (true) {
+		co_await delay(std::max(1.0, SERVER_KNOBS->CDC_PROXY_REBALANCE_INTERVAL));
+		if (!SERVER_KNOBS->CDC_PROXY_REBALANCE_ENABLED) {
+			TraceEvent("CDCProxyRebalanceDisabled", self->id);
+			co_return;
+		}
+		if (!self->db.recoveryData.isValid() ||
+		    self->db.serverInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED ||
+		    !self->db.clientInfo->get().nativeCdcEnabled) {
+			continue;
+		}
+		const uint64_t expectedRecoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
+		const std::vector<CDCProxyInterface>& published = self->db.clientInfo->get().cdcProxies;
+		if (published.size() < 2 || published.size() != self->db.cdcProxies.size()) {
+			continue;
+		}
+		std::vector<UID> available;
+		available.reserve(published.size());
+		for (const auto& proxy : published) {
+			if (!containsCDCProxy(self->db.cdcProxies, proxy.id())) {
+				available.clear();
+				break;
+			}
+			available.push_back(proxy.id());
+		}
+		if (available.size() < 2) {
+			continue;
+		}
+		try {
+			const std::vector<UID> expectedProxies = available;
+			auto stillEligible = [self, expectedRecoveryCount, expectedProxies] {
+				return SERVER_KNOBS->CDC_PROXY_REBALANCE_ENABLED && self->db.recoveryData.isValid() &&
+				       self->db.recoveryData->cstate.myDBState.recoveryCount == expectedRecoveryCount &&
+				       self->db.serverInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
+				       self->db.clientInfo->get().nativeCdcEnabled &&
+				       self->db.cdcProxies.size() == expectedProxies.size() &&
+				       std::all_of(expectedProxies.begin(), expectedProxies.end(), [self](UID proxyId) {
+					       return containsCDCProxy(self->db.cdcProxies, proxyId);
+				       });
+			};
+			co_await rebalanceNativeCdcProxyAssignments(self->db.db, std::move(available), std::move(stillEligible));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled || e.code() == error_code_broken_promise) {
+				throw;
+			}
+			// An ambiguous commit is reconciled by the assignment monitor; the next scheduled pass may try again.
+			TraceEvent(SevWarn, "CDCProxyRebalanceError", self->id).error(e);
+		}
 	}
 }
 
@@ -3516,6 +3577,7 @@ Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorGlobalConfig(&self.db));
 	// These actors also drain durable CDC state when new stream registration is disabled.
 	self.addActor.send(monitorCDCProxyAssignments(&self));
+	self.addActor.send(rebalanceCDCProxyAssignments(&self));
 	self.addActor.send(monitorAndRecruitCDCProxies(&self));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
@@ -4296,7 +4358,7 @@ TEST_CASE("/fdbserver/clustercontroller/deferBetterMasterRecoveryUntilInitialSto
 	return Void();
 }
 
-TEST_CASE("/fdbserver/clustercontroller/recoverForExcludedOldTLogLocality") {
+TEST_CASE("/fdbserver/clustercontroller/ignoreExcludedOldTLogLocality") {
 	ClusterControllerData data(ClusterControllerFullInterface(),
 	                           LocalityData(),
 	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
@@ -4328,12 +4390,24 @@ TEST_CASE("/fdbserver/clustercontroller/recoverForExcludedOldTLogLocality") {
 	oldTLogSet.tLogs.push_back(OptionalInterface(oldTLog));
 	OldTLogConf oldTLogConf;
 	oldTLogConf.tLogs.push_back(oldTLogSet);
+	LocalityData currentLocality;
+	currentLocality.set(LocalityData::keyProcessId, Standalone<StringRef>(std::string{ "current-tlog" }));
+	TLogInterface currentTLog(currentLocality);
+	TLogSet currentTLogSet;
+	currentTLogSet.tLogs.push_back(OptionalInterface(currentTLog));
 	ServerDBInfo dbInfo;
 	dbInfo.master.locality = masterLocality;
+	dbInfo.logSystemConfig.tLogs.push_back(currentTLogSet);
 	dbInfo.logSystemConfig.oldTLogs.push_back(oldTLogConf);
 	dbInfo.recoveryState = RecoveryState::FULLY_RECOVERED;
 	data.db.serverInfo->set(dbInfo);
 
+	// An unregistered current log stops unrelated placement comparisons after checking the old roles.
+	ASSERT(!data.betterMasterExists());
+
+	auto& currentWorker = data.id_worker[currentLocality.processId()];
+	currentWorker.details.interf = WorkerInterface(currentLocality);
+	currentWorker.priorityInfo.isExcluded = true;
 	ASSERT(data.betterMasterExists());
 	return Void();
 }
