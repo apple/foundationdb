@@ -370,7 +370,7 @@ Operators pick from three paths to reach `ROLLBACK COMPLETE`:
 
 The active rewrite path described below is **opt-in per operator event**
 via two database configuration options that mirror the
-`storage_engine` + `perpetual_storage_wiggle` pattern:
+`storage_engine` + `storage_migration_type` pattern:
 
 ```
 fdbcli> configure shard_metadata_format=original
@@ -524,34 +524,31 @@ force an extra recovery on upgrade): just set the config and DD converges.
 Deploying the binary is a byte-identical no-op until an operator sets the
 config.
 
-**Two DD features stay gated on the raw knob, not the config target — a
-known limitation.** Physical shard moves (`ENABLE_DD_PHYSICAL_SHARD`) and
-per-range replication / "large teams" (`ddLargeTeamEnabled`, i.e.
-`DD_MAX_SHARDS_ON_LARGE_TEAMS > 0 && !SHARD_ENCODE_LOCATION_METADATA`) are
-**mutually exclusive with shard-encoded metadata** — they operate only in the
-old (tag-based) format. They still read the `SHARD_ENCODE_LOCATION_METADATA`
+**Large teams stay gated on the raw knob, not the config target — a known
+limitation.** Per-range replication (`ddLargeTeamEnabled`, i.e.
+`DD_MAX_SHARDS_ON_LARGE_TEAMS > 0 && !SHARD_ENCODE_LOCATION_METADATA`) is
+**mutually exclusive with shard-encoded metadata** — it operates only in the
+old (tag-based) format. It still reads the `SHARD_ENCODE_LOCATION_METADATA`
 knob directly rather than the resolved `shard_metadata_format` target. That is
 a deliberate trade-off, not a full solution:
 
-- Gating them on `shard_metadata_format` would be *worse*: the config flips
-  instantly but the metadata drains asynchronously, so they would switch on
+- Gating it on `shard_metadata_format` would be *worse*: the config flips
+  instantly but the metadata drains asynchronously, so it would switch on
   the moment `shard_metadata_format=original` is set — while encoded entries
   still exist — violating the mutual exclusion during the active rollback.
   Gating on the knob (which only changes via a process restart) avoids that.
 - But the knob gating is not fully safe either, once config and knob can
   disagree. Two consequences:
   - After a **config-only** rollback (config=old, knob still `true`), large
-    teams / physical shard stay **disabled** even at `ROLLBACK COMPLETE`. To
-    re-enable them, redeploy with `SHARD_ENCODE_LOCATION_METADATA=false` (the
-    same knob=false deploy a binary downgrade needs — see the downgrade
-    contract below).
+    teams stays **disabled** even at `ROLLBACK COMPLETE`. To re-enable it,
+    redeploy with `SHARD_ENCODE_LOCATION_METADATA=false` (the same knob=false
+    deploy a binary downgrade needs — see the downgrade contract below).
   - Conversely, a contradictory `SHARD_ENCODE_LOCATION_METADATA=false` flip
     while `shard_metadata_format=encoded` would **wrongly enable** large
-    teams / physical shard on encoded metadata.
-- Impact is low in practice: large teams is rarely used, physical shard is
-  experimental (off by default), and the bad case requires an operator
-  deliberately contradicting the config with the knob. The correct fix (gate
-  these on the fully-drained old-format state) is deferred.
+    teams on encoded metadata.
+- Impact is low in practice: large teams is rarely used, and the bad case
+  requires an operator deliberately contradicting the config with the knob.
+  The correct fix (gate it on the fully-drained old-format state) is deferred.
 
 **Operational rule:** once you set `shard_metadata_format`, do not move the
 `SHARD_ENCODE_LOCATION_METADATA` knob except as part of a downgrade
@@ -630,6 +627,13 @@ counts dataMoves entries. Reports one of four states:
 Use `location_metadata physicalshards` for routine monitoring (is migration
 progressing?). Use `audit_storage metadata_encoding` for the final gate decision
 (is it safe to downgrade?).
+
+If `MIGRATION IN PROGRESS` persists with the counts no longer moving, grep the
+trace logs for `DDShardEncodeRollbackSkipUndecodable`: DD hit a `serverKeys` value
+it cannot decode, so no old-format value can be derived and no number of rescans
+will convert it. Repair the entry by hand. DD still writes its completion sentinel
+here — that sentinel is only DD's fast-path cache, and the downgrade gate is
+always a fresh `audit_storage metadata_encoding` scan.
 
 ### Rollout/rollback summary
 

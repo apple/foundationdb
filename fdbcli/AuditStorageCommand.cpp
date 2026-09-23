@@ -29,6 +29,7 @@
  *   - audit_storage locationmetadata   : Validate location metadata
  *   - audit_storage ssshard            : Validate storage server shards
  *   - audit_storage validate_restore   : Validate restored backup data
+ *   - audit_storage metadata_encoding  : Report shard-location metadata encoding
  *
  * ============================================================================
  * RESTORE VALIDATION (validate_restore) - Quick Reference
