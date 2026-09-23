@@ -85,7 +85,6 @@ class NativeCdcLoadModel {
 			}
 			tagOwners[streams[i].assignment.tag].insert(streams[i].proxyId);
 		}
-		streamSegments.resize(streams.size());
 		for (auto range : coveringStreams.ranges()) {
 			if (range.value().empty()) {
 				continue;
@@ -93,14 +92,41 @@ class NativeCdcLoadModel {
 			Segment segment{ KeyRange(range.range()), range.value(), {}, {} };
 			for (size_t streamIndex : segment.streams) {
 				++segment.tagCounts[streams[streamIndex].assignment.tag];
-				auto& intervals = streamSegments[streamIndex];
-				if (!intervals.empty() && intervals.back().second == segments.size()) {
-					intervals.back().second = segments.size() + 1;
-				} else {
-					intervals.emplace_back(segments.size(), segments.size() + 1);
-				}
 			}
 			segments.push_back(std::move(segment));
+		}
+	}
+
+	void prepareMoveIndex() {
+		ASSERT(complete);
+		if (!rangePrefix.empty()) {
+			return;
+		}
+		rangePrefix.push_back(0);
+		removableLoads.assign(streams.size(), 0);
+		streamSegments.resize(streams.size());
+		for (const auto& [tag, load] : tagLoads) {
+			tagPrefixes[tag].push_back(0);
+		}
+		for (size_t i = 0; i < segments.size(); ++i) {
+			const auto& segment = segments[i];
+			// Finalization checked the total; these nonnegative subset sums cannot overflow.
+			rangePrefix.push_back(rangePrefix.back() + segment.load.get());
+			for (auto& [tag, prefix] : tagPrefixes) {
+				prefix.push_back(prefix.back() + (segment.tagCounts.contains(tag) ? segment.load.get() : 0));
+			}
+			for (const size_t streamIndex : segment.streams) {
+				const Tag tag = streams[streamIndex].assignment.tag;
+				if (segment.tagCounts.at(tag) == 1) {
+					removableLoads[streamIndex] += segment.load.get();
+				}
+				auto& intervals = streamSegments[streamIndex];
+				if (!intervals.empty() && intervals.back().second == i) {
+					intervals.back().second = i + 1;
+				} else {
+					intervals.emplace_back(i, i + 1);
+				}
+			}
 		}
 	}
 
@@ -142,39 +168,21 @@ public:
 	}
 
 	bool finishSamples() {
-		rangePrefix.assign(1, 0);
-		removableLoads.assign(streams.size(), 0);
-		tagPrefixes.clear();
+		ASSERT(!complete);
 		tagLoads.clear();
-		for (const auto& [tag, owners] : tagOwners) {
-			tagPrefixes[tag].push_back(0);
-		}
+		int64_t total = 0;
 		for (const auto& segment : segments) {
 			if (!segment.load.present()) {
 				return false;
 			}
-			int64_t rangeLoad = rangePrefix.back();
-			if (!addNativeCdcLoad(&rangeLoad, segment.load.get())) {
+			if (!addNativeCdcLoad(&total, segment.load.get())) {
 				return false;
 			}
-			rangePrefix.push_back(rangeLoad);
-			for (auto& [tag, prefix] : tagPrefixes) {
-				int64_t tagLoad = prefix.back();
-				if (segment.tagCounts.contains(tag) && !addNativeCdcLoad(&tagLoad, segment.load.get())) {
-					return false;
-				}
-				prefix.push_back(tagLoad);
-			}
-			for (const size_t streamIndex : segment.streams) {
-				const Tag tag = streams[streamIndex].assignment.tag;
-				if (segment.tagCounts.at(tag) == 1 &&
-				    !addNativeCdcLoad(&removableLoads[streamIndex], segment.load.get())) {
+			for (const auto& [tag, count] : segment.tagCounts) {
+				if (!addNativeCdcLoad(&tagLoads[tag], segment.load.get())) {
 					return false;
 				}
 			}
-		}
-		for (const auto& [tag, prefix] : tagPrefixes) {
-			tagLoads[tag] = prefix.back();
 		}
 		complete = true;
 		return true;
@@ -184,8 +192,8 @@ public:
 	                                            int tagCount,
 	                                            Version cooldown,
 	                                            double minRelativeImprovement,
-	                                            int64_t minBytesPerSecondImprovement) const {
-		ASSERT(complete);
+	                                            int64_t minBytesPerSecondImprovement) {
+		prepareMoveIndex();
 		std::vector<Tag> destinations;
 		for (const auto& [tag, owners] : tagOwners) {
 			if (tag.id < tagCount) {
@@ -620,6 +628,8 @@ TEST_CASE("/NativeCDC/TagBalancing/Overlap") {
 	                                          nativeCdcPolicyTestStream(3, KeyRangeRef("c"_sr, "d"_sr), 1) },
 	                                        { 2000000, 3000000, 5000000 });
 	ASSERT_EQ(partial.segmentCount(), 3);
+	ASSERT_EQ(partial.loads().at(Tag(tagLocalityCDC, 0)), 10000000);
+	ASSERT_EQ(partial.loads().at(Tag(tagLocalityCDC, 1)), 3000000);
 	const auto decision = partial.chooseMove(1000, 2, 0, 0.1, 1000);
 	ASSERT(decision.present());
 	ASSERT_EQ(partial.stream(decision.get().streamIndex).streamId, 1);

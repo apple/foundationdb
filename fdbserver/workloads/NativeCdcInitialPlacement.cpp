@@ -104,6 +104,7 @@ class NativeCdcInitialPlacementWorkload : public TestWorkload {
 	}
 
 	Future<CDCStreamId> registerWithLoad(Database cx, Tag coldTag, Tag hotTag) {
+		const std::vector<KeyRange> ranges{ KeyRange(KeyRangeRef(placedKey, keyAfter(placedKey))) };
 		Transaction tr(cx);
 		std::set<CDCStreamId> attemptedIds;
 		while (true) {
@@ -126,10 +127,7 @@ class NativeCdcInitialPlacementWorkload : public TestWorkload {
 					continue;
 				}
 				const auto result = co_await prepareNativeCdcStreamRegistration(
-				    &tr,
-				    placedName,
-				    { KeyRange(KeyRangeRef(placedKey, keyAfter(placedKey))) },
-				    cx->clientInfo->get().cdcProxies.front().id());
+				    &tr, placedName, ranges, cx->clientInfo->get().cdcProxies.front().id());
 				ASSERT(result.requiresCommit);
 				attemptedIds.insert(result.streamId);
 				co_await tr.commit();
@@ -184,12 +182,12 @@ class NativeCdcInitialPlacementWorkload : public TestWorkload {
 	}
 
 	Future<Void> run(Database cx) {
-		const KeyRange coldRange(KeyRangeRef(coldKey, keyAfter(coldKey)));
-		const KeyRange hotRange(KeyRangeRef(hotKey, keyAfter(hotKey)));
-		const CDCStreamId cold = co_await registerNativeCdcStreamClient(cx, coldName, { coldRange });
+		const std::vector<KeyRange> coldRanges{ KeyRange(KeyRangeRef(coldKey, keyAfter(coldKey))) };
+		const std::vector<KeyRange> hotRanges{ KeyRange(KeyRangeRef(hotKey, keyAfter(hotKey))) };
+		const CDCStreamId cold = co_await registerNativeCdcStreamClient(cx, coldName, coldRanges);
 		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 2);
-		const CDCStreamId hot = co_await registerNativeCdcStreamClient(cx, hotName, { hotRange });
-		const CDCStreamId duplicate = co_await registerNativeCdcStreamClient(cx, duplicateName, { coldRange });
+		const CDCStreamId hot = co_await registerNativeCdcStreamClient(cx, hotName, hotRanges);
+		const CDCStreamId duplicate = co_await registerNativeCdcStreamClient(cx, duplicateName, coldRanges);
 		const Tag coldTag = co_await readTag(cx, cold);
 		const Tag hotTag = co_await readTag(cx, hot);
 		ASSERT_NE(coldTag, hotTag);
@@ -202,12 +200,10 @@ class NativeCdcInitialPlacementWorkload : public TestWorkload {
 		ASSERT_EQ(co_await readTag(cx, cold), coldTag);
 		ASSERT_EQ(co_await readTag(cx, duplicate), coldTag);
 		ASSERT_EQ(co_await readTag(cx, hot), hotTag);
-		co_await timeoutError(
-		    verifyLiveMovesDisabled(cx,
-		                            { { cold, coldTag }, { hot, hotTag }, { duplicate, coldTag }, { placed, coldTag } },
-		                            coldTag,
-		                            hotTag),
-		    operationTimeout);
+		const std::vector<std::pair<CDCStreamId, Tag>> assignments{
+			{ cold, coldTag }, { hot, hotTag }, { duplicate, coldTag }, { placed, coldTag }
+		};
+		co_await timeoutError(verifyLiveMovesDisabled(cx, assignments, coldTag, hotTag), operationTimeout);
 		Reference<NativeCdcConsumer> consumer = co_await createNativeCdcConsumer(cx, placedName);
 		const Value marker = "placed-stream-delivery"_sr;
 		const Version committed = co_await writeValue(cx, placedKey, marker);
