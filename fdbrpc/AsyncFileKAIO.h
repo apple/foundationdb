@@ -71,11 +71,11 @@ struct TruncateResult {
 
 template <class Fallocate, class Ftruncate>
 TruncateResult truncateSyscalls(int fd,
-                               int64_t size,
-                               int64_t lastFileSize,
-                               bool& fallocateSupported,
-                               Fallocate&& fallocateCall,
-                               Ftruncate&& ftruncateCall) {
+                                int64_t size,
+                                int64_t lastFileSize,
+                                bool& fallocateSupported,
+                                Fallocate&& fallocateCall,
+                                Ftruncate&& ftruncateCall) {
 	int fallocateRetries = 0;
 	int fallocateErrorCode = 0;
 	if (fallocateSupported && size >= lastFileSize) {

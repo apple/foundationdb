@@ -281,13 +281,8 @@ TEST_CASE("/fdbrpc/AsyncFileKAIO/TruncateEINTR") {
 		ASSERT(fileStat.st_size == 8192);
 
 		ftruncateCalls = 0;
-		auto shrink = kaio_detail::truncateSyscalls(
-		    fd,
-		    4096,
-		    8192,
-		    fallocateSupported,
-		    ::fallocate,
-		    [&](int fd, off_t length) {
+		auto shrink =
+		    kaio_detail::truncateSyscalls(fd, 4096, 8192, fallocateSupported, ::fallocate, [&](int fd, off_t length) {
 			    if (++ftruncateCalls == 1) {
 				    errno = EINTR;
 				    return -1;
