@@ -787,6 +787,7 @@ const KeyRangeRef cdcStreamNameKeys("\xff/cdc/name/"_sr, "\xff/cdc/name0"_sr);
 const KeyRef cdcMaxStreamIdKey = "\xff/cdc/maxStreamId"_sr;
 const KeyRangeRef cdcStreamKeys("\xff/cdc/keys/"_sr, "\xff/cdc/keys0"_sr);
 const KeyRangeRef cdcTagHistoryKeys("\xff/cdc/tagHistory/"_sr, "\xff/cdc/tagHistory0"_sr);
+const KeyRangeRef cdcTagLoadKeys("\xff\x02/cdc/tagLoad/"_sr, "\xff\x02/cdc/tagLoad0"_sr);
 const KeyRangeRef cdcTagOwnerKeys("\xff\x02/cdc/tagOwner/"_sr, "\xff\x02/cdc/tagOwner0"_sr);
 const KeyRangeRef cdcMinVersionKeys("\xff\x02/cdc/minVersion/"_sr, "\xff\x02/cdc/minVersion0"_sr);
 const KeyRangeRef cdcRetiredTagPopKeys("\xff/cdc/retiredTagPop/"_sr, "\xff/cdc/retiredTagPop0"_sr);
@@ -898,6 +899,34 @@ CDCTagHistoryEntry decodeCDCTagHistoryEntry(KeyRef const& key, ValueRef const& v
 		result.version = committedVersion;
 	}
 	return result;
+}
+
+Key cdcTagLoadKeyFor(Tag tag) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(cdcTagLoadKeys.begin);
+	wr << tag;
+	return wr.toValue();
+}
+
+Tag decodeCDCTagLoadKey(KeyRef const& key) {
+	Tag tag;
+	BinaryReader reader(key.removePrefix(cdcTagLoadKeys.begin), Unversioned());
+	reader >> tag;
+	return tag;
+}
+
+Value cdcTagLoadValue(CDCTagLoadSample const& sample) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withNativeCdc()));
+	wr << sample.assignmentChange << sample.sampleVersion << sample.validThrough << sample.bytesWrittenPerKSecond;
+	return wr.toValue();
+}
+
+CDCTagLoadSample decodeCDCTagLoadValue(ValueRef const& value) {
+	CDCTagLoadSample sample;
+	BinaryReader reader(value, IncludeVersion());
+	ASSERT_WE_THINK(reader.protocolVersion().hasNativeCdc());
+	reader >> sample.assignmentChange >> sample.sampleVersion >> sample.validThrough >> sample.bytesWrittenPerKSecond;
+	return sample;
 }
 
 Key cdcTagOwnerKeyFor(Tag tag) {
@@ -2010,6 +2039,15 @@ TEST_CASE("/SystemData/NativeCDC") {
 		invalidBoundaryRejected = true;
 	}
 	ASSERT(invalidBoundaryRejected);
+
+	const CDCTagLoadSample sample{ "assignment"_sr, minVersion, minVersion + 100, 123000 };
+	const CDCTagLoadSample decodedSample = decodeCDCTagLoadValue(cdcTagLoadValue(sample));
+	ASSERT_EQ(decodeCDCTagLoadKey(cdcTagLoadKeyFor(tag)), tag);
+	ASSERT(nonMetadataSystemKeys.contains(cdcTagLoadKeyFor(tag)));
+	ASSERT_EQ(decodedSample.assignmentChange, sample.assignmentChange);
+	ASSERT_EQ(decodedSample.sampleVersion, sample.sampleVersion);
+	ASSERT_EQ(decodedSample.validThrough, sample.validThrough);
+	ASSERT_EQ(decodedSample.bytesWrittenPerKSecond, sample.bytesWrittenPerKSecond);
 
 	const Value serializedTagHistory = ObjectWriter::toValue(decodedTagHistory, Unversioned());
 	const auto deserializedTagHistory =

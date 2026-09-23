@@ -49,6 +49,7 @@ class NativeCdcIdentifierAllocator {
 	bool sawStream = false;
 	CDCStreamId maxStreamId = 0;
 	std::unordered_map<CDCTagId, uint32_t> tagStreamCounts;
+	std::unordered_map<CDCTagId, int64_t> tagWriteRates;
 
 public:
 	void observeStreamId(CDCStreamId streamId) {
@@ -59,6 +60,14 @@ public:
 	void observeTag(Tag tag) {
 		ASSERT_WE_THINK(tag.locality == tagLocalityCDC);
 		++tagStreamCounts[tag.id];
+	}
+
+	void observeTagLoad(Tag tag, CDCTagLoadSample const& sample, ValueRef generation, Version readVersion) {
+		if (tag.locality == tagLocalityCDC && sample.assignmentChange == generation && sample.sampleVersion >= 0 &&
+		    sample.sampleVersion <= readVersion && sample.validThrough >= readVersion &&
+		    sample.bytesWrittenPerKSecond >= 0) {
+			tagWriteRates[tag.id] = sample.bytesWrittenPerKSecond;
+		}
 	}
 
 	bool hasStreams(Tag tag) const { return tagStreamCounts.contains(tag.id); }
@@ -72,16 +81,24 @@ public:
 		if (!validNativeCdcTagCount(tagCount)) {
 			throw invalid_option_value();
 		}
+		const bool completeLoad = !tagStreamCounts.empty() &&
+		                          std::all_of(tagStreamCounts.begin(), tagStreamCounts.end(), [&](auto const& entry) {
+			                          return entry.first >= tagCount || tagWriteRates.contains(entry.first);
+		                          });
 		uint32_t leastStreams = std::numeric_limits<uint32_t>::max();
+		int64_t leastWriteRate = std::numeric_limits<int64_t>::max();
 		CDCTagId selectedTagId = 0;
 		for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(tagCount); ++tagId) {
 			auto count = tagStreamCounts.find(static_cast<CDCTagId>(tagId));
 			const uint32_t streamCount = count == tagStreamCounts.end() ? 0 : count->second;
-			if (streamCount < leastStreams) {
+			const int64_t writeRate = completeLoad && streamCount > 0 ? tagWriteRates.at(tagId) : 0;
+			if (writeRate < leastWriteRate || (writeRate == leastWriteRate && streamCount < leastStreams)) {
+				leastWriteRate = writeRate;
 				leastStreams = streamCount;
 				selectedTagId = static_cast<CDCTagId>(tagId);
 			}
 		}
+		CODE_PROBE(completeLoad, "Native CDC registration places streams using fresh producer throughput");
 		return { streamId, Tag(tagLocalityCDC, selectedTagId) };
 	}
 };
@@ -211,6 +228,22 @@ Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAlloca
 	co_await readNativeCdcCurrentTags(tr, &currentTags, allocator);
 	for (const auto& tagAssignment : currentTags) {
 		allocator->observeTag(tagAssignment.second);
+	}
+	if (!currentTags.empty()) {
+		const Value generation = (co_await tr->get(cdcProxyAssignmentChangeKey)).orDefault(Value());
+		const Version readVersion = co_await tr->getReadVersion();
+		Key begin = cdcTagLoadKeys.begin;
+		while (begin < cdcTagLoadKeys.end) {
+			RangeResult samples = co_await tr->getRange(KeyRangeRef(begin, cdcTagLoadKeys.end), CLIENT_KNOBS->TOO_MANY);
+			for (const auto& sample : samples) {
+				allocator->observeTagLoad(
+				    decodeCDCTagLoadKey(sample.key), decodeCDCTagLoadValue(sample.value), generation, readVersion);
+			}
+			if (!samples.more) {
+				break;
+			}
+			begin = keyAfter(samples.back().key);
+		}
 	}
 }
 
@@ -577,5 +610,41 @@ TEST_CASE("/NativeCDC/LifecycleAllocation") {
 	ASSERT_EQ(sharedId, 1);
 	ASSERT_EQ(sharedTag, Tag(tagLocalityCDC, 0));
 
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ThroughputPlacement") {
+	const Value generation = "current"_sr;
+	const Tag hotTag(tagLocalityCDC, 0);
+	const Tag coldTag(tagLocalityCDC, 1);
+	const CDCTagLoadSample hot{ generation, 100, 200, 100000 };
+	const CDCTagLoadSample cold{ generation, 100, 200, 0 };
+	auto select = [&](CDCTagLoadSample const& hotSample, Optional<CDCTagLoadSample> coldSample, int tagCount = 2) {
+		NativeCdcIdentifierAllocator allocator;
+		allocator.observeTag(hotTag);
+		allocator.observeTag(coldTag);
+		allocator.observeTag(coldTag);
+		allocator.observeTagLoad(hotTag, hotSample, generation, 150);
+		if (coldSample.present()) {
+			allocator.observeTagLoad(coldTag, coldSample.get(), generation, 150);
+		}
+		return allocator.allocate(tagCount).second;
+	};
+	ASSERT_EQ(select(hot, cold), coldTag);
+	ASSERT_EQ(select(hot, Optional<CDCTagLoadSample>()), hotTag);
+	ASSERT_EQ(select(hot, cold, 3), Tag(tagLocalityCDC, 2));
+
+	CDCTagLoadSample invalid = cold;
+	invalid.assignmentChange = "previous"_sr;
+	ASSERT_EQ(select(hot, invalid), hotTag);
+	invalid = cold;
+	invalid.validThrough = 149;
+	ASSERT_EQ(select(hot, invalid), hotTag);
+	invalid = cold;
+	invalid.sampleVersion = 151;
+	ASSERT_EQ(select(hot, invalid), hotTag);
+	invalid = cold;
+	invalid.bytesWrittenPerKSecond = -1;
+	ASSERT_EQ(select(hot, invalid), hotTag);
 	return Void();
 }

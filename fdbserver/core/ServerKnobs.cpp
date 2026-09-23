@@ -192,6 +192,18 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CDC_PROXY_REBALANCE_ENABLED,                           false ); if( randomize && buggify() ) CDC_PROXY_REBALANCE_ENABLED = true;
 	init( CDC_PROXY_REBALANCE_INTERVAL,                           60.0 ); if( randomize && buggify() ) CDC_PROXY_REBALANCE_INTERVAL = deterministicRandom()->randomInt(10, 121);
 	init( NATIVE_CDC_RETAG_CLEANUP_INTERVAL,                     30.0 ); if( randomize && buggify() ) NATIVE_CDC_RETAG_CLEANUP_INTERVAL = 0.1;
+	init( NATIVE_CDC_TAG_BALANCING_ENABLED,                      true );
+	init( NATIVE_CDC_LIVE_RETAGGING_ENABLED,                    false );
+	init( NATIVE_CDC_TAG_SAMPLE_INTERVAL,                        30.0 );
+	init( NATIVE_CDC_TAG_SAMPLE_TIMEOUT,                          5.0 );
+	init( NATIVE_CDC_TAG_SAMPLE_MAX_AGE,                         90.0 );
+	init( NATIVE_CDC_TAG_MOVE_COOLDOWN,                         300.0 );
+	init( NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT,                0.2 );
+	init( NATIVE_CDC_TAG_MIN_BYTES_PER_SECOND_IMPROVEMENT,      10000 );
+	init( NATIVE_CDC_TAG_MAX_STREAMS,                            1000 );
+	init( NATIVE_CDC_TAG_MODEL_MAX_ENTRIES,                   2000000 );
+	init( NATIVE_CDC_TAG_SAMPLE_CONCURRENCY,                        8 );
+	init( NATIVE_CDC_TAG_SAMPLE_SHARD_LIMIT,                     1000 );
 	init( APPLY_MUTATION_BYTES,                                  1e6 );
 	init( BUGGIFY_RECOVER_MEMORY_LIMIT,                          1e6 );
 	init( BUGGIFY_WORKER_REMOVED_MAX_LAG,                         30 );
