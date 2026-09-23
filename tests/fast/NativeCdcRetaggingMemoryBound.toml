@@ -1,0 +1,38 @@
+[configuration]
+config = 'single logs=1 commit_proxies=1 grv_proxies=1'
+singleRegion = true
+datacenters = 1
+machineCount = 10
+statelessProcessClassesPerDC = 4
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 2
+native_cdc_retag_cleanup_interval = 0.25
+cdc_proxy_buffer_bytes = 4608
+maximum_peek_bytes = 1152
+cdc_proxy_consume_reply_bytes = 4096
+# Both readers must deliver before acknowledgement, well before a consume lease can expire.
+cdc_proxy_consume_poll_timeout = 600.0
+cdc_proxy_pop_scan_interval = 600.0
+
+[[test]]
+testTitle = 'NativeCdcRetaggingMemoryBound'
+useDB = true
+runFailureWorkloads = false
+runConsistencyCheck = false
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+timeout = 600
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 2
+    minStreamCount = 2
+    keyCount = 2
+    writesPerRound = 1
+    testRetaggingMemoryBound = true
+    retentionValidationDelay = 1.0
+    operationTimeout = 20.0

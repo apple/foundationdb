@@ -191,6 +191,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CDC_PROXY_POP_SCAN_INTERVAL,                            5.0 ); if( randomize && buggify() ) CDC_PROXY_POP_SCAN_INTERVAL = 0.1;
 	init( CDC_PROXY_REBALANCE_ENABLED,                           false ); if( randomize && buggify() ) CDC_PROXY_REBALANCE_ENABLED = true;
 	init( CDC_PROXY_REBALANCE_INTERVAL,                           60.0 ); if( randomize && buggify() ) CDC_PROXY_REBALANCE_INTERVAL = deterministicRandom()->randomInt(10, 121);
+	init( NATIVE_CDC_RETAG_CLEANUP_INTERVAL,                     30.0 ); if( randomize && buggify() ) NATIVE_CDC_RETAG_CLEANUP_INTERVAL = 0.1;
 	init( APPLY_MUTATION_BYTES,                                  1e6 );
 	init( BUGGIFY_RECOVER_MEMORY_LIMIT,                          1e6 );
 	init( BUGGIFY_WORKER_REMOVED_MAX_LAG,                         30 );

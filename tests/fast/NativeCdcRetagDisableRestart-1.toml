@@ -1,0 +1,33 @@
+[configuration]
+config = 'single'
+singleRegion = true
+storageEngineExcludeTypes = [3, 4, 5]
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 2
+native_cdc_retag_cleanup_interval = 0.25
+
+[[test]]
+testTitle = 'NativeCdcRetagDisableRestart'
+clearAfterTest = false
+runFailureWorkloads = false
+runConsistencyCheck = false
+waitForQuiescenceEnd = false
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    initialStreamCount = 1
+    minStreamCount = 1
+    keyCount = 4
+    writesPerRound = 1
+    prepareRestartDrain = true
+    testRetaggedRestart = true
+    testRetagTransactionRetries = true
+
+    [[test.workload]]
+    testName = 'SaveAndKill'
+    restartInfoLocation = 'simfdb/restartInfo.ini'
+    testDuration = 20.0
