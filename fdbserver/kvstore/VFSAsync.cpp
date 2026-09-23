@@ -250,7 +250,7 @@ static int asyncLock(sqlite3_file* pFile, int eLock) {
 	return eLock == EXCLUSIVE_LOCK ? SQLITE_BUSY : SQLITE_OK;
 }
 static int asyncUnlock(sqlite3_file* pFile, int eLock) {
-	assert(eLock <= SHARED_LOCK);
+	ASSERT_ABORT(eLock <= SHARED_LOCK);
 
 	return SQLITE_OK;
 }
@@ -347,7 +347,7 @@ static int asyncShmMap(sqlite3_file* fd, /* Handle open on database file */
 		++memInfo->refcount;
 		// printf("Shared memory for: '%s' (%d refs)\n", filename.c_str(), memInfo->refcount);
 	} else {
-		assert(memInfo->regionSize == szRegion);
+		ASSERT_ABORT(memInfo->regionSize == szRegion);
 	}
 
 	if (iRegion >= memInfo->regions.size()) {
@@ -380,11 +380,12 @@ static int asyncShmLock(sqlite3_file* fd, /* Database file holding the shared me
                         int n, /* Number of locks to acquire or release */
                         int flags /* What to do with the lock */
 ) {
-	assert(ofst >= 0 && ofst + n <= SQLITE_SHM_NLOCK);
-	assert(n >= 1);
-	assert(flags == (SQLITE_SHM_LOCK | SQLITE_SHM_SHARED) || flags == (SQLITE_SHM_LOCK | SQLITE_SHM_EXCLUSIVE) ||
-	       flags == (SQLITE_SHM_UNLOCK | SQLITE_SHM_SHARED) || flags == (SQLITE_SHM_UNLOCK | SQLITE_SHM_EXCLUSIVE));
-	assert(n == 1 || (flags & SQLITE_SHM_EXCLUSIVE) != 0);
+	ASSERT_ABORT(ofst >= 0 && ofst + n <= SQLITE_SHM_NLOCK);
+	ASSERT_ABORT(n >= 1);
+	ASSERT_ABORT(flags == (SQLITE_SHM_LOCK | SQLITE_SHM_SHARED) || flags == (SQLITE_SHM_LOCK | SQLITE_SHM_EXCLUSIVE) ||
+	             flags == (SQLITE_SHM_UNLOCK | SQLITE_SHM_SHARED) ||
+	             flags == (SQLITE_SHM_UNLOCK | SQLITE_SHM_EXCLUSIVE));
+	ASSERT_ABORT(n == 1 || (flags & SQLITE_SHM_EXCLUSIVE) != 0);
 
 	MutexHolder hold(SharedMemoryInfo::mutex);
 
@@ -617,9 +618,9 @@ static int asyncAccess(sqlite3_vfs* pVfs, const char* zPath, int flags, int* pRe
 	int rc; /* access() return code */
 	int eAccess = F_OK; /* Second argument to access() */
 
-	assert(flags == SQLITE_ACCESS_EXISTS /* access(zPath, F_OK) */
-	       || flags == SQLITE_ACCESS_READ /* access(zPath, R_OK) */
-	       || flags == SQLITE_ACCESS_READWRITE /* access(zPath, R_OK|W_OK) */
+	ASSERT_ABORT(flags == SQLITE_ACCESS_EXISTS /* access(zPath, F_OK) */
+	             || flags == SQLITE_ACCESS_READ /* access(zPath, R_OK) */
+	             || flags == SQLITE_ACCESS_READWRITE /* access(zPath, R_OK|W_OK) */
 	);
 
 	if (flags == SQLITE_ACCESS_READWRITE)

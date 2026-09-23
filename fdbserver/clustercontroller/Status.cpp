@@ -178,7 +178,7 @@ class StatusCounter {
 public:
 	StatusCounter() : hz(0), roughness(0), counter(0) {}
 	StatusCounter(double hz, double roughness, int64_t counter) : hz(hz), roughness(roughness), counter(counter) {}
-	explicit(false) StatusCounter(const std::string& parsableText) { parseText(parsableText); }
+	explicit StatusCounter(const std::string& parsableText) { parseText(parsableText); }
 
 	StatusCounter& parseText(const std::string& parsableText) {
 		sscanf(parsableText.c_str(), "%lf %lf %" SCNd64 "", &hz, &roughness, &counter);

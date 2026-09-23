@@ -20,6 +20,7 @@
 
 #include <map>
 
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "flow/UnitTest.h"
 
@@ -270,43 +271,84 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/TLogSpaceFactor") {
 TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/StorageReplicationFactor") {
 	StorageReplicationFactor factor;
 	auto provider = makeReference<FakeWorkerEventProvider>();
-	Level level;
-
+	auto teamMetrics = [](int priority) {
+		TraceEventFields fields;
+		fields.addField("HighestTeamPriority", std::to_string(priority));
+		return fields;
+	};
+	provider->setLatestEvents("TotalDataInFlight",
+	                          makeLatestWorkerEvents(teamMetrics(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY)));
 	provider->setLatestEvents("MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().build()));
-	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	Level level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
+	// Repair activity remains SelfHealing, even after the teams themselves recover.
 	provider->setLatestEvents(
 	    "MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().inQueue(1).priorityTeamUnhealthy(1).build()));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::SELF_HEALING);
 
-	provider->setLatestEvents(
-	    "MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().inFlight(1).priorityTeam1Left(1).build()));
+	provider->setLatestEvents("TotalDataInFlight",
+	                          makeLatestWorkerEvents(teamMetrics(SERVER_KNOBS->PRIORITY_TEAM_1_LEFT)));
+	provider->setLatestEvents("MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().build()));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::SELF_HEALING);
-
 	provider->setStorageTeamOneReplicaLeftIsCritical(true);
-	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
-	ASSERT_EQ(level, Level::CRITICAL_INTERVENTION_REQUIRED);
 
+	// Admission and completion can change the queue's priority counts without changing team health.
+	// In particular, a full relocation pipeline can temporarily contain no zero-replica relocations.
+	for (int priority : { SERVER_KNOBS->PRIORITY_TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT }) {
+		provider->setLatestEvents("TotalDataInFlight", makeLatestWorkerEvents(teamMetrics(priority)));
+		for (int zeroReplicaMoves : { 2, 0, 1 }) {
+			provider->setLatestEvents("MovingData",
+			                          makeLatestWorkerEvents(MovingDataMetricsBuilder()
+			                                                     .inQueue(900)
+			                                                     .inFlight(100)
+			                                                     .priorityTeam1Left(700)
+			                                                     .priorityTeam0Left(zeroReplicaMoves)
+			                                                     .build()));
+			level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+			ASSERT_EQ(level,
+			          priority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ? Level::OUTAGE
+			                                                         : Level::CRITICAL_INTERVENTION_REQUIRED);
+		}
+		provider->setLatestEvents("MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().build()));
+		level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+		ASSERT_EQ(level,
+		          priority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ? Level::OUTAGE
+		                                                         : Level::CRITICAL_INTERVENTION_REQUIRED);
+	}
+
+	// Old severe relocations must not keep a recovered team at Outage or Critical.
+	provider->setLatestEvents("TotalDataInFlight",
+	                          makeLatestWorkerEvents(teamMetrics(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY)));
 	provider->setLatestEvents(
 	    "MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().inQueue(1).priorityTeam0Left(1).build()));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
-	ASSERT_EQ(level, Level::OUTAGE);
+	ASSERT_EQ(level, Level::SELF_HEALING);
 
-	WorkerEvents staleWorkerEvents;
-	staleWorkerEvents.emplace(NetworkAddress(IPAddress(0x01010101), 1),
-	                          MovingDataMetricsBuilder().inQueue(1).priorityTeam0Left(1).build());
-	staleWorkerEvents.emplace(NetworkAddress(IPAddress(0x02020202), 2), MovingDataMetricsBuilder().build());
-	provider->setLatestEvents("MovingData", makeLatestWorkerEvents(std::move(staleWorkerEvents)));
-	provider->setLatestDataDistributorEvents(
-	    "MovingData",
-	    makeLatestWorkerEvents(NetworkAddress(IPAddress(0x02020202), 2), MovingDataMetricsBuilder().build()));
+	// Both summaries must come from the current DD, not a former DD worker's cached events.
+	provider->setLatestEvents("TotalDataInFlight",
+	                          makeLatestWorkerEvents(teamMetrics(SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)));
+	provider->setLatestDataDistributorEvents("TotalDataInFlight",
+	                                         makeLatestWorkerEvents(teamMetrics(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY)));
+	provider->setLatestDataDistributorEvents("MovingData", makeLatestWorkerEvents(MovingDataMetricsBuilder().build()));
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::HEALTHY);
 
-	provider->setLatestEvents("MovingData", LatestWorkerEvents());
+	// Uninitialized, old-format, empty, and unavailable team summaries must not fabricate health.
+	TraceEventFields oldFormat;
+	oldFormat.addField("HighestPriority", "0");
+	for (const auto& fields : { teamMetrics(-1), oldFormat, TraceEventFields() }) {
+		provider->setLatestDataDistributorEvents("TotalDataInFlight", makeLatestWorkerEvents(fields));
+		level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+		ASSERT_EQ(level, Level::METRICS_MISSING);
+	}
+	provider->setLatestDataDistributorEvents("TotalDataInFlight", LatestWorkerEvents());
+	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
+	ASSERT_EQ(level, Level::METRICS_MISSING);
+	provider->setLatestDataDistributorEvents("TotalDataInFlight",
+	                                         makeLatestWorkerEvents(teamMetrics(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY)));
 	provider->setLatestDataDistributorEvents("MovingData", LatestWorkerEvents());
 	level = co_await factor.fetchLevel(provider, TrackCodeProbes::False);
 	ASSERT_EQ(level, Level::METRICS_MISSING);

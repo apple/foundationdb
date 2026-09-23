@@ -95,7 +95,7 @@ class AdminServer {
 	}
 
 public:
-	AdminServer(const Arguments& args)
+	explicit AdminServer(const Arguments& args)
 	  : args(args), server_pid(-1), pipe_to_server(boost::process::pipe()), pipe_to_client(boost::process::pipe()) {
 		start();
 	}
