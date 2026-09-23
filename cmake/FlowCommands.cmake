@@ -136,7 +136,7 @@ function(strip_debug_symbols target)
       OUTPUT "${out_file}" "${out_file}.debug"
       COMMAND ${strip_command} $<TARGET_FILE:${target}>
       # COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug"
-      COMMAND "${CMAKE_COMMAND}" -E copy "${target}" "${out_file}.debug" # instead of only-keep-debug
+      COMMAND "${CMAKE_COMMAND}" -E copy $<TARGET_FILE:${target}> "${out_file}.debug"
       COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug" "${out_file}"
       DEPENDS ${target}
       COMMENT "Stripping symbols and copying debug symbols from ${target}")
