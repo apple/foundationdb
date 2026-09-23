@@ -3695,8 +3695,13 @@ public:
 					    .detail("ZeroHealthy", self->zeroOptimalTeams.get())
 					    .detail("HighestPriority", highestPriority)
 					    .detail("TeamsHealthy", teamCount(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY))
-					    .detail("Teams1Left", teamCount(SERVER_KNOBS->PRIORITY_TEAM_1_LEFT))
+					    .detail("TeamsContainsUndesiredServer",
+					            teamCount(SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER))
+					    .detail("TeamsRedundant", teamCount(SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT))
+					    .detail("TeamsUnhealthy", teamCount(SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY))
 					    .detail("Teams2Left", teamCount(SERVER_KNOBS->PRIORITY_TEAM_2_LEFT))
+					    .detail("Teams1Left", teamCount(SERVER_KNOBS->PRIORITY_TEAM_1_LEFT))
+					    .detail("Teams0Left", teamCount(SERVER_KNOBS->PRIORITY_TEAM_0_LEFT))
 					    .trackLatest(self->primary ? "TotalDataInFlight"
 					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
 					                                                             // lifetime is controlled by
