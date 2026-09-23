@@ -921,10 +921,17 @@ static Future<bool> repairUninitializedCoordinatorQueue(std::string dataFolder) 
 	co_return true;
 }
 
-static Future<Void> testCoordinatorQueueRepair(std::string folder,
-                                               std::array<const char*, 4> contents,
-                                               bool expectRepair) {
+struct CoordinatorQueueTestFiles {
+	// Indexed by queue file number (0 or 1); nullptr means absent, "" means present but empty.
+	std::array<const char*, 2> finalFiles;
+	std::array<const char*, 2> partFiles;
+};
+
+static Future<Void> testCoordinatorQueueRepair(std::string folder, CoordinatorQueueTestFiles files, bool expectRepair) {
 	platform::createDirectory(folder);
+	std::array<const char*, 4> contents = {
+		files.finalFiles[0], files.finalFiles[1], files.partFiles[0], files.partFiles[1]
+	};
 	std::array<std::string, 4> paths;
 	for (int i = 0; i < 4; ++i) {
 		paths[i] = joinPath(folder, format("%s%d.fdq%s", fileCoordinatorPrefix.c_str(), i % 2, i < 2 ? "" : ".part"));
@@ -994,25 +1001,31 @@ static Future<Void> testCoordinatorQueueRepair(std::string folder,
 }
 
 TEST_CASE("/fdbserver/Coordination/incompleteQueue/repair") {
-	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "missing-0"), { nullptr, "", "", nullptr }, true);
-	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "missing-1"), { "", nullptr, nullptr, "" }, true);
+	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "missing-0"),
+	                                    { .finalFiles = { nullptr, "" }, .partFiles = { "", nullptr } },
+	                                    true);
+	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "missing-1"),
+	                                    { .finalFiles = { "", nullptr }, .partFiles = { nullptr, "" } },
+	                                    true);
 }
 
 TEST_CASE("/fdbserver/Coordination/incompleteQueue/preserveFiles") {
-	co_await testCoordinatorQueueRepair(
-	    joinPath(params.getDataDir(), "both-missing"), { nullptr, nullptr, "", "" }, false);
-	co_await testCoordinatorQueueRepair(
-	    joinPath(params.getDataDir(), "both-present"), { "", "", nullptr, nullptr }, false);
+	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "both-missing"),
+	                                    { .finalFiles = { nullptr, nullptr }, .partFiles = { "", "" } },
+	                                    false);
+	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "both-present"),
+	                                    { .finalFiles = { "", "" }, .partFiles = { nullptr, nullptr } },
+	                                    false);
 	for (int missing = 0; missing < 2; ++missing) {
-		std::array<const char*, 4> contents = { "", "", nullptr, nullptr };
-		contents[missing] = nullptr;
+		CoordinatorQueueTestFiles contents{ .finalFiles = { "", "" }, .partFiles = { nullptr, nullptr } };
+		contents.finalFiles[missing] = nullptr;
 		co_await testCoordinatorQueueRepair(
 		    joinPath(params.getDataDir(), format("missing-part-%d", missing)), contents, false);
-		contents[missing + 2] = "data";
+		contents.partFiles[missing] = "data";
 		co_await testCoordinatorQueueRepair(
 		    joinPath(params.getDataDir(), format("nonempty-part-%d", missing)), contents, false);
-		contents[missing + 2] = "";
-		contents[1 - missing] = "data";
+		contents.partFiles[missing] = "";
+		contents.finalFiles[1 - missing] = "data";
 		co_await testCoordinatorQueueRepair(
 		    joinPath(params.getDataDir(), format("nonempty-final-%d", missing)), contents, false);
 	}
