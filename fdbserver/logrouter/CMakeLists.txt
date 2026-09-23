@@ -5,6 +5,10 @@ add_fdbserver_link_test(fdbserver_logrouterlinktest
   fdbserver_logrouter
   fdbserver_logsystem
   fdbserver_core)
+add_fdbserver_unit_test(fdbserver_logrouter_test logrouter
+  fdbserver_logrouter
+  fdbserver_logsystem
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_logrouter)
 target_include_directories(fdbserver_logrouter
