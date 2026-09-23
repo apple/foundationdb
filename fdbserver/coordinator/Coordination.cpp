@@ -871,6 +871,7 @@ Future<Void> leaderServer(LeaderElectionRegInterface interf,
 
 static Future<bool> repairUninitializedCoordinatorQueue(std::string dataFolder) {
 	std::vector<Future<Reference<IAsyncFile>>> files;
+	files.reserve(2);
 	for (int i = 0; i < 2; ++i) {
 		files.push_back(IAsyncFileSystem::filesystem()->open(
 		    joinPath(dataFolder, format("%s%d.fdq", fileCoordinatorPrefix.c_str(), i)),
