@@ -24,7 +24,9 @@
 #include <utility>
 
 #include "NativeCdcOrderedMetadata.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
+#include "flow/CodeProbe.h"
 #include "flow/UnitTest.h"
 #include "flow/serialize.h"
 
@@ -270,6 +272,138 @@ CDCStreamId decodeCDCOrderedParentValue(ValueRef value) {
 		throw serialization_failed();
 	}
 	return logicalId;
+}
+
+namespace {
+
+void validateVersionedScalar(ValueRef value, ValueRef reference, int scalarBytes) {
+	if (value.size() != reference.size() || !value.startsWith(reference.substr(0, reference.size() - scalarBytes))) {
+		throw serialization_failed();
+	}
+}
+
+Version readMinVersion(ValueRef value) {
+	if (value.size() != sizeof(Version) + sizeof(uint16_t)) {
+		validateVersionedScalar(value, cdcMinVersionValue(0), sizeof(Version));
+	}
+	const Version minVersion = decodeCDCMinVersionValue(value);
+	if (minVersion < 0 || minVersion == std::numeric_limits<Version>::max()) {
+		throw serialization_failed();
+	}
+	return minVersion;
+}
+
+} // namespace
+
+Version validateNativeCdcOrderedPartition(CDCStreamId logicalId,
+                                          CDCStreamId childId,
+                                          const std::vector<KeyRange>& expectedRanges,
+                                          ValueRef ranges,
+                                          ValueRef parent,
+                                          ValueRef minimum,
+                                          Version commonMinimum) {
+	if (childId == logicalId || ranges != cdcStreamKeysValue(expectedRanges) ||
+	    decodeCDCOrderedParentValue(parent) != logicalId) {
+		throw serialization_failed();
+	}
+	const Version minVersion = readMinVersion(minimum);
+	if (commonMinimum != invalidVersion && minVersion != commonMinimum) {
+		throw serialization_failed();
+	}
+	return minVersion;
+}
+
+Future<Optional<NativeCdcOrderedSnapshot>> readNativeCdcOrderedSnapshot(Transaction* tr, CDCStreamId logicalId) {
+	if (logicalId == 0) {
+		throw client_invalid_operation();
+	}
+	const Optional<Value> groupValue = co_await tr->get(cdcOrderedStreamKeyFor(logicalId));
+	if (!groupValue.present()) {
+		co_return Optional<NativeCdcOrderedSnapshot>();
+	}
+	NativeCdcOrderedMetadata metadata = decodeCDCOrderedStreamValue(groupValue.get());
+	const auto partitionRanges = nativeCdcOrderedPartitionRanges(metadata.ranges(), metadata.splitPoints());
+	std::vector<Future<Optional<Value>>> rangeReads;
+	std::vector<Future<Optional<Value>>> parentReads;
+	std::vector<Future<Optional<Value>>> minimumReads;
+	for (const CDCStreamId child : metadata.partitions()) {
+		rangeReads.push_back(tr->get(cdcStreamKeyFor(child)));
+		parentReads.push_back(tr->get(cdcOrderedParentKeyFor(child)));
+		minimumReads.push_back(tr->get(cdcMinVersionKeyFor(child)));
+	}
+	Version commonMinVersion = invalidVersion;
+	for (size_t i = 0; i < metadata.partitions().size(); ++i) {
+		const Optional<Value> ranges = co_await rangeReads[i];
+		const Optional<Value> parent = co_await parentReads[i];
+		const Optional<Value> minimum = co_await minimumReads[i];
+		commonMinVersion = validateNativeCdcOrderedPartition(logicalId,
+		                                                     metadata.partitions()[i],
+		                                                     partitionRanges[i],
+		                                                     ranges.orDefault(Value()),
+		                                                     parent.orDefault(Value()),
+		                                                     minimum.orDefault(Value()),
+		                                                     commonMinVersion);
+	}
+	co_return Optional<NativeCdcOrderedSnapshot>(NativeCdcOrderedSnapshot{ std::move(metadata), commonMinVersion });
+}
+
+Future<Optional<NativeCdcOrderedSnapshot>> readNativeCdcOrderedSnapshot(Database cx, CDCStreamId logicalId) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			co_return co_await readNativeCdcOrderedSnapshot(&tr, logicalId);
+		} catch (Error& error) {
+			err = error;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+Future<Version> acknowledgeNativeCdcOrderedStream(Database cx,
+                                                  CDCStreamId logicalId,
+                                                  NativeCdcOrderedMetadata expectedMetadata,
+                                                  Version consumedThrough,
+                                                  Version knownAvailableThrough) {
+	if (logicalId == 0 || consumedThrough < 0 || consumedThrough >= std::numeric_limits<Version>::max() - 1 ||
+	    knownAvailableThrough < invalidVersion) {
+		throw client_invalid_operation();
+	}
+	const Version minUnpoppedVersion = consumedThrough + 1;
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			const Optional<NativeCdcOrderedSnapshot> snapshot = co_await readNativeCdcOrderedSnapshot(&tr, logicalId);
+			if (!snapshot.present() || snapshot.get().metadata != expectedMetadata) {
+				throw client_invalid_operation();
+			}
+			if (minUnpoppedVersion <= snapshot.get().minVersion) {
+				CODE_PROBE(true, "Ordered native CDC preserves a duplicate acknowledgement");
+				co_return snapshot.get().minVersion;
+			}
+			const Version readVersion = co_await tr.getReadVersion();
+			if (consumedThrough > readVersion && consumedThrough > knownAvailableThrough) {
+				throw client_invalid_operation();
+			}
+			const Value minimum = cdcMinVersionValue(minUnpoppedVersion);
+			for (const CDCStreamId child : expectedMetadata.partitions()) {
+				tr.set(cdcMinVersionKeyFor(child), minimum);
+			}
+			co_await tr.commit();
+			CODE_PROBE(true, "Ordered native CDC advances all partition acknowledgements atomically");
+			co_return minUnpoppedVersion;
+		} catch (Error& error) {
+			err = error;
+		}
+		co_await tr.onError(err);
+	}
 }
 
 void forceLinkNativeCdcOrderedMetadataTests() {}

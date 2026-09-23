@@ -69,6 +69,37 @@ NativeCdcOrderedMetadata decodeCDCOrderedStreamValue(ValueRef value);
 Value cdcOrderedParentValue(CDCStreamId logicalId);
 CDCStreamId decodeCDCOrderedParentValue(ValueRef value);
 
+class Database;
+class Transaction;
+
+// Validates one physical partition and the common durable acknowledgement. Missing values are empty refs.
+Version validateNativeCdcOrderedPartition(CDCStreamId logicalId,
+                                          CDCStreamId childId,
+                                          const std::vector<KeyRange>& expectedRanges,
+                                          ValueRef ranges,
+                                          ValueRef parent,
+                                          ValueRef minimum,
+                                          Version commonMinimum);
+
+struct NativeCdcOrderedSnapshot {
+	NativeCdcOrderedMetadata metadata;
+	Version minVersion;
+};
+
+// The transaction overload neither sets options nor retries. Its caller enables system-key and lock-aware reads.
+// An absent group returns none; inconsistent child metadata or unequal child watermarks fails with
+// serialization_failed.
+Future<Optional<NativeCdcOrderedSnapshot>> readNativeCdcOrderedSnapshot(Transaction* tr, CDCStreamId logicalId);
+Future<Optional<NativeCdcOrderedSnapshot>> readNativeCdcOrderedSnapshot(Database cx, CDCStreamId logicalId);
+
+// knownAvailableThrough must be proven across every partition of expectedMetadata. All child watermarks advance in
+// one transaction; calling the physical-stream acknowledgement helper for individual children violates this invariant.
+Future<Version> acknowledgeNativeCdcOrderedStream(Database cx,
+                                                  CDCStreamId logicalId,
+                                                  NativeCdcOrderedMetadata expectedMetadata,
+                                                  Version consumedThrough,
+                                                  Version knownAvailableThrough = invalidVersion);
+
 void forceLinkNativeCdcOrderedMetadataTests();
 
 #endif // FDBCLIENT_NATIVECDCORDEREDMETADATA_H

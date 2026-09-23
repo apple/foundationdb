@@ -435,10 +435,17 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		const std::vector<CDCStreamId> partitions = co_await readPartitions(cx, streamId);
 		phase("WaitForOwners");
 		co_await waitForOwners(cx, partitions);
+		const Key ordinaryName = name.withSuffix("/ordinary"_sr);
+		const CDCStreamId listedOrdinaryId = co_await registerNativeCdcStreamClient(cx, ordinaryName, ranges);
 		const auto listed = co_await listNativeCdcStreamsClient(cx);
-		ASSERT_EQ(listed.size(), 1);
+		ASSERT_EQ(listed.size(), 2);
+		ASSERT_EQ(listed.front().name, name);
 		ASSERT_EQ(listed.front().streamId, streamId);
 		ASSERT(listed.front().ranges == ranges);
+		ASSERT_EQ(listed.back().name, ordinaryName);
+		ASSERT_EQ(listed.back().streamId, listedOrdinaryId);
+		ASSERT(listed.back().ranges == ranges);
+		co_await removeNativeCdcStreamClient(cx, ordinaryName);
 		Reference<NativeCdcConsumer> consumer = co_await createNativeCdcConsumer(cx, name);
 		ASSERT_EQ(consumer->position().streamId, streamId);
 		Keyspace view;

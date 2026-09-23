@@ -43,7 +43,6 @@ class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
 	UID consumerId = deterministicRandom()->randomUniqueID();
 	bool operationOutstanding = false;
 	bool initialized = false;
-	bool internalPartition = false;
 	int64_t replyByteLimit = 0;
 
 public:

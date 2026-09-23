@@ -37,7 +37,6 @@ class NativeCdcOrderedMerge {
 public:
 	NativeCdcOrderedMerge(size_t partitionCount, Version commonPosition, int64_t bufferByteLimit);
 
-	size_t partitionCount() const { return partitions.size(); }
 	bool needsRead(size_t index) const;
 	Version frontier(size_t index) const;
 	Version position() const { return currentPosition; }

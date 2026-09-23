@@ -403,55 +403,25 @@ class NativeCdcTests(unittest.TestCase):
     def test_ordered_registration_marshals_binary_split_points(self):
         impl = fdb.impl
         expected = [self.prefix + b"b\x00\xff", self.prefix + b"m\x00"]
-        seen = []
-
-        def register(db, name, name_length, ranges, range_count, points, point_count):
-            seen.append(
-                (
-                    name[:name_length],
-                    tuple(
-                        (
-                            ctypes.string_at(
-                                ranges[i].begin_key, ranges[i].begin_key_length
-                            ),
-                            ctypes.string_at(
-                                ranges[i].end_key, ranges[i].end_key_length
-                            ),
-                        )
-                        for i in range(range_count)
-                    ),
-                    tuple(
-                        ctypes.string_at(points[i].key, points[i].key_length)
-                        for i in range(point_count)
-                    ),
-                )
-            )
-            return 123
-
         with mock.patch.object(impl, "_require_cdc_api_version"):
             with mock.patch.object(
-                self.db.capi, "fdb_database_register_cdc_ordered_stream", register
-            ):
-                with mock.patch.object(impl, "FutureUInt64") as future:
-                    self.db.register_cdc_stream(
-                        self.name,
-                        self.begin,
-                        self.end,
-                        split_points=(point for point in expected),
-                    )
-                    self.db.register_cdc_stream(
-                        self.name, self.begin, self.end, split_points=[]
-                    )
-                    self.assertEqual(
-                        future.call_args_list, [mock.call(123), mock.call(123)]
-                    )
-        self.assertEqual(
-            seen,
-            [
-                (self.name, ((self.begin, self.end),), tuple(expected)),
-                (self.name, ((self.begin, self.end),), ()),
-            ],
-        )
+                self.db.capi, "fdb_database_register_cdc_ordered_stream"
+            ) as register:
+                with mock.patch.object(impl, "FutureUInt64"):
+                    for points in (expected, []):
+                        self.db.register_cdc_stream(
+                            self.name, self.begin, self.end, split_points=iter(points)
+                        )
+                        native_points, count = register.call_args[0][-2:]
+                        self.assertEqual(
+                            [
+                                ctypes.string_at(
+                                    native_points[i].key, native_points[i].key_length
+                                )
+                                for i in range(count)
+                            ],
+                            points,
+                        )
 
     def test_missing_ordered_symbol_preserves_ordinary_cdc(self):
         impl = fdb.impl

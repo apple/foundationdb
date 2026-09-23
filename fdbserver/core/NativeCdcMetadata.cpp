@@ -29,7 +29,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "NativeCdcInternal.h"
-#include "NativeCdcOrderedLifecycle.h"
+#include "NativeCdcOrderedMetadata.h"
 #include "fdbserver/core/NativeCdcMetadata.h"
 #include "flow/CodeProbe.h"
 #include "flow/Error.h"

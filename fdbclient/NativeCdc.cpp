@@ -33,7 +33,6 @@
 #include "NativeCdcInternal.h"
 #include "NativeCdcOrderedMetadata.h"
 #include "NativeCdcOrderedMerge.h"
-#include "NativeCdcOrderedLifecycle.h"
 #include "flow/CodeProbe.h"
 #include "flow/Error.h"
 #include "flow/ScopeExit.h"
@@ -323,61 +322,56 @@ Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams(Database cx) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
-			std::vector<std::pair<Key, CDCStreamId>> names;
-			Key begin = cdcStreamNameKeys.begin;
-			while (begin < cdcStreamNameKeys.end) {
-				RangeResult page =
-				    co_await tr.getRange(KeyRangeRef(begin, cdcStreamNameKeys.end), CLIENT_KNOBS->TOO_MANY);
-				for (const auto& kv : page) {
-					names.emplace_back(decodeCDCStreamNameKey(kv.key), decodeCDCStreamNameValue(kv.value));
-				}
-				if (!page.more) {
-					break;
-				}
-				begin = keyAfter(page.back().key);
+			std::vector<Future<Standalone<VectorRef<KeyValueRef>>>> metadata;
+			for (const auto& keys :
+			     { cdcStreamNameKeys, cdcStreamKeys, cdcMinVersionKeys, cdcOrderedStreamKeys, cdcOrderedParentKeys }) {
+				metadata.push_back(readNativeCdcStatusRange(&tr, keys));
 			}
-
-			std::unordered_map<CDCStreamId, std::vector<KeyRange>> streamRanges;
-			begin = cdcStreamKeys.begin;
-			while (begin < cdcStreamKeys.end) {
-				RangeResult page = co_await tr.getRange(KeyRangeRef(begin, cdcStreamKeys.end), CLIENT_KNOBS->TOO_MANY);
-				for (const auto& kv : page) {
-					streamRanges.emplace(decodeCDCStreamKey(kv.key), decodeCDCStreamKeysValue(kv.value));
-				}
-				if (!page.more) {
-					break;
-				}
-				begin = keyAfter(page.back().key);
+			co_await waitForAll(metadata);
+			std::unordered_map<CDCStreamId, ValueRef> streamRanges, minVersions, orderedGroups, parents;
+			for (const auto& entry : metadata[1].get()) {
+				streamRanges.emplace(decodeCDCStreamKey(entry.key), entry.value);
 			}
-
-			std::unordered_map<CDCStreamId, Version> minVersions;
-			begin = cdcMinVersionKeys.begin;
-			while (begin < cdcMinVersionKeys.end) {
-				RangeResult page =
-				    co_await tr.getRange(KeyRangeRef(begin, cdcMinVersionKeys.end), CLIENT_KNOBS->TOO_MANY);
-				for (const auto& kv : page) {
-					minVersions.emplace(decodeCDCMinVersionKey(kv.key), decodeCDCMinVersionValue(kv.value));
-				}
-				if (!page.more) {
-					break;
-				}
-				begin = keyAfter(page.back().key);
+			for (const auto& entry : metadata[2].get()) {
+				minVersions.emplace(decodeCDCMinVersionKey(entry.key), entry.value);
+			}
+			for (const auto& entry : metadata[3].get()) {
+				orderedGroups.emplace(decodeCDCOrderedStreamKey(entry.key), entry.value);
+			}
+			for (const auto& entry : metadata[4].get()) {
+				parents.emplace(decodeCDCOrderedParentKey(entry.key), entry.value);
 			}
 
 			std::vector<NativeCdcStreamInfo> result;
-			result.reserve(names.size());
-			for (auto& [name, streamId] : names) {
-				const auto ordered = co_await readNativeCdcOrderedSnapshot(&tr, streamId);
-				if (ordered.present()) {
-					result.push_back(NativeCdcStreamInfo{
-					    std::move(name), streamId, ordered.get().metadata.ranges(), ordered.get().minVersion });
+			result.reserve(metadata[0].get().size());
+			for (const auto& entry : metadata[0].get()) {
+				const Key name = decodeCDCStreamNameKey(entry.key);
+				const CDCStreamId streamId = decodeCDCStreamNameValue(entry.value);
+				const auto ordered = orderedGroups.find(streamId);
+				if (ordered != orderedGroups.end()) {
+					const auto group = decodeCDCOrderedStreamValue(ordered->second);
+					const auto partitionRanges = nativeCdcOrderedPartitionRanges(group.ranges(), group.splitPoints());
+					Version minimum = invalidVersion;
+					for (size_t i = 0; i < group.partitions().size(); ++i) {
+						const CDCStreamId child = group.partitions()[i];
+						minimum = validateNativeCdcOrderedPartition(streamId,
+						                                            child,
+						                                            partitionRanges[i],
+						                                            streamRanges[child],
+						                                            parents[child],
+						                                            minVersions[child],
+						                                            minimum);
+					}
+					result.push_back(NativeCdcStreamInfo{ name, streamId, group.ranges(), minimum });
 					continue;
 				}
 				auto ranges = streamRanges.find(streamId);
 				auto minVersion = minVersions.find(streamId);
 				if (ranges != streamRanges.end() && minVersion != minVersions.end()) {
-					result.push_back(NativeCdcStreamInfo{
-					    std::move(name), streamId, std::move(ranges->second), minVersion->second });
+					result.push_back(NativeCdcStreamInfo{ name,
+					                                      streamId,
+					                                      decodeCDCStreamKeysValue(ranges->second),
+					                                      decodeCDCMinVersionValue(minVersion->second) });
 				}
 			}
 			co_return result;
@@ -802,7 +796,6 @@ class NativeCdcConsumer::OrderedState : public ReferenceCounted<NativeCdcConsume
 		for (size_t i = 0; i < metadata.partitions().size(); ++i) {
 			auto child =
 			    makeReference<NativeCdcConsumer>(cx, CDCCursor(metadata.partitions()[i], position), acknowledged);
-			child->internalPartition = true;
 			child->initialized = true;
 			child->knownAvailableThrough = acknowledged;
 			child->replyByteLimit = childReplyByteLimit;
@@ -869,8 +862,7 @@ Future<Void> NativeCdcConsumer::initialize(Reference<NativeCdcConsumer> self) {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			// Retention pressure must not throttle the metadata reads needed to resume draining CDC.
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			if (!self->internalPartition &&
-			    (co_await tr.get(cdcOrderedParentKeyFor(self->currentPosition.streamId))).present()) {
+			if ((co_await tr.get(cdcOrderedParentKeyFor(self->currentPosition.streamId))).present()) {
 				throw client_invalid_operation();
 			}
 			snapshot = co_await readNativeCdcOrderedSnapshot(&tr, self->currentPosition.streamId);

@@ -128,7 +128,6 @@ CDCConsumeReply NativeCdcOrderedMerge::next(int64_t replyByteLimit) {
 	CDCConsumeReply result;
 	result.lastConsumedVersion = through;
 	int64_t selectedBytes = 0;
-	std::vector<bool> retainedArena(partitions.size(), false);
 	while (true) {
 		Version version = std::numeric_limits<Version>::max();
 		for (size_t i = 0; i < partitions.size(); ++i) {
@@ -166,9 +165,8 @@ CDCConsumeReply NativeCdcOrderedMerge::next(int64_t replyByteLimit) {
 			if (partition.reply.present() && offsets[i] < partition.reply.get().mutations.size()) {
 				const auto& versioned = partition.reply.get().mutations[offsets[i]];
 				if (versioned.version == version) {
-					if (!retainedArena[i]) {
+					if (offsets[i] == partition.offset) {
 						result.arena.dependsOn(partition.reply.get().arena);
-						retainedArena[i] = true;
 					}
 					for (const auto& mutation : versioned.mutations) {
 						merged.push_back(result.arena, mutation);

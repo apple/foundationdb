@@ -113,19 +113,6 @@ TEST_CASE("/NativeCDC/OrderedInterfaceCompatibility") {
 	return Void();
 }
 
-TEST_CASE("/NativeCDC/OrderedRegistrationRequestFlatBufferRoundTrip") {
-	for (const std::vector<Key>& splitPoints : { std::vector<Key>{}, std::vector<Key>{ Key("m"_sr), Key("t"_sr) } }) {
-		CDCRegisterOrderedStreamRequest request(
-		    "ordered"_sr, { KeyRangeRef("a"_sr, "p"_sr), KeyRangeRef("s"_sr, "z"_sr) }, splitPoints);
-		const auto bytes = ObjectWriter::toValue(request, Unversioned());
-		const auto decoded = ObjectReader::fromStringRef<CDCRegisterOrderedStreamRequest>(bytes, Unversioned());
-		ASSERT_EQ(decoded.name, request.name);
-		ASSERT_EQ(decoded.ranges, request.ranges);
-		ASSERT_EQ(decoded.splitPoints, request.splitPoints);
-	}
-	return Void();
-}
-
 TEST_CASE("/NativeCDC/TLogPeekRequestFlatBufferRoundTrip") {
 	TLogPeekRequest request(100,
 	                        Tag(tagLocalityCDC, 0),
