@@ -3690,6 +3690,7 @@ public:
 					    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 					    .detail("ZeroHealthy", self->zeroOptimalTeams.get())
 					    .detail("HighestPriority", highestPriority)
+					    .detail("HighestTeamPriority", self->getHighestTeamPriority())
 					    .trackLatest(self->primary ? "TotalDataInFlight"
 					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
 					                                                             // lifetime is controlled by
@@ -4636,6 +4637,31 @@ void DDTeamCollection::resetLocalitySet() {
 		it.second->localityEntry =
 		    storageServerMap->add(it.second->getLastKnownInterface().locality, &it.second->getId());
 	}
+}
+
+int DDTeamCollection::getHighestTeamPriority() const {
+	if (teamCollections.empty()) {
+		return -1;
+	}
+	int highestPriority = 0;
+	for (const auto* collection : teamCollections) {
+		if (collection == nullptr || !collection->initialFailureReactionDelay.isReady()) {
+			return -1;
+		}
+		// Team health is updated independently of relocation admission and completion. Include both regions
+		// and conservatively keep counting degraded teams until their trackers are retired.
+		int collectionPriority = -1;
+		for (const auto& [priority, count] : collection->priority_teams) {
+			if (count > 0) {
+				collectionPriority = std::max(collectionPriority, priority);
+			}
+		}
+		if (collectionPriority < 0) {
+			return -1;
+		}
+		highestPriority = std::max(highestPriority, collectionPriority);
+	}
+	return highestPriority;
 }
 
 bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>>& team, int amount) const {
