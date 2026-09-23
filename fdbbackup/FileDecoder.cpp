@@ -776,8 +776,14 @@ Future<Void> process_file(Reference<IBackupContainer> container,
 // Use the snapshot metadata to quickly identify relevant range files and
 // then filter by versions.
 Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Reference<DecodeParams> params) {
+	// Only consider snapshots whose version range overlaps the requested filter. Reading a snapshot
+	// means downloading and parsing its entire manifest and checking every file it lists against the
+	// container, so snapshots that getRelevantRangeFiles() would discard below must not be read at
+	// all. A partially expired snapshot outside the filter would otherwise report every expired file
+	// it lists as a SevError, burying the result the caller asked for.
 	std::vector<KeyspaceSnapshotFile> snapshots =
-	    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->listKeyspaceSnapshots();
+	    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))
+	        ->listKeyspaceSnapshots(params->beginVersionFilter, params->endVersionFilter);
 	std::vector<RangeFile> files;
 
 	for (int i = 0; i < snapshots.size(); i++) {

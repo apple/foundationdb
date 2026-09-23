@@ -2888,4 +2888,72 @@ TEST_CASE("/backup/containers/localdir/readKeyspaceSnapshot/chunked") {
 	co_await c->deleteContainer();
 }
 
+// Verify that listKeyspaceSnapshots(begin, end) returns exactly the snapshots whose [beginVersion,
+// endVersion] range overlaps [begin, end), and that the default arguments still return every snapshot.
+TEST_CASE("/backup/containers/localdir/listKeyspaceSnapshots/versionFilter") {
+	std::string url = format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int());
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	co_await c->create();
+
+	// Three snapshots, each spanning 5 versions, separated by gaps:
+	//   [1000, 1004]   [2000, 2004]   [3000, 3004]
+	int blockSize = 64;
+	for (Version base : { 1000, 2000, 3000 }) {
+		std::vector<std::string> rangeFileNames;
+		std::vector<std::pair<Key, Key>> beginEndKeys;
+		for (Version v = base; v < base + 5; ++v) {
+			Key begin = StringRef(format("begin-%lld", v));
+			Key end = StringRef(format("end-%lld", v));
+			Reference<IBackupFile> range = co_await c->writeRangeFile(v, 0, v, blockSize);
+			co_await testWriteSnapshotFile(range, begin, end, blockSize);
+			rangeFileNames.push_back(range->getFileName());
+			beginEndKeys.push_back({ begin, end });
+		}
+		co_await c->writeKeyspaceSnapshotFile(rangeFileNames, beginEndKeys, 99999, IncludeKeyRangeMap::True);
+	}
+
+	Reference<BackupContainerFileSystem> bcfs = c.castTo<BackupContainerFileSystem>();
+
+	// Default arguments (0, INT64_MAX) must not filter anything out. fdbdecode relies on this so that
+	// omitting --begin/end_version_filter behaves as it did before the filter was plumbed through.
+	std::vector<KeyspaceSnapshotFile> all = co_await bcfs->listKeyspaceSnapshots();
+	ASSERT_EQ(all.size(), 3);
+
+	// A window covering only the first snapshot.
+	std::vector<KeyspaceSnapshotFile> first = co_await bcfs->listKeyspaceSnapshots(1000, 1005);
+	ASSERT_EQ(first.size(), 1);
+	ASSERT_EQ(first[0].beginVersion, 1000);
+
+	// A single-version window inside the second snapshot, i.e. [v, v+1). This is the shape of a query for
+	// one specific range file, and the case that previously read all three manifests.
+	std::vector<KeyspaceSnapshotFile> single = co_await bcfs->listKeyspaceSnapshots(2002, 2003);
+	ASSERT_EQ(single.size(), 1);
+	ASSERT_EQ(single[0].beginVersion, 2000);
+
+	// A window in the gap between snapshots matches nothing.
+	std::vector<KeyspaceSnapshotFile> none = co_await bcfs->listKeyspaceSnapshots(1500, 1600);
+	ASSERT_EQ(none.size(), 0);
+
+	// A window spanning two snapshots returns both, in beginVersion order.
+	std::vector<KeyspaceSnapshotFile> two = co_await bcfs->listKeyspaceSnapshots(1004, 2001);
+	ASSERT_EQ(two.size(), 2);
+	ASSERT_EQ(two[0].beginVersion, 1000);
+	ASSERT_EQ(two[1].beginVersion, 2000);
+
+	// Boundary checks against the predicate `beginVersion < end && endVersion >= begin`.
+	// end is exclusive: a window ending exactly at a snapshot's beginVersion excludes it.
+	std::vector<KeyspaceSnapshotFile> endExclusive = co_await bcfs->listKeyspaceSnapshots(1500, 2000);
+	ASSERT_EQ(endExclusive.size(), 0);
+	// begin is inclusive: a window starting exactly at a snapshot's endVersion includes it.
+	std::vector<KeyspaceSnapshotFile> beginInclusive = co_await bcfs->listKeyspaceSnapshots(1004, 1005);
+	ASSERT_EQ(beginInclusive.size(), 1);
+	ASSERT_EQ(beginInclusive[0].beginVersion, 1000);
+
+	// A window past every snapshot matches nothing.
+	std::vector<KeyspaceSnapshotFile> beyond = co_await bcfs->listKeyspaceSnapshots(4000, 5000);
+	ASSERT_EQ(beyond.size(), 0);
+
+	co_await c->deleteContainer();
+}
+
 } // namespace backup_test
