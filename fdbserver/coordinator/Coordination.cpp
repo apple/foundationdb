@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <array>
 #include <cstdint>
 
 #include "fdbserver/coordinator/CoordinationServer.h"
@@ -868,6 +869,155 @@ Future<Void> leaderServer(LeaderElectionRegInterface interf,
 	co_await server.run();
 }
 
+static Future<bool> repairUninitializedCoordinatorQueue(std::string dataFolder) {
+	std::vector<Future<Reference<IAsyncFile>>> files;
+	for (int i = 0; i < 2; ++i) {
+		files.push_back(IAsyncFileSystem::filesystem()->open(
+		    joinPath(dataFolder, format("%s%d.fdq", fileCoordinatorPrefix.c_str(), i)),
+		    IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED |
+		        IAsyncFile::OPEN_LOCK,
+		    0));
+	}
+	co_await waitForAllReady(files);
+	for (const auto& file : files) {
+		if (file.isError() && file.getError().code() != error_code_file_not_found) {
+			throw file.getError();
+		}
+	}
+	if (files[0].isError() == files[1].isError()) {
+		co_return false;
+	}
+	const int missing = files[0].isError() ? 0 : 1;
+	const int64_t survivingSize = co_await files[1 - missing].get()->size();
+	if (survivingSize != 0) {
+		co_return false;
+	}
+
+	Reference<IAsyncFile> part;
+	try {
+		part = co_await IAsyncFileSystem::filesystem()->open(
+		    joinPath(dataFolder, format("%s%d.fdq.part", fileCoordinatorPrefix.c_str(), missing)),
+		    IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED |
+		        IAsyncFile::OPEN_LOCK,
+		    0);
+	} catch (Error& e) {
+		if (e.code() == error_code_file_not_found) {
+			co_return false;
+		}
+		throw;
+	}
+	const int64_t partSize = co_await part->size();
+	if (partSize != 0) {
+		co_return false;
+	}
+
+	// The simulator can interrupt the two initial renames before either file receives data. A .part file also
+	// occurs during queue replacement, so this is only a simulation workaround, not a production recovery rule.
+	files.clear();
+	part.clear();
+	co_await IAsyncFileSystem::filesystem()->deleteFile(
+	    joinPath(dataFolder, format("%s%d.fdq", fileCoordinatorPrefix.c_str(), 1 - missing)), true);
+	TraceEvent(SevWarnAlways, "CoordinatorDiskQueueCreationInterrupted").detail("MissingFile", missing);
+	co_return true;
+}
+
+static Future<Void> testCoordinatorQueueRepair(std::string folder,
+                                               std::array<const char*, 4> contents,
+                                               bool expectRepair) {
+	platform::createDirectory(folder);
+	std::array<std::string, 4> paths;
+	for (int i = 0; i < 4; ++i) {
+		paths[i] = joinPath(folder, format("%s%d.fdq%s", fileCoordinatorPrefix.c_str(), i % 2, i < 2 ? "" : ".part"));
+		if (contents[i] != nullptr) {
+			Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(
+			    paths[i],
+			    IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
+			        IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO,
+			    0600);
+			const std::string value(contents[i]);
+			if (!value.empty()) {
+				co_await file->write(value.data(), value.size(), 0);
+			}
+			co_await file->sync();
+		}
+	}
+
+	const bool repaired = co_await repairUninitializedCoordinatorQueue(folder);
+	ASSERT(repaired == expectRepair);
+	if (repaired) {
+		contents[0] = nullptr;
+		contents[1] = nullptr;
+	}
+	for (int i = 0; i < 4; ++i) {
+		Reference<IAsyncFile> file;
+		try {
+			file = co_await IAsyncFileSystem::filesystem()->open(paths[i], IAsyncFile::OPEN_READONLY, 0);
+		} catch (Error& e) {
+			if (e.code() != error_code_file_not_found) {
+				throw;
+			}
+			ASSERT(contents[i] == nullptr);
+			continue;
+		}
+		ASSERT(contents[i] != nullptr);
+		const std::string expected(contents[i]);
+		const int64_t size = co_await file->size();
+		ASSERT(size == static_cast<int64_t>(expected.size()));
+		if (size != 0) {
+			std::string actual(expected.size(), '\0');
+			const int bytesRead = co_await file->read(actual.data(), actual.size(), 0);
+			ASSERT(bytesRead == static_cast<int>(expected.size()));
+			ASSERT(actual == expected);
+		}
+	}
+
+	if (repaired) {
+		{
+			OnDemandStore store(folder, deterministicRandom()->randomUniqueID(), fileCoordinatorPrefix);
+			const Optional<Value> value = co_await store->readValue("repair-test"_sr);
+			ASSERT(!value.present());
+			store->set(KeyValueRef("repair-test"_sr, "value"_sr));
+			co_await store->commit();
+			Future<Void> closed = store.onClosed();
+			store.close();
+			co_await closed;
+		}
+		{
+			OnDemandStore store(folder, deterministicRandom()->randomUniqueID(), fileCoordinatorPrefix);
+			const Optional<Value> value = co_await store->readValue("repair-test"_sr);
+			ASSERT(value == "value"_sr);
+			Future<Void> closed = store.onClosed();
+			store.close();
+			co_await closed;
+		}
+	}
+}
+
+TEST_CASE("/fdbserver/Coordination/incompleteQueue/repair") {
+	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "missing-0"), { nullptr, "", "", nullptr }, true);
+	co_await testCoordinatorQueueRepair(joinPath(params.getDataDir(), "missing-1"), { "", nullptr, nullptr, "" }, true);
+}
+
+TEST_CASE("/fdbserver/Coordination/incompleteQueue/preserveFiles") {
+	co_await testCoordinatorQueueRepair(
+	    joinPath(params.getDataDir(), "both-missing"), { nullptr, nullptr, "", "" }, false);
+	co_await testCoordinatorQueueRepair(
+	    joinPath(params.getDataDir(), "both-present"), { "", "", nullptr, nullptr }, false);
+	for (int missing = 0; missing < 2; ++missing) {
+		std::array<const char*, 4> contents = { "", "", nullptr, nullptr };
+		contents[missing] = nullptr;
+		co_await testCoordinatorQueueRepair(
+		    joinPath(params.getDataDir(), format("missing-part-%d", missing)), contents, false);
+		contents[missing + 2] = "data";
+		co_await testCoordinatorQueueRepair(
+		    joinPath(params.getDataDir(), format("nonempty-part-%d", missing)), contents, false);
+		contents[missing + 2] = "";
+		contents[1 - missing] = "data";
+		co_await testCoordinatorQueueRepair(
+		    joinPath(params.getDataDir(), format("nonempty-final-%d", missing)), contents, false);
+	}
+}
+
 static Future<Void> coordinationServerOnce(std::string dataFolder,
                                            Reference<IClusterConnectionRecord> ccr,
                                            bool* repairedIncompleteQueue) {
@@ -953,7 +1103,12 @@ static Future<Void> coordinationServerOnce(std::string dataFolder,
 			co_await IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "0.fdq"),
 			                                                    true);
 		}
-		if (repairedIncompleteQueue != nullptr) {
+		if (repairedIncompleteQueue != nullptr && fdbSimulationPolicyState().restarted) {
+			*repairedIncompleteQueue = true;
+		}
+	} else if (g_network->isSimulated() && err.code() == error_code_file_not_found) {
+		if (co_await repairUninitializedCoordinatorQueue(dataFolder)) {
+			ASSERT(repairedIncompleteQueue != nullptr);
 			*repairedIncompleteQueue = true;
 		}
 	}
@@ -979,7 +1134,7 @@ static Future<Void> restartCoordinationServer(std::string dataFolder, Reference<
 }
 
 Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
-	if (g_network->isSimulated() && fdbSimulationPolicyState().restarted) {
+	if (g_network->isSimulated()) {
 		return restartCoordinationServer(dataFolder, ccr);
 	}
 	return coordinationServerOnce(dataFolder, ccr, nullptr);
