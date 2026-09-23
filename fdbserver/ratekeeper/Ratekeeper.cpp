@@ -292,12 +292,18 @@ Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const
 		}
 
 		UID ssi = ssHighWriteQueue.get();
+		auto interface = storageServerInterfaces.find(ssi);
+		// The selected server may have left since the last rate update.
+		if (interface == storageServerInterfaces.end()) {
+			CODE_PROBE(true, "Hot shard storage server removed before monitoring");
+			continue;
+		}
 		SetThrottledShardRequest setReq;
 
 		// TraceEvent(SevDebug, "SendGetHotShardsRequest");
 		try {
 			GetHotShardsRequest getReq;
-			GetHotShardsReply reply = co_await storageServerInterfaces[ssi].getHotShards.getReply(getReq);
+			GetHotShardsReply reply = co_await interface->second.getHotShards.getReply(getReq);
 
 			// Backup's restore range can't be throttled, otherwise restore would fail,
 			// i.e., "ApplyMutationsError".

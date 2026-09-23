@@ -27,6 +27,7 @@
 #include "com_apple_foundationdb_testing_WorkloadContext.h"
 
 #include <jni.h>
+#include <cstdlib>
 #include <set>
 #include <iostream>
 #include <boost/algorithm/string.hpp>
@@ -80,7 +81,6 @@ void printTrace(JNIEnv* env, jclass, jlong logger, jint severity, jstring messag
 	} else if (severity < 40) {
 		sev = FDBSeverity::WarnAlways;
 	} else {
-		assert(false);
 		std::abort();
 	}
 	log->trace(sev, msg, detailsMap);

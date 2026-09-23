@@ -2027,7 +2027,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 		FlowLock* lock;
 		int64_t remaining;
 		Releaser() : lock(0), remaining(0) {}
-		explicit(false) Releaser(FlowLock& lock, int64_t amount = 1) : lock(&lock), remaining(amount) {}
+		explicit Releaser(FlowLock& lock, int64_t amount = 1) : lock(&lock), remaining(amount) {}
 		Releaser(Releaser&& r) noexcept : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
 		void operator=(Releaser&& r) {
 			if (remaining)
@@ -2402,9 +2402,9 @@ public:
 	AndFuture& operator=(AndFuture const& f) = default;
 	AndFuture& operator=(AndFuture&& f) noexcept = default;
 
-	explicit(false) AndFuture(Future<Void> const& f) : futureCount(1), futures{ f } {}
+	explicit AndFuture(Future<Void> const& f) : futureCount(1), futures{ f } {}
 
-	explicit(false) AndFuture(Error const& e) : futureCount(1), futures{ Future<Void>(e) } {}
+	explicit AndFuture(Error const& e) : futureCount(1), futures{ Future<Void>(e) } {}
 
 	operator Future<Void>() { return getFuture(); }
 

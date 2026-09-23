@@ -139,7 +139,7 @@ enum class DDAuditContext : uint8_t {
 };
 
 struct DDAudit {
-	explicit(false) DDAudit(AuditStorageState coreState)
+	explicit DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), auditStorageAnyChildFailed(false), retryCount(0),
 	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0), overallSkippedDoAuditCount(0),
 	    remainingBudgetForAuditTasks(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX), context(DDAuditContext::INVALID) {}
@@ -716,6 +716,7 @@ public:
 			    .detail("TotalBytes", 0)
 			    .detail("UnhealthyServers", 0)
 			    .detail("HighestPriority", 0)
+			    .detail("HighestTeamPriority", -1)
 			    .trackLatest(self->totalDataInFlightEventHolder->trackingKey);
 			TraceEvent("TotalDataInFlight", self->ddId)
 			    .detail("Primary", false)

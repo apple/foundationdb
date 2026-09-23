@@ -162,7 +162,7 @@ struct GetMetricsRequest {
 	KeyRange keys;
 	Promise<StorageMetrics> reply;
 	GetMetricsRequest() = default;
-	explicit(false) GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
+	explicit GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
 };
 
 struct GetTopKMetricsReply {
@@ -188,10 +188,10 @@ public:
 	double maxReadLoadPerKSecond = 0, minReadLoadPerKSecond = 0; // all returned shards won't exceed this read load
 
 	GetTopKMetricsRequest() = default;
-	explicit(false) GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
-	                                      int topK = 1,
-	                                      double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
-	                                      double minReadLoadPerKSecond = 0)
+	explicit GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
+	                               int topK = 1,
+	                               double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
+	                               double minReadLoadPerKSecond = 0)
 	  : topK(topK), keys(keys), maxReadLoadPerKSecond(maxReadLoadPerKSecond),
 	    minReadLoadPerKSecond(minReadLoadPerKSecond) {
 		ASSERT_GE(topK, 1);
@@ -252,7 +252,7 @@ FDB_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
 	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
-	explicit(false) PhysicalShardCollection(Reference<IDDTxnProcessor> db)
+	explicit PhysicalShardCollection(Reference<IDDTxnProcessor> db)
 	  : txnProcessor(db), lastTransitionStartTime(now()), requireTransition(false) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
@@ -604,7 +604,7 @@ inline bool bulkDumpIsEnabled(int bulkDumpModeValue) {
 
 class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {
 public:
-	explicit(false) BulkLoadTaskCollection(UID ddId) : ddId(ddId) {
+	explicit BulkLoadTaskCollection(UID ddId) : ddId(ddId) {
 		bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadEngineTask>());
 	}
 

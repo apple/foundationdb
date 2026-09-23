@@ -2209,9 +2209,7 @@ Future<Void> commitBatch(ProxyCommitData* pCommitData,
 		if (err.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid)
-		    .detail("Stage", context.stage)
-		    .detail("ErrorCode", err.code());
+		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid).error(err).detail("Stage", context.stage);
 		throw failed_to_progress();
 	}
 }
@@ -2305,10 +2303,9 @@ static Future<Void> readRequestServer(CommitProxyInterface proxy,
 	while (true) {
 		GetKeyServerLocationsRequest req = co_await proxy.getKeyServersLocations.getFuture();
 		// WARNING: this code is run at a high priority, so it needs to do as little work as possible
-		if (req.limit != CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && // Always do data distribution requests
-		    (commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
-		         SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE ||
-		     (g_network->isSimulated() && buggify(0.001)))) {
+		if (commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
+		        SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE ||
+		    (g_network->isSimulated() && buggify(0.001))) {
 			++commitData->stats.keyServerLocationErrors;
 			req.reply.sendError(commit_proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyLocationRequestThresholdExceeded").suppressFor(60);

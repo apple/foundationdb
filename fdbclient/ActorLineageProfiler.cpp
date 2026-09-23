@@ -74,7 +74,7 @@ class Packer : public msgpack::packer<msgpack::sbuffer> {
 		void visit(const std::any& val, Packer& packer) {
 			auto iter = visitorMap.find(val.type());
 			if (iter == visitorMap.end()) {
-				TraceEvent(SevError, "PackerTypeNotFound").detail("Type", val.type().name());
+				TraceEvent(SevError, "PackerTypeNotFound").detail("ValueType", val.type().name());
 			} else {
 				iter->second(val, packer);
 			}
