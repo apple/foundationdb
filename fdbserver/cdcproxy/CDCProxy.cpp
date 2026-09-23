@@ -2492,6 +2492,8 @@ class CDCPrefetchTestCursor final : public IReplayPeekCursor, public ReferenceCo
 	Optional<ArenaReader> input;
 	Future<Void> ready;
 	Version messageVersion;
+	Version lastMessageVersion;
+	Version committedVersion;
 	LogMessageVersion position;
 	bool fetched = false;
 	bool done = false;
@@ -2505,9 +2507,16 @@ public:
 	explicit CDCPrefetchTestCursor(Future<Void> ready,
 	                               bool containsMutation = true,
 	                               Version version = 100,
-	                               int mutationCount = 1)
-	  : ready(ready), messageVersion(version), position(version), containsMutation(containsMutation),
-	    mutationCount(mutationCount) {
+	                               int mutationCount = 1,
+	                               Optional<Version> lastVersion = {},
+	                               Optional<Version> committedThrough = {})
+	  : ready(ready), messageVersion(version), lastMessageVersion(lastVersion.orDefault(version)),
+	    committedVersion(committedThrough.orDefault(lastMessageVersion)), position(version),
+	    containsMutation(containsMutation), mutationCount(mutationCount) {
+		ASSERT_GE(messageVersion, 0);
+		ASSERT_GE(lastMessageVersion, messageVersion);
+		ASSERT_LT(lastMessageVersion, std::numeric_limits<Version>::max());
+		ASSERT_GT(mutationCount, 0);
 		BinaryWriter writer(AssumeVersion(g_network->protocolVersion()));
 		writer << MutationRef(MutationRef::SetValue, "k"_sr, "value"_sr);
 		payload = writer.toValue();
@@ -2528,8 +2537,16 @@ public:
 			setProtocolVersion(input.get().protocolVersion());
 			return;
 		}
-		done = true;
-		position = LogMessageVersion(messageVersion + 1);
+		if (position.version < lastMessageVersion) {
+			consumedMutations = 0;
+			position = LogMessageVersion(position.version + 1);
+			if (input.present()) {
+				setProtocolVersion(input.get().protocolVersion());
+			}
+		} else {
+			done = true;
+			position = LogMessageVersion(lastMessageVersion + 1);
+		}
 	}
 	Future<Void> getMore(TaskPriority taskID) override {
 		++fetches;
@@ -2539,21 +2556,30 @@ public:
 		co_await ready;
 		fetched = true;
 		if (!containsMutation) {
-			position = LogMessageVersion(messageVersion + 1);
+			position = LogMessageVersion(lastMessageVersion + 1);
 		}
 		co_return;
 	}
 	bool isExhausted() const override { return fetched && !hasMessage(); }
 	LogMessageVersion const& version() const override { return position; }
 	Version popped() const override { return 0; }
-	Version getMinKnownCommittedVersion() const override { return messageVersion; }
+	Version getMinKnownCommittedVersion() const override { return committedVersion; }
 	int64_t getMaxRetainedReplyCount() const override { return 1; }
-	void setReplyByteLimit(int limitBytes) override { ASSERT_GT(limitBytes, int64_t(payload.size()) * mutationCount); }
+	void setReplyByteLimit(int limitBytes) override {
+		const int64_t versionBytes = int64_t(payload.size()) * mutationCount;
+		ASSERT_GT(limitBytes, versionBytes);
+		ASSERT_LE(lastMessageVersion - messageVersion + 1, limitBytes / versionBytes);
+	}
 	Optional<UID> getPrimaryPeekLocation() const override { return {}; }
 	Optional<UID> getCurrentPeekLocation() const override { return {}; }
-	Version getMaxKnownVersion() const override { return messageVersion; }
+	Version getMaxKnownVersion() const override { return lastMessageVersion; }
 	Reference<IReplayPeekCursor> cloneNoMore() override {
-		auto clone = makeReference<CDCPrefetchTestCursor>(Void(), containsMutation, messageVersion, mutationCount);
+		auto clone = makeReference<CDCPrefetchTestCursor>(Void(),
+		                                                  containsMutation,
+		                                                  messageVersion,
+		                                                  mutationCount,
+		                                                  Optional<Version>(lastMessageVersion),
+		                                                  Optional<Version>(committedVersion));
 		clone->position = position;
 		clone->consumedMutations = consumedMutations;
 		clone->fetched = fetched;
@@ -2561,10 +2587,9 @@ public:
 		return clone;
 	}
 	void advanceTo(LogMessageVersion next) override {
-		if (next > position) {
-			consumedMutations = mutationCount;
-			done = true;
-			position = LogMessageVersion(messageVersion + 1);
+		while (!done && next > position) {
+			consumedMutations = mutationCount - 1;
+			nextMessage();
 		}
 	}
 	void addref() override { ReferenceCounted<CDCPrefetchTestCursor>::addref(); }
@@ -2809,6 +2834,52 @@ public:
 		ASSERT(!test.proxy.nextTagPrefetchVersion(test.tag).present());
 		test.proxy.clearBufferedMutations(first);
 		test.proxy.clearBufferedMutations(second);
+		ASSERT_EQ(test.proxy.bufferLock.activePermits(), 0);
+		co_return;
+	}
+
+	static Future<Void> committedBatch(Version committedThrough) {
+		CDCProxyPrefetchTest test;
+		auto stream = test.addStream(1);
+		const Version firstVersion = 100;
+		const Version lastVersion = 102;
+		const int mutationCount = 2;
+		auto cursor = makeReference<CDCPrefetchTestCursor>(Void(),
+		                                                   true,
+		                                                   firstVersion,
+		                                                   mutationCount,
+		                                                   Optional<Version>(lastVersion),
+		                                                   Optional<Version>(committedThrough));
+		const auto result =
+		    co_await test.proxy.bufferTagCursor(test.tag, firstVersion, cursor, Never(), Prefetch::True);
+		ASSERT(result == CDCBufferTagPassResult::RETRY);
+		ASSERT_EQ(cursor->fetchCount(), 1);
+		ASSERT_EQ(stream->bufferedThrough, committedThrough);
+		ASSERT_EQ(stream->tagIntervals.front().bufferedThrough, committedThrough);
+		const Version expectedVersions = committedThrough - firstVersion + 1;
+		ASSERT_EQ(stream->mutations.size(), expectedVersions);
+		const MutationRef expected(MutationRef::SetValue, "k"_sr, "value"_sr);
+		for (Version i = 0; i < expectedVersions; ++i) {
+			const auto& versioned = stream->mutations[i];
+			ASSERT_EQ(versioned.version, firstVersion + i);
+			ASSERT_EQ(versioned.mutations.size(), mutationCount);
+			for (const auto& mutation : versioned.mutations) {
+				ASSERT_EQ(mutation.type, expected.type);
+				ASSERT_EQ(mutation.param1, expected.param1);
+				ASSERT_EQ(mutation.param2, expected.param2);
+			}
+		}
+		ASSERT_EQ(cursor->version().version, committedThrough + 1);
+		ASSERT_EQ(cursor->hasMessage(), committedThrough < lastVersion);
+		ASSERT_EQ(cursor->isExhausted(), committedThrough == lastVersion);
+		ASSERT(!stream->readAhead.claimedBy(test.tag.getPtr()));
+		ASSERT(!test.proxy.nextTagPrefetchVersion(test.tag).present());
+		const int64_t versionBytes =
+		    sizeof(VersionedMutationsRef) + mutationCount * (sizeof(MutationRef) + expected.expectedSize());
+		ASSERT_EQ(stream->bufferedBytes, expectedVersions * versionBytes);
+		ASSERT_EQ(test.proxy.bufferedBytes, stream->bufferedBytes);
+		ASSERT_EQ(test.proxy.bufferLock.activePermits(), test.proxy.bufferedBytes);
+		test.proxy.clearBufferedMutations(stream);
 		ASSERT_EQ(test.proxy.bufferLock.activePermits(), 0);
 		co_return;
 	}
@@ -3120,6 +3191,12 @@ TEST_CASE("/NativeCDC/PrefetchCreditTailAndTags") {
 
 TEST_CASE("/NativeCDC/PrefetchMaterializesSharedTag") {
 	return CDCProxyPrefetchTest::publish();
+}
+TEST_CASE("/NativeCDC/PrefetchBatchesCommittedVersions") {
+	return CDCProxyPrefetchTest::committedBatch(102);
+}
+TEST_CASE("/NativeCDC/PrefetchStopsAtCommittedFrontier") {
+	return CDCProxyPrefetchTest::committedBatch(100);
 }
 TEST_CASE("/NativeCDC/PrefetchPreservesLaterSharedTagCredit") {
 	return CDCProxyPrefetchTest::staggeredSharedTag();
