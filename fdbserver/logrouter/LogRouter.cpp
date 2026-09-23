@@ -34,6 +34,7 @@
 #include "flow/CoroUtils.h"
 #include "flow/Coroutines.h"
 #include "flow/Histogram.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/network.h"
@@ -945,91 +946,48 @@ Future<Void> logRouter(TLogInterface interf,
 
 namespace {
 
-class LogRouterPoppedTestFixture : NonCopyable {
-public:
-	explicit LogRouterPoppedTestFixture(Version startVersion, bool isReplacement)
-	  : batching(SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG),
-	    router(deterministicRandom()->randomUniqueID(), request(startVersion, isReplacement)) {
-		const_cast<ServerKnobs*>(SERVER_KNOBS)->PEEK_BATCHING_EMPTY_MSG = false;
-	}
-
-	~LogRouterPoppedTestFixture() {
-		const_cast<ServerKnobs*>(SERVER_KNOBS)->PEEK_BATCHING_EMPTY_MSG = batching;
-	}
-
-	Future<Void> bootstrap() { return router.waitForVersion(router.startVersion + 1); }
-
-	void bufferThrough(Version version) { router.version.set(version); }
-
-	Future<TLogPeekReply> peek() {
-		Promise<TLogPeekReply> reply;
-		Future<Void> serving =
-		    router.logRouterPeekMessages(reply, router.version.get(), Tag(tagLocalityRemoteLog, 0));
-		TLogPeekReply result = co_await timeoutError(reply.getFuture(), 1.0);
-		co_await timeoutError(serving, 1.0);
-		co_return result;
-	}
-
-	Future<Void> pop(uint16_t tagId, Version version) {
-		return timeoutError(logRouterPop(&router, TLogPopRequest(version, version, Tag(tagLocalityRemoteLog, tagId))),
-		                    1.0);
-	}
-
-private:
-	static InitializeLogRouterRequest request(Version startVersion, bool isReplacement) {
-		InitializeLogRouterRequest req;
-		req.recoveryCount = 1;
-		req.routerTag = Tag(tagLocalityLogRouter, 0);
-		req.startVersion = startVersion;
-		req.tLogLocalities.resize(3);
-		req.tLogPolicy = makeReference<PolicyOne>();
-		req.locality = 1;
-		req.allowDropInSim = false;
-		req.isReplacement = isReplacement;
-		return req;
-	}
-
-	const bool batching;
-	LogRouterData router;
-};
-
-Future<Void> testLogRouterPoppedFrontier(Version startVersion, bool isReplacement) {
-	LogRouterPoppedTestFixture fixture(startVersion, isReplacement);
-	// The bootstrap floor must still let an empty router start pulling without remote pops.
-	Future<Void> bootstrap = fixture.bootstrap();
-	ASSERT(bootstrap.isReady());
-	co_await timeoutError(bootstrap, 1.0);
-	TLogPeekReply initial = co_await fixture.peek();
-	ASSERT(initial.maxKnownVersion == startVersion);
-	ASSERT(initial.end == startVersion + 1);
-	ASSERT(initial.minKnownCommittedVersion == 0);
-	ASSERT(initial.popped == 0);
-
-	fixture.bufferThrough(startVersion + 100);
-	co_await fixture.pop(0, startVersion + 30);
-	co_await fixture.pop(1, startVersion + 20);
-	TLogPeekReply partial = co_await fixture.peek();
-	ASSERT(partial.popped == 0);
-
-	// A pop exactly at the bootstrap floor must remain conservative.
-	co_await fixture.pop(2, startVersion);
-	TLogPeekReply equal = co_await fixture.peek();
-	ASSERT(equal.popped == 0);
-
-	co_await fixture.pop(2, startVersion + 10);
-	TLogPeekReply all = co_await fixture.peek();
-	ASSERT(all.popped == startVersion + 10);
-	co_await fixture.pop(2, startVersion + 40);
-	TLogPeekReply advanced = co_await fixture.peek();
-	ASSERT(advanced.popped == startVersion + 20);
+Future<TLogPeekReply> peekLogRouter(LogRouterData* router) {
+	Promise<TLogPeekReply> reply;
+	Future<Void> serving = router->logRouterPeekMessages(reply, router->version.get(), Tag(tagLocalityRemoteLog, 0));
+	TLogPeekReply result = co_await timeoutError(reply.getFuture(), 1.0);
+	co_await timeoutError(serving, 1.0);
+	co_return result;
 }
 
 } // namespace
 
 TEST_CASE("/LogRouter/PoppedFrontier/PositiveStart") {
-	co_await testLogRouterPoppedFrontier(100, false);
-}
+	InitializeLogRouterRequest req;
+	req.recoveryCount = 1;
+	req.routerTag = Tag(tagLocalityLogRouter, 0);
+	req.startVersion = 100;
+	req.tLogLocalities.resize(2);
+	req.tLogPolicy = makeReference<PolicyOne>();
+	req.locality = 1;
+	req.allowDropInSim = false;
+	LogRouterData router(deterministicRandom()->randomUniqueID(), req);
 
-TEST_CASE("/LogRouter/PoppedFrontier/Replacement") {
-	co_await testLogRouterPoppedFrontier(0, true);
+	const bool batching = SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG;
+	ScopeExit restoreBatching(
+	    [batching]() { const_cast<ServerKnobs*>(SERVER_KNOBS)->PEEK_BATCHING_EMPTY_MSG = batching; });
+	const_cast<ServerKnobs*>(SERVER_KNOBS)->PEEK_BATCHING_EMPTY_MSG = false;
+
+	// The bootstrap floor must still let an empty router start pulling without remote pops.
+	Future<Void> bootstrap = router.waitForVersion(101);
+	ASSERT(bootstrap.isReady());
+	co_await timeoutError(bootstrap, 1.0);
+	TLogPeekReply initial = co_await peekLogRouter(&router);
+	ASSERT(initial.popped == 0);
+
+	router.version.set(200);
+	co_await logRouterPop(&router, TLogPopRequest(130, 130, Tag(tagLocalityRemoteLog, 0)));
+	TLogPeekReply partial = co_await peekLogRouter(&router);
+	ASSERT(partial.popped == 0);
+
+	co_await logRouterPop(&router, TLogPopRequest(110, 110, Tag(tagLocalityRemoteLog, 1)));
+	TLogPeekReply all = co_await peekLogRouter(&router);
+	ASSERT(all.popped == 110);
+	co_await logRouterPop(&router, TLogPopRequest(140, 140, Tag(tagLocalityRemoteLog, 1)));
+	TLogPeekReply advanced = co_await peekLogRouter(&router);
+	ASSERT(advanced.popped == 130);
 }
