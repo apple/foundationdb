@@ -500,6 +500,7 @@ Version retiredTagPopTarget(Version retiredVersion, Optional<Version> safePopVer
 }
 
 class CDCProxy {
+	friend class CDCProxyConsumeTest;
 	friend class CDCProxyPrefetchTest;
 	UID id;
 	Database cx;
@@ -2483,6 +2484,52 @@ TEST_CASE("/NativeCDC/ConsumeLeaseSupersession") {
 	ASSERT(original.isReady() && original.isError());
 	ASSERT_EQ(original.getError().code(), error_code_request_maybe_delivered);
 	return Void();
+}
+
+namespace {
+
+class CDCProxyConsumeTest {
+public:
+	static Future<Void> rejectConcurrentConsume(Optional<UID> activeConsumerId, Optional<UID> incomingConsumerId) {
+		CDCProxy proxy;
+		auto stream = makeReference<CDCBufferedStream>(1);
+		stream->initialized = true;
+		stream->minVersion = 1;
+		auto lease = makeReference<CDCConsumeLease>(activeConsumerId);
+		stream->activeConsume = lease;
+		proxy.streams.emplace(stream->streamId, stream);
+		proxy.activeConsumeRequests = 1;
+
+		// A held lease establishes overlap without depending on when two RPCs reach the proxy.
+		Promise<CDCConsumeReply> pendingReply;
+		Future<CDCConsumeReply> original = lease->waitForReply(pendingReply.getFuture());
+		CDCConsumeRequest request(CDCCursor(stream->streamId, 0), incomingConsumerId);
+		Future<CDCConsumeReply> rejected = request.reply.getFuture();
+		Future<Void> handler = proxy.consume(request);
+		ASSERT(handler.isReady() && !handler.isError());
+		ASSERT(rejected.isReady() && rejected.isError());
+		ASSERT_EQ(rejected.getError().code(), error_code_client_invalid_operation);
+		ASSERT(stream->activeConsume == lease);
+		ASSERT(!original.isReady());
+		ASSERT_EQ(proxy.activeConsumeRequests, 1);
+		ASSERT_EQ(stream->readDemand, 0);
+		return Void();
+	}
+};
+
+} // namespace
+
+TEST_CASE("/NativeCDC/ConsumeRejectsConcurrentAnonymousConsumers") {
+	return CDCProxyConsumeTest::rejectConcurrentConsume({}, {});
+}
+TEST_CASE("/NativeCDC/ConsumeRejectsAnonymousConsumerAgainstNamedLease") {
+	return CDCProxyConsumeTest::rejectConcurrentConsume(UID(1, 2), {});
+}
+TEST_CASE("/NativeCDC/ConsumeRejectsNamedConsumerAgainstAnonymousLease") {
+	return CDCProxyConsumeTest::rejectConcurrentConsume({}, UID(1, 2));
+}
+TEST_CASE("/NativeCDC/ConsumeRejectsDifferentNamedConsumer") {
+	return CDCProxyConsumeTest::rejectConcurrentConsume(UID(1, 2), UID(3, 4));
 }
 
 namespace {
