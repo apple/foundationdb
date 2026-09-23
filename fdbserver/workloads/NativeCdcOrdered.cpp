@@ -159,9 +159,10 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 	                            Version target,
 	                            Keyspace* view,
 	                            std::set<Version>* observed,
-	                            Optional<Version> replayFrom = {}) {
-		Version previous = replayFrom.present() ? replayFrom.get() : consumer->position().lastConsumedVersion;
-		while (previous < target) {
+	                            Version durableFloor) {
+		ASSERT_GT(target, durableFloor);
+		Version through = durableFloor;
+		while (through < target) {
 			TraceEvent("NativeCdcOrderedConsumeBegin")
 			    .detail("Cursor", consumer->position().lastConsumedVersion)
 			    .detail("Target", target);
@@ -170,25 +171,35 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 			    .detail("Through", reply.lastConsumedVersion)
 			    .detail("Versions", reply.mutations.size())
 			    .detail("Target", target);
-			ASSERT_GT(reply.lastConsumedVersion, previous);
+			ASSERT_GT(reply.lastConsumedVersion, durableFloor);
 			ASSERT_EQ(consumer->position().lastConsumedVersion, reply.lastConsumedVersion);
+			Version previous = durableFloor;
 			for (const auto& versioned : reply.mutations) {
 				ASSERT_GT(versioned.version, previous);
 				ASSERT_LE(versioned.version, reply.lastConsumedVersion);
 				previous = versioned.version;
 				auto expected = expectedVersions.find(versioned.version);
 				ASSERT(expected != expectedVersions.end());
-				ASSERT(observed->insert(versioned.version).second);
+				// Owner replacement can replay unacknowledged versions. Validate every
+				// delivery, but apply each version only once to the reconstructed keyspace.
+				const bool firstDelivery = observed->insert(versioned.version).second;
 				ASSERT_EQ(versioned.mutations.size(), expected->second.size());
 				for (int i = 0; i < versioned.mutations.size(); ++i) {
 					const auto& mutation = versioned.mutations[i];
 					ASSERT_EQ(mutation.type, expected->second[i].type);
 					ASSERT_EQ(mutation.param1, expected->second[i].param1);
 					ASSERT_EQ(mutation.param2, expected->second[i].param2);
-					apply(*view, mutation);
+					if (firstDelivery) {
+						apply(*view, mutation);
+					}
 				}
 			}
-			previous = reply.lastConsumedVersion;
+			for (auto expected = expectedVersions.upper_bound(durableFloor);
+			     expected != expectedVersions.end() && expected->first <= reply.lastConsumedVersion;
+			     ++expected) {
+				ASSERT(observed->contains(expected->first));
+			}
+			through = reply.lastConsumedVersion;
 		}
 		ASSERT(observed->contains(target));
 	}
@@ -457,7 +468,8 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 			const Version minimum = listed.front().minVersion;
 			// Two of these three partitions share a proxy. Its first retained reply leaves too little room
 			// for the other reader, while the aggregate cannot acknowledge until every partition replies.
-			co_await expectError(consumeThrough(consumer, initial, &view, &observed), error_code_server_overloaded);
+			co_await expectError(consumeThrough(consumer, initial, &view, &observed, minimum - 1),
+			                     error_code_server_overloaded);
 			co_await verifyCommonMinimum(cx, partitions, minimum);
 			// Retrying the same consumer must preserve its durable floor and cancel abandoned child reads.
 			co_await expectError(consumeThrough(consumer, initial, &view, &observed, minimum - 1),
@@ -468,7 +480,7 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 			completed = true;
 			co_return;
 		}
-		co_await consumeThrough(consumer, initial, &view, &observed);
+		co_await consumeThrough(consumer, initial, &view, &observed, listed.front().minVersion - 1);
 		co_await verifyKeyspace(cx, view);
 		phase("InitialAcknowledgement");
 		co_await consumer->acknowledge();
@@ -484,13 +496,13 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		const Version quiet = co_await writeStep(cx, 1);
 		ASSERT_GT(quiet, checkpoint.lastConsumedVersion);
 		expectedVersions.emplace(quiet, expectedMutations(writeMutations(1)));
-		co_await consumeThrough(consumer, quiet, &view, &observed);
+		co_await consumeThrough(consumer, quiet, &view, &observed, checkpoint.lastConsumedVersion);
 		co_await verifyKeyspace(cx, view);
 		phase("MixedMutations");
 		const Version mixed = co_await writeStep(cx, 2);
 		ASSERT_GT(mixed, quiet);
 		expectedVersions.emplace(mixed, expectedMutations(writeMutations(2)));
-		co_await consumeThrough(consumer, mixed, &view, &observed);
+		co_await consumeThrough(consumer, mixed, &view, &observed, checkpoint.lastConsumedVersion);
 		co_await verifyKeyspace(cx, view);
 		ASSERT_EQ(observed.size(), 3);
 		co_await verifyCommonMinimum(cx, partitions, checkpoint.lastConsumedVersion + 1);
@@ -529,7 +541,7 @@ class NativeCdcOrderedWorkload : public TestWorkload {
 		consumer = resumeNativeCdcConsumer(cx, checkpoint);
 		view = checkpointView;
 		observed.clear();
-		co_await consumeThrough(consumer, mixed, &view, &observed);
+		co_await consumeThrough(consumer, mixed, &view, &observed, checkpoint.lastConsumedVersion);
 		ASSERT_EQ(observed.size(), 2);
 		ASSERT(observed.contains(quiet));
 		co_await verifyKeyspace(cx, view);
