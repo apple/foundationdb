@@ -757,6 +757,7 @@ public:
 	int BACKUP_FILE_BLOCK_BYTES;
 	int64_t BACKUP_WORKER_LOCK_BYTES;
 	double BACKUP_UPLOAD_DELAY;
+	bool CC_RERECRUIT_BACKUP_WORKER_ENABLED; // re-recruit an old epoch's failed backup worker
 
 	// Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;

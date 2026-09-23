@@ -344,6 +344,13 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	bool removeBackupWorker(const BackupWorkerDoneRequest& req) final;
 
+	bool replaceBackupWorker(UID deadWorker, const InitializeBackupReply& reply) final;
+
+	void releaseBackupWorker(UID worker, LogEpoch backupEpoch) final;
+
+	// Pins oldestBackupEpoch to the lowest old epoch still holding backup workers.
+	void recomputeOldestBackupEpoch();
+
 	LogEpoch getOldestBackupEpoch() const final;
 
 	void setOldestBackupEpoch(LogEpoch epoch) final;

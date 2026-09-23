@@ -718,6 +718,16 @@ struct ILogSystem {
 	// if the worker is not found.
 	virtual bool removeBackupWorker(const BackupWorkerDoneRequest& req) = 0;
 
+	// Points an old epoch's backup worker slot at a re-recruited replacement, keeping the entry in
+	// place so the epoch retains its hold on oldestBackupEpoch. Returns false if the dead worker is
+	// no longer tracked, meaning the replacement must not be installed.
+	virtual bool replaceBackupWorker(UID deadWorker, const InitializeBackupReply& reply) = 0;
+
+	// Frees a backup worker slot whose work durable progress already shows as complete, for a worker
+	// that died without reporting done. Unlike removeBackupWorker this records nothing for a later
+	// setBackupWorkers, since there is no done request in flight to reconcile with.
+	virtual void releaseBackupWorker(UID worker, LogEpoch backupEpoch) = 0;
+
 	virtual LogEpoch getOldestBackupEpoch() const = 0;
 	virtual void setOldestBackupEpoch(LogEpoch epoch) = 0;
 };
