@@ -39,6 +39,61 @@
 // /data/v7/fdb/
 #define KAIO_LOGGING 0
 
+namespace kaio_detail {
+// Truncation runs synchronously on the network thread; repeated signals must not keep it in a retry loop indefinitely.
+constexpr int MAX_EINTR_RETRIES = 3;
+
+struct SyscallResult {
+	int result;
+	int errorCode;
+	int retries;
+};
+
+template <class Call>
+SyscallResult retryOnEINTR(Call&& call) {
+	for (int retries = 0;; ++retries) {
+		int result = call();
+		if (result == 0)
+			return { result, 0, retries };
+		int errorCode = errno;
+		if (errorCode != EINTR || retries == MAX_EINTR_RETRIES)
+			return { result, errorCode, retries };
+	}
+}
+
+struct TruncateResult {
+	int result;
+	int errorCode;
+	int fallocateErrorCode;
+	int fallocateRetries;
+	int ftruncateRetries;
+};
+
+template <class Fallocate, class Ftruncate>
+TruncateResult truncateSyscalls(int fd,
+                               int64_t size,
+                               int64_t lastFileSize,
+                               bool& fallocateSupported,
+                               Fallocate&& fallocateCall,
+                               Ftruncate&& ftruncateCall) {
+	int fallocateRetries = 0;
+	int fallocateErrorCode = 0;
+	if (fallocateSupported && size >= lastFileSize) {
+		auto allocation = retryOnEINTR([&] { return fallocateCall(fd, 0, 0, size); });
+		fallocateRetries = allocation.retries;
+		if (allocation.result == 0)
+			return { 0, 0, 0, fallocateRetries, 0 };
+		fallocateErrorCode = allocation.errorCode;
+		if (fallocateErrorCode != EOPNOTSUPP)
+			return { allocation.result, allocation.errorCode, fallocateErrorCode, fallocateRetries, 0 };
+		fallocateSupported = false;
+	}
+
+	auto truncation = retryOnEINTR([&] { return ftruncateCall(fd, size); });
+	return { truncation.result, truncation.errorCode, fallocateErrorCode, fallocateRetries, truncation.retries };
+}
+} // namespace kaio_detail
+
 struct SlowAioSubmit {
 	int64_t submitDuration;
 	int64_t truncateDuration;
@@ -217,19 +272,6 @@ public:
 	static int get_eventfd() { return ctx.evfd; }
 	static void setTimeout(double ioTimeout) { ctx.setIOTimeout(ioTimeout); }
 
-	using FallocateFunction = int (*)(int, int, off_t, off_t);
-	using FtruncateFunction = int (*)(int, off_t);
-
-	static void setSyscallHooksForTest(FallocateFunction fallocate, FtruncateFunction ftruncate) {
-		fallocateFunc = fallocate;
-		ftruncateFunc = ftruncate;
-	}
-
-	static void resetSyscallHooksForTest() {
-		fallocateFunc = ::fallocate;
-		ftruncateFunc = ::ftruncate;
-	}
-
 	void addref() override { ReferenceCounted<AsyncFileKAIO>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileKAIO>::delref(); }
 	Future<int> read(void* data, int length, int64_t offset) override {
@@ -312,40 +354,30 @@ public:
 #if KAIO_LOGGING
 		uint32_t id = OpLogEntry::nextID();
 #endif
-		int result = -1;
 		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::START, size / 4096);
-		bool completed = false;
 		double begin = timer_monotonic();
 
-		if (ctx.fallocateSupported && size >= lastFileSize) {
-			do {
-				result = fallocateFunc(fd, 0, 0, size);
-			} while (result != 0 && errno == EINTR);
-			if (result != 0) {
-				int fallocateErrCode = errno;
-				TraceEvent("AsyncFileKAIOAllocateError")
-				    .detail("Fd", fd)
-				    .detail("Filename", filename)
-				    .detail("Size", size)
-				    .GetLastError();
-				if (fallocateErrCode == EOPNOTSUPP) {
-					// Mark fallocate as unsupported. Try again with truncate.
-					ctx.fallocateSupported = false;
-				} else {
-					KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
-					return io_error();
-				}
-			} else {
-				completed = true;
-			}
+		auto outcome =
+		    kaio_detail::truncateSyscalls(fd, size, lastFileSize, ctx.fallocateSupported, ::fallocate, ::ftruncate);
+		if (outcome.fallocateRetries || outcome.ftruncateRetries) {
+			TraceEvent("AsyncFileKAIOTruncateInterrupted")
+			    .suppressFor(60)
+			    .detail("Fd", fd)
+			    .detail("Filename", filename)
+			    .detail("FallocateRetries", outcome.fallocateRetries)
+			    .detail("FtruncateRetries", outcome.ftruncateRetries);
 		}
-		int ftruncateErrCode = 0;
-		if (!completed) {
-			do {
-				result = ftruncateFunc(fd, size);
-			} while (result != 0 && errno == EINTR);
-			if (result != 0)
-				ftruncateErrCode = errno;
+		if (outcome.fallocateErrorCode != 0) {
+			errno = outcome.fallocateErrorCode;
+			TraceEvent("AsyncFileKAIOAllocateError")
+			    .detail("Fd", fd)
+			    .detail("Filename", filename)
+			    .detail("Size", size)
+			    .GetLastError();
+			if (outcome.fallocateErrorCode != EOPNOTSUPP) {
+				KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, outcome.result);
+				return io_error();
+			}
 		}
 
 		double end = timer_monotonic();
@@ -354,10 +386,10 @@ public:
 			    .detail("TruncateTime", end - begin)
 			    .detail("TruncateBytes", size - lastFileSize);
 		}
-		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
+		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, outcome.result);
 
-		if (result != 0) {
-			errno = ftruncateErrCode;
+		if (outcome.result != 0) {
+			errno = outcome.errorCode;
 			TraceEvent("AsyncFileKAIOTruncateError").detail("Fd", fd).detail("Filename", filename).GetLastError();
 			return io_error();
 		}
@@ -683,8 +715,6 @@ private:
 			io->next = io->prev = nullptr;
 		}
 	};
-	static inline FallocateFunction fallocateFunc = ::fallocate;
-	static inline FtruncateFunction ftruncateFunc = ::ftruncate;
 	static Context ctx;
 
 	explicit AsyncFileKAIO(int fd, int flags, std::string const& filename)
