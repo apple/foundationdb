@@ -37,7 +37,7 @@ IPAddress ClusterConnectionString::determineLocalSourceIP() const {
 		try {
 			using namespace boost::asio;
 
-			io_service ioService;
+			io_context ioService;
 			ip::udp::socket socket(ioService);
 
 			NetworkAddress coordAddr;
@@ -58,7 +58,7 @@ IPAddress ClusterConnectionString::determineLocalSourceIP() const {
 			ip::udp::endpoint endpoint(boostIp, coordAddr.port);
 			socket.connect(endpoint);
 			IPAddress ip = coordAddr.ip.isV6() ? IPAddress(socket.local_endpoint().address().to_v6().to_bytes())
-			                                   : IPAddress(socket.local_endpoint().address().to_v4().to_ulong());
+			                                   : IPAddress(socket.local_endpoint().address().to_v4().to_uint());
 			socket.close();
 
 			return ip;

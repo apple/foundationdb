@@ -144,7 +144,7 @@ void runTlsTest(int serverChainLen, int clientChainLen) {
 	auto io = io_context();
 	auto serverWorkGuard = work_guard_type(io.get_executor());
 	auto clientWorkGuard = work_guard_type(io.get_executor());
-	auto const ip = ip::address::from_string("127.0.0.1");
+	auto const ip = ip::make_address("127.0.0.1");
 	auto acceptor = tcp::acceptor(io, tcp::endpoint(ip, 0));
 	auto const serverAddr = acceptor.local_endpoint();
 	logs("server listening at {}", serverAddr);
