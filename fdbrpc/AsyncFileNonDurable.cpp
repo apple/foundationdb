@@ -50,16 +50,9 @@ Future<Reference<IAsyncFile>> AsyncFileDetachable::open(Future<Reference<IAsyncF
 	auto* process = g_simulator->getCurrentProcess();
 	TaskPriority task = g_network->getCurrentTask();
 	auto shutdown = process->shutdownSignal.getFuture();
-	Reference<IAsyncFile> file;
-	Error error;
-	try {
-		auto result = co_await race(shutdown, wrappedFile);
-		if (result.index() == 0) {
-			throw io_error().asInjectedFault();
-		}
-		file = std::get<1>(std::move(result));
-	} catch (Error& e) {
-		error = e;
+	auto result = co_await race(shutdown, ready(wrappedFile));
+	if (result.index() == 0) {
+		throw io_error().asInjectedFault();
 	}
 	// Pending opens are shared within a machine. Restore the caller before delivering the result
 	// or binding the detachable file to a process's shutdown signal.
@@ -69,10 +62,7 @@ Future<Reference<IAsyncFile>> AsyncFileDetachable::open(Future<Reference<IAsyncF
 			throw io_error().asInjectedFault();
 		}
 	}
-	if (error.isValid()) {
-		throw error;
-	}
-	co_return makeReference<AsyncFileDetachable>(file);
+	co_return makeReference<AsyncFileDetachable>(wrappedFile.get());
 }
 
 Future<int> AsyncFileDetachable::read(void* data, int length, int64_t offset) {
