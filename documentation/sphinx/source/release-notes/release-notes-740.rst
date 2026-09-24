@@ -11,6 +11,7 @@ AVX enabled release.
 
 * Reconciled uncertain S3 multipart upload completions: a 200 response that embeds an error is now treated as a failure, and a completion that returns NoSuchUpload or a transport error is verified against the committed object with a HEAD request before being reported as successful. `(PR #14089) <https://github.com/apple/foundationdb/pull/14089>`_, `(PR #14093) <https://github.com/apple/foundationdb/pull/14093>`_
 * Fixed RPM build-id link conflicts that prevented installing versioned client packages alongside the main client package. `(PR #14103) <https://github.com/apple/foundationdb/pull/14103>`_
+* Changed debug level to "-g1" and enabled compression for "\*.debug" release artifacts, to make them much smaller. Also changed to include the main executable in the "\*.debug" release artifact so it can optionally be run directly, on its own. `(PR #14103) <https://github.com/apple/foundationdb/pull/14103>`_, `(PR #14131) <https://github.com/apple/foundationdb/pull/14131>`_
 
 7.4.7
 =====
