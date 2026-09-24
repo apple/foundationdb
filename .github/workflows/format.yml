@@ -4,7 +4,7 @@ on:
   pull_request:
     branches:
       - main
-      - release-7.4
+      - release-8.0
 
 permissions:
   contents: read
