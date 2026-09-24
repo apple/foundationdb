@@ -328,8 +328,6 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	BACKUP_CLUSTER_FILE_OPTIONS,
-	{ OPT_ERRORLIMIT, "-e", SO_REQ_SEP },
-	{ OPT_ERRORLIMIT, "--errorlimit", SO_REQ_SEP },
 	BACKUP_TAG_OPTIONS,
 	BACKUP_LOG_OPTIONS,
 	BACKUP_QUIET_OPTIONS,
@@ -932,7 +930,6 @@ static void printBackupUsage(bool devhelp) {
 	       "                 Specifies a UID to verify against the BackupUID of the running backup.  If provided, the "
 	       "UID is verified in the same transaction\n"
 	       "                 which sets the new backup parameters (if the UID matches).\n");
-	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup or to filter the backup in query operations.\n"
 	       "                 If not specified, the entire database will be backed up or no filter will be applied.\n");
 	printf("  --keys-file FILE\n"
@@ -1141,7 +1138,7 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  -s, --source CONNFILE\n"
 	       "                 The path of a file containing the connection string for the\n"
 	       "                 source FoundationDB cluster.\n");
-	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
+	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 20).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 	       "                 If not specified, the entire database will be backed up.\n");
 	printf("  --keys-file FILE\n"
