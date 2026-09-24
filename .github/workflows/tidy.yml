@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - main
+      - release-8.0
 
 permissions:
   contents: read
