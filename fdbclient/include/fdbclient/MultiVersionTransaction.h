@@ -160,6 +160,13 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                              int nameLength,
 	                                              FDBKeyRange const* ranges,
 	                                              int rangeCount);
+	FDBFuture* (*databaseRegisterNativeCdcOrderedStream)(FDBDatabase* database,
+	                                                     uint8_t const* name,
+	                                                     int nameLength,
+	                                                     FDBKeyRange const* ranges,
+	                                                     int rangeCount,
+	                                                     FDBKey const* splitPoints,
+	                                                     int splitPointCount);
 	FDBFuture* (*databaseRemoveNativeCdcStream)(FDBDatabase* database, uint8_t const* name, int nameLength);
 	FDBFuture* (*databaseListNativeCdcStreams)(FDBDatabase* database);
 	FDBFuture* (*databaseCreateNativeCdcConsumer)(FDBDatabase* database, uint8_t const* name, int nameLength);
@@ -433,6 +440,9 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const std::vector<KeyRange>& ranges) override;
+	ThreadFuture<CDCStreamId> registerNativeCdcOrderedStream(const KeyRef& name,
+	                                                         const std::vector<KeyRange>& ranges,
+	                                                         const std::vector<Key>& splitPoints) override;
 	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
 	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;
 	ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) override;
@@ -751,6 +761,9 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 	ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name, const std::vector<KeyRange>& ranges) override;
+	ThreadFuture<CDCStreamId> registerNativeCdcOrderedStream(const KeyRef& name,
+	                                                         const std::vector<KeyRange>& ranges,
+	                                                         const std::vector<Key>& splitPoints) override;
 	ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) override;
 	ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() override;
 	ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) override;

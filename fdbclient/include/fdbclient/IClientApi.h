@@ -159,6 +159,9 @@ public:
 	// depending on the native client implementation.
 	virtual ThreadFuture<CDCStreamId> registerNativeCdcStream(const KeyRef& name,
 	                                                          const std::vector<KeyRange>& ranges) = 0;
+	virtual ThreadFuture<CDCStreamId> registerNativeCdcOrderedStream(const KeyRef& name,
+	                                                                 const std::vector<KeyRange>& ranges,
+	                                                                 const std::vector<Key>& splitPoints) = 0;
 	virtual ThreadFuture<Void> removeNativeCdcStream(const KeyRef& name) = 0;
 	virtual ThreadFuture<std::vector<NativeCdcStreamInfo>> listNativeCdcStreams() = 0;
 	virtual ThreadFuture<Reference<INativeCdcConsumer>> createNativeCdcConsumer(const KeyRef& name) = 0;

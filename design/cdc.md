@@ -7,7 +7,9 @@ reading committed mutations for a registered set of key ranges. A client
 registers a named stream, creates a consumer for that name, consumes batches of
 mutations, and acknowledges processed versions. The implementation persists
 enough state to retain unread TLog data and to resume stream service after CDC
-proxy failure or transaction-system recovery.
+proxy failure or transaction-system recovery. An optional ordered stream divides
+delivery across fixed key-range partitions while preserving one logical identity,
+commit-version-ordered consumer, cursor, and acknowledgement.
 
 ## Background
 
@@ -42,6 +44,9 @@ Native CDC is intended to provide:
 * A consumer API in which a client only needs a stream name after
   registration, rather than repeating its registered ranges on every read.
 * Ordered mutation batches identified by FoundationDB commit versions.
+* Optional fixed delivery partitions whose reads can run across CDC proxies,
+  with complete commit-version groups and one durable acknowledgement for the
+  combined stream.
 * Durable acknowledgements that determine how much CDC-tagged TLog history may
   be popped.
 * Correct retention when several streams share a CDC tag, including streams
@@ -82,6 +87,8 @@ The current implementation does not attempt to provide:
   leaves that composition to the consumer.
 * Dynamic stream range changes. A name is registered for an immutable range
   set; changing membership requires removing and registering a stream.
+* Adaptive splitting or merging of ordered stream partitions. Their boundaries
+  are fixed at registration.
 * Throughput-aware assignment of streams across CDC proxies.
 * Language-specific bindings beyond the C and Python APIs.
 
@@ -90,7 +97,8 @@ The current implementation does not attempt to provide:
 The native C++ client-facing declarations are in `fdbclient/NativeCdc.h`;
 value types and the thread-safe surface shared with language bindings are in
 `fdbclient/NativeCdcClient.h`; durable metadata operations used by server
-roles are in the private `fdbclient/NativeCdcInternal.h`; cursor and wire
+roles live in `fdbserver/core`, while shared client validation and
+acknowledgement helpers remain in `fdbclient`; cursor and wire
 request types are in `fdbclient/CDCProxyInterface.h`. The public C binding is
 declared in `bindings/c/foundationdb/fdb_c.h` and documented in
 `documentation/sphinx/source/api-c.rst`. The Python binding is documented in
@@ -100,6 +108,8 @@ configured tag pool can contain at most 65,536 distinct tags.
 
 ```cpp
 Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, std::vector<KeyRange> ranges);
+Future<CDCStreamId> registerNativeCdcOrderedStreamClient(
+    Database cx, Key name, std::vector<KeyRange> ranges, std::vector<Key> splitPoints);
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);
 
@@ -117,6 +127,14 @@ stable stream lifecycles, not per-request stream churn. The initial
 implementation does not define a supported registrations-per-second target:
 each change can scan global CDC metadata and wake a full durable ownership
 rescan. Applications should register long-lived streams and reuse them.
+
+`registerNativeCdcOrderedStreamClient()` adds fixed physical partitions to the
+same range-union contract. Its C binding is
+`fdb_database_register_cdc_ordered_stream()`. Python selects this registration
+mode with `Database.register_cdc_stream(..., split_points=[...])`; omitted or
+`None` split points use ordinary registration, while an empty list creates an
+ordered stream with one physical partition. All modes use the existing
+create, resume, consume, acknowledge, and position interfaces afterward.
 
 A stream registration contains:
 
@@ -247,13 +265,88 @@ removal is terminal for existing consumers. Stale consume or acknowledgement
 operations return an error instead of waiting indefinitely for an owner that
 will never be assigned again.
 
+### Ordered registration and delivery
+
+An ordered stream has one logical ID and between 1 and 64 private physical
+stream IDs. After canonicalizing the registered range union, registration
+accepts up to 63 strictly increasing split points inside its outer bounds.
+Each physical partition receives the intersection of that union with one
+interval between successive split points. Gaps remain excluded. A split may
+lie in a gap or at an existing range boundary, but creating an empty physical
+partition is rejected. Registration is idempotent only when the name,
+canonical ranges, and exact split points match. Registration mode and split
+points are immutable.
+
+For example, ranges `[a,f)` and `[m,z)` split at `c` and `t` produce three
+partitions: `{[a,c)}`, `{[c,f),[m,t)}`, and `{[t,z)}`. Each physical stream
+retains its own ordinary CDC range filtering, tag history, and proxy owner.
+The logical stream has no physical owner or tag. Partition IDs are internal
+delivery identities: public create/resume and acknowledgement operations use
+the logical ID, and removal uses its registered name and logical ID.
+
+The native client reads physical partitions concurrently and merges their
+results. A partition's returned cursor certifies that its complete mutation
+prefix, including empty version gaps, has been read through that version.
+The minimum certified frontier across all partitions bounds the logical
+cursor. A quiet partition must establish its frontier before later versions
+from other partitions can be emitted; absence of mutations alone is not a
+completion signal.
+
+Each returned version group contains all selected mutations at that commit
+version across every partition. Within a partition, mutation order is
+preserved. Mutations from different partitions at the same version use stable
+partition order; the API does not reconstruct the original cross-range
+mutation order or individual transaction boundaries. A spanning clear is
+clipped independently by the intersected partitions and can appear as several
+fragments in one version group. This ordering is sufficient for applying
+mutations to their disjoint selected key ranges. A downstream system needing
+atomic publication across ranges must still apply or publish the complete
+group atomically itself.
+
+The client retains at most one current reply per partition and bounds retained
+read-ahead with `NATIVE_CDC_ORDERED_BUFFER_BYTES` (64 MiB by default). Each
+physical consume RPC receives a byte quota derived from that shared budget,
+so concurrent reads cannot each request the full client budget. A logical
+reply is limited by `NATIVE_CDC_ORDERED_REPLY_BYTES` (10 MiB by default) and
+never splits a commit-version group. A single physical version group that
+cannot fit its RPC quota, or a merged group that cannot fit the logical reply
+limit, fails with `server_overloaded`. A physical consume also fails with
+`server_overloaded` when unacknowledged proxy buffers leave insufficient room
+for its next read, since partitions cannot acknowledge independently to release
+that capacity. These failures preserve the group's durable acknowledgement.
+The retained-memory accounting estimates
+records and payload bytes; transport and allocator overhead and batches still
+held by the application are additional memory.
+
+The client sends ordered registration to a CDC proxy through its
+`registerOrderedStream` RPC. The client and proxy both require every published
+CDC proxy to advertise ordered-stream support. The proxy invokes server-core
+metadata helpers to create the logical name, group metadata, all children,
+inverse parent mappings, and initial acknowledgement versionstamps in one
+transaction. It chooses distinct initial tags within the group and requires
+enough tags in the configured pool. An existing shared tag keeps its current
+proxy owner, which must still be published; newly owned tags are spread across
+the currently published proxies. Distinct tags therefore do not guarantee
+distinct owners or balanced measured load.
+
+The client reads shared group metadata and acknowledges logical version `V`
+by validating the immutable group and advancing every child's durable minimum
+to `V + 1` in one transaction. All children must have the same durable minimum
+before that update. Delivery or read-ahead of one child never independently
+acknowledges it. Removal goes through a published CDC proxy that supports
+ordered streams. Its server-core transaction atomically removes the logical
+stream and every child and records final-pop work for the union of their
+historical tags. Other streams sharing those tags retain their normal
+minimum-watermark protection.
+
 ### Consumption and expiration
 
 Consumption is ordered by commit version. A single-key mutation is returned
 only if its key is in one of the registered ranges. A clear range is intersected
 with every selected interval it overlaps and emits one clear for each non-empty
-intersection, in key order. These fragments remain in the original mutation
-position relative to other mutations from the same commit version. For example,
+intersection, in key order within each physical stream. These fragments remain
+in the original mutation position relative to other mutations from the same
+commit version in that physical stream. For example,
 a stream selecting `[a,c)` and `[x,z)` returns `[b,c)` and `[x,y)` for a clear
 of `[b,y)`, and never clears the unselected gap `[c,x)`.
 
@@ -332,6 +425,11 @@ acknowledgement permits it.
 The cluster controller recruits CDC proxies, publishes their interfaces, and
 keeps durable stream-to-proxy ownership consistent with current endpoints.
 
+Ordered streams reuse this physical data path for each partition. Their client
+merger coordinates version completion and acknowledgement; it does not forward
+all partitions through a designated CDC proxy. The following sections describe
+the durable state, routing, buffering, lifecycle, and recovery details.
+
 ## Durable state
 
 CDC uses two categories of system data. Routing and recovery-critical metadata
@@ -380,6 +478,17 @@ than transaction state:
 | `\xff\x02/cdc/retiredTagPopVersion/<tag>` | `Version` | Final pop watermark required after a stream using a tag is removed. |
 | `\xff\x02/cdc/tagLoad/<tag>` | assignment generation, sample version, expiry version, sampled write rate | Advisory producer-load estimate used for placement. |
 | `\xff\x02/cdc/tagOwner/<tag>` | `CDCStreamId` | Derived representative stream used to look up a current tag's proxy owner. |
+| `\xff\x02/cdc/orderedStream/<logicalId>` | schema version, canonical ranges, split points, physical stream IDs | Immutable ordered-stream membership and partition geometry. |
+| `\xff\x02/cdc/orderedParent/<childId>` | schema version, logical stream ID | Identifies a private physical partition's logical parent. |
+
+An ordered name points to its separate logical ID in `cdc/name`. That ID has
+no `cdc/keys`, tag history, proxy assignment, or independent `minVersion` row.
+Its children have ordinary physical rows and no registered names. The group
+and inverse-parent codecs reject unknown schema versions, malformed or trailing
+bytes, invalid partition geometry, and duplicate child identities. Group
+metadata must fit in one value. Reading a group also checks each child's exact
+ranges, inverse parent, and common durable minimum; inconsistent state is an
+error rather than a partially available stream.
 
 The initial `minVersion` is written with a versionstamp at stream
 registration. When a consumer acknowledges processing through version `V`, the
@@ -394,7 +503,9 @@ actual final pop to perform.
 
 ## Stream creation and assignment
 
-Registration runs as a durable metadata transaction:
+The client routes registration to a CDC proxy, which runs a durable metadata
+transaction through the server-core helpers. Ordinary registration proceeds as
+follows:
 
 1. It validates the stream name, range count, normal key ranges, and encoded
    metadata size, and canonicalizes the range union.
@@ -800,6 +911,22 @@ operation waits for a new assignment. Removal is terminal and wakes that wait;
 callers may cancel or externally bound the operation when they need a local
 deadline.
 
+For an ordered consumer, cancellation or replacement of any partition owner
+invalidates unacknowledged client read-ahead. The client cancels the pending
+partition operations, rereads the group's common durable minimum, and rewinds
+all partitions to that acknowledged frontier before resuming the merge. This
+can redeliver complete versions already processed but not acknowledged. Mixing
+one replacement partition's replay with other partitions' later buffered
+prefixes would break the common-cursor contract. The application must retain
+the existing discipline of durably processing a returned batch before
+acknowledging it.
+
+Canceling an acknowledgement has the same reconciliation rule: if its atomic
+metadata update committed, the next operation observes that common progress;
+otherwise it can replay the unacknowledged suffix. A later consume also checks
+the logical registration before returning a previously buffered suffix, so a
+completed removal cannot be hidden by local read-ahead.
+
 ### Transaction-system recovery
 
 During full recovery, active stream ranges, tag history, and pending retired
@@ -837,6 +964,32 @@ streams and finish retired cleanup before upgrading. Upgrade every CDC-capable
 server binary and client before registering streams in the new format; mixed
 old and new CDC implementations are unsupported, and existing cursors do not
 bridge that change.
+
+Ordered registration is additive for current multi-range CDC clients. Its
+optional external-client symbol returns `unsupported_operation` when an older
+loaded client lacks ordered registration. Existing ordinary registrations keep
+their format. A logical ordered ID deliberately has no physical range or owner
+row: an older client cannot interpret it as one child and silently consume a
+partial feed. Such clients remain incompatible with ordered names and may fail
+or wait for an owner they cannot resolve; use ordered-capable clients for the
+whole lifecycle.
+
+Before creating ordered streams, upgrade CDC clients and serving proxies to
+support ordered registration, removal, and partition consume byte quotas.
+The CDC proxy interface advertises `supportsOrderedStreams`; new interfaces
+set it during endpoint initialization, while older decoded interfaces default
+to false. Both the client and server reject ordered registration while any
+published proxy lacks that capability. The new `registerOrderedStream`
+endpoint uses index 9 without changing the protocol gate for ordinary paths.
+A proxy that ignores a partition quota cannot establish the client read-ahead
+bound.
+
+This admission check does not replace the retagging rollout requirement:
+CDC-serving and log-recovery binaries must still understand commit-stamped
+histories before live retagging is enabled. Keep ordered-capable clients and proxies
+available to drain and remove ordered streams before a rollback. Removing an
+ordered name starts ordinary retired-tag cleanup for every child; the logical
+metadata disappearing alone does not establish physical log reclamation.
 
 ### Feature gating
 
@@ -979,6 +1132,18 @@ It does not establish an unrestricted stream-count or throughput envelope.
 * One pending move per stream and conservative cooldown/hysteresis intentionally
   favor stability over rapid reaction. Cross-proxy placement and migration remain
   future work.
+* Ordered streams fix their partition boundaries at registration. A hot key or
+  badly skewed partition remains limited by one physical reader; adaptive splits
+  and merges are future work. Existing tag balancing moves whole physical
+  streams and does not subdivide a hot partition.
+* Ordered delivery still merges and returns every mutation through one client
+  consumer. Client CPU, transport, sink capacity, TLog placement, shared-tag
+  reads, and broad-clear fanout can become the next bottleneck. A single slow
+  partition holds back the logical completion frontier and acknowledgement.
+* The ordered-stream implementation does not establish 500,000 mutations/second
+  capacity. Qualification requires sustained end-to-end measurements at the
+  intended mutation sizes, partition skew, clear-range frequency, proxy and
+  TLog topology, and acknowledgement cadence, including catch-up after failure.
 * The CDC client surface does not yet provide language-specific bindings beyond
   the C and Python APIs or a higher-level consumer checkpoint abstraction. Administrative
   status and identity-guarded removal are available through `fdbcli`.
@@ -1014,6 +1179,22 @@ abandoned consumer, but it would silently violate the stated retention
 contract for a slow active stream. The initial design therefore requires an
 acknowledgement or explicit removal before releasing required history and
 treats administrative expiration policy as future work.
+
+### Independent streams and alternative partitioning
+
+Independent range streams allow downstream workers to advance and acknowledge
+separately. They are appropriate when the application can manage those cursors
+and does not need one complete ordered feed. The ordered interface instead
+preserves a scalar cursor and common acknowledgement, accepting coordination
+and client merging costs.
+
+Hashing keys across physical streams can reduce range skew, but a clear range
+then needs hash-aware filtering or fanout across all relevant buckets. Fixed
+key ranges reuse ordinary CDC filtering and clear clipping. Hashing whole
+transactions or striping by log source would require additional ordering and
+identity machinery; replicated TLogs are not disjoint mutation partitions.
+Increasing buffering or optimizing one proxy can improve local capacity but
+does not change the physical stream as the unit of ownership.
 
 ## Testing considerations
 
@@ -1083,6 +1264,17 @@ pending CDC work do not recruit CDC proxies or retain CDC TLog tags. The data
 distributor retains a low-rate metadata-generation check for pending-history
 finalization.
 
+Ordered-stream coverage adds partition-geometry and malformed-codec tests,
+bounded merge tests with skewed and empty prefixes, and checks that no partial
+commit-version group is emitted. Distributed validation must exercise atomic
+registration, common acknowledgement and removal, cross-boundary clears,
+partition-owner replacement, cancellation and replay, transaction-system
+recovery, and preservation of another stream sharing a retired tag. Tests
+should compare against an independent expected mutation history and verify
+that public child operations cannot advance one partition's acknowledgement.
+These correctness checks do not establish throughput or memory-overhead limits
+for a production workload.
+
 ## Observability and supportability considerations
 
 The `CDCProxyMetrics` event described under consumption and expiration is the
@@ -1118,6 +1310,22 @@ changes. The client uses bounded requests and reports unavailable proxy samples
 without discarding the durable status result. The interface adds an endpoint
 without changing existing serialized fields or endpoint offsets; older proxies
 can continue serving CDC while the new status sample is unavailable.
+
+Ordered status includes both the logical parent and physical children. The
+parent's `partitions` array identifies its child IDs, and each child carries
+`ordered_parent_stream_id`; the child's displayed name is its parent's
+administrative context, not a separately registered removable name. The parent
+reports the range union, common durable minimum, and union of tags. Its null
+`owner_proxy_id` is expected for an aggregate, while `owner_published` is true
+only when every child has a published owner. Inspect individual children to
+locate a missing owner or delayed reader.
+
+Proxy buffer and read-demand samples and tag blocking IDs remain physical
+stream measurements. Do not add an ordered parent's summary to its children
+when counting streams, tags, or memory. To remove an ordered stream, use its
+logical name and parent ID; the identity guard rejects that name paired with a
+child ID. All children are removed together, so an operator cannot discard one
+partition's retained history while preserving the logical stream contract.
 
 The status view deliberately does not report per-stream TLog disk bytes. Shared
 tags and replicated log files make proxy buffer bytes and version distance
