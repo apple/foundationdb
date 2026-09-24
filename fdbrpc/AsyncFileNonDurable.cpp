@@ -47,14 +47,32 @@ Future<Void> AsyncFileDetachable::doShutdown(AsyncFileDetachable* self) {
 }
 
 Future<Reference<IAsyncFile>> AsyncFileDetachable::open(Future<Reference<IAsyncFile>> wrappedFile) {
-	auto res = co_await race(g_simulator->getCurrentProcess()->shutdownSignal.getFuture(), wrappedFile);
-	if (res.index() == 0) {
-		throw io_error().asInjectedFault();
-	} else if (res.index() == 1) {
-		Reference<IAsyncFile> f = std::get<1>(std::move(res));
-		co_return makeReference<AsyncFileDetachable>(f);
+	auto* process = g_simulator->getCurrentProcess();
+	TaskPriority task = g_network->getCurrentTask();
+	auto shutdown = process->shutdownSignal.getFuture();
+	Reference<IAsyncFile> file;
+	Error error;
+	try {
+		auto result = co_await race(shutdown, wrappedFile);
+		if (result.index() == 0) {
+			throw io_error().asInjectedFault();
+		}
+		file = std::get<1>(std::move(result));
+	} catch (Error& e) {
+		error = e;
 	}
-	UNREACHABLE();
+	// Pending opens are shared within a machine. Restore the caller before delivering the result
+	// or binding the detachable file to a process's shutdown signal.
+	if (g_simulator->getCurrentProcess() != process || g_network->getCurrentTask() != task) {
+		auto resumed = co_await race(shutdown, g_simulator->onProcess(process, task));
+		if (resumed.index() == 0) {
+			throw io_error().asInjectedFault();
+		}
+	}
+	if (error.isValid()) {
+		throw error;
+	}
+	co_return makeReference<AsyncFileDetachable>(file);
 }
 
 Future<int> AsyncFileDetachable::read(void* data, int length, int64_t offset) {
