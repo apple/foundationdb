@@ -15,7 +15,7 @@ function(compile_boost)
 
   # Configure bootstrap command
   set(BOOTSTRAP_COMMAND "./bootstrap.sh")
-  set(BOOTSTRAP_LIBRARIES "context,filesystem,iostreams,system,serialization,program_options,url")
+  set(BOOTSTRAP_LIBRARIES "context,filesystem,iostreams,serialization,program_options,url")
 
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
   # Can't build Boost with Intel compiler, use clang instead.
@@ -73,8 +73,8 @@ function(compile_boost)
   # Build boost
   include(ExternalProject)
 
-  set(BOOST_SRC_URL https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2)
-  set(BOOST_SRC_SHA SHA256=1bed88e40401b2cb7a1f76d4bab499e352fa4d0c5f31c0dbae64e24d34d7513b)
+  set(BOOST_SRC_URL https://archives.boost.io/release/1.89.0/source/boost_1_89_0.tar.bz2)
+  set(BOOST_SRC_SHA SHA256=85a33fa22621b4f314f8e85e1a5e2a9363d22e4f4992925d4bb3bc631b5a0c7a)
 
   if(USE_ASAN)
     set(B2_ADDTTIONAL_BUILD_ARGS context-impl=ucontext)
@@ -100,7 +100,6 @@ function(compile_boost)
                        "${BOOST_INSTALL_DIR}/lib/libboost_filesystem.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_serialization.a"
-                       "${BOOST_INSTALL_DIR}/lib/libboost_system.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_url.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_program_options.a")
 
@@ -124,17 +123,13 @@ function(compile_boost)
   add_dependencies(${COMPILE_BOOST_TARGET}_serialization ${COMPILE_BOOST_TARGET}Project)
   set_target_properties(${COMPILE_BOOST_TARGET}_serialization PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_serialization.a")
 
-  add_library(${COMPILE_BOOST_TARGET}_system STATIC IMPORTED)
-  add_dependencies(${COMPILE_BOOST_TARGET}_system ${COMPILE_BOOST_TARGET}Project)
-  set_target_properties(${COMPILE_BOOST_TARGET}_system PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_system.a")
-
   add_library(${COMPILE_BOOST_TARGET}_url STATIC IMPORTED)
   add_dependencies(${COMPILE_BOOST_TARGET}_url ${COMPILE_BOOST_TARGET}Project)
   set_target_properties(${COMPILE_BOOST_TARGET}_url PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_url.a")
 
   add_library(${COMPILE_BOOST_TARGET} INTERFACE)
   target_include_directories(${COMPILE_BOOST_TARGET} SYSTEM INTERFACE ${BOOST_INSTALL_DIR}/include)
-  target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}_iostreams ${COMPILE_BOOST_TARGET}_system ${COMPILE_BOOST_TARGET}_serialization ${COMPILE_BOOST_TARGET}_url)
+  target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}_iostreams ${COMPILE_BOOST_TARGET}_serialization ${COMPILE_BOOST_TARGET}_url)
 
 endfunction(compile_boost)
 
@@ -162,12 +157,12 @@ set(Boost_USE_STATIC_LIBS ON)
 
 # Clang and Gcc will have different name mangling to std::call_once, etc.
 if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$" AND USE_LIBCXX)
-  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_86_0_clang)
-  set(BOOST_HINT_PATHS /opt/boost_1_86_0_clang)
+  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_89_0_clang)
+  set(BOOST_HINT_PATHS /opt/boost_1_89_0_clang)
   message(STATUS "Preferring _clang build of boost ...")
 else ()
-  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_86_0)
-  set(BOOST_HINT_PATHS /opt/boost_1_86_0)
+  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_89_0)
+  set(BOOST_HINT_PATHS /opt/boost_1_89_0)
 endif ()
 
 if(BOOST_ROOT)
@@ -177,8 +172,8 @@ endif()
 if(WIN32)
   # Use CONFIG mode to prefer Boost's BoostConfig.cmake over deprecated FindBoost module
   # This is required for CMake 3.30+ compatibility (policy CMP0167)
-  find_package(Boost 1.86.0 QUIET
-               COMPONENTS filesystem iostreams serialization system program_options url
+  find_package(Boost 1.89.0 QUIET
+               COMPONENTS filesystem iostreams serialization program_options url
                CONFIG PATHS ${BOOST_HINT_PATHS})
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target
@@ -186,7 +181,6 @@ if(WIN32)
                                   Boost::filesystem
                                   Boost::iostreams
                                   Boost::serialization
-                                  Boost::system
                                   Boost::url
   )
   add_library(boost_target_program_options INTERFACE)
@@ -195,8 +189,8 @@ if(WIN32)
 endif()
 
 
-find_package(Boost 1.86.0 EXACT QUIET
-             COMPONENTS context filesystem iostreams program_options serialization system url
+find_package(Boost 1.89.0 EXACT QUIET
+             COMPONENTS context filesystem iostreams program_options serialization url
              CONFIG PATHS ${BOOST_HINT_PATHS})
 
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
@@ -211,7 +205,6 @@ if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
                                   Boost::filesystem
                                   Boost::iostreams
                                   Boost::serialization
-                                  Boost::system
                                   Boost::url
   )
   add_library(boost_target_program_options INTERFACE)
