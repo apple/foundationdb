@@ -4,6 +4,14 @@
 Release Notes
 #############
 
+7.4.8
+=====
+
+AVX enabled release.
+
+* Reconciled uncertain S3 multipart upload completions: a 200 response that embeds an error is now treated as a failure, and a completion that returns NoSuchUpload or a transport error is verified against the committed object with a HEAD request before being reported as successful. `(PR #14089) <https://github.com/apple/foundationdb/pull/14089>`_, `(PR #14093) <https://github.com/apple/foundationdb/pull/14093>`_
+* Fixed RPM build-id link conflicts that prevented installing versioned client packages alongside the main client package. `(PR #14103) <https://github.com/apple/foundationdb/pull/14103>`_
+
 7.4.7
 =====
 
