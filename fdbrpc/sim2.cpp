@@ -21,18 +21,19 @@
 #include <string>
 #include <utility>
 
-#include "flow/MkCert.h"
-#include "fdbrpc/simulator.h"
-#include "flow/Arena.h"
-#ifndef BOOST_SYSTEM_NO_LIB
-#define BOOST_SYSTEM_NO_LIB
-#endif
+// For <boost/asio.hpp>
+// The ifndef's allow us to compile with pre-built boost - depending on what
+// libraries were enabled when it was built, we can get errors about double-defines.
 #ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #endif
 #ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #endif
+
+#include "flow/MkCert.h"
+#include "fdbrpc/simulator.h"
+#include "flow/Arena.h"
 #include "SimExternalConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
