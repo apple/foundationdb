@@ -140,7 +140,7 @@ Building FoundationDB requires at least 8GB of memory. More memory is needed whe
 
 ### macOS
 
-The build under macOS will work the same way as on Linux. [Homebrew](https://brew.sh/) can be used to install the `boost` library and the `ninja` build tool. Be careful: the current main branch uses Boost 1.86; install this version or let CMake download it. Also, if the Swift binding is not of interest, use `-DBUILD_SWIFT_BINDING=OFF`.
+The build under macOS will work the same way as on Linux. [Homebrew](https://brew.sh/) can be used to install the `boost` library and the `ninja` build tool. Be careful: the current main branch uses Boost 1.89; install this version or let CMake download it. Also, if the Swift binding is not of interest, use `-DBUILD_SWIFT_BINDING=OFF`.
 
 ```sh
 cmake -G Ninja <FDB_SOURCE_DIR> -B <BUILD_DIR>
@@ -160,7 +160,7 @@ Under Windows, only Visual Studio with ClangCl is supported.
 
 1. Install Visual Studio 2019 (IDE or Build Tools), and enable LLVM support
 1. Install [CMake 3.24.2](https://cmake.org/download/) or higher
-1. Download [Boost 1.86.0](https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2)
+1. Download [Boost 1.89.0](https://archives.boost.io/release/1.89.0/source/boost_1_89_0.tar.bz2)
 1. Unpack boost to C:\boost, or use `-DBOOST_ROOT=<PATH_TO_BOOST>` with `cmake` if unpacked elsewhere
 1. Install [Python](https://www.python.org/downloads/) if it is not already installed by Visual Studio
 1. (Optional) Install [OpenJDK 11](https://developers.redhat.com/products/openjdk/download) to build Java bindings

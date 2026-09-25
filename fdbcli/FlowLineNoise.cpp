@@ -21,16 +21,13 @@
 #include "fdbcli/FlowLineNoise.h"
 #include "flow/IThreadPool.h"
 
-#ifndef BOOST_SYSTEM_NO_LIB
-#define BOOST_SYSTEM_NO_LIB
-#endif
 #ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #endif
 #ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #endif
-#include "boost/asio.hpp"
+#include <boost/asio.hpp>
 
 #include "flow/ThreadHelper.h"
 
@@ -142,7 +139,7 @@ Future<Optional<std::string>> LineNoise::read(std::string const& prompt) {
 	return f;
 }
 
-Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
+Future<Void> waitKeyboardInterrupt(boost::asio::io_context* ios) {
 	boost::asio::signal_set signals(*ios, SIGINT);
 	Promise<Void> result;
 	signals.async_wait([result](const boost::system::error_code& error, int signal_number) {
@@ -157,7 +154,7 @@ Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
 }
 
 Future<Void> LineNoise::onKeyboardInterrupt() {
-	auto* ios = (boost::asio::io_service*)g_network->global(INetwork::enASIOService);
+	auto* ios = (boost::asio::io_context*)g_network->global(INetwork::enASIOService);
 	if (!ios)
 		return Never();
 	return waitKeyboardInterrupt(ios);
