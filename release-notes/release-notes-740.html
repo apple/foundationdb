@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Release Notes &#8212; FoundationDB 7.4.7 documentation</title>
+    <title>Release Notes &#8212; FoundationDB 7.4.8 documentation</title>
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
     <script src="../_static/jquery.js"></script>
@@ -37,7 +37,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.7</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -67,14 +67,15 @@
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">7.4.7</a></li>
-<li><a class="reference internal" href="#id3">7.4.6</a></li>
-<li><a class="reference internal" href="#id4">7.4.5</a></li>
-<li><a class="reference internal" href="#id5">7.4.4</a></li>
-<li><a class="reference internal" href="#id6">7.4.3</a></li>
-<li><a class="reference internal" href="#id7">7.4.2</a></li>
-<li><a class="reference internal" href="#id8">7.4.1</a></li>
-<li><a class="reference internal" href="#id9">7.4.0</a><ul>
+<li><a class="reference internal" href="#id2">7.4.8</a></li>
+<li><a class="reference internal" href="#id4">7.4.7</a></li>
+<li><a class="reference internal" href="#id5">7.4.6</a></li>
+<li><a class="reference internal" href="#id6">7.4.5</a></li>
+<li><a class="reference internal" href="#id7">7.4.4</a></li>
+<li><a class="reference internal" href="#id8">7.4.3</a></li>
+<li><a class="reference internal" href="#id9">7.4.2</a></li>
+<li><a class="reference internal" href="#id10">7.4.1</a></li>
+<li><a class="reference internal" href="#id11">7.4.0</a><ul>
 <li><a class="reference internal" href="#features-supported">Features (Supported)</a></li>
 <li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
@@ -126,14 +127,15 @@
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">7.4.7</a></li>
-<li><a class="reference internal" href="#id3">7.4.6</a></li>
-<li><a class="reference internal" href="#id4">7.4.5</a></li>
-<li><a class="reference internal" href="#id5">7.4.4</a></li>
-<li><a class="reference internal" href="#id6">7.4.3</a></li>
-<li><a class="reference internal" href="#id7">7.4.2</a></li>
-<li><a class="reference internal" href="#id8">7.4.1</a></li>
-<li><a class="reference internal" href="#id9">7.4.0</a><ul>
+<li><a class="reference internal" href="#id2">7.4.8</a></li>
+<li><a class="reference internal" href="#id4">7.4.7</a></li>
+<li><a class="reference internal" href="#id5">7.4.6</a></li>
+<li><a class="reference internal" href="#id6">7.4.5</a></li>
+<li><a class="reference internal" href="#id7">7.4.4</a></li>
+<li><a class="reference internal" href="#id8">7.4.3</a></li>
+<li><a class="reference internal" href="#id9">7.4.2</a></li>
+<li><a class="reference internal" href="#id10">7.4.1</a></li>
+<li><a class="reference internal" href="#id11">7.4.0</a><ul>
 <li><a class="reference internal" href="#features-supported">Features (Supported)</a></li>
 <li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
@@ -156,6 +158,15 @@
   <section id="release-notes">
 <span id="id1"></span><h1>Release Notes</h1>
 <section id="id2">
+<h2>7.4.8</h2>
+<p>AVX enabled release.</p>
+<ul class="simple">
+<li><p>Reconciled uncertain S3 multipart upload completions: a 200 response that embeds an error is now treated as a failure, and a completion that returns NoSuchUpload or a transport error is verified against the committed object with a HEAD request before being reported as successful. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14089">(PR #14089)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/14093">(PR #14093)</a></p></li>
+<li><p>Fixed RPM build-id link conflicts that prevented installing versioned client packages alongside the main client package. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14103">(PR #14103)</a></p></li>
+<li><p>Changed debug level to “-g1” and enabled compression for “*.debug” release artifacts, to make them much smaller. Also changed to include the main executable in the “*.debug” release artifact so it can optionally be run directly, on its own. <a class="reference external" href="https://github.com/apple/foundationdb/pull/14103">(PR #14103)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/14131">(PR #14131)</a></p></li>
+</ul>
+</section>
+<section id="id4">
 <h2>7.4.7</h2>
 <p>AVX enabled release.</p>
 <ul class="simple">
@@ -185,7 +196,7 @@
 <li><p>Enabled TLS hostname validation against certificate CN and SAN values. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12730">(PR #12730)</a></p></li>
 </ul>
 </section>
-<section id="id3">
+<section id="id5">
 <h2>7.4.6</h2>
 <p>AVX enabled release.</p>
 <ul class="simple">
@@ -205,13 +216,13 @@
 <li><p>Downgraded RocksDB to 8.11.5. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12651">(PR #12651)</a></p></li>
 </ul>
 </section>
-<section id="id4">
+<section id="id6">
 <h2>7.4.5</h2>
 <ul class="simple">
 <li><p>Same as 7.4.4 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id5">
+<section id="id7">
 <h2>7.4.4</h2>
 <ul class="simple">
 <li><p>Fixed a race that could cause recovery to be stuck when purging old generations. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12214">(PR #12214)</a></p></li>
@@ -223,13 +234,13 @@
 <li><p>Fixed an issue in TLog server code that was causing OOMs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12298">(PR #12298)</a></p></li>
 </ul>
 </section>
-<section id="id6">
+<section id="id8">
 <h2>7.4.3</h2>
 <ul class="simple">
 <li><p>Same as 7.4.2 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id7">
+<section id="id9">
 <h2>7.4.2</h2>
 <ul class="simple">
 <li><p>Fixed a backup restore speed regression. <a class="reference external" href="https://github.com/apple/foundationdb/issues/12098">(PR #12098)</a></p></li>
@@ -242,13 +253,13 @@
 <li><p>Optimized keyInfo lookup in commit proxy. <a class="reference external" href="https://github.com/apple/foundationdb/issues/12106">(PR #12106)</a></p></li>
 </ul>
 </section>
-<section id="id8">
+<section id="id10">
 <h2>7.4.1</h2>
 <ul class="simple">
 <li><p>Same as 7.4.0 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id9">
+<section id="id11">
 <h2>7.4.0</h2>
 <section id="features-supported">
 <h3>Features (Supported)</h3>
@@ -387,7 +398,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 01, 2026.<br/>
+      Last updated on Sep 24, 2026.<br/>
     </p>
   </div>
 </footer>

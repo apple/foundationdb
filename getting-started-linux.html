@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Getting Started on Linux &#8212; FoundationDB 7.4.7 documentation</title>
+    <title>Getting Started on Linux &#8212; FoundationDB 7.4.8 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.7</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -70,6 +70,7 @@
 <li><a class="reference internal" href="#">Getting Started on Linux</a><ul>
 <li><a class="reference internal" href="#first-steps">First steps</a></li>
 <li><a class="reference internal" href="#installing-or-upgrading-foundationdb-packages">Installing or upgrading FoundationDB packages</a></li>
+<li><a class="reference internal" href="#installing-multiple-client-versions">Installing multiple client versions</a></li>
 <li><a class="reference internal" href="#testing-your-foundationdb-installation">Testing your FoundationDB installation</a></li>
 <li><a class="reference internal" href="#managing-the-foundationdb-service">Managing the FoundationDB service</a></li>
 <li><a class="reference internal" href="#next-steps">Next steps</a></li>
@@ -119,6 +120,7 @@
 <li><a class="reference internal" href="#">Getting Started on Linux</a><ul>
 <li><a class="reference internal" href="#first-steps">First steps</a></li>
 <li><a class="reference internal" href="#installing-or-upgrading-foundationdb-packages">Installing or upgrading FoundationDB packages</a></li>
+<li><a class="reference internal" href="#installing-multiple-client-versions">Installing multiple client versions</a></li>
 <li><a class="reference internal" href="#testing-your-foundationdb-installation">Testing your FoundationDB installation</a></li>
 <li><a class="reference internal" href="#managing-the-foundationdb-service">Managing the FoundationDB service</a></li>
 <li><a class="reference internal" href="#next-steps">Next steps</a></li>
@@ -149,16 +151,38 @@
 <p>Unless using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">Multi-version client</span></a>, the installed client and server packages must have the same version. When upgrading a FoundationDB cluster, be sure also to upgrade all clients to the same version.</p>
 </div>
 <p>To install on <strong>Ubuntu</strong> use the dpkg command:</p>
-<pre class="literal-block">user&#64;host$ sudo dpkg -i foundationdb-clients_7.4.7-1_amd64.deb \
-foundationdb-server_7.4.7-1_amd64.deb</pre>
+<pre class="literal-block">user&#64;host$ sudo dpkg -i foundationdb-clients_7.4.8-1_amd64.deb \
+foundationdb-server_7.4.8-1_amd64.deb</pre>
 <p>To install on <strong>RHEL/CentOS 6</strong> use the rpm command:</p>
-<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.4.7-1.el9.x86_64.rpm \
-foundationdb-server-7.4.7-1.el9.x86_64.rpm</pre>
+<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.4.8-1.el9.x86_64.rpm \
+foundationdb-server-7.4.8-1.el9.x86_64.rpm</pre>
 <p>To install on <strong>RHEL/CentOS 7</strong> use the rpm command:</p>
-<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.4.7-1.el9.x86_64.rpm \
-foundationdb-server-7.4.7-1.el9.x86_64.rpm</pre>
+<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.4.8-1.el9.x86_64.rpm \
+foundationdb-server-7.4.8-1.el9.x86_64.rpm</pre>
 <p>FoundationDB installs in a single-server mode appropriate for a development workstation. In this mode data is not replicated, and therefore the database is <strong>not failure tolerant</strong>. This default database is also configured to use the memory storage engine which, while using the disk for durability, <strong>requires data to fit in RAM</strong>.</p>
 <p>By default FoundationDB uses the loopback IP (<code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code>). In this configuration all parts of FoundationDB, <strong>including client applications</strong>, must run on the same machine and communicate via <code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code>, not via external IPs.</p>
+</section>
+<section id="installing-multiple-client-versions">
+<h2>Installing multiple client versions</h2>
+<p>The regular <code class="docutils literal notranslate"><span class="pre">foundationdb-clients</span></code> RPM installs files in shared system paths
+and is intended for a normal install or upgrade. Do not install two regular
+client RPMs with <code class="docutils literal notranslate"><span class="pre">rpm</span> <span class="pre">-ivh</span></code>; they own the same files and RPM will report file
+conflicts.</p>
+<p>For multi-version client support, use the separately named CPack versioned
+client RPMs. Their names have the form
+<code class="docutils literal notranslate"><span class="pre">foundationdb&lt;version&gt;-clients-1.versioned.&lt;architecture&gt;.rpm</span></code> and their
+files are installed below <code class="docutils literal notranslate"><span class="pre">/usr/lib/foundationdb-&lt;version&gt;/</span></code>. Non-release
+builds may include build-time and prerelease text in the package name and
+directory. Install each versioned package with <code class="docutils literal notranslate"><span class="pre">rpm</span> <span class="pre">-ivh</span></code> so the packages
+can remain installed simultaneously. If a release does not publish its
+versioned RPM, build the
+<code class="docutils literal notranslate"><span class="pre">clients-versioned</span></code> component from source with CPack (run <code class="docutils literal notranslate"><span class="pre">cpack</span> <span class="pre">-G</span> <span class="pre">RPM</span></code>
+from the configured build directory).</p>
+<p>The active client is selected through the <code class="docutils literal notranslate"><span class="pre">fdbclients</span></code> alternatives group.
+Use <code class="docutils literal notranslate"><span class="pre">update-alternatives</span> <span class="pre">--display</span> <span class="pre">fdbclients</span></code> to inspect it and
+<code class="docutils literal notranslate"><span class="pre">update-alternatives</span> <span class="pre">--config</span> <span class="pre">fdbclients</span></code> to select a version. The selected
+alternative applies consistently to the client tools, library, headers,
+pkg-config metadata, and CMake package metadata.</p>
 </section>
 <section id="testing-your-foundationdb-installation">
 <h2>Testing your FoundationDB installation</h2>
@@ -253,7 +277,7 @@ Client time: Thu Mar 15 14:41:34 2018
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 01, 2026.<br/>
+      Last updated on Sep 24, 2026.<br/>
     </p>
   </div>
 </footer>
