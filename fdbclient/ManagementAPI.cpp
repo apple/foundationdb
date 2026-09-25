@@ -1051,19 +1051,7 @@ Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	ClientCoordinators coord(makeReference<ClusterConnectionMemoryRecord>(*conn));
 
-	leaderServers.reserve(coord.clientLeaderServers.size());
-	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-		if (coord.clientLeaderServers[i].hostname.present()) {
-			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
-			                                                  coord.clientLeaderServers[i].hostname.get(),
-			                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
-			                                                  TaskPriority::CoordinationReply));
-		} else {
-			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-			                                           GetLeaderRequest(coord.clusterKey, UID()),
-			                                           TaskPriority::CoordinationReply));
-		}
-	}
+	leaderServers = coord.getLeaderReplies();
 
 	auto leaderServersResult = co_await timeout(waitForAll(leaderServers), 5.0);
 	if (!leaderServersResult.present()) {
@@ -1257,20 +1245,7 @@ struct AutoQuorumChange final : IQuorumChange {
 
 		// Check availability
 		ClientCoordinators coord(ccr);
-		std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-		leaderServers.reserve(coord.clientLeaderServers.size());
-		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			if (coord.clientLeaderServers[i].hostname.present()) {
-				leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
-				                                                  coord.clientLeaderServers[i].hostname.get(),
-				                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
-				                                                  TaskPriority::CoordinationReply));
-			} else {
-				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-				                                           GetLeaderRequest(coord.clusterKey, UID()),
-				                                           TaskPriority::CoordinationReply));
-			}
-		}
+		std::vector<Future<Optional<LeaderInfo>>> leaderServers = coord.getLeaderReplies();
 		Optional<std::vector<Optional<LeaderInfo>>> results =
 		    co_await timeout(getAll(leaderServers), CLIENT_KNOBS->IS_ACCEPTABLE_DELAY);
 		if (!results.present()) {
