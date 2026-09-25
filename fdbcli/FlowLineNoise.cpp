@@ -21,16 +21,13 @@
 #include "fdbcli/FlowLineNoise.h"
 #include "flow/IThreadPool.h"
 
-#ifndef BOOST_SYSTEM_NO_LIB
-#define BOOST_SYSTEM_NO_LIB
-#endif
 #ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #endif
 #ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #endif
-#include "boost/asio.hpp"
+#include <boost/asio.hpp>
 
 #include "flow/ThreadHelper.h"
 

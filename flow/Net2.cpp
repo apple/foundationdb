@@ -18,22 +18,10 @@
  * limitations under the License.
  */
 
-#include "boost/asio/buffer.hpp"
-#include "boost/asio/ip/address.hpp"
-#include "boost/system/system_error.hpp"
-#include "flow/Arena.h"
-#include "flow/Knobs.h"
-#include "flow/Platform.h"
-#include "flow/SimpleCounter.h"
-#include "flow/Trace.h"
-#include "flow/swift.h"
-#include "flow/swift_concurrency_hooks.h"
 #include <algorithm>
 #include <memory>
 #include <string_view>
-#ifndef BOOST_SYSTEM_NO_LIB
-#define BOOST_SYSTEM_NO_LIB
-#endif
+
 #ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #endif
@@ -41,10 +29,21 @@
 #define BOOST_REGEX_NO_LIB
 #endif
 #include <boost/asio.hpp>
-#include "boost/asio/ssl.hpp"
+#include <boost/asio/ssl.hpp>
+#include <boost/asio/buffer.hpp>
+#include <boost/asio/ip/address.hpp>
+#include <boost/system/system_error.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/range.hpp>
 #include <boost/algorithm/string/join.hpp>
+
+#include "flow/Arena.h"
+#include "flow/Knobs.h"
+#include "flow/Platform.h"
+#include "flow/SimpleCounter.h"
+#include "flow/Trace.h"
+#include "flow/swift.h"
+#include "flow/swift_concurrency_hooks.h"
 #include "flow/network.h"
 #include "flow/IThreadPool.h"
 
