@@ -63,7 +63,7 @@ public:
 			}
 		}
 	}
-	//	void addHistogram(const Histrogram& h2);
+	//	void addHistogram(const Histogram& h2);
 
 	T mean() const { return sum * (1.0 / N); } // exact
 	const T& min() const { return minSample; }

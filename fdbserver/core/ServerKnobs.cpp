@@ -903,8 +903,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REPORT_TRANSACTION_COST_ESTIMATION_DELAY,               0.1 );
 	init( PROXY_REJECT_BATCH_QUEUED_TOO_LONG,                    true );
 
-	bool buggfyUseResolverPrivateMutations = randomize && buggify() && !ENABLE_VERSION_VECTOR_TLOG_UNICAST;
-	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); if( buggfyUseResolverPrivateMutations ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
+	bool buggifyUseResolverPrivateMutations = randomize && buggify() && !ENABLE_VERSION_VECTOR_TLOG_UNICAST;
+	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); if( buggifyUseResolverPrivateMutations ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
 
 	init( BURSTINESS_METRICS_ENABLED  ,                         false );
 	init( BURSTINESS_METRICS_LOG_INTERVAL,                        0.1 );
@@ -919,7 +919,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( GLOBAL_CONFIG_REFRESH_TIMEOUT,                         10.0 ); if ( randomize && buggify() ) GLOBAL_CONFIG_REFRESH_TIMEOUT = 1.0;
 
 	// Master Server
-	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
+	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistribution)
 	//  by delay()ing for this amount of time between accepted batches of TransactionRequests.
 	bool fastBalancing = randomize && buggify();
 	init( COMMIT_SLEEP_TIME,								  0.0001 ); if( randomize && buggify() ) COMMIT_SLEEP_TIME = 0;

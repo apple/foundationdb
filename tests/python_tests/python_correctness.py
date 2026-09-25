@@ -254,7 +254,7 @@ class PythonCorrectness(PythonTest):
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error("Get non-existent key failed"))
+            self.result.add_error(self.get_error("Get nonexistent key failed"))
 
         try:
             tr.commit().wait()
@@ -315,7 +315,7 @@ class PythonCorrectness(PythonTest):
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error("Delete non-existent key failed"))
+            self.result.add_error(self.get_error("Delete nonexistent key failed"))
 
         try:
             tr.set("testkey", "testvalue")

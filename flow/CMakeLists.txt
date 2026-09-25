@@ -267,7 +267,7 @@ if(WITH_SWIFT)
     -Xcc
     -DSWIFT_STREAM_SUPPORT_H
     -Xcc
-    -DSWIFT_HIDE_CHECKED_CONTINUTATION)
+    -DSWIFT_HIDE_CHECKED_CONTINUATION)
 
   add_swift_to_cxx_header_gen_target(
     flow_swift

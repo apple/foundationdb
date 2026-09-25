@@ -114,7 +114,7 @@
       where the multi-line text ends.
     - The newline after ENDTAG in the start tag, and the newline
       before ENDTAG in the end tag is not included in the data value.
-    - The ending tag must be on it's own line with no whitespace before
+    - The ending tag must be on its own line with no whitespace before
       or after it.
     - The multi-line value is modified at load so that each line in the value
       is delimited by a single '\\n' character on all platforms. At save time
@@ -272,7 +272,7 @@ enum SI_Error {
 /** Simple INI file reader.
 
     This can be instantiated with the choice of unicode or native characterset,
-    and case sensitive or insensitive comparisons of section and key names.
+    and case-sensitive or insensitive comparisons of section and key names.
     The supported combinations are pre-defined with the following typedefs:
 
     <table>

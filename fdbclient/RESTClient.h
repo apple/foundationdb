@@ -52,7 +52,7 @@ public:
 	};
 
 	RESTClientKnobs knobs;
-	Reference<RESTConnectionPool> conectionPool;
+	Reference<RESTConnectionPool> connectionPool;
 	// Connection stats maintained per "host:service"
 	std::unordered_map<std::string, std::unique_ptr<Stats>> statsMap;
 

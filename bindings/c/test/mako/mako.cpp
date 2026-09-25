@@ -242,7 +242,7 @@ int populate(Database db, const ThreadArgs& thread_args, int thread_tps, Workflo
 
 void updateErrorStatsRunMode(WorkflowStatistics& stats, fdb::Error err, int op) {
 	if (err) {
-		if (err.is(1020 /*not_commited*/)) {
+		if (err.is(1020 /*not_committed*/)) {
 			stats.incrConflictCount();
 		} else if (err.is(1031 /*timeout*/)) {
 			stats.incrTimeoutCount(op);
@@ -2141,7 +2141,7 @@ void printReport(Arguments const& args,
 		fmt::fprintf(fp, "\"totalErrors\": %lu,", measured_worker_stats.getTotalErrorCount());
 		fmt::fprintf(fp, "\"totalTimeouts\": %lu,", measured_worker_stats.getTotalTimeoutCount());
 		fmt::fprintf(fp, "\"overallTPS\": %lu,", tps_i);
-		fmt::fprintf(fp, "\"workerProcesseCPU\": %.8f,", cpu_util_worker_processes);
+		fmt::fprintf(fp, "\"workerProcessesCPU\": %.8f,", cpu_util_worker_processes);
 		fmt::fprintf(fp, "\"workerThreadCPU\": %.8f,", cpu_util_worker_threads);
 		fmt::fprintf(fp, "\"localNetworkCPU\": %.8f,", cpu_util_local_fdb_networks);
 		fmt::fprintf(fp, "\"externalNetworkCPU\": %.8f,", cpu_util_external_fdb_networks);

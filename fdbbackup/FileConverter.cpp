@@ -273,7 +273,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 	}
 
 	// Requires hasMutations() return true before calling this function.
-	// The caller must hold on the the arena associated with the mutation.
+	// The caller must hold on the arena associated with the mutation.
 	Future<VersionedData> getNextMutation() {
 		ASSERT(!fileProgress.empty() && !fileProgress[0]->mutations.empty());
 

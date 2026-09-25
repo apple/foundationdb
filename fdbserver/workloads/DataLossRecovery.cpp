@@ -116,7 +116,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		co_await readAndVerify(this, cx, key, Optional<Value>());
 		TraceEvent("DataLossRecovery").detail("Phase", "VerifiedDataDropped");
 
-		// Write will scceed.
+		// Write will succeed.
 		co_await writeAndVerify(this, cx, key, newValue);
 	}
 

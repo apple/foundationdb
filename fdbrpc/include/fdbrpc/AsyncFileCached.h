@@ -173,7 +173,7 @@ public:
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
-		// If there is a truncate in progress before the the write position then we must
+		// If there is a truncate in progress before the write position then we must
 		// wait for it to complete.
 		if (length + offset > currentTruncateSize) {
 			Future<Void> currentTruncate = this->currentTruncate;
@@ -586,7 +586,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	Future<Void> truncate() {
-		// Allow truncatation during zero copy reads but orphan the previous buffer
+		// Allow truncation during zero copy reads but orphan the previous buffer
 		if (zeroCopyRefCount != 0)
 			orphan();
 		truncated = true;
