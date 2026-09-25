@@ -30,6 +30,9 @@ class TransactionTagCounterImpl {
 	TransactionTagMap<double> intervalCosts;
 	double intervalTotalCost = 0;
 	double intervalStart = 0;
+	// intervalStart alone can't signal "no interval started yet": now() can legitimately be exactly 0
+	// (e.g. at the start of a simulation), which would otherwise be indistinguishable from the default.
+	bool intervalStarted = false;
 	int maxTagsTracked;
 	double minRateTracked;
 
@@ -70,13 +73,15 @@ public:
 	void startNewInterval() {
 		double elapsed = now() - intervalStart;
 		previousBusiestTags.clear();
-		if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
+		if (intervalStarted && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
 			previousBusiestTags = getBusiestTagsFromLastInterval(elapsed);
 
 			// For status, report the busiest tag:
 			if (previousBusiestTags.empty()) {
 				if (!wasIdleLastInterval) {
-					TraceEvent("BusiestReadTag", thisServerID).detail("TagCost", 0.0);
+					TraceEvent("BusiestReadTag", thisServerID)
+					    .trackLatest(busiestReadTagEventHolder->trackingKey)
+					    .detail("TagCost", 0.0);
 				}
 				wasIdleLastInterval = true;
 			} else {
@@ -88,6 +93,7 @@ public:
 					}
 				}
 				TraceEvent("BusiestReadTag", thisServerID)
+				    .trackLatest(busiestReadTagEventHolder->trackingKey)
 				    .detail("Tag", printable(busiestTagInfo.tag))
 				    .detail("TagCost", busiestTagInfo.rate)
 				    .detail("FractionalBusyness", busiestTagInfo.fractionalBusyness);
@@ -105,6 +111,7 @@ public:
 		intervalCosts.clear();
 		intervalTotalCost = 0;
 		intervalStart = now();
+		intervalStarted = true;
 	}
 
 	std::vector<BusyTagInfo> const& getBusiestTags() const { return previousBusiestTags; }
@@ -143,7 +150,8 @@ TagSet getTagSet(TransactionTagRef tag) {
 } // namespace
 
 TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBeyondMaxTags") {
-	TransactionTagCounter counter(UID(),
+	UID const thisServerID(1, 1);
+	TransactionTagCounter counter(thisServerID,
 	                              /*maxTagsTracked=*/2,
 	                              /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE /
 	                                  CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
@@ -160,11 +168,15 @@ TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBeyondMaxTags") {
 	ASSERT(containsTag(busiestTags, "tagA"_sr));
 	ASSERT(!containsTag(busiestTags, "tagB"_sr));
 	ASSERT(containsTag(busiestTags, "tagC"_sr));
+	// BusiestReadTag must reach latestEventCache (and from there, fdbcli status's
+	// "busiest_read_tag" field via EventLogRequest) -- not just be computed in memory.
+	ASSERT(latestEventCache.get(thisServerID.toString() + "/BusiestReadTag").size() > 0);
 	co_return;
 }
 
 TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBelowMinRate") {
-	TransactionTagCounter counter(UID(),
+	UID const thisServerID(2, 2);
+	TransactionTagCounter counter(thisServerID,
 	                              /*maxTagsTracked=*/2,
 	                              /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE /
 	                                  CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
@@ -175,5 +187,11 @@ TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBelowMinRate") {
 	counter.startNewInterval();
 	auto const busiestTags = counter.getBusiestTags();
 	ASSERT_EQ(busiestTags.size(), 0);
+	// Even with no busy tag this interval, BusiestReadTag still logs (TagCost: 0) and that
+	// zero-cost report must still reach latestEventCache -- this is the actual production
+	// case: every real cluster we checked reports TagCost=0 100% of the time.
+	TraceEventFields const& latest = latestEventCache.get(thisServerID.toString() + "/BusiestReadTag");
+	ASSERT(latest.size() > 0);
+	ASSERT_EQ(latest.getDouble("TagCost"), 0);
 	co_return;
 }
