@@ -580,11 +580,62 @@ public:
 		co_return version;
 	}
 
+	// Everything the status renderers need, read once. The text and JSON renderers are pure functions
+	// over this, so every read is issued before the first suspension.
+	struct StatusSnapshot {
+		UID uid;
+		std::string tag;
+		std::string stateText;
+		ERestoreState state;
+		bool useRangeFile;
+
+		int64_t fileCount;
+		int64_t fileBlockCount;
+		int64_t fileBlocksDispatched;
+		int64_t fileBlocksFinished;
+		int64_t bytesWritten;
+
+		int64_t submittedTasks;
+		int64_t triggeredTasks;
+		int64_t runningTasks;
+		int64_t totalTasks;
+
+		Version currentVersion;
+		Version applyLag;
+		Version firstConsistentVersion;
+		Version restoreVersion;
+		Version readVersion;
+
+		std::pair<std::string, Version> lastError;
+
+		std::vector<KeyRange> ranges;
+		Key addPrefix;
+		Key removePrefix;
+		Key url;
+		bool bulkLoadComplete;
+	};
+
+	static Future<StatusSnapshot> getStatusSnapshot_impl(RestoreConfig restore,
+	                                                     Reference<ReadYourWritesTransaction> tr);
+	Future<StatusSnapshot> getStatusSnapshot(Reference<ReadYourWritesTransaction> tr) {
+		return getStatusSnapshot_impl(*this, tr);
+	}
+
+	static std::string renderProgressText(const StatusSnapshot& s);
+	static std::string renderFullStatusText(const StatusSnapshot& s);
+	static JsonBuilderObject renderStatusJSON(const StatusSnapshot& s);
+	static std::pair<const char*, const char*> statusPhases(const StatusSnapshot& s);
+
 	static Future<std::string> getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr) { return getProgress_impl(*this, tr); }
 
 	static Future<std::string> getFullStatus_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr) { return getFullStatus_impl(*this, tr); }
+
+	static Future<JsonBuilderObject> getStatusJSON_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
+	Future<JsonBuilderObject> getStatusJSON(Reference<ReadYourWritesTransaction> tr) {
+		return getStatusJSON_impl(*this, tr);
+	}
 };
 
 using RestoreFile = RestoreConfig::RestoreFile;
@@ -853,7 +904,8 @@ Future<bool> monitorBulkLoadJobCompletionWithProgress(Database cx,
 	}
 }
 
-Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
+Future<RestoreConfig::StatusSnapshot> RestoreConfig::getStatusSnapshot_impl(RestoreConfig restore,
+                                                                            Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -873,122 +925,207 @@ Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Refer
 	Future<int64_t> runningTasks = restore.bulkLoadRunningTasks().getD(tr);
 	Future<int64_t> totalTasks = restore.bulkLoadTotalTasks().getD(tr);
 	Future<Optional<bool>> useRangeFileRestore = restore.useRangeFileRestore().get(tr);
-
-	UID uid = restore.getUid();
-	co_await (success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
-	          success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
-	          success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError) &&
-	          success(submittedTasks) && success(triggeredTasks) && success(runningTasks) && success(totalTasks) &&
-	          success(useRangeFileRestore));
-
-	bool useRangeFile = !useRangeFileRestore.get().present() || useRangeFileRestore.get().get();
-
-	std::string errstr = "None";
-	if (lastError.get().second != 0) {
-		errstr = format("'%s' %" PRId64 "s ago.\n",
-		                lastError.get().first.c_str(),
-		                (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
-	}
-
-	TraceEvent("FileRestoreProgress")
-	    .detail("RestoreUID", uid)
-	    .detail("Tag", tag.get())
-	    .detail("State", status.get().toString())
-	    .detail("FileCount", fileCount.get())
-	    .detail("FileBlocksFinished", fileBlocksFinished.get())
-	    .detail("FileBlocksTotal", fileBlockCount.get())
-	    .detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
-	    .detail("SubmittedTasks", submittedTasks.get())
-	    .detail("TriggeredTasks", triggeredTasks.get())
-	    .detail("RunningTasks", runningTasks.get())
-	    .detail("TotalTasks", totalTasks.get())
-	    .detail("BytesWritten", bytesWritten.get())
-	    .detail("CurrentVersion", currentVersion.get())
-	    .detail("FirstConsistentVersion", firstConsistentVersion.get())
-	    .detail("ApplyLag", lag.get());
-
-	std::string progressStr;
-	if (useRangeFile) {
-		progressStr = format("Tag: %s  UID: %s  State: %s\n",
-		                     tag.get().c_str(),
-		                     uid.toString().c_str(),
-		                     status.get().toString().c_str());
-		progressStr += format(" Blocks: %lld/%lld complete\n", fileBlocksFinished.get(), fileBlockCount.get());
-		progressStr += format(" Files: %lld\n", fileCount.get());
-		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(bytesWritten.get()).c_str());
-		progressStr += format(" Apply version lag: %s\n", versionToString(lag.get()).c_str());
-	} else {
-		progressStr = format("Tag: %s  UID: %s  State: %s\n",
-		                     tag.get().c_str(),
-		                     uid.toString().c_str(),
-		                     status.get().toString().c_str());
-		progressStr += format(" Tasks submitted: %lld  triggered: %lld  running: %lld\n",
-		                      submittedTasks.get(),
-		                      triggeredTasks.get(),
-		                      runningTasks.get());
-		progressStr += format(" Tasks triggered: %lld / %lld total\n", triggeredTasks.get(), totalTasks.get());
-		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(bytesWritten.get()).c_str());
-		double avgBytesPerTask = triggeredTasks.get() > 0 ? (double)bytesWritten.get() / triggeredTasks.get() : 0;
-		if (avgBytesPerTask > 0) {
-			progressStr += format(" Avg bytes/task: %s\n", formatBytesHumanReadable((int64_t)avgBytesPerTask).c_str());
-		}
-	}
-
-	co_return progressStr;
-}
-
-Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
 	Future<std::vector<KeyRange>> ranges = restore.getRestoreRangesOrDefault(tr);
 	Future<Key> addPrefix = restore.addPrefix().getD(tr);
 	Future<Key> removePrefix = restore.removePrefix().getD(tr);
 	Future<Key> url = restore.sourceContainerURL().getD(tr);
 	Future<Version> restoreVersion = restore.restoreVersion().getD(tr);
-	Future<std::string> progress = restore.getProgress(tr);
 	Future<ERestoreState> restoreState = restore.stateEnum().getD(tr);
-	Future<Optional<bool>> useRangeFileRestore = restore.useRangeFileRestore().get(tr);
 	Future<Optional<bool>> bulkLoadComplete = restore.bulkLoadComplete().get(tr);
+	Future<Version> readVersion = tr->getReadVersion();
 
+	UID uid = restore.getUid();
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
-	co_await (success(ranges) && success(addPrefix) && success(removePrefix) && success(url) &&
-	          success(restoreVersion) && success(progress) && success(restoreState) && success(useRangeFileRestore) &&
-	          success(bulkLoadComplete));
+	co_await (success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
+	          success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
+	          success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError) &&
+	          success(submittedTasks) && success(triggeredTasks) && success(runningTasks) && success(totalTasks) &&
+	          success(useRangeFileRestore) && success(ranges) && success(addPrefix) && success(removePrefix) &&
+	          success(url) && success(restoreVersion) && success(restoreState) && success(bulkLoadComplete) &&
+	          success(readVersion));
 
-	std::string returnStr;
-	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
-	for (auto& range : ranges.get()) {
+	StatusSnapshot s;
+	s.uid = uid;
+	s.tag = tag.get();
+	s.stateText = status.get().toString();
+	s.state = restoreState.get();
+	s.useRangeFile = !useRangeFileRestore.get().present() || useRangeFileRestore.get().get();
+	s.fileCount = fileCount.get();
+	s.fileBlockCount = fileBlockCount.get();
+	s.fileBlocksDispatched = fileBlocksDispatched.get();
+	s.fileBlocksFinished = fileBlocksFinished.get();
+	s.bytesWritten = bytesWritten.get();
+	s.submittedTasks = submittedTasks.get();
+	s.triggeredTasks = triggeredTasks.get();
+	s.runningTasks = runningTasks.get();
+	s.totalTasks = totalTasks.get();
+	s.currentVersion = currentVersion.get();
+	s.applyLag = lag.get();
+	s.firstConsistentVersion = firstConsistentVersion.get();
+	s.restoreVersion = restoreVersion.get();
+	s.readVersion = readVersion.get();
+	s.lastError = lastError.get();
+	s.ranges = ranges.get();
+	s.addPrefix = addPrefix.get();
+	s.removePrefix = removePrefix.get();
+	s.url = url.get();
+	s.bulkLoadComplete = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
+
+	TraceEvent("FileRestoreProgress")
+	    .detail("RestoreUID", s.uid)
+	    .detail("Tag", s.tag)
+	    .detail("State", s.stateText)
+	    .detail("FileCount", s.fileCount)
+	    .detail("FileBlocksFinished", s.fileBlocksFinished)
+	    .detail("FileBlocksTotal", s.fileBlockCount)
+	    .detail("FileBlocksInProgress", s.fileBlocksDispatched - s.fileBlocksFinished)
+	    .detail("SubmittedTasks", s.submittedTasks)
+	    .detail("TriggeredTasks", s.triggeredTasks)
+	    .detail("RunningTasks", s.runningTasks)
+	    .detail("TotalTasks", s.totalTasks)
+	    .detail("BytesWritten", s.bytesWritten)
+	    .detail("CurrentVersion", s.currentVersion)
+	    .detail("FirstConsistentVersion", s.firstConsistentVersion)
+	    .detail("ApplyLag", s.applyLag);
+
+	co_return s;
+}
+
+std::string RestoreConfig::renderProgressText(const StatusSnapshot& s) {
+	std::string progressStr =
+	    format("Tag: %s  UID: %s  State: %s\n", s.tag.c_str(), s.uid.toString().c_str(), s.stateText.c_str());
+	if (s.useRangeFile) {
+		progressStr += format(" Blocks: %lld/%lld complete\n", s.fileBlocksFinished, s.fileBlockCount);
+		progressStr += format(" Files: %lld\n", s.fileCount);
+		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(s.bytesWritten).c_str());
+		progressStr += format(" Apply version lag: %s\n", versionToString(s.applyLag).c_str());
+	} else {
+		progressStr += format(" Tasks submitted: %lld  triggered: %lld  running: %lld\n",
+		                      s.submittedTasks,
+		                      s.triggeredTasks,
+		                      s.runningTasks);
+		progressStr += format(" Tasks triggered: %lld / %lld total\n", s.triggeredTasks, s.totalTasks);
+		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(s.bytesWritten).c_str());
+		double avgBytesPerTask = s.triggeredTasks > 0 ? (double)s.bytesWritten / s.triggeredTasks : 0;
+		if (avgBytesPerTask > 0) {
+			progressStr += format(" Avg bytes/task: %s\n", formatBytesHumanReadable((int64_t)avgBytesPerTask).c_str());
+		}
+	}
+	return progressStr;
+}
+
+// {snapshot, mutation log} phase, or {nullptr, nullptr} when the state has no phase to report.
+// Shared by the text and JSON renderers so the two cannot disagree.
+std::pair<const char*, const char*> RestoreConfig::statusPhases(const StatusSnapshot& s) {
+	if (s.state == ERestoreState::COMPLETED) {
+		return { "complete", "complete" };
+	}
+	if (s.state != ERestoreState::RUNNING) {
+		return { nullptr, nullptr };
+	}
+	if (s.useRangeFile) {
+		return { "in_progress", "in_progress" };
+	}
+	return { s.bulkLoadComplete ? "complete" : "in_progress", s.bulkLoadComplete ? "in_progress" : "not_started" };
+}
+
+std::string RestoreConfig::renderFullStatusText(const StatusSnapshot& s) {
+	std::string returnStr = format("%s  URL: %s", renderProgressText(s).c_str(), s.url.toString().c_str());
+	for (auto& range : s.ranges) {
 		returnStr += format("  Range: '%s'-'%s'", printable(range.begin).c_str(), printable(range.end).c_str());
 	}
 	returnStr += format("  AddPrefix: '%s'  RemovePrefix: '%s'  Version: %lld",
-	                    printable(addPrefix.get()).c_str(),
-	                    printable(removePrefix.get()).c_str(),
-	                    restoreVersion.get());
+	                    printable(s.addPrefix).c_str(),
+	                    printable(s.removePrefix).c_str(),
+	                    s.restoreVersion);
 
-	// Add enhanced status fields for BulkLoad integration
-	bool usingBulkLoad = useRangeFileRestore.get().present() && !useRangeFileRestore.get().get();
-	std::string snapshotMethod = usingBulkLoad ? "bulkload" : "rangefile";
-	returnStr += format("  Snapshot Method: %s", snapshotMethod.c_str());
+	returnStr += format("  Snapshot Method: %s", s.useRangeFile ? "rangefile" : "bulkload");
 
-	// Add phase status information
-	ERestoreState currentState = restoreState.get();
-	bool bulkLoadDone = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
-
-	if (currentState == ERestoreState::RUNNING) {
-		if (usingBulkLoad) {
-			std::string snapshotPhase = bulkLoadDone ? "complete" : "in_progress";
-			returnStr += format("  Snapshot Phase: %s", snapshotPhase.c_str());
-			std::string mutationPhase = bulkLoadDone ? "in_progress" : "not_started";
-			returnStr += format("  Mutation Log Phase: %s", mutationPhase.c_str());
-		} else {
-			returnStr += "  Snapshot Phase: in_progress  Mutation Log Phase: in_progress";
-		}
-	} else if (currentState == ERestoreState::COMPLETED) {
-		returnStr += "  Snapshot Phase: complete  Mutation Log Phase: complete";
+	auto [snapshotPhase, mutationLogPhase] = statusPhases(s);
+	if (snapshotPhase != nullptr) {
+		returnStr += format("  Snapshot Phase: %s  Mutation Log Phase: %s", snapshotPhase, mutationLogPhase);
 	}
 
-	co_return returnStr;
+	return returnStr;
+}
+
+JsonBuilderObject RestoreConfig::renderStatusJSON(const StatusSnapshot& s) {
+	JsonBuilderObject doc;
+	doc.setKey("Tag", s.tag);
+	doc.setKey("UID", s.uid.toString());
+	doc.setKey("State", s.stateText);
+	doc.setKey("SnapshotMethod", s.useRangeFile ? "rangefile" : "bulkload");
+	doc.setKey("URL", s.url.toString());
+
+	JsonBuilderArray rangeList;
+	for (auto& range : s.ranges) {
+		JsonBuilderObject r;
+		r.setKey("Begin", printable(range.begin));
+		r.setKey("End", printable(range.end));
+		rangeList.push_back(r);
+	}
+	doc.setKey("Ranges", rangeList);
+
+	doc.setKey("AddPrefix", printable(s.addPrefix));
+	doc.setKey("RemovePrefix", printable(s.removePrefix));
+	doc.setKey("RestoreVersion", s.restoreVersion);
+	doc.setKey("CurrentVersion", s.currentVersion);
+	doc.setKey("FirstConsistentVersion", s.firstConsistentVersion);
+	doc.setKey("BytesWritten", s.bytesWritten);
+
+	// The two snapshot engines report progress in different units; emit only the one that applies so a
+	// consumer cannot mistake an absent counter for a zeroed one.
+	if (s.useRangeFile) {
+		JsonBuilderObject blocks;
+		blocks.setKey("Finished", s.fileBlocksFinished);
+		blocks.setKey("Total", s.fileBlockCount);
+		blocks.setKey("InProgress", s.fileBlocksDispatched - s.fileBlocksFinished);
+		doc.setKey("Blocks", blocks);
+		doc.setKey("FileCount", s.fileCount);
+		doc.setKey("ApplyVersionLag", s.applyLag);
+	} else {
+		JsonBuilderObject tasks;
+		tasks.setKey("Submitted", s.submittedTasks);
+		tasks.setKey("Triggered", s.triggeredTasks);
+		tasks.setKey("Running", s.runningTasks);
+		tasks.setKey("Total", s.totalTasks);
+		doc.setKey("Tasks", tasks);
+		// Same guard as the text renderer: omit rather than report a zero average.
+		if (s.triggeredTasks > 0 && s.bytesWritten / s.triggeredTasks > 0) {
+			doc.setKey("AvgBytesPerTask", s.bytesWritten / s.triggeredTasks);
+		}
+	}
+
+	auto [snapshotPhase, mutationLogPhase] = statusPhases(s);
+	if (snapshotPhase != nullptr) {
+		doc.setKey("SnapshotPhase", snapshotPhase);
+		doc.setKey("MutationLogPhase", mutationLogPhase);
+	}
+
+	if (s.lastError.second != 0) {
+		JsonBuilderObject err;
+		err.setKey("Message", s.lastError.first);
+		err.setKey("SecondsAgo", (s.readVersion - s.lastError.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+		doc.setKey("LastError", err);
+	}
+
+	return doc;
+}
+
+Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
+	StatusSnapshot s = co_await getStatusSnapshot_impl(restore, tr);
+	co_return renderProgressText(s);
+}
+
+Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
+	StatusSnapshot s = co_await getStatusSnapshot_impl(restore, tr);
+	co_return renderFullStatusText(s);
+}
+
+Future<JsonBuilderObject> RestoreConfig::getStatusJSON_impl(RestoreConfig restore,
+                                                            Reference<ReadYourWritesTransaction> tr) {
+	StatusSnapshot s = co_await getStatusSnapshot_impl(restore, tr);
+	co_return renderStatusJSON(s);
 }
 
 // two buffers are alternatively serving data and reading data from file
@@ -6424,6 +6561,32 @@ Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key t
 	co_return result;
 }
 
+Future<std::string> restoreStatusJSON(Reference<ReadYourWritesTransaction> tr, Key tagName) {
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+	std::vector<KeyBackedTag> tags;
+	if (tagName.empty()) {
+		tags = co_await getAllRestoreTags(tr);
+	} else {
+		tags.push_back(makeRestoreTag(tagName.toString()));
+	}
+
+	JsonBuilderObject doc;
+	doc.setKey("SchemaVersion", "1.0.0");
+
+	JsonBuilderArray restores;
+	for (int i = 0; i < tags.size(); ++i) {
+		UidAndAbortedFlagT u = co_await tags[i].getD(tr);
+		JsonBuilderObject restoreDoc = co_await RestoreConfig(u.first).getStatusJSON(tr);
+		restores.push_back(restoreDoc);
+	}
+	doc.setKey("Restores", restores);
+
+	co_return doc.getJson();
+}
+
 Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -8510,6 +8673,10 @@ Future<ERestoreState> FileBackupAgent::abortRestore(Database cx, Key tagName) {
 
 Future<std::string> FileBackupAgent::restoreStatus(Reference<ReadYourWritesTransaction> tr, Key tagName) {
 	return fileBackup::restoreStatus(tr, tagName);
+}
+
+Future<std::string> FileBackupAgent::restoreStatusJSON(Reference<ReadYourWritesTransaction> tr, Key tagName) {
+	return fileBackup::restoreStatusJSON(tr, tagName);
 }
 
 Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, Verbose verbose) {

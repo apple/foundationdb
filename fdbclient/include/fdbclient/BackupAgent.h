@@ -262,6 +262,14 @@ public:
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return restoreStatus(tr, tagName); });
 	}
 
+	// As restoreStatus(), serialized as a JSON document. An empty tagName reports every restore tag, so
+	// the result is always one object with a "Restores" array rather than a document per tag.
+	Future<std::string> restoreStatusJSON(Reference<ReadYourWritesTransaction> tr, Key tagName);
+	Future<std::string> restoreStatusJSON(Database cx, Key tagName) {
+		return runRYWTransaction(
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return restoreStatusJSON(tr, tagName); });
+	}
+
 	/** BACKUP METHODS **/
 
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
