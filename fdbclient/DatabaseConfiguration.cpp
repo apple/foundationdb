@@ -23,6 +23,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "flow/ITrace.h"
+#include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/genericactors.h"
@@ -834,17 +835,16 @@ bool DatabaseConfiguration::isExcludedServer(NetworkAddressList a, const Localit
 	       isExcludedLocality(locality);
 }
 std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
-	const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();
+	const auto snapshot = configurationSnapshot();
 	std::set<AddressExclusion> addrs;
-	for (auto i = lower_bound(rawConfiguration, excludedServersKeys.begin);
-	     i != rawConfiguration.end() && i->key < excludedServersKeys.end;
+	for (auto i = lower_bound(snapshot, excludedServersKeys.begin);
+	     i != snapshot.end() && i->key < excludedServersKeys.end;
 	     ++i) {
 		AddressExclusion a = decodeExcludedServersKey(i->key);
 		if (a.isValid())
 			addrs.insert(a);
 	}
-	for (auto i = lower_bound(rawConfiguration, failedServersKeys.begin);
-	     i != rawConfiguration.end() && i->key < failedServersKeys.end;
+	for (auto i = lower_bound(snapshot, failedServersKeys.begin); i != snapshot.end() && i->key < failedServersKeys.end;
 	     ++i) {
 		AddressExclusion a = decodeFailedServersKey(i->key);
 		if (a.isValid())
@@ -872,17 +872,16 @@ bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) con
 
 // Gets the list of already excluded localities (with failed option)
 std::set<std::string> DatabaseConfiguration::getExcludedLocalities() const {
-	// TODO: revisit all const_cast usages
-	const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();
+	const auto snapshot = configurationSnapshot();
 	std::set<std::string> localities;
-	for (auto i = lower_bound(rawConfiguration, excludedLocalityKeys.begin);
-	     i != rawConfiguration.end() && i->key < excludedLocalityKeys.end;
+	for (auto i = lower_bound(snapshot, excludedLocalityKeys.begin);
+	     i != snapshot.end() && i->key < excludedLocalityKeys.end;
 	     ++i) {
 		std::string l = decodeExcludedLocalityKey(i->key);
 		localities.insert(l);
 	}
-	for (auto i = lower_bound(rawConfiguration, failedLocalityKeys.begin);
-	     i != rawConfiguration.end() && i->key < failedLocalityKeys.end;
+	for (auto i = lower_bound(snapshot, failedLocalityKeys.begin);
+	     i != snapshot.end() && i->key < failedLocalityKeys.end;
 	     ++i) {
 		std::string l = decodeFailedLocalityKey(i->key);
 		localities.insert(l);
@@ -900,21 +899,22 @@ void DatabaseConfiguration::makeConfigurationMutable() {
 	rawConfiguration = Standalone<VectorRef<KeyValueRef>>();
 }
 
-void DatabaseConfiguration::makeConfigurationImmutable() {
+Standalone<VectorRef<KeyValueRef>> DatabaseConfiguration::configurationSnapshot() const {
 	if (!mutableConfiguration.present())
-		return;
-	auto& mc = mutableConfiguration.get();
-	rawConfiguration = Standalone<VectorRef<KeyValueRef>>();
-	rawConfiguration.resize(rawConfiguration.arena(), mc.size());
+		return rawConfiguration;
+	const auto& mc = mutableConfiguration.get();
+	Standalone<VectorRef<KeyValueRef>> snapshot;
+	snapshot.resize(snapshot.arena(), mc.size());
 	int i = 0;
-	for (auto r = mc.begin(); r != mc.end(); ++r)
-		rawConfiguration[i++] = KeyValueRef(rawConfiguration.arena(), KeyValueRef(r->first, r->second));
-	mutableConfiguration = Optional<std::map<std::string, std::string>>();
+	for (const auto& [key, value] : mc)
+		snapshot[i++] = KeyValueRef(snapshot.arena(), KeyValueRef(key, value));
+	return snapshot;
 }
 
 void DatabaseConfiguration::fromKeyValues(Standalone<VectorRef<KeyValueRef>> rawConfig) {
 	resetInternal();
-	this->rawConfiguration = rawConfig;
+	mutableConfiguration = Optional<std::map<std::string, std::string>>();
+	this->rawConfiguration = std::move(rawConfig);
 	for (auto c = rawConfiguration.begin(); c != rawConfiguration.end(); ++c) {
 		setInternal(c->key, c->value);
 	}
@@ -955,5 +955,63 @@ TEST_CASE("/fdbclient/databaseConfiguration/overwriteCommitProxy") {
 	ASSERT(conf1 == conf2);
 	ASSERT(conf1.getDesiredCommitProxies() == conf2.getDesiredCommitProxies());
 
+	return Void();
+}
+
+TEST_CASE("/fdbclient/databaseConfiguration/constReads") {
+	const KeyRef key = "\xff/conf/test_value"_sr;
+	const ValueRef value = "a configuration value that outlives read operations"_sr;
+	DatabaseConfiguration mutableConfig;
+	mutableConfig.set(key, value);
+	mutableConfig.set("\xff/conf/excluded/127.0.0.1:4000"_sr, ""_sr);
+	mutableConfig.set("\xff/conf/failed/127.0.0.2"_sr, ""_sr);
+	mutableConfig.set("\xff/conf/excluded_locality/zoneid:one"_sr, ""_sr);
+	mutableConfig.set("\xff/conf/failed_locality/zoneid:two"_sr, ""_sr);
+	const DatabaseConfiguration config = std::move(mutableConfig);
+	const DatabaseConfiguration copy = config;
+	const ValueRef borrowed = config.get(key).get();
+
+	ASSERT(config == copy);
+	ASSERT_EQ(config.getExcludedServers().size(), 2);
+	ASSERT(config.getExcludedLocalities() == (std::set<std::string>{ "zoneid:one", "zoneid:two" }));
+	ASSERT(config.get(key).get().begin() == borrowed.begin());
+	ASSERT(borrowed == value);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/databaseConfiguration/snapshotSerialization") {
+	Standalone<VectorRef<KeyValueRef>> raw;
+	raw.push_back(raw.arena(), KeyValueRef("\xff/conf/commit_proxies"_sr, "3"_sr));
+	raw.push_back(raw.arena(), KeyValueRef("\xff/conf/resolvers"_sr, "4"_sr));
+	raw.push_back(raw.arena(), KeyValueRef("\xff/conf/unknown"_sr, "value"_sr));
+
+	DatabaseConfiguration config;
+	config.set("\xff/conf/unknown"_sr, "value"_sr);
+	config.set("\xff/conf/resolvers"_sr, "4"_sr);
+	config.set("\xff/conf/commit_proxies"_sr, "3"_sr);
+	DatabaseConfiguration loaded;
+	loaded.set("\xff/conf/obsolete"_sr, "old"_sr);
+	loaded.fromKeyValues(raw);
+	ASSERT(!loaded.get("\xff/conf/obsolete"_sr).present());
+	ASSERT(config == loaded);
+
+	const auto binary = BinaryWriter::toValue(config, IncludeVersion());
+	ASSERT(binary == BinaryWriter::toValue(raw, IncludeVersion()));
+	const auto binaryDecoded = BinaryReader::fromStringRef<DatabaseConfiguration>(binary, IncludeVersion());
+	ASSERT(binaryDecoded == config);
+	ASSERT_EQ(binaryDecoded.commitProxyCount, 3);
+	ASSERT_EQ(binaryDecoded.resolverCount, 4);
+
+	constexpr FileIdentifier id = 2738451;
+	ObjectWriter writer(IncludeVersion());
+	writer.serialize(id, config);
+	const auto object = writer.toString();
+	ObjectReader reader(object.begin(), IncludeVersion());
+	loaded.set("\xff/conf/obsolete"_sr, "old"_sr);
+	reader.deserialize(id, loaded);
+	ASSERT(!loaded.get("\xff/conf/obsolete"_sr).present());
+	ASSERT(loaded == config);
+	ASSERT_EQ(loaded.commitProxyCount, 3);
+	ASSERT_EQ(loaded.resolverCount, 4);
 	return Void();
 }
