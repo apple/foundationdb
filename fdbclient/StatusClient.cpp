@@ -313,20 +313,7 @@ AsyncResult<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<IC
 		ClientCoordinators coord(connRecord);
 		StatusObject statusObj;
 
-		std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-		leaderServers.reserve(coord.clientLeaderServers.size());
-		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			if (coord.clientLeaderServers[i].hostname.present()) {
-				leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
-				                                                  coord.clientLeaderServers[i].hostname.get(),
-				                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
-				                                                  TaskPriority::CoordinationReply));
-			} else {
-				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-				                                           GetLeaderRequest(coord.clusterKey, UID()),
-				                                           TaskPriority::CoordinationReply));
-			}
-		}
+		std::vector<Future<Optional<LeaderInfo>>> leaderServers = coord.getLeaderReplies();
 
 		std::vector<Future<ProtocolInfoReply>> coordProtocols;
 		coordProtocols.reserve(coord.clientLeaderServers.size());
