@@ -424,6 +424,14 @@ CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {
 
 // "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"
 const KeyRangeRef dataMoveKeys("\xff/dataMoves/"_sr, "\xff/dataMoves0"_sr);
+
+// See declaration in SystemData.h. Written ("old") and cleared by DD from
+// rewriteShardEncodedMetadata; cleared on re-forward by
+// clearStaleShardEncodedRewriteSentinel.
+const KeyRef shardEncodeMigrationCompleteKey = "\xff/dd/shard_encode_migration_complete"_sr;
+const ValueRef shardEncodeMigrationValueOld = "old"_sr;
+const ValueRef shardEncodeMigrationValueNew = "new"_sr;
+
 const Key dataMoveKeyFor(UID dataMoveId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(dataMoveKeys.begin);
@@ -579,6 +587,18 @@ bool serverHasKey(ValueRef storedValue) {
 	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
 	decodeServerKeysValue(storedValue, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
 	return assigned;
+}
+
+// See declaration in SystemData.h.
+bool isServerKeysUnassigned(const ValueRef& value) {
+	// Empty values are KRM boundary sentinels. serverKeysFalse ("not
+	// assigned") is written by both flavors on the drop-side of a move.
+	return value.empty() || value == serverKeysFalse;
+}
+
+// See declaration in SystemData.h.
+bool isServerKeysOldFormatAssigned(const ValueRef& value) {
+	return value == serverKeysTrue || value == serverKeysTrueEmptyRange;
 }
 
 const Value serverKeysValue(const UID& id) {
