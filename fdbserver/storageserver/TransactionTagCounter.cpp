@@ -35,6 +35,9 @@ class TransactionTagCounterImpl {
 
 	std::vector<BusyTagInfo> previousBusiestTags;
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
+	// True once an idle (TagCost: 0) interval has already been reported, so we don't repeat it
+	// every interval while nothing changes. Cleared as soon as a real busy tag is seen again.
+	bool wasIdleLastInterval = false;
 
 	std::vector<BusyTagInfo> getBusiestTagsFromLastInterval(double elapsed) const {
 		BusyTagCollector busiestTags(maxTagsTracked, minRateTracked);
@@ -72,7 +75,10 @@ public:
 
 			// For status, report the busiest tag:
 			if (previousBusiestTags.empty()) {
-				TraceEvent("BusiestReadTag", thisServerID).detail("TagCost", 0.0);
+				if (!wasIdleLastInterval) {
+					TraceEvent("BusiestReadTag", thisServerID).detail("TagCost", 0.0);
+				}
+				wasIdleLastInterval = true;
 			} else {
 				auto busiestTagInfo = previousBusiestTags[0];
 				for (int i = 1; i < previousBusiestTags.size(); ++i) {
@@ -85,6 +91,7 @@ public:
 				    .detail("Tag", printable(busiestTagInfo.tag))
 				    .detail("TagCost", busiestTagInfo.rate)
 				    .detail("FractionalBusyness", busiestTagInfo.fractionalBusyness);
+				wasIdleLastInterval = false;
 			}
 
 			for (const auto& tagInfo : previousBusiestTags) {
