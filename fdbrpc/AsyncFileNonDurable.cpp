@@ -24,6 +24,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/CoroUtils.h"
+#include "flow/UnitTest.h"
 
 std::map<std::string, Future<Void>> AsyncFileNonDurable::filesBeingDeleted;
 
@@ -220,4 +221,177 @@ void AsyncFileNonDurable::removeOpenFile(std::string filename, AsyncFileNonDurab
 			openFiles.erase(iter);
 		}
 	}
+}
+
+namespace {
+
+class DetachableTestFile final : public IAsyncFile, public ReferenceCounted<DetachableTestFile> {
+public:
+	explicit DetachableTestFile(Promise<Void> destroyed) : destroyed(destroyed) {}
+	~DetachableTestFile() override { destroyed.send(Void()); }
+	void addref() override { ReferenceCounted<DetachableTestFile>::addref(); }
+	void delref() override { ReferenceCounted<DetachableTestFile>::delref(); }
+	Future<int> read(void*, int, int64_t) override { return unsupported_operation(); }
+	Future<Void> write(void const*, int, int64_t) override { return unsupported_operation(); }
+	Future<Void> truncate(int64_t) override { return unsupported_operation(); }
+	Future<Void> sync() override { return unsupported_operation(); }
+	Future<int64_t> size() const override { return unsupported_operation(); }
+	int64_t debugFD() const override { return -1; }
+	std::string getFilename() const override { return "detachable-test-file"; }
+
+private:
+	Promise<Void> destroyed;
+};
+
+class DetachableTestProcess {
+public:
+	DetachableTestProcess() : controller(g_simulator->getCurrentProcess()), priority(g_network->getCurrentTask()) {
+		caller = g_simulator->newProcess("DetachableTestCaller",
+		                                 controller->address.ip,
+		                                 controller->machine->getRandomPort(),
+		                                 false,
+		                                 1,
+		                                 controller->locality,
+		                                 controller->metadata,
+		                                 "",
+		                                 "",
+		                                 controller->protocolVersion,
+		                                 false);
+		caller->excludeFromRestarts = true;
+	}
+	~DetachableTestProcess() { g_simulator->destroyProcess(caller); }
+	ISimulator::ProcessInfo* getCaller() const { return caller; }
+	Future<Void> onController() const { return g_simulator->onProcess(controller, priority); }
+	void shutdown() const { caller->shutdownSignal.send(ISimulator::KillType::RebootProcess); }
+
+private:
+	ISimulator::ProcessInfo* controller;
+	TaskPriority priority;
+	ISimulator::ProcessInfo* caller;
+};
+
+Future<Reference<IAsyncFile>> checkOpenContext(Future<Reference<IAsyncFile>> opened,
+                                               DetachableTestProcess* process,
+                                               Error expected) {
+	auto result = co_await errorOr(opened);
+	ASSERT(g_simulator->getCurrentProcess() == process->getCaller());
+	ASSERT(g_network->getCurrentTask() == TaskPriority::DiskRead);
+	ASSERT(result.isError() == expected.isValid());
+	if (expected.isValid()) {
+		ASSERT_EQ(result.getError().code(), expected.code());
+	}
+	// Release the input before leaving its completion stack, so it cannot retain the raw file.
+	opened = Future<Reference<IAsyncFile>>();
+	co_await process->onController();
+	co_return result.isError() ? Reference<IAsyncFile>() : result.get();
+}
+
+} // namespace
+
+TEST_CASE("/fdbrpc/AsyncFileDetachable/openContextAndShutdown") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+	for (auto [sameProcess, error] : { std::pair{ false, Error() },
+	                                   { true, Error() },
+	                                   { false, file_not_found() },
+	                                   { false, actor_cancelled() } }) {
+		DetachableTestProcess process;
+		Promise<Void> destroyed;
+		auto raw = makeReference<DetachableTestFile>(destroyed);
+		Promise<Reference<IAsyncFile>> input;
+		co_await g_simulator->onProcess(process.getCaller(), TaskPriority::DiskRead);
+		auto opened = AsyncFileDetachable::open(input.getFuture());
+		ASSERT(!opened.isReady());
+		auto checked = checkOpenContext(opened, &process, error);
+		co_await (sameProcess ? g_simulator->onProcess(process.getCaller(), TaskPriority::DefaultYield)
+		                      : process.onController());
+		if (error.isValid()) {
+			input.sendError(error);
+		} else {
+			input.send(raw);
+		}
+		co_await process.onController();
+		auto file = co_await checked;
+		ASSERT(bool(file) == !error.isValid());
+		checked = Future<Reference<IAsyncFile>>();
+		opened = Future<Reference<IAsyncFile>>();
+		input = Promise<Reference<IAsyncFile>>();
+		raw.clear();
+		if (file) {
+			ASSERT(!destroyed.getFuture().isReady());
+			ASSERT(file->getFilename() == "detachable-test-file");
+			process.shutdown();
+			ASSERT(destroyed.getFuture().isReady());
+			try {
+				(void)file->getFilename();
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT_EQ(e.code(), error_code_io_error);
+				ASSERT(e.isInjectedFault());
+			}
+		}
+	}
+}
+
+TEST_CASE("/fdbrpc/AsyncFileDetachable/openInterrupted") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+	for (bool cancel : { false, true }) {
+		for (bool duringReturn : { false, true }) {
+			DetachableTestProcess process;
+			Promise<Void> destroyed;
+			auto raw = makeReference<DetachableTestFile>(destroyed);
+			Promise<Reference<IAsyncFile>> input;
+			co_await g_simulator->onProcess(process.getCaller(), TaskPriority::DiskRead);
+			auto opened = AsyncFileDetachable::open(input.getFuture());
+			co_await process.onController();
+			if (duringReturn) {
+				input.send(raw);
+			}
+			ASSERT(!opened.isReady());
+			if (cancel) {
+				opened.cancel();
+			} else {
+				process.shutdown();
+			}
+			ASSERT(opened.isReady() && opened.isError());
+			Error expected = opened.getError();
+			ASSERT_EQ(expected.code(), cancel ? error_code_actor_cancelled : error_code_io_error);
+			ASSERT(cancel || expected.isInjectedFault());
+			if (!duringReturn) {
+				input.send(raw);
+			}
+			// Drain a queued caller handoff and ensure it cannot replace the interruption.
+			co_await g_simulator->onProcess(process.getCaller(), TaskPriority::DiskRead);
+			co_await process.onController();
+			ASSERT(opened.isError() && opened.getError().code() == expected.code());
+			opened = Future<Reference<IAsyncFile>>();
+			ASSERT_EQ(input.getFutureReferenceCount(), 0);
+			input = Promise<Reference<IAsyncFile>>();
+			raw.clear();
+			ASSERT(destroyed.getFuture().isReady());
+		}
+	}
+}
+
+TEST_CASE("/fdbrpc/AsyncFileDetachable/openAlreadyReady") {
+	if (!g_network->isSimulated()) {
+		co_return;
+	}
+	DetachableTestProcess process;
+	Promise<Void> destroyed;
+	Future<Reference<IAsyncFile>> input{ makeReference<DetachableTestFile>(destroyed) };
+	co_await g_simulator->onProcess(process.getCaller(), TaskPriority::DiskRead);
+	auto opened = AsyncFileDetachable::open(input);
+	ASSERT(opened.isReady() && !opened.isError());
+	process.shutdown();
+	auto tied = AsyncFileDetachable::open(input);
+	ASSERT(tied.isReady() && tied.isError());
+	ASSERT_EQ(tied.getError().code(), error_code_io_error);
+	ASSERT(tied.getError().isInjectedFault());
+	ASSERT(g_simulator->getCurrentProcess() == process.getCaller());
+	ASSERT(g_network->getCurrentTask() == TaskPriority::DiskRead);
+	co_await process.onController();
 }
