@@ -7,7 +7,7 @@ on:
   push:
     branches:
       - main
-      - 'boost-*'
+      - release-8.0
 
 permissions:
   contents: read
