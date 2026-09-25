@@ -42,6 +42,11 @@ jobs:
             CXXFLAGS=-I${PWD}/fdbclient/include/fdbclient \
             cmake -S .. -G Ninja -D BUILD_AWS_BACKUP=ON -D BUILD_MAKO=ON -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
 
+          # Source-built Boost installs its headers during the external-project build.
+          if ninja -t query boost_targetProject >/dev/null 2>&1; then
+            ninja -v boost_targetProject
+          fi
+
           ninja -v                      \
             processed_compile_commands  \
             fdboptions                  \

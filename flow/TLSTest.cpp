@@ -31,25 +31,25 @@
 std::FILE* outp = stdout;
 
 template <class... Args>
-void log(Args&&... args) {
+void log(fmt::format_string<Args...> format, Args&&... args) {
 	auto buf = fmt::memory_buffer{};
-	fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
+	fmt::format_to(std::back_inserter(buf), format, std::forward<Args>(args)...);
 	fmt::print(outp, "{}\n", std::string_view(buf.data(), buf.size()));
 }
 
 template <class... Args>
-void logc(Args&&... args) {
+void logc(fmt::format_string<Args...> format, Args&&... args) {
 	auto buf = fmt::memory_buffer{};
 	fmt::format_to(std::back_inserter(buf), "[CLIENT] ");
-	fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
+	fmt::format_to(std::back_inserter(buf), format, std::forward<Args>(args)...);
 	fmt::print(outp, "{}\n", std::string_view(buf.data(), buf.size()));
 }
 
 template <class... Args>
-void logs(Args&&... args) {
+void logs(fmt::format_string<Args...> format, Args&&... args) {
 	auto buf = fmt::memory_buffer{};
 	fmt::format_to(std::back_inserter(buf), "[SERVER] ");
-	fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
+	fmt::format_to(std::back_inserter(buf), format, std::forward<Args>(args)...);
 	fmt::print(outp, "{}\n", std::string_view(buf.data(), buf.size()));
 }
 
@@ -104,7 +104,7 @@ struct fmt::formatter<tcp::endpoint> {
 	constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 
 	template <class FormatContext>
-	auto format(const tcp::endpoint& ep, FormatContext& ctx) -> decltype(ctx.out()) {
+	auto format(const tcp::endpoint& ep, FormatContext& ctx) const -> decltype(ctx.out()) {
 		return fmt::format_to(ctx.out(), "{}:{}", ep.address().to_string(), ep.port());
 	}
 };
