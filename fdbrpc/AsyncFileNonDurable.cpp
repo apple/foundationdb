@@ -358,7 +358,7 @@ TEST_CASE("/fdbrpc/AsyncFileDetachable/openInterrupted") {
 			}
 			ASSERT(opened.isReady() && opened.isError());
 			Error expected = opened.getError();
-			ASSERT_EQ(expected.code(), cancel ? error_code_actor_cancelled : error_code_io_error);
+			ASSERT_EQ(expected.code(), (cancel ? actor_cancelled() : io_error()).code());
 			ASSERT(cancel || expected.isInjectedFault());
 			if (!duringReturn) {
 				input.send(raw);
