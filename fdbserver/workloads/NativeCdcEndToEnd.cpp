@@ -2470,9 +2470,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 		const Version lastVersion = expected.back().version;
 
-		// Prime one proxy-owned retained buffer without acknowledging. Several complete versions fit one TLog peek,
-		// but all versions exceed its bound; a batched reply proves one pass buffered multiple complete versions.
-		bool sawBatchedPrimingReply = false;
+		// Prime one proxy-owned retained buffer without acknowledging. The cursor's known committed frontier can
+		// advance one version at a time, so priming replies need not contain multiple versions.
 		const double primeDeadline = now() + operationTimeout;
 		while (stream.consumer->position().lastConsumedVersion < lastVersion) {
 			const Version previous = stream.consumer->position().lastConsumedVersion;
@@ -2489,15 +2488,15 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				continue;
 			}
 			ASSERT_GT(reply.lastConsumedVersion, previous);
-			sawBatchedPrimingReply |= reply.mutations.size() > 1;
 		}
-		ASSERT(sawBatchedPrimingReply);
 
+		// Resume from the retained buffer to check batching when all expected versions have been materialized.
 		Reference<NativeCdcConsumer> resumed =
 		    resumeNativeCdcConsumer(cx, CDCCursor(stream.consumer->position().streamId, invalidVersion));
 		std::set<Version> observedVersions;
 		int replyCount = 0;
 		bool checkedFirstReply = false;
+		bool sawBatchedReply = false;
 		const double resumeDeadline = now() + operationTimeout;
 		while (resumed->position().lastConsumedVersion < lastVersion) {
 			const Version previous = resumed->position().lastConsumedVersion;
@@ -2508,6 +2507,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 				continue;
 			}
 			ASSERT_GT(reply.lastConsumedVersion, previous);
+			sawBatchedReply |= reply.mutations.size() > 1;
 			if (!checkedFirstReply) {
 				ASSERT_LT(reply.lastConsumedVersion, lastVersion);
 				checkedFirstReply = true;
@@ -2539,6 +2539,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			++replyCount;
 		}
 		ASSERT(checkedFirstReply);
+		ASSERT(sawBatchedReply);
 		ASSERT_GT(replyCount, 1);
 		ASSERT_EQ(observedVersions.size(), expected.size());
 
