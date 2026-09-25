@@ -299,6 +299,10 @@ public:
 	double TSS_RECRUITMENT_TIMEOUT;
 	double TSS_DD_CHECK_INTERVAL;
 	double DATA_DISTRIBUTION_LOGGING_INTERVAL;
+	// Cadence of DDServerEligibility. Coarse because it gauges conditions that persist for hours. A new
+	// team collection emits immediately, so distributor restarts are captured at any value. Lower it
+	// while watching a migration.
+	double DD_SERVER_ELIGIBILITY_LOGGING_INTERVAL;
 	double DD_ENABLED_CHECK_DELAY;
 	double DD_STALL_CHECK_DELAY;
 	double DD_LOW_BANDWIDTH_DELAY;
