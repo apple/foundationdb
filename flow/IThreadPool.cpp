@@ -66,8 +66,8 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 	}
 
 	std::vector<Thread*> threads;
-	boost::asio::io_service ios;
-	boost::asio::io_service::work dontstop;
+	boost::asio::io_context ios;
+	boost::asio::executor_work_guard<boost::asio::io_context::executor_type> dontstop;
 	enum Mode { Run = 0, Shutdown = 2 };
 	volatile int mode;
 	int stackSize;
@@ -92,7 +92,7 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 	};
 
 public:
-	ThreadPool(int stackSize, int pri) : dontstop(ios), mode(Run), stackSize(stackSize), pri(pri) {}
+	ThreadPool(int stackSize, int pri) : dontstop(ios.get_executor()), mode(Run), stackSize(stackSize), pri(pri) {}
 	~ThreadPool() override = default;
 	Future<Void> stop(Error const& e = success()) override {
 		if (mode == Shutdown)
@@ -131,7 +131,7 @@ public:
 		threads.push_back(new Thread(this, userData));
 		threads.back()->handle = g_network->startThread(start, threads.back(), stackSize, name);
 	}
-	void post(PThreadAction action) override { ios.post(ActionWrapper(action)); }
+	void post(PThreadAction action) override { boost::asio::post(ios, ActionWrapper(action)); }
 	int priority() const { return pri; }
 };
 
