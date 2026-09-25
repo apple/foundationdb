@@ -937,6 +937,37 @@ def cdc_operator_commands():
     assert b"Retired cleanup may still be pending" in result.stdout, result.stdout
 
 
+def audit_status_arguments():
+    invalid_commands = [
+        "get_audit_status",
+        "get_audit_status ha",
+        "get_audit_status ha id",
+        "get_audit_status ha progress",
+        "get_audit_status ha phase",
+    ]
+    for command in invalid_commands:
+        result = subprocess.run(
+            command_template + [command], capture_output=True, env=fdbcli_env
+        )
+        assert result.returncode != 0, (command, result.stdout, result.stderr)
+        assert result.stdout.startswith(b"Usage: get_audit_status "), (
+            command,
+            result.stdout,
+            result.stderr,
+        )
+
+    for command in [
+        "get_audit_status ha recent",
+        "get_audit_status ha recent 0",
+        "get_audit_status ha phase running",
+        "get_audit_status ha phase running 0",
+    ]:
+        result = subprocess.run(
+            command_template + [command], capture_output=True, env=fdbcli_env
+        )
+        assert result.returncode == 0, (command, result.stdout, result.stderr)
+
+
 def client_threads_per_version_env_ignored():
     test_env = fdbcli_env.copy()
     test_env["FDB_NETWORK_OPTION_CLIENT_THREADS_PER_VERSION"] = "not_an_integer"
@@ -1055,6 +1086,7 @@ if __name__ == "__main__":
         status_json_file_region_failover_message()
         idempotency_ids()
         cdc_operator_commands()
+        audit_status_arguments()
         client_threads_per_version_env_ignored()
     else:
         assert args.process_number > 1, "Process number should be positive"
