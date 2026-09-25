@@ -414,8 +414,10 @@ Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Refe
 			              .trackLatest(eventCacheHolder->trackingKey);
 			          // If no primary peek location after many tries, flag an error for manual intervention.
 			          // The LR may become a bottleneck on the system and need to be excluded.
-			          noPrimaryPeekLocation = primaryPeekLocation.present() ? 0 : ++noPrimaryPeekLocation;
-			          if (!(noPrimaryPeekLocation % 4)) {
+			          // Only consecutive absences count.
+			          if (primaryPeekLocation.present()) {
+				          noPrimaryPeekLocation = 0;
+			          } else if (!(++noPrimaryPeekLocation % 4)) {
 				          TraceEvent(SevWarnAlways, "NoPrimaryPeekLocationForLR", dbgid);
 			          }
 		          })
