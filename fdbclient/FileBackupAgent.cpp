@@ -625,6 +625,7 @@ public:
 	static std::string renderFullStatusText(const StatusSnapshot& s);
 	static JsonBuilderObject renderStatusJSON(const StatusSnapshot& s);
 	static std::pair<const char*, const char*> statusPhases(const StatusSnapshot& s);
+	static double avgBytesPerTask(const StatusSnapshot& s);
 
 	static Future<std::string> getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr) { return getProgress_impl(*this, tr); }
@@ -1006,9 +1007,9 @@ std::string RestoreConfig::renderProgressText(const StatusSnapshot& s) {
 		                      s.runningTasks);
 		progressStr += format(" Tasks triggered: %lld / %lld total\n", s.triggeredTasks, s.totalTasks);
 		progressStr += format(" Bytes written: %s\n", formatBytesHumanReadable(s.bytesWritten).c_str());
-		double avgBytesPerTask = s.triggeredTasks > 0 ? (double)s.bytesWritten / s.triggeredTasks : 0;
-		if (avgBytesPerTask > 0) {
-			progressStr += format(" Avg bytes/task: %s\n", formatBytesHumanReadable((int64_t)avgBytesPerTask).c_str());
+		double avg = avgBytesPerTask(s);
+		if (avg > 0) {
+			progressStr += format(" Avg bytes/task: %s\n", formatBytesHumanReadable((int64_t)avg).c_str());
 		}
 	}
 	return progressStr;
@@ -1027,6 +1028,13 @@ std::pair<const char*, const char*> RestoreConfig::statusPhases(const StatusSnap
 		return { "in_progress", "in_progress" };
 	}
 	return { s.bulkLoadComplete ? "complete" : "in_progress", s.bulkLoadComplete ? "in_progress" : "not_started" };
+}
+
+// Average bytes per triggered task, or 0 when there is none to report. Shared so the text and JSON renderers
+// cannot disagree about whether to emit it. The quotient is a double because an integer one rounds a sub-one
+// average to zero, which would drop the field from one renderer and keep it in the other.
+double RestoreConfig::avgBytesPerTask(const StatusSnapshot& s) {
+	return s.triggeredTasks > 0 ? (double)s.bytesWritten / s.triggeredTasks : 0;
 }
 
 std::string RestoreConfig::renderFullStatusText(const StatusSnapshot& s) {
@@ -1090,9 +1098,11 @@ JsonBuilderObject RestoreConfig::renderStatusJSON(const StatusSnapshot& s) {
 		tasks.setKey("Running", s.runningTasks);
 		tasks.setKey("Total", s.totalTasks);
 		doc.setKey("Tasks", tasks);
-		// Same guard as the text renderer: omit rather than report a zero average.
-		if (s.triggeredTasks > 0 && s.bytesWritten / s.triggeredTasks > 0) {
-			doc.setKey("AvgBytesPerTask", s.bytesWritten / s.triggeredTasks);
+		// Emitted as an integer to match the rest of the document: JsonBuilder renders doubles with "%g",
+		// which would lose precision on a large average.
+		double avg = avgBytesPerTask(s);
+		if (avg > 0) {
+			doc.setKey("AvgBytesPerTask", (int64_t)avg);
 		}
 	}
 
