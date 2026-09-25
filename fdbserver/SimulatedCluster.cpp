@@ -481,6 +481,8 @@ public:
 	Optional<bool> generateFearless, buggify, faultInjection;
 	Optional<std::string> config;
 	Optional<std::string> remoteConfig;
+	// Satellite redundancy mode override applied to all regions (e.g. "one_satellite_single")
+	Optional<std::string> satelliteRedundancyMode;
 	bool randomlyRenameZoneId = false;
 	bool simHTTPServerEnabled = true;
 
@@ -548,6 +550,7 @@ public:
 		    .add("storageEngineType", &storageEngineType)
 		    .add("config", &config)
 		    .add("remoteConfig", &remoteConfig)
+		    .add("satelliteRedundancyMode", &satelliteRedundancyMode)
 		    .add("buggify", &buggify)
 		    .add("faultInjection", &faultInjection)
 		    .add("StderrSeverity", &stderrSeverity)
@@ -1896,7 +1899,10 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 
 	bool needsRemote = generateFearless;
 	if (generateFearless) {
-		if (datacenters > 4) {
+		std::string satelliteRedundancyModeStr;
+		if (testConfig.satelliteRedundancyMode.present()) {
+			satelliteRedundancyModeStr = testConfig.satelliteRedundancyMode.get();
+		} else if (datacenters > 4) {
 			// FIXME: we cannot use one satellite replication with more than one satellite per region because
 			// canKillProcesses does not respect usable_dcs
 			int satellite_replication_type = deterministicRandom()->randomInt(0, 3);
@@ -1912,14 +1918,12 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 			}
 			case 1: {
 				CODE_PROBE(true, "Simulated cluster using two satellite fast redundancy mode");
-				primaryObj["satellite_redundancy_mode"] = "two_satellite_fast";
-				remoteObj["satellite_redundancy_mode"] = "two_satellite_fast";
+				satelliteRedundancyModeStr = "two_satellite_fast";
 				break;
 			}
 			case 2: {
 				CODE_PROBE(true, "Simulated cluster using two satellite safe redundancy mode");
-				primaryObj["satellite_redundancy_mode"] = "two_satellite_safe";
-				remoteObj["satellite_redundancy_mode"] = "two_satellite_safe";
+				satelliteRedundancyModeStr = "two_satellite_safe";
 				break;
 			}
 			default:
@@ -1939,25 +1943,27 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 			}
 			case 2: {
 				CODE_PROBE(true, "Simulated cluster using single satellite redundancy mode");
-				primaryObj["satellite_redundancy_mode"] = "one_satellite_single";
-				remoteObj["satellite_redundancy_mode"] = "one_satellite_single";
+				satelliteRedundancyModeStr = "one_satellite_single";
 				break;
 			}
 			case 3: {
 				CODE_PROBE(true, "Simulated cluster using double satellite redundancy mode");
-				primaryObj["satellite_redundancy_mode"] = "one_satellite_double";
-				remoteObj["satellite_redundancy_mode"] = "one_satellite_double";
+				satelliteRedundancyModeStr = "one_satellite_double";
 				break;
 			}
 			case 4: {
 				CODE_PROBE(true, "Simulated cluster using triple satellite redundancy mode");
-				primaryObj["satellite_redundancy_mode"] = "one_satellite_triple";
-				remoteObj["satellite_redundancy_mode"] = "one_satellite_triple";
+				satelliteRedundancyModeStr = "one_satellite_triple";
 				break;
 			}
 			default:
 				ASSERT(false); // Programmer forgot to adjust cases.
 			}
+		}
+
+		if (!satelliteRedundancyModeStr.empty()) {
+			primaryObj["satellite_redundancy_mode"] = satelliteRedundancyModeStr;
+			remoteObj["satellite_redundancy_mode"] = satelliteRedundancyModeStr;
 		}
 
 		// Calculate the maximum satellite_logs we can support based on available machines
