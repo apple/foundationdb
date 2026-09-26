@@ -99,6 +99,10 @@ Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> con
 			co_await tr->commit();
 			break;
 		} catch (Error& e) {
+			// The transaction may have committed, so replaying could restart the scan or clear stats twice.
+			if (e.code() == error_code_commit_unknown_result) {
+				throw;
+			}
 			err = e;
 		}
 		co_await tr->onError(err);
