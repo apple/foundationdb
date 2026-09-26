@@ -94,7 +94,7 @@ AuthAllowedSubnet AuthAllowedSubnet::fromString(std::string_view addressString) 
 	unsigned int netmaskWeight = 0;
 	auto [end, error] = std::from_chars(prefix.data(), prefix.data() + prefix.size(), netmaskWeight);
 	auto invalidPrefix = [&]() {
-		fmt::print("ERROR: {} has an invalid subnet prefix length\n", addressString);
+		fmt::println("ERROR: {} has an invalid subnet prefix length", addressString);
 		throw invalid_option();
 	};
 	if (error != std::errc{} || end != prefix.data() + prefix.size()) {
