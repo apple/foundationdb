@@ -826,24 +826,20 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	return result;
 }
 
-Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
-	Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-	Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
-
-	co_await (success(processClasses) && success(processData));
-	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
-	ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
+std::vector<ProcessData> ManagementAPI::decodeWorkers(const RangeResult& processClasses,
+                                                      const RangeResult& processData) {
+	ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
+	ASSERT(!processData.more && processData.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
-	for (int i = 0; i < processClasses.get().size(); i++) {
-		id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
-		    decodeProcessClassValue(processClasses.get()[i].value);
+	for (int i = 0; i < processClasses.size(); i++) {
+		id_class[decodeProcessClassKey(processClasses[i].key)] = decodeProcessClassValue(processClasses[i].value);
 	}
 
 	std::vector<ProcessData> results;
 
-	for (int i = 0; i < processData.get().size(); i++) {
-		ProcessData data = decodeWorkerListValue(processData.get()[i].value);
+	for (int i = 0; i < processData.size(); i++) {
+		ProcessData data = decodeWorkerListValue(processData[i].value);
 		ProcessClass processClass = id_class[data.locality.processId()];
 
 		if (processClass.classSource() == ProcessClass::DBSource ||
@@ -854,7 +850,15 @@ Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
 			results.push_back(data);
 	}
 
-	co_return results;
+	return results;
+}
+
+Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
+	Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+	Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+
+	co_await (success(processClasses) && success(processData));
+	co_return ManagementAPI::decodeWorkers(processClasses.get(), processData.get());
 }
 
 Future<std::vector<ProcessData>> getWorkers(Database cx) {
