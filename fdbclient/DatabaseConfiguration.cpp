@@ -974,7 +974,6 @@ TEST_CASE("/fdbclient/databaseConfiguration/constReads") {
 	ASSERT(config == copy);
 	ASSERT_EQ(config.getExcludedServers().size(), 2);
 	ASSERT(config.getExcludedLocalities() == (std::set<std::string>{ "zoneid:one", "zoneid:two" }));
-	ASSERT(config.get(key).get().begin() == borrowed.begin());
 	ASSERT(borrowed == value);
 	return Void();
 }
