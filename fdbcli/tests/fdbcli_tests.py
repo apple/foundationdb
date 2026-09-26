@@ -226,6 +226,18 @@ def lockAndUnlock(logger):
     )
 
 
+def expensive_data_check_empty_all():
+    result = subprocess.run(
+        command_template + ["expensive_data_check all; sleep 0"],
+        capture_output=True,
+        env=fdbcli_env,
+    )
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert b"ERROR: no processes to check" in result.stderr, result.stderr
+    assert b"remaining commands will not be executed" in result.stdout, result.stdout
+    assert b">>> sleep 0" not in result.stdout, result.stdout
+
+
 @enable_logging()
 def kill(logger):
     output1 = run_fdbcli_command("kill")
@@ -1069,6 +1081,7 @@ if __name__ == "__main__":
         # advanceversion()
         consistencycheck()
         datadistribution()
+        expensive_data_check_empty_all()
         kill()
         lockAndUnlock()
         maintenance()
