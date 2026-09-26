@@ -44,6 +44,9 @@
 #include "flow/UnitTest.h"
 
 #ifdef __linux__
+#include <cerrno>
+#include <cstdlib>
+
 namespace {
 Future<Void> runAsyncFileKAIOTestOps(Reference<IAsyncFile> f, int numIterations, int fileSize, bool expectedToSucceed) {
 	void* buf = FastAllocator<4096>::allocate(); // we leak this if there is an error, but that shouldn't be a big deal
@@ -126,6 +129,171 @@ TEST_CASE("/fdbrpc/AsyncFileKAIO/RequestList") {
 
 		co_await AsyncFileEIO::deleteFile(f->getFilename(), true);
 	}
+}
+
+TEST_CASE("/fdbrpc/AsyncFileKAIO/TruncateEINTR") {
+	bool fallocateSupported = true;
+	int fallocateCalls = 0;
+	auto fallback = [](int, off_t) {
+		errno = EIO;
+		return -1;
+	};
+
+	auto interrupted = kaio_detail::truncateSyscalls(
+	    -1,
+	    8192,
+	    0,
+	    fallocateSupported,
+	    [&](int, int, off_t, off_t) {
+		    if (++fallocateCalls <= 2) {
+			    errno = EINTR;
+			    return -1;
+		    }
+		    return 0;
+	    },
+	    fallback);
+	ASSERT(interrupted.result == 0);
+	ASSERT(interrupted.fallocateRetries == 2);
+	ASSERT(fallocateCalls == 3);
+
+	fallocateCalls = 0;
+	auto exhausted = kaio_detail::truncateSyscalls(
+	    -1,
+	    8192,
+	    0,
+	    fallocateSupported,
+	    [&](int, int, off_t, off_t) {
+		    ++fallocateCalls;
+		    errno = EINTR;
+		    return -1;
+	    },
+	    fallback);
+	ASSERT(exhausted.result == -1);
+	ASSERT(exhausted.errorCode == EINTR);
+	ASSERT(exhausted.fallocateRetries == kaio_detail::MAX_EINTR_RETRIES);
+	ASSERT(fallocateCalls == kaio_detail::MAX_EINTR_RETRIES + 1);
+
+	fallocateCalls = 0;
+	auto permanent = kaio_detail::truncateSyscalls(
+	    -1,
+	    8192,
+	    0,
+	    fallocateSupported,
+	    [&](int, int, off_t, off_t) {
+		    ++fallocateCalls;
+		    errno = EIO;
+		    return -1;
+	    },
+	    fallback);
+	ASSERT(permanent.result == -1);
+	ASSERT(permanent.errorCode == EIO);
+	ASSERT(permanent.fallocateRetries == 0);
+	ASSERT(fallocateCalls == 1);
+
+	int ftruncateCalls = 0;
+	auto unsupported = kaio_detail::truncateSyscalls(
+	    -1,
+	    8192,
+	    0,
+	    fallocateSupported,
+	    [&](int, int, off_t, off_t) {
+		    errno = EOPNOTSUPP;
+		    return -1;
+	    },
+	    [&](int, off_t) {
+		    ++ftruncateCalls;
+		    return 0;
+	    });
+	ASSERT(unsupported.result == 0);
+	ASSERT(unsupported.fallocateErrorCode == EOPNOTSUPP);
+	ASSERT(!fallocateSupported);
+	ASSERT(ftruncateCalls == 1);
+
+	ftruncateCalls = 0;
+	auto truncateFailure = kaio_detail::truncateSyscalls(
+	    -1,
+	    4096,
+	    8192,
+	    fallocateSupported,
+	    [&](int, int, off_t, off_t) {
+		    ASSERT(false);
+		    return 0;
+	    },
+	    [&](int, off_t) {
+		    ++ftruncateCalls;
+		    errno = EIO;
+		    return -1;
+	    });
+	ASSERT(truncateFailure.result == -1);
+	ASSERT(truncateFailure.errorCode == EIO);
+	ASSERT(ftruncateCalls == 1);
+
+	ftruncateCalls = 0;
+	auto truncateExhausted = kaio_detail::truncateSyscalls(
+	    -1,
+	    4096,
+	    8192,
+	    fallocateSupported,
+	    [&](int, int, off_t, off_t) {
+		    ASSERT(false);
+		    return 0;
+	    },
+	    [&](int, off_t) {
+		    ++ftruncateCalls;
+		    errno = EINTR;
+		    return -1;
+	    });
+	ASSERT(truncateExhausted.result == -1);
+	ASSERT(truncateExhausted.errorCode == EINTR);
+	ASSERT(truncateExhausted.ftruncateRetries == kaio_detail::MAX_EINTR_RETRIES);
+	ASSERT(ftruncateCalls == kaio_detail::MAX_EINTR_RETRIES + 1);
+
+	// Exercise the same syscall path on a real file when running outside simulation.
+	if (!g_network->isSimulated()) {
+		char filename[] = "/tmp/__KAIO_TRUNCATE_EINTR_TEST_FILE__.XXXXXX";
+		int fd = ::mkstemp(filename);
+		ASSERT(fd >= 0);
+		ASSERT(::unlink(filename) == 0);
+
+		fallocateSupported = true;
+		fallocateCalls = 0;
+		auto growth = kaio_detail::truncateSyscalls(
+		    fd,
+		    8192,
+		    0,
+		    fallocateSupported,
+		    [&](int fd, int mode, off_t offset, off_t length) {
+			    if (++fallocateCalls == 1) {
+				    errno = EINTR;
+				    return -1;
+			    }
+			    return ::fallocate(fd, mode, offset, length);
+		    },
+		    ::ftruncate);
+		ASSERT(growth.result == 0);
+		ASSERT(fallocateCalls == 2);
+		ASSERT(growth.fallocateRetries == 1);
+		struct stat fileStat;
+		ASSERT(::fstat(fd, &fileStat) == 0);
+		ASSERT(fileStat.st_size == 8192);
+
+		ftruncateCalls = 0;
+		auto shrink =
+		    kaio_detail::truncateSyscalls(fd, 4096, 8192, fallocateSupported, ::fallocate, [&](int fd, off_t length) {
+			    if (++ftruncateCalls == 1) {
+				    errno = EINTR;
+				    return -1;
+			    }
+			    return ::ftruncate(fd, length);
+		    });
+		ASSERT(shrink.result == 0);
+		ASSERT(shrink.ftruncateRetries == 1);
+		ASSERT(ftruncateCalls == 2);
+		ASSERT(::fstat(fd, &fileStat) == 0);
+		ASSERT(fileStat.st_size == 4096);
+		ASSERT(::close(fd) == 0);
+	}
+	return Void();
 }
 #endif // __linux__
 
