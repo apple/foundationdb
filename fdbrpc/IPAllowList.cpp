@@ -28,6 +28,7 @@
 #include <fmt/printf.h>
 #include <fmt/ranges.h>
 #include <bitset>
+#include <charconv>
 
 namespace {
 
@@ -89,8 +90,20 @@ AuthAllowedSubnet AuthAllowedSubnet::fromString(std::string_view addressString) 
 		throw invalid_option();
 	}
 	auto address = addressString.substr(0, pos);
-	auto netmaskWeight = std::stoi(std::string(addressString.substr(pos + 1)));
+	auto prefix = addressString.substr(pos + 1);
+	unsigned int netmaskWeight = 0;
+	auto [end, error] = std::from_chars(prefix.data(), prefix.data() + prefix.size(), netmaskWeight);
+	auto invalidPrefix = [&]() {
+		fmt::print("ERROR: {} has an invalid subnet prefix length\n", addressString);
+		throw invalid_option();
+	};
+	if (error != std::errc{} || end != prefix.data() + prefix.size()) {
+		invalidPrefix();
+	}
 	auto addr = boost::asio::ip::make_address(address);
+	if (netmaskWeight > (addr.is_v4() ? 32u : 128u)) {
+		invalidPrefix();
+	}
 	if (addr.is_v4()) {
 		auto bM = createBitMask(addr.to_v4().to_bytes(), netmaskWeight);
 		// we typically would expect a base address has been passed, but to be safe we still
@@ -311,6 +324,28 @@ TEST_CASE("/fdbrpc/allow_list") {
 	for (int i = 0; i < 129; ++i) {
 		auto subnet = AuthAllowedSubnet::fromString(fmt::format("0::/{}", i));
 		ASSERT_EQ(i, subnet.netmaskWeight());
+	}
+	for (std::string_view invalid : { "0.0.0.0/-1",
+	                                  "0.0.0.0/-0",
+	                                  "0.0.0.0/+1",
+	                                  "0.0.0.0/33",
+	                                  "0.0.0.0/40",
+	                                  "0.0.0.0/128",
+	                                  "0.0.0.0/",
+	                                  "0.0.0.0/8junk",
+	                                  "0.0.0.0/4294967296",
+	                                  "::/-1",
+	                                  "::/129",
+	                                  "::/136",
+	                                  "::/128junk" }) {
+		bool rejected = false;
+		try {
+			AuthAllowedSubnet::fromString(invalid);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_invalid_option);
+			rejected = true;
+		}
+		ASSERT(rejected);
 	}
 	IPAllowList allowList;
 	// Simulated v4 addresses
