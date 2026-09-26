@@ -42,14 +42,14 @@ Future<Void> dumpStats(ConsistencyScanState* cs, Reference<ReadYourWritesTransac
 }
 
 Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> const& tokens) {
-	// Skip the command token so start at begin+1
-	std::list<StringRef> args(tokens.begin() + 1, tokens.end());
-
 	ConsistencyScanState cs = ConsistencyScanState();
 	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	bool error = false;
+	size_t statsPrinted = 0;
 
 	while (true) {
+		std::list<StringRef> args(tokens.begin() + 1, tokens.end());
+		size_t statsSeen = 0;
 		Error err;
 		try {
 			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
@@ -75,7 +75,11 @@ Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> con
 				} else if (next == "restart") {
 					config.minStartVersion = tr->getReadVersion().get();
 				} else if (next == "stats") {
-					co_await dumpStats(&cs, tr);
+					// Stats printed before a failed commit should not be printed again on retry.
+					if (statsSeen++ >= statsPrinted) {
+						co_await dumpStats(&cs, tr);
+						++statsPrinted;
+					}
 				} else if (next == "clearstats") {
 					co_await cs.clearStats(tr);
 				} else if (next == "maxRate") {
