@@ -968,6 +968,28 @@ def audit_status_arguments():
         assert result.returncode == 0, (command, result.stdout, result.stderr)
 
 
+def location_metadata_shard_count():
+    for count in ['""', "abc", "12junk", "2147483648", "-2147483649"]:
+        command = "location_metadata listshards " + count
+        result = subprocess.run(
+            command_template + [command], capture_output=True, env=fdbcli_env
+        )
+        assert result.returncode != 0, (command, result.stdout, result.stderr)
+        assert b"ERROR: invalid shard count" in result.stderr, result.stderr
+
+    for count, suffix in [
+        ("0", "Non-physical"),
+        ("-1", "Non-physical"),
+        ("+0 physical", "Physical"),
+    ]:
+        command = "location_metadata listshards " + count
+        result = subprocess.run(
+            command_template + [command], capture_output=True, env=fdbcli_env
+        )
+        assert result.returncode == 0, (command, result.stdout, result.stderr)
+        assert f"Found 0 {suffix} shards".encode() in result.stdout, result.stdout
+
+
 def client_threads_per_version_env_ignored():
     test_env = fdbcli_env.copy()
     test_env["FDB_NETWORK_OPTION_CLIENT_THREADS_PER_VERSION"] = "not_an_integer"
@@ -1087,6 +1109,7 @@ if __name__ == "__main__":
         idempotency_ids()
         cdc_operator_commands()
         audit_status_arguments()
+        location_metadata_shard_count()
         client_threads_per_version_env_ignored()
     else:
         assert args.process_number > 1, "Process number should be positive"

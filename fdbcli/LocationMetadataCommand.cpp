@@ -26,6 +26,8 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.h"
 
+#include <stdexcept>
+
 namespace {
 Future<std::string> describeServers(Reference<ReadYourWritesTransaction> tr, std::vector<UID> ids) {
 	std::vector<Future<Optional<Value>>> serverListEntries;
@@ -271,7 +273,20 @@ Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> to
 			co_return false;
 		}
 		const bool physical = tokens.size() == 4;
-		co_await printRandomShards(cx, std::stoi(tokens[2].toString()), physical);
+		const std::string countText = tokens[2].toString();
+		size_t consumed;
+		int count;
+		try {
+			count = std::stoi(countText, &consumed);
+		} catch (const std::logic_error&) {
+			fprintf(stderr, "ERROR: invalid shard count `%s'.\n", printable(tokens[2]).c_str());
+			co_return false;
+		}
+		if (consumed != countText.size()) {
+			fprintf(stderr, "ERROR: invalid shard count `%s'.\n", printable(tokens[2]).c_str());
+			co_return false;
+		}
+		co_await printRandomShards(cx, count, physical);
 	} else {
 		printUsage(tokens[0]);
 		co_return false;
