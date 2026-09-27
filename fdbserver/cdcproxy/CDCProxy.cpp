@@ -3242,7 +3242,10 @@ TEST_CASE("/NativeCDC/BoundedConsumeCapacityCancellation") {
 	return CDCProxyPrefetchTest::boundedCapacity(true, true);
 }
 TEST_CASE("/NativeCDC/BoundedConsumeJoinsCapacityWait") {
-	return CDCProxyPrefetchTest::boundedCapacity(false, false, true);
+	constexpr bool retainedAfterWait = false;
+	constexpr bool cancel = false;
+	constexpr bool consumeAfterWait = true;
+	return CDCProxyPrefetchTest::boundedCapacity(retainedAfterWait, cancel, consumeAfterWait);
 }
 
 TEST_CASE("/NativeCDC/PrefetchCreditLifecycle") {
