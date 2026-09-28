@@ -210,16 +210,32 @@ add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR
   OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${FDB_VERSION} MANIFEST ${MANIFEST_FILE} GENERATE_NATIVE_HEADERS fdb_java_native)
 add_dependencies(fdb-java fdb_java_options)
 
-create_javadoc(fdb
-               FILES ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${GENERATED_JAVA_DIR}/ApiVersion.java
-               VERSION ${FDB_VERSION}
-               )
-add_dependencies(fdb_javadoc fdb_java_options) 
-
-add_custom_target(CopyJavadoc
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/javadoc/fdb ${CMAKE_CURRENT_BINARY_DIR}/../../documentation/html/javadoc
+# create_javadoc() from cmake UseJava does not set OUTPUT and DEPENDS properly
+# to avoid rebuilds when no files changed, so re-implement here
+set(FDB_JAVADOC_DIR ${CMAKE_CURRENT_BINARY_DIR}/javadoc/fdb)
+add_custom_command(
+    OUTPUT ${FDB_JAVADOC_DIR}/index.html
+    COMMAND ${Java_JAVADOC_EXECUTABLE} -d ${FDB_JAVADOC_DIR} -version
+            ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${GENERATED_JAVA_DIR}/ApiVersion.java
+    DEPENDS ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${GENERATED_JAVA_DIR}/ApiVersion.java fdb_java_options
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Generating javadoc for fdb"
 )
-add_dependencies(CopyJavadoc fdb_javadoc)
+add_custom_target(fdb_javadoc ALL DEPENDS ${FDB_JAVADOC_DIR}/index.html)
+
+set(DOC_JAVADOC_DIR ${CMAKE_CURRENT_BINARY_DIR}/../../documentation/html/javadoc)
+add_custom_command(
+    OUTPUT ${DOC_JAVADOC_DIR}/index.html
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${FDB_JAVADOC_DIR} ${DOC_JAVADOC_DIR}
+    DEPENDS ${FDB_JAVADOC_DIR}/index.html
+    COMMENT "Copying javadoc to documentation directory"
+)
+add_custom_target(CopyJavadoc DEPENDS ${DOC_JAVADOC_DIR}/index.html)
+
+install(
+    DIRECTORY ${FDB_JAVADOC_DIR}
+    DESTINATION share/javadoc
+)
 
 if(NOT OPEN_FOR_IDE)
   set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
