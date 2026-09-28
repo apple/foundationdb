@@ -139,7 +139,7 @@ Future<Reference<IAsyncFile>> AsyncFileNonDurable::open(std::string filename,
 
 	std::string currentFilename =
 	    (wrappedFile.isReady() && !wrappedFile.isError()) ? wrappedFile.get()->getFilename() : actualFilename;
-	currentProcess->machine->openFiles.erase(currentFilename);
+	currentProcess->machine->eraseOpenFile(currentFilename, currentProcess->address);
 	//TraceEvent("AsyncFileNonDurableOpenError").errorUnsuppressed(e).detail("Filename", filename).detail("Address", currentProcess->address).detail("Addr", g_simulator->getCurrentProcess()->address);
 	co_await g_simulator->onProcess(currentProcess, currentTaskID);
 	throw err;
@@ -207,8 +207,11 @@ void AsyncFileNonDurable::removeOpenFile(std::string filename, AsyncFileNonDurab
 	// names.
 	if (iter != openFiles.end()) {
 		// even if the filename exists, it doesn't mean that it references the same file. It could be that the
-		// file was renamed and later a file with the same name was opened.
-		if (iter->second.getPtrIfReady().orDefault(nullptr) == file) {
+		// file was renamed and later a file with the same name was opened. Matching on identity also leaves
+		// the other entries alone, which are other processes' handles on this path and outlive this one.
+		std::erase_if(iter->second,
+		              [file](auto& handle) { return handle.file.getPtrIfReady().orDefault(nullptr) == file; });
+		if (iter->second.empty()) {
 			openFiles.erase(iter);
 		}
 	}

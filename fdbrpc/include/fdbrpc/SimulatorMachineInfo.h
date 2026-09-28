@@ -28,6 +28,7 @@
 
 #include "flow/Optional.h"
 #include "flow/IAsyncFile.h"
+#include "flow/network.h"
 
 namespace simulator {
 
@@ -38,8 +39,50 @@ struct MachineInfo {
 	ProcessInfo* machineProcess;
 	std::vector<ProcessInfo*> processes;
 
-	// A map from filename to file handle for all open files on a machine
-	std::map<std::string, UnsafeWeakFutureReference<IAsyncFile>> openFiles;
+	struct OpenFile {
+		UnsafeWeakFutureReference<IAsyncFile> file;
+		NetworkAddress openedBy;
+	};
+
+	// Every handle open on a path, at most one per process.
+	//
+	// An AsyncFileNonDurable's operations complete on Sim2 tasks belonging to the process that
+	// opened it, so a handle may only be reused by that process: resuming another process's waiter
+	// on it migrates that process's coroutine chain onto the opener. Processes on a machine share a
+	// disk, not open file objects.
+	//
+	// All of a path's handles stay listed here, because machine-wide operations act on the disk
+	// rather than on one process: killing a machine must corrupt every in-flight write to a path,
+	// and deleting a file must invalidate every handle to it.
+	//
+	// A path drops out entirely once its last handle does, never lingering as an empty vector, so a
+	// key present here means some process still holds that path open.
+	std::map<std::string, std::vector<OpenFile>> openFiles;
+
+	// openedBy's handle on filename, or nullptr if it has none.
+	OpenFile* getOpenFile(std::string const& filename, NetworkAddress const& openedBy) {
+		auto itr = openFiles.find(filename);
+		if (itr == openFiles.end()) {
+			return nullptr;
+		}
+		for (auto& handle : itr->second) {
+			if (handle.openedBy == openedBy) {
+				return &handle;
+			}
+		}
+		return nullptr;
+	}
+
+	void eraseOpenFile(std::string const& filename, NetworkAddress const& openedBy) {
+		auto itr = openFiles.find(filename);
+		if (itr == openFiles.end()) {
+			return;
+		}
+		std::erase_if(itr->second, [&openedBy](OpenFile const& handle) { return handle.openedBy == openedBy; });
+		if (itr->second.empty()) {
+			openFiles.erase(itr);
+		}
+	}
 
 	std::set<std::string> deletingOrClosingFiles;
 	std::set<std::string> closingFiles;

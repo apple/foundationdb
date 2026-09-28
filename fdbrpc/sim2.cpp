@@ -1501,8 +1501,12 @@ public:
 
 		// Get the size of all files we've created on the server and subtract them from the free space
 		for (auto file = proc->machine->openFiles.begin(); file != proc->machine->openFiles.end(); ++file) {
-			if (file->second.get().isReady()) {
-				totalFileSize += ((AsyncFileNonDurable*)file->second.get().get().getPtr())->approximateSize;
+			// A path's bytes count once, however many processes hold it open.
+			for (auto& handle : file->second) {
+				if (handle.file.get().isReady()) {
+					totalFileSize += ((AsyncFileNonDurable*)handle.file.get().get().getPtr())->approximateSize;
+					break;
+				}
 			}
 			numFiles++;
 		}
@@ -3062,20 +3066,21 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		ASSERT(flags & IAsyncFile::OPEN_CREATE);
 
 	if (flags & IAsyncFile::OPEN_UNCACHED) {
-		auto& machineCache = g_simulator->getCurrentProcess()->machine->openFiles;
+		auto* process = g_simulator->getCurrentProcess();
+		auto* machine = process->machine;
+		NetworkAddress openedBy = process->address;
 		std::string actualFilename = filename;
 		if (flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) {
 			actualFilename = filename + ".part";
-			auto partFile = machineCache.find(actualFilename);
-			if (partFile != machineCache.end()) {
-				Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second.get());
+			if (auto* partFile = machine->getOpenFile(actualFilename, openedBy)) {
+				Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->file.get());
 				return f;
 			}
 		}
 
 		Future<Reference<IAsyncFile>> f;
-		auto itr = machineCache.find(actualFilename);
-		if (itr == machineCache.end()) {
+		auto* openFile = machine->getOpenFile(actualFilename, openedBy);
+		if (!openFile) {
 			// Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.
 			// This way, they can both keep up with the time to start the next operation
 			auto diskParameters =
@@ -3091,9 +3096,9 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			f = AsyncFileNonDurable::open(
 			    filename, actualFilename, f, diskParameters, (flags & IAsyncFile::OPEN_NO_AIO) == 0);
 
-			machineCache[actualFilename] = UnsafeWeakFutureReference<IAsyncFile>(f);
+			machine->openFiles[actualFilename].push_back({ UnsafeWeakFutureReference<IAsyncFile>(f), openedBy });
 		} else {
-			f = itr->second.get();
+			f = openFile->file.get();
 		}
 
 		f = AsyncFileDetachable::open(f);
