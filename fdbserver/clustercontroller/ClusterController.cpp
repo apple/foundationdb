@@ -5244,11 +5244,11 @@ static std::vector<WorkerInterface> addRecruitmentTestWorkers(ClusterControllerD
 static ClusterControllerData makeRecruitmentTestData(Key const& dcId) {
 	LocalityData locality;
 	locality.set(LocalityData::keyDcId, dcId);
-	return ClusterControllerData(ClusterControllerFullInterface(),
-	                             locality,
-	                             ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                                 new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
-	                             makeReference<AsyncVar<Optional<UID>>>());
+	return ClusterControllerData(
+	    ClusterControllerFullInterface(),
+	    locality,
+	    ServerCoordinators(makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString())),
+	    makeReference<AsyncVar<Optional<UID>>>());
 }
 
 // Regression test for the original bug: in a small cluster where the desired commit-proxy
