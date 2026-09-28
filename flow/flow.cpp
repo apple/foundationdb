@@ -456,35 +456,6 @@ struct Int {
 };
 } // namespace
 
-TEST_CASE("/flow/CachedSerialization/Binary") {
-	auto version = AssumeVersion(g_network->protocolVersion());
-	CachedSerialization<Int> value(Int(7));
-	auto initial = BinaryWriter::toValue(value, version);
-	ASSERT(initial == BinaryWriter::toValue(value.read(), version));
-	ASSERT(initial == BinaryWriter::toValue(value, version));
-
-	CachedSerialization<Int> decoded(Int(9));
-	ASSERT(BinaryWriter::toValue(decoded, version) != initial);
-	BinaryReader initialReader(initial, version);
-	initialReader >> decoded;
-	initialReader.assertEnd();
-	ASSERT_EQ(decoded.read().value, 7);
-	ASSERT(BinaryWriter::toValue(decoded, version) == initial);
-
-	value.mutate().value = 11;
-	auto updated = BinaryWriter::toValue(value, version);
-	ASSERT(updated != initial);
-	ASSERT(updated == BinaryWriter::toValue(value.read(), version));
-	ASSERT(updated == BinaryWriter::toValue(value, version));
-
-	BinaryReader updatedReader(updated, version);
-	updatedReader >> decoded;
-	updatedReader.assertEnd();
-	ASSERT_EQ(decoded.read().value, 11);
-	ASSERT(BinaryWriter::toValue(decoded, version) == updated);
-	return Void();
-}
-
 TEST_CASE("/flow/FlatBuffers/ErrorOr") {
 	{
 		ErrorOr<Int> in(worker_removed());

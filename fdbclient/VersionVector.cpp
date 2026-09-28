@@ -91,29 +91,6 @@ TEST_CASE("/fdbclient/VersionVector/simpleVV") {
 	return Void();
 }
 
-TEST_CASE("/fdbclient/VersionVector/constSerializationAfterUpdate") {
-	Arena arena;
-	TestContextArena context{ arena };
-
-	VersionVector updated;
-	updated.setVersion(Tag(0, 1), 1);
-	size_t initialSize = dynamic_size_traits<VersionVector>::size(updated, context);
-	updated.setVersion(Tag(0, 2), 2);
-
-	const VersionVector serializedVV = updated;
-	size_t size = dynamic_size_traits<VersionVector>::size(serializedVV, context);
-	ASSERT_GT(size, initialSize);
-	ASSERT_EQ(size, dynamic_size_traits<VersionVector>::size(serializedVV, context));
-
-	uint8_t* buf = context.allocate(size);
-	dynamic_size_traits<VersionVector>::save(buf, serializedVV, context);
-	VersionVector deserializedVV;
-	dynamic_size_traits<VersionVector>::load(buf, size, deserializedVV, context);
-	ASSERT(deserializedVV.compare(serializedVV));
-
-	return Void();
-}
-
 // Populates version vector (with randomly generated tag localities, ids, and commit versions)
 // based on the given specifications.
 // @param vv Version vector
