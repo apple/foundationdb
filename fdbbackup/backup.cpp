@@ -673,6 +673,7 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	BACKUP_MEMORY_OPTIONS,
 	BACKUP_HELP_OPTIONS,
+	{ OPT_JSON, "--json", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -1139,6 +1140,8 @@ static void printDBBackupUsage(bool devhelp) {
 	       "                 The path of a file containing the connection string for the\n"
 	       "                 source FoundationDB cluster.\n");
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 20).\n");
+	printf("  --json         Emit status as a JSON document instead of text. Reports every error\n"
+	       "                 rather than the -e maximum, which applies to the text output only.\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 	       "                 If not specified, the entire database will be backed up.\n");
 	printf("  --keys-file FILE\n"
@@ -2000,11 +2003,12 @@ Future<Void> switchDBBackup(Database src,
 	}
 }
 
-Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, int errorLimit) {
+Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, int errorLimit, bool json) {
 	try {
 		DatabaseBackupAgent backupAgent(src);
 
-		std::string statusText = co_await backupAgent.getStatus(dest, errorLimit, StringRef(tagName));
+		std::string statusText = co_await (json ? backupAgent.getStatusJSON(dest, StringRef(tagName))
+		                                        : backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -4395,7 +4399,7 @@ int main(int argc, char* argv[]) {
 				f = stopAfter(submitDBBackup(sourceDb, db, backupKeys, tagName));
 				break;
 			case DBType::STATUS:
-				f = stopAfter(statusDBBackup(sourceDb, db, tagName, maxErrors));
+				f = stopAfter(statusDBBackup(sourceDb, db, tagName, maxErrors, jsonOutput));
 				break;
 			case DBType::SWITCH:
 				f = stopAfter(switchDBBackup(sourceDb, db, backupKeys, tagName, forceAction));
