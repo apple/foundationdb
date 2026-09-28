@@ -3077,14 +3077,19 @@ public:
 
 				UID logUid = co_await backupAgent->getLogUid(tr, tagName);
 
+				// The agents report a failure by setting a single key AT this subspace prefix
+				// (logError() -> tr->set(errors.pack(logUid))), but Subspace::range() begins at
+				// prefix + '\x00' and so excluded exactly that key, meaning no reported error was
+				// ever displayed. Start the scan at the key itself and keep the subspace end so a
+				// future writer that nests keys below it is still picked up.
+				Key logUidValue = BinaryWriter::toValue(logUid, Unversioned());
+				KeyRange errorSubspace = backupAgent->errors.get(logUidValue).range();
+				KeyRange errorRange = KeyRangeRef(backupAgent->errors.pack(logUidValue), errorSubspace.end);
+
 				Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
 				Future<RangeResult> fErrorValues =
-				    errorLimit > 0
-				        ? tr->getRange(backupAgent->errors.get(BinaryWriter::toValue(logUid, Unversioned())).range(),
-				                       errorLimit,
-				                       Snapshot::False,
-				                       Reverse::True)
-				        : Future<RangeResult>();
+				    errorLimit > 0 ? tr->getRange(errorRange, errorLimit, Snapshot::False, Reverse::True)
+				                   : Future<RangeResult>();
 				Future<Optional<Value>> fBackupUid =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(DatabaseBackupAgent::keyFolderId));
