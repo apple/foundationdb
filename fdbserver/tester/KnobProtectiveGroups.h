@@ -34,7 +34,7 @@ class KnobProtectiveGroup {
 	void assignKnobs(const KnobKeyValuePairs& overrideKnobs);
 
 public:
-	explicit KnobProtectiveGroup(const KnobKeyValuePairs& overridenKnobs_);
+	explicit KnobProtectiveGroup(const KnobKeyValuePairs& overriddenKnobs_);
 	~KnobProtectiveGroup();
 };
 

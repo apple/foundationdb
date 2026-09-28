@@ -140,7 +140,7 @@ public:
 	//
 	// A uniformly periodic counter will have roughness of 0
 	// A uniformly periodic counter that increases in clumps of N will have roughness of N-1
-	// A counter with exponentially distributed incrementations will have roughness of 1
+	// A counter with exponentially distributed increments will have roughness of 1
 	double getRoughness() const override;
 
 	bool hasRate() const override { return true; }

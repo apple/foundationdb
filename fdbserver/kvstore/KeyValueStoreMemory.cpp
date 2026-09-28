@@ -708,7 +708,7 @@ private:
 		co_await this->recovering;
 
 		Key nextKey = this->recoveredSnapshotKey;
-		bool nextKeyAfter = false; // setting this to true is equilvent to setting nextKey = keyAfter(nextKey)
+		bool nextKeyAfter = false; // setting this to true is equivalent to setting nextKey = keyAfter(nextKey)
 		uint64_t snapshotTotalWrittenBytes = 0;
 		int lastDiff = 0;
 		int snapItems = 0;

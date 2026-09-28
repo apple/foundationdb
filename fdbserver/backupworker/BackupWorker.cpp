@@ -602,7 +602,7 @@ Future<Void> monitorBackupProgress(BackupData* self) {
 		// Check every version is larger than backup's startVersion
 		for (auto& [uid, info] : self->backups) {
 			if (self->recruitedEpoch == self->oldestBackupEpoch) {
-				// update update progress so far if previous epochs are done
+				// update progress so far if previous epochs are done
 				Version v = std::numeric_limits<Version>::max();
 				for (const auto& [tag, version] : tagVersions) {
 					v = std::min(v, version);
@@ -750,7 +750,7 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 			TraceEvent("BackupWorkerTrueUp", self->myId).detail("LastSavedVersion", it->second.lastSavedVersion);
 		}
 		// The true-up version can be larger than first message version, so keep
-		// the begin versions for later muation filtering.
+		// the begin versions for later mutation filtering.
 		beginVersions.push_back(it->second.lastSavedVersion);
 
 		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(

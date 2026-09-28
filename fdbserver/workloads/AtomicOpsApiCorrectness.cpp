@@ -133,7 +133,7 @@ public:
 		ASSERT(visible.get() == full);
 	}
 
-	// Test Atomic ops on non existing keys that results in a set
+	// Test Atomic ops on nonexistent keys that results in a set
 	Future<Void> testAtomicOpSetOnNonExistingKey(Database cx, uint32_t opType, Key key) {
 		uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
 		Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
@@ -196,7 +196,7 @@ public:
 		}
 	}
 
-	// Test Atomic ops on non existing keys that results in a unset
+	// Test Atomic ops on nonexistent keys that results in a unset
 	Future<Void> testAtomicOpUnsetOnNonExistingKey(Database cx, uint32_t opType, Key key) {
 		uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
 		Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));

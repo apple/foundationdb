@@ -203,14 +203,14 @@ class RangeQueryTest {
 					for (KeyValue actualKv : kvs) {
 						if (ByteArrayUtil.compareTo(entry.getKey(), 0, entry.getKey().length, actualKv.getKey(), 0,
 						                            actualKv.getKey().length) == 0) {
-							String erroMsg = String.format("Incorrect value for key '%s'; Expected: <%s>, Actual: <%s>",
+							String errorMsg = String.format("Incorrect value for key '%s'; Expected: <%s>, Actual: <%s>",
 							                               new String(entry.getKey()), new String(entry.getValue()),
 							                               new String(actualKv.getValue()));
 							Assertions.assertEquals(
 							    0,
 							    ByteArrayUtil.compareTo(entry.getValue(), 0, entry.getValue().length,
 							                            actualKv.getValue(), 0, actualKv.getValue().length),
-							    erroMsg);
+							    errorMsg);
 							found = true;
 							break;
 						}
@@ -253,14 +253,14 @@ class RangeQueryTest {
 					for (KeyValue actualKv : kvs) {
 						if (ByteArrayUtil.compareTo(entry.getKey(), 0, entry.getKey().length, actualKv.getKey(), 0,
 						                            actualKv.getKey().length) == 0) {
-							String erroMsg = String.format("Incorrect value for key '%s'; Expected: <%s>, Actual: <%s>",
+							String errorMsg = String.format("Incorrect value for key '%s'; Expected: <%s>, Actual: <%s>",
 							                               new String(entry.getKey()), new String(entry.getValue()),
 							                               new String(actualKv.getValue()));
 							Assertions.assertEquals(
 							    0,
 							    ByteArrayUtil.compareTo(entry.getValue(), 0, entry.getValue().length,
 							                            actualKv.getValue(), 0, actualKv.getValue().length),
-							    erroMsg);
+							    errorMsg);
 							found = true;
 							break;
 						}
@@ -300,14 +300,14 @@ class RangeQueryTest {
 					for (KeyValue actualKv : kvs) {
 						if (ByteArrayUtil.compareTo(entry.getKey(), 0, entry.getKey().length, actualKv.getKey(), 0,
 						                            actualKv.getKey().length) == 0) {
-							String erroMsg = String.format("Incorrect value for key '%s'; Expected: <%s>, Actual: <%s>",
+							String errorMsg = String.format("Incorrect value for key '%s'; Expected: <%s>, Actual: <%s>",
 							                               new String(entry.getKey()), new String(entry.getValue()),
 							                               new String(actualKv.getValue()));
 							Assertions.assertEquals(
 							    0,
 							    ByteArrayUtil.compareTo(entry.getValue(), 0, entry.getValue().length,
 							                            actualKv.getValue(), 0, actualKv.getValue().length),
-							    erroMsg);
+							    errorMsg);
 							found = true;
 							break;
 						}

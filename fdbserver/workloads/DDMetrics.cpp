@@ -35,7 +35,7 @@ struct DDMetricsWorkload : TestWorkload {
 	Future<int> getHighPriorityRelocationsInFlight(Database cx, DDMetricsWorkload* self) {
 		WorkerInterface masterWorker = co_await getMasterWorker(cx, self->dbInfo);
 
-		TraceEvent("GetHighPriorityReliocationsInFlight").detail("Stage", "ContactingMaster");
+		TraceEvent("GetHighPriorityRelocationsInFlight").detail("Stage", "ContactingMaster");
 		TraceEventFields md =
 		    co_await timeoutError(masterWorker.eventLogRequest.getReply(EventLogRequest("MovingData"_sr)), 1.0);
 		int relocations;

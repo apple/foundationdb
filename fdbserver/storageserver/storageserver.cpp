@@ -144,7 +144,7 @@ bool canReplyWith(Error e) {
 	// getMappedRange related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
-	case error_code_mapper_bad_range_decriptor:
+	case error_code_mapper_bad_range_descriptor:
 	case error_code_quick_get_key_values_has_more:
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
@@ -647,7 +647,7 @@ struct StorageServerDisk {
 	}
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
-	// Read the key that is equal or greater then 'key' from the storage engine.
+	// Read the key that is equal or greater than 'key' from the storage engine.
 	// For example, readNextKeyInclusive("a") should return:
 	//  - "a", if key "a" exist
 	//  - "b", if key "a" doesn't exist, and "b" is the next existing key in total order
@@ -2939,13 +2939,13 @@ Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpointKeyVa
 		while (true) {
 			RangeResult res = co_await iter->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT);
 			if (!res.empty()) {
-				TraceEvent(SevDebug, "FetchCheckpontKeyValuesReadRange", self->thisServerID)
+				TraceEvent(SevDebug, "FetchCheckpointKeyValuesReadRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID)
 				    .detail("FirstReturnedKey", res.front().key)
 				    .detail("LastReturnedKey", res.back().key)
 				    .detail("Size", res.size());
 			} else {
-				TraceEvent(SevInfo, "FetchCheckpontKeyValuesEmptyRange", self->thisServerID)
+				TraceEvent(SevInfo, "FetchCheckpointKeyValuesEmptyRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID);
 			}
 
@@ -6012,7 +6012,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 			MappedKeyPlan mappedKeyPlan(mappedKeyFormatTuple.pack());
 			Key mappedKey = mappedKeyPlan.constructMappedKey(kvr);
 		} catch (Error& e) {
-			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
+			ASSERT(e.code() == error_code_mapper_bad_range_descriptor);
 			throwException2 = true;
 		}
 		ASSERT(throwException2);
@@ -8724,8 +8724,8 @@ Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			if (!updates.empty()) {
 				TraceEvent(moveInShard->logSev, "FetchShardApplyingUpdates", data->thisServerID)
 				    .detail("MoveInShard", moveInShard->toString())
-				    .detail("MinVerion", updates.front().version)
-				    .detail("MaxVerion", updates.back().version)
+				    .detail("MinVersion", updates.front().version)
+				    .detail("MaxVersion", updates.back().version)
 				    .detail("TargetVersion", version)
 				    .detail("HighWatermark", highWatermark)
 				    .detail("Size", updates.size());
@@ -11106,7 +11106,7 @@ Future<Void> updateStorage(StorageServer* data) {
 				    .detail("Version", data->pendingAddRanges.begin()->first)
 				    .detail("DurableVersion", data->durableVersion.get());
 				addedRanges = true;
-				// Remove commit byte limit to make sure the private mutaiton(s) associated with the
+				// Remove commit byte limit to make sure the private mutation(s) associated with the
 				// `addRange` are committed.
 				unlimitedCommitBytes = UnlimitedCommitBytes::True;
 			}
@@ -11149,7 +11149,7 @@ Future<Void> updateStorage(StorageServer* data) {
 			data->fetchKeysBytesBudget += bytesLeft;
 			data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
 
-			// Dependng on how negative the fetchKeys budget was it could still be used up
+			// Depending on how negative the fetchKeys budget was it could still be used up
 			if (!data->fetchKeysBudgetUsed.get()) {
 				co_await (durableDelay || data->fetchKeysBudgetUsed.onChange());
 			}
@@ -11276,7 +11276,7 @@ Future<Void> updateStorage(StorageServer* data) {
 		debug_advanceMinCommittedVersion(data->thisServerID, data->storageMinRecoverVersion);
 
 		if (removeKVSRanges) {
-			TraceEvent(SevDebug, "RemoveKVSRangesComitted", data->thisServerID)
+			TraceEvent(SevDebug, "RemoveKVSRangesCommitted", data->thisServerID)
 			    .detail("NewDurableVersion", newOldestVersion)
 			    .detail("DesiredVersion", desiredVersion)
 			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
@@ -11333,7 +11333,7 @@ Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		durableInProgress.send(Void());
-		co_await delay(0, TaskPriority::UpdateStorage); // Setting durableInProgess could cause the storage server to
+		co_await delay(0, TaskPriority::UpdateStorage); // Setting durableInProgress could cause the storage server to
 		                                                // shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was

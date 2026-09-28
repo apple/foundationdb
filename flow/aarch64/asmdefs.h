@@ -12,7 +12,7 @@
 
 // clang-format off
 
-/* Branch Target Identitication support.  */
+/* Branch Target Identification support.  */
 #define BTI_C		hint	34
 #define BTI_J		hint	36
 /* Return address signing support (pac-ret).  */

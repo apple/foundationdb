@@ -70,10 +70,10 @@ RESTClient::Stats RESTClient::Stats::operator-(const Stats& rhs) {
 	return r;
 }
 
-RESTClient::RESTClient() : conectionPool(makeReference<RESTConnectionPool>(knobs.connection_pool_size)) {}
+RESTClient::RESTClient() : connectionPool(makeReference<RESTConnectionPool>(knobs.connection_pool_size)) {}
 
 RESTClient::RESTClient(std::unordered_map<std::string, int>& knobSettings)
-  : conectionPool(makeReference<RESTConnectionPool>(knobs.connection_pool_size)) {
+  : connectionPool(makeReference<RESTConnectionPool>(knobs.connection_pool_size)) {
 	knobs.set(knobSettings);
 }
 
@@ -141,7 +141,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> c
 		try {
 			// Start connecting
 			Future<RESTConnectionPool::ReusableConnection> frconn =
-			    client->conectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
+			    client->connectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
 
 			// Finish connecting, do request
 			rconn = co_await timeoutError(frconn, client->knobs.connect_timeout);
@@ -154,7 +154,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> c
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
 			if (r->data.headers["Connection"] != "close") {
-				client->conectionPool->returnConnection(connectPoolKey, rconn, client->knobs.connection_pool_size);
+				client->connectionPool->returnConnection(connectPoolKey, rconn, client->knobs.connection_pool_size);
 			}
 			rconn.conn.clear();
 		} catch (Error& e) {
@@ -262,7 +262,7 @@ Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> c
 			if (err.present()) {
 				int code = err.get().code();
 
-				// If we get a timed_out error during the the connect() phase, we'll call that connection_failed
+				// If we get a timed_out error during the connect() phase, we'll call that connection_failed
 				// despite the fact that there was technically never a 'connection' to begin with.  It
 				// differentiates between an active connection timing out vs a connection timing out, though not
 				// between an active connection failing vs connection attempt failing.
@@ -352,7 +352,7 @@ Future<Reference<HTTP::IncomingResponse>> RESTClient::doDelete(const std::string
 	    url,
 	    // 200 - action has been enacted.
 	    // 202 - action will likely succeed, but, has not yet been enacted.
-	    // 204 - action has been enated, no further information is to supplied.
+	    // 204 - action has been enacted, no further information is to supplied.
 	    { HTTP::HTTP_STATUS_CODE_OK, HTTP::HTTP_STATUS_CODE_NO_CONTENT, HTTP::HTTP_STATUS_CODE_ACCEPTED });
 }
 

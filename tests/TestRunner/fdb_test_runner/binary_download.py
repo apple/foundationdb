@@ -119,13 +119,13 @@ class FdbBinaryDownloader:
             assert local_file_tmp.exists(), "{} does not exist".format(local_file_tmp)
             assert local_sha256.exists(), "{} does not exist".format(local_sha256)
             expected_checksum = read_to_str(local_sha256)[0:64]
-            actual_checkum = compute_sha256(local_file_tmp)
-            if expected_checksum == actual_checkum:
+            actual_checksum = compute_sha256(local_file_tmp)
+            if expected_checksum == actual_checksum:
                 print("Checksum OK")
                 break
             print(
                 "Checksum mismatch. Expected: {} Actual: {}".format(
-                    expected_checksum, actual_checkum
+                    expected_checksum, actual_checksum
                 )
             )
 

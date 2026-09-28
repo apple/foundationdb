@@ -30,7 +30,7 @@ test, do the following:
 
 1. Tag all tests that require multiple clients with `@Tag("MultiClient")`
 2. Ensure that your tests have the `MultiClientHelper` extension present, and Registered as an extension
-3. Ensure that your test class is in the the JAVA_INTEGRATION_TESTS list in `test.cmake`
+3. Ensure that your test class is in the JAVA_INTEGRATION_TESTS list in `test.cmake`
 
 ( see `BasicMultiClientIntegrationTest` for a good reference example)
 

@@ -292,7 +292,7 @@ def transactional(*tr_args, **tr_kwargs):
                 # the code above uses @transactional before the API version is set
                 if fdb.get_api_version() >= 630 and inspect.isgeneratorfunction(func):
                     raise ValueError(
-                        "Generators can not be wrapped with fdb.transactional"
+                        "Generators cannot be wrapped with fdb.transactional"
                     )
 
                 if isinstance(args[index], TransactionRead):
@@ -312,7 +312,7 @@ def transactional(*tr_args, **tr_kwargs):
                         ret = func(*largs, **kwargs)
                         if fdb.get_api_version() >= 630 and inspect.isgenerator(ret):
                             raise ValueError(
-                                "Generators can not be wrapped with fdb.transactional"
+                                "Generators cannot be wrapped with fdb.transactional"
                             )
                         tr.commit().wait()
                         committed = True

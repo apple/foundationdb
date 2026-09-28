@@ -293,7 +293,7 @@ struct ValidateStorage : TestWorkload {
 		}
 
 		testStringToAuditPhaseFunctionality();
-		TraceEvent("TestAuditStorageStringToAuditPhaseFuncionalityDone");
+		TraceEvent("TestAuditStorageStringToAuditPhaseFunctionalityDone");
 
 		co_await testSSUserDataValidation(this, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr));
 		TraceEvent("TestAuditStorageValidateValueDone");
@@ -485,7 +485,7 @@ struct ValidateStorage : TestWorkload {
 		UID auditIdD = co_await self->auditStorageForType(
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageFunctionality");
 		TraceEvent("TestFunctionalitySSShardInfoDone", auditIdD);
-		co_await self->testGetAuditStateWhenNoOngingAudit(self, cx);
+		co_await self->testGetAuditStateWhenNoOngoingAudit(self, cx);
 		TraceEvent("TestGetAuditStateDone");
 	}
 
@@ -504,7 +504,7 @@ struct ValidateStorage : TestWorkload {
 		;
 	}
 
-	Future<Void> testGetAuditStateWhenNoOngingAuditForType(ValidateStorage* self, Database cx, AuditType type) {
+	Future<Void> testGetAuditStateWhenNoOngoingAuditForType(ValidateStorage* self, Database cx, AuditType type) {
 		TraceEvent("TestGetAuditStateBegin").detail("AuditType", type);
 		std::vector<AuditStorageState> res1 = co_await getAuditStates(cx, type, /*newFirst=*/true, 1);
 		if (res1.size() > 1) { // == 0 if empty range when testAuditStorageFunctionality
@@ -554,17 +554,17 @@ struct ValidateStorage : TestWorkload {
 		TraceEvent("TestGetAuditStateEnd").detail("AuditType", type);
 	}
 
-	Future<Void> testGetAuditStateWhenNoOngingAudit(ValidateStorage* self, Database cx) {
-		co_await self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateHA);
+	Future<Void> testGetAuditStateWhenNoOngoingAudit(ValidateStorage* self, Database cx) {
+		co_await self->testGetAuditStateWhenNoOngoingAuditForType(self, cx, AuditType::ValidateHA);
 		TraceEvent("TestGetAuditStateHADone");
 
-		co_await self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateReplica);
+		co_await self->testGetAuditStateWhenNoOngoingAuditForType(self, cx, AuditType::ValidateReplica);
 		TraceEvent("TestGetAuditStateReplicaDone");
 
-		co_await self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateLocationMetadata);
+		co_await self->testGetAuditStateWhenNoOngoingAuditForType(self, cx, AuditType::ValidateLocationMetadata);
 		TraceEvent("TestGetAuditStateShardLocationMetadataDone");
 
-		co_await self->testGetAuditStateWhenNoOngingAuditForType(self, cx, AuditType::ValidateStorageServerShard);
+		co_await self->testGetAuditStateWhenNoOngoingAuditForType(self, cx, AuditType::ValidateStorageServerShard);
 		TraceEvent("TestGetAuditStateSSShardInfoDone");
 	}
 
@@ -694,7 +694,7 @@ struct ValidateStorage : TestWorkload {
 			auditState.ddId = ddId;
 			auditState.setPhase(AuditPhase::Complete);
 			co_await self->persistAuditStateByRange(self, cx, auditState);
-			alreadyPersisteRanges.push_back(progressRanges[i]);
+			alreadyPersistedRanges.push_back(progressRanges[i]);
 			std::vector<AuditStorageState> auditStates = co_await getAuditStateByRange(cx, auditType, auditId, allKeys);
 			for (int i = 0; i < auditStates.size(); i++) {
 				KeyRange toCompare = auditStates[i].range;
@@ -702,8 +702,8 @@ struct ValidateStorage : TestWorkload {
 				bool fullyCovered = false;
 				std::vector<KeyRange> unCoveredRanges;
 				unCoveredRanges.push_back(toCompare);
-				// check if toCompare is overlapped/fullyCovered by alreadyPersisteRanges
-				for (const auto& persistedRange : alreadyPersisteRanges) {
+				// check if toCompare is overlapped/fullyCovered by alreadyPersistedRanges
+				for (const auto& persistedRange : alreadyPersistedRanges) {
 					KeyRange overlappedRange = toCompare & persistedRange;
 					if (!overlappedRange.empty()) {
 						overlapped = true;
@@ -718,10 +718,10 @@ struct ValidateStorage : TestWorkload {
 					unCoveredRanges = unCoveredRangesNow;
 				}
 				fullyCovered = unCoveredRanges.empty();
-				if (fullyCovered) { // toCompare is fully covered by alreadyPersisteRanges
+				if (fullyCovered) { // toCompare is fully covered by alreadyPersistedRanges
 					ASSERT(auditStates[i].getPhase() == AuditPhase::Complete);
 				} else {
-					// toCompare cannot be partially covered by alreadyPersisteRanges
+					// toCompare cannot be partially covered by alreadyPersistedRanges
 					ASSERT(!overlapped);
 					ASSERT(auditStates[i].getPhase() == AuditPhase::Invalid);
 				}

@@ -547,7 +547,7 @@ Tuple Tuple::getNested(size_t index) const {
 		}
 	}
 
-	// The item may shrink because of escaped nulls that are unespaced.
+	// The item may shrink because of escaped nulls that are unescaped.
 	return Tuple(dest, dest_offsets);
 }
 

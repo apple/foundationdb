@@ -404,7 +404,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	/**
 	 * Get an encoded representation of this {@code Tuple} for use with
 	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
-	 *  This works the same as the {@link #packWithVersionstamp(byte[]) one-paramter version of this method},
+	 *  This works the same as the {@link #packWithVersionstamp(byte[]) one-parameter version of this method},
 	 *  but it does not add any prefix to the array.
 	 *
 	 * @return a packed representation of this {@code Tuple} for use with versionstamp ops.

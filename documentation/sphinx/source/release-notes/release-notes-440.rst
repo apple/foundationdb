@@ -26,7 +26,7 @@ Features
 
 * Added support for streaming writes. This allows a client to load an ordered list of mutations into the database in parallel, and once they are all loaded, the mutations will be applied to the database in order.
 * DR uses streaming writes to significantly improve throughput.
-* Restore was rewritten so that many clients can partipate in restoring data, significantly improving restore speed. The command line restore tool interface has been updated to support this new capability.
+* Restore was rewritten so that many clients can participate in restoring data, significantly improving restore speed. The command line restore tool interface has been updated to support this new capability.
 * Cluster files now support comments (using the '#' character).
 * A wide variety of new client-side statistics are logged in client trace files every 5 seconds.
 * Status reports the generation of the system. The generation is incremented every time there is a failure (and recovery) in the transaction subsystem.

@@ -121,7 +121,7 @@ func (uuid UUID) String() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:])
 }
 
-// Versionstamp is struct for a FoundationDB verionstamp. Versionstamps are
+// Versionstamp is struct for a FoundationDB versionstamp. Versionstamps are
 // 12 bytes long composed of a 10 byte transaction version and a 2 byte user
 // version. The transaction version is filled in at commit time and the user
 // version is provided by the application to order results within a transaction.

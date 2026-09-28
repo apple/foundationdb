@@ -31,14 +31,14 @@ make packages
 #### Multi-Platform Jar-File
 
 If you want to create a jar file that can run on more than one supported
-architecture (the official one supports MacOS, Linux, and Windows), you can do
+architecture (the official one supports macOS, Linux, and Windows), you can do
 that by executing the following steps:
 
 1. Create a directory called `lib` somewhere on your file system.
 1. Create a subdirectory for each *additional* platform you want to support
-   (`windows` for windows, `osx` for MacOS, and `linux` for Linux).
+   (`windows` for windows, `osx` for macOS, and `linux` for Linux).
 1. Under each of those create a subdirectory with the name of the architecture
-   (currently only `amd64` is supported - on MacOS this has to be called
+   (currently only `amd64` is supported - on macOS this has to be called
    `x86_64` - `amd64` on all others).
 1. Set the cmake variable `FAT_JAR_BINARIES` to this `lib` directory. For
    example, if you created this directory structure under `/foo/bar`, the

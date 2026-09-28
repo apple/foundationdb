@@ -101,7 +101,7 @@ bool findBestPolicySetSimple(int targetUniqueValueCount,
                              std::vector<LocalityEntry>& bestSet,
                              int desired) {
 	auto& mutableEntries = logServerSet->getMutableEntries();
-	// First make sure the current localitySet is able to fulfuill the policy
+	// First make sure the current localitySet is able to fulfill the policy
 	AttribKey indexKey = logServerSet->keyIndex("zoneid");
 	int uniqueValueCount = logServerSet->getKeyValueArray()[indexKey._id].size();
 
@@ -250,7 +250,7 @@ bool findBestPolicySet(std::vector<LocalityEntry>& bestResults,
 				auto oldBestFound =
 				    findBestPolicySetExpensive(oldBest, localitySet, policy, nMinItems, nSelectTests, nPolicyTests);
 				if (!oldBestFound) {
-					TraceEvent(SevError, "FBPSMissmatch").detail("Policy", policy->info());
+					TraceEvent(SevError, "FBPSMismatch").detail("Policy", policy->info());
 				} else {
 					ASSERT(mostUsedZoneCount(localitySet, bestResults) <= mostUsedZoneCount(localitySet, oldBest));
 				}

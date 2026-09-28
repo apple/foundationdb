@@ -28,7 +28,7 @@ The key concepts are:
  - Inbox: An inbox receives messages posted to feeds
  - Subscriptions: A subscription connects an inbox to a feed
 
-Simply put, an inbox receives receives all messages posted to the feeds it subscribes to.
+Simply put, an inbox receives all messages posted to the feeds it subscribes to.
 
 The pub/sub layer allows management of feeds, inboxes, and subscriptions, as well as the
 actual delivery of messages.

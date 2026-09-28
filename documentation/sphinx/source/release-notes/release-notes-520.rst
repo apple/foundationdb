@@ -42,7 +42,7 @@ Fixes
 
 * A memory leak was fixed in connection closing. `(PR #574) <https://github.com/apple/foundationdb/pull/574>`_
 * A memory leak was fixed in the coordinator's handling of disconnected clients. `(PR #579) <https://github.com/apple/foundationdb/pull/579>`_
-* Aligned memory allocation on MacOS was sometimes failing to allocate memory, causing a crash. `(PR #547) <https://github.com/apple/foundationdb/pull/547>`_
+* Aligned memory allocation on macOS was sometimes failing to allocate memory, causing a crash. `(PR #547) <https://github.com/apple/foundationdb/pull/547>`_
 
 5.2.5
 =====

@@ -36,7 +36,7 @@
     we choose to not cover the version of OTELSum which uses double
 
     Furthermore, we also diverge from the protobuf definition of HistogramDataPoint by using DDSketch.
-    This means that that there is an additional field for storing the errorGuarantee (a double). Also, to save some
+    This means that there is an additional field for storing the errorGuarantee (a double). Also, to save some
    space the buckets are uint32_t instead of uint64_t. The reason for this is due to the fact that it is highly unlikely
    that a single bucket would hit it's threshold with the default error guarantee of 1%.
 

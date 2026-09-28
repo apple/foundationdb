@@ -166,7 +166,7 @@ public:
 
 	uint64_t getPopulationSize() const { return populationSize; }
 
-	double getErrorGurantee() const { return errorGuarantee; }
+	double getErrorGuarantee() const { return errorGuarantee; }
 
 	DDSketchBase<Impl, T>& mergeWith(const DDSketchBase<Impl, T>& anotherSketch) {
 		// Must have the same guarantee

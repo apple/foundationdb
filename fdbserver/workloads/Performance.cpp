@@ -97,7 +97,7 @@ struct PerformanceWorkload : TestWorkload {
 	}
 
 	void logOptions(Standalone<VectorRef<VectorRef<KeyValueRef>>> options) {
-		TraceEvent start("PerformaceSetupStarting");
+		TraceEvent start("PerformanceSetupStarting");
 		for (int i = 0; i < options.size(); i++) {
 			for (int j = 0; j < options[i].size(); j++) {
 				start.detail(format("Option-%d-%d", i, j).c_str(),
@@ -160,7 +160,7 @@ struct PerformanceWorkload : TestWorkload {
 
 		while (true) {
 			Standalone<VectorRef<VectorRef<KeyValueRef>>> options = self->getOpts(tps);
-			TraceEvent start("PerformaceProbeStarting");
+			TraceEvent start("PerformanceProbeStarting");
 			start.detail("RateTarget", tps);
 			for (int i = 0; i < options.size(); i++) {
 				for (int j = 0; j < options[i].size(); j++) {

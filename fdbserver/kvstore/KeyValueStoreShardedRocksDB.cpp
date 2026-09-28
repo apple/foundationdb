@@ -55,7 +55,7 @@ static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSD
               "Unsupported rocksdb version.");
 
 const std::string METADATA_SHARD_ID = "kvs-metadata";
-const std::string DEFAULT_CF_NAME = "default"; // `specialKeys` is stored in this culoumn family.
+const std::string DEFAULT_CF_NAME = "default"; // `specialKeys` is stored in this column family.
 const std::string manifestFilePrefix = "MANIFEST-";
 const KeyRef shardMappingPrefix("\xff\xff/ShardMapping/"_sr);
 const KeyRef compactionTimestampPrefix("\xff\xff/CompactionTimestamp/"_sr);
@@ -585,7 +585,7 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.num_entries = fileMetaData.num_entries;
 		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+		liveFileMetaData.oldest_ancestor_time = fileMetaData.oldest_ancestor_time;
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
 		liveFileMetaData.smallest = fileMetaData.smallest;
 		liveFileMetaData.largest = fileMetaData.largest;
@@ -624,7 +624,7 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 			liveFileMetaData.num_entries = fileMetaData.num_entries;
 			liveFileMetaData.num_deletions = fileMetaData.num_deletions;
 			liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-			liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+			liveFileMetaData.oldest_ancestor_time = fileMetaData.oldest_ancestor_time;
 			liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
 			liveFileMetaData.smallest = fileMetaData.smallest;
 			liveFileMetaData.largest = fileMetaData.largest;
@@ -1207,7 +1207,7 @@ public:
 					}
 					e.detail("NumLevels", numLevels);
 				}
-				TraceEvent(SevInfo, "KVSPhysialShardMetrics")
+				TraceEvent(SevInfo, "KVSPhysicalShardMetrics")
 				    .detail("NumActiveShards", shardManager->numActiveShards())
 				    .detail("TotalPhysicalShards", shardManager->numPhysicalShards())
 				    .detail("NumSstFiles", numSstFiles);
@@ -1273,7 +1273,7 @@ public:
 			return status;
 		}
 
-		TraceEvent("ShardedRocksDBOpen").detail("Duraton", now() - start).detail("NumCFs", descriptors.size());
+		TraceEvent("ShardedRocksDBOpen").detail("Duration", now() - start).detail("NumCFs", descriptors.size());
 
 		if (foundMetadata) {
 			TraceEvent(SevInfo, "ShardedRocksInitLoadPhysicalShards", this->logId)
@@ -2908,7 +2908,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					(*columnFamilyMap)[ps->cf->GetID()] = ps->cf;
 					TraceEvent(SevInfo, "RocksDBRestoreCFSuccess", logId)
 					    .detail("Path", a.path)
-					    .detail("ColumnFaminly", ps->cf->GetName())
+					    .detail("ColumnFamily", ps->cf->GetName())
 					    .detail("Checkpoints", describe(a.checkpoints));
 
 					// Remove the extra data.
@@ -3106,9 +3106,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			auto db = a.shard->db;
 			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
-				uint64_t deadlineMircos =
+				uint64_t deadlineMicros =
 				    db->GetEnv()->NowMicros() + (readValueTimeout - (timer_monotonic() - a.startTime)) * 1000000;
-				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+				std::chrono::seconds deadlineSeconds(deadlineMicros / 1000000);
 				options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 			}
 			auto s = db->Get(options, a.shard->cf, toSlice(a.key), &value);
@@ -3182,9 +3182,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			auto options = getReadOptions();
 			auto db = a.shard->db;
 			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
-				uint64_t deadlineMircos =
+				uint64_t deadlineMicros =
 				    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (timer_monotonic() - a.startTime)) * 1000000;
-				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+				std::chrono::seconds deadlineSeconds(deadlineMicros / 1000000);
 				options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 			}
 
@@ -3333,7 +3333,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 	};
 
-	// Persist shard mappinng key range should not be in shardMap.
+	// Persist shard mapping key range should not be in shardMap.
 	explicit ShardedRocksDBKeyValueStore(const std::string& path, UID id)
 	  : rState(std::make_shared<ShardedRocksDBState>()), path(path), id(id),
 	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
@@ -3347,7 +3347,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    shardManager(path, id, rState, dbOptions, errorListener, eventListener, &counters, iteratorPool),
 	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, rState, dbOptions.statistics)),
 	    latencyMetrics(std::make_shared<LatencyMetrics>()) {
-		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
+		// In simulation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
 		// engine is still multi-threaded as background compaction threads are still present. Reads/writes to disk
 		// will also block the network thread in a way that would be unacceptable in production but is a necessary
 		// evil here. When performing the reads in background threads in simulation, the event loop thinks there is
@@ -3503,7 +3503,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT;
 	}
 
-	// Checks and waits for few seconds if rocskdb is overloaded.
+	// Checks and waits for few seconds if rocksdb is overloaded.
 	Future<Void> checkRocksdbState(rocksdb::DB* db) {
 		uint64_t estPendCompactBytes{ 0 };
 		int count = SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
@@ -4554,7 +4554,7 @@ TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointBasic") {
 	iter0.reset();
 	iter1.reset();
 	ASSERT(!cpReader->inUse());
-	TraceEvent(SevDebug, "ShardedRocksCheckpointReaaderTested");
+	TraceEvent(SevDebug, "ShardedRocksCheckpointReaderTested");
 	std::vector<Future<Void>> closes;
 	closes.push_back(cpReader->close());
 	closes.push_back(kvStore->onClosed());

@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
- * Miscellanenous tests for Java-bindings-specific implementation of
+ * Miscellaneous tests for Java-bindings-specific implementation of
  * transactions
  */
 @ExtendWith(RequiresDatabase.class)
