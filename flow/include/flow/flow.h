@@ -407,7 +407,7 @@ public:
 		if constexpr (is_fb_function<Ar>) {
 			// Suppress vtable collection. Save and load are implemented via the specializations below
 		} else {
-			if (Ar::isDeserializing) {
+			if constexpr (Ar::isDeserializing) {
 				cache = Standalone<StringRef>();
 				cacheType = SerializeType::None;
 				serializer(ar, data);
@@ -416,7 +416,7 @@ public:
 					cache = BinaryWriter::toValue(data, AssumeVersion(g_network->protocolVersion()));
 					cacheType = SerializeType::Binary;
 				}
-				ar.serializeBytes(const_cast<uint8_t*>(cache.begin()), cache.size());
+				ar.serializeBytes(cache.begin(), cache.size());
 			}
 		}
 	}
