@@ -87,12 +87,13 @@ void printDecodeUsage() {
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --list-only    Print file list and exit.\n"
 	             "  --validate-filters Validate the default RangeMap filtering logic with a slower one.\n"
-	             "  -k KEY_PREFIX  Use a single prefix for filtering mutations.\n"
+	             "  -k KEY_PREFIX  Use a single prefix for filtering mutations and range files.\n"
 	             "  --filters PREFIX_FILTER_FILE\n"
 	             "                 A file containing a list of prefix filters in HEX format separated by \";\",\n"
 	             "                 e.g., \"\\x05\\x01;\\x15\\x2b\"\n"
 	             "  --hex-prefix   HEX_PREFIX\n"
 	             "                 The prefix specified in HEX format, e.g., --hex-prefix \"\\\\x05\\\\x01\".\n"
+	             "                 With none of -k, --filters or --hex-prefix, everything is decoded.\n"
 	             "  --begin-version-filter BEGIN_VERSION\n"
 	             "                 The version range's begin version (inclusive) for filtering.\n"
 	             "  --end-version-filter END_VERSION\n"
@@ -791,6 +792,12 @@ Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Ref
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->readKeyspaceSnapshot(snapshots[i]);
 			for (const auto& rangeFile : results.first) {
+				// No prefix filter, or a manifest with no per-file key ranges (encrypted backups), selects
+				// every file. An empty RangeMapFilters matches nothing, so it cannot answer this.
+				if (params->prefixes.empty() || results.second.empty()) {
+					files.push_back(rangeFile);
+					continue;
+				}
 				const auto& keyRange = results.second.at(rangeFile.fileName);
 				if (params->matchFilters(keyRange)) {
 					files.push_back(rangeFile);

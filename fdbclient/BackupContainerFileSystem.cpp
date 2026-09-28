@@ -2956,4 +2956,29 @@ TEST_CASE("/backup/containers/localdir/listKeyspaceSnapshots/versionFilter") {
 	co_await c->deleteContainer();
 }
 
+// A RangeMapFilters with no prefixes matches nothing, so callers wanting "no filter means everything" must
+// check for an empty prefix list themselves instead of consulting the filter.
+TEST_CASE("/backup/rangeMapFilters/emptyMatchesNothing") {
+	fileBackup::RangeMapFilters empty;
+	ASSERT(!empty.match(KeyRangeRef(""_sr, "\xff"_sr))); // not even the whole keyspace
+	ASSERT(!empty.match(KeyRangeRef("a"_sr, "b"_sr)));
+	ASSERT(!empty.match(KeyValueRef("a"_sr, "v"_sr)));
+
+	std::vector<std::string> prefixes = { "ab" };
+	fileBackup::RangeMapFilters filters;
+	filters.updateFilters(prefixes);
+	ASSERT(filters.match(KeyRangeRef("ab"_sr, "ac"_sr)));
+	ASSERT(filters.match(KeyRangeRef("aa"_sr, "az"_sr)));
+	ASSERT(filters.match(KeyValueRef("abc"_sr, "v"_sr)));
+	ASSERT(!filters.match(KeyRangeRef("b"_sr, "c"_sr)));
+	ASSERT(!filters.match(KeyValueRef("b"_sr, "v"_sr)));
+
+	std::vector<KeyRange> ranges = { KeyRangeRef("m"_sr, "n"_sr) };
+	fileBackup::RangeMapFilters fromRanges(ranges);
+	ASSERT(fromRanges.match(KeyRangeRef("m"_sr, "mz"_sr)));
+	ASSERT(!fromRanges.match(KeyRangeRef("x"_sr, "y"_sr)));
+
+	return Void();
+}
+
 } // namespace backup_test
