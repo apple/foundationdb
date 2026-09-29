@@ -142,7 +142,7 @@ public:
 		return etag;
 	}
 
-	ACTOR static Future<Void> doFinishUpload(AsyncFileS3BlobStoreWrite* f) {
+	ACTOR static Future<Void> doFinishUpload(AsyncFileS3BlobStoreWrite* f, int64_t totalSize) {
 		// If there is only 1 part then it has not yet been uploaded so just write the whole file at once.
 		if (f->m_parts.size() == 1) {
 			Reference<Part> part = f->m_parts.back();
@@ -168,7 +168,7 @@ public:
 
 		// No need to wait for the upload ID here because the above loop waited for all the parts and each part required
 		// the upload ID so it is ready
-		wait(f->m_bstore->finishMultiPartUpload(f->m_bucket, f->m_object, f->m_upload_id.get(), partSet));
+		wait(f->m_bstore->finishMultiPartUpload(f->m_bucket, f->m_object, f->m_upload_id.get(), partSet, totalSize));
 
 		return Void();
 	}
@@ -177,7 +177,7 @@ public:
 	Future<Void> sync() override {
 		// Only initiate the finish operation once, and also prevent further writing.
 		if (!m_finished.isValid()) {
-			m_finished = doFinishUpload(this);
+			m_finished = doFinishUpload(this, m_cursor);
 			m_cursor = -1; // Cause future write attempts to fail
 		}
 

@@ -299,7 +299,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			etagMap[part.partNumber] = part.etag;
 		}
 
-		wait(endpoint->finishMultiPartUpload(bucket, objectName, uploadID, etagMap));
+		wait(endpoint->finishMultiPartUpload(bucket, objectName, uploadID, etagMap, size));
 
 		// Clear data after successful upload
 		parts.clear();

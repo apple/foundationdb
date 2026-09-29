@@ -1,6 +1,11 @@
 find_package(WIX)
 
 if(WIX_FOUND)
+  if(TARGET fdbmonitor)
+    set(FDBMONITOR_ARG -Dfdbmonitor=$<TARGET_FILE:fdbmonitor>)
+  else()
+    set(FDBMONITOR_ARG "")
+  endif()
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FDBInstaller.wxs
     COMMAND ${CMAKE_COMMAND}
             -DOUT=${CMAKE_CURRENT_BINARY_DIR}/FDBInstaller.wxs
@@ -8,7 +13,7 @@ if(WIX_FOUND)
             -Dfdbserver=$<TARGET_FILE:fdbserver>
             -Dfdbcli=$<TARGET_FILE:fdbcli>
             -Dfdbbackup=$<TARGET_FILE:fdbbackup>
-            -Dfdbmonitor=$<TARGET_FILE:fdbmonitor>
+            ${FDBMONITOR_ARG}
             -Dfdbc=$<TARGET_FILE:fdb_c>
             -DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
             -DBUILD_ROOT=${CMAKE_BINARY_DIR}
@@ -27,7 +32,10 @@ if(WIX_FOUND)
     COMMENT "Create WIX Object file"
     )
   add_custom_target(wixobj DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/FDBInstaller.wixobj)
-  add_dependencies(wixobj fdbserver fdbcli fdbmonitor fdb_c fdbbackup python_binding)
+  if(TARGET fdbmonitor)
+    add_dependencies(wixobj fdbmonitor)
+  endif()
+  add_dependencies(wixobj fdbserver fdbcli fdb_c fdbbackup python_binding)
 	if(NOT FDB_RELEASE)
     set(not_fdb_release_string "-SNAPSHOT")
   else()
