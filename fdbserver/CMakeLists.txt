@@ -48,12 +48,6 @@ add_subdirectory(tlog)
 add_subdirectory(worker)
 add_subdirectory(workloads)
 
-if(FDB_MEMORY_TRACKER)
-  add_fdbserver_unit_test(fdbserver_memorytracker_test MemoryTrackerTest.cpp
-    fdbserver_core)
-  target_sources(fdbserver_memorytracker_test PRIVATE MemoryTrackerTest.cpp GlobalNewDelete.cpp)
-endif()
-
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
@@ -242,5 +236,5 @@ target_link_libraries(fdbserver PUBLIC fdbctl)
 
 if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
                                      # x-compiling.
-  add_subdirectory(bench EXCLUDE_FROM_ALL)
+  add_subdirectory(bench/coroflow EXCLUDE_FROM_ALL)
 endif()
