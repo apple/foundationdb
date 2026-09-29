@@ -3077,36 +3077,28 @@ public:
 
 				UID logUid = co_await backupAgent->getLogUid(tr, tagName);
 
-				// The agents report a failure by setting a single key AT this subspace prefix
-				// (logError() -> tr->set(errors.pack(logUid))), but Subspace::range() begins at
-				// prefix + '\x00' and so excluded exactly that key, meaning no reported error was
-				// ever displayed. Start the scan at the key itself and keep the subspace end so a
-				// future writer that nests keys below it is still picked up.
 				Key logUidValue = BinaryWriter::toValue(logUid, Unversioned());
-				KeyRange errorSubspace = backupAgent->errors.get(logUidValue).range();
-				KeyRange errorRange = KeyRangeRef(backupAgent->errors.pack(logUidValue), errorSubspace.end);
+				Subspace logUidStates = backupAgent->states.get(logUidValue);
+
+				// The agents report a failure by setting a single key AT this prefix, not under it
+				// (logError() -> tr->set(errors.pack(logUid))). Subspace::range() begins at
+				// prefix + '\x00' and so excluded exactly that key, meaning no reported error was
+				// ever displayed.
+				KeyRange errorRange = prefixRange(backupAgent->errors.pack(logUidValue));
 
 				Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
 				Future<RangeResult> fErrorValues =
 				    errorLimit > 0 ? tr->getRange(errorRange, errorLimit, Snapshot::False, Reverse::True)
 				                   : Future<RangeResult>();
-				Future<Optional<Value>> fBackupUid =
-				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
-				                .pack(DatabaseBackupAgent::keyFolderId));
+				Future<Optional<Value>> fBackupUid = tr->get(logUidStates.pack(DatabaseBackupAgent::keyFolderId));
 				Future<Optional<Value>> fBackupVerison =
-				    tr->get(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin));
-				Future<Optional<Key>> fTagName =
-				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
-				                .pack(BackupAgentBase::keyConfigBackupTag));
-				Future<Optional<Value>> fStopVersionKey =
-				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
-				                .pack(BackupAgentBase::keyStateStop));
+				    tr->get(logUidValue.withPrefix(applyMutationsBeginRange.begin));
+				Future<Optional<Key>> fTagName = tr->get(logUidStates.pack(BackupAgentBase::keyConfigBackupTag));
+				Future<Optional<Value>> fStopVersionKey = tr->get(logUidStates.pack(BackupAgentBase::keyStateStop));
 				Future<Optional<Key>> fBackupKeysPacked =
-				    tr->get(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned()))
-				                .pack(BackupAgentBase::keyConfigBackupRanges));
+				    tr->get(backupAgent->config.get(logUidValue).pack(BackupAgentBase::keyConfigBackupRanges));
 				Future<Optional<Value>> flogVersionKey =
-				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
-				                .pack(BackupAgentBase::keyStateLogBeginVersion));
+				    tr->get(logUidStates.pack(BackupAgentBase::keyStateLogBeginVersion));
 
 				EBackupState backupState = co_await backupAgent->getStateValue(tr, logUid);
 
