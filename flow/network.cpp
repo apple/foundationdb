@@ -17,6 +17,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <limits>
+#include <stdexcept>
+
 #include <boost/asio.hpp>
 
 #include "flow/Arena.h"
@@ -182,7 +185,19 @@ NetworkAddress NetworkAddress::parse(std::string const& s) {
 			throw connection_string_invalid();
 		}
 
-		auto port = std::stoi(f.substr(addrEnd + 2));
+		std::string portString = f.substr(addrEnd + 2);
+		size_t parsedLength = 0;
+		int port;
+		try {
+			port = std::stoi(portString, &parsedLength);
+		} catch (const std::invalid_argument&) {
+			throw connection_string_invalid();
+		} catch (const std::out_of_range&) {
+			throw connection_string_invalid();
+		}
+		if (parsedLength != portString.size() || port < 0 || port > std::numeric_limits<uint16_t>::max()) {
+			throw connection_string_invalid();
+		}
 		auto addr = IPAddress::parse(f.substr(1, addrEnd - 1));
 		if (!addr.present()) {
 			throw connection_string_invalid();
@@ -428,6 +443,33 @@ const std::vector<int> NetworkMetrics::starvationBins = { 1, 3500, 7000, 7500, 8
 
 TEST_CASE("/flow/network/ipaddress") {
 	ASSERT(NetworkAddress::parse("[::1]:4800").toString() == "[::1]:4800");
+
+	for (const auto& [input, expected] : std::vector<std::pair<std::string, std::string>>{
+	         { "[::1]:0", "[::1]:0" },
+	         { "[::1]:65535:tls(fromHostname)", "[::1]:65535:tls(fromHostname)" },
+	         { "[::1]:+080", "[::1]:80" },
+	         { "[::1]: 80", "[::1]:80" },
+	     }) {
+		ASSERT(NetworkAddress::parse(input).toString() == expected);
+	}
+
+	for (const auto& input : { "[::1]:",
+	                           "[::1]:abc",
+	                           "[::1]:80junk",
+	                           "[::1]:-1",
+	                           "[::1]:65536",
+	                           "[::1]:9999999999999999999999999",
+	                           "[::1]:80junk:tls(fromHostname)" }) {
+		bool rejected = false;
+		try {
+			NetworkAddress::parse(input);
+		} catch (const Error& e) {
+			ASSERT(e.code() == error_code_connection_string_invalid);
+			rejected = true;
+		}
+		ASSERT(rejected);
+		ASSERT(!NetworkAddress::parseOptional(input).present());
+	}
 
 	{
 		auto addr = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800";
