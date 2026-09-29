@@ -400,6 +400,11 @@ protected:
 };
 
 namespace fileBackup {
+// If a log file's progress is not saved, a new log file is generated covering the same begin version, so a
+// container can hold files that are subsets of others. Drops those, keeping the widest of each overlapping
+// run. Logs must be sorted.
+std::vector<LogFile> filterDuplicateLogFiles(const std::vector<LogFile>& logs);
+
 // Use RangeMap to store a list of ranges for efficient query if a mutation
 // matches to any of the range.
 class RangeMapFilters {

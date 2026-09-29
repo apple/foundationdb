@@ -1193,22 +1193,7 @@ public:
 	// of contents in another log file.
 	// PRE-CONDITION: logs are already sorted by (tagId, beginVersion, endVersion).
 	static std::vector<LogFile> filterDuplicates(const std::vector<LogFile>& logs) {
-		std::vector<LogFile> filtered;
-		int i = 0;
-		for (int j = 1; j < logs.size(); j++) {
-			if (logs[j].isSubset(logs[i])) {
-				ASSERT_LE(logs[j].fileSize, logs[i].fileSize);
-				continue;
-			}
-
-			if (!logs[i].isSubset(logs[j])) {
-				filtered.push_back(logs[i]);
-			}
-			i = j;
-		}
-		if (i < logs.size())
-			filtered.push_back(logs[i]);
-		return filtered;
+		return fileBackup::filterDuplicateLogFiles(logs);
 	}
 
 	static Optional<RestorableFileSet> getRestoreSetFromLogs(const std::vector<LogFile>& logs,
@@ -2977,6 +2962,44 @@ TEST_CASE("/backup/rangeMapFilters/emptyMatchesNothing") {
 	fileBackup::RangeMapFilters fromRanges(ranges);
 	ASSERT(fromRanges.match(KeyRangeRef("m"_sr, "mz"_sr)));
 	ASSERT(!fromRanges.match(KeyRangeRef("x"_sr, "y"_sr)));
+
+	return Void();
+}
+
+// A log file whose progress was not saved is rewritten covering the same begin version, so a container can
+// hold files that are subsets of others. filterDuplicateLogFiles() keeps the widest of each overlapping run.
+TEST_CASE("/backup/logFiles/filterDuplicates") {
+	auto log = [](Version begin, Version end, int64_t size, int tagId = -1) {
+		LogFile f;
+		f.beginVersion = begin;
+		f.endVersion = end;
+		f.blockSize = 1;
+		f.fileName = format("log,%lld,%lld,%d", begin, end, tagId);
+		f.fileSize = size;
+		f.tagId = tagId;
+		return f;
+	};
+
+	// [100,200) supersedes [100,150); the wider file survives.
+	std::vector<LogFile> logs = { log(100, 150, 10), log(100, 200, 20), log(200, 300, 30) };
+	std::sort(logs.begin(), logs.end());
+	std::vector<LogFile> filtered = fileBackup::filterDuplicateLogFiles(logs);
+	ASSERT_EQ(filtered.size(), 2);
+	ASSERT_EQ(filtered[0].endVersion, 200);
+	ASSERT_EQ(filtered[1].beginVersion, 200);
+
+	// Files that merely abut are all kept, and a gap does not merge anything.
+	logs = { log(100, 200, 10), log(200, 300, 10), log(400, 500, 10) };
+	filtered = fileBackup::filterDuplicateLogFiles(logs);
+	ASSERT_EQ(filtered.size(), 3);
+
+	// Subset detection compares tagId, so partitioned logs for different tags never cancel out.
+	logs = { log(100, 150, 10, 0), log(100, 200, 20, 1) };
+	std::sort(logs.begin(), logs.end());
+	filtered = fileBackup::filterDuplicateLogFiles(logs);
+	ASSERT_EQ(filtered.size(), 2);
+
+	ASSERT_EQ(fileBackup::filterDuplicateLogFiles({}).size(), 0);
 
 	return Void();
 }

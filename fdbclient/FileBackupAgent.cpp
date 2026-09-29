@@ -5097,6 +5097,25 @@ bool RangeMapFilters::match(const KeyRangeRef& range) const {
 	return false;
 }
 
+std::vector<LogFile> filterDuplicateLogFiles(const std::vector<LogFile>& logs) {
+	std::vector<LogFile> filtered;
+	int i = 0;
+	for (int j = 1; j < logs.size(); j++) {
+		if (logs[j].isSubset(logs[i])) {
+			ASSERT_LE(logs[j].fileSize, logs[i].fileSize);
+			continue;
+		}
+
+		if (!logs[i].isSubset(logs[j])) {
+			filtered.push_back(logs[i]);
+		}
+		i = j;
+	}
+	if (i < logs.size())
+		filtered.push_back(logs[i]);
+	return filtered;
+}
+
 // Returns a vector of filtered KV refs from data which are either part of incomplete mutation groups OR complete
 // and have data relevant to one of the KV ranges in ranges
 std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const RangeMapFilters& filters) {

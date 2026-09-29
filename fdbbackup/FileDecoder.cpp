@@ -19,9 +19,11 @@
  */
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -263,16 +265,24 @@ std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 
 	int p = 0;
 	while (p < line.size()) {
-		int end = line.find_first_of(';', p);
+		// Newlines separate entries as well as ';', so a file with one prefix per line parses as intended
+		// rather than as a single prefix with embedded newline bytes.
+		int end = line.find_first_of(";\n", p);
 		if (end == line.npos) {
 			end = line.size();
 		}
-		auto prefix = decode_hex_string(line.substr(p, end - p), err);
+		std::string token = line.substr(p, end - p);
+		size_t first = token.find_first_not_of(" \t\r\n");
+		p = end + 1;
+		if (first == std::string::npos) {
+			continue; // blank entry, e.g. a trailing newline or ";;"
+		}
+		token = token.substr(first, token.find_last_not_of(" \t\r\n") - first + 1);
+		auto prefix = decode_hex_string(token, err);
 		if (err) {
 			return results;
 		}
 		results.push_back(prefix);
-		p = end + 1;
 	}
 	return results;
 }
@@ -280,6 +290,18 @@ std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err) {
 	std::string line = readFileBytes(filename, size_t{ 64 } * 1024 * 1024);
 	return parsePrefixesLine(line, err);
+}
+
+// Parses a non-negative decimal version, rejecting trailing garbage and overflow that atoll ignores.
+bool parseVersion(const char* arg, Version& out) {
+	errno = 0;
+	char* end = nullptr;
+	long long v = std::strtoll(arg, &end, 10);
+	if (errno != 0 || end == arg || *end != '\0' || v < 0) {
+		return false;
+	}
+	out = v;
+	return true;
 }
 
 int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
@@ -328,30 +350,51 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 			break;
 
 		case OPT_KEY_PREFIX:
+			// An empty prefix would reach strinc("") in prefixRange() and assert.
+			if (*args->OptionArg() == '\0') {
+				std::cerr << "ERROR: -k requires a non-empty prefix\n";
+				return FDB_EXIT_ERROR;
+			}
 			param->prefixes.push_back(args->OptionArg());
 			break;
 
-		case OPT_FILTERS:
-			param->prefixes = parsePrefixFile(args->OptionArg(), err);
+		case OPT_FILTERS: {
+			// Appends, so -k/--hex-prefix given alongside --filters are all honored.
+			std::vector<std::string> filePrefixes = parsePrefixFile(args->OptionArg(), err);
 			if (err) {
-				throw std::runtime_error("ERROR:" + std::string(args->OptionArg()) + "contains invalid prefix(es)");
+				std::cerr << "ERROR: " << args->OptionArg() << " contains invalid prefix(es)\n";
+				return FDB_EXIT_ERROR;
 			}
+			param->prefixes.insert(param->prefixes.end(), filePrefixes.begin(), filePrefixes.end());
 			break;
+		}
 
-		case OPT_HEX_KEY_PREFIX:
-			param->prefixes.push_back(decode_hex_string(args->OptionArg(), err));
+		case OPT_HEX_KEY_PREFIX: {
+			std::string prefix = decode_hex_string(args->OptionArg(), err);
+			if (err || prefix.empty()) {
+				std::cerr << "ERROR: invalid hex prefix: " << args->OptionArg() << "\n";
+				return FDB_EXIT_ERROR;
+			}
+			param->prefixes.push_back(prefix);
 			break;
+		}
 
 		case OPT_PROXY:
 			param->proxy = args->OptionArg();
 			break;
 
 		case OPT_BEGIN_VERSION_FILTER:
-			param->beginVersionFilter = std::atoll(args->OptionArg());
+			if (!parseVersion(args->OptionArg(), param->beginVersionFilter)) {
+				std::cerr << "ERROR: invalid version for --begin-version-filter: " << args->OptionArg() << "\n";
+				return FDB_EXIT_ERROR;
+			}
 			break;
 
 		case OPT_END_VERSION_FILTER:
-			param->endVersionFilter = std::atoll(args->OptionArg());
+			if (!parseVersion(args->OptionArg(), param->endVersionFilter)) {
+				std::cerr << "ERROR: invalid version for --end-version-filter: " << args->OptionArg() << "\n";
+				return FDB_EXIT_ERROR;
+			}
 			break;
 
 		case OPT_CRASHONERROR:
@@ -431,7 +474,12 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 		case OPT_BUILD_FLAGS:
 			printBuildInformation();
 			return FDB_EXIT_ERROR;
-			break;
+
+		default:
+			// gConverterOptions is shared with fdbconvert and carries options this tool does not
+			// implement, e.g. -b/--begin and -e/--end. Reject them instead of ignoring them.
+			std::cerr << "ERROR: unsupported option: " << args->OptionText() << "\n";
+			return FDB_EXIT_ERROR;
 		}
 	}
 	return FDB_EXIT_SUCCESS;
@@ -493,7 +541,9 @@ struct VersionedMutations {
  */
 class DecodeProgress {
 	std::vector<Standalone<VectorRef<KeyValueRef>>> blocks;
-	std::unordered_map<Version, fileBackup::AccumulatedMutations> mutationBlocksByVersion;
+	// Ordered so that mutations are emitted in version order; an unordered_map makes output depend on hash
+	// iteration order and differ between builds.
+	std::map<Version, fileBackup::AccumulatedMutations> mutationBlocksByVersion;
 
 public:
 	DecodeProgress() = default;
@@ -766,7 +816,8 @@ Future<Void> process_file(Reference<IBackupContainer> container,
 				    .detail("Version", vms.version)
 				    .setMaxFieldLength(1000)
 				    .detail("M", m.toString());
-				std::cout << vms.version << "." << sub << " " << typeString[(int)m.type]
+				// getTypeString() bounds-checks; m.type comes unvalidated from the file.
+				std::cout << vms.version << "." << sub << " " << getTypeString(m.type)
 				          << " param1: " << hexStringRef(m.param1) << " param2: " << hexStringRef(m.param2) << "\n";
 			}
 		}
@@ -776,7 +827,9 @@ Future<Void> process_file(Reference<IBackupContainer> container,
 
 // Use the snapshot metadata to quickly identify relevant range files and
 // then filter by versions.
-Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Reference<DecodeParams> params) {
+Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc,
+                                             Reference<DecodeParams> params,
+                                             Optional<Version> expiredEndVersion) {
 	// Only consider snapshots whose version range overlaps the requested filter. Reading a snapshot
 	// means downloading and parsing its entire manifest and checking every file it lists against the
 	// container, so snapshots that getRelevantRangeFiles() would discard below must not be read at
@@ -804,9 +857,24 @@ Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Ref
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent("ReadKeyspaceSnapshotError").error(e).detail("I", i);
 			if (e.code() != error_code_restore_missing_data) {
+				TraceEvent("ReadKeyspaceSnapshotError").error(e).detail("I", i);
 				throw;
+			}
+			// Files this snapshot lists are gone, so skipping it makes the reported file set incomplete.
+			// Expiration deletes range files but keeps a manifest that straddles the expiry boundary, so
+			// that case is expected; anything else is unexplained data loss.
+			double expiredPct = snapshots[i].expiredPct(expiredEndVersion);
+			if (expiredPct > 0) {
+				std::cerr << "WARNING: skipping snapshot " << snapshots[i].fileName << ": " << expiredPct
+				          << "% of its version range is expired\n";
+				TraceEvent(SevWarnAlways, "DecodeSkippedExpiredSnapshot")
+				    .detail("File", snapshots[i].fileName)
+				    .detail("ExpiredPct", expiredPct);
+			} else {
+				std::cerr << "ERROR: skipping snapshot " << snapshots[i].fileName
+				          << ": it references range files that are absent from the container\n";
+				TraceEvent(SevError, "DecodeSnapshotMissingRangeFiles").detail("File", snapshots[i].fileName);
 			}
 		}
 	}
@@ -818,9 +886,15 @@ Future<Void> decode_logs(Reference<DecodeParams> params) {
 	    IBackupContainer::openContainer(params->container_url, params->proxy, params->encryptionKeyFileName, 0);
 	UID uid = deterministicRandom()->randomUniqueID();
 
+	// describeBackup() must run before any file listing: for an encrypted container the listing converts raw
+	// file sizes using the block size it establishes, and converting against 0 asserts or yields sizes of 0.
+	BackupDescription desc = co_await container->describeBackup();
+	container->setEncryptionBlockSize(desc.encryptionBlockSize);
+
 	BackupFileList listing = co_await container->dumpFileList();
 
-	// remove partitioned logs
+	// Partitioned logs use a block format this tool cannot parse; only fdbconvert reads them.
+	size_t logsBeforeFilter = listing.logs.size();
 	listing.logs.erase(std::remove_if(listing.logs.begin(),
 	                                  listing.logs.end(),
 	                                  [](const LogFile& file) {
@@ -828,13 +902,19 @@ Future<Void> decode_logs(Reference<DecodeParams> params) {
 		                                  return file.fileName.substr(0, prefix.size()) == prefix;
 	                                  }),
 	                   listing.logs.end());
+	size_t partitionedLogs = logsBeforeFilter - listing.logs.size();
+	if (partitionedLogs > 0) {
+		std::cerr << "WARNING: skipping " << partitionedLogs
+		          << " partitioned log file(s); use fdbconvert to read them\n";
+		TraceEvent(SevWarnAlways, "DecodeSkippedPartitionedLogs", uid).detail("Count", partitionedLogs);
+	}
+
 	std::sort(listing.logs.begin(), listing.logs.end());
+	// A log file whose progress was not saved is rewritten with the same begin version, leaving subsets of
+	// other files in the container. Without this the same mutations are emitted more than once.
+	listing.logs = fileBackup::filterDuplicateLogFiles(listing.logs);
 	TraceEvent("Container", uid).detail("URL", params->container_url).detail("Logs", listing.logs.size());
 	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params->toString());
-
-	BackupDescription desc = co_await container->describeBackup();
-
-	container->setEncryptionBlockSize(desc.encryptionBlockSize);
 
 	std::cout << "\n" << desc.toString() << "\n";
 
@@ -844,11 +924,22 @@ Future<Void> decode_logs(Reference<DecodeParams> params) {
 	if (params->decode_logs) {
 		logFiles = getRelevantLogFiles(listing.logs, params);
 		printLogFiles("Relevant log files are: ", logFiles);
+		// Mutations between a gap's endpoints are absent from the container, so the decoded stream is
+		// incomplete there. Restore refuses such a set outright; report it and continue.
+		for (int i = 1; i < logFiles.size(); i++) {
+			if (logFiles[i].beginVersion > logFiles[i - 1].endVersion) {
+				std::cerr << "WARNING: gap in mutation log between versions " << logFiles[i - 1].endVersion
+				          << " and " << logFiles[i].beginVersion << "\n";
+				TraceEvent(SevWarnAlways, "DecodeLogGap", uid)
+				    .detail("From", logFiles[i - 1].endVersion)
+				    .detail("To", logFiles[i].beginVersion);
+			}
+		}
 	}
 
 	if (params->decode_range) {
 		// rangeFiles = getRelevantRangeFiles(filteredRangeFiles, params);
-		std::vector<RangeFile> files = co_await getRangeFiles(container, params);
+		std::vector<RangeFile> files = co_await getRangeFiles(container, params, desc.expiredEndVersion);
 		rangeFiles = files;
 		printLogFiles("Relevant range files are: ", rangeFiles);
 	}
@@ -962,6 +1053,12 @@ int main(int argc, char** argv) {
 
 		runNetwork();
 
+		// stopAfter() reports failure by leaving the Optional unset. Without this the tool exits 0 after any
+		// decode error, as fdbbackup's main() already guards against.
+		if (f.isValid() && f.isReady() && (f.isError() || !f.get().present())) {
+			status = FDB_EXIT_ERROR;
+		}
+
 		flushTraceFileVoid();
 		fflush(stdout);
 		closeTraceFile();
@@ -1004,6 +1101,44 @@ int main() {
 	p.beginVersionFilter = 300;
 	p.endVersionFilter = 200;
 	ok &= assertValid(p, false, "begin > end");
+
+	auto check = [&ok](bool cond, const char* label) {
+		if (cond) {
+			printf("PASS [%s]\n", label);
+		} else {
+			fprintf(stderr, "FAIL [%s]\n", label);
+			ok = false;
+		}
+	};
+
+	// parseVersion rejects what atoll() silently accepted.
+	Version v = -1;
+	check(file_converter::parseVersion("100", v) && v == 100, "parseVersion decimal");
+	check(!file_converter::parseVersion("v100", v), "parseVersion rejects leading garbage");
+	check(!file_converter::parseVersion("100x", v), "parseVersion rejects trailing garbage");
+	check(!file_converter::parseVersion("", v), "parseVersion rejects empty");
+	check(!file_converter::parseVersion("-1", v), "parseVersion rejects negative");
+	check(!file_converter::parseVersion("99999999999999999999", v), "parseVersion rejects overflow");
+
+	// A prefix file ends in a newline, which must not become part of the last prefix.
+	bool err = false;
+	std::vector<std::string> prefixes = file_converter::parsePrefixesLine("\\x05\\x01;\\x15\\x2b\n", err);
+	check(!err && prefixes.size() == 2, "parsePrefixesLine count");
+	check(prefixes.size() == 2 && prefixes[0] == std::string("\x05\x01", 2), "parsePrefixesLine first prefix");
+	check(prefixes.size() == 2 && prefixes[1] == std::string("\x15\x2b", 2), "parsePrefixesLine trailing newline");
+
+	// Blank entries are skipped rather than yielding an empty prefix, which would assert in prefixRange().
+	prefixes = file_converter::parsePrefixesLine("\\x05;;\\x15\n\n", err);
+	check(!err && prefixes.size() == 2, "parsePrefixesLine skips blanks");
+
+	// One prefix per line must not collapse into a single prefix with embedded newline bytes.
+	prefixes = file_converter::parsePrefixesLine("\\x05\\x01\n\\x15\\x2b\n", err);
+	check(!err && prefixes.size() == 2, "parsePrefixesLine newline separates entries");
+	check(prefixes.size() == 2 && prefixes[1] == std::string("\x15\x2b", 2), "parsePrefixesLine multiline prefix");
+
+	// Malformed escapes are reported, not silently dropped.
+	decode_hex_string("\\xZZ", err);
+	check(err, "decode_hex_string reports bad hex");
 
 	return ok ? 0 : 1;
 }
