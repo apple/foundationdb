@@ -62,6 +62,10 @@ class AsyncTransactionCloseTest {
 			@Override
 			public void setOption(int code, byte[] value) {
 			}
+
+			@Override
+			public void closeInternal(long ignored) {
+			}
 		});
 
 		return db.get();
