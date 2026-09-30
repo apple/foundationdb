@@ -69,13 +69,11 @@ capi::FDBPromise wrap(GenericPromise<bool> promise) {
 } // namespace promise
 
 namespace context {
-void trace(
-	capi::OpaqueWorkloadContext* c_context,
-	capi::FDBSeverity c_severity,
-	const char* name,
-	const capi::FDBStringPair* c_details,
-	int n
-) {
+void trace(capi::OpaqueWorkloadContext* c_context,
+           capi::FDBSeverity c_severity,
+           const char* name,
+           const capi::FDBStringPair* c_details,
+           int n) {
 	auto context = (FDBWorkloadContext*)c_context;
 	FDBSeverity severity;
 	switch (c_severity) {
@@ -180,13 +178,12 @@ private:
 public:
 	Workload(const std::string& name) : name(name) {}
 	virtual ~Workload() {
-		if (this->workload.inner) WITH(this->workload, free);
+		if (this->workload.inner)
+			WITH(this->workload, free);
 	}
 
 #if FDB_API_VERSION <= 730
-	virtual std::string description() const override {
-		return "unreachable";
-	}
+	virtual std::string description() const override { return "unreachable"; }
 #endif
 
 	virtual bool init(FDBWorkloadContext* context) override {
@@ -205,15 +202,13 @@ public:
 	virtual void getMetrics(std::vector<FDBPerfMetric>& out) const override {
 		return WITH(this->workload, getMetrics, metrics::wrap(&out));
 	}
-	virtual double getCheckTimeout() override {
-		return WITH(this->workload, getCheckTimeout);
-	}
+	virtual double getCheckTimeout() override { return WITH(this->workload, getCheckTimeout); }
 };
 } // namespace translator
 
-class CppWorkloadFactory: public FDBWorkloadFactory {
+class CppWorkloadFactory : public FDBWorkloadFactory {
 public:
-	CppWorkloadFactory(FDBLogger* logger): FDBWorkloadFactory() {
+	CppWorkloadFactory(FDBLogger* logger) : FDBWorkloadFactory() {
 		logger->trace(FDBSeverity::Info, "CppWorkloadFactory", {});
 	}
 

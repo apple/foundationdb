@@ -12,7 +12,7 @@ Macro definitions used to maintain the FoundationDB's crate
 """
 
 documentation = "https://docs.rs/foundationdb"
-repository = "https://github.com/foundationdb-rs/foundationdb-rs"
+repository = "https://github.com/apple/foundationdb"
 license = "MIT/Apache-2.0"
 
 readme = "README.md"

@@ -7,42 +7,12 @@ This is a wrapper library around the FoundationDB (Fdb) C API. It implements fut
 * Rust 1.85.1 or more,
 * FoundationDB's client installed.
 
-## Platform Support
+## Platform support
 
-Support for different platforms ("targets") are organized into three tiers, each with a different set of guarantees. For more information on the policies for targets at each tier, see the [Target Tier Policy](#target-tier-policy).
-
-| Platform       | Tier   | Notes                                                                                                                               |
-|----------------|--------|-------------------------------------------------------------------------------------------------------------------------------------|
-| linux x86_64   | 1      |                                                                                                                                     |
-| osx x86_64     | 2      |                                                                                                                                     |
-| osx Silicon    | 2      |                                                                                                                                     |
-| Windows x86_64 | 3      | [Windows build has been officially discontinue, now maintained by the community](https://github.com/apple/foundationdb/issues/5135) |
-
-For more information on the policies for targets at each tier, see the
-
-## Target Tier Policy
-
-### Tier 1
-
-`Tier 1` targets can be thought of as "guaranteed to work". This means that:
-
-* we are actively checking correctness with the [BindingTester](https://github.com/apple/foundationdb/blob/master/bindings/bindingtester/spec/bindingApiTester.md),
-* we are running classic Rust tests on each pull requests,
-* you can use the crate on the platform.
-
-
-### Tier 2
-
-`Tier 2` targets can be thought of as "guaranteed to build". This means that:
-
-* we are running classic Rust tests on each pull requests,
-* you can use the crate on the platform.
-
-But we are not checking correctness.
-
-### Tier 3
-
-`Tier 3` targets are platforms we would like to have as Tier 2. You might be able to compile, but no CI has been set up.
+The imported client supports Linux and macOS; standalone Windows support is
+community maintained. See the [workspace README](../README.md) for the in-tree
+build and current validation scope. Upstream platform tiers and scheduled CI do
+not imply equivalent coverage in this repository.
 
 ## Getting Started
 
@@ -56,7 +26,7 @@ You first need to install FoundationDB. You can follow the official documentatio
 ### Add dependencies on foundationdb-rs
 
 ```shell
-cargo add foundationdb -F embedded-fdb-include
+cargo add foundationdb -F embedded-fdb-include,fdb-7_4
 cargo add futures
 ```
 
@@ -131,15 +101,15 @@ async fn hello_world() -> foundationdb::FdbResult<()> {
 
 ### The class-scheduling tutorial
 
-The official FoundationDB's tutorial is called the [Class Scheduling](https://apple.github.io/foundationdb/class-scheduling.html). You can find the Rust version in the [examples](https://github.com/foundationdb-rs/foundationdb-rs/tree/main/foundationdb/examples).
+The official FoundationDB's tutorial is called the [Class Scheduling](https://apple.github.io/foundationdb/class-scheduling.html). You can find the Rust version in the [examples](https://github.com/apple/foundationdb/tree/main/bindings/rust/foundationdb/examples).
 
 ### The blob tutorial
 
 The official FoundationDB documentation provides also [another topic](https://apple.github.io/foundationdb/largeval.html#modeling-large-values)
 which is further discussed inside a [design recipe](https://apple.github.io/foundationdb/blob.html).
-A Rust implementation can be found [here](https://github.com/foundationdb-rs/foundationdb-rs/tree/main/foundationdb/examples/blob.rs).
+A Rust implementation can be found [here](https://github.com/apple/foundationdb/tree/main/bindings/rust/foundationdb/examples/blob.rs).
 
-Another [example](https://github.com/foundationdb-rs/foundationdb-rs/tree/main/foundationdb/examples/blob-with-manifest.rs),
+Another [example](https://github.com/apple/foundationdb/tree/main/bindings/rust/foundationdb/examples/blob-with-manifest.rs),
 explores how to use subspaces to attach metadata to our blob.
 
 ### Must-read documentations

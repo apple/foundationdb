@@ -177,6 +177,8 @@ The language bindings that CMake supports will have a corresponding `README.md` 
 
 Generally, CMake will build all language bindings for which it can find all necessary dependencies. After each successful CMake run, CMake will tell you which language bindings it is going to build.
 
+The [Rust bindings](bindings/rust/README.md) are opt-in with `-DBUILD_RUST_BINDING=ON`. They retain the imported Rust API and currently select FoundationDB API 740; see their README for build requirements and compatibility limits.
+
 
 ### Generating `compile_commands.json`
 

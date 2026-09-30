@@ -14,7 +14,7 @@ description = """
 Bindings to the C api for FoundationDB
 """
 
-repository = "https://github.com/foundationdb-rs/foundationdb-rs"
+repository = "https://github.com/apple/foundationdb"
 
 readme = "README.md"
 keywords = ["foundationdb", "kv"]

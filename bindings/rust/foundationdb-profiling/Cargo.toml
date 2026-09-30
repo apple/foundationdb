@@ -12,15 +12,12 @@ Read and decode FoundationDB client transaction profiling data
 """
 
 documentation = "https://docs.rs/foundationdb-profiling"
-repository = "https://github.com/foundationdb-rs/foundationdb-rs"
+repository = "https://github.com/apple/foundationdb"
 license = "MIT/Apache-2.0"
 
 readme = "README.md"
 keywords = ["foundationdb", "profiling"]
 categories = ["database", "development-tools::profiling"]
-
-[badges]
-codecov = { repository = "foundationdb-rs/foundationdb-rs", branch = "main", service = "github" }
 
 [dependencies]
 futures-core = "0.3.32"

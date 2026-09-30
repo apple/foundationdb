@@ -332,59 +332,7 @@ where
     panic!("unexpected end of token");
 }
 
-#[cfg(all(not(feature = "embedded-fdb-include"), target_os = "linux"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("/usr/include/foundationdb/fdb.options");
-
-#[cfg(all(not(feature = "embedded-fdb-include"), target_os = "macos"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("/usr/local/include/foundationdb/fdb.options");
-
-#[cfg(all(not(feature = "embedded-fdb-include"), target_os = "windows"))]
-const OPTIONS_DATA: &[u8] =
-    include_bytes!("C:/Program Files/foundationdb/include/foundationdb/fdb.options");
-
-#[cfg(all(feature = "embedded-fdb-include", feature = "fdb-5_1"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("../include/510/fdb.options");
-#[cfg(all(feature = "embedded-fdb-include", feature = "fdb-5_2"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("../include/520/fdb.options");
-#[cfg(all(feature = "embedded-fdb-include", feature = "fdb-6_0"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("../include/600/fdb.options");
-#[cfg(all(feature = "embedded-fdb-include", feature = "fdb-6_1"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("../include/610/fdb.options");
-#[cfg(all(feature = "embedded-fdb-include", feature = "fdb-6_2"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("../include/620/fdb.options");
-#[cfg(all(feature = "embedded-fdb-include", feature = "fdb-6_3"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("../include/630/fdb.options");
-#[cfg(all(feature = "embedded-fdb-include", feature = "fdb-7_0"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("../include/700/fdb.options");
-#[cfg(all(feature = "embedded-fdb-include", feature = "fdb-7_1"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("../include/710/fdb.options");
-#[cfg(all(feature = "embedded-fdb-include", feature = "fdb-7_3"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("../include/730/fdb.options");
-#[cfg(all(feature = "embedded-fdb-include", feature = "fdb-7_4"))]
-const OPTIONS_DATA: &[u8] = include_bytes!("../include/740/fdb.options");
-
-// Compile error when no version feature is specified
-#[cfg(not(any(
-    feature = "fdb-5_1",
-    feature = "fdb-5_2",
-    feature = "fdb-6_0",
-    feature = "fdb-6_1",
-    feature = "fdb-6_2",
-    feature = "fdb-6_3",
-    feature = "fdb-7_0",
-    feature = "fdb-7_1",
-    feature = "fdb-7_3",
-    feature = "fdb-7_4",
-)))]
-compile_error!(
-    "foundationdb-gen requires a version feature to be specified.\n\
-     \n\
-     Available version features: fdb-5_1, fdb-5_2, fdb-6_0, fdb-6_1, fdb-6_2, fdb-6_3, fdb-7_0, fdb-7_1, fdb-7_3, fdb-7_4\n\
-     \n\
-     Examples:\n\
-     - With embedded include: features = [\"embedded-fdb-include\", \"fdb-7_4\"]\n\
-     - With system install: features = [\"fdb-7_4\"]"
-);
+const OPTIONS_DATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/fdb.options"));
 
 pub fn emit(w: &mut impl fmt::Write) -> fmt::Result {
     let mut reader = OPTIONS_DATA;

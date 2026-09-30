@@ -1,48 +1,74 @@
-[![Discord](https://img.shields.io/discord/925467557903884349)](https://discord.gg/zkgtbtFfWY)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/foundationdb-rs/foundationdb-rs/ci.yml?branch=main)](https://github.com/foundationdb-rs/foundationdb-rs/actions)
-[![dependency status](https://deps.rs/repo/github/foundationdb-rs/foundationdb-rs/status.svg)](https://deps.rs/repo/github/foundationdb-rs/foundationdb-rs)
-[![Codecov](https://img.shields.io/codecov/c/github/foundationdb-rs/foundationdb-rs)](https://codecov.io/gh/foundationdb-rs/foundationdb-rs)
-![Rustc 1.85.1+](https://img.shields.io/badge/rustc-1.85.1+-lightgrey)
+# FoundationDB Rust bindings
 
-# FoundationDB Rust Client
+This Cargo workspace provides an async Rust interface to the FoundationDB C API,
+including transactions, tuple and directory layers, and a binding tester. It was
+imported from [foundationdb-rs](https://github.com/foundationdb-rs/foundationdb-rs).
+See [UPSTREAM.md](UPSTREAM.md) for the source revision and licensing provenance.
 
-The repo consists of multiple crates:
+## Crates
 
-| Library                                            | Status                                                                                                                                                                                                          | Description                                                 |
-|----------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------|
-| [**foundationdb**](foundationdb/README.md)         | [![Crates.io](https://img.shields.io/crates/v/foundationdb)](https://crates.io/crates/foundationdb) [![foundationdb](https://docs.rs/foundationdb/badge.svg)](https://docs.rs/foundationdb)                     | High level FoundationDB client API                          |
-| [**foundationdb-sys**](foundationdb-sys/README.md) | [![Crates.io](https://img.shields.io/crates/v/foundationdb-sys)](https://crates.io/crates/foundationdb-sys) [![foundationdb-sys](https://docs.rs/foundationdb-sys/badge.svg)](https://docs.rs/foundationdb-sys) | C API bindings for FoundationDB                             |
-| **foundationdb-gen**                               | n/a                                                                                                                                                                                                             | Code generator for common options and types of FoundationDB |
+| Crate | Purpose |
+| --- | --- |
+| [`foundationdb`](foundationdb/README.md) | Async client, transactions, directory layer, and recipes |
+| [`foundationdb-sys`](foundationdb-sys/README.md) | Raw C API bindings |
+| [`foundationdb-gen`](foundationdb-gen/README.md) | Generate Rust options from `fdb.options` |
+| [`foundationdb-tuple`](foundationdb-tuple/README.md) | Tuple encoding, subspaces, and versionstamps |
+| [`foundationdb-macros`](foundationdb-macros/README.md) | API-version conditional compilation |
+| [`bindingtester`](foundationdb-bindingtester/README.md) | FoundationDB binding tester protocol |
+| [`foundationdb-profiling`](foundationdb-profiling/README.md) | Client profiling data decoder |
+| [`foundationdb-simulation`](foundationdb-simulation/README.md) | Rust workloads for the deterministic simulator |
+| [`foundationdb-simulation-tracing`](foundationdb-simulation-tracing/README.md) | Simulator trace integration |
+| [`foundationdb-recipes-simulation`](foundationdb-recipes-simulation/README.md) | Recipe simulation workloads |
 
-The current version requires rustc 1.85.1+ to work.
-The previous version (0.3) is still maintained and is available within the 0.3 branch.
+## Building with FoundationDB
 
-You can access the `main` branch documentation [here](https://foundationdb-rs.github.io/foundationdb-rs/foundationdb/index.html).
+Rust is optional and requires Rust 1.85.1 or later, Cargo, and libclang for
+bindgen. Enable it when configuring the repository, then build the Rust targets:
 
-## Supported platforms
+```sh
+cmake -S . -B build -G Ninja -DBUILD_RUST_BINDING=ON
+cmake --build build --target fdb_rust fdb_rust_tester fdb_rust_tests
+ctest --test-dir build -R '^rust_' --output-on-failure
+```
 
-Supported platforms are listed on the [foundationdb's README](foundationdb/README.md).
+The CMake build links the in-tree `fdb_c` library and generates bindings from the
+same C headers and `fdb.options` as the other language bindings. Cargo artifacts
+stay in the build directory. See [CONTRIBUTING.md](CONTRIBUTING.md) for tests and
+standalone Cargo development.
 
-## Contributing
+## Compatibility and current limits
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+The migration preserves the upstream crate versions and public Rust API. Crate
+versions are independent of the FoundationDB server release number. Published
+crates on crates.io are separate releases; importing the source does not publish
+or transfer ownership of them.
 
-## Correctness
+Select exactly one Cargo API feature: `fdb-5_1`, `fdb-5_2`, `fdb-6_0`, `fdb-6_1`,
+`fdb-6_2`, `fdb-6_3`, `fdb-7_0`, `fdb-7_1`, `fdb-7_3`, or `fdb-7_4`. The in-tree
+build selects `fdb-7_4` (API 740), the highest API supported by the imported
+workspace. A newer C client can serve that API, but this does not expose every
+feature of the current FoundationDB main branch. In particular, this import does
+not add API 800 wrappers or the native CDC API. Directory snapshot operations are
+also not supported by the Rust binding tester, and its scripted suite is skipped
+because it requires API 800. Additional wrappers and API-version support can be
+developed separately.
 
-Special care has been set up to be sure that the crate is correct, like official bindings. Every hour, we are running thousands of seeds on the [BindingTester](https://github.com/apple/foundationdb/blob/master/bindings/bindingtester/spec/bindingApiTester.md).
+The client follows the same transaction, retry, key-selector, tuple, and directory
+protocols as the other bindings, expressed through Rust futures and ownership.
+The [binding tester](foundationdb-bindingtester/README.md) exercises protocol
+compatibility. The import is not a claim of complete feature parity or a new
+cross-platform support guarantee. The CMake integration initially targets Linux
+and macOS; standalone Cargo retains upstream platform support.
+
+Simulation and profiling crates are retained as optional tools. Their compatibility
+with server-internal interfaces and profiling formats must be checked separately
+when changing server versions. Rust crates are not yet included in the native
+client installation packages, and the upstream publishing and scheduled simulation
+workflows are not installed by this migration.
 
 ## License
 
-Licensed under either of
-
-- Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-
-at your option.
-
-### Contribution
-
-Unless you explicitly state otherwise, any contribution intentionally
-submitted for inclusion in the work by you, as defined in the Apache-2.0
-license, shall be dual licensed as above, without any additional terms or
-conditions.
+The imported Rust workspace remains dual licensed under
+[Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option. Existing author
+and copyright notices are preserved. FoundationDB's other components retain their
+existing licenses.

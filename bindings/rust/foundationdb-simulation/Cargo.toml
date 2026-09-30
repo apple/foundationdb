@@ -11,7 +11,7 @@ Embed Rust code within FoundationDB's simulation
 """
 license = "MIT/Apache-2.0"
 documentation = "https://docs.rs/foundationdb-simulation"
-repository = "https://github.com/foundationdb-rs/foundationdb-rs"
+repository = "https://github.com/apple/foundationdb"
 readme = "README.md"
 keywords = ["foundationdb", "simulation"]
 

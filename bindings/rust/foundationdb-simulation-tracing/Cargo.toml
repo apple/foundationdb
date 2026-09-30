@@ -10,7 +10,7 @@ Forward tokio-tracing events into the FoundationDB simulator trace log
 """
 license = "MIT/Apache-2.0"
 documentation = "https://docs.rs/foundationdb-simulation-tracing"
-repository = "https://github.com/foundationdb-rs/foundationdb-rs"
+repository = "https://github.com/apple/foundationdb"
 readme = "README.md"
 keywords = ["foundationdb", "simulation", "tracing"]
 

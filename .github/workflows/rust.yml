@@ -1,0 +1,97 @@
+name: Rust bindings
+
+on:
+  pull_request:
+    branches:
+      - main
+      - release-*
+    paths:
+      - bindings/rust/**
+      - fdbclient/vexillographer/fdb.options
+      - .github/workflows/rust.yml
+  push:
+    branches:
+      - main
+      - release-*
+    paths:
+      - bindings/rust/**
+      - fdbclient/vexillographer/fdb.options
+      - .github/workflows/rust.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: bindings/rust
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    name: Check and unit tests (${{ matrix.toolchain }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.85.1", stable]
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Install Rust and libclang
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+          sudo apt-get update
+          sudo apt-get install --yes libclang-dev
+
+      - name: Check all workspace targets
+        # API version features are mutually exclusive; do not use --all-features.
+        run: >-
+          cargo check --locked --workspace --all-targets
+          --features embedded-fdb-include,fdb-7_4,num-bigint,trace
+
+      - name: Check supported historical APIs
+        # Some examples require newer APIs; historical compatibility covers the library.
+        run: |
+          for version in 6_1 6_2 6_3 7_0 7_1 7_3 7_4; do
+            cargo check --locked -p foundationdb --lib --no-default-features \
+              --features "embedded-fdb-include,fdb-${version},uuid"
+          done
+
+      - name: Test tuple encoding and macros
+        # These tests do not require libfdb_c or a running FoundationDB cluster.
+        run: |
+          cargo test --locked -p foundationdb-tuple --all-features
+          cargo test --locked -p foundationdb-macros
+
+      - name: Generate options from the repository schema
+        env:
+          FDB_INCLUDE_DIR: ${{ github.workspace }}/fdbclient/vexillographer
+        run: >-
+          cargo run --locked -p foundationdb-gen
+          --features embedded-fdb-include,fdb-7_4 --bin foundationdb-options-gen
+          > "$RUNNER_TEMP/rust-fdb-options.rs"
+
+  format:
+    name: Rustfmt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RUSTUP_TOOLCHAIN: "1.85.1"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Install Rustfmt
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check

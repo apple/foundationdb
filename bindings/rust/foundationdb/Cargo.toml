@@ -14,7 +14,7 @@ High level client bindings for FoundationDB.
 """
 
 documentation = "https://docs.rs/foundationdb"
-repository = "https://github.com/foundationdb-rs/foundationdb-rs"
+repository = "https://github.com/apple/foundationdb"
 license = "MIT/Apache-2.0"
 
 readme = "README.md"
@@ -23,9 +23,6 @@ categories = ["database"]
 
 [package.metadata.docs.rs]
 features = ["embedded-fdb-include", "fdb-7_4", "uuid", "recipes"]
-
-[badges]
-codecov = { repository = "foundationdb-rs/foundationdb-rs", branch = "main", service = "github" }
 
 [features]
 default = ["uuid", "recipes"]

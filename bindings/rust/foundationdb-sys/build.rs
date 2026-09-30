@@ -127,11 +127,16 @@ fn main() {
         api_version = 740;
     }
 
+    println!("cargo:rerun-if-env-changed=FDB_INCLUDE_DIR");
+    let include_path = env::var_os("FDB_INCLUDE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(INCLUDE_PATH));
+
     let bindings = bindgen::Builder::default()
-        // TODO: there must be a way to get foundationdb from pkg-config...
-        .clang_arg(format!("-I{INCLUDE_PATH}"))
+        .clang_arg(format!("-I{}", include_path.display()))
         .clang_arg(format!("-D FDB_API_VERSION={api_version}"))
-        .header(format!("{INCLUDE_PATH}/fdb_c.h"))
+        .header(include_path.join("fdb_c.h").to_string_lossy())
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .generate_comments(true)
         .layout_tests(false)
         .generate()
