@@ -139,7 +139,7 @@ set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
 # User config
 ################################################################################
 
-set(GENERATE_DEBUG_PACKAGES "${FDB_RELEASE}" CACHE BOOL "Build debug rpm/deb packages (default: only ON for FDB_RELEASE)")
+set(GENERATE_DEBUG_PACKAGES ON CACHE BOOL "Build debug rpm/deb packages")
 
 ################################################################################
 # Alternatives config
@@ -238,6 +238,7 @@ set(CPACK_RPM_PACKAGE_GROUP                                ${CURRENT_GIT_VERSION
 set(CPACK_RPM_PACKAGE_LICENSE                              "Apache 2.0")
 set(CPACK_RPM_PACKAGE_NAME                                 "foundationdb")
 set(CPACK_RPM_COMPRESSION_TYPE                             "gzip")
+
 set(CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME                     "${CPACK_RPM_PACKAGE_NAME}-clients")
 set(CPACK_RPM_CLIENTS-EL7_FILE_NAME                        "${CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME}-${FDB_PACKAGE_VERSION}${package_version_postfix}.el7.${CMAKE_SYSTEM_PROCESSOR}.rpm")
 set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME              "${CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME}-${FDB_PACKAGE_VERSION}${package_version_postfix}.el7-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
@@ -269,6 +270,14 @@ set(CPACK_RPM_SERVER-VERSIONED_PACKAGE_REQUIRES            "${CPACK_COMPONENT_CL
 set(CPACK_RPM_SERVER-VERSIONED_POST_INSTALL_SCRIPT_FILE    ${CMAKE_BINARY_DIR}/packaging/multiversion/server/postinst-rpm)
 set(CPACK_RPM_SERVER-VERSIONED_PRE_UNINSTALL_SCRIPT_FILE   ${CMAKE_BINARY_DIR}/packaging/multiversion/server/prerm)
 
+# Avoid VERSIONED client package conflicting with main client package of same exact version,
+# due to the build-id links in /usr/lib/.build-id/
+set(CPACK_RPM_SPEC_MORE_DEFINE "
+%if \\\"%{name}\\\" == \\\"${CPACK_RPM_CLIENTS-VERSIONED_PACKAGE_NAME}\\\"
+%define _build_id_links none
+%endif
+")
+
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir")
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION data COMPONENT server)
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION log COMPONENT server)
@@ -281,8 +290,6 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/usr/lib64/cmake"
   "/etc/foundationdb"
   "/usr/lib64/pkgconfig"
-  "/usr/lib64/python2.7"
-  "/usr/lib64/python2.7/site-packages"
   "/var"
   "/var/log"
   "/var/lib"
@@ -294,10 +301,9 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/usr/lib/foundationdb"
   "/usr/lib/cmake"
   "/usr/lib/foundationdb-${FDB_VERSION}${FDB_BUILDTIME_STRING}/etc/foundationdb"
-  )
+)
 set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX "/usr/src")
 set(CPACK_RPM_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
-#set(CPACK_RPM_BUILD_SOURCE_FDB_INSTALL_DIRS_PREFIX /usr/src)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
 ################################################################################
