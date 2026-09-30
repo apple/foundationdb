@@ -1,0 +1,42 @@
+# Poll-based, fenced leader-election simulation.
+#
+# Clients autonomously select standard, contention, or suspicion profiles while
+# exercising one durable (revision, optional owner, lease duration) state. Every
+# leader poll co-commits a RankedRegister read, protected write at its fencing
+# rank, and a versionstamp-ordered operation-log entry.
+
+# Production runs Redwood; the unconstrained random engine draw picked RocksDB on
+# most seeds at up to 49x the wall time of this forced choice, and never picked
+# redwood at all (measured 2026-07-31).
+[configuration]
+storageEngineType = 3
+# The simulated S3/HTTP mock adds 1-3 machines per datacenter and nothing here uses it.
+simHTTPServerEnabled = false
+
+[[test]]
+testTitle = 'PollLeaderElection'
+# Skip post-test urgent/regular checks and storage audits. The independent randomized background
+# consistency scan remains enabled.
+runConsistencyCheck = false
+
+  [[test.workload]]
+    testName = 'External'
+    useCAPI = true
+    libraryName = 'foundationdb_recipes_simulation'
+    workloadName = 'LeaderElectionWorkload'
+    libraryPath = './target/release'
+
+  [[test.workload]]
+    # Broad deterministic disruption exercises transaction retries and
+    # maybe-committed outcomes. The commit log, not issue order, is the oracle.
+    testName = 'RandomClogging'
+    testDuration = 45.0
+    swizzle = 2
+
+  [[test.workload]]
+    # Rebooted and error-recovered clients use fresh incarnations and local state.
+    testName = 'Attrition'
+    machinesToKill = 6
+    machinesToLeave = 2
+    reboot = true
+    testDuration = 45.0

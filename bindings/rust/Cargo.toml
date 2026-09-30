@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "foundationdb",
+    "foundationdb-tuple",
+    "foundationdb-sys",
+    "foundationdb-gen",
+    "foundationdb-bindingtester",
+    "foundationdb-macros",
+    "foundationdb-profiling",
+    "foundationdb-simulation",
+    "foundationdb-simulation-tracing",
+    "foundationdb-recipes-simulation",
+]
+
+[profile.release]
+debug = true

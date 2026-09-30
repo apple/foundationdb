@@ -1,0 +1,9 @@
+[[test]]
+testTitle = 'Test_Test'
+
+  [[test.workload]]
+    useCAPI = true
+    testName = 'External'
+    workloadName = 'SharedWorkload'
+    libraryPath = './target/release/examples'
+    libraryName = 'shared'

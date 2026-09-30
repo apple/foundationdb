@@ -1,0 +1,32 @@
+[package]
+name = "bindingtester"
+version = "0.9.0"
+authors = [
+    "Benjamin Fry <benjaminfry@me.com>",
+    "Vincent Rouillé <vincent@clikengo.com>",
+    "Pierre Zemb <contact@pierrezemb.fr>"
+]
+edition = "2024"
+rust-version = "1.85.1"
+publish = false
+
+description = """
+Bindings to the C api for FoundationDB
+"""
+
+repository = "https://github.com/foundationdb-rs/foundationdb-rs"
+
+readme = "README.md"
+keywords = ["foundationdb", "kv"]
+categories = ["database"]
+
+license = "MIT/Apache-2.0"
+
+[dependencies]
+env_logger = { version = "0.11.10", default-features = false, features = ["auto-color", "regex"] }
+foundationdb = { path = "../foundationdb", features = ["uuid", "num-bigint", "fdb-7_4", "embedded-fdb-include"], default-features = false }
+foundationdb-sys = { version = "0.11.0", path = "../foundationdb-sys", features = ["embedded-fdb-include", "fdb-7_4"], default-features = false }
+futures = "0.3.32"
+log = "0.4.33"
+num-bigint = "0.5.1"
+async-trait = "0.1.89"

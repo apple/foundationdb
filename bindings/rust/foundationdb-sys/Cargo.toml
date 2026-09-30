@@ -1,0 +1,50 @@
+[package]
+name = "foundationdb-sys"
+version = "0.11.0"
+authors = [
+    "Benjamin Fry <benjaminfry@me.com>",
+    "Vincent Rouillé <vincent@clikengo.com>",
+    "Pierre Zemb <contact@pierrezemb.fr>"
+]
+edition = "2024"
+rust-version = "1.85.1"
+
+description = """
+Bindings to the C api for FoundationDB
+"""
+
+documentation = "https://docs.rs/foundationdb-sys"
+repository = "https://github.com/foundationdb-rs/foundationdb-rs"
+
+readme = "README.md"
+keywords = ["foundationdb", "kv"]
+categories = ["database"]
+
+license = "MIT/Apache-2.0"
+
+[package.metadata.docs.rs]
+features = ["embedded-fdb-include", "fdb-7_4"]
+
+[badges]
+codecov = { repository = "foundationdb-rs/foundationdb-rs", branch = "main", service = "github" }
+
+[features]
+default = []
+# Use the locally embedded foundationdb fdb_c.h file
+embedded-fdb-include = []
+fdb-5_1 = []
+fdb-5_2 = []
+fdb-6_0 = []
+fdb-6_1 = []
+fdb-6_2 = []
+fdb-6_3 = []
+fdb-7_0 = []
+fdb-7_1 = []
+fdb-7_3 = []
+fdb-7_4 = []
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+bindgen = "0.73.2"

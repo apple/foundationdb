@@ -1,0 +1,14 @@
+[alias]
+# Common development aliases for contributors
+
+# Build/test/check with latest FDB version (7.4) using embedded headers
+# These work with Nix or when FDB headers are available
+build-fdb-latest = "build -p foundationdb --features embedded-fdb-include,fdb-7_4"
+test-fdb-latest = "test -p foundationdb --features embedded-fdb-include,fdb-7_4"
+check-fdb-latest = "check -p foundationdb --features embedded-fdb-include,fdb-7_4"
+clippy-fdb-latest = "clippy -p foundationdb --features embedded-fdb-include,fdb-7_4"
+doc-fdb-latest = "doc -p foundationdb --features embedded-fdb-include,fdb-7_4"
+
+# Lint the whole workspace (all targets and features) and deny warnings.
+# Used by CI; run it before pushing.
+clippy-all = "clippy --all-targets --no-default-features --features num-bigint,embedded-fdb-include,fdb-7_4,trace -- -D warnings"

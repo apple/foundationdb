@@ -1,0 +1,39 @@
+[package]
+name = "foundationdb-simulation-tracing"
+version = "0.1.0"
+authors = [
+    "Pierre Zemb <contact@pierrezemb.fr>"
+]
+edition = "2024"
+description = """
+Forward tokio-tracing events into the FoundationDB simulator trace log
+"""
+license = "MIT/Apache-2.0"
+documentation = "https://docs.rs/foundationdb-simulation-tracing"
+repository = "https://github.com/foundationdb-rs/foundationdb-rs"
+readme = "README.md"
+keywords = ["foundationdb", "simulation", "tracing"]
+
+[package.metadata.docs.rs]
+features = ["embedded-fdb-include", "fdb-7_4"]
+
+[dependencies]
+foundationdb-simulation = { version = "0.3.0", path = "../foundationdb-simulation", default-features = false }
+tracing-core = "0.1.36"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry"] }
+
+[dev-dependencies]
+tracing = "0.1.44"
+foundationdb = { path = "../foundationdb", default-features = false, features = ["trace"] }
+
+[features]
+default = ["embedded-fdb-include"]
+fdb-7_1 = ["foundationdb-simulation/fdb-7_1"]
+fdb-7_3 = ["foundationdb-simulation/fdb-7_3"]
+fdb-7_4 = ["foundationdb-simulation/fdb-7_4"]
+embedded-fdb-include = ["foundationdb-simulation/embedded-fdb-include"]
+
+[[example]]
+name = "tracing_demo"
+path = "examples/tracing_demo/lib.rs"
+crate-type = ["cdylib"]
