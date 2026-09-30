@@ -43,7 +43,7 @@ Each entry is named ``unit/<target>/native`` or
 ``unit/<target>/simulation`` and has ``unit``, runtime-mode, and target-name
 labels. For example, ``ctest -L native`` selects the native suites and
 ``ctest -L '^fdbclient_test$'`` selects both client modes. Flow has only a native
-entry. The memory-tracker suite is available when ``FDB_MEMORY_TRACKER=ON``.
+entry.
 
 ``UNIT_TEST_SEED`` is a decimal seed shared by these entries, independent of
 the cluster simulation seed. It defaults to ``1``; set it to ``0`` to choose a

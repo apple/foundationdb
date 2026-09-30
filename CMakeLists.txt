@@ -69,12 +69,6 @@ endif()
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
 
-option(FDB_MEMORY_TRACKER "Compile in the sampled per-call-site memory tracker (flow/MemoryTracker)" ON)
-if(NOT FDB_MEMORY_TRACKER)
-  message(STATUS "Building FoundationDB with the memory tracker compiled out")
-  add_compile_definitions(FDB_MEMORY_TRACKER=0)
-endif()
-
 ###############################################################################
 # Packages used for bindings
 ###############################################################################
