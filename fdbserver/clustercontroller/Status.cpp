@@ -2485,6 +2485,23 @@ static AsyncResult<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 	co_return statusObj;
 }
 
+// A satellite log set carries a synchronous copy of its region's mutation stream, and a commit is acknowledged
+// only after the satellite quorum has made it durable. A log generation whose local primary set has been lost
+// is therefore still fully recoverable (its storage servers can still catch up) as long as its local satellite
+// set still satisfies its replication policy, even though the fault-tolerance counters of the lost primary set
+// are negative. This is deliberately conservative in the other direction: a generation with no satellite set,
+// or with a satellite set that no longer satisfies its policy, stays marked as possibly losing data.
+static bool computePossiblyLosingData(int minFaultTolerance,
+                                      Optional<int32_t> logFaultTolerance,
+                                      Optional<int32_t> satLogFaultTolerance) {
+	if (minFaultTolerance >= 0) {
+		return false;
+	}
+	const bool primarySetLost = logFaultTolerance.present() && logFaultTolerance.get() < 0;
+	const bool satelliteCopyIntact = satLogFaultTolerance.present() && satLogFaultTolerance.get() >= 0;
+	return !(primarySetLost && satelliteCopyIntact);
+}
+
 static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
                                      const std::vector<TLogSet>& tLogs,
                                      std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
@@ -2559,8 +2576,10 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
 	*logFaultTolerance = std::min(*logFaultTolerance, minFaultTolerance);
 	statusObj["log_interfaces"] = logsObj;
 	// We may lose logs in this log generation, storage servers may never be able to catch up this log
-	// generation.
-	statusObj["possibly_losing_data"] = minFaultTolerance < 0;
+	// generation, unless its synchronous satellite copy is still intact: in that case the committed mutations
+	// remain recoverable from the satellite.
+	statusObj["possibly_losing_data"] =
+	    computePossiblyLosingData(minFaultTolerance, log_fault_tolerance, sat_log_fault_tolerance);
 
 	if (sat_log_replication_factor.present())
 		statusObj["satellite_log_replication_factor"] = sat_log_replication_factor.get();
@@ -4114,6 +4133,27 @@ TEST_CASE("/fdbserver/clustercontroller/degradedMultiRegionComputation") {
 		remoteRegionStallEvent.addField("RemoteRegionStallStartSeconds", "-5.0");
 		remoteRegionStallEvent.addField("RemoteRegionLogsMissing", "1");
 		ASSERT_EQ(parseRemoteRegionStallSeconds(remoteRegionStallEvent), 0.0);
+	}
+
+	// computePossiblyLosingData: the primary region's local log set is lost while its satellite set still
+	// satisfies its replication policy, so the committed mutations are recoverable from that synchronous copy.
+	// This is the satellite-survives-a-region-failure case, which must not be reported as data loss.
+	{
+		ASSERT(!computePossiblyLosingData(/*minFaultTolerance=*/-1,
+		                                  /*logFaultTolerance=*/-1,
+		                                  /*satLogFaultTolerance=*/0));
+	}
+	// computePossiblyLosingData: the satellite set is degraded, missing, or there is no primary set to lose,
+	// so the negative fault tolerance does indicate that committed data may be lost.
+	{
+		ASSERT(computePossiblyLosingData(-1, -1, -1));
+		ASSERT(computePossiblyLosingData(-1, -1, Optional<int32_t>()));
+		ASSERT(computePossiblyLosingData(-1, Optional<int32_t>(), 0));
+	}
+	// computePossiblyLosingData: no local set is below its policy (including an epoch with no log sets).
+	{
+		ASSERT(!computePossiblyLosingData(0, 0, 0));
+		ASSERT(!computePossiblyLosingData(0, Optional<int32_t>(), Optional<int32_t>()));
 	}
 
 	co_return;

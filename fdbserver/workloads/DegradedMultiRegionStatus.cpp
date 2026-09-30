@@ -33,6 +33,10 @@
 // the status JSON and asserts:
 //   - cluster.degraded_multi_region == true
 //   - cluster.data.state.description contains "Degraded multiregional"
+//   - fault_tolerance.max_zone_failures_without_losing_data is still negative, while the
+//     generation that lost its primary log set (negative log_fault_tolerance) is NOT
+//     flagged as possibly losing data: its surviving satellite set still satisfies its
+//     replication policy, so committed mutations remain recoverable from it
 //
 // Before killing the primary DC the test also exercises the false-positive regression
 // from the remote log set being transiently absent at accepting_commits: it verifies
@@ -278,17 +282,30 @@ struct DegradedMultiRegionStatusWorkload : TestWorkload {
 								    .detail("Elapsed", now() - tStart)
 								    .detail("Degraded", degraded)
 								    .detail("DataStateDesc", dataStateDesc);
-								printf("\n=== Degraded Multi-Region Status Found ===\n");
-								printf("Warning: one region is unavailable; committed data is expected to remain safe "
-								       "in the surviving "
-								       "region.\n");
-								printf(
-								    "Please restart following tlog interfaces, otherwise storage servers may never be "
-								    "able to catch up.\n");
-								printf("\nData:\n");
-								printf("  Replication health - %s\n", dataStateDesc.c_str());
-								printf("========================================\n\n");
-								fflush(stdout);
+								// The unavailable region forces the overall fault tolerance negative, so the log state
+								// is what decides whether committed data is reported as at risk.
+								ASSERT(clusterObj.contains("fault_tolerance") &&
+								       clusterObj["fault_tolerance"]
+								               .get_obj()["max_zone_failures_without_losing_data"]
+								               .get_int() == -1);
+								// A generation that lost its primary log set while keeping a satellite set that still
+								// satisfies its replication policy must not be flagged: the satellite holds a
+								// synchronous copy of the mutation stream, so its storage servers can still catch up.
+								ASSERT(clusterObj.contains("logs"));
+								bool sawGenerationWithLostPrimarySet = false;
+								for (auto& logEpoch : clusterObj["logs"].get_array()) {
+									auto& logEpochObj = logEpoch.get_obj();
+									if (!logEpochObj.contains("log_fault_tolerance") ||
+									    logEpochObj["log_fault_tolerance"].get_int() >= 0 ||
+									    !logEpochObj.contains("satellite_log_fault_tolerance") ||
+									    logEpochObj["satellite_log_fault_tolerance"].get_int() < 0) {
+										continue;
+									}
+									sawGenerationWithLostPrimarySet = true;
+									ASSERT(logEpochObj.contains("possibly_losing_data") &&
+									       !logEpochObj["possibly_losing_data"].get_bool());
+								}
+								ASSERT(sawGenerationWithLostPrimarySet);
 								co_return true;
 							}
 						} else {

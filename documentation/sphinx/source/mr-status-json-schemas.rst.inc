@@ -650,6 +650,7 @@
       },
       "active_tss_count":0,
       "degraded_processes":0,
+      "degraded_multi_region":true,
       "database_available":true,
       "database_lock_state":{
          "locked":true,
