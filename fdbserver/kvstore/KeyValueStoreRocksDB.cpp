@@ -1446,7 +1446,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			std::vector<rocksdb::ColumnFamilyHandle*> handles;
-			status = rocksdb::DB::Open(options, a.path, descriptors, &handles, &db);
+			std::unique_ptr<rocksdb::DB> dbPtr;
+			status = rocksdb::DB::Open(options, a.path, descriptors, &handles, &dbPtr);
+			db = dbPtr.release();
 			cfHandles.insert(handles.begin(), handles.end());
 
 			if (!status.ok()) {
