@@ -422,5 +422,21 @@ public:
 	Future<Void> finishMultiPartUpload(std::string const& bucket,
 	                                   std::string const& object,
 	                                   std::string const& uploadID,
-	                                   MultiPartSetT const& parts);
+	                                   MultiPartSetT const& parts,
+	                                   int64_t totalSize);
+
+	void rememberMultipartUploadToken(std::string const& uploadID, std::string const& token);
+	Optional<std::string> multipartUploadToken(std::string const& uploadID) const;
+	void forgetMultipartUploadToken(std::string const& uploadID);
+
+private:
+	// A completion retry may outlive the response to the original request. Only this upload's
+	// metadata token can identify the committed object after S3 removes its upload ID.
+	struct MultipartUploadToken {
+		std::string token;
+		uint64_t sequence;
+	};
+	static constexpr size_t maxTrackedMultipartUploads = 4096;
+	std::map<std::string, MultipartUploadToken> multipartUploadTokens;
+	uint64_t nextMultipartUploadSequence = 0;
 };
