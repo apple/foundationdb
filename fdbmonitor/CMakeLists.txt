@@ -28,12 +28,8 @@ if(NOT "${fdbmonitor_options}" STREQUAL "fdbmonitor_options-NOTFOUND")
   set_property(TARGET fdbmonitor PROPERTY LINK_OPTIONS ${fdbmonitor_options})
 endif()
 
-if(GENERATE_DEBUG_PACKAGES)
-  fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)
-else()
-  add_custom_target(prepare_fdbmonitor_install ALL DEPENDS strip_only_fdbmonitor)
-  fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbmonitor DESTINATION fdbmonitor COMPONENT server)
-endif()
+add_custom_target(stripped_fdbmonitor ALL DEPENDS strip_only_fdbmonitor)
+fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)
 
 # Create a local sandbox for quick manual testing without simulator
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/sandbox/data)
