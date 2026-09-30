@@ -20,6 +20,7 @@
 
 #include <iterator>
 #include "fdbclient/BackupAgent.h"
+#include "fdbclient/JsonBuilder.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
@@ -3053,15 +3054,157 @@ public:
 		}
 	}
 
-	static Future<std::string> getStatus(DatabaseBackupAgent* backupAgent, Database cx, int errorLimit, Key tagName) {
+	// Everything `fdbdr status` reports, read once. The text and JSON renderers are pure functions over
+	// this so a field cannot be reported by one and silently omitted by the other.
+	struct StatusSnapshot {
+		EBackupState state = EBackupState::STATE_NEVERRAN;
+		std::string tag;
+		Optional<Version> lastLogVersion;
+		Optional<Version> stopVersion;
+		Standalone<VectorRef<KeyRangeRef>> ranges;
+
+		// Most recent first, already capped at errorLimit. truncated means the cap was reached, so
+		// older reports exist that are not listed.
+		std::vector<std::string> errors;
+		bool errorsTruncated = false;
+		int errorLimit = 0;
+
+		Optional<double> secondsBehind;
+		bool paused = false;
+
+		// Set when the read had to be abandoned; both renderers report a partial result rather than
+		// failing, which is the pre-existing behaviour.
+		Optional<std::string> fetchWarning;
+	};
+
+	static std::string renderStatusText(const StatusSnapshot& s) {
+		std::string statusText;
+
+		if (s.state == EBackupState::STATE_NEVERRAN) {
+			statusText += "No previous backups found.\n";
+		} else {
+			std::string logVersionText =
+			    ". Last log version is " +
+			    (s.lastLogVersion.present() ? format("%lld", s.lastLogVersion.get()) : "unset");
+
+			switch (s.state) {
+			case EBackupState::STATE_SUBMITTED:
+				statusText +=
+				    "The DR on tag `" + s.tag + "' is NOT a complete copy of the primary database (just started).\n";
+				break;
+			case EBackupState::STATE_RUNNING:
+				statusText += "The DR on tag `" + s.tag + "' is NOT a complete copy of the primary database.\n";
+				break;
+			case EBackupState::STATE_RUNNING_DIFFERENTIAL:
+				statusText +=
+				    "The DR on tag `" + s.tag + "' is a complete copy of the primary database" + logVersionText + ".\n";
+				break;
+			case EBackupState::STATE_COMPLETED:
+				statusText += "The previous DR on tag `" + s.tag + "' completed at version " +
+				              format("%lld", s.stopVersion.orDefault(-1)) + ".\n";
+				break;
+			case EBackupState::STATE_PARTIALLY_ABORTED:
+				statusText += "The previous DR on tag `" + s.tag + "' " + BackupAgentBase::getStateText(s.state) +
+				              logVersionText + ".\n";
+				statusText += "Abort the DR with --cleanup before starting a new DR.\n";
+				break;
+			default:
+				statusText += "The previous DR on tag `" + s.tag + "' " + BackupAgentBase::getStateText(s.state) +
+				              logVersionText + ".\n";
+				break;
+			}
+		}
+
+		if (!s.errors.empty()) {
+			statusText += s.errorsTruncated ? "WARNING: Some DR agents have reported issues (printing " +
+			                                      std::to_string(s.errorLimit) + "):\n"
+			                                : "WARNING: Some DR agents have reported issues:\n";
+			for (auto& e : s.errors) {
+				statusText += "   " + e + "\n";
+			}
+		}
+
+		if (s.secondsBehind.present()) {
+			statusText += format("\nThe DR is %.6f seconds behind.\n", s.secondsBehind.get());
+		}
+
+		if (s.paused) {
+			statusText += format("\nAll DR agents have been paused.\n");
+		}
+
+		if (s.fetchWarning.present()) {
+			statusText += format("\nWARNING: Could not fetch full DR status: %s\n", s.fetchWarning.get().c_str());
+		}
+
+		return statusText;
+	}
+
+	static std::string renderStatusJSON(const StatusSnapshot& s) {
+		JsonBuilderObject doc;
+		doc.setKey("SchemaVersion", "1.0.0");
+		doc.setKey("State", BackupAgentBase::getStateName(s.state));
+		doc.setKey("DRAgentsPaused", s.paused);
+
+		if (s.state != EBackupState::STATE_NEVERRAN) {
+			doc.setKey("Tag", s.tag);
+
+			// A complete copy of the primary is exactly the differential state; the text says so in
+			// prose, so state it as a field rather than making a consumer re-derive it.
+			doc.setKey("CompleteCopy", s.state == EBackupState::STATE_RUNNING_DIFFERENTIAL);
+
+			if (s.lastLogVersion.present()) {
+				doc.setKey("LastLogVersion", s.lastLogVersion.get());
+			}
+			if (s.state == EBackupState::STATE_COMPLETED && s.stopVersion.present()) {
+				doc.setKey("StopVersion", s.stopVersion.get());
+			}
+			if (s.state == EBackupState::STATE_PARTIALLY_ABORTED) {
+				doc.setKey("CleanupRequired", true);
+			}
+
+			JsonBuilderArray rangeList;
+			for (auto& range : s.ranges) {
+				JsonBuilderObject r;
+				r.setKey("Begin", printable(range.begin));
+				r.setKey("End", printable(range.end));
+				rangeList.push_back(r);
+			}
+			doc.setKey("Ranges", rangeList);
+		}
+
+		if (s.secondsBehind.present()) {
+			doc.setKey("SecondsBehind", s.secondsBehind.get());
+		}
+
+		JsonBuilderArray errorList;
+		for (auto& e : s.errors) {
+			errorList.push_back(e);
+		}
+		doc.setKey("Errors", errorList);
+		// The error list is capped by -e/--errorlimit, so say when older reports were withheld
+		// instead of letting an empty-looking tail imply there were none.
+		doc.setKey("ErrorsTruncated", s.errorsTruncated);
+
+		if (s.fetchWarning.present()) {
+			doc.setKey("FetchWarning", s.fetchWarning.get());
+		}
+
+		return doc.getJson();
+	}
+
+	static Future<StatusSnapshot> getStatusSnapshot(DatabaseBackupAgent* backupAgent,
+	                                                Database cx,
+	                                                int errorLimit,
+	                                                Key tagName) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		std::string statusText;
 		int retries = 0;
 
 		while (true) {
 			Error err;
 			bool hasErr = false;
+			StatusSnapshot s;
+			s.errorLimit = errorLimit;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3072,8 +3215,6 @@ public:
 				Transaction scrTr(backupAgent->taskBucket->src);
 				scrTr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Future<Version> srcReadVersion = scrTr.getReadVersion();
-
-				statusText = "";
 
 				UID logUid = co_await backupAgent->getLogUid(tr, tagName);
 
@@ -3100,84 +3241,37 @@ public:
 				Future<Optional<Value>> flogVersionKey =
 				    tr->get(logUidStates.pack(BackupAgentBase::keyStateLogBeginVersion));
 
-				EBackupState backupState = co_await backupAgent->getStateValue(tr, logUid);
+				s.state = co_await backupAgent->getStateValue(tr, logUid);
 
-				if (backupState == EBackupState::STATE_NEVERRAN) {
-					statusText += "No previous backups found.\n";
-				} else {
-					std::string tagNameDisplay;
-					Optional<Key> tagName = co_await fTagName;
-
-					// Define the display tag name
-					if (tagName.present()) {
-						tagNameDisplay = tagName.get().toString();
+				if (s.state != EBackupState::STATE_NEVERRAN) {
+					Optional<Key> tag = co_await fTagName;
+					if (tag.present()) {
+						s.tag = tag.get().toString();
 					}
 
 					Optional<Value> stopVersionKey = co_await fStopVersionKey;
-					Optional<Value> logVersionKey = co_await flogVersionKey;
-					std::string logVersionText =
-					    ". Last log version is " +
-					    (logVersionKey.present()
-					         ? format("%lld", BinaryReader::fromStringRef<Version>(logVersionKey.get(), Unversioned()))
-					         : "unset");
-					Optional<Key> backupKeysPacked = co_await fBackupKeysPacked;
+					if (stopVersionKey.present()) {
+						s.stopVersion = BinaryReader::fromStringRef<Version>(stopVersionKey.get(), Unversioned());
+					}
 
-					Standalone<VectorRef<KeyRangeRef>> backupRanges;
+					Optional<Value> logVersionKey = co_await flogVersionKey;
+					if (logVersionKey.present()) {
+						s.lastLogVersion = BinaryReader::fromStringRef<Version>(logVersionKey.get(), Unversioned());
+					}
+
+					Optional<Key> backupKeysPacked = co_await fBackupKeysPacked;
 					if (backupKeysPacked.present()) {
 						BinaryReader br(backupKeysPacked.get(), IncludeVersion());
-						br >> backupRanges;
-					}
-
-					switch (backupState) {
-					case EBackupState::STATE_SUBMITTED:
-						statusText += "The DR on tag `" + tagNameDisplay +
-						              "' is NOT a complete copy of the primary database (just started).\n";
-						break;
-					case EBackupState::STATE_RUNNING:
-						statusText +=
-						    "The DR on tag `" + tagNameDisplay + "' is NOT a complete copy of the primary database.\n";
-						break;
-					case EBackupState::STATE_RUNNING_DIFFERENTIAL:
-						statusText += "The DR on tag `" + tagNameDisplay +
-						              "' is a complete copy of the primary database" + logVersionText + ".\n";
-						break;
-					case EBackupState::STATE_COMPLETED: {
-						Version stopVersion =
-						    stopVersionKey.present()
-						        ? BinaryReader::fromStringRef<Version>(stopVersionKey.get(), Unversioned())
-						        : -1;
-						statusText += "The previous DR on tag `" + tagNameDisplay + "' completed at version " +
-						              format("%lld", stopVersion) + ".\n";
-					} break;
-					case EBackupState::STATE_PARTIALLY_ABORTED: {
-						statusText += "The previous DR on tag `" + tagNameDisplay + "' " +
-						              BackupAgentBase::getStateText(backupState) + logVersionText + ".\n";
-						statusText += "Abort the DR with --cleanup before starting a new DR.\n";
-						break;
-					}
-					default:
-						statusText += "The previous DR on tag `" + tagNameDisplay + "' " +
-						              BackupAgentBase::getStateText(backupState) + logVersionText + ".\n";
-						break;
+						br >> s.ranges;
 					}
 				}
 
-				// Append the errors, if requested
 				if (errorLimit > 0) {
 					RangeResult values = co_await fErrorValues;
-
-					// Display the errors, if any
-					if (!values.empty()) {
-						// Inform the user that the list of errors is complete or partial
-						statusText += (values.size() < errorLimit)
-						                  ? "WARNING: Some DR agents have reported issues:\n"
-						                  : "WARNING: Some DR agents have reported issues (printing " +
-						                        std::to_string(errorLimit) + "):\n";
-
-						for (auto& s : values) {
-							statusText += "   " + printable(s.value) + "\n";
-						}
+					for (auto& v : values) {
+						s.errors.push_back(printable(v.value));
 					}
+					s.errorsTruncated = values.size() >= errorLimit;
 				}
 
 				// calculate time differential
@@ -3187,18 +3281,15 @@ public:
 					if (v.present()) {
 						Version destApplyBegin = BinaryReader::fromStringRef<Version>(v.get(), Unversioned());
 						Version sourceVersion = co_await srcReadVersion;
-						double secondsBehind =
+						s.secondsBehind =
 						    ((double)(sourceVersion - destApplyBegin)) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
-						statusText += format("\nThe DR is %.6f seconds behind.\n", secondsBehind);
 					}
 				}
 
 				Optional<Value> paused = co_await fPaused;
-				if (paused.present()) {
-					statusText += format("\nAll DR agents have been paused.\n");
-				}
+				s.paused = paused.present();
 
-				break;
+				co_return s;
 			} catch (Error& e) {
 				err = e;
 				hasErr = true;
@@ -3206,14 +3297,26 @@ public:
 			if (hasErr) {
 				retries++;
 				if (retries > 5) {
-					statusText += format("\nWARNING: Could not fetch full DR status: %s\n", err.name());
-					co_return statusText;
+					// Report whatever was gathered before giving up, matching the pre-existing behaviour
+					// of appending the warning to a partially built status.
+					s.fetchWarning = std::string(err.name());
+					co_return s;
 				}
 				co_await tr->onError(err);
 			}
 		}
+	}
 
-		co_return statusText;
+	static Future<std::string> getStatus(DatabaseBackupAgent* backupAgent, Database cx, int errorLimit, Key tagName) {
+		StatusSnapshot s = co_await getStatusSnapshot(backupAgent, cx, errorLimit, tagName);
+		co_return renderStatusText(s);
+	}
+
+	static Future<std::string> getStatusJSON(DatabaseBackupAgent* backupAgent, Database cx, Key tagName) {
+		// The JSON document reports the error list in full rather than capping it, since a consumer is
+		// not reading a terminal; CLIENT_KNOBS->TOO_MANY bounds it.
+		StatusSnapshot s = co_await getStatusSnapshot(backupAgent, cx, CLIENT_KNOBS->TOO_MANY, tagName);
+		co_return renderStatusJSON(s);
 	}
 
 	static Future<EBackupState> getStateValue(DatabaseBackupAgent* backupAgent,
@@ -3296,6 +3399,10 @@ Future<Void> DatabaseBackupAgent::abortBackup(Database cx,
 
 Future<std::string> DatabaseBackupAgent::getStatus(Database cx, int errorLimit, Key tagName) {
 	return DatabaseBackupAgentImpl::getStatus(this, cx, errorLimit, tagName);
+}
+
+Future<std::string> DatabaseBackupAgent::getStatusJSON(Database cx, Key tagName) {
+	return DatabaseBackupAgentImpl::getStatusJSON(this, cx, tagName);
 }
 
 Future<EBackupState> DatabaseBackupAgent::getStateValue(Reference<ReadYourWritesTransaction> tr,
