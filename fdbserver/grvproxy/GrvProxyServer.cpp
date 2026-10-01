@@ -314,7 +314,8 @@ Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cachedVers
 				RangeResult tmpCachedData = co_await tmpCachedDataFuture;
 				// Update together: these are served to clients as a matched pair.
 				if (globalConfigVersion.present()) {
-					Version parsedVersion = BinaryReader::fromStringRef<Version>(globalConfigVersion.get(), Unversioned());
+					Version parsedVersion =
+					    BinaryReader::fromStringRef<Version>(globalConfigVersion.get(), Unversioned());
 					*cachedVersion = bigEndian64(parsedVersion);
 				}
 				*cachedData = tmpCachedData;
