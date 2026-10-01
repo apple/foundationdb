@@ -803,7 +803,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				self->lastConnectTime = now();
 
 				TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID())
-				    .suppressFor(1.0)
+				    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 				    .detail("PeerAddr", self->destination)
 				    .detail("PeerAddress", self->destination)
 				    .detail("PeerReferences", self->peerReferences)
@@ -843,7 +843,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 							}
 
 							TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
-							    .suppressFor(1.0)
+							    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 							    .detail("PeerAddr", self->destination)
 							    .detail("PeerAddress", self->destination);
 							self->prependConnectPacket();
@@ -922,7 +922,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				wait(connectionWriter(self, conn) || reader || connectionMonitor(self) ||
 				     self->resetConnection.onTrigger());
 				TraceEvent("ConnectionReset", conn ? conn->getDebugID() : UID())
-				    .suppressFor(1.0)
+				    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 				    .detail("PeerAddr", self->destination)
 				    .detail("PeerAddress", self->destination);
 				throw connection_failed();
@@ -949,7 +949,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 			if (firstConnFailedTime.present()) {
 				if (now() - firstConnFailedTime.get() > FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT) {
 					TraceEvent(SevWarnAlways, "PeerUnavailableForLongTime", conn ? conn->getDebugID() : UID())
-					    .suppressFor(1.0)
+					    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 					    .detail("PeerAddr", self->destination)
 					    .detail("PeerAddress", self->destination);
 					firstConnFailedTime = now() - FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT / 2.0;
@@ -979,14 +979,14 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 			if (self->compatible) {
 				TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID())
 				    .errorUnsuppressed(e)
-				    .suppressFor(1.0)
+				    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 				    .detail("PeerAddr", self->destination)
 				    .detail("PeerAddress", self->destination);
 			} else {
 				TraceEvent(
 				    ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID())
 				    .errorUnsuppressed(e)
-				    .suppressFor(1.0)
+				    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 				    .detail("PeerAddr", self->destination)
 				    .detail("PeerAddress", self->destination);
 
@@ -1051,7 +1051,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 			    self->outstandingReplies == 0) {
 				TraceEvent("PeerDestroy")
 				    .errorUnsuppressed(e)
-				    .suppressFor(1.0)
+				    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 				    .detail("PeerAddr", self->destination)
 				    .detail("PeerAddress", self->destination)
 				    .detail("PeerReferences", self->peerReferences)
@@ -1154,7 +1154,8 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 	    (lastConnectTime > 1.0 && now() - lastConnectTime > FLOW_KNOBS->ALWAYS_ACCEPT_DELAY)) {
 		// Keep the new connection
 		TraceEvent("IncomingConnection"_audit, conn->getDebugID())
-		    .suppressFor(1.0)
+		    // suppressFor is a no-op here: _audit events are forced-enabled and never suppressible.
+		    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 		    .detail("FromAddr", conn->getPeerAddress())
 		    .detail("CanonicalAddr", destination)
 		    .detail("IsPublic", destination.isPublic())
@@ -1165,7 +1166,7 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 		connect = connectionKeeper(self, conn, reader);
 	} else {
 		TraceEvent("RedundantConnection", conn->getDebugID())
-		    .suppressFor(1.0)
+		    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 		    .detail("FromAddr", conn->getPeerAddress().toString())
 		    .detail("CanonicalAddr", destination)
 		    .detail("LocalAddr", compatibleAddr);
@@ -1576,7 +1577,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						} else {
 							compatible = true;
 							TraceEvent("ConnectionEstablished", conn->getDebugID())
-							    .suppressFor(1.0)
+							    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 							    .detail("Peer", conn->getPeerAddress())
 							    .detail("PeerAddress", conn->getPeerAddress())
 							    .detail("ConnectionId", connectionId);
@@ -1593,7 +1594,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							peerProtocolVersion = protocolVersion;
 							// Outgoing connection; port information should be what we expect
 							TraceEvent("ConnectedOutgoing")
-							    .suppressFor(1.0)
+							    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 							    .detail("PeerAddr", NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort))
 							    .detail("PeerAddress",
 							            NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort));
@@ -1700,7 +1701,7 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 		if (e.code() != error_code_actor_cancelled) {
 			TraceEvent("IncomingConnectionError", conn->getDebugID())
 			    .errorUnsuppressed(e)
-			    .suppressFor(1.0)
+			    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 			    .detail("FromAddress", conn->getPeerAddress());
 			static SimpleCounter<int64_t>* countIncomingConnectionFailed =
 			    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionFailed");
@@ -1735,7 +1736,7 @@ ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr)
 			countIncomingConnectionCreated->increment(1);
 			if (conn) {
 				TraceEvent("ConnectionFrom", conn->getDebugID())
-				    .suppressFor(1.0)
+				    .suppressFor(FLOW_KNOBS->CONNECTION_EVENT_SUPPRESS_FOR)
 				    .detail("FromAddress", conn->getPeerAddress())
 				    .detail("ListenAddress", listenAddr.toString());
 				incoming.add(connectionIncoming(self, conn));
