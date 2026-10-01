@@ -66,7 +66,7 @@ impl RustWorkload for SharedWorkload {
             self.phase_clock.now()
         );
     }
-    fn get_metrics(&self, mut _out: Metrics) {
+    fn get_metrics(&self, mut _out: Metrics<'_>) {
         println!("rust_get_metrics({})", self.client_id);
     }
     fn get_check_timeout(&self) -> f64 {

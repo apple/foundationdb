@@ -36,3 +36,5 @@ The in-tree adaptation also corrects public API contracts from this snapshot:
   callback tables are managed by the crate. Context clones and environments
   panic before accessing C state if used from another thread or after their
   workload is released.
+- `Metrics<'_>` borrows its native sink for one `get_metrics` callback. A workload
+  cannot retain the sink after returning; collect owned metric values instead.

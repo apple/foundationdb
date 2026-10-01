@@ -79,8 +79,8 @@ pub trait RustWorkload: Sized + 'static {
     ///
     /// # Arguments
     ///
-    /// * `out` - A metric sink
-    fn get_metrics(&self, out: Metrics);
+    /// * `out` - A metric sink borrowed for this callback
+    fn get_metrics(&self, out: Metrics<'_>);
 
     /// Set the check timeout in simulated seconds for this workload.
     fn get_check_timeout(&self) -> f64;
@@ -217,11 +217,11 @@ unsafe extern "C" fn workload_check<W: RustWorkload + 'static>(
 }
 unsafe extern "C" fn workload_get_metrics<W: RustWorkload>(
     raw_workload: *mut OpaqueWorkload,
-    raw_metrics: FDBMetrics,
+    mut raw_metrics: FDBMetrics,
 ) {
     unsafe {
         let workload = &*(raw_workload as *mut W);
-        let out = Metrics::new(raw_metrics);
+        let out = Metrics::new(&mut raw_metrics);
         workload.get_metrics(out);
         #[cfg(coverage)]
         write_coverage_profile();

@@ -102,7 +102,7 @@ add_test(NAME rust_future_safety_tests
   COMMAND_EXPAND_LISTS)
 set_tests_properties(rust_future_safety_tests PROPERTIES TIMEOUT 300 LABELS "rust")
 
-foreach(symbol str_from_c WorkloadContext::new register_workload_context WrappedWorkload)
+foreach(symbol str_from_c WorkloadContext::new register_workload_context WrappedWorkload Metrics)
   string(REPLACE "::" "_" test_suffix ${symbol})
   add_test(NAME rust_simulation_${test_suffix}_safety_tests
     COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}

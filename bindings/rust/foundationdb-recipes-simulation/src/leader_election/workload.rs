@@ -580,7 +580,7 @@ impl RustWorkload for LeaderElectionWorkload {
         }
     }
 
-    fn get_metrics(&self, mut out: Metrics) {
+    fn get_metrics(&self, mut out: Metrics<'_>) {
         out.extend([
             Metric::val("swarm_profile", self.profile.metric_value()),
             Metric::val("operation_count", self.operation_count as f64),

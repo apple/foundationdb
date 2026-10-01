@@ -124,7 +124,7 @@ impl RustWorkload for TracingDemoWorkload {
         tracing::info!(client = self.client_id, phase = "check", "workload check");
     }
 
-    fn get_metrics(&self, mut out: Metrics) {
+    fn get_metrics(&self, mut out: Metrics<'_>) {
         out.extend([Metric::val("committed", self.committed as i32 as f64)]);
     }
 

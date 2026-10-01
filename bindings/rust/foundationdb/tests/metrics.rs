@@ -1,5 +1,5 @@
 use foundationdb::metrics::{AttemptOutcome, MetricKey, TransactionMetrics};
-use foundationdb::runner::MetricsHooks;
+use foundationdb::runner::{MetricsHooks, RunnerHooks};
 use foundationdb::*;
 mod common;
 use std::borrow::Cow;
@@ -384,6 +384,42 @@ async fn test_transaction_info() -> FdbResult<()> {
 
         assert_eq!(metrics.transaction.retries, EXPECTED_RETRIES);
         assert_eq!(metrics.attempts.len(), EXPECTED_RETRIES as usize + 1);
+    }
+
+    Ok(())
+}
+
+/// Completed native GRVs can be polled after the transaction has entered a new
+/// attempt. Their results remain usable, but must not populate its metrics.
+#[tokio::test]
+async fn retained_grv_does_not_record_into_a_later_attempt() -> FdbResult<()> {
+    let db = common::database().await?;
+
+    for retry in [false, true] {
+        let metrics = TransactionMetrics::new();
+        let hooks = MetricsHooks::new(&metrics);
+        let mut txn = db.create_trx()?;
+        hooks.on_attempt_start(&txn, 0);
+
+        let retained = txn.get_read_version();
+        // Both calls share the transaction's read version. Awaiting the second
+        // makes the first native result ready without polling its Rust wrapper.
+        let original_version = txn.get_read_version().await?;
+
+        if retry {
+            txn = txn.on_error(FdbError::from_code(1020)).await?;
+        } else {
+            txn.reset();
+        }
+        assert_eq!(retained.await?, original_version);
+        txn.commit().await.expect("empty attempt should commit");
+
+        let report = metrics.get_metrics_data();
+        assert_eq!(report.attempts.len(), if retry { 2 } else { 1 });
+        let current = report.last_attempt().expect("the new attempt was recorded");
+        assert!(current.grv_duration.is_none());
+        assert!(current.read_version.is_none());
+        assert_eq!(report.transaction.read_version, Some(original_version));
     }
 
     Ok(())

@@ -118,7 +118,7 @@ pub trait RustWorkload {
     async fn setup(&mut self, db: SimDatabase);
     async fn start(&mut self, db: SimDatabase);
     async fn check(&mut self, db: SimDatabase);
-    fn get_metrics(&self, out: Metrics);
+    fn get_metrics(&self, out: Metrics<'_>);
     fn get_check_timeout(&self) -> f64;
 }
 ```
@@ -270,7 +270,7 @@ At the end of the simulation, the `get_metrics` method is called for each client
 Implement this method to report results.
 
 ```rust
-fn get_metrics(&self, out: Metrics) {
+fn get_metrics(&self, out: Metrics<'_>) {
     // val metrics are summed across all clients
     out.push(Metric::val("total_ops", self.ops as f64));
     // avg metrics are averaged across all clients

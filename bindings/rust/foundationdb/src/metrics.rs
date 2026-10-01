@@ -302,12 +302,28 @@ impl TransactionMetrics {
         }
     }
 
-    /// Records the time spent waiting on `get_read_version`, whatever its
-    /// result. Later calls of the same attempt are ignored.
-    pub(crate) fn record_grv(&self, duration: Duration) {
+    /// Records a GRV completion only while its issuing attempt is still open.
+    /// The first timing of that attempt is kept, even when the GRV failed.
+    pub(crate) fn record_grv(
+        &self,
+        usage: &Arc<AttemptUsage>,
+        duration: Duration,
+        version: Option<i64>,
+    ) {
         let mut open = self.open();
+        if !open
+            .usage
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, usage))
+        {
+            return;
+        }
         if open.grv_duration.is_none() {
             open.grv_duration = Some(duration);
+        }
+        if let Some(version) = version {
+            open.read_version = Some(version);
+            self.report().transaction.read_version = Some(version);
         }
     }
 
@@ -532,8 +548,8 @@ mod tests {
         first.record_set(10);
         first.increment_custom(key.clone(), 1);
         metrics.record_commit(Duration::from_millis(3));
-        metrics.record_grv(Duration::from_millis(5));
-        metrics.record_grv(Duration::from_millis(1)); // first sample wins
+        metrics.record_grv(&first, Duration::from_millis(5), Some(42));
+        metrics.record_grv(&first, Duration::from_millis(1), Some(42)); // first sample wins
         metrics.finish_attempt(AttemptOutcome::Retried {
             cause: FdbError::from_code(1020),
         });
@@ -541,6 +557,7 @@ mod tests {
 
         let second = Arc::new(AttemptUsage::new());
         metrics.begin_attempt(second.clone());
+        metrics.record_grv(&first, Duration::from_millis(20), Some(43));
         second.record_set(4);
         second.increment_custom(key.clone(), 2);
         metrics.finish_attempt(AttemptOutcome::Committed);
@@ -551,6 +568,7 @@ mod tests {
         let report = metrics.get_metrics_data();
         assert_eq!(report.attempts.len(), 2);
         assert_eq!(report.transaction.retries, 1);
+        assert_eq!(report.transaction.read_version, Some(42));
 
         let first = &report.attempts[0];
         assert_eq!(first.index, 0);
@@ -570,6 +588,7 @@ mod tests {
         assert_eq!(second.custom_metrics.get(&key), Some(&2));
         assert!(second.commit_duration.is_none());
         assert!(second.grv_duration.is_none());
+        assert!(second.read_version.is_none());
         assert!(matches!(second.outcome, AttemptOutcome::Committed));
 
         assert_eq!(report.total_usage().bytes_written, 14);

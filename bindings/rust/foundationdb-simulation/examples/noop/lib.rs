@@ -70,7 +70,7 @@ impl RustWorkload for NoopWorkload {
             &[("Layer", "Rust"), ("Stage", "Check")],
         );
     }
-    fn get_metrics(&self, mut out: Metrics) {
+    fn get_metrics(&self, mut out: Metrics<'_>) {
         println!("rust_get_metrics({}_{})", self.name, self.client_id);
         out.reserve(8);
         out.push(Metric::val("test", 42));

@@ -136,8 +136,30 @@ impl Drop for ContextOwner {
 }
 /// Wrapper around the C FDBPromise
 pub struct Promise(FDBPromise);
-/// Wrapper around the C FDBMetrics
-pub struct Metrics(FDBMetrics);
+/// A metrics sink borrowed for one [`crate::RustWorkload::get_metrics`] callback.
+///
+/// The native sink is destroyed after the callback returns, so workloads cannot
+/// retain it for later use:
+///
+/// ```compile_fail,E0521
+/// use std::cell::RefCell;
+/// use foundationdb_simulation::{Metrics, RustWorkload, SimDatabase};
+///
+/// struct RetainingWorkload {
+///     saved: RefCell<Option<Metrics<'static>>>,
+/// }
+///
+/// impl RustWorkload for RetainingWorkload {
+///     async fn setup(&mut self, _: SimDatabase) {}
+///     async fn start(&mut self, _: SimDatabase) {}
+///     async fn check(&mut self, _: SimDatabase) {}
+///     fn get_metrics(&self, out: Metrics<'_>) {
+///         *self.saved.borrow_mut() = Some(out);
+///     }
+///     fn get_check_timeout(&self) -> f64 { 1.0 }
+/// }
+/// ```
+pub struct Metrics<'callback>(&'callback mut FDBMetrics);
 
 /// A single metric entry
 #[derive(Clone)]
@@ -388,20 +410,20 @@ impl Drop for Promise {
     }
 }
 
-impl Metrics {
-    pub(crate) fn new(raw: FDBMetrics) -> Self {
+impl<'callback> Metrics<'callback> {
+    pub(crate) fn new(raw: &'callback mut FDBMetrics) -> Self {
         Self(raw)
     }
     /// Call std::vector::reserve on the underlying C++ sink
     pub fn reserve(&mut self, n: usize) {
-        with! { self.0 => reserve(n as i32) }
+        with! { &*self.0 => reserve(n as i32) }
     }
     /// Push a [Metric] entry in the underlying C++ sink
     pub fn push(&mut self, metric: Metric) {
         let key_storage = str_for_c(metric.key);
         let fmt_storage = str_for_c(metric.fmt.unwrap_or("%.3g"));
         with! {
-            self.0 => push(FDBMetric {
+            &*self.0 => push(FDBMetric {
                 key: key_storage.as_ptr(),
                 fmt: fmt_storage.as_ptr(),
                 val: metric.val,
@@ -465,7 +487,7 @@ mod tests {
     use super::WorkloadContext;
     use super::raw_bindings::*;
     use crate::registration::register_workload_context;
-    use crate::{Metrics, RustWorkload, SimDatabase};
+    use crate::{Metric, Metrics, RustWorkload, SimDatabase};
 
     struct NativeContext {
         calls: Arc<AtomicUsize>,
@@ -560,7 +582,19 @@ mod tests {
         async fn setup(&mut self, _: SimDatabase) {}
         async fn start(&mut self, _: SimDatabase) {}
         async fn check(&mut self, _: SimDatabase) {}
-        fn get_metrics(&self, _: Metrics) {}
+        fn get_metrics(&self, mut out: Metrics<'_>) {
+            out.reserve(3);
+            out.push(Metric::val("operations", 7));
+            out.extend([
+                Metric::avg("latency", 2.5),
+                Metric {
+                    key: "completion",
+                    val: 1.0,
+                    avg: false,
+                    fmt: Some("%.0f"),
+                },
+            ]);
+        }
         fn get_check_timeout(&self) -> f64 {
             7.0
         }
@@ -572,6 +606,54 @@ mod tests {
                 assert_eq!(context.now(), 12.0);
             }
         }
+    }
+
+    #[derive(Default)]
+    struct NativeMetrics {
+        reservations: Vec<i32>,
+        entries: Vec<(String, f64, bool, String)>,
+    }
+
+    unsafe extern "C" fn reserve_metrics(raw: *mut OpaqueMetrics, n: i32) {
+        // SAFETY: The metrics callback keeps the native sink alive and exclusive.
+        let sink = unsafe { &mut *(raw as *mut NativeMetrics) };
+        sink.reservations.push(n);
+        sink.entries.reserve(n as usize);
+    }
+
+    unsafe extern "C" fn push_metric(raw: *mut OpaqueMetrics, metric: FDBMetric) {
+        // SAFETY: The callback owns the sink and borrows these strings for this call.
+        let sink = unsafe { &mut *(raw as *mut NativeMetrics) };
+        let key = unsafe { super::str_from_c(metric.key) };
+        let format = unsafe { super::str_from_c(metric.fmt) };
+        sink.entries.push((key, metric.val, metric.avg, format));
+    }
+
+    #[test]
+    fn metrics_callback_writes_to_borrowed_native_sink() {
+        let workload = TestWorkload(None).wrap();
+        let mut sink = NativeMetrics::default();
+        let mut metrics_vt = FDBMetrics_FDBMetrics_VT {
+            reserve: Some(reserve_metrics),
+            push: Some(push_metric),
+        };
+        let raw_metrics = FDBMetrics {
+            inner: &mut sink as *mut NativeMetrics as *mut _,
+            vt: &mut metrics_vt,
+        };
+
+        // SAFETY: The workload, sink, and vtable all remain live for this callback.
+        unsafe { (*workload.0.vt).getMetrics.unwrap()(workload.0.inner, raw_metrics) };
+
+        assert_eq!(sink.reservations.first(), Some(&3));
+        assert_eq!(
+            sink.entries,
+            vec![
+                ("operations".into(), 7.0, false, "%.3g".into()),
+                ("latency".into(), 2.5, true, "%.3g".into()),
+                ("completion".into(), 1.0, false, "%.0f".into()),
+            ]
+        );
     }
 
     #[test]
