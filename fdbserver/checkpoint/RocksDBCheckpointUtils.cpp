@@ -576,7 +576,9 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::tryOpenForRead(const std::str
 	for (const std::string& name : columnFamilies) {
 		descriptors.emplace_back(name, cfOptions);
 	}
-	status = rocksdb::DB::OpenForReadOnly(options, path, descriptors, &handles, &db);
+	std::unique_ptr<rocksdb::DB> dbPtr;
+	status = rocksdb::DB::OpenForReadOnly(options, path, descriptors, &handles, &dbPtr);
+	db = dbPtr.release();
 	if (!status.ok()) {
 		logRocksDBError(status, "OpenForReadOnly", logId);
 		return status;
@@ -640,7 +642,9 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::importCheckpoint(const std::s
 		descriptors.emplace_back(name, cfOptions);
 	}
 
-	status = rocksdb::DB::Open(options, path, descriptors, &handles, &db);
+	std::unique_ptr<rocksdb::DB> dbPtr;
+	status = rocksdb::DB::Open(options, path, descriptors, &handles, &dbPtr);
+	db = dbPtr.release();
 	if (!status.ok()) {
 		TraceEvent(SevWarn, "CheckpointReaderOpenedFailed", logId)
 		    .detail("Status", status.ToString())

@@ -115,6 +115,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY,         2.0 );
 
 	//FlowTransport
+	init( CONNECTION_EVENT_SUPPRESS_FOR,                       2.0 );
 	init( CONNECTION_REJECTED_MESSAGE_DELAY,                   1.0 );
 	init( CONNECTION_ID_TIMEOUT,                             600.0 ); if( randomize && buggify() ) CONNECTION_ID_TIMEOUT = 60.0;
 	init( CONNECTION_CLEANUP_DELAY,                          100.0 );
