@@ -985,13 +985,10 @@ impl StackMachine {
                 let trx_id = self.next_trx_id();
                 let f = trx
                     .take(trx_id)
-                    .on_error(error)
-                    .map(|res| match res {
-                        Ok(trx) => StackResult {
-                            state: trx_name.map(|n| (n, TransactionState::Transaction(trx))),
-                            data: Ok(RESULT_NOT_PRESENT.clone().into_owned()),
-                        },
-                        Err(err) => StackResult::from(err),
+                    .on_error_with_transaction(error)
+                    .map(|(trx, result)| StackResult {
+                        state: trx_name.map(|n| (n, TransactionState::Transaction(trx))),
+                        data: result.map(|()| RESULT_NOT_PRESENT.clone().into_owned()),
                     })
                     .boxed_local();
                 self.push_fut(number, trx_id, f);
@@ -2808,10 +2805,19 @@ mod tests {
         futures::executor::block_on(async {
             let db = Arc::new(Database::new_compat(None).await.expect("cannot open fdb"));
             let mut sm = StackMachine::new(&db, Bytes::from(b"on-error-reuse".as_slice()));
+            let key = b"on-error-reuse".as_slice();
             let instructions = [
                 pack(&("NEW_TRANSACTION",)),
                 pack(&("PUSH", 1020)),
                 pack(&("ON_ERROR",)),
+                pack(&("GET_READ_VERSION",)),
+                pack(&("PUSH", 2000)),
+                pack(&("ON_ERROR",)),
+                pack(&("WAIT_FUTURE",)),
+                pack(&("PUSH", key)),
+                pack(&("GET",)),
+                pack(&("WAIT_FUTURE",)),
+                pack(&("RESET",)),
                 pack(&("GET_READ_VERSION",)),
             ];
 
@@ -2821,10 +2827,17 @@ mod tests {
                     .expect("instruction failed");
             }
 
-            assert!(sm.last_version > 0);
-            assert_eq!(sm.stack.len(), 2);
+            let error = Element::Bytes(pack(&(b"ERROR".as_slice(), b"2000".as_slice())).into());
+            let cancelled = Element::Bytes(pack(&(b"ERROR".as_slice(), b"1025".as_slice())).into());
+            assert_eq!(sm.stack.len(), 5);
             assert_eq!(sm.stack[0].data.as_ref(), Some(&RESULT_NOT_PRESENT));
             assert_eq!(sm.stack[1].data.as_ref(), Some(&GOT_READ_VERSION));
+            assert_eq!(sm.stack[2].data.as_ref(), Some(&error));
+            // A failed on_error cancels the native transaction at API >= 610.
+            // A replacement transaction or implicit reset would hide this state.
+            assert_eq!(sm.stack[3].data.as_ref(), Some(&cancelled));
+            assert_eq!(sm.stack[4].data.as_ref(), Some(&GOT_READ_VERSION));
+            assert!(sm.last_version > 0);
         });
     }
 }

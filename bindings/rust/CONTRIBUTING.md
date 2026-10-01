@@ -59,10 +59,11 @@ for comparison with Python. Tuple tests and macro tests do not need a cluster.
 wakeups, thread ownership, and phase teardown through native workload callbacks.
 Client integration tests check timekeeper read-error propagation and versionstamp
 behavior in separate processes selecting runtime APIs 510, 520, and 740.
-The live-cluster tests also cover raw directory-prefix collisions, transaction
-reuse after bindingtester `ON_ERROR`, and two independently loaded Rust libraries
-sharing a verified C API selection. The library test uses current in-tree headers
-and checks both runtime and header-version mismatches.
+The live-cluster tests also cover raw directory-prefix collisions and transaction
+preservation after both retryable and nonretryable bindingtester `ON_ERROR` results,
+including reset and reuse. The library test uses current in-tree headers and two
+independently loaded Rust libraries to check concurrent initial API selection,
+shared selection, and runtime/header-version mismatches.
 The simulation safety doctests check that borrowed
 metrics sinks cannot escape their callback and process switching requires `unsafe`.
 `rust_simulation_wake_order_tests` uses Loom to explore weak-memory interleavings of

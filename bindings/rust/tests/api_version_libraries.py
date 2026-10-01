@@ -64,6 +64,34 @@ def selected_versions(client):
     return runtime.value, header.value
 
 
+def concurrent_selections(*operations):
+    barrier = threading.Barrier(len(operations), timeout=10)
+    results = [None] * len(operations)
+    errors = [None] * len(operations)
+
+    def select(index, operation):
+        try:
+            barrier.wait()
+            # CDLL releases the GIL while each independent library enters C.
+            results[index] = operation()
+        except Exception as error:
+            errors[index] = error
+
+    threads = [
+        threading.Thread(target=select, args=(index, operation), daemon=True)
+        for index, operation in enumerate(operations)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+        require(not thread.is_alive(), "API selection did not finish within 10 seconds")
+    for error in errors:
+        if error is not None:
+            raise RuntimeError("concurrent API selection failed") from error
+    return results
+
+
 @contextlib.contextmanager
 def running_database(client, cluster_file):
     check(client, client.fdb_setup_network(), "set up network")
@@ -106,18 +134,80 @@ def run_case(args):
         )
         first = load_rust(first_path)
         if args.case == "incompatible-header":
-            check(client, client.fdb_select_api_version_impl(730, 730), "select native API")
-            require(first.test_select_api(730) == 2201, "accepted a mismatched header API")
+            check(
+                client,
+                client.fdb_select_api_version_impl(730, 730),
+                "select native API",
+            )
+            require(
+                first.test_select_api(730) == 2201, "accepted a mismatched header API"
+            )
             require(selected_versions(client) == (730, 730), "changed the native API")
             return
 
         second = load_rust(second_path)
-        check(client, first.test_select_api(740), "select API in first Rust library")
-        require(selected_versions(client) == (740, 740), "first library used another client")
-        require(second.test_select_api(730) == 2201, "accepted a mismatched runtime API")
-        check(client, second.test_select_api(740), "adopt API in second Rust library")
-        check(client, first.test_select_api(740), "repeat selection in first Rust library")
-        require(selected_versions(client) == (740, 740), "changed the selected API")
+        if args.case == "concurrent-matching":
+            results = concurrent_selections(
+                lambda: first.test_select_api(740),
+                lambda: second.test_select_api(740),
+            )
+            require(results == [0, 0], f"matching API selections failed: {results}")
+            expected_versions = (740, 740)
+        elif args.case == "concurrent-runtime-mismatch":
+            results = concurrent_selections(
+                lambda: first.test_select_api(740),
+                lambda: second.test_select_api(730),
+            )
+            require(
+                sorted(results) == [0, 2201],
+                f"conflicting runtime selections must have one winner: {results}",
+            )
+            expected_versions = ((740, 730)[results.index(0)], 740)
+        elif args.case == "concurrent-header-mismatch":
+            results = concurrent_selections(
+                lambda: first.test_select_api(730),
+                lambda: client.fdb_select_api_version_impl(730, 730),
+            )
+            require(
+                sorted(results) == [0, 2201],
+                f"conflicting header selections must have one winner: {results}",
+            )
+            expected_versions = (730, (740, 730)[results.index(0)])
+            require(
+                selected_versions(client) == expected_versions, "changed the API pair"
+            )
+            if expected_versions[1] == 730:
+                for library in (first, second):
+                    require(
+                        library.test_select_api(730) == 2201,
+                        "accepted the incompatible winning header API",
+                    )
+                return
+        else:
+            check(
+                client, first.test_select_api(740), "select API in first Rust library"
+            )
+            require(
+                selected_versions(client) == (740, 740),
+                "first library used another client",
+            )
+            require(
+                second.test_select_api(730) == 2201, "accepted a mismatched runtime API"
+            )
+            expected_versions = (740, 740)
+
+        require(
+            selected_versions(client) == expected_versions, "wrong API pair selected"
+        )
+        for name, library in (("first", first), ("second", second)):
+            check(
+                client,
+                library.test_select_api(expected_versions[0]),
+                f"adopt or repeat winning API in {name} Rust library",
+            )
+        require(
+            selected_versions(client) == expected_versions, "changed the selected API"
+        )
         with running_database(client, args.cluster_file) as database:
             for name, library in (("first", first), ("second", second)):
                 check(
@@ -132,9 +222,14 @@ def main():
     parser.add_argument("--client-library", required=True, type=Path)
     parser.add_argument("--rust-library", required=True, type=Path)
     parser.add_argument("--cluster-file", type=Path)
-    parser.add_argument(
-        "--case", choices=("shared-selection", "incompatible-header"), help=argparse.SUPPRESS
+    cases = (
+        "shared-selection",
+        "incompatible-header",
+        "concurrent-matching",
+        "concurrent-runtime-mismatch",
+        "concurrent-header-mismatch",
     )
+    parser.add_argument("--case", choices=cases, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.case:
         run_case(args)
@@ -143,7 +238,7 @@ def main():
 
     # API selection is irreversible, so each compatibility boundary needs a
     # fresh process. An abort from either Rust library must fail the parent.
-    for case in ("shared-selection", "incompatible-header"):
+    for case in cases:
         command = [
             sys.executable,
             str(Path(__file__).resolve()),

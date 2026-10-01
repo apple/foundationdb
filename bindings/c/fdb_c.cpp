@@ -22,6 +22,7 @@
 #include "flow/ProtocolVersion.h"
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #define FDB_USE_LATEST_API_VERSION
 #define FDB_INCLUDE_LEGACY_TYPES
 
@@ -1110,6 +1111,13 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points_with_limi
 		fdb_api_ptr_##func = (void*)&fdb_api_ptr_removed;
 
 extern "C" DLLEXPORT fdb_error_t fdb_select_api_version_impl(int runtime_version, int header_version) {
+	std::unique_lock<std::mutex> selectionLock;
+	RETURN_ON_ERROR(
+	    // Shared by every caller of this C library, including independently loaded language bindings.
+	    // Retain the mutex through process exit so late calls cannot encounter a destroyed lock.
+	    static auto* const selectionMutex = new std::mutex;
+	    selectionLock = std::unique_lock<std::mutex>(*selectionMutex););
+
 	/* Can only call this once */
 	if (g_api_version != 0)
 		return error_code_api_version_already_set;

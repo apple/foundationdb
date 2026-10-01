@@ -669,6 +669,7 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_split_points_w
 #define FDB_KEYSEL_FIRST_GREATER_THAN(k, l) k, l, 1, 1
 #define FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(k, l) k, l, 0, 1
 
+/* Concurrent selection calls are serialized; calls after successful selection return api_version_already_set. */
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_select_api_version_impl(int runtime_version, int header_version);
 
 /*

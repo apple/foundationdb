@@ -144,7 +144,7 @@ Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. T
 
    Passing a version less than ``FDB_API_VERSION`` will cause the API to behave as it did in the older version.
 
-   It is an error to call this function after it has returned successfully. It is not thread safe, and if called from more than one thread simultaneously its behavior is undefined.
+   Concurrent calls are serialized. Once a call succeeds, every later call returns ``api_version_already_set``, even when requesting the same version. API selection must still complete before other threads use the FoundationDB API.
 
    .. note:: This is actually implemented as a macro. If you are accessing this API via ``dlopen()`` or an FFI, you will need to use :func:`fdb_select_api_version_impl()`.
 
@@ -154,7 +154,7 @@ Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. T
 
    This is the actual entry point called by the :func:`fdb_select_api_version` macro. It should never be called directly from C, but if you are accessing this API via ``dlopen()`` or an FFI, you will need to use it. ``fdb_select_api_version(v)`` is equivalent to ``fdb_select_api_version_impl(v, FDB_API_VERSION)``.
 
-   It is an error to call this function after it has returned successfully. It is not thread safe, and if called from more than one thread simultaneously its behavior is undefined.
+   Concurrent calls are serialized. Once a call succeeds, every later call returns ``api_version_already_set``, even when requesting the same runtime and header versions. API selection must still complete before other threads use the FoundationDB API.
 
    ``runtime_version``
       The version of run-time behavior the API is requested to provide. Must be less than or equal to ``header_version``, and should almost always be equal.

@@ -1447,10 +1447,28 @@ impl Transaction {
     /// [client budget](Self::set_client_budget) is kept. User versions
     /// allocated by [`Self::allocate_user_version`] are invalid for the new
     /// attempt, which starts allocating again at zero.
+    ///
+    /// On failure, the transaction is dropped. Use [`Self::on_error_with_transaction`]
+    /// to retain ownership on both success and failure.
     pub fn on_error(
         self,
         err: FdbError,
     ) -> impl Future<Output = FdbResult<Transaction>> + Send + Sync + Unpin {
+        self.on_error_with_transaction(err)
+            .map(|(transaction, result)| result.map(|()| transaction))
+    }
+
+    /// Applies the same retry and backoff behavior as [`Self::on_error`], returning
+    /// ownership of the transaction even when the error cannot be retried.
+    ///
+    /// On success, the returned transaction has been reset for a new attempt.
+    /// On failure, it retains the state left by the native error handler, which
+    /// may be canceled. Call [`Self::reset`] before using it for another attempt.
+    /// This method does not replace or explicitly reset the failed transaction.
+    pub fn on_error_with_transaction(
+        self,
+        err: FdbError,
+    ) -> impl Future<Output = (Transaction, FdbResult<()>)> + Send + Sync + Unpin {
         self.mark_attempt_end();
 
         unsafe {
@@ -1459,11 +1477,13 @@ impl Transaction {
                 err.code(),
             ))
         }
-        .map_ok(move |()| {
-            self.end_attempt(AttemptOutcome::Retried { cause: err });
-            self.begin_attempt_usage();
-            self.reset_user_version_allocator();
-            self
+        .map(move |result| {
+            if result.is_ok() {
+                self.end_attempt(AttemptOutcome::Retried { cause: err });
+                self.begin_attempt_usage();
+                self.reset_user_version_allocator();
+            }
+            (self, result)
         })
     }
 
