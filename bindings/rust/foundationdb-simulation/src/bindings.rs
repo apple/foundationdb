@@ -6,6 +6,11 @@
 use std::{
     ffi::{self, c_char},
     str::FromStr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::{self, ThreadId},
     time::Duration,
 };
 
@@ -35,8 +40,13 @@ pub const FDB_WORKLOAD_API_VERSION: i32 = raw_bindings::FDB_WORKLOAD_API_VERSION
 // String conversions
 
 #[doc(hidden)]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn str_from_c(c_buf: *const c_char) -> String {
+/// # Safety
+/// `c_buf` must point to a readable, NUL-terminated string for this call.
+///
+/// ```compile_fail,E0133
+/// foundationdb_simulation::internals::str_from_c(std::ptr::null());
+/// ```
+pub unsafe fn str_from_c(c_buf: *const c_char) -> String {
     let c_str = unsafe { ffi::CStr::from_ptr(c_buf) };
     c_str.to_str().unwrap().to_string()
 }
@@ -96,8 +106,34 @@ macro_rules! details {
 // -----------------------------------------------------------------------------
 // Rust Types
 
-/// Wrapper around the C FDBWorkloadContext
-pub struct WorkloadContext(FDBWorkloadContext);
+/// A simulator context shared by one workload and its environment handles.
+///
+/// Context operations panic outside the creating thread or after the registered
+/// workload is released. Cloning the context does not extend the native lifetime.
+#[derive(Clone)]
+pub struct WorkloadContext(Arc<ContextState>);
+
+struct ContextState {
+    raw: FDBWorkloadContext,
+    owner: ThreadId,
+    active: AtomicBool,
+}
+
+// SAFETY: Raw context access is private and always checks the owning thread and
+// lifetime first. No other thread can call the native vtable or invalidate the
+// context, and dropping the state does not dereference its raw pointers.
+unsafe impl Send for ContextState {}
+// SAFETY: The same owner-thread check prevents concurrent native access.
+unsafe impl Sync for ContextState {}
+
+pub(crate) struct ContextOwner(pub(crate) WorkloadContext);
+
+impl Drop for ContextOwner {
+    fn drop(&mut self) {
+        self.0.assert_owner();
+        self.0.0.active.store(false, Ordering::Release);
+    }
+}
 /// Wrapper around the C FDBPromise
 pub struct Promise(FDBPromise);
 /// Wrapper around the C FDBMetrics
@@ -140,19 +176,11 @@ pub enum Severity {
 
 macro_rules! with {
     ($this:expr_2021=>$method:ident($($args:expr_2021),* $(,)?)) => {
-        unsafe { (*$this.vt).$method.unwrap_unchecked()($this.inner $(, $args)*) }
+        {
+            let raw = $this;
+            unsafe { (*raw.vt).$method.unwrap_unchecked()(raw.inner $(, $args)*) }
+        }
     };
-}
-
-impl Clone for WorkloadContext {
-    /// Clones the wrapper by copying the underlying `FDBWorkloadContext` POD (a
-    /// bundle of raw pointers owned by fdbserver, with no `Drop`). The clone
-    /// aliases the same fdbserver-owned context, so it is only valid for the
-    /// lifetime of the workload instance the original was handed to; once
-    /// fdbserver frees that context, every clone dangles.
-    fn clone(&self) -> Self {
-        Self(self.0)
-    }
 }
 
 /// Detail key automatically appended to `Severity::Error` trace events.
@@ -203,13 +231,50 @@ where
 
 impl WorkloadContext {
     #[doc(hidden)]
-    pub fn new(raw: FDBWorkloadContext) -> Self {
-        Self(raw)
+    /// # Safety
+    /// Every operation on this context or its clones requires `raw` to identify
+    /// a live native context with a complete vtable owned by the creating thread.
+    /// The caller must uphold that lifetime for all handles. Construction,
+    /// cloning, and dropping do not access the native pointers. Registration
+    /// hooks invalidate all clones before the native context is destroyed.
+    ///
+    /// ```compile_fail,E0133
+    /// use foundationdb_simulation::{WorkloadContext, internals::FDBWorkloadContext};
+    /// let raw = FDBWorkloadContext {
+    ///     api_version: 1,
+    ///     inner: std::ptr::null_mut(),
+    ///     vt: std::ptr::null_mut(),
+    /// };
+    /// WorkloadContext::new(raw);
+    /// ```
+    pub unsafe fn new(raw: FDBWorkloadContext) -> Self {
+        Self(Arc::new(ContextState {
+            raw,
+            owner: thread::current().id(),
+            active: AtomicBool::new(true),
+        }))
+    }
+
+    fn assert_owner(&self) {
+        assert_eq!(
+            self.0.owner,
+            thread::current().id(),
+            "simulation context accessed outside its owning thread"
+        );
+    }
+
+    fn raw(&self) -> FDBWorkloadContext {
+        self.assert_owner();
+        assert!(
+            self.0.active.load(Ordering::Acquire),
+            "simulation context accessed after workload release"
+        );
+        self.0.raw
     }
 
     /// Get the server FDB_WORKLOAD_API_VERSION
     pub fn get_workload_api_version(&self) -> i32 {
-        self.0.api_version
+        self.raw().api_version
     }
 
     /// Add a log entry in the FoundationDB logs.
@@ -236,7 +301,7 @@ impl WorkloadContext {
             })
             .collect::<Vec<_>>();
         with! {
-            self.0 => trace(
+            self.raw() => trace(
                 severity as FDBSeverity,
                 name.as_ptr(),
                 details.as_ptr(),
@@ -246,19 +311,19 @@ impl WorkloadContext {
     }
     /// Get the process id of the workload
     pub fn get_process_id(&self) -> u64 {
-        with! { self.0 => getProcessID() }
+        with! { self.raw() => getProcessID() }
     }
     /// Set the process id of the workload
     pub fn set_process_id(&self, id: u64) {
-        with! { self.0 => setProcessID(id) }
+        with! { self.raw() => setProcessID(id) }
     }
     /// Get the current simulated time in seconds (starts at zero)
     pub fn now(&self) -> f64 {
-        with! { self.0 => now() }
+        with! { self.raw() => now() }
     }
     /// Get a determinist 32-bit random number
     pub fn rnd(&self) -> u32 {
-        with! { self.0 => rnd() }
+        with! { self.raw() => rnd() }
     }
     /// Get the value of a parameter from the simulation config file
     ///
@@ -275,30 +340,31 @@ impl WorkloadContext {
         let name = str_for_c(name);
         let default_value = str_for_c(null);
         let raw_value = with! {
-            self.0 => getOption(name.as_ptr(), default_value.as_ptr())
+            self.raw() => getOption(name.as_ptr(), default_value.as_ptr())
         };
-        let value = str_from_c(raw_value.inner);
+        // SAFETY: getOption returns an owned, NUL-terminated string.
+        let value = unsafe { str_from_c(raw_value.inner) };
         with! { raw_value => free() };
         if value == null { None } else { Some(value) }
     }
     /// Get the client id of the workload
     pub fn client_id(&self) -> i32 {
-        with! { self.0 => clientId() }
+        with! { self.raw() => clientId() }
     }
     /// Get the client id of the workload
     pub fn client_count(&self) -> i32 {
-        with! { self.0 => clientCount() }
+        with! { self.raw() => clientCount() }
     }
     /// Get a determinist 64-bit random number
     pub fn shared_random_number(&self) -> i64 {
-        with! { self.0 => sharedRandomNumber() }
+        with! { self.raw() => sharedRandomNumber() }
     }
     /// Return a future that will be ready after a given (simulated) duration
     pub fn delay(
         &self,
         duration: Duration,
     ) -> impl std::future::Future<Output = fdb::FdbResult<()>> + Send + Sync + 'static + use<> {
-        let f = with! { self.0 => delay(duration.as_secs_f64()) };
+        let f = with! { self.raw() => delay(duration.as_secs_f64()) };
         // SAFETY: delay returns a new, owned C future with no result value.
         unsafe { fdb::future::FdbFuture::new(f as *mut _) }
     }
@@ -387,6 +453,212 @@ impl<'a> Metric<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Severity, capitalize_first_byte, prepare_trace_details, str_for_c};
+
+    use std::cell::Cell;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use std::time::Duration;
+
+    use super::WorkloadContext;
+    use super::raw_bindings::*;
+    use crate::registration::register_workload_context;
+    use crate::{Metrics, RustWorkload, SimDatabase};
+
+    struct NativeContext {
+        calls: Arc<AtomicUsize>,
+        next_random: Cell<u32>,
+    }
+
+    unsafe extern "C" fn now(raw: *mut OpaqueWorkloadContext) -> f64 {
+        // SAFETY: The test keeps NativeContext alive until workload release.
+        let context = unsafe { &*(raw as *const NativeContext) };
+        context.calls.fetch_add(1, Ordering::Relaxed);
+        12.0
+    }
+
+    unsafe extern "C" fn rnd(raw: *mut OpaqueWorkloadContext) -> u32 {
+        // SAFETY: The test keeps NativeContext alive until workload release.
+        let context = unsafe { &*(raw as *const NativeContext) };
+        context.calls.fetch_add(1, Ordering::Relaxed);
+        let value = context.next_random.get();
+        context.next_random.set(value + 1);
+        value
+    }
+
+    // The unused callbacks are still present so the fake has a complete vtable.
+    unsafe extern "C" fn trace(
+        _: *mut OpaqueWorkloadContext,
+        _: FDBSeverity,
+        _: *const std::ffi::c_char,
+        _: *const FDBStringPair,
+        _: i32,
+    ) {
+    }
+    unsafe extern "C" fn get_process_id(_: *mut OpaqueWorkloadContext) -> u64 {
+        0
+    }
+    unsafe extern "C" fn set_process_id(_: *mut OpaqueWorkloadContext, _: u64) {}
+    unsafe extern "C" fn free_string(_: *const std::ffi::c_char) {}
+    unsafe extern "C" fn get_option(
+        _: *mut OpaqueWorkloadContext,
+        _: *const std::ffi::c_char,
+        default: *const std::ffi::c_char,
+    ) -> FDBString {
+        FDBString {
+            inner: default,
+            vt: &FDBString_FDBString_VT {
+                free: Some(free_string),
+            } as *const _ as *mut _,
+        }
+    }
+    unsafe extern "C" fn client_id(_: *mut OpaqueWorkloadContext) -> i32 {
+        0
+    }
+    unsafe extern "C" fn client_count(_: *mut OpaqueWorkloadContext) -> i32 {
+        1
+    }
+    unsafe extern "C" fn shared_random_number(_: *mut OpaqueWorkloadContext) -> i64 {
+        42
+    }
+    unsafe extern "C" fn delay(_: *mut OpaqueWorkloadContext, _: f64) -> *mut FDBFuture {
+        unreachable!("test does not schedule delays")
+    }
+
+    const CONTEXT_VT: FDBWorkloadContext_FDBWorkloadContext_VT =
+        FDBWorkloadContext_FDBWorkloadContext_VT {
+            trace: Some(trace),
+            getProcessID: Some(get_process_id),
+            setProcessID: Some(set_process_id),
+            now: Some(now),
+            rnd: Some(rnd),
+            getOption: Some(get_option),
+            clientId: Some(client_id),
+            clientCount: Some(client_count),
+            sharedRandomNumber: Some(shared_random_number),
+            delay: Some(delay),
+        };
+
+    fn native_context(calls: Arc<AtomicUsize>) -> (Box<NativeContext>, FDBWorkloadContext) {
+        let mut native = Box::new(NativeContext {
+            calls,
+            next_random: Cell::new(42),
+        });
+        let raw = FDBWorkloadContext {
+            api_version: super::FDB_WORKLOAD_API_VERSION,
+            inner: &mut *native as *mut NativeContext as *mut _,
+            vt: &CONTEXT_VT as *const _ as *mut _,
+        };
+        (native, raw)
+    }
+
+    struct TestWorkload(Option<WorkloadContext>);
+
+    impl RustWorkload for TestWorkload {
+        async fn setup(&mut self, _: SimDatabase) {}
+        async fn start(&mut self, _: SimDatabase) {}
+        async fn check(&mut self, _: SimDatabase) {}
+        fn get_metrics(&self, _: Metrics) {}
+        fn get_check_timeout(&self) -> f64 {
+            7.0
+        }
+    }
+
+    impl Drop for TestWorkload {
+        fn drop(&mut self) {
+            if let Some(context) = &self.0 {
+                assert_eq!(context.now(), 12.0);
+            }
+        }
+    }
+
+    #[test]
+    fn environment_rejects_access_after_registered_workload_release() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (native, raw) = native_context(calls.clone());
+        let mut escaped = None;
+        // SAFETY: Native context stays alive through the same-thread free call.
+        let workload = unsafe {
+            register_workload_context(raw, |context| {
+                escaped = Some(context.clone());
+                TestWorkload(Some(context)).wrap()
+            })
+        };
+        let context = escaped.unwrap();
+        let environment = context.environment();
+        assert_eq!(environment.clock().monotonic(), Duration::from_secs(12));
+        assert_eq!(environment.rng().next_u32(), 42);
+        // SAFETY: These are the callbacks on the registered, live allocation.
+        unsafe {
+            assert_eq!((*workload.vt).getCheckTimeout.unwrap()(workload.inner), 7.0);
+            (*workload.vt).free.unwrap()(workload.inner);
+        }
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            3,
+            "destructor retains live context"
+        );
+        drop(native);
+        assert!(catch_unwind(AssertUnwindSafe(|| context.now())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| environment.clock().wall())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| environment.rng().next_u64())).is_err());
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            3,
+            "rejected access never enters native context"
+        );
+    }
+
+    #[test]
+    fn environment_rejects_other_threads_without_consuming_randomness() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (_native, raw) = native_context(calls.clone());
+        let mut escaped = None;
+        // SAFETY: Native context stays alive through the same-thread free call.
+        let workload = unsafe {
+            register_workload_context(raw, |context| {
+                escaped = Some(context.environment());
+                TestWorkload(None).wrap()
+            })
+        };
+        let environment = escaped.unwrap();
+        let other_thread = environment.clone();
+        std::thread::spawn(move || {
+            assert!(catch_unwind(AssertUnwindSafe(|| other_thread.clock().monotonic())).is_err());
+            assert!(catch_unwind(AssertUnwindSafe(|| other_thread.rng().next_u32())).is_err());
+        })
+        .join()
+        .unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(environment.rng().next_u64(), (42_u64 << 32) | 43);
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        // SAFETY: This is the unique release of the registered allocation.
+        unsafe { (*workload.vt).free.unwrap()(workload.inner) };
+        assert!(catch_unwind(AssertUnwindSafe(|| environment.rng().next_u32())).is_err());
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn factory_unwind_invalidates_escaped_context() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (native, raw) = native_context(calls.clone());
+        let mut escaped = None;
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| unsafe {
+                // SAFETY: The native context outlives registration, which unwinds.
+                register_workload_context(raw, |context| {
+                    escaped = Some(context.environment());
+                    panic!("factory failed");
+                })
+            }))
+            .is_err()
+        );
+        drop(native);
+        assert!(catch_unwind(AssertUnwindSafe(|| escaped.unwrap().rng().next_u32())).is_err());
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+    }
 
     #[test]
     fn str_for_c_escapes_interior_nul() {

@@ -158,6 +158,15 @@ See the `atomic` and `noop` implementations in the `examples/` directory for com
 ## The WorkloadContext
 
 The `WorkloadContext` passed at instantiation is the primary way to interact with the simulator.
+Contexts and environments created from them may be cloned, but their operations
+must run on the simulator thread that created the workload. Calls from another
+thread or after the registered workload is released panic before accessing the
+native context. Keeping a clone does not extend the native workload's lifetime.
+
+Raw context and string conversion entry points are unsafe. `WrappedWorkload` is
+an opaque owned value; factories create it with `RustWorkload::wrap()` rather
+than constructing a raw C workload or overriding its callback table.
+
 It provides several useful methods:
 
 - `trace(severity, name, details)`: Add a log entry to the FDB trace files.

@@ -290,12 +290,19 @@ async fn tuple_hooks_fire_left_to_right_in_lifecycle_order() {
     let attempts_ref = &attempts;
 
     let result: Result<(), HookTestError> = db
-        .run_with_hooks(&hooks, |trx, _| async move {
-            if attempts_ref.fetch_add(1, Ordering::SeqCst) == 0 {
-                return Err(HookTestError::Fdb(FdbError::from_code(1020)));
+        .run_with_hooks(&hooks, |trx, _| {
+            let attempt = attempts_ref.fetch_add(1, Ordering::SeqCst);
+            events
+                .lock()
+                .expect("events mutex")
+                .push(format!("closure:{attempt}"));
+            async move {
+                if attempt == 0 {
+                    return Err(HookTestError::Fdb(FdbError::from_code(1020)));
+                }
+                trx.set(b"runner_hooks_tuple", b"ok");
+                Ok(())
             }
-            trx.set(b"runner_hooks_tuple", b"ok");
-            Ok(())
         })
         .await;
 
@@ -306,6 +313,7 @@ async fn tuple_hooks_fire_left_to_right_in_lifecycle_order() {
         vec![
             "a:attempt_start:0",
             "b:attempt_start:0",
+            "closure:0",
             "a:closure_error:1020:0",
             "b:closure_error:1020:0",
             "a:error_duration:0",
@@ -314,6 +322,7 @@ async fn tuple_hooks_fire_left_to_right_in_lifecycle_order() {
             "b:retry:0",
             "a:attempt_start:1",
             "b:attempt_start:1",
+            "closure:1",
             "a:before_commit:1",
             "b:before_commit:1",
             "a:commit_success:1",
@@ -561,15 +570,20 @@ async fn metrics_hooks_stacked_on_user_hooks_produce_a_full_report() {
     let attempts_ref = &attempts;
 
     let result: Result<(), HookTestError> = db
-        .run_with_hooks(&hooks, |trx, _| async move {
+        .run_with_hooks(&hooks, |trx, _| {
             let first = attempts_ref.fetch_add(1, Ordering::SeqCst) == 0;
+            // These operations start before the returned future is polled.
+            let read_version = trx.get_read_version();
             trx.set(b"runner_hooks_metrics_stacked", b"value");
             trx.set_custom_metric("stacked", 1, &[]);
-            let _ = trx.get(b"runner_hooks_metrics_stacked", false).await?;
-            if first {
-                return Err(HookTestError::Fdb(FdbError::from_code(1020)));
+            async move {
+                let _ = read_version.await?;
+                let _ = trx.get(b"runner_hooks_metrics_stacked", false).await?;
+                if first {
+                    return Err(HookTestError::Fdb(FdbError::from_code(1020)));
+                }
+                Ok(())
             }
-            Ok(())
         })
         .await;
 
@@ -589,6 +603,8 @@ async fn metrics_hooks_stacked_on_user_hooks_produce_a_full_report() {
     assert_eq!(first.index, 0);
     assert!(matches!(first.outcome, AttemptOutcome::Retried { .. }));
     assert!(first.on_error_duration.is_some());
+    assert!(first.grv_duration.is_some());
+    assert!(first.read_version.is_some());
     assert_eq!(first.usage.call_set, 1);
     assert_eq!(first.usage.call_get, 1);
     assert!(first.usage.bytes_written > 0);
@@ -602,6 +618,8 @@ async fn metrics_hooks_stacked_on_user_hooks_produce_a_full_report() {
     let last = report.attempts.last().expect("a last attempt");
     assert!(matches!(last.outcome, AttemptOutcome::Committed));
     assert!(last.commit_duration.is_some());
+    assert!(last.grv_duration.is_some());
+    assert!(last.read_version.is_some());
     assert_eq!(last.usage.call_set, 1);
 
     // The user hook saw the same run.

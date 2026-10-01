@@ -23,7 +23,7 @@ against older API versions. The in-tree CMake build uses the canonical Foundatio
 headers and option definitions instead. Preserve the historical snapshots when
 updating current options or formatting current FoundationDB C/C++ sources.
 
-The in-tree adaptation also corrects two public API contracts from this snapshot:
+The in-tree adaptation also corrects public API contracts from this snapshot:
 
 - `FdbFuture::new` is now unsafe because it takes unique ownership of a raw C
   future. Callers must establish pointer validity, ownership, and the result type
@@ -31,3 +31,8 @@ The in-tree adaptation also corrects two public API contracts from this snapshot
 - Integer option payloads use `i64`, matching the signed 64-bit values accepted by
   the C API. Callers with explicitly typed `i32` values must widen them with
   `i64::from(value)`; unsuffixed integer literals continue to infer the right type.
+- Raw simulation context and string constructors require `unsafe`. Workloads are
+  wrapped through `RustWorkload::wrap`; `WrappedWorkload` is opaque, and workload
+  callback tables are managed by the crate. Context clones and environments
+  panic before accessing C state if used from another thread or after their
+  workload is released.

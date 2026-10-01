@@ -345,7 +345,15 @@ mod tests {
     /// A zeroed context is enough for guard tests: we only store it in the slot
     /// and drop it, never calling any method that would dereference a pointer.
     fn dummy_context() -> WorkloadContext {
-        WorkloadContext::new(unsafe { std::mem::zeroed::<FDBWorkloadContext>() })
+        // SAFETY: These guard tests only construct, clone, and drop the context;
+        // they never emit trace events or perform native context operations.
+        unsafe {
+            WorkloadContext::new(FDBWorkloadContext {
+                api_version: 1,
+                inner: std::ptr::null_mut(),
+                vt: std::ptr::null_mut(),
+            })
+        }
     }
 
     fn slot_generation() -> Option<u64> {

@@ -9,6 +9,7 @@ use foundationdb_sys::FDBDatabase as FDBDatabaseAlias;
 mod bindings;
 pub mod env;
 mod fdb_rt;
+mod registration;
 
 use bindings::{
     FDB_WORKLOAD_API_VERSION, FDBDatabase, FDBMetrics, FDBPromise, FDBWorkload, FDBWorkload_VT,
@@ -23,8 +24,29 @@ use fdb_rt::fdb_spawn;
 
 /// Rust representation of a simulated FoundationDB database
 pub type SimDatabase = Arc<Database>;
-/// Rust representation of a FoundationDB workload
-pub type WrappedWorkload = FDBWorkload;
+/// An owned FoundationDB workload created by [`RustWorkload::wrap`].
+///
+/// The native pointer and callback table are private so safe factories cannot
+/// return an invalid workload.
+///
+/// ```compile_fail,E0308
+/// use foundationdb_simulation::{WrappedWorkload, internals::FDBWorkload};
+/// let raw = FDBWorkload {
+///     api_version: 1,
+///     inner: std::ptr::null_mut(),
+///     vt: std::ptr::null_mut(),
+/// };
+/// let _: WrappedWorkload = raw;
+/// ```
+pub struct WrappedWorkload(FDBWorkload);
+
+impl Drop for WrappedWorkload {
+    fn drop(&mut self) {
+        // SAFETY: Only RustWorkload::wrap constructs this owned allocation and
+        // its matching vtable, and registration transfers rather than copies it.
+        unsafe { (*self.0.vt).free.unwrap()(self.0.inner) };
+    }
+}
 
 /// Equivalent to the C++ abstract class `FDBWorkload`
 #[allow(async_fn_in_trait)]
@@ -63,25 +85,28 @@ pub trait RustWorkload: Sized + 'static {
     /// Set the check timeout in simulated seconds for this workload.
     fn get_check_timeout(&self) -> f64;
 
-    /// Virtual Table used by the C API
-    const VT: FDBWorkload_VT = FDBWorkload_VT {
-        setup: Some(workload_setup::<Self>),
-        start: Some(workload_start::<Self>),
-        check: Some(workload_check::<Self>),
-        getMetrics: Some(workload_get_metrics::<Self>),
-        getCheckTimeout: Some(workload_get_check_timeout::<Self>),
-        free: Some(workload_drop::<Self>),
-    };
-
     /// Wrap the underlying Rust type so it can be passed to the C API
     fn wrap(self) -> WrappedWorkload {
         let inner = Box::into_raw(Box::new(self));
-        WrappedWorkload {
+        WrappedWorkload(FDBWorkload {
             api_version: FDB_WORKLOAD_API_VERSION,
             inner: inner as *mut _,
-            vt: &Self::VT as *const _ as *mut _,
-        }
+            vt: &WorkloadVtable::<Self>::VT as *const _ as *mut _,
+        })
     }
+}
+
+struct WorkloadVtable<W>(std::marker::PhantomData<W>);
+
+impl<W: RustWorkload> WorkloadVtable<W> {
+    const VT: FDBWorkload_VT = FDBWorkload_VT {
+        setup: Some(workload_setup::<W>),
+        start: Some(workload_start::<W>),
+        check: Some(workload_check::<W>),
+        getMetrics: Some(workload_get_metrics::<W>),
+        getCheckTimeout: Some(workload_get_check_timeout::<W>),
+        free: Some(workload_drop::<W>),
+    };
 }
 
 /// Equivalent to the C++ abstract class `FDBWorkloadFactory`
@@ -220,8 +245,9 @@ unsafe extern "C" fn workload_drop<W: RustWorkload>(raw_workload: *mut OpaqueWor
 #[doc(hidden)]
 /// Primitives exposed for the registrations hooks, should not be used otherwise
 pub mod internals {
-    pub use crate::bindings::{FDBWorkloadContext, str_from_c};
+    pub use crate::bindings::{FDBWorkload, FDBWorkloadContext, str_from_c};
     pub use crate::fdb_rt::poll_pending_tasks;
+    pub use crate::registration::register_workload_context;
 
     #[cfg(feature = "cpp-abi")]
     unsafe extern "C" {
@@ -247,10 +273,10 @@ pub mod internals {
 macro_rules! register_factory {
     ($name:ident) => {
         #[unsafe(no_mangle)]
-        extern "C" fn workloadCFactory(
+        unsafe extern "C" fn workloadCFactory(
             raw_name: *const std::ffi::c_char,
             raw_context: $crate::internals::FDBWorkloadContext,
-        ) -> $crate::WrappedWorkload {
+        ) -> $crate::internals::FDBWorkload {
             use std::sync::atomic::{AtomicBool, Ordering};
             static DONE: AtomicBool = AtomicBool::new(false);
             if DONE
@@ -266,12 +292,17 @@ macro_rules! register_factory {
                     .set($crate::internals::poll_pending_tasks)
                     .unwrap();
             }
-            let name = $crate::internals::str_from_c(raw_name);
-            let context = $crate::WorkloadContext::new(raw_context);
-            <$name as $crate::RustWorkloadFactory>::create(name, context)
+            // SAFETY: The simulator supplies a live string and context, invokes
+            // callbacks on this thread, and releases the workload before context.
+            unsafe {
+                let name = $crate::internals::str_from_c(raw_name);
+                $crate::internals::register_workload_context(raw_context, |context| {
+                    <$name as $crate::RustWorkloadFactory>::create(name, context)
+                })
+            }
         }
         #[unsafe(no_mangle)]
-        extern "C" fn workloadFactory(logger: *const u8) -> *const u8 {
+        unsafe extern "C" fn workloadFactory(logger: *const u8) -> *const u8 {
             unsafe { $crate::internals::workloadCppFactory(logger) }
         }
     };
@@ -283,10 +314,10 @@ macro_rules! register_factory {
 macro_rules! register_workload {
     ($name:ident) => {
         #[unsafe(no_mangle)]
-        extern "C" fn workloadCFactory(
+        unsafe extern "C" fn workloadCFactory(
             raw_name: *const std::ffi::c_char,
             raw_context: $crate::internals::FDBWorkloadContext,
-        ) -> $crate::WrappedWorkload {
+        ) -> $crate::internals::FDBWorkload {
             use std::sync::atomic::{AtomicBool, Ordering};
             static DONE: AtomicBool = AtomicBool::new(false);
             if DONE
@@ -302,12 +333,19 @@ macro_rules! register_workload {
                     .set($crate::internals::poll_pending_tasks)
                     .unwrap();
             }
-            let name = $crate::internals::str_from_c(raw_name);
-            let context = $crate::WorkloadContext::new(raw_context);
-            $crate::RustWorkload::wrap(<$name as $crate::SingleRustWorkload>::new(name, context))
+            // SAFETY: The simulator supplies a live string and context, invokes
+            // callbacks on this thread, and releases the workload before context.
+            unsafe {
+                let name = $crate::internals::str_from_c(raw_name);
+                $crate::internals::register_workload_context(raw_context, |context| {
+                    $crate::RustWorkload::wrap(<$name as $crate::SingleRustWorkload>::new(
+                        name, context,
+                    ))
+                })
+            }
         }
         #[unsafe(no_mangle)]
-        extern "C" fn workloadFactory(logger: *const u8) -> *const u8 {
+        unsafe extern "C" fn workloadFactory(logger: *const u8) -> *const u8 {
             unsafe { $crate::internals::workloadCppFactory(logger) }
         }
     };

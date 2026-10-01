@@ -31,10 +31,11 @@ set(rust_env
 set(rust_profile $<IF:$<CONFIG:Debug>,debug,release>)
 # API 740 is the newest API supported by the imported Rust binding. Building
 # against current headers does not imply support for every current C API.
-set(rust_cargo_args
+set(rust_cargo_base_args
   --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
   --locked
-  --profile $<IF:$<CONFIG:Debug>,dev,release>
+  --profile $<IF:$<CONFIG:Debug>,dev,release>)
+set(rust_cargo_args ${rust_cargo_base_args}
   --features foundationdb/fdb-7_4,foundationdb-gen/fdb-7_4)
 
 # Cargo owns Rust dependency tracking, including changes to build-script inputs.
@@ -63,10 +64,13 @@ set(rust_unit_packages
   --package foundationdb
   --package foundationdb-tuple
   --package foundationdb-gen
-  --package foundationdb-macros)
+  --package foundationdb-macros
+  --package foundationdb-simulation)
+set(rust_unit_args ${rust_cargo_args}
+  --features foundationdb-simulation/fdb-7_4)
 add_custom_target(fdb_rust_tests ALL
   COMMAND ${CMAKE_COMMAND} -E env ${rust_env}
-    ${CARGO_EXECUTABLE} test ${rust_cargo_args} ${rust_unit_packages} --lib --no-run
+    ${CARGO_EXECUTABLE} test ${rust_unit_args} ${rust_unit_packages} --lib --no-run
   DEPENDS fdb_rust
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   COMMENT "Compile Rust library unit tests"
@@ -83,7 +87,7 @@ set(rust_test_env ${rust_env}
 
 add_test(NAME rust_unit_tests
   COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
-    ${CARGO_EXECUTABLE} test ${rust_cargo_args} ${rust_unit_packages} --lib --offline
+    ${CARGO_EXECUTABLE} test ${rust_unit_args} ${rust_unit_packages} --lib --offline
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   COMMAND_EXPAND_LISTS)
 set_tests_properties(rust_unit_tests PROPERTIES TIMEOUT 300 LABELS "rust")
@@ -97,6 +101,19 @@ add_test(NAME rust_future_safety_tests
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   COMMAND_EXPAND_LISTS)
 set_tests_properties(rust_future_safety_tests PROPERTIES TIMEOUT 300 LABELS "rust")
+
+foreach(symbol str_from_c WorkloadContext::new register_workload_context WrappedWorkload)
+  string(REPLACE "::" "_" test_suffix ${symbol})
+  add_test(NAME rust_simulation_${test_suffix}_safety_tests
+    COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
+      ${CARGO_EXECUTABLE} test ${rust_cargo_base_args}
+      --features foundationdb-simulation/fdb-7_4
+      --package foundationdb-simulation --doc --offline ${symbol}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMAND_EXPAND_LISTS)
+  set_tests_properties(rust_simulation_${test_suffix}_safety_tests PROPERTIES
+    TIMEOUT 300 LABELS "rust")
+endforeach()
 
 if(RUN_RUST_INTEGRATION_TESTS)
   add_custom_target(fdb_rust_integration_tests ALL

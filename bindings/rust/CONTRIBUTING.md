@@ -55,6 +55,10 @@ cargo test-fdb-latest --locked
 Use the in-tree [binding tester instructions](foundationdb-bindingtester/README.md)
 for comparison with Python. Tuple tests and macro tests do not need a cluster.
 
+`rust_unit_tests` also checks simulation context lifetime and thread guards with
+fake callbacks; it does not start the simulator. Simulation workload execution
+is a separate check against a compatible server.
+
 The simulation crates and their scripts are retained for focused simulator work;
 their READMEs describe the workload ABI and required server versions. The original
 repository's scheduled correctness, simulation, release, and documentation jobs

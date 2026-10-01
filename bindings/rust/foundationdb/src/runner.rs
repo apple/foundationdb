@@ -109,7 +109,8 @@ const NOT_COMMITTED: i32 = 1020;
 /// tuple, callbacks fire left to right, and both sides always run even if the
 /// left one returned an error, the first error being the one reported.
 pub trait RunnerHooks {
-    /// Called when an attempt starts, before the closure runs.
+    /// Called when an attempt starts, before invoking the closure to construct
+    /// its future.
     fn on_attempt_start(&self, _trx: &Transaction, _attempt: usize) {}
 
     /// Called after the closure succeeded, before the transaction is committed.
@@ -558,7 +559,7 @@ enum Attempt<T, E> {
     BindingFailed(FdbBindingError),
 }
 
-/// Runs the closure once and commits, without any retry logic.
+/// Awaits the closure future and commits, without any retry logic.
 ///
 /// The closure future is built by the caller so that the runner keeps owning
 /// the closure itself: an attempt that borrowed it would make every `run`
@@ -573,8 +574,6 @@ where
     Fut: Future<Output = Result<T, E>>,
     H: RunnerHooks,
 {
-    hooks.on_attempt_start(&transaction, attempt);
-
     let value = match closure_result.await {
         Ok(value) => value,
         Err(error) => return Attempt::ClosureFailed { transaction, error },
@@ -620,6 +619,8 @@ where
     let mut attempt: usize = 0;
 
     loop {
+        // The closure can issue operations while constructing its future.
+        hooks.on_attempt_start(&transaction, attempt);
         let closure_result = closure(transaction.clone(), MaybeCommitted::new(maybe_committed));
 
         let (retried_transaction, _fdb_err) =

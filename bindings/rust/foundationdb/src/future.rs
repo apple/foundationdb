@@ -114,18 +114,12 @@ where
         tracing::instrument(level = "debug", skip(self, cx))
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<FdbResult<T>> {
-        let f = self.f.as_ref().expect("cannot poll after resolve");
-        let ready = unsafe { fdb_sys::fdb_future_is_ready(f.as_ptr()) };
-        if ready == 0 {
-            let f_ptr = f.as_ptr();
-            let mut register = false;
-            let waker = self.waker.get_or_insert_with(|| {
-                register = true;
-                Arc::new(AtomicWaker::new())
-            });
-            waker.register(cx.waker());
-            if register {
-                let network_waker: Arc<AtomicWaker> = waker.clone();
+        let f_ptr = self.f.as_ref().expect("cannot poll after resolve").as_ptr();
+        if poll_ready(
+            &mut self.waker,
+            cx,
+            || unsafe { fdb_sys::fdb_future_is_ready(f_ptr) != 0 },
+            |network_waker| {
                 let network_waker_ptr = Arc::into_raw(network_waker);
                 unsafe {
                     fdb_sys::fdb_future_set_callback(
@@ -134,14 +128,43 @@ where
                         network_waker_ptr as *mut _,
                     );
                 }
-            }
-            Poll::Pending
-        } else {
-            Poll::Ready(
-                error::eval(unsafe { fdb_sys::fdb_future_get_error(f.as_ptr()) })
-                    .and_then(|()| T::try_from(self.f.take().expect("self.f.is_some()"))),
-            )
+            },
+        )
+        .is_pending()
+        {
+            return Poll::Pending;
         }
+        Poll::Ready(
+            error::eval(unsafe { fdb_sys::fdb_future_get_error(f_ptr) })
+                .and_then(|()| T::try_from(self.f.take().expect("self.f.is_some()"))),
+        )
+    }
+}
+
+fn poll_ready(
+    waker: &mut Option<Arc<AtomicWaker>>,
+    cx: &Context<'_>,
+    mut is_ready: impl FnMut() -> bool,
+    set_callback: impl FnOnce(Arc<AtomicWaker>),
+) -> Poll<()> {
+    if is_ready() {
+        return Poll::Ready(());
+    }
+    let mut register = false;
+    let waker = waker.get_or_insert_with(|| {
+        register = true;
+        Arc::new(AtomicWaker::new())
+    });
+    waker.register(cx.waker());
+    if register {
+        set_callback(Arc::clone(waker));
+    }
+    // Completion may have consumed the previous task's waker before registration.
+    // Recheck readiness so the one-shot callback cannot leave this task pending.
+    if is_ready() {
+        Poll::Ready(())
+    } else {
+        Poll::Pending
     }
 }
 
@@ -530,5 +553,109 @@ impl TryFrom<FdbFutureHandle> for () {
     type Error = FdbError;
     fn try_from(_f: FdbFutureHandle) -> FdbResult<Self> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Wake, Waker};
+
+    #[derive(Default)]
+    struct WakeCount(AtomicUsize);
+
+    impl Wake for WakeCount {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[derive(Default)]
+    struct PendingFuture {
+        ready: Cell<bool>,
+        callback: RefCell<Option<Arc<AtomicWaker>>>,
+    }
+
+    impl PendingFuture {
+        fn complete(&self) {
+            self.ready.set(true);
+            self.callback.borrow_mut().take().unwrap().wake();
+        }
+
+        fn poll(
+            &self,
+            waker: &mut Option<Arc<AtomicWaker>>,
+            cx: &Context<'_>,
+            complete_after_read: bool,
+        ) -> Poll<()> {
+            poll_ready(
+                waker,
+                cx,
+                || {
+                    let ready = self.ready.get();
+                    if complete_after_read && !ready {
+                        // The C readiness check has observed false, then the
+                        // network callback completes before the caller registers.
+                        self.complete();
+                    }
+                    ready
+                },
+                |callback| {
+                    assert!(self.callback.replace(Some(callback)).is_none());
+                },
+            )
+        }
+    }
+
+    #[test]
+    fn completion_before_registering_a_new_task_is_ready() {
+        let future = PendingFuture::default();
+        let mut registration = None;
+        let old_task = Arc::new(WakeCount::default());
+        let old_waker = Waker::from(Arc::clone(&old_task));
+        let new_task = Arc::new(WakeCount::default());
+        let new_waker = Waker::from(Arc::clone(&new_task));
+
+        assert!(
+            future
+                .poll(&mut registration, &Context::from_waker(&old_waker), false)
+                .is_pending()
+        );
+        assert!(
+            future
+                .poll(&mut registration, &Context::from_waker(&new_waker), true)
+                .is_ready()
+        );
+        assert_eq!(old_task.0.load(Ordering::SeqCst), 1);
+        assert_eq!(new_task.0.load(Ordering::SeqCst), 0);
+        assert!(future.callback.borrow().is_none());
+    }
+
+    #[test]
+    fn completion_after_registering_a_new_task_wakes_it() {
+        let future = PendingFuture::default();
+        let mut registration = None;
+        let old_task = Arc::new(WakeCount::default());
+        let old_waker = Waker::from(Arc::clone(&old_task));
+        let new_task = Arc::new(WakeCount::default());
+        let new_waker = Waker::from(Arc::clone(&new_task));
+
+        for waker in [&old_waker, &new_waker] {
+            assert!(
+                future
+                    .poll(&mut registration, &Context::from_waker(waker), false)
+                    .is_pending()
+            );
+        }
+        future.complete();
+        assert_eq!(old_task.0.load(Ordering::SeqCst), 0);
+        assert_eq!(new_task.0.load(Ordering::SeqCst), 1);
+        assert!(
+            future
+                .poll(&mut registration, &Context::from_waker(&new_waker), false)
+                .is_ready()
+        );
     }
 }

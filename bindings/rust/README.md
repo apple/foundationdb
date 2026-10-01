@@ -38,9 +38,10 @@ standalone Cargo development.
 
 ## Compatibility and current limits
 
-The migration preserves the upstream crate versions. Two API corrections are
-documented in [UPSTREAM.md](UPSTREAM.md): raw-future ownership requires `unsafe`,
-and integer options take `i64` to cover the C API's full range. Crate versions are
+The migration preserves the upstream crate versions. API corrections are
+documented in [UPSTREAM.md](UPSTREAM.md): raw-pointer ownership requires `unsafe`,
+integer options take `i64` to cover the C API's full range, and simulation workload
+wrappers enforce context lifetime and thread access. Crate versions are
 independent of the FoundationDB server release number. Published crates on
 crates.io are separate releases; importing the source does not publish or transfer
 ownership of them.

@@ -20,13 +20,12 @@
 //! }
 //! ```
 //!
-//! # Lifetime
+//! # Lifetime and threads
 //!
-//! Every type here holds a copy of the fdbserver-owned context, with the same
-//! caveat as [`WorkloadContext::clone`]: the copy aliases a context that
-//! fdbserver frees with the workload instance. Keep a [`SimClock`], a
-//! [`SimRng`], or an [`Environment`] holding them no longer than the workload
-//! that produced it. Using one afterwards dereferences a dangling pointer.
+//! Handles share the workload's guarded context. Calls panic if the workload has
+//! been released or if they run outside the simulator thread that created it.
+//! An [`Environment`] may be cloned or moved, but accessing its clock or RNG on
+//! another thread is rejected before entering fdbserver.
 
 use std::fmt;
 use std::sync::Arc;
@@ -35,19 +34,6 @@ use std::time::Duration;
 use foundationdb::env::{Clock, Environment, Rng};
 
 use crate::bindings::WorkloadContext;
-
-/// A copy of the fdbserver-owned workload context.
-///
-/// The wrapped [`WorkloadContext`] is a bundle of raw pointers with no `Drop`,
-/// so copying it is free and dropping it does nothing. See the
-/// [module documentation](self) for how long the copy stays valid.
-struct ContextHandle(WorkloadContext);
-
-impl ContextHandle {
-    fn new(context: &WorkloadContext) -> Self {
-        Self(context.clone())
-    }
-}
 
 /// The [`Clock`] of a simulated workload, reading fdbserver's simulated time.
 ///
@@ -61,22 +47,14 @@ impl ContextHandle {
 ///
 /// See the [module documentation](self) for how long an instance stays valid.
 pub struct SimClock {
-    context: ContextHandle,
+    context: WorkloadContext,
 }
-
-// SAFETY: the wrapped context is a bundle of raw pointers into fdbserver, which
-// drives every workload callback on a single thread, so the context is never
-// accessed concurrently. This is the same justification as the rest of the
-// crate's use of the raw context, see `Clone for WorkloadContext`.
-unsafe impl Send for SimClock {}
-// SAFETY: see the `Send` impl above.
-unsafe impl Sync for SimClock {}
 
 impl SimClock {
     /// Reads simulated time from `context`.
     pub fn new(context: &WorkloadContext) -> Self {
         Self {
-            context: ContextHandle::new(context),
+            context: context.clone(),
         }
     }
 }
@@ -91,7 +69,7 @@ impl Clock for SimClock {
     fn monotonic(&self) -> Duration {
         // The simulated clock starts at zero and never goes backwards, but it is
         // an f64 crossing the FFI boundary: clamp rather than panic.
-        Duration::from_secs_f64(self.context.0.now().max(0.0))
+        Duration::from_secs_f64(self.context.now().max(0.0))
     }
 
     /// Simulated wall time counts from the UNIX epoch at simulation start, so
@@ -116,22 +94,14 @@ impl Clock for SimClock {
 ///
 /// See the [module documentation](self) for how long an instance stays valid.
 pub struct SimRng {
-    context: ContextHandle,
+    context: WorkloadContext,
 }
-
-// SAFETY: the wrapped context is a bundle of raw pointers into fdbserver, which
-// drives every workload callback on a single thread, so the context is never
-// accessed concurrently. This is the same justification as the rest of the
-// crate's use of the raw context, see `Clone for WorkloadContext`.
-unsafe impl Send for SimRng {}
-// SAFETY: see the `Send` impl above.
-unsafe impl Sync for SimRng {}
 
 impl SimRng {
     /// Draws from the deterministic generator of `context`.
     pub fn new(context: &WorkloadContext) -> Self {
         Self {
-            context: ContextHandle::new(context),
+            context: context.clone(),
         }
     }
 }
@@ -146,14 +116,14 @@ impl Rng for SimRng {
     /// Composes two 32-bit draws, so one call consumes two values of the
     /// simulator's sequence.
     fn next_u64(&self) -> u64 {
-        let high = self.context.0.rnd();
-        let low = self.context.0.rnd();
+        let high = self.context.rnd();
+        let low = self.context.rnd();
         (u64::from(high) << 32) | u64::from(low)
     }
 
     /// One draw of the simulator's sequence, taken directly from the generator.
     fn next_u32(&self) -> u32 {
-        self.context.0.rnd()
+        self.context.rnd()
     }
 }
 
@@ -164,8 +134,8 @@ impl WorkloadContext {
     /// Pass it to the layers and recipes the workload exercises so that they
     /// read time and randomness from the simulator instead of from the machine.
     ///
-    /// The result borrows nothing, but it holds a copy of this context: see the
-    /// [module documentation](self) for how long it stays valid.
+    /// Calls on the resulting clock and RNG panic after this workload is
+    /// released or outside its simulator thread.
     pub fn environment(&self) -> Environment {
         Environment::new(Arc::new(SimClock::new(self)), Arc::new(SimRng::new(self)))
     }
