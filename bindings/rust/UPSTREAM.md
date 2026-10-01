@@ -22,3 +22,12 @@ Historical headers and `fdb.options` snapshots support standalone Cargo builds
 against older API versions. The in-tree CMake build uses the canonical FoundationDB
 headers and option definitions instead. Preserve the historical snapshots when
 updating current options or formatting current FoundationDB C/C++ sources.
+
+The in-tree adaptation also corrects two public API contracts from this snapshot:
+
+- `FdbFuture::new` is now unsafe because it takes unique ownership of a raw C
+  future. Callers must establish pointer validity, ownership, and the result type
+  before constructing the wrapper.
+- Integer option payloads use `i64`, matching the signed 64-bit values accepted by
+  the C API. Callers with explicitly typed `i32` values must widen them with
+  `i64::from(value)`; unsuffixed integer literals continue to infer the right type.

@@ -76,7 +76,23 @@ impl<T> FdbFuture<T>
 where
     T: TryFrom<FdbFutureHandle, Error = FdbError> + Unpin,
 {
-    pub fn new(f: *mut fdb_sys::FDBFuture) -> Self {
+    /// Takes ownership of a future returned by the FoundationDB C API.
+    ///
+    /// # Safety
+    ///
+    /// `f` must be a non-null, valid `FDBFuture` whose result can be extracted by
+    /// `T::try_from`. Ownership of the future is transferred to this wrapper:
+    /// no other owner may destroy it or release its result memory. In particular,
+    /// the same pointer must not be passed to this constructor more than once.
+    ///
+    /// Constructing an owning wrapper requires an explicit unsafe call:
+    ///
+    /// ```compile_fail,E0133
+    /// use foundationdb::future::FdbFuture;
+    ///
+    /// let future = FdbFuture::<()>::new(std::ptr::null_mut());
+    /// ```
+    pub unsafe fn new(f: *mut fdb_sys::FDBFuture) -> Self {
         Self {
             f: Some(FdbFutureHandle(
                 NonNull::new(f).expect("FDBFuture to not be null"),

@@ -485,9 +485,9 @@ pub enum AttemptFailure<'a, E> {
 /// * [`RetryDecision::Retry`] does the same with code 1020 (`not_committed`),
 ///   which is retryable by definition.
 ///
-/// A policy cannot corrupt the
-/// [`MaybeCommitted`] flag handed to the closure: it is
-/// computed from the original error before the policy is consulted.
+/// A policy cannot clear the [`MaybeCommitted`] flag handed to the closure:
+/// it accumulates the original errors from all attempts before the policy is
+/// consulted.
 ///
 /// # Example: cap the number of attempts
 ///
@@ -646,13 +646,10 @@ where
 
                 Attempt::ClosureFailed { transaction, error } => {
                     let proposed = error.retry_decision();
-                    // maybe_committed is computed from the original error only,
-                    // before the policy is consulted: a previous maybe-committed
-                    // attempt must stay visible to the closure whatever the
-                    // policy decides. The synthetic 1020 of `Retry` leaves it
-                    // untouched on purpose.
+                    // Later failures cannot resolve an earlier uncertain commit.
+                    // Preserve it regardless of the policy's replacement error.
                     if let RetryDecision::Fdb(fdb_err) = proposed {
-                        maybe_committed = fdb_err.is_maybe_committed();
+                        maybe_committed |= fdb_err.is_maybe_committed();
                     }
 
                     let fdb_err =
@@ -682,7 +679,7 @@ where
                 }
 
                 Attempt::CommitFailed(commit_error) => {
-                    maybe_committed = commit_error.is_maybe_committed();
+                    maybe_committed |= commit_error.is_maybe_committed();
                     let proposed = RetryDecision::Fdb(*commit_error);
 
                     // Fires before the policy is consulted: a hook reading the

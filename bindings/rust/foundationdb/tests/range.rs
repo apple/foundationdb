@@ -332,6 +332,18 @@ async fn test_mapped_value() -> FdbResult<()> {
         .get_mapped_range(&range_option, &mapper, 1024, false)
         .await?;
 
+    // Neighboring records surround each interior child range, so a shifted
+    // selector would include the previous record and omit the last child key.
+    for mapped_key_value in &mapped_key_values {
+        let child_range = RangeOption::from((
+            mapped_key_value.begin_selector(),
+            mapped_key_value.end_selector(),
+        ));
+        let child_values = t.get_range(&child_range, 1, false).await?;
+        assert!(!child_values.more());
+        assert_eq!(child_values.as_ref(), mapped_key_value.key_values());
+    }
+
     verify_mapped_values(blue_counter, vec![mapped_key_values]);
 
     Ok(())

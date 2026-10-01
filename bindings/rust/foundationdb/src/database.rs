@@ -29,12 +29,11 @@ use crate::{FdbError, FdbResult, error};
 use crate::error::RetryableError;
 use futures::prelude::*;
 
-/// Wrapper around the boolean representing whether the
-/// previous transaction is still on fly
-/// This wrapper prevents the boolean to be copy and force it
-/// to be moved instead.
-/// This pretty handy when you don't want to see the `Database::run` closure
-/// capturing the environment.
+/// Whether any earlier attempt in this run may have committed.
+///
+/// Once true, this remains true for every subsequent attempt, even if later
+/// attempts fail with errors that are known not to have committed.
+/// Convert it to a boolean with `bool::from` when checking the flag.
 pub struct MaybeCommitted(bool);
 
 impl MaybeCommitted {
@@ -122,9 +121,11 @@ impl Database {
         &self,
     ) -> impl Future<Output = FdbResult<crate::future::FdbSlice>> + Send + Sync + Unpin + use<>
     {
-        crate::future::FdbFuture::new(unsafe {
-            fdb_sys::fdb_database_get_client_status(self.inner.as_ptr())
-        })
+        unsafe {
+            crate::future::FdbFuture::new(fdb_sys::fdb_database_get_client_status(
+                self.inner.as_ptr(),
+            ))
+        }
     }
 }
 
@@ -339,8 +340,8 @@ impl Database {
     /// As with other client/server databases, in some failure scenarios a client may be unable to determine
     /// whether a transaction succeeded. You should make sure your closure is idempotent.
     ///
-    /// The closure will notify the user in case of a maybe_committed transaction in a previous run
-    ///  with the `MaybeCommitted` provided in the closure.
+    /// The closure receives a [`MaybeCommitted`] flag indicating whether any earlier attempt
+    /// in this run may have committed. Once true, it stays true for all subsequent attempts.
     ///
     /// This one can be used as boolean with
     /// ```ignore
@@ -458,8 +459,9 @@ impl Database {
     /// # Warning: Maybe committed transactions
     ///
     /// As with other client/server databases, in some failure scenarios a client may be unable to determine
-    /// whether a transaction succeeded. The closure will be notified of a maybe_committed transaction
-    /// in a previous run with the `MaybeCommitted` provided in the closure.
+    /// whether a transaction succeeded. The closure receives a [`MaybeCommitted`] flag indicating
+    /// whether any earlier attempt in this run may have committed. Once true, it stays true for
+    /// all subsequent attempts.
     #[cfg_attr(
         feature = "trace",
         tracing::instrument(level = "debug", skip(self, closure))

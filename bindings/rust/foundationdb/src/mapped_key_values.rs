@@ -19,7 +19,6 @@ use crate::future::{FdbFutureHandle, FdbKeyValue};
 use crate::{error, KeySelector};
 use crate::{FdbError, FdbResult};
 use foundationdb_sys as fdb_sys;
-use std::borrow::Cow;
 use std::fmt;
 
 use std::ops::Deref;
@@ -117,12 +116,12 @@ impl FdbMappedKeyValue {
 
     /// Retrieves the beginning of the range as a [`KeySelector`]
     pub fn begin_selector(&self) -> KeySelector<'_> {
-        KeySelector::new(Cow::from(self.begin_range()), false, 0)
+        KeySelector::first_greater_or_equal(self.begin_range())
     }
 
     /// Retrieves the end of the range as a [`KeySelector`]
     pub fn end_selector(&self) -> KeySelector<'_> {
-        KeySelector::new(Cow::from(self.end_range()), false, 0)
+        KeySelector::first_greater_or_equal(self.end_range())
     }
 
     /// retrieves the associated slice of [`FdbKeyValue`]

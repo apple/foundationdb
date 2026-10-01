@@ -105,7 +105,7 @@ impl FdbScope {
                 }
                 FdbOptionTy::Int => {
                     writeln!(w, "(v) => {{")?;
-                    writeln!(w, "{TAB4}let data: [u8;8] = i64::to_ne_bytes(v as i64);",)?;
+                    writeln!(w, "{TAB4}let data: [u8;8] = v.to_ne_bytes();",)?;
                     writeln!(
                         w,
                         "{TAB4}fdb_sys::{fn_name}({args}, data.as_ptr() as *const u8, 8)"
@@ -224,7 +224,7 @@ impl FdbOption {
 
     fn get_ty(&self) -> Option<&'static str> {
         match self.param_type {
-            FdbOptionTy::Int => Some("i32"),
+            FdbOptionTy::Int => Some("i64"),
             FdbOptionTy::Str => Some("String"),
             FdbOptionTy::Bytes => Some("Vec<u8>"),
             FdbOptionTy::Empty => None,

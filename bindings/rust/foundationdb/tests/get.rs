@@ -129,7 +129,7 @@ async fn test_transact() -> FdbResult<()> {
         // increment try counter
         try_count0.fetch_add(1, Ordering::SeqCst);
 
-        trx.set_option(options::TransactionOption::RetryLimit(RETRY_COUNT as i32))
+        trx.set_option(options::TransactionOption::RetryLimit(RETRY_COUNT as i64))
             .expect("failed to set retry limit");
 
         // update conflict range
@@ -336,7 +336,7 @@ async fn test_set_raw_option() -> FdbResult<()> {
     ) -> FdbResult<()> {
         // increment try counter
         try_count0.fetch_add(1, Ordering::SeqCst);
-        let option = options::TransactionOption::RetryLimit(RETRY_COUNT as i32);
+        let option = options::TransactionOption::RetryLimit(RETRY_COUNT as i64);
         trx.set_raw_option(option.code(), Some(RETRY_COUNT.to_le_bytes().to_vec()))
             .expect("failed to set retry limit");
 

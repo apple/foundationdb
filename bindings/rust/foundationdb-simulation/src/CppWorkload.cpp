@@ -183,26 +183,26 @@ public:
 	}
 
 #if FDB_API_VERSION <= 730
-	virtual std::string description() const override { return "unreachable"; }
+	std::string description() const override { return "unreachable"; }
 #endif
 
-	virtual bool init(FDBWorkloadContext* context) override {
+	bool init(FDBWorkloadContext* context) override {
 		this->workload = translator::workloadCFactory(this->name.c_str(), context::wrap(context));
 		return true;
 	}
-	virtual void setup(FDBDatabase* db, GenericPromise<bool> done) override {
+	void setup(FDBDatabase* db, GenericPromise<bool> done) override {
 		return WITH(this->workload, setup, (capi::FDBDatabase*)db, promise::wrap(done));
 	}
-	virtual void start(FDBDatabase* db, GenericPromise<bool> done) override {
+	void start(FDBDatabase* db, GenericPromise<bool> done) override {
 		return WITH(this->workload, start, (capi::FDBDatabase*)db, promise::wrap(done));
 	}
-	virtual void check(FDBDatabase* db, GenericPromise<bool> done) override {
+	void check(FDBDatabase* db, GenericPromise<bool> done) override {
 		return WITH(this->workload, check, (capi::FDBDatabase*)db, promise::wrap(done));
 	}
-	virtual void getMetrics(std::vector<FDBPerfMetric>& out) const override {
+	void getMetrics(std::vector<FDBPerfMetric>& out) const override {
 		return WITH(this->workload, getMetrics, metrics::wrap(&out));
 	}
-	virtual double getCheckTimeout() override { return WITH(this->workload, getCheckTimeout); }
+	double getCheckTimeout() override { return WITH(this->workload, getCheckTimeout); }
 };
 } // namespace translator
 
@@ -212,7 +212,7 @@ public:
 		logger->trace(FDBSeverity::Info, "CppWorkloadFactory", {});
 	}
 
-	virtual std::shared_ptr<FDBWorkload> create(const std::string& name) {
+	std::shared_ptr<FDBWorkload> create(const std::string& name) override {
 		return std::make_shared<translator::Workload>(name);
 	}
 };

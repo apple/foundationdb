@@ -38,10 +38,12 @@ standalone Cargo development.
 
 ## Compatibility and current limits
 
-The migration preserves the upstream crate versions and public Rust API. Crate
-versions are independent of the FoundationDB server release number. Published
-crates on crates.io are separate releases; importing the source does not publish
-or transfer ownership of them.
+The migration preserves the upstream crate versions. Two API corrections are
+documented in [UPSTREAM.md](UPSTREAM.md): raw-future ownership requires `unsafe`,
+and integer options take `i64` to cover the C API's full range. Crate versions are
+independent of the FoundationDB server release number. Published crates on
+crates.io are separate releases; importing the source does not publish or transfer
+ownership of them.
 
 Select exactly one Cargo API feature: `fdb-5_1`, `fdb-5_2`, `fdb-6_0`, `fdb-6_1`,
 `fdb-6_2`, `fdb-6_3`, `fdb-7_0`, `fdb-7_1`, `fdb-7_3`, or `fdb-7_4`. The in-tree

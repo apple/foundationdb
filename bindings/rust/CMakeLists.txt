@@ -88,6 +88,16 @@ add_test(NAME rust_unit_tests
   COMMAND_EXPAND_LISTS)
 set_tests_properties(rust_unit_tests PROPERTIES TIMEOUT 300 LABELS "rust")
 
+# This compile-fail doctest checks the public raw-pointer ownership boundary.
+# Other client doctests may require a running cluster.
+add_test(NAME rust_future_safety_tests
+  COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
+    ${CARGO_EXECUTABLE} test ${rust_cargo_args} --package foundationdb --doc --offline
+    future::FdbFuture
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMAND_EXPAND_LISTS)
+set_tests_properties(rust_future_safety_tests PROPERTIES TIMEOUT 300 LABELS "rust")
+
 if(RUN_RUST_INTEGRATION_TESTS)
   add_custom_target(fdb_rust_integration_tests ALL
     COMMAND ${CMAKE_COMMAND} -E env ${rust_env}

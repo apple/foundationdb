@@ -299,7 +299,8 @@ impl WorkloadContext {
         duration: Duration,
     ) -> impl std::future::Future<Output = fdb::FdbResult<()>> + Send + Sync + 'static + use<> {
         let f = with! { self.0 => delay(duration.as_secs_f64()) };
-        fdb::future::FdbFuture::new(f as *mut _)
+        // SAFETY: delay returns a new, owned C future with no result value.
+        unsafe { fdb::future::FdbFuture::new(f as *mut _) }
     }
 }
 
