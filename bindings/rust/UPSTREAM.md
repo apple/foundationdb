@@ -44,3 +44,11 @@ The in-tree adaptation also corrects public API contracts from this snapshot:
 - Custom metric formats are checked before reaching native formatting. They must
   contain exactly one floating-point conversion without argument-supplied width,
   precision, positional arguments, or length modifiers; invalid formats panic.
+- Simulation phases own their suspended workload and are cancelled before native
+  workload teardown. Borrowed database handles are disarmed on completion and
+  cancellation; all Rust references must be dropped before either path finishes.
+- Versionstamped mutations require runtime API 520 or later. Earlier runtime
+  versions panic before issuing either mutation because their key and value
+  encodings differ from the tuple helpers' modern encoding.
+- Timekeeper range-read errors propagate to the caller's retry loop. `None` means
+  a successful read found no matching entry.

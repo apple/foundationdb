@@ -831,6 +831,401 @@ mod tests {
         }
     }
 
+    #[cfg(not(fdb_simulation_loom))]
+    mod lifecycle {
+        use super::*;
+        use std::{
+            cell::RefCell,
+            future::{pending, poll_fn},
+            rc::Rc,
+            task::{Poll, Waker},
+        };
+
+        // This unit-test executable supplies the C destroy symbol. The workload
+        // callbacks still construct the real Database wrapper, so an accidental
+        // Database::drop is observable without dereferencing a fake C++ object.
+        #[derive(Default)]
+        struct NativeDatabase {
+            releases: Cell<usize>,
+        }
+
+        #[unsafe(no_mangle)]
+        unsafe extern "C" fn fdb_database_destroy(raw: *mut foundationdb_sys::FDBDatabase) {
+            let database = unsafe { &*(raw as *const NativeDatabase) };
+            database.releases.set(database.releases.get() + 1);
+        }
+
+        struct NativePromise {
+            events: Rc<RefCell<Vec<&'static str>>>,
+            on_send: Option<FDBWorkload>,
+            on_free: Option<FDBWorkload>,
+        }
+
+        unsafe extern "C" fn send(raw: *mut OpaquePromise, _: bool) {
+            let promise = unsafe { &mut *(raw as *mut NativePromise) };
+            promise.events.borrow_mut().push("promise send");
+            if let Some(workload) = promise.on_send.take() {
+                unsafe { (*workload.vt).free.unwrap()(workload.inner) };
+            }
+        }
+
+        unsafe extern "C" fn free(raw: *mut OpaquePromise) {
+            let promise = unsafe { Box::from_raw(raw as *mut NativePromise) };
+            promise.events.borrow_mut().push("promise free");
+            if let Some(workload) = promise.on_free {
+                unsafe { (*workload.vt).free.unwrap()(workload.inner) };
+            }
+        }
+
+        const PROMISE_VT: FDBPromise_FDBPromise_VT = FDBPromise_FDBPromise_VT {
+            send: Some(send),
+            free: Some(free),
+        };
+
+        fn promise(
+            events: &Rc<RefCell<Vec<&'static str>>>,
+            on_send: Option<FDBWorkload>,
+            on_free: Option<FDBWorkload>,
+        ) -> FDBPromise {
+            FDBPromise {
+                inner: Box::into_raw(Box::new(NativePromise {
+                    events: events.clone(),
+                    on_send,
+                    on_free,
+                })) as *mut _,
+                vt: &PROMISE_VT as *const _ as *mut _,
+            }
+        }
+
+        #[derive(Clone, Copy)]
+        enum Wait {
+            Ready,
+            RetainWaker,
+            NoWaker,
+        }
+
+        struct PhaseDrop {
+            context: WorkloadContext,
+            events: Rc<RefCell<Vec<&'static str>>>,
+        }
+
+        impl Drop for PhaseDrop {
+            fn drop(&mut self) {
+                assert_eq!(self.context.now(), 12.0);
+                self.events.borrow_mut().push("phase drop");
+                // Destruction may synchronously invoke the executor hook.
+                crate::fdb_rt::poll_pending_tasks();
+            }
+        }
+
+        struct LifecycleWorkload {
+            context: WorkloadContext,
+            events: Rc<RefCell<Vec<&'static str>>>,
+            waker: Rc<RefCell<Option<Waker>>>,
+            wait: Wait,
+            completed: usize,
+        }
+
+        impl LifecycleWorkload {
+            async fn phase(&mut self, db: SimDatabase) {
+                let _drop = PhaseDrop {
+                    context: self.context.clone(),
+                    events: self.events.clone(),
+                };
+                self.events.borrow_mut().push("phase poll");
+                match self.wait {
+                    Wait::Ready => {}
+                    Wait::RetainWaker => {
+                        poll_fn(|cx| {
+                            *self.waker.borrow_mut() = Some(cx.waker().clone());
+                            Poll::<()>::Pending
+                        })
+                        .await;
+                    }
+                    Wait::NoWaker => pending::<()>().await,
+                }
+                self.completed += 1;
+                drop(db);
+            }
+        }
+
+        impl RustWorkload for LifecycleWorkload {
+            async fn setup(&mut self, db: SimDatabase) {
+                self.phase(db).await;
+            }
+            async fn start(&mut self, db: SimDatabase) {
+                self.phase(db).await;
+            }
+            async fn check(&mut self, db: SimDatabase) {
+                self.phase(db).await;
+            }
+            fn get_metrics(&self, _: Metrics<'_>) {
+                assert_eq!(self.context.now(), 12.0);
+                self.events.borrow_mut().push("metrics");
+            }
+            fn get_check_timeout(&self) -> f64 {
+                7.0
+            }
+        }
+
+        impl Drop for LifecycleWorkload {
+            fn drop(&mut self) {
+                assert_eq!(self.context.now(), 12.0);
+                self.events.borrow_mut().push("workload drop");
+            }
+        }
+
+        fn workload(
+            raw: FDBWorkloadContext,
+            events: &Rc<RefCell<Vec<&'static str>>>,
+            waker: &Rc<RefCell<Option<Waker>>>,
+            wait: Wait,
+        ) -> FDBWorkload {
+            // SAFETY: Each test owns the native context until the registered
+            // workload's unique same-thread free, including reentrant callbacks.
+            unsafe {
+                register_workload_context(raw, |context| {
+                    LifecycleWorkload {
+                        context,
+                        events: events.clone(),
+                        waker: waker.clone(),
+                        wait,
+                        completed: 0,
+                    }
+                    .wrap()
+                })
+            }
+        }
+
+        fn release_native_database(database: &mut NativeDatabase) {
+            // Exercise the same linked C symbol as Database::drop. Only this
+            // native owner release is permitted for the phase's borrowed handle.
+            unsafe {
+                foundationdb_sys::fdb_database_destroy(database as *mut NativeDatabase as *mut _);
+            }
+            assert_eq!(database.releases.get(), 1);
+        }
+
+        #[test]
+        fn native_free_cancels_a_suspended_phase_before_workload_and_context() {
+            let (native, context) = native_context(Arc::new(AtomicUsize::new(0)));
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let waker = Rc::new(RefCell::new(None));
+            let workload = workload(context, &events, &waker, Wait::RetainWaker);
+            let mut database = NativeDatabase::default();
+            unsafe {
+                (*workload.vt).check.unwrap()(
+                    workload.inner,
+                    &mut database as *mut NativeDatabase as *mut _,
+                    promise(&events, None, None),
+                );
+                assert_eq!(*events.borrow(), ["phase poll"]);
+                // The native timeout expression may start check before asking
+                // for its timeout; the pending check still owns a mutable W.
+                assert_eq!((*workload.vt).getCheckTimeout.unwrap()(workload.inner), 7.0);
+                (*workload.vt).free.unwrap()(workload.inner);
+            }
+            assert_eq!(
+                *events.borrow(),
+                ["phase poll", "phase drop", "promise free", "workload drop"]
+            );
+            assert_eq!(database.releases.get(), 0);
+            drop(native);
+            waker.borrow_mut().take().unwrap().wake();
+            crate::fdb_rt::poll_pending_tasks();
+            assert_eq!(
+                events.borrow().len(),
+                4,
+                "late wake cannot poll freed state"
+            );
+            release_native_database(&mut database);
+        }
+
+        #[test]
+        fn metrics_after_timeout_cancel_the_phase_before_accessing_the_workload() {
+            for free_on_cancel in [false, true] {
+                let (_native, context) = native_context(Arc::new(AtomicUsize::new(0)));
+                let events = Rc::new(RefCell::new(Vec::new()));
+                let waker = Rc::new(RefCell::new(None));
+                let workload = workload(context, &events, &waker, Wait::RetainWaker);
+                let mut database = NativeDatabase::default();
+                let mut sink = NativeMetrics::default();
+                let mut metrics_vt = FDBMetrics_FDBMetrics_VT {
+                    reserve: Some(reserve_metrics),
+                    push: Some(push_metric),
+                };
+                let raw_metrics = FDBMetrics {
+                    inner: &mut sink as *mut NativeMetrics as *mut _,
+                    vt: &mut metrics_vt,
+                };
+                unsafe {
+                    (*workload.vt).check.unwrap()(
+                        workload.inner,
+                        &mut database as *mut NativeDatabase as *mut _,
+                        promise(&events, None, free_on_cancel.then_some(workload)),
+                    );
+                    assert_eq!((*workload.vt).getCheckTimeout.unwrap()(workload.inner), 7.0);
+                    // The tester requests metrics after its check waiter times
+                    // out, although the Rust phase still retains its waker.
+                    (*workload.vt).getMetrics.unwrap()(workload.inner, raw_metrics);
+                }
+                if free_on_cancel {
+                    assert_eq!(
+                        *events.borrow(),
+                        ["phase poll", "phase drop", "promise free", "workload drop"]
+                    );
+                } else {
+                    assert_eq!(
+                        *events.borrow(),
+                        ["phase poll", "phase drop", "promise free", "metrics"]
+                    );
+                    unsafe { (*workload.vt).free.unwrap()(workload.inner) };
+                }
+                let count = events.borrow().len();
+                waker.borrow_mut().take().unwrap().wake();
+                crate::fdb_rt::poll_pending_tasks();
+                assert_eq!(events.borrow().len(), count);
+                assert_eq!(database.releases.get(), 0);
+                release_native_database(&mut database);
+            }
+        }
+
+        #[test]
+        fn a_new_phase_cancels_a_previous_native_waiters_abandoned_task() {
+            let (_native, context) = native_context(Arc::new(AtomicUsize::new(0)));
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let waker = Rc::new(RefCell::new(None));
+            let workload = workload(context, &events, &waker, Wait::RetainWaker);
+            let mut start_database = NativeDatabase::default();
+            let mut check_database = NativeDatabase::default();
+            unsafe {
+                (*workload.vt).start.unwrap()(
+                    workload.inner,
+                    &mut start_database as *mut NativeDatabase as *mut _,
+                    promise(&events, None, None),
+                );
+            }
+            let old_waker = waker.borrow_mut().take().unwrap();
+            unsafe {
+                (*workload.vt).check.unwrap()(
+                    workload.inner,
+                    &mut check_database as *mut NativeDatabase as *mut _,
+                    promise(&events, None, None),
+                );
+            }
+            assert_eq!(
+                *events.borrow(),
+                ["phase poll", "phase drop", "promise free", "phase poll"]
+            );
+            old_waker.wake();
+            crate::fdb_rt::poll_pending_tasks();
+            assert_eq!(events.borrow().len(), 4);
+            unsafe { (*workload.vt).free.unwrap()(workload.inner) };
+            assert_eq!(
+                *events.borrow(),
+                [
+                    "phase poll",
+                    "phase drop",
+                    "promise free",
+                    "phase poll",
+                    "phase drop",
+                    "promise free",
+                    "workload drop"
+                ]
+            );
+            drop(waker.borrow_mut().take());
+            release_native_database(&mut start_database);
+            release_native_database(&mut check_database);
+        }
+
+        #[test]
+        fn no_waker_cancellation_preserves_the_callers_database_reference() {
+            let (_native, context) = native_context(Arc::new(AtomicUsize::new(0)));
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let workload = workload(
+                context,
+                &events,
+                &Rc::new(RefCell::new(None)),
+                Wait::NoWaker,
+            );
+            let mut database = NativeDatabase::default();
+            unsafe {
+                (*workload.vt).check.unwrap()(
+                    workload.inner,
+                    &mut database as *mut NativeDatabase as *mut _,
+                    promise(&events, None, Some(workload)),
+                );
+            }
+            assert_eq!(
+                *events.borrow(),
+                ["phase poll", "phase drop", "promise free", "workload drop"]
+            );
+            assert_eq!(database.releases.get(), 0);
+            release_native_database(&mut database);
+        }
+
+        #[test]
+        fn completion_releases_phase_state_before_reentrant_native_free() {
+            let (_native, context) = native_context(Arc::new(AtomicUsize::new(0)));
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let workload = workload(context, &events, &Rc::new(RefCell::new(None)), Wait::Ready);
+            let mut database = NativeDatabase::default();
+            unsafe {
+                (*workload.vt).setup.unwrap()(
+                    workload.inner,
+                    &mut database as *mut NativeDatabase as *mut _,
+                    promise(&events, Some(workload), None),
+                );
+            }
+            assert_eq!(
+                *events.borrow(),
+                [
+                    "phase poll",
+                    "phase drop",
+                    "promise send",
+                    "workload drop",
+                    "promise free"
+                ]
+            );
+            assert_eq!(database.releases.get(), 0);
+            release_native_database(&mut database);
+        }
+
+        #[test]
+        fn timeout_is_not_queried_before_setup_initializes_the_workload() {
+            struct SetupDependentTimeout(Option<f64>);
+
+            impl RustWorkload for SetupDependentTimeout {
+                async fn setup(&mut self, _: SimDatabase) {
+                    self.0 = Some(7.0);
+                }
+                async fn start(&mut self, _: SimDatabase) {}
+                async fn check(&mut self, _: SimDatabase) {}
+                fn get_metrics(&self, _: Metrics<'_>) {}
+                fn get_check_timeout(&self) -> f64 {
+                    self.0.expect("setup initializes the check timeout")
+                }
+            }
+
+            let (_native, context) = native_context(Arc::new(AtomicUsize::new(0)));
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let mut database = NativeDatabase::default();
+            unsafe {
+                let workload =
+                    register_workload_context(context, |_| SetupDependentTimeout(None).wrap());
+                (*workload.vt).setup.unwrap()(
+                    workload.inner,
+                    &mut database as *mut NativeDatabase as *mut _,
+                    promise(&events, None, None),
+                );
+                assert_eq!((*workload.vt).getCheckTimeout.unwrap()(workload.inner), 7.0);
+                (*workload.vt).free.unwrap()(workload.inner);
+            }
+            assert_eq!(database.releases.get(), 0);
+            release_native_database(&mut database);
+        }
+    }
+
     #[test]
     fn environment_rejects_access_after_registered_workload_release() {
         let calls = Arc::new(AtomicUsize::new(0));

@@ -185,6 +185,9 @@ pub fn pack<T: TuplePack>(v: &T) -> Vec<u8> {
 
 /// Pack value and returns the packed buffer
 ///
+/// An incomplete versionstamp uses the four-byte offset encoding required by
+/// FoundationDB API 520 and later; earlier mutation formats are not supported.
+///
 /// # Panics
 ///
 /// Panics if there is multiple versionstamp present or if the encoded data size doesn't fit in `u32`.

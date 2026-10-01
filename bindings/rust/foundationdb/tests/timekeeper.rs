@@ -1,5 +1,38 @@
+use foundationdb::options::TransactionOption;
 use foundationdb::timekeeper::{HintMode, hint_version_from_timestamp};
+use foundationdb::{FdbBindingError, RangeOption};
 use std::time::SystemTime;
+
+mod common;
+
+#[tokio::test]
+async fn timekeeper_propagates_range_read_errors() -> Result<(), FdbBindingError> {
+    let database = common::database().await?;
+    let trx = database.create_trx()?;
+    trx.set_read_version(1);
+    trx.set_option(TransactionOption::ReadSystemKeys)?;
+    trx.set_option(TransactionOption::ReadLockAware)?;
+
+    let range = RangeOption::from((
+        b"\xff\x02/timeKeeper/map/".as_ref(),
+        b"\xff\x02/timeKeeper/map/\xff".as_ref(),
+    ));
+    let read_error = trx
+        .get_range(&range, 1, true)
+        .await
+        .err()
+        .expect("an obsolete read version must fail the range read");
+    assert_eq!(read_error.code(), 1007);
+
+    // The helper must return the range error, not fail while setting options.
+    trx.set_option(TransactionOption::ReadSystemKeys)?;
+    trx.set_option(TransactionOption::ReadLockAware)?;
+    let error = hint_version_from_timestamp(&trx, 0, HintMode::AfterTimestamp, true)
+        .await
+        .expect_err("a failed range read must not look like a missing timekeeper entry");
+    assert_eq!(error.get_fdb_error().unwrap().code(), read_error.code());
+    Ok(())
+}
 
 #[tokio::test]
 async fn timekeeper() {

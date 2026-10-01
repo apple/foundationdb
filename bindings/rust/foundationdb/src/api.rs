@@ -73,10 +73,18 @@ enum NetworkLifecycle {
 }
 
 static NETWORK: Mutex<NetworkLifecycle> = Mutex::new(NetworkLifecycle::Uninitialized);
+// Published after successful API selection and never changed. Version-dependent
+// transaction operations must not take the lifecycle lock (network shutdown
+// holds it while joining the network thread).
+static SELECTED_API_VERSION: AtomicI32 = AtomicI32::new(0);
 static STOP_ON_EXIT: AtomicBool = AtomicBool::new(true);
 // Last error returned by fdb_run_network (0 = none). An atomic, not a mutex: the
 // network thread must never take a lock shared with the thread joining it.
 static NETWORK_RUN_ERROR: AtomicI32 = AtomicI32::new(0);
+
+pub(crate) fn selected_api_version() -> i32 {
+    SELECTED_API_VERSION.load(Ordering::Acquire)
+}
 
 fn lock_network() -> MutexGuard<'static, NetworkLifecycle> {
     // State is only mutated after the corresponding FFI call succeeded, so a
@@ -113,6 +121,7 @@ impl NetworkLifecycle {
                 *self = NetworkLifecycle::ApiVersionSelected {
                     api_version: version,
                 };
+                SELECTED_API_VERSION.store(version, Ordering::Release);
                 Ok(())
             }
             NetworkLifecycle::ApiVersionSelected { api_version }
@@ -320,6 +329,7 @@ impl FdbApiBuilder {
     ///
     /// Must be less than or equal to header_version, `foundationdb_sys::FDB_API_VERSION`, and should almost always be equal.
     /// Language bindings which themselves expose API versioning will usually pass the version requested by the application.
+    /// Versionstamped mutations require runtime API 520 or later in this binding.
     pub fn set_runtime_version(mut self, version: i32) -> Self {
         self.runtime_version = version;
         self

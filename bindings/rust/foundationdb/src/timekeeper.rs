@@ -12,11 +12,10 @@
 //!
 //! [source](https://forums.foundationdb.org/t/versionstamp-as-absolute-time/2442/3)
 
-use crate::future::FdbValue;
 use crate::options::TransactionOption;
-use crate::{FdbBindingError, FdbResult, KeySelector, RangeOption, Transaction};
+use crate::{FdbBindingError, KeySelector, RangeOption, Transaction};
 use foundationdb_tuple::{pack, unpack};
-use futures::StreamExt;
+use futures::TryStreamExt;
 
 /// Timekeeper keys are stored in a special keyspace
 /// Can be found in the [Java implementation](https://github.com/FoundationDB/fdb-record-layer/blob/main/fdb-extensions/src/main/java/com/apple/foundationdb/system/SystemKeyspace.java#L80)
@@ -45,6 +44,10 @@ pub enum HintMode {
 /// compatible with an i64.
 ///
 /// Timestamps are provided from unix time as seconds
+///
+/// Read failures are returned to the caller so that retryable errors can be
+/// handled by the transaction's retry loop. `None` means the read succeeded
+/// without finding a matching entry.
 pub async fn hint_version_from_timestamp(
     trx: &Transaction,
     unix_timestamp_as_seconds: u64,
@@ -86,14 +89,10 @@ pub async fn hint_version_from_timestamp(
     range.limit = Some(1);
 
     // We get the first key matching our start range bound
-    let results = trx
-        .get_ranges_keyvalues(range, snapshot)
-        .take(1)
-        .collect::<Vec<FdbResult<FdbValue>>>()
-        .await;
+    let result = trx.get_ranges_keyvalues(range, snapshot).try_next().await?;
 
     // If any result then the value found will be the read version ID
-    if let Some(Ok(kv)) = results.first() {
+    if let Some(kv) = result {
         let version = unpack(kv.value()).map_err(FdbBindingError::PackError)?;
         return Ok(Some(version));
     }

@@ -1,7 +1,16 @@
 #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
 
-use std::{ptr::NonNull, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    future::Future,
+    mem::ManuallyDrop,
+    pin::Pin,
+    ptr::NonNull,
+    rc::Rc,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 use foundationdb::Database;
 use foundationdb_sys::FDBDatabase as FDBDatabaseAlias;
@@ -17,7 +26,7 @@ use bindings::{
 };
 pub use bindings::{Metric, Metrics, Severity, WorkloadContext};
 pub use env::{SimClock, SimRng};
-use fdb_rt::fdb_spawn;
+use fdb_rt::{TaskId, poll_pending_tasks};
 
 // -----------------------------------------------------------------------------
 // User friendly types
@@ -87,7 +96,12 @@ pub trait RustWorkload: Sized + 'static {
 
     /// Wrap the underlying Rust type so it can be passed to the C API
     fn wrap(self) -> WrappedWorkload {
-        let inner = Box::into_raw(Box::new(self));
+        let inner = Box::into_raw(Box::new(Rc::new(WorkloadState {
+            workload: RefCell::new(Some(Box::new(self))),
+            task: Cell::new(None),
+            check_timeout: Cell::new(None),
+            releasing_phase: Cell::new(false),
+        })));
         WrappedWorkload(FDBWorkload {
             api_version: FDB_WORKLOAD_API_VERSION,
             inner: inner as *mut _,
@@ -130,14 +144,88 @@ pub trait SingleRustWorkload: RustWorkload {
 // -----------------------------------------------------------------------------
 // C to Rust bindings
 
-fn check_database_ref(database: SimDatabase) {
-    if Arc::strong_count(&database) != 1 || Arc::weak_count(&database) != 0 {
-        eprintln!(
-            "Reference to Database kept between phases (setup/start/check). All references should be dropped."
-        );
-        std::process::exit(1);
+struct WorkloadState<W> {
+    workload: RefCell<Option<Box<W>>>,
+    task: Cell<Option<TaskId>>,
+    check_timeout: Cell<Option<f64>>,
+    releasing_phase: Cell<bool>,
+}
+
+// The phase owns W while suspended, rather than borrowing an allocation that the
+// native free callback can destroy. Cancellation returns it before owner teardown.
+struct PhaseWorkload<W> {
+    workload: Option<Box<W>>,
+    state: Rc<WorkloadState<W>>,
+}
+
+impl<W> Drop for PhaseWorkload<W> {
+    fn drop(&mut self) {
+        *self.state.workload.borrow_mut() = self.workload.take();
     }
-    std::mem::forget(database);
+}
+
+// The native caller owns this database reference. The guard always outlives the
+// user future, including cancellation, and releases only the Rust Arc allocation.
+struct PhaseDatabase(ManuallyDrop<SimDatabase>);
+
+impl Drop for PhaseDatabase {
+    fn drop(&mut self) {
+        // SAFETY: This is the guard's only release, and ManuallyDrop prevents a
+        // borrowed native reference from being destroyed on any error path.
+        let database = unsafe { ManuallyDrop::take(&mut self.0) };
+        if Arc::strong_count(&database) != 1 || Arc::weak_count(&database) != 0 {
+            eprintln!(
+                "Reference to Database kept after phase completion or cancellation. All references must be dropped."
+            );
+            std::process::exit(1);
+        }
+        let Ok(database) = Arc::try_unwrap(database) else {
+            unreachable!("the phase owns the only database reference")
+        };
+        let _borrowed = ManuallyDrop::new(database);
+    }
+}
+
+struct PhaseTask<W> {
+    future: Option<Pin<Box<dyn Future<Output = ()>>>>,
+    database: Option<PhaseDatabase>,
+    state: Option<Rc<WorkloadState<W>>>,
+    done: Option<Promise>,
+}
+
+impl<W> PhaseTask<W> {
+    fn release_phase(&mut self) {
+        if let Some(state) = self.state.take() {
+            state.releasing_phase.set(true);
+            drop(self.future.take());
+            drop(self.database.take());
+            state.releasing_phase.set(false);
+            state.task.set(None);
+            // Do not retain W across native promise callbacks: resolving or
+            // releasing a promise may synchronously free the registered workload.
+            drop(state);
+        }
+    }
+}
+
+impl<W> Future for PhaseTask<W> {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let this = self.get_mut();
+        if this.future.as_mut().unwrap().as_mut().poll(cx).is_pending() {
+            return Poll::Pending;
+        }
+        this.release_phase();
+        this.done.take().unwrap().send(true);
+        Poll::Ready(())
+    }
+}
+
+impl<W> Drop for PhaseTask<W> {
+    fn drop(&mut self) {
+        self.release_phase();
+    }
 }
 
 #[cfg(coverage)]
@@ -160,67 +248,119 @@ fn write_coverage_profile() {
     }
 }
 
-unsafe fn database_new(raw_database: *mut FDBDatabase) -> SimDatabase {
-    unsafe {
-        Arc::new(Database::new_from_pointer(NonNull::new_unchecked(
-            raw_database as *mut FDBDatabaseAlias,
-        )))
-    }
+enum Phase {
+    Setup,
+    Start,
+    Check,
 }
-unsafe extern "C" fn workload_setup<W: RustWorkload + 'static>(
+
+// A native timeout abandons its waiter without notifying the Rust task. A new
+// phase or final metrics callback ends the previous phase's exclusive access.
+unsafe fn idle_workload<W: RustWorkload>(
+    raw_workload: *mut OpaqueWorkload,
+) -> Option<Rc<WorkloadState<W>>> {
+    let state = unsafe { &*(raw_workload as *const Rc<WorkloadState<W>>) };
+    let weak = Rc::downgrade(state);
+    let task = state.task.take();
+    if let Some(task) = task {
+        // Releasing the old promise can synchronously free the native owner.
+        // A strong Rc here would delay W's destructor past context invalidation.
+        fdb_rt::cancel(task);
+    }
+    weak.upgrade()
+}
+
+unsafe fn spawn_phase<W: RustWorkload>(
+    raw_workload: *mut OpaqueWorkload,
+    raw_database: *mut FDBDatabase,
+    raw_promise: FDBPromise,
+    phase: Phase,
+) {
+    // SAFETY: wrap allocates this owner and the ABI invokes its callbacks on the
+    // same thread, serially, until its unique free callback.
+    let Some(state) = (unsafe { idle_workload::<W>(raw_workload) }) else {
+        drop(Promise::new(raw_promise));
+        return;
+    };
+    let workload = state
+        .workload
+        .borrow_mut()
+        .take()
+        .expect("workload phases cannot overlap");
+    // Native callers may evaluate check() before getCheckTimeout(). Sampling
+    // while W is idle avoids aliasing a suspended phase's exclusive borrow.
+    if matches!(phase, Phase::Check) {
+        state.check_timeout.set(Some(workload.get_check_timeout()));
+    }
+    let mut workload = PhaseWorkload {
+        workload: Some(workload),
+        state: state.clone(),
+    };
+    let ptr = NonNull::new(raw_database as *mut FDBDatabaseAlias)
+        .expect("the simulator must supply a database");
+    // SAFETY: The native caller supplies a live pointer for this phase. The
+    // guard suppresses Database::drop and rejects references escaping the phase.
+    let database = PhaseDatabase(ManuallyDrop::new(Arc::new(unsafe {
+        Database::new_from_pointer(ptr)
+    })));
+    let borrowed_database = Arc::clone(&database.0);
+    let future = async move {
+        let inner = workload.workload.as_mut().unwrap();
+        match phase {
+            Phase::Setup => inner.setup(borrowed_database).await,
+            Phase::Start => inner.start(borrowed_database).await,
+            Phase::Check => inner.check(borrowed_database).await,
+        }
+        // Keep the owning guard, rather than only its workload field, captured
+        // until the user future has released every borrow of W.
+        drop(workload);
+    };
+    let task = PhaseTask {
+        future: Some(Box::pin(future)),
+        database: Some(database),
+        state: Some(state.clone()),
+        done: Some(Promise::new(raw_promise)),
+    };
+    state.task.set(Some(fdb_rt::enqueue(task)));
+    drop(state);
+    poll_pending_tasks();
+}
+
+unsafe extern "C" fn workload_setup<W: RustWorkload>(
     raw_workload: *mut OpaqueWorkload,
     raw_database: *mut FDBDatabase,
     raw_promise: FDBPromise,
 ) {
-    unsafe {
-        let workload = &mut *(raw_workload as *mut W);
-        let database = database_new(raw_database);
-        let done = Promise::new(raw_promise);
-        fdb_spawn(async move {
-            workload.setup(database.clone()).await;
-            check_database_ref(database);
-            done.send(true);
-        });
-    }
+    unsafe { spawn_phase::<W>(raw_workload, raw_database, raw_promise, Phase::Setup) };
 }
-unsafe extern "C" fn workload_start<W: RustWorkload + 'static>(
+
+unsafe extern "C" fn workload_start<W: RustWorkload>(
     raw_workload: *mut OpaqueWorkload,
     raw_database: *mut FDBDatabase,
     raw_promise: FDBPromise,
 ) {
-    unsafe {
-        let workload = &mut *(raw_workload as *mut W);
-        let database = database_new(raw_database);
-        let done = Promise::new(raw_promise);
-        fdb_spawn(async move {
-            workload.start(database.clone()).await;
-            check_database_ref(database);
-            done.send(true);
-        });
-    }
+    unsafe { spawn_phase::<W>(raw_workload, raw_database, raw_promise, Phase::Start) };
 }
-unsafe extern "C" fn workload_check<W: RustWorkload + 'static>(
+
+unsafe extern "C" fn workload_check<W: RustWorkload>(
     raw_workload: *mut OpaqueWorkload,
     raw_database: *mut FDBDatabase,
     raw_promise: FDBPromise,
 ) {
-    unsafe {
-        let workload = &mut *(raw_workload as *mut W);
-        let database = database_new(raw_database);
-        let done = Promise::new(raw_promise);
-        fdb_spawn(async move {
-            workload.check(database.clone()).await;
-            check_database_ref(database);
-            done.send(true);
-        });
-    }
+    unsafe { spawn_phase::<W>(raw_workload, raw_database, raw_promise, Phase::Check) };
 }
 unsafe extern "C" fn workload_get_metrics<W: RustWorkload>(
     raw_workload: *mut OpaqueWorkload,
     mut raw_metrics: FDBMetrics,
 ) {
     unsafe {
-        let workload = &*(raw_workload as *mut W);
+        let Some(state) = idle_workload::<W>(raw_workload) else {
+            return;
+        };
+        let workload = state.workload.borrow();
+        let workload = workload
+            .as_ref()
+            .expect("cancellation restores the workload");
         let out = Metrics::new(&mut raw_metrics);
         workload.get_metrics(out);
         #[cfg(coverage)]
@@ -231,12 +371,28 @@ unsafe extern "C" fn workload_get_check_timeout<W: RustWorkload>(
     raw_workload: *mut OpaqueWorkload,
 ) -> f64 {
     unsafe {
-        let workload = &*(raw_workload as *mut W);
-        workload.get_check_timeout()
+        let state = &*(raw_workload as *const Rc<WorkloadState<W>>);
+        let workload = state.workload.borrow();
+        match workload.as_ref() {
+            Some(workload) => workload.get_check_timeout(),
+            None => state
+                .check_timeout
+                .get()
+                .expect("a phase samples its timeout"),
+        }
     }
 }
 unsafe extern "C" fn workload_drop<W: RustWorkload>(raw_workload: *mut OpaqueWorkload) {
-    unsafe { drop(Box::from_raw(raw_workload as *mut W)) };
+    let owner = unsafe { &*(raw_workload as *const Rc<WorkloadState<W>>) };
+    assert!(
+        !owner.releasing_phase.get(),
+        "the native caller cannot free a workload during its phase destructor"
+    );
+    let state = unsafe { Box::from_raw(raw_workload as *mut Rc<WorkloadState<W>>) };
+    if let Some(task) = state.task.take() {
+        fdb_rt::cancel(task);
+    }
+    drop(state);
 }
 
 // -----------------------------------------------------------------------------

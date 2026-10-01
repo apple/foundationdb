@@ -19,13 +19,14 @@ use loom::sync::{Mutex, atomic::AtomicBool};
 #[cfg(not(all(test, fdb_simulation_loom)))]
 use std::sync::{Mutex, atomic::AtomicBool};
 
-type TaskId = usize;
+pub(crate) type TaskId = usize;
 type Task = Pin<Box<dyn Future<Output = ()>>>;
 type Queue = Mutex<VecDeque<Notification>>;
 
 thread_local! {
     static EXECUTOR: RefCell<Executor> = RefCell::new(Executor::default());
     static POLLING: Cell<bool> = const { Cell::new(false) };
+    static CURRENT_TASK: Cell<Option<TaskId>> = const { Cell::new(None) };
 }
 
 #[derive(Default)]
@@ -88,11 +89,19 @@ fn next_notification(queue: &Queue) -> Option<Notification> {
     notification
 }
 
-struct PollingGuard;
+struct PollingTaskGuard;
+
+impl Drop for PollingTaskGuard {
+    fn drop(&mut self) {
+        CURRENT_TASK.with(|current| current.set(None));
+    }
+}
+
+struct PollingGuard(bool);
 
 impl Drop for PollingGuard {
     fn drop(&mut self) {
-        let _ = POLLING.try_with(|polling| polling.set(false));
+        let _ = POLLING.try_with(|polling| polling.set(self.0));
     }
 }
 
@@ -110,7 +119,7 @@ pub fn poll_pending_tasks() {
     let Ok(false) = POLLING.try_with(|polling| polling.replace(true)) else {
         return;
     };
-    let _guard = PollingGuard;
+    let _guard = PollingGuard(false);
     loop {
         let Some(notification) = next_notification(&queue) else {
             return;
@@ -122,6 +131,8 @@ pub fn poll_pending_tasks() {
                 let id = notification.id;
                 let future = EXECUTOR.with_borrow_mut(|executor| executor.tasks.remove(&id));
                 if let Some(mut future) = future {
+                    CURRENT_TASK.with(|current| current.set(Some(id)));
+                    let _task_guard = PollingTaskGuard;
                     let waker = Waker::from(notification);
                     let mut cx = Context::from_waker(&waker);
                     if future.as_mut().poll(&mut cx).is_pending() {
@@ -139,8 +150,8 @@ pub fn poll_pending_tasks() {
     }
 }
 
-/// Spawn an async block and resolve all contained FoundationDB futures.
-pub(crate) fn fdb_spawn<F>(future: F)
+/// Queue a task without polling it, so its owner can record the cancellation ID.
+pub(crate) fn enqueue<F>(future: F) -> TaskId
 where
     F: Future<Output = ()> + 'static,
 {
@@ -154,7 +165,31 @@ where
             queued: AtomicBool::new(false),
         })
     });
+    let id = notification.id;
     notification.wake();
+    id
+}
+
+/// Synchronously release a suspended task before its borrowed native state.
+pub(crate) fn cancel(id: TaskId) {
+    CURRENT_TASK.with(|current| {
+        assert_ne!(
+            current.get(),
+            Some(id),
+            "the native caller cannot free a workload during its phase poll"
+        );
+    });
+    let _guard = PollingGuard(POLLING.with(|polling| polling.replace(true)));
+    let future = EXECUTOR.with_borrow_mut(|executor| executor.tasks.remove(&id));
+    drop(future);
+}
+
+#[cfg(all(test, not(fdb_simulation_loom)))]
+fn fdb_spawn<F>(future: F)
+where
+    F: Future<Output = ()> + 'static,
+{
+    enqueue(future);
     poll_pending_tasks();
 }
 

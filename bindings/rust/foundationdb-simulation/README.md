@@ -264,6 +264,19 @@ steps, allowing the `fdbserver` to drive simulation events between awaits.
 - All foundationdb-rs async operations are compatible with this model.
 - Avoid using arbitrary async primitives from other crates (e.g., `tokio::sleep`).
 
+If the native tester releases the workload while a phase is suspended, its task is canceled
+before the workload is destroyed. Final metrics collection or a new phase also cancels a
+phase left pending after the tester abandoned its native waiter. Late wakes cannot restart
+it. Timeout queries during `check` use the value sampled just before that phase began.
+Phase futures and workload destructors still have a live context during this teardown. A native callback must not free
+a workload reentrantly while its user phase is actively being polled.
+
+`SimDatabase` is a borrowed native database represented by a Rust `Arc`. The phase guard
+releases the Rust allocation on completion and cancellation without releasing the native
+caller's database reference. Every strong and weak `SimDatabase` reference must be dropped
+by the end of the phase, including cancellation. Retaining one terminates the process before
+it can outlive the borrowed native handle.
+
 ## Reporting Metrics
 
 At the end of the simulation, the `get_metrics` method is called for each client.

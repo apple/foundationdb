@@ -22,8 +22,8 @@ Before polling, the owner acquires the queued flag while clearing it. A coalesce
 wake does not take the queue lock, so this acquire makes its producer's writes
 visible to the poll even when no second notification was enqueued.
 
-`fdb_spawn` inserts a future into the current thread's registry, queues its first poll,
-and calls `poll_pending_tasks`. The drain removes each future from the registry while
+`enqueue` inserts a future into the current thread's registry and queues its first poll.
+The workload owner records its task ID before calling `poll_pending_tasks`. The drain removes each future from the registry while
 polling it and restores it only if it returns `Pending`. No queue lock or registry borrow
 spans user polling or destruction. A thread-local guard defers nested drains, including
 synchronous FoundationDB callbacks, until the current poll has returned. Tasks spawned
@@ -57,6 +57,25 @@ progress. Calling the hook on a foreign thread drains only that thread's own exe
 This executor is not a general-purpose cross-thread event loop.
 
 ## Completion and cancellation
+
+The native workload owns its pending phase task. Releasing the workload synchronously
+removes and drops that task before dropping the user workload and invalidating the native
+context. Task destruction defers nested executor drains. The phase owns its workload while
+suspended and returns it before releasing its promise, including on cancellation. A timeout
+query during `check` uses the value sampled immediately before that phase began, avoiding
+aliasing its exclusive workload borrow; idle queries call the workload getter normally.
+A final metrics callback or new phase first cancels any task left behind by an abandoned
+native waiter. That cancellation retains only a weak workload reference: if releasing the
+old promise frees the native workload reentrantly, its destructor still runs with a live
+context and the incoming callback does not access the released workload. Resolving
+or releasing that promise can synchronously call native teardown, so no phase borrow or
+extra workload owner survives the callback. Native teardown during an actual user poll is
+an ABI violation and fails closed; Rust cannot synchronously destroy an executing future.
+
+A phase database is borrowed from the native caller. A guard retains its last Rust `Arc`
+until the user future is destroyed, then frees the Rust allocation without calling the
+native database destructor. Strong or weak database references that escape completion or
+cancellation terminate the process before the native pointer can be used after its lifetime.
 
 A completed future is destroyed on its owner even if external wakers still exist. Later
 wakes for its task ID are harmless. If a pending future loses its final waker without

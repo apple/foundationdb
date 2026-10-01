@@ -68,6 +68,10 @@ pub trait TuplePack {
 
     /// Pack value and returns the packed buffer
     ///
+    /// An incomplete versionstamp appends the four-byte offset used by
+    /// FoundationDB API 520 and later. Earlier versionstamped mutation formats
+    /// are not supported.
+    ///
     /// # Panics
     ///
     /// Panics if there is multiple versionstamp present or if the encoded data size doesn't fit in `u32`.
@@ -89,7 +93,9 @@ pub trait TuplePack {
         self.pack_root(output).expect(PACK_ERR_MSG)
     }
 
-    /// Pack value into the given buffer
+    /// Pack value into the given buffer, appending a four-byte offset for an
+    /// incomplete versionstamp. This encoding requires FoundationDB API 520 or
+    /// later for versionstamped mutations.
     ///
     /// # Panics
     ///

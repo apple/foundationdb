@@ -104,6 +104,9 @@ impl Subspace {
 
     /// Returns the key encoding the specified Tuple with the prefix of this Subspace
     /// prepended, with a versionstamp.
+    ///
+    /// An incomplete versionstamp appends a four-byte offset, suitable for
+    /// versionstamped mutations with FoundationDB API 520 or later.
     pub fn pack_with_versionstamp<T: TuplePack>(&self, t: &T) -> Vec<u8> {
         let mut output = self.prefix.clone();
         let mut versionstamp_offset = self.versionstamp_offset;

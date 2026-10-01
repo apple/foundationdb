@@ -43,6 +43,8 @@ documented in [UPSTREAM.md](UPSTREAM.md): raw-pointer ownership requires `unsafe
 integer options take `i64` to cover the C API's full range, and simulation workload
 wrappers enforce context lifetime and thread access. Simulation metrics sinks are
 borrowed for their callback, and executor futures stay on their creating thread.
+Freeing a simulation workload cancels its suspended phase before releasing the
+workload or context. Phase database handles remain owned by the native caller.
 Process switching requires an unsafe call, and custom metric formats are checked
 before they reach the native formatter.
 Crate versions are independent of the FoundationDB server release number. Published crates on
@@ -58,6 +60,11 @@ not add API 800 wrappers or the native CDC API. Directory snapshot operations ar
 also not supported by the Rust binding tester, and its scripted suite is skipped
 because it requires API 800. Additional wrappers and API-version support can be
 developed separately.
+
+Versionstamped key and value mutations require runtime API 520 or later. With
+API 510, these mutations panic before reaching the C client; other supported
+API 510 operations remain available. Tuple versionstamp helpers use the modern
+four-byte offset encoding.
 
 The client follows the same transaction, retry, key-selector, tuple, and directory
 protocols as the other bindings, expressed through Rust futures and ownership.

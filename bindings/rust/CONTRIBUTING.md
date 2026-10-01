@@ -56,7 +56,10 @@ Use the in-tree [binding tester instructions](foundationdb-bindingtester/README.
 for comparison with Python. Tuple tests and macro tests do not need a cluster.
 
 `rust_unit_tests` also checks simulation context and metrics callbacks, executor
-wakeups, and thread ownership. The simulation safety doctests check that borrowed
+wakeups, thread ownership, and phase teardown through native workload callbacks.
+Client integration tests check timekeeper read-error propagation and versionstamp
+behavior in separate processes selecting runtime APIs 510, 520, and 740.
+The simulation safety doctests check that borrowed
 metrics sinks cannot escape their callback and process switching requires `unsafe`.
 `rust_simulation_wake_order_tests` uses Loom to explore weak-memory interleavings of
 the executor's wake and dequeue code. Its separate Cargo target directory keeps

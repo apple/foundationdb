@@ -944,11 +944,28 @@ impl Transaction {
     /// If a transaction uses both an atomic operation and a strictly serializable read on the same
     /// key, the benefits of using the atomic operation (for both conflict checking and performance)
     /// are lost.
+    ///
+    /// # Panics
+    ///
+    /// `SetVersionstampedKey` and `SetVersionstampedValue` require runtime API 520
+    /// or later. Earlier APIs use different key and value encodings, which this
+    /// binding does not support; both mutations panic before reaching the native
+    /// client, including when given manually encoded operands.
     #[cfg_attr(
         feature = "trace",
         tracing::instrument(level = "debug", skip(self, key, param))
     )]
     pub fn atomic_op(&self, key: &[u8], param: &[u8], op_type: options::MutationType) {
+        if matches!(
+            op_type,
+            options::MutationType::SetVersionstampedKey
+                | options::MutationType::SetVersionstampedValue
+        ) {
+            assert!(
+                crate::api::selected_api_version() >= 520,
+                "versionstamped mutations require runtime API 520 or later"
+            );
+        }
         unsafe {
             fdb_sys::fdb_transaction_atomic_op(
                 self.inner.as_ptr(),
