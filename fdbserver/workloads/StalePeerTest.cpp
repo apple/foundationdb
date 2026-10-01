@@ -1,5 +1,5 @@
 /*
- * StalePeerTest.actor.cpp
+ * StalePeerTest.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
