@@ -458,6 +458,80 @@ def status_json_file_region_failover_message():
     assert "may have data loss" not in stdout
 
 
+def status_json_file_excluded_and_error_processes_message():
+    status_json = {
+        "client": {
+            "cluster_file": {"path": "fdb.cluster", "up_to_date": True},
+            "coordinators": {"coordinators": [], "quorum_reachable": True},
+            "database_status": {"available": True, "healthy": True},
+            "messages": [],
+            "timestamp": 1417807090,
+        },
+        "cluster": {
+            "configuration": {
+                "redundancy_mode": "double",
+                "storage_engine": "ssd-2",
+                "coordinators_count": 1,
+                "excluded_servers": [],
+            },
+            "data": {"state": {"name": "healthy", "healthy": True}},
+            "fault_tolerance": {
+                "max_zone_failures_without_losing_availability": 1,
+                "max_zone_failures_without_losing_data": 1,
+            },
+            "logs": [
+                {
+                    "epoch": 1,
+                    "current": True,
+                    "begin_version": 1,
+                    "possibly_losing_data": False,
+                    "log_interfaces": [],
+                }
+            ],
+            "machines": {
+                "m1": {"excluded": True},
+                "m2": {"excluded": False},
+            },
+            "processes": {
+                "1.1.1.1:4000": {
+                    "address": "1.1.1.1:4000",
+                    "excluded": True,
+                    "messages": [],
+                    "locality": {"zoneid": "z1", "machineid": "m1"},
+                },
+                "2.2.2.2:4000": {
+                    "address": "2.2.2.2:4000",
+                    "excluded": False,
+                    "messages": [
+                        {
+                            "name": "storage_server_lagging",
+                            "description": "Storage server lagging by 120 seconds.",
+                        }
+                    ],
+                    "locality": {"zoneid": "z2", "machineid": "m2"},
+                },
+            },
+        },
+    }
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as status_file:
+        json.dump(status_json, status_file)
+        status_file.flush()
+        result = subprocess.run(
+            [command_template[0], "--status-from-json", status_file.name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=fdbcli_env,
+        )
+
+    stdout = result.stdout.decode("utf-8")
+    stderr = result.stderr.decode("utf-8")
+    assert result.returncode == 0, stderr
+    assert "excluded processes: 1; processes with errors: 1" in stdout
+    assert "excluded zones: 1" in stdout
+    assert "excluded machines: 1" in stdout
+
+
 @enable_logging()
 def consistencycheck(logger):
     consistency_check_on_output = "ConsistencyCheck is on"
@@ -1084,6 +1158,7 @@ if __name__ == "__main__":
         integer_options()
         tls_address_suffix()
         status_json_file_region_failover_message()
+        status_json_file_excluded_and_error_processes_message()
         idempotency_ids()
         cdc_operator_commands()
         audit_status_arguments()
