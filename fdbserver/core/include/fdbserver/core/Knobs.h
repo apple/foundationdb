@@ -654,7 +654,6 @@ public:
 	int ROCKSDB_KEEP_LOG_FILE_NUM;
 	int ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL;
 	bool ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
-	bool ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	bool ROCKSDB_FULLFILE_CHECKSUM; // For validate sst files when compaction and producing backup files. TODO: set
 	                                // verify_file_checksum when ingesting (for physical shard move).
 	                                // This is different from ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE (block-level
