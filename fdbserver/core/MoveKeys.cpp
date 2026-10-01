@@ -1488,6 +1488,59 @@ static bool destUnchanged(const RangeResult& keyServers,
 	return true;
 }
 
+template <class GetRangesFn>
+static Future<bool> serverKeysAssignedImpl(GetRangesFn getRanges,
+                                           std::vector<UID> const& dest,
+                                           KeyRange const& range,
+                                           int krmRowLimit,
+                                           int krmByteLimit) {
+	if (buggify(0.01)) {
+		CODE_PROBE(true, "finishMove* injecting a post-wait serverKeys change");
+		co_return false;
+	}
+
+	for (const auto& ssid : dest) {
+		Key toReadRangeBegin = range.begin;
+		while (toReadRangeBegin < range.end) {
+			RangeResult readResult = co_await getRanges(
+			    serverKeysPrefixFor(ssid), KeyRangeRef(toReadRangeBegin, range.end), krmRowLimit, krmByteLimit);
+			for (int i = 0; i < readResult.size() - 1; i++) {
+				UID shardId;
+				bool assigned, emptyRange;
+				DataMoveType dataMoveType = DataMoveType::LOGICAL;
+				DataMovementReason dataMoveReason = DataMovementReason::INVALID;
+				decodeServerKeysValue(readResult[i].value, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
+				if (!assigned) {
+					co_return false;
+				}
+			}
+			if (readResult.back().key < range.end) {
+				toReadRangeBegin = readResult.back().key;
+			} else {
+				break;
+			}
+		}
+	}
+	co_return true;
+}
+
+// Post-wait verification: reads serverKeys to verify that every sub-range in `range`
+// is still assigned to every destination server in `dest`.
+static Future<bool> serverKeysAssigned(Transaction* tr,
+                                       std::vector<UID> const& dest,
+                                       KeyRange const& range,
+                                       int krmRowLimit,
+                                       int krmByteLimit) {
+	return serverKeysAssignedImpl(
+	    [tr](Key prefix, KeyRange keys, int rowLimit, int byteLimit) {
+		    return krmGetRanges(tr, prefix, keys, rowLimit, byteLimit);
+	    },
+	    dest,
+	    range,
+	    krmRowLimit,
+	    krmByteLimit);
+}
+
 // Decoded per-iteration state used by finishMoveKeys after it reads the
 // planning-era keyServers snapshot. finishMoveShards has its own analog
 // (DecodedShardsKeyServers): the two flavors differ in `dest` provenance
@@ -1819,6 +1872,18 @@ static Future<bool> reverifyKeysDestAndCommit(Transaction* tr,
 		    .detail("KeyBegin", keys.begin)
 		    .detail("KeyEnd", keys.end)
 		    .detail("OrigDest", describe(dest));
+		co_await retryAfterPostWaitChange(retryBudget, tr);
+		co_return false;
+	}
+
+	if (!co_await serverKeysAssigned(
+	        tr, dest, *currentKeys, SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT, SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES)) {
+		CODE_PROBE(
+		    true, "finishMoveKeys serverKeys assignment changed during waitForShardReady", probe::decoration::rare);
+		TraceEvent(SevWarn, "FinishMoveKeysServerKeysChanged", relocationIntervalId)
+		    .detail("KeyBegin", keys.begin)
+		    .detail("KeyEnd", keys.end)
+		    .detail("Dest", describe(dest));
 		co_await retryAfterPostWaitChange(retryBudget, tr);
 		co_return false;
 	}
@@ -2807,6 +2872,18 @@ static Future<ReverifyShardsResult> reverifyShardsAndCommit(Transaction* tr,
 	if (!destUnchanged(reread.keyServers, reread.uidToTagMap, destServers, dataMoveId)) {
 		CODE_PROBE(true, "finishMoveShards dest changed during waitForShardReady", probe::decoration::rare);
 		TraceEvent(SevWarn, "FinishMoveShardsDestChanged", relocationIntervalId)
+		    .detail("DataMoveID", dataMoveId)
+		    .detail("Range", *range);
+		*runPreCheck = false;
+		co_await retryAfterPostWaitChange(retryBudget, tr);
+		co_return ReverifyShardsResult::RetryLoop;
+	}
+
+	if (!co_await serverKeysAssigned(
+	        tr, destServers, *range, SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT, SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT)) {
+		CODE_PROBE(
+		    true, "finishMoveShards serverKeys assignment changed during waitForShardReady", probe::decoration::rare);
+		TraceEvent(SevWarn, "FinishMoveShardsServerKeysChanged", relocationIntervalId)
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Range", *range);
 		*runPreCheck = false;
@@ -4347,4 +4424,67 @@ Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr,
 
 	co_await waitForAll(actors);
 #endif
+}
+TEST_CASE("/fdbserver/MoveKeys/serverKeysAssigned") {
+	std::vector<UID> destServers = { deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID() };
+	KeyRange range = KeyRangeRef("a"_sr, "z"_sr);
+
+	auto makeMockGetRanges = [&](bool assigned) {
+		return [assigned](Key prefix, KeyRange keys, int rowLimit, int byteLimit) -> Future<RangeResult> {
+			RangeResult result;
+			// We only yield one item to test basic success/failure and rely on the pagination test below
+			// to test krmRowLimit iteration.
+			result.push_back_deep(result.arena(), KeyValueRef(keys.begin, assigned ? serverKeysTrue : serverKeysFalse));
+			result.push_back_deep(result.arena(), KeyValueRef(keys.end, serverKeysFalse));
+			return result;
+		};
+	};
+
+	// 1. Returns true when every destination server has serverKeys assigned for the requested logical range.
+	bool allAssigned = co_await serverKeysAssignedImpl(makeMockGetRanges(true), destServers, range, 1000, 100000);
+	ASSERT(allAssigned);
+
+	// 2. Returns false when one destination server has an unassigned subrange inside the requested range.
+	bool oneUnassigned = co_await serverKeysAssignedImpl(makeMockGetRanges(false), destServers, range, 1000, 100000);
+	ASSERT(!oneUnassigned);
+
+	// 3. With multiple destination servers, verifies every destination UID rather than only the first one.
+	auto makeMockGetRangesMultiple = [&](std::vector<UID> destServers) {
+		return [destServers](Key prefix, KeyRange keys, int rowLimit, int byteLimit) -> Future<RangeResult> {
+			RangeResult result;
+			bool assigned = true;
+			// Make the second server return unassigned
+			if (prefix == serverKeysPrefixFor(destServers[1])) {
+				assigned = false;
+			}
+			result.push_back_deep(result.arena(), KeyValueRef(keys.begin, assigned ? serverKeysTrue : serverKeysFalse));
+			result.push_back_deep(result.arena(), KeyValueRef(keys.end, serverKeysFalse));
+			return result;
+		};
+	};
+	bool multipleCheck =
+	    co_await serverKeysAssignedImpl(makeMockGetRangesMultiple(destServers), destServers, range, 1000, 100000);
+	ASSERT(!multipleCheck);
+
+	// 4. Handles KRM pagination correctly when the requested range spans multiple KRM rows/pages.
+	auto makeMockGetRangesPagination = [&]() {
+		return [](Key prefix, KeyRange keys, int rowLimit, int byteLimit) -> Future<RangeResult> {
+			RangeResult result;
+			if (keys.begin == "a"_sr) {
+				result.push_back_deep(result.arena(), KeyValueRef("a"_sr, serverKeysTrue));
+				result.push_back_deep(result.arena(), KeyValueRef("m"_sr, serverKeysTrue));
+			} else if (keys.begin == "m"_sr) {
+				result.push_back_deep(result.arena(), KeyValueRef("m"_sr, serverKeysTrue));
+				result.push_back_deep(result.arena(), KeyValueRef("z"_sr, serverKeysFalse));
+			} else {
+				ASSERT(false);
+			}
+			return result;
+		};
+	};
+	bool paginationCheck =
+	    co_await serverKeysAssignedImpl(makeMockGetRangesPagination(), destServers, range, 2, 100000);
+	ASSERT(paginationCheck);
+
+	return Void();
 }

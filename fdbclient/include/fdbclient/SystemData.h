@@ -207,6 +207,9 @@ extern const ValueRef shardEncodeMigrationValueNew;
 //	Using the serverID as a prefix, then followed by the beginning of the shard range
 //	as the key, the value indicates whether the shard does or does not exist on the server.
 //	These values can be changed as data movement occurs.
+//	Invariant: Finish-move verification relies on the corresponding serverKeys ownership
+//	being consistent with the keyServers assignment for the logical range. The KRM boundaries
+//	do not need to be exactly identical, but the ownership status must match.
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
