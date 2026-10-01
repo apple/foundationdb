@@ -1939,13 +1939,7 @@ bool TagPartitionedLogSystem::removeBackupWorker(const BackupWorkerDoneRequest& 
 	}
 
 	if (removed) {
-		oldestBackupEpoch = epoch;
-		for (const auto& old : oldLogData) {
-			if (old.epoch < oldestBackupEpoch && old.tLogs[0]->backupWorkers.size() > 0) {
-				oldestBackupEpoch = old.epoch;
-			}
-		}
-		backupWorkerChanged.trigger();
+		recomputeOldestBackupEpoch();
 	} else {
 		removedBackupWorkers.insert(req.workerUID);
 	}
@@ -1956,6 +1950,67 @@ bool TagPartitionedLogSystem::removeBackupWorker(const BackupWorkerDoneRequest& 
 	    .detail("WorkerID", req.workerUID)
 	    .detail("OldestBackupEpoch", oldestBackupEpoch);
 	return removed;
+}
+
+bool TagPartitionedLogSystem::replaceBackupWorker(UID deadWorker, const InitializeBackupReply& reply) {
+	Reference<LogSet> logset = getEpochLogSet(reply.backupEpoch);
+	if (!logset.isValid()) {
+		return false;
+	}
+
+	for (auto& worker : logset->backupWorkers) {
+		if (worker->get().interf().id() != deadWorker) {
+			continue;
+		}
+		// Keeping the entry in place leaves the epoch's count unchanged, so it retains its hold on
+		// oldestBackupEpoch and no TLog data becomes collectable while its work is outstanding.
+		worker->setUnconditional(OptionalInterface<BackupInterface>(reply.interf));
+		TraceEvent("ReplaceBackupWorker", dbgid)
+		    .detail("BackupEpoch", reply.backupEpoch)
+		    .detail("DeadWorkerID", deadWorker)
+		    .detail("WorkerID", reply.interf.id());
+
+		// A replacement that finished before this call found no entry to erase and only recorded its
+		// UID. Honour that now, or the epoch keeps a slot for a worker that will never report again.
+		if (removedBackupWorkers.contains(reply.interf.id())) {
+			removedBackupWorkers.erase(reply.interf.id());
+			releaseBackupWorker(reply.interf.id(), reply.backupEpoch);
+			return false;
+		}
+
+		backupWorkerChanged.trigger();
+		return true;
+	}
+	return false;
+}
+
+void TagPartitionedLogSystem::releaseBackupWorker(UID worker, LogEpoch backupEpoch) {
+	Reference<LogSet> logset = getEpochLogSet(backupEpoch);
+	if (!logset.isValid()) {
+		return;
+	}
+
+	for (auto it = logset->backupWorkers.begin(); it != logset->backupWorkers.end(); it++) {
+		if (it->getPtr()->get().interf().id() == worker) {
+			logset->backupWorkers.erase(it);
+			recomputeOldestBackupEpoch();
+			TraceEvent("ReleaseBackupWorker", dbgid)
+			    .detail("BackupEpoch", backupEpoch)
+			    .detail("WorkerID", worker)
+			    .detail("OldestBackupEpoch", oldestBackupEpoch);
+			return;
+		}
+	}
+}
+
+void TagPartitionedLogSystem::recomputeOldestBackupEpoch() {
+	oldestBackupEpoch = epoch;
+	for (const auto& old : oldLogData) {
+		if (old.epoch < oldestBackupEpoch && old.tLogs[0]->backupWorkers.size() > 0) {
+			oldestBackupEpoch = old.epoch;
+		}
+	}
+	backupWorkerChanged.trigger();
 }
 
 LogEpoch TagPartitionedLogSystem::getOldestBackupEpoch() const {
