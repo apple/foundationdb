@@ -5,7 +5,7 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use foundationdb::directory::DirectoryLayer;
+use foundationdb::directory::{DirectoryError, DirectoryLayer};
 
 use foundationdb::directory::Directory;
 
@@ -43,6 +43,69 @@ async fn test_directory() {
     test_create_then_open_then_delete(&db, &directory, vec![String::from("1"), String::from("2")])
         .await
         .expect("failed to run");
+}
+
+#[tokio::test]
+async fn test_directory_rejects_occupied_bare_prefix() {
+    test_directory_rejects_occupied_raw_prefix("test-directory-bare-prefix", &[]).await;
+}
+
+#[tokio::test]
+async fn test_directory_rejects_occupied_ff_suffix() {
+    test_directory_rejects_occupied_raw_prefix("test-directory-ff-suffix", &[0xff]).await;
+}
+
+async fn test_directory_rejects_occupied_raw_prefix(name: &str, suffix: &[u8]) {
+    let db = common::database().await.expect("cannot open fdb");
+    let test_root = Subspace::from(name);
+    let content = test_root.subspace(&"content");
+    let directory = DirectoryLayer::new(test_root.subspace(&"node"), content.clone(), false);
+    let path = vec![String::from("occupied")];
+    let value = b"existing application data";
+
+    // Occupy every candidate in the initial allocator window so this does not
+    // depend on which random candidate the allocator chooses.
+    let keys: Vec<_> = (0..64_i64)
+        .map(|candidate| {
+            let mut key = content.pack(&candidate);
+            key.extend_from_slice(suffix);
+            key
+        })
+        .collect();
+    let trx = db.create_trx().expect("cannot create txn");
+    trx.clear_subspace_range(&test_root);
+    for key in &keys {
+        trx.set(key, value);
+    }
+    trx.commit()
+        .await
+        .expect("cannot populate occupied prefixes");
+
+    let trx = db.create_trx().expect("cannot create txn");
+    assert!(matches!(
+        directory.create(&trx, &path, None, None).await,
+        Err(DirectoryError::PrefixNotEmpty)
+    ));
+    drop(trx);
+
+    let trx = db.create_trx().expect("cannot create txn");
+    assert!(
+        !directory
+            .remove_if_exists(&trx, &path)
+            .await
+            .expect("cannot check rejected directory")
+    );
+    trx.commit().await.expect("cannot commit removal check");
+
+    let trx = db.create_trx().expect("cannot create txn");
+    for key in &keys {
+        let stored = trx
+            .get(key, false)
+            .await
+            .expect("cannot read occupied prefix")
+            .expect("existing key was removed");
+        assert_eq!(&*stored, value);
+    }
 }
 
 async fn test_create_then_open_then_delete(

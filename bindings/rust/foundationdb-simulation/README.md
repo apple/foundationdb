@@ -267,7 +267,8 @@ steps, allowing the `fdbserver` to drive simulation events between awaits.
 If the native tester releases the workload while a phase is suspended, its task is canceled
 before the workload is destroyed. Final metrics collection or a new phase also cancels a
 phase left pending after the tester abandoned its native waiter. Late wakes cannot restart
-it. Timeout queries during `check` use the value sampled just before that phase began.
+it. Timeout queries during `check` use the value sampled just before that phase began;
+a timeout query before `check` cancels an abandoned setup/start before reading the workload.
 Phase futures and workload destructors still have a live context during this teardown. A native callback must not free
 a workload reentrantly while its user phase is actively being polled.
 
@@ -346,3 +347,12 @@ callbacks, so a simulation failure or timeout before that callback has no profil
   use the fresh `&mut self` and `db` references passed to the next phase. Storing `SimDatabase`,
   `Transaction`, or `Future` objects across phases will lead to segmentation faults or other
   undefined behavior.
+
+### Shared client API selection
+
+Workload libraries built against the current FoundationDB C headers and library
+can share an API selection only when both runtime and header versions match.
+Registration rejects incompatible or unverifiable selections before creating a
+workload. Historical headers do not expose the selection query and therefore
+cannot adopt another library's selection. The simulator retains ownership of the
+network and the database handles it passes into workload phases.

@@ -4,6 +4,29 @@
 #![allow(clippy::unreadable_literal)]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
+/// Returns the selected runtime and header API versions when the build headers
+/// expose the query. The returned pair is `(0, 0)` before successful selection.
+///
+/// Historical headers return `None`; code built with current headers requires a
+/// C library that also exports `fdb_get_selected_api_versions`.
+pub fn selected_api_versions() -> Option<(i32, i32)> {
+    #[cfg(fdb_has_selected_api_versions)]
+    {
+        let mut runtime_version = 0;
+        let mut header_version = 0;
+        // SAFETY: Both outputs are live, distinct integers. The C query is
+        // thread-safe and does not change API selection or the network lifecycle.
+        unsafe {
+            fdb_get_selected_api_versions(&mut runtime_version, &mut header_version);
+        }
+        Some((runtime_version, header_version))
+    }
+    #[cfg(not(fdb_has_selected_api_versions))]
+    {
+        None
+    }
+}
+
 /// Defines the FDB_API_VERSION constant and generates the `if_cfg_api_versions` macro
 /// from a list of (name, number) versions.
 ///

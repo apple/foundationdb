@@ -1023,6 +1023,7 @@ mod tests {
                 // The native timeout expression may start check before asking
                 // for its timeout; the pending check still owns a mutable W.
                 assert_eq!((*workload.vt).getCheckTimeout.unwrap()(workload.inner), 7.0);
+                assert_eq!(*events.borrow(), ["phase poll"]);
                 (*workload.vt).free.unwrap()(workload.inner);
             }
             assert_eq!(
@@ -1091,51 +1092,95 @@ mod tests {
         }
 
         #[test]
-        fn a_new_phase_cancels_a_previous_native_waiters_abandoned_task() {
-            let (_native, context) = native_context(Arc::new(AtomicUsize::new(0)));
-            let events = Rc::new(RefCell::new(Vec::new()));
-            let waker = Rc::new(RefCell::new(None));
-            let workload = workload(context, &events, &waker, Wait::RetainWaker);
-            let mut start_database = NativeDatabase::default();
-            let mut check_database = NativeDatabase::default();
-            unsafe {
-                (*workload.vt).start.unwrap()(
-                    workload.inner,
-                    &mut start_database as *mut NativeDatabase as *mut _,
-                    promise(&events, None, None),
+        fn checking_cancels_an_abandoned_start_in_either_timeout_argument_order() {
+            for timeout_first in [false, true] {
+                let (_native, context) = native_context(Arc::new(AtomicUsize::new(0)));
+                let events = Rc::new(RefCell::new(Vec::new()));
+                let waker = Rc::new(RefCell::new(None));
+                let workload = workload(context, &events, &waker, Wait::RetainWaker);
+                let mut start_database = NativeDatabase::default();
+                let mut check_database = NativeDatabase::default();
+                unsafe {
+                    (*workload.vt).start.unwrap()(
+                        workload.inner,
+                        &mut start_database as *mut NativeDatabase as *mut _,
+                        promise(&events, None, None),
+                    );
+                }
+                let old_waker = waker.borrow_mut().take().unwrap();
+                unsafe {
+                    if timeout_first {
+                        assert_eq!((*workload.vt).getCheckTimeout.unwrap()(workload.inner), 7.0);
+                        assert_eq!(
+                            *events.borrow(),
+                            ["phase poll", "phase drop", "promise free"]
+                        );
+                    }
+                    (*workload.vt).check.unwrap()(
+                        workload.inner,
+                        &mut check_database as *mut NativeDatabase as *mut _,
+                        promise(&events, None, None),
+                    );
+                    assert_eq!((*workload.vt).getCheckTimeout.unwrap()(workload.inner), 7.0);
+                }
+                assert_eq!(
+                    *events.borrow(),
+                    ["phase poll", "phase drop", "promise free", "phase poll"]
                 );
-            }
-            let old_waker = waker.borrow_mut().take().unwrap();
-            unsafe {
-                (*workload.vt).check.unwrap()(
-                    workload.inner,
-                    &mut check_database as *mut NativeDatabase as *mut _,
-                    promise(&events, None, None),
+                old_waker.wake();
+                crate::fdb_rt::poll_pending_tasks();
+                assert_eq!(events.borrow().len(), 4);
+                unsafe { (*workload.vt).free.unwrap()(workload.inner) };
+                assert_eq!(
+                    *events.borrow(),
+                    [
+                        "phase poll",
+                        "phase drop",
+                        "promise free",
+                        "phase poll",
+                        "phase drop",
+                        "promise free",
+                        "workload drop"
+                    ]
                 );
+                drop(waker.borrow_mut().take());
+                release_native_database(&mut start_database);
+                release_native_database(&mut check_database);
             }
-            assert_eq!(
-                *events.borrow(),
-                ["phase poll", "phase drop", "promise free", "phase poll"]
-            );
-            old_waker.wake();
-            crate::fdb_rt::poll_pending_tasks();
-            assert_eq!(events.borrow().len(), 4);
-            unsafe { (*workload.vt).free.unwrap()(workload.inner) };
-            assert_eq!(
-                *events.borrow(),
-                [
-                    "phase poll",
-                    "phase drop",
-                    "promise free",
-                    "phase poll",
-                    "phase drop",
-                    "promise free",
-                    "workload drop"
-                ]
-            );
-            drop(waker.borrow_mut().take());
-            release_native_database(&mut start_database);
-            release_native_database(&mut check_database);
+        }
+
+        #[test]
+        fn timeout_query_can_cancel_an_abandoned_phase_and_free_its_native_owner() {
+            for setup in [false, true] {
+                let (native, context) = native_context(Arc::new(AtomicUsize::new(0)));
+                let events = Rc::new(RefCell::new(Vec::new()));
+                let waker = Rc::new(RefCell::new(None));
+                let workload = workload(context, &events, &waker, Wait::RetainWaker);
+                let mut database = NativeDatabase::default();
+                unsafe {
+                    let phase = if setup {
+                        (*workload.vt).setup.unwrap()
+                    } else {
+                        (*workload.vt).start.unwrap()
+                    };
+                    phase(
+                        workload.inner,
+                        &mut database as *mut NativeDatabase as *mut _,
+                        promise(&events, None, Some(workload)),
+                    );
+                    assert_eq!((*workload.vt).getCheckTimeout.unwrap()(workload.inner), 0.0);
+                }
+                assert_eq!(
+                    *events.borrow(),
+                    ["phase poll", "phase drop", "promise free", "workload drop"]
+                );
+                assert_eq!(database.releases.get(), 0);
+                drop(native);
+                waker.borrow_mut().take().unwrap().wake();
+                crate::fdb_rt::poll_pending_tasks();
+                assert_eq!(events.borrow().len(), 4);
+                release_native_database(&mut database);
+            }
         }
 
         #[test]

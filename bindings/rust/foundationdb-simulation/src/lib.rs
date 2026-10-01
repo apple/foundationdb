@@ -99,7 +99,7 @@ pub trait RustWorkload: Sized + 'static {
         let inner = Box::into_raw(Box::new(Rc::new(WorkloadState {
             workload: RefCell::new(Some(Box::new(self))),
             task: Cell::new(None),
-            check_timeout: Cell::new(None),
+            active_check_timeout: Cell::new(None),
             releasing_phase: Cell::new(false),
         })));
         WrappedWorkload(FDBWorkload {
@@ -147,7 +147,7 @@ pub trait SingleRustWorkload: RustWorkload {
 struct WorkloadState<W> {
     workload: RefCell<Option<Box<W>>>,
     task: Cell<Option<TaskId>>,
-    check_timeout: Cell<Option<f64>>,
+    active_check_timeout: Cell<Option<f64>>,
     releasing_phase: Cell<bool>,
 }
 
@@ -200,6 +200,7 @@ impl<W> PhaseTask<W> {
             drop(self.future.take());
             drop(self.database.take());
             state.releasing_phase.set(false);
+            state.active_check_timeout.set(None);
             state.task.set(None);
             // Do not retain W across native promise callbacks: resolving or
             // releasing a promise may synchronously free the registered workload.
@@ -254,8 +255,8 @@ enum Phase {
     Check,
 }
 
-// A native timeout abandons its waiter without notifying the Rust task. A new
-// phase or final metrics callback ends the previous phase's exclusive access.
+// A native timeout abandons its waiter without notifying the Rust task.
+// Callbacks requiring idle W must end the previous phase's exclusive access.
 unsafe fn idle_workload<W: RustWorkload>(
     raw_workload: *mut OpaqueWorkload,
 ) -> Option<Rc<WorkloadState<W>>> {
@@ -290,7 +291,9 @@ unsafe fn spawn_phase<W: RustWorkload>(
     // Native callers may evaluate check() before getCheckTimeout(). Sampling
     // while W is idle avoids aliasing a suspended phase's exclusive borrow.
     if matches!(phase, Phase::Check) {
-        state.check_timeout.set(Some(workload.get_check_timeout()));
+        state
+            .active_check_timeout
+            .set(Some(workload.get_check_timeout()));
     }
     let mut workload = PhaseWorkload {
         workload: Some(workload),
@@ -372,14 +375,22 @@ unsafe extern "C" fn workload_get_check_timeout<W: RustWorkload>(
 ) -> f64 {
     unsafe {
         let state = &*(raw_workload as *const Rc<WorkloadState<W>>);
-        let workload = state.workload.borrow();
-        match workload.as_ref() {
-            Some(workload) => workload.get_check_timeout(),
-            None => state
-                .check_timeout
-                .get()
-                .expect("a phase samples its timeout"),
+        if let Some(timeout) = state.active_check_timeout.get() {
+            // Check can still hold an exclusive borrow of W when the native
+            // caller evaluates the timeout after starting that phase.
+            return timeout;
         }
+        // The opposite argument order can leave an abandoned setup/start
+        // holding W. Cancel it before reading the workload's current timeout.
+        let Some(state) = idle_workload::<W>(raw_workload) else {
+            // Releasing the old promise synchronously freed the native owner.
+            return 0.0;
+        };
+        let workload = state.workload.borrow();
+        workload
+            .as_ref()
+            .expect("cancellation restores the workload")
+            .get_check_timeout()
     }
 }
 unsafe extern "C" fn workload_drop<W: RustWorkload>(raw_workload: *mut OpaqueWorkload) {
@@ -440,9 +451,10 @@ macro_rules! register_factory {
                 .is_ok()
             {
                 let version = <$name as $crate::RustWorkloadFactory>::FDB_API_VERSION;
-                let _ = foundationdb::api::FdbApiBuilder::default()
+                foundationdb::api::FdbApiBuilder::default()
                     .set_runtime_version(version as i32)
-                    .build();
+                    .build()
+                    .expect("the workload API must match the shared C client selection");
                 println!("FDB API version selected: {version}");
                 foundationdb::future::CUSTOM_EXECUTOR_HOOK
                     .set($crate::internals::poll_pending_tasks)
@@ -481,9 +493,10 @@ macro_rules! register_workload {
                 .is_ok()
             {
                 let version = <$name as $crate::SingleRustWorkload>::FDB_API_VERSION;
-                let _ = foundationdb::api::FdbApiBuilder::default()
+                foundationdb::api::FdbApiBuilder::default()
                     .set_runtime_version(version as i32)
-                    .build();
+                    .build()
+                    .expect("the workload API must match the shared C client selection");
                 println!("FDB API version selected: {version}");
                 foundationdb::future::CUSTOM_EXECUTOR_HOOK
                     .set($crate::internals::poll_pending_tasks)

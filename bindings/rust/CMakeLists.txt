@@ -131,7 +131,9 @@ set_tests_properties(rust_simulation_wake_order_tests PROPERTIES
 if(RUN_RUST_INTEGRATION_TESTS)
   add_custom_target(fdb_rust_integration_tests ALL
     COMMAND ${CMAKE_COMMAND} -E env ${rust_env}
-      ${CARGO_EXECUTABLE} test ${rust_cargo_args} --package foundationdb --tests --no-run
+      ${CARGO_EXECUTABLE} test ${rust_cargo_args} --package foundationdb --package bindingtester --tests --no-run
+    COMMAND ${CMAKE_COMMAND} -E env ${rust_env}
+      ${CARGO_EXECUTABLE} build ${rust_cargo_args} --package foundationdb --example api_version_library
     DEPENDS fdb_rust_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMENT "Compile Rust client integration tests"
@@ -142,9 +144,22 @@ if(RUN_RUST_INTEGRATION_TESTS)
       ${CARGO_EXECUTABLE} test ${rust_cargo_args} --package foundationdb --tests --offline -- --test-threads=1
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     TEST_TIMEOUT 1200)
+  add_fdbclient_test(NAME rust_bindingtester_on_error_tests
+    COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
+      ${CARGO_EXECUTABLE} test ${rust_cargo_base_args} --features foundationdb/fdb-7_4
+      --package bindingtester --bin bindingtester --offline
+      tests::on_error_restores_transaction_before_next_instruction -- --exact --ignored
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    TEST_TIMEOUT 300)
+  add_fdbclient_test(NAME rust_api_version_libraries_tests
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/api_version_libraries.py
+      --client-library $<TARGET_FILE:fdb_c>
+      --rust-library ${rust_target_dir}/${rust_profile}/examples/${CMAKE_SHARED_LIBRARY_PREFIX}api_version_library${CMAKE_SHARED_LIBRARY_SUFFIX}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    TEST_TIMEOUT 120)
   # tmp_cluster otherwise preserves an inherited default cluster. These tests
   # must always use the disposable cluster created by the test runner.
-  set_tests_properties(rust_integration_tests PROPERTIES
+  set_tests_properties(rust_integration_tests rust_bindingtester_on_error_tests rust_api_version_libraries_tests PROPERTIES
     LABELS "rust;integration"
     ENVIRONMENT_MODIFICATION "FDB_CLUSTER_FILE=unset:")
 endif()

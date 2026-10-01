@@ -57,6 +57,8 @@ compile_error!(
 );
 
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(fdb_has_selected_api_versions)");
+
     // Link against fdb_c.
     println!("cargo:rustc-link-lib=fdb_c");
 
@@ -141,6 +143,14 @@ fn main() {
         .layout_tests(false)
         .generate()
         .expect("Unable to generate FoundationDB bindings");
+    // Historical headers cannot query another library's API selection. Detect
+    // the generated declaration rather than assuming support from the runtime API.
+    if bindings
+        .to_string()
+        .contains("pub fn fdb_get_selected_api_versions(")
+    {
+        println!("cargo:rustc-cfg=fdb_has_selected_api_versions");
+    }
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");

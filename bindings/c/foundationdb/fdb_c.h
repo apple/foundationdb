@@ -671,6 +671,14 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_split_points_w
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_select_api_version_impl(int runtime_version, int header_version);
 
+/*
+ * Returns the runtime and header versions selected by fdb_select_api_version_impl,
+ * or zero for both until selection completes successfully. Both output pointers
+ * must be non-null. This query is thread-safe; API selection must still complete
+ * before other threads use the FoundationDB API.
+ */
+DLLEXPORT void fdb_get_selected_api_versions(int* runtime_version, int* header_version);
+
 DLLEXPORT int fdb_get_max_api_version(void);
 DLLEXPORT const char* fdb_get_client_version(void);
 

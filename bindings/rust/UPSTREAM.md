@@ -52,3 +52,7 @@ The in-tree adaptation also corrects public API contracts from this snapshot:
   encodings differ from the tuple helpers' modern encoding.
 - Timekeeper range-read errors propagate to the caller's retry loop. `None` means
   a successful read found no matching entry.
+- Simulator registration checks API-selection failures. When built with the
+  current C headers, it uses `fdb_get_selected_api_versions` to verify an existing
+  process-wide runtime/header pair before initializing another Rust library.
+  Historical headers cannot verify another library's selection and return an error.

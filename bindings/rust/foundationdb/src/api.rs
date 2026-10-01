@@ -13,7 +13,7 @@
 //! - [API versioning](https://apple.github.io/foundationdb/api-c.html#api-versioning)
 //! - [Network](https://apple.github.io/foundationdb/api-c.html#network)
 //!
-//! The network lifecycle is tracked by a process-global state machine
+//! The network lifecycle is tracked by a Rust-library-local state machine
 //! (`Uninitialized -> ApiVersionSelected -> Running -> Stopped`). Booting is safe
 //! and idempotent, the network is started lazily by [`crate::Database`]
 //! constructors if needed, and it runs until process exit: an atexit hook stops it
@@ -52,7 +52,7 @@ const ERR_API_VERSION_NOT_SUPPORTED: i32 = 2203;
 const ERR_NETWORK_ALREADY_SETUP: i32 = 2009;
 const ERR_NETWORK_CANNOT_BE_RESTARTED: i32 = 2025;
 
-/// Process-global lifecycle of the FoundationDB client.
+/// Lifecycle of this Rust library's FoundationDB client.
 ///
 /// The C API allows selecting the API version and setting up the network once per
 /// process, and the network can never be restarted once stopped. Every FFI call
@@ -73,9 +73,9 @@ enum NetworkLifecycle {
 }
 
 static NETWORK: Mutex<NetworkLifecycle> = Mutex::new(NetworkLifecycle::Uninitialized);
-// Published after successful API selection and never changed. Version-dependent
-// transaction operations must not take the lifecycle lock (network shutdown
-// holds it while joining the network thread).
+// Published after successful or verified shared API selection and never changed.
+// Version-dependent transaction operations must not take the lifecycle lock
+// (network shutdown holds it while joining the network thread).
 static SELECTED_API_VERSION: AtomicI32 = AtomicI32::new(0);
 static STOP_ON_EXIT: AtomicBool = AtomicBool::new(true);
 // Last error returned by fdb_run_network (0 = none). An atomic, not a mutex: the
@@ -100,10 +100,20 @@ impl NetworkLifecycle {
     fn select_api_version(&mut self, version: i32) -> FdbResult<()> {
         match self {
             NetworkLifecycle::Uninitialized => {
-                error::eval(unsafe {
-                    fdb_sys::fdb_select_api_version_impl(version, fdb_sys::FDB_API_VERSION as i32)
-                })
-                .inspect_err(|e| {
+                let header_version = fdb_sys::FDB_API_VERSION as i32;
+                let selection =
+                    unsafe { fdb_sys::fdb_select_api_version_impl(version, header_version) };
+                // Another Rust shared library has its own lifecycle state. Only
+                // the shared C library can confirm both runtime semantics and
+                // the header version controlling its versioned entry points.
+                let selection = if selection == ERR_API_VERSION_ALREADY_SET
+                    && fdb_sys::selected_api_versions() == Some((version, header_version))
+                {
+                    0
+                } else {
+                    selection
+                };
+                error::eval(selection).inspect_err(|e| {
                     // generally means the local libfdb doesn't support the requested version
                     if e.code() == ERR_API_VERSION_NOT_SUPPORTED {
                         let max_api_version = get_max_api_version();
@@ -337,12 +347,17 @@ impl FdbApiBuilder {
 
     /// Selects the foundationDB API version and returns a `NetworkBuilder`.
     ///
-    /// Idempotent: re-selecting the version already in use is a no-op.
+    /// Re-selecting this Rust library's existing version is a no-op. With current
+    /// C headers and their matching library, a version selected by another shared
+    /// library is also accepted when both runtime and header versions match.
+    /// Historical headers cannot verify external selection and return error 2201.
+    /// This selects API behavior only; it does not adopt or start another library's
+    /// network thread.
     ///
     /// # Errors
     ///
-    /// - error 2201 (`api_version_already_set`) if a different version was selected
-    ///   before
+    /// - error 2201 (`api_version_already_set`) if a different runtime or header
+    ///   version was selected before, or an external selection cannot be verified
     /// - error 2203 (`api_version_not_supported`) if the installed libfdb_c does
     ///   not support the requested version
     pub fn build(self) -> FdbResult<NetworkBuilder> {

@@ -66,6 +66,13 @@ API 510, these mutations panic before reaching the C client; other supported
 API 510 operations remain available. Tuple versionstamp helpers use the modern
 four-byte offset encoding.
 
+Multiple Rust simulator libraries can share the C client's API selection when
+built against the current headers and library. Registration verifies both the
+runtime and header versions before adopting an existing selection. Historical
+headers cannot query that state, so externally selected APIs are rejected instead
+of assuming compatibility. Each library must use the same version pair; this does
+not transfer ownership of the native network thread.
+
 The client follows the same transaction, retry, key-selector, tuple, and directory
 protocols as the other bindings, expressed through Rust futures and ownership.
 The [binding tester](foundationdb-bindingtester/README.md) exercises protocol

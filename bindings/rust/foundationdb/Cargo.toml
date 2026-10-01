@@ -75,3 +75,8 @@ bytesize = "2.4"
 uuid = { version = "1.23.3", features = ["v4"] }
 futures-util = "0.3.32"
 tracing-subscriber = "0.3.23"
+
+[[example]]
+name = "api_version_library"
+crate-type = ["cdylib"]
+required-features = ["fdb-7_4"]

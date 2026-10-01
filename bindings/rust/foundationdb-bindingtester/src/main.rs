@@ -994,7 +994,7 @@ impl StackMachine {
                         Err(err) => StackResult::from(err),
                     })
                     .boxed_local();
-                self.push_fut(number, 0, f);
+                self.push_fut(number, trx_id, f);
                 pending = true;
             }
 
@@ -2796,4 +2796,35 @@ fn main() {
     info!("Closing...");
 
     info!("Done.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires a running FoundationDB cluster"]
+    fn on_error_restores_transaction_before_next_instruction() {
+        futures::executor::block_on(async {
+            let db = Arc::new(Database::new_compat(None).await.expect("cannot open fdb"));
+            let mut sm = StackMachine::new(&db, Bytes::from(b"on-error-reuse".as_slice()));
+            let instructions = [
+                pack(&("NEW_TRANSACTION",)),
+                pack(&("PUSH", 1020)),
+                pack(&("ON_ERROR",)),
+                pack(&("GET_READ_VERSION",)),
+            ];
+
+            for (number, instruction) in instructions.iter().enumerate() {
+                sm.run_step(db.clone(), number, Instr::from(instruction))
+                    .await
+                    .expect("instruction failed");
+            }
+
+            assert!(sm.last_version > 0);
+            assert_eq!(sm.stack.len(), 2);
+            assert_eq!(sm.stack[0].data.as_ref(), Some(&RESULT_NOT_PRESENT));
+            assert_eq!(sm.stack[1].data.as_ref(), Some(&GOT_READ_VERSION));
+        });
+    }
 }

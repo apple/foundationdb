@@ -63,8 +63,9 @@ removes and drops that task before dropping the user workload and invalidating t
 context. Task destruction defers nested executor drains. The phase owns its workload while
 suspended and returns it before releasing its promise, including on cancellation. A timeout
 query during `check` uses the value sampled immediately before that phase began, avoiding
-aliasing its exclusive workload borrow; idle queries call the workload getter normally.
-A final metrics callback or new phase first cancels any task left behind by an abandoned
+aliasing its exclusive workload borrow; the cached value is cleared when that phase ends.
+A timeout query before `check` cancels an abandoned setup/start before reading its timeout.
+A final metrics callback or new phase also cancels any task left behind by an abandoned
 native waiter. That cancellation retains only a weak workload reference: if releasing the
 old promise frees the native workload reentrantly, its destructor still runs with a live
 context and the incoming callback does not access the released workload. Resolving
