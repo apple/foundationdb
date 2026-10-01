@@ -7,6 +7,8 @@ Release Notes (8.0)
 8.0.0
 =====
 
+AVX enabled release.
+
 Compatibility and removed features
 ----------------------------------
 
@@ -46,16 +48,23 @@ Compatibility and removed features
 Features (Experimental)
 -----------------------
 
-* Added **Native CDC**: durable named streams for a single user-key range,
-  commit-version-grouped mutations, resumable consumers, and durable
-  acknowledgements controlling log retention. The native C++ and C APIs support
-  registration, listing, removal, consumption, and acknowledgement. New stream
-  admission is disabled by default through ``ENABLE_NATIVE_CDC``. Consumers must
-  handle redelivery and acknowledge only durably processed data; CDC does not
-  provide exactly-once application side effects. See :doc:`/api-c` and the
+* Added **Native CDC**: durable named streams over one or more disjoint user-key
+  ranges, commit-version-grouped mutations, resumable consumers, and durable
+  acknowledgements controlling log retention. Native C++, C, and Python APIs
+  support registration, listing, removal, consumption, and acknowledgement;
+  ordered fixed-partition streams can merge mutations into commit-version order.
+  Operator commands report stream status and guard removal while consumers lag.
+  New stream admission is disabled by default through ``ENABLE_NATIVE_CDC``.
+  Consumers must handle redelivery and acknowledge only durably processed data;
+  CDC does not provide exactly-once application side effects. See :doc:`/api-c`,
+  :doc:`/api-python`, and the
   `CDC design <https://github.com/apple/foundationdb/blob/main/design/cdc.md>`_.
   `(PR #13287) <https://github.com/apple/foundationdb/pull/13287>`_,
-  `(PR #13674) <https://github.com/apple/foundationdb/pull/13674>`_
+  `(PR #13674) <https://github.com/apple/foundationdb/pull/13674>`_,
+  `(PR #13925) <https://github.com/apple/foundationdb/pull/13925>`_,
+  `(PR #13926) <https://github.com/apple/foundationdb/pull/13926>`_,
+  `(PR #13971) <https://github.com/apple/foundationdb/pull/13971>`_,
+  `(PR #14116) <https://github.com/apple/foundationdb/pull/14116>`_
 * Extended **bulk dump and bulk load**, introduced in 7.4, to operate on selected
   key ranges. Bulk-load restore can target a non-empty database; data in the
   destination range is replaced. See :doc:`/bulkdump` and :doc:`/bulkload-user`.
@@ -86,6 +95,12 @@ Features (Experimental)
   `(PR #12540) <https://github.com/apple/foundationdb/pull/12540>`_,
   `(PR #12555) <https://github.com/apple/foundationdb/pull/12555>`_,
   `(PR #12603) <https://github.com/apple/foundationdb/pull/12603>`_
+* Added the ``range_digest`` storage audit to compute a partition-independent
+  content fingerprint on a quiescent cluster. This can validate a backup and
+  restore without reading all data through an external client, and exposes
+  per-range progress for localizing mismatches. See
+  `the range-digest design <https://github.com/apple/foundationdb/blob/main/design/range-digest.md>`_.
+  `(PR #13866) <https://github.com/apple/foundationdb/pull/13866>`_
 
 Client APIs and bindings
 ------------------------
@@ -108,6 +123,9 @@ Client APIs and bindings
 * Fixed read-your-writes transactions leaving watch futures unresolved when a
   commit is interrupted by a transaction error such as a timeout.
   `(PR #13395) <https://github.com/apple/foundationdb/pull/13395>`_
+* Removed deprecated Java finalizer-based cleanup. Java applications must close
+  databases, transactions, and other native-backed objects explicitly.
+  `(PR #13997) <https://github.com/apple/foundationdb/pull/13997>`_
 
 Backup, restore, and object storage
 -----------------------------------
@@ -124,8 +142,17 @@ Backup, restore, and object storage
   request handling and connection reuse.
   `(PR #12246) <https://github.com/apple/foundationdb/pull/12246>`_,
   `(PR #12447) <https://github.com/apple/foundationdb/pull/12447>`_
-* Coalesced encrypted blobstore backup reads to reduce small object-store read
-  requests. `(PR #13750) <https://github.com/apple/foundationdb/pull/13750>`_
+* Coalesced encrypted blobstore backup reads and issued encrypted block reads
+  concurrently, reducing small object-store read requests.
+  `(PR #13750) <https://github.com/apple/foundationdb/pull/13750>`_,
+  `(PR #13992) <https://github.com/apple/foundationdb/pull/13992>`_
+* Fixed backup agents that reopen an existing encrypted backup writing unreadable
+  data before the encryption key finished loading, which left restores retrying
+  authentication failures without progress.
+  `(PR #14072) <https://github.com/apple/foundationdb/pull/14072>`_
+* Fixed reopening the same backup URL with a different proxy, encryption key file,
+  or encryption block size silently reusing the first configuration.
+  `(PR #14065) <https://github.com/apple/foundationdb/pull/14065>`_
 * Added progress-based timeouts for backup/restore bulk jobs. Failed or incomplete
   bulk dumps and unverifiable bulk-load restores now fail instead of appearing
   successful or waiting indefinitely.
@@ -138,6 +165,10 @@ Backup, restore, and object storage
   `(PR #13873) <https://github.com/apple/foundationdb/pull/13873>`_
 * Rejected path traversal in bulk-load manifest file paths.
   `(PR #13665) <https://github.com/apple/foundationdb/pull/13665>`_
+* Fixed ``fdbbackup status --json`` omitting recorded errors, and made
+  ``fdbdecode`` apply version filters before inspecting snapshot manifests.
+  `(PR #14124) <https://github.com/apple/foundationdb/pull/14124>`_,
+  `(PR #14122) <https://github.com/apple/foundationdb/pull/14122>`_
 
 Cluster operations and reliability
 ----------------------------------
@@ -164,12 +195,29 @@ Cluster operations and reliability
   worker interfaces.
   `(PR #13646) <https://github.com/apple/foundationdb/pull/13646>`_
 * Bounded retries for degraded storage teams across data-distribution pipeline
-  transitions, allowing stranded shards to make progress without repeated
-  duplicate submissions.
-  `(PR #13838) <https://github.com/apple/foundationdb/pull/13838>`_
+  transitions and avoided publishing transient pipeline capacity, allowing
+  stranded shards to make progress without repeated duplicate submissions.
+  `(PR #13838) <https://github.com/apple/foundationdb/pull/13838>`_,
+  `(PR #14012) <https://github.com/apple/foundationdb/pull/14012>`_
 * Fixed Sharded RocksDB resource lifetime and compaction shutdown handling during
   storage-server rollback.
   `(PR #13726) <https://github.com/apple/foundationdb/pull/13726>`_
+* Enabled stale client-peer eviction and eager proxy refresh by default
+  (``LOCATION_CACHE_PEER_EVICTOR_ENABLED``, ``DBCONTEXT_EAGER_PROXY_UPDATE``,
+  ``SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD``). These were available but
+  disabled by default in 7.3 and 7.4. This reduces connection-timeout churn after
+  storage-server or proxy failures.
+  `(PR #14050) <https://github.com/apple/foundationdb/pull/14050>`_
+* Preserved old TLog history until remote replicas have durably copied it, and
+  retried lost old-log-router initialization replies during recovery.
+  `(PR #13913) <https://github.com/apple/foundationdb/pull/13913>`_,
+  `(PR #14047) <https://github.com/apple/foundationdb/pull/14047>`_
+* Fixed commit-proxy recruitment in small configurations and enforced admission
+  control on key-location requests after a cluster bounce.
+  `(PR #13400) <https://github.com/apple/foundationdb/pull/13400>`_,
+  `(PR #14090) <https://github.com/apple/foundationdb/pull/14090>`_
+* Fixed a RocksDB checkpoint-reader initialization race.
+  `(PR #14084) <https://github.com/apple/foundationdb/pull/14084>`_
 
 Performance and observability
 -----------------------------
@@ -190,11 +238,6 @@ Performance and observability
   `(PR #13416) <https://github.com/apple/foundationdb/pull/13416>`_,
   `(PR #13403) <https://github.com/apple/foundationdb/pull/13403>`_,
   `(PR #13767) <https://github.com/apple/foundationdb/pull/13767>`_
-* Added sampled allocation attribution by call site. Production sampling is off
-  by default (``MEMORY_TRACKING_SAMPLE_INVERSE=0``), and the tracker can be
-  compiled out with ``FDB_MEMORY_TRACKER=OFF``. See the
-  `memory tracker design <https://github.com/apple/foundationdb/blob/main/design/memory-tracker.md>`_.
-  `(PR #13344) <https://github.com/apple/foundationdb/pull/13344>`_
 
 Build and packaging
 --------------------
@@ -208,13 +251,12 @@ Build and packaging
   It requires Swift 6.1 or newer and Clang; Linux builds also require libc++.
   `(PR #12428) <https://github.com/apple/foundationdb/pull/12428>`_,
   `(PR #12500) <https://github.com/apple/foundationdb/pull/12500>`_
-* The source build selects RocksDB **9.7.3**, compared with **8.11.4** on the
-  audited 7.4 branch. See the
-  `8.0 RocksDB version configuration <https://github.com/apple/foundationdb/blob/3e8f0d8546c7cf723bb33e0decdb31fa1e9db841/cmake/RocksDBVersion.cmake>`_
-  and the
-  `7.4 RocksDB version configuration <https://github.com/apple/foundationdb/blob/a5c62d6846c0402801e8fb9ac881fc9a86c2304a/cmake/RocksDBVersion.cmake>`_.
+* Upgraded RocksDB to **11.1.2**. Recent 7.4.x releases use RocksDB **8.11.x**.
+  `(PR #14189) <https://github.com/apple/foundationdb/pull/14189>`_
 * Updated the main Docker image base to Rocky Linux **10.2**.
   `(PR #12549) <https://github.com/apple/foundationdb/pull/12549>`_
+* Upgraded Boost from **1.86.0** to **1.89.0**.
+  `(PR #14137) <https://github.com/apple/foundationdb/pull/14137>`_
 * Removed Flow's unused ``CompressionUtils`` abstraction and its zstd support.
   `(PR #13708) <https://github.com/apple/foundationdb/pull/13708>`_
 
