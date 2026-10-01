@@ -4432,28 +4432,22 @@ TEST_CASE("/fdbserver/MoveKeys/serverKeysAssigned") {
 	auto makeMockGetRanges = [&](bool assigned) {
 		return [assigned](Key prefix, KeyRange keys, int rowLimit, int byteLimit) -> Future<RangeResult> {
 			RangeResult result;
-			// We only yield one item to test basic success/failure and rely on the pagination test below
-			// to test krmRowLimit iteration.
 			result.push_back_deep(result.arena(), KeyValueRef(keys.begin, assigned ? serverKeysTrue : serverKeysFalse));
 			result.push_back_deep(result.arena(), KeyValueRef(keys.end, serverKeysFalse));
 			return result;
 		};
 	};
 
-	// 1. Returns true when every destination server has serverKeys assigned for the requested logical range.
 	bool allAssigned = co_await serverKeysAssignedImpl(makeMockGetRanges(true), destServers, range, 1000, 100000);
 	ASSERT(allAssigned);
 
-	// 2. Returns false when one destination server has an unassigned subrange inside the requested range.
 	bool oneUnassigned = co_await serverKeysAssignedImpl(makeMockGetRanges(false), destServers, range, 1000, 100000);
 	ASSERT(!oneUnassigned);
 
-	// 3. With multiple destination servers, verifies every destination UID rather than only the first one.
 	auto makeMockGetRangesMultiple = [&](std::vector<UID> destServers) {
 		return [destServers](Key prefix, KeyRange keys, int rowLimit, int byteLimit) -> Future<RangeResult> {
 			RangeResult result;
 			bool assigned = true;
-			// Make the second server return unassigned
 			if (prefix == serverKeysPrefixFor(destServers[1])) {
 				assigned = false;
 			}
@@ -4466,7 +4460,6 @@ TEST_CASE("/fdbserver/MoveKeys/serverKeysAssigned") {
 	    co_await serverKeysAssignedImpl(makeMockGetRangesMultiple(destServers), destServers, range, 1000, 100000);
 	ASSERT(!multipleCheck);
 
-	// 4. Handles KRM pagination correctly when the requested range spans multiple KRM rows/pages.
 	auto makeMockGetRangesPagination = [&]() {
 		return [](Key prefix, KeyRange keys, int rowLimit, int byteLimit) -> Future<RangeResult> {
 			RangeResult result;
