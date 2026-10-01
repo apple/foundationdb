@@ -43,6 +43,8 @@ documented in [UPSTREAM.md](UPSTREAM.md): raw-pointer ownership requires `unsafe
 integer options take `i64` to cover the C API's full range, and simulation workload
 wrappers enforce context lifetime and thread access. Simulation metrics sinks are
 borrowed for their callback, and executor futures stay on their creating thread.
+Process switching requires an unsafe call, and custom metric formats are checked
+before they reach the native formatter.
 Crate versions are independent of the FoundationDB server release number. Published crates on
 crates.io are separate releases; importing the source does not publish or transfer
 ownership of them.

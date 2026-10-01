@@ -18,6 +18,10 @@ are coalesced. The queue holds the notification state alive until it is consumed
 even a consuming `Waker::wake()` schedules a poll before releasing the final waker.
 Waking never polls the future directly.
 
+Before polling, the owner acquires the queued flag while clearing it. A coalesced
+wake does not take the queue lock, so this acquire makes its producer's writes
+visible to the poll even when no second notification was enqueued.
+
 `fdb_spawn` inserts a future into the current thread's registry, queues its first poll,
 and calls `poll_pending_tasks`. The drain removes each future from the registry while
 polling it and restores it only if it returns `Pending`. No queue lock or registry borrow

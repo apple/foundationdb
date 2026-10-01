@@ -4,6 +4,7 @@ extern crate cc;
 
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(coverage)");
+    println!("cargo:rustc-check-cfg=cfg(fdb_simulation_loom)");
 
     let bindings = bindgen::Builder::default()
         .header("src/headers/CWorkload.h")

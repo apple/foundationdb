@@ -102,7 +102,7 @@ add_test(NAME rust_future_safety_tests
   COMMAND_EXPAND_LISTS)
 set_tests_properties(rust_future_safety_tests PROPERTIES TIMEOUT 300 LABELS "rust")
 
-foreach(symbol str_from_c WorkloadContext::new register_workload_context WrappedWorkload Metrics)
+foreach(symbol str_from_c WorkloadContext::new WorkloadContext::set_process_id register_workload_context WrappedWorkload Metrics)
   string(REPLACE "::" "_" test_suffix ${symbol})
   add_test(NAME rust_simulation_${test_suffix}_safety_tests
     COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
@@ -114,6 +114,19 @@ foreach(symbol str_from_c WorkloadContext::new register_workload_context Wrapped
   set_tests_properties(rust_simulation_${test_suffix}_safety_tests PROPERTIES
     TIMEOUT 300 LABELS "rust")
 endforeach()
+
+add_test(NAME rust_simulation_wake_order_tests
+  COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
+    "RUSTFLAGS=$ENV{RUSTFLAGS} --cfg fdb_simulation_loom"
+    CARGO_TARGET_DIR=${rust_target_dir}-loom
+    ${CARGO_EXECUTABLE} test ${rust_cargo_base_args}
+    --features foundationdb-simulation/fdb-7_4
+    --package foundationdb-simulation --lib --offline
+    fdb_rt::loom_tests::coalesced_wake_publishes_before_poll -- --exact
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMAND_EXPAND_LISTS)
+set_tests_properties(rust_simulation_wake_order_tests PROPERTIES
+  TIMEOUT 300 LABELS "rust")
 
 if(RUN_RUST_INTEGRATION_TESTS)
   add_custom_target(fdb_rust_integration_tests ALL

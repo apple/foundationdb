@@ -38,3 +38,9 @@ The in-tree adaptation also corrects public API contracts from this snapshot:
   workload is released.
 - `Metrics<'_>` borrows its native sink for one `get_metrics` callback. A workload
   cannot retain the sink after returning; collect owned metric values instead.
+- `WorkloadContext::set_process_id` is unsafe: its integer argument represents a
+  native process pointer and must satisfy the documented lifetime and restoration
+  requirements.
+- Custom metric formats are checked before reaching native formatting. They must
+  contain exactly one floating-point conversion without argument-supplied width,
+  precision, positional arguments, or length modifiers; invalid formats panic.

@@ -87,8 +87,9 @@ const NOT_COMMITTED: i32 = 1020;
 ///    [`on_error_duration`](Self::on_error_duration) and
 ///    [`on_retry`](Self::on_retry) if the transaction was retried
 ///
-/// [`on_complete`](Self::on_complete) fires exactly once per run, on **every**
-/// exit path: success, non-retryable error, exhausted retries or binding error.
+/// [`on_complete`](Self::on_complete) fires exactly once when the run returns:
+/// success, non-retryable error, exhausted retries or binding error. Canceling a
+/// run by dropping its future does not invoke this hook.
 ///
 /// The two fallible hooks ([`before_commit`](Self::before_commit) and
 /// [`on_commit_error`](Self::on_commit_error)) never abort the runner: their
@@ -170,7 +171,8 @@ pub trait RunnerHooks {
     /// accepted to retry it.
     fn on_retry(&self, _attempt: usize) {}
 
-    /// Called exactly once when the run ends, whatever its outcome.
+    /// Called exactly once when the run returns, whatever its outcome.
+    /// Dropping the run's future before it returns does not invoke this hook.
     fn on_complete(&self) {}
 }
 
@@ -600,7 +602,7 @@ where
 /// [`run_attempt`].
 ///
 /// Wrapped by [`run_with_hooks`], which owns firing
-/// [`RunnerHooks::on_complete`] on every exit path.
+/// [`RunnerHooks::on_complete`] when the run returns.
 async fn retry_loop<F, Fut, T, E, H, P>(
     initial_transaction: RetryableTransaction,
     hooks: &H,
@@ -742,7 +744,7 @@ where
 }
 
 /// The retry runner: [`retry_loop`] plus the guarantee that
-/// [`RunnerHooks::on_complete`] fires exactly once.
+/// [`RunnerHooks::on_complete`] fires exactly once when the run returns.
 #[cfg_attr(
     feature = "trace",
     tracing::instrument(level = "debug", skip(initial_transaction, hooks, policy, closure))

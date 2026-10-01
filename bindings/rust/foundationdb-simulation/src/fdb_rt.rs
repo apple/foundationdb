@@ -10,12 +10,14 @@ use std::{
     collections::{BTreeMap, VecDeque},
     future::Future,
     pin::Pin,
-    sync::{
-        Arc, Mutex, Weak,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Weak, atomic::Ordering},
     task::{Context, Wake, Waker},
 };
+
+#[cfg(all(test, fdb_simulation_loom))]
+use loom::sync::{Mutex, atomic::AtomicBool};
+#[cfg(not(all(test, fdb_simulation_loom)))]
+use std::sync::{Mutex, atomic::AtomicBool};
 
 type TaskId = usize;
 type Task = Pin<Box<dyn Future<Output = ()>>>;
@@ -73,6 +75,19 @@ impl Drop for TaskWaker {
     }
 }
 
+fn next_notification(queue: &Queue) -> Option<Notification> {
+    let notification = queue
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .pop_front();
+    if let Some(Notification::Ready(waker)) = &notification {
+        // Coalesced wakes skip the queue lock. Acquire their publication before
+        // polling; a later wake sees false and queues another notification.
+        waker.queued.swap(false, Ordering::AcqRel);
+    }
+    notification
+}
+
 struct PollingGuard;
 
 impl Drop for PollingGuard {
@@ -97,18 +112,13 @@ pub fn poll_pending_tasks() {
     };
     let _guard = PollingGuard;
     loop {
-        let notification = queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .pop_front();
-        let Some(notification) = notification else {
+        let Some(notification) = next_notification(&queue) else {
             return;
         };
         // Neither the queue lock nor the registry borrow may span user polling
         // or destruction: either can synchronously wake or spawn another task.
         match notification {
             Notification::Ready(notification) => {
-                notification.queued.store(false, Ordering::Release);
                 let id = notification.id;
                 let future = EXECUTOR.with_borrow_mut(|executor| executor.tasks.remove(&id));
                 if let Some(mut future) = future {
@@ -148,7 +158,7 @@ where
     poll_pending_tasks();
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(fdb_simulation_loom)))]
 mod tests {
     use super::*;
     use std::{
@@ -345,5 +355,67 @@ mod tests {
         waker.wake_by_ref();
         drop(waker);
         poll_pending_tasks();
+    }
+}
+
+#[cfg(all(test, fdb_simulation_loom))]
+mod loom_tests {
+    use super::*;
+    use std::{future::poll_fn, task::Poll};
+
+    #[test]
+    fn coalesced_wake_publishes_before_poll() {
+        loom::model(|| {
+            let queue = Arc::new(Queue::default());
+            let notification = Arc::new(TaskWaker {
+                id: 0,
+                queue: Arc::downgrade(&queue),
+                queued: AtomicBool::new(false),
+            });
+            let retained_waker = Waker::from(notification.clone());
+            retained_waker.wake_by_ref();
+
+            let ready = Arc::new(AtomicBool::new(false));
+            let wake_done = Arc::new(AtomicBool::new(false));
+            let producer_ready = ready.clone();
+            let producer_done = wake_done.clone();
+            let producer_waker = retained_waker.clone();
+            let producer = loom::thread::spawn(move || {
+                producer_ready.store(true, Ordering::Relaxed);
+                producer_waker.wake_by_ref();
+                producer_done.store(true, Ordering::Relaxed);
+            });
+
+            // Schedule the second wake while the first is still queued, without
+            // acquiring its writes through a join, channel, or readiness flag.
+            while !wake_done.load(Ordering::Relaxed) {
+                loom::thread::yield_now();
+            }
+            let Some(Notification::Ready(waker)) = next_notification(&queue) else {
+                panic!("expected the queued wake");
+            };
+            let waker = Waker::from(waker);
+            let mut future = std::pin::pin!(poll_fn(|_| {
+                if ready.load(Ordering::Relaxed) {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }));
+            assert!(
+                future
+                    .as_mut()
+                    .poll(&mut Context::from_waker(&waker))
+                    .is_ready(),
+                "the coalesced wake must publish readiness before polling"
+            );
+            producer.join().unwrap();
+
+            // std Arc/Waker preserve the real Wake implementation. These
+            // retained references prevent final-drop synchronization from
+            // supplying the acquire that the queue must provide itself.
+            drop(retained_waker);
+            drop(notification);
+        });
     }
 }

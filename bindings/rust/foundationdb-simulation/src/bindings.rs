@@ -170,7 +170,13 @@ pub struct Metric<'a> {
     pub val: f64,
     /// Indicates if the value represents an average or not
     pub avg: bool,
-    /// C++ string formatter of the metric
+    /// C `printf` format for one `double`, defaulting to `%.3g`.
+    ///
+    /// Supported formats contain exactly one `a`, `A`, `e`, `E`, `f`, `F`, `g`,
+    /// or `G` conversion, with optional `-`, `+`, space, `#`, and `0` flags and
+    /// decimal width and precision no greater than `i32::MAX`. Literal text and
+    /// `%%` are allowed. Length modifiers, positional arguments, `*`, and other
+    /// conversions are rejected by [`Metrics::push`] before entering native code.
     pub fmt: Option<&'a str>,
 }
 
@@ -335,8 +341,23 @@ impl WorkloadContext {
     pub fn get_process_id(&self) -> u64 {
         with! { self.raw() => getProcessID() }
     }
-    /// Set the process id of the workload
-    pub fn set_process_id(&self, id: u64) {
+    /// Switch the simulator's current process using a native process handle.
+    ///
+    /// # Safety
+    /// During simulation, `id` must be an unchanged handle previously obtained
+    /// from [`Self::get_process_id`] in the same simulator instance, and its
+    /// native process must remain alive while selected. It is a pointer-valued
+    /// handle, not an arbitrary numeric process identifier. The caller must
+    /// ensure intervening operations are valid for that process and restore the
+    /// previous process before yielding, returning, or unwinding.
+    ///
+    /// ```compile_fail,E0133
+    /// use foundationdb_simulation::WorkloadContext;
+    /// fn change_process(context: &WorkloadContext) {
+    ///     context.set_process_id(1);
+    /// }
+    /// ```
+    pub unsafe fn set_process_id(&self, id: u64) {
         with! { self.raw() => setProcessID(id) }
     }
     /// Get the current simulated time in seconds (starts at zero)
@@ -410,6 +431,65 @@ impl Drop for Promise {
     }
 }
 
+// Native metric formatting passes exactly one double to printf. Keep this
+// grammar narrow so neither the conversion nor width/precision consumes a
+// differently typed or additional variadic argument.
+fn valid_metric_format(format: &str) -> bool {
+    fn decimal(input: &mut &[u8]) -> bool {
+        let mut value = 0_i32;
+        while let Some((&digit, rest)) = input.split_first() {
+            if !digit.is_ascii_digit() {
+                break;
+            }
+            let Some(next) = value
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(i32::from(digit - b'0')))
+            else {
+                return false;
+            };
+            value = next;
+            *input = rest;
+        }
+        true
+    }
+
+    let mut input = format.as_bytes();
+    let mut conversion = false;
+    while let Some((&byte, rest)) = input.split_first() {
+        input = rest;
+        if byte != b'%' {
+            continue;
+        }
+        if input.first() == Some(&b'%') {
+            input = &input[1..];
+            continue;
+        }
+        if conversion {
+            return false;
+        }
+        while matches!(input.first(), Some(b'-' | b'+' | b' ' | b'#' | b'0')) {
+            input = &input[1..];
+        }
+        if !decimal(&mut input) {
+            return false;
+        }
+        if input.first() == Some(&b'.') {
+            input = &input[1..];
+            if !decimal(&mut input) {
+                return false;
+            }
+        }
+        match input.split_first() {
+            Some((b'a' | b'A' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G', rest)) => {
+                conversion = true;
+                input = rest;
+            }
+            _ => return false,
+        }
+    }
+    conversion
+}
+
 impl<'callback> Metrics<'callback> {
     pub(crate) fn new(raw: &'callback mut FDBMetrics) -> Self {
         Self(raw)
@@ -418,10 +498,19 @@ impl<'callback> Metrics<'callback> {
     pub fn reserve(&mut self, n: usize) {
         with! { &*self.0 => reserve(n as i32) }
     }
-    /// Push a [Metric] entry in the underlying C++ sink
+    /// Push a [Metric] entry in the underlying C++ sink.
+    ///
+    /// # Panics
+    /// Panics before calling the native sink if [`Metric::fmt`] does not follow
+    /// its supported single-double format grammar.
     pub fn push(&mut self, metric: Metric) {
+        let format = metric.fmt.unwrap_or("%.3g");
+        assert!(
+            valid_metric_format(format),
+            "invalid metric format: {format:?}"
+        );
         let key_storage = str_for_c(metric.key);
-        let fmt_storage = str_for_c(metric.fmt.unwrap_or("%.3g"));
+        let fmt_storage = str_for_c(format);
         with! {
             &*self.0 => push(FDBMetric {
                 key: key_storage.as_ptr(),
@@ -654,6 +743,92 @@ mod tests {
                 ("completion".into(), 1.0, false, "%.0f".into()),
             ]
         );
+    }
+
+    #[test]
+    fn metrics_reject_unsafe_formats_before_calling_the_native_sink() {
+        let mut sink = NativeMetrics::default();
+        let mut metrics_vt = FDBMetrics_FDBMetrics_VT {
+            reserve: Some(reserve_metrics),
+            push: Some(push_metric),
+        };
+        let mut raw_metrics = FDBMetrics {
+            inner: &mut sink as *mut NativeMetrics as *mut _,
+            vt: &mut metrics_vt,
+        };
+
+        for format in [
+            None,
+            Some("%a"),
+            Some("%A"),
+            Some("%e"),
+            Some("%E"),
+            Some("%f"),
+            Some("%F"),
+            Some("%g"),
+            Some("%G"),
+            Some("%.0f"),
+            Some("load=%-+#010.3f%%"),
+            Some("% .f"),
+            Some("%% latency %.6g ms %%"),
+        ] {
+            super::Metrics::new(&mut raw_metrics).push(Metric {
+                key: "value",
+                val: 1.25,
+                avg: false,
+                fmt: format,
+            });
+            assert_eq!(
+                sink.entries.last(),
+                Some(&("value".into(), 1.25, false, format.unwrap_or("%.3g").into(),)),
+            );
+        }
+
+        let forwarded = sink.entries.len();
+        for format in [
+            "",
+            "value %%",
+            "%n",
+            "%s",
+            "%d",
+            "%c",
+            "%p",
+            "%Lf",
+            "%lf",
+            "%llf",
+            "%hf",
+            "%zf",
+            "%jf",
+            "%tf",
+            "%1$f",
+            "%1$.*2$f",
+            "%*f",
+            "%.*f",
+            "%*.*f",
+            "%f %g",
+            "%f %n",
+            "%f%",
+            "%",
+            "%.",
+            "%.2",
+            "%.2.3f",
+            "%2147483648f",
+            "%.2147483648f",
+            "%99999999999999999999999g",
+            "%g\0%n",
+        ] {
+            // Catch on the Rust side: a panic must never cross the C callback.
+            let rejected = catch_unwind(AssertUnwindSafe(|| {
+                super::Metrics::new(&mut raw_metrics).push(Metric {
+                    key: "rejected",
+                    val: 1.25,
+                    avg: false,
+                    fmt: Some(format),
+                });
+            }));
+            assert!(rejected.is_err(), "accepted {format:?}");
+            assert_eq!(sink.entries.len(), forwarded, "forwarded {format:?}");
+        }
     }
 
     #[test]

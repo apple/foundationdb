@@ -28,6 +28,7 @@ bindgen = "0.73.2"
 
 [dev-dependencies]
 futures-util = "0.3.32"
+loom = "0.7.2"
 
 [features]
 default = ["embedded-fdb-include"]
