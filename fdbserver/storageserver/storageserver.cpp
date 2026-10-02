@@ -673,6 +673,14 @@ struct StorageServerDisk {
 		++(*kvScans);
 		return storage->readRange(keys, rowLimit, byteLimit, options);
 	}
+	Future<StorageRangeKeysResult> readRangeKeys(KeyRangeRef keys,
+	                                             int rowLimit,
+	                                             int byteLimit,
+	                                             int scanByteLimit,
+	                                             Optional<ReadOptions> options) {
+		++(*kvScans);
+		return storage->readRangeKeys(keys, rowLimit, byteLimit, scanByteLimit, options);
+	}
 
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { return storage->checkpoint(request); }
 
@@ -3054,13 +3062,22 @@ KeyValueRef removePrefix(KeyValueRef const& src, Optional<KeyRef> prefix) {
 	}
 }
 
+int rangeReadBytes(const KeyValueRef& row) {
+	return sizeof(KeyValueRef) + row.expectedSize();
+}
+
+int rangeReadBytes(const RangeKeyRef& row) {
+	return sizeof(uint32_t) + row.expectedSize();
+}
+
 // Combines data from base (at an older version) with sets from newer versions in [start, end) and appends the first (up
 // to) |limit| rows to output If limit<0, base and output are in descending order, and start->key()>end->key(), but
 // start is still inclusive and end is exclusive
+template <class Item, VecSerStrategy strategy, class BaseResult>
 void merge(Arena& arena,
-           VectorRef<KeyValueRef, VecSerStrategy::String>& output,
-           VectorRef<KeyValueRef> const& vm_output,
-           RangeResult const& base,
+           VectorRef<Item, strategy>& output,
+           VectorRef<Item> const& vm_output,
+           BaseResult const& base,
            int& vCount,
            int limit,
            bool stopAtEndOfBase,
@@ -3076,8 +3093,8 @@ void merge(Arena& arena,
 		limit = -limit;
 	int adjustedLimit = limit + output.size();
 	int accumulatedBytes = 0;
-	KeyValueRef const* baseStart = base.begin();
-	KeyValueRef const* baseEnd = base.end();
+	Item const* baseStart = base.begin();
+	Item const* baseEnd = base.end();
 	while (baseStart != baseEnd && vCount > 0 && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
 		if (forward ? baseStart->key < vm_output[pos].key : baseStart->key > vm_output[pos].key) {
 			output.push_back(arena, *baseStart++);
@@ -3088,16 +3105,16 @@ void merge(Arena& arena,
 			++pos;
 			vCount--;
 		}
-		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
+		accumulatedBytes += rangeReadBytes(output.end()[-1]);
 	}
 	while (baseStart != baseEnd && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
 		output.push_back(arena, *baseStart++);
-		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
+		accumulatedBytes += rangeReadBytes(output.end()[-1]);
 	}
 	if (!stopAtEndOfBase) {
 		while (vCount > 0 && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
 			output.push_back_deep(arena, vm_output[pos]);
-			accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
+			accumulatedBytes += rangeReadBytes(output.end()[-1]);
 			++pos;
 			vCount--;
 		}
@@ -3166,16 +3183,46 @@ Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 	}
 }
 
+template <class Result>
+Future<StorageRangeReadResult<Result>> readStorageRange(StorageServer* data,
+                                                        KeyRangeRef keys,
+                                                        int rowLimit,
+                                                        int byteLimit,
+                                                        int64_t remainingScanBytes,
+                                                        Optional<ReadOptions> options) {
+	if constexpr (std::is_same_v<Result, RangeKeysResult>) {
+		ASSERT(remainingScanBytes > 0);
+		CODE_PROBE(true, "Keys-only storage range read");
+		return data->storage.readRangeKeys(keys, rowLimit, byteLimit, static_cast<int>(remainingScanBytes), options);
+	} else {
+		return data->storage.readRange(keys, rowLimit, byteLimit, options);
+	}
+}
+
+RangeResult recordRangeScan(StorageServer* data, RangeResult result, int64_t*) {
+	data->counters.kvScanBytes += result.logicalSize();
+	return result;
+}
+
+RangeKeysResult recordRangeScan(StorageServer* data, StorageRangeKeysResult result, int64_t* remainingScanBytes) {
+	*remainingScanBytes -= result.scannedBytes;
+	data->counters.kvScanBytes += result.scannedBytes;
+	return std::move(result.keys);
+}
+
 // If limit>=0, it returns the first rows in the range (sorted ascending), otherwise the last rows (sorted descending).
 // readRange has O(|result|) + O(log |data|) cost
-Future<GetKeyValuesReply> readRange(StorageServer* data,
-                                    Version version,
-                                    KeyRange range,
-                                    int limit,
-                                    int* pLimitBytes,
-                                    SpanContext parentSpan,
-                                    Optional<ReadOptions> options) {
-	GetKeyValuesReply result;
+template <class Reply>
+Future<Reply> readRangeImpl(StorageServer* data,
+                            Version version,
+                            KeyRange range,
+                            int limit,
+                            int* pLimitBytes,
+                            SpanContext parentSpan,
+                            Optional<ReadOptions> options) {
+	using Item = std::conditional_t<std::is_same_v<Reply, GetRangeKeysReply>, RangeKeyRef, KeyValueRef>;
+	using DiskResult = std::conditional_t<std::is_same_v<Reply, GetRangeKeysReply>, RangeKeysResult, RangeResult>;
+	Reply result;
 	StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	StorageServer::VersionedData::iterator vCurrent = view.end();
 	KeyRef readBegin;
@@ -3183,11 +3230,19 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 	Key readBeginTemp;
 	int vCount = 0;
 	Span span("SS:readRange"_loc, parentSpan);
-	int resultLogicalSize = 0;
-	int logicalSize = 0;
+	int64_t resultLogicalSize = 0;
+	int64_t remainingScanBytes = std::max(*pLimitBytes, SERVER_KNOBS->STORAGE_LIMIT_BYTES);
+	bool stoppedAtStorageLimit = false;
 
 	// for caching the storage queue results during the first PTree traversal
-	VectorRef<KeyValueRef> resultCache;
+	VectorRef<Item> resultCache;
+	auto cacheCurrent = [&]() {
+		if constexpr (std::is_same_v<Item, RangeKeyRef>) {
+			resultCache.push_back_deep(result.arena, RangeKeyRef{ vCurrent.key() });
+		} else {
+			resultCache.emplace_back(result.arena, vCurrent.key(), vCurrent->getValue());
+		}
+	};
 
 	// for remembering the position in the resultCache
 	int pos = 0;
@@ -3236,8 +3291,8 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 				while (vCurrent && vCurrent.key() < range.end && !vCurrent->isClearTo() && vCount < limit &&
 				       vSize < *pLimitBytes) {
 					// Store the versionedData results in resultCache
-					resultCache.emplace_back(result.arena, vCurrent.key(), vCurrent->getValue());
-					vSize += sizeof(KeyValueRef) + resultCache.cback().expectedSize();
+					cacheCurrent();
+					vSize += rangeReadBytes(resultCache.cback());
 					++vCount;
 					++vCurrent;
 				}
@@ -3245,11 +3300,10 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			// Read the data on disk up to vCurrent (or the end of the range)
 			readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
-			RangeResult atStorageVersion =
-			    co_await data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, options);
-			logicalSize = atStorageVersion.logicalSize();
-			data->counters.kvScanBytes += logicalSize;
-			resultLogicalSize += logicalSize;
+			auto storageRead = co_await readStorageRange<DiskResult>(
+			    data, KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, remainingScanBytes, options);
+			DiskResult atStorageVersion = recordRangeScan(data, std::move(storageRead), &remainingScanBytes);
+			resultLogicalSize += atStorageVersion.logicalSize();
 			data->readRangeBytesLimitHistogram->sample(*pLimitBytes);
 
 			ASSERT(atStorageVersion.size() <= limit);
@@ -3277,11 +3331,17 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 			limit -= result.data.size() - prevSize;
 
 			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++) {
-				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
+				*pLimitBytes -= rangeReadBytes(*i);
 			}
 
 			if (limit <= 0 || *pLimitBytes <= 0) {
 				break;
+			}
+			if constexpr (std::is_same_v<Item, RangeKeyRef>) {
+				if ((atStorageVersion.more || remainingScanBytes <= 0) && result.data.size() > prevSize) {
+					stoppedAtStorageLimit = true;
+					break;
+				}
 			}
 
 			// Setup for the next iteration
@@ -3334,8 +3394,8 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 				while (vCurrent && vCurrent.key() >= range.begin && !vCurrent->isClearTo() && vCount < -limit &&
 				       vSize < *pLimitBytes) {
 					// Store the versionedData results in resultCache
-					resultCache.emplace_back(result.arena, vCurrent.key(), vCurrent->getValue());
-					vSize += sizeof(KeyValueRef) + resultCache.cback().expectedSize();
+					cacheCurrent();
+					vSize += rangeReadBytes(resultCache.cback());
 					++vCount;
 					--vCurrent;
 				}
@@ -3343,11 +3403,10 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			readBegin = vCurrent ? std::max(vCurrent->isClearTo() ? vCurrent->getEndKey() : vCurrent.key(), range.begin)
 			                     : range.begin;
-			RangeResult atStorageVersion =
-			    co_await data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, options);
-			logicalSize = atStorageVersion.logicalSize();
-			data->counters.kvScanBytes += logicalSize;
-			resultLogicalSize += logicalSize;
+			auto storageRead = co_await readStorageRange<DiskResult>(
+			    data, KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, remainingScanBytes, options);
+			DiskResult atStorageVersion = recordRangeScan(data, std::move(storageRead), &remainingScanBytes);
+			resultLogicalSize += atStorageVersion.logicalSize();
 			data->readRangeBytesLimitHistogram->sample(*pLimitBytes);
 
 			ASSERT(atStorageVersion.size() <= -limit);
@@ -3373,11 +3432,17 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 			limit += result.data.size() - prevSize;
 
 			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++) {
-				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
+				*pLimitBytes -= rangeReadBytes(*i);
 			}
 
 			if (limit >= 0 || *pLimitBytes <= 0) {
 				break;
+			}
+			if constexpr (std::is_same_v<Item, RangeKeyRef>) {
+				if ((atStorageVersion.more || remainingScanBytes <= 0) && result.data.size() > prevSize) {
+					stoppedAtStorageLimit = true;
+					break;
+				}
 			}
 
 			if (atStorageVersion.more) {
@@ -3399,19 +3464,31 @@ Future<GetKeyValuesReply> readRange(StorageServer* data,
 	data->readRangeKVPairsReturnedHistogram->sample(result.data.size());
 
 	// all but the last item are less than *pLimitBytes
-	ASSERT(result.data.empty() || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
-	result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
+	ASSERT(result.data.empty() || *pLimitBytes + rangeReadBytes(result.data.end()[-1]) > 0);
+	CODE_PROBE(remainingScanBytes <= 0, "Keys-only range scan budget exhausted");
+	result.more = limit == 0 || *pLimitBytes <= 0 || stoppedAtStorageLimit; // FIXME: Does this have to be exact?
 	result.version = version;
 	co_return result;
 }
 
-Future<Key> findKey(StorageServer* data,
-                    KeySelectorRef sel,
-                    Version version,
-                    KeyRange range,
-                    int* pOffset,
-                    SpanContext parentSpan,
-                    Optional<ReadOptions> options)
+Future<GetKeyValuesReply> readRange(StorageServer* data,
+                                    Version version,
+                                    KeyRange range,
+                                    int limit,
+                                    int* pLimitBytes,
+                                    SpanContext parentSpan,
+                                    Optional<ReadOptions> options) {
+	return readRangeImpl<GetKeyValuesReply>(data, version, range, limit, pLimitBytes, parentSpan, options);
+}
+
+template <class Reply>
+Future<Key> findKeyImpl(StorageServer* data,
+                        KeySelectorRef sel,
+                        Version version,
+                        KeyRange range,
+                        int* pOffset,
+                        SpanContext parentSpan,
+                        Optional<ReadOptions> options)
 // Attempts to find the key indicated by sel in the data at version, within range.
 // Precondition: selectorInRange(sel, range)
 // If it is found, offset is set to 0 and a key is returned which falls inside range.
@@ -3445,14 +3522,14 @@ Future<Key> findKey(StorageServer* data,
 		               : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 	}
 
-	GetKeyValuesReply rep = co_await readRange(data,
-	                                           version,
-	                                           forward ? KeyRangeRef(sel.getKey(), range.end)
-	                                                   : KeyRangeRef(range.begin, keyAfter(sel.getKey())),
-	                                           (distance + skipEqualKey) * sign,
-	                                           &maxBytes,
-	                                           span.context,
-	                                           options);
+	Reply rep = co_await readRangeImpl<Reply>(data,
+	                                          version,
+	                                          forward ? KeyRangeRef(sel.getKey(), range.end)
+	                                                  : KeyRangeRef(range.begin, keyAfter(sel.getKey())),
+	                                          (distance + skipEqualKey) * sign,
+	                                          &maxBytes,
+	                                          span.context,
+	                                          options);
 	bool more = rep.more && rep.data.size() != distance + skipEqualKey;
 
 	// If we get only one result in the reverse direction as a result of the data being too large, we could get stuck in
@@ -3460,7 +3537,7 @@ Future<Key> findKey(StorageServer* data,
 	if (more && !forward && rep.data.size() == 1) {
 		CODE_PROBE(true, "Reverse key selector returned only one result in range read");
 		maxBytes = std::numeric_limits<int>::max();
-		GetKeyValuesReply rep2 = co_await readRange(
+		Reply rep2 = co_await readRangeImpl<Reply>(
 		    data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span.context, options);
 		rep = rep2;
 		more = rep.more && rep.data.size() != distance + skipEqualKey;
@@ -3506,6 +3583,16 @@ Future<Key> findKey(StorageServer* data,
 			co_return forward ? range.end : range.begin;
 		}
 	}
+}
+
+Future<Key> findKey(StorageServer* data,
+                    KeySelectorRef sel,
+                    Version version,
+                    KeyRange range,
+                    int* pOffset,
+                    SpanContext parentSpan,
+                    Optional<ReadOptions> options) {
+	return findKeyImpl<GetKeyValuesReply>(data, sel, version, range, pOffset, parentSpan, options);
 }
 
 KeyRange getShardKeyRange(StorageServer* data, const KeySelectorRef& sel)
@@ -3611,10 +3698,13 @@ void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest 
 	    .detail("Count", reply.data.size());
 }
 
-Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
+template <class Request>
+Future<Void> getRangeQ(StorageServer* data, Request req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
 {
+	using Reply =
+	    std::conditional_t<std::is_same_v<Request, GetRangeKeysRequest>, GetRangeKeysReply, GetKeyValuesReply>;
 	Span span("SS:getKeyValues"_loc, req.spanContext);
 	int64_t resultSize = 0;
 
@@ -3690,12 +3780,19 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 		int offset1 = 0;
 		int offset2{ 0 };
-		Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
-		                         ? Future<Key>(req.begin.getKey())
-		                         : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
-		Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
-		                       ? Future<Key>(req.end.getKey())
-		                       : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
+		auto resolveSelector = [&](KeySelectorRef selector, int* offset) -> Future<Key> {
+			if (selector.isFirstGreaterOrEqual()) {
+				return Future<Key>(selector.getKey());
+			}
+			if constexpr (std::is_same_v<Request, GetRangeKeysRequest>) {
+				if (req.deterministicLimits) {
+					return findKey(data, selector, version, shard, offset, span.context, req.options);
+				}
+			}
+			return findKeyImpl<Reply>(data, selector, version, shard, offset, span.context, req.options);
+		};
+		Future<Key> fBegin = resolveSelector(req.begin, &offset1);
+		Future<Key> fEnd = resolveSelector(req.end, &offset2);
 		Key begin = co_await fBegin;
 		Key end = co_await fEnd;
 
@@ -3742,7 +3839,7 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			}
 			//.detail("Begin",begin).detail("End",end);
 
-			GetKeyValuesReply none;
+			Reply none;
 			none.version = version;
 			none.more = false;
 			none.penalty = data->getPenalty();
@@ -3751,19 +3848,49 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
 			                                     std::max<KeyRef>(req.begin.getKey(), req.end.getKey())));
 
-			if (g_network->isSimulated()) {
-				maybeInjectConsistencyScanCorruption(data->thisServerID, req, none);
+			if constexpr (std::is_same_v<Request, GetKeyValuesRequest>) {
+				if (g_network->isSimulated()) {
+					maybeInjectConsistencyScanCorruption(data->thisServerID, req, none);
+				}
 			}
 			req.reply.send(none);
 		} else {
 			int remainingLimitBytes = req.limitBytes;
 
 			double kvReadRange = g_network->timer();
-			GetKeyValuesReply _r = co_await readRange(
-			    data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context, req.options);
+			Reply _r;
+			if constexpr (std::is_same_v<Request, GetRangeKeysRequest>) {
+				if (req.deterministicLimits) {
+					GetKeyValuesReply values = co_await readRange(data,
+					                                              version,
+					                                              KeyRangeRef(begin, end),
+					                                              req.limit,
+					                                              &remainingLimitBytes,
+					                                              span.context,
+					                                              req.options);
+					_r.version = values.version;
+					_r.more = values.more;
+					_r.cached = values.cached;
+					_r.data.reserve(_r.arena, values.data.size());
+					for (const auto& value : values.data) {
+						_r.data.push_back_deep(_r.arena, RangeKeyRef{ value.key });
+					}
+				} else {
+					_r = co_await readRangeImpl<Reply>(data,
+					                                   version,
+					                                   KeyRangeRef(begin, end),
+					                                   req.limit,
+					                                   &remainingLimitBytes,
+					                                   span.context,
+					                                   req.options);
+				}
+			} else {
+				_r = co_await readRange(
+				    data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context, req.options);
+			}
 			const double duration = g_network->timer() - kvReadRange;
 			data->counters.readLatencySamples.sample(duration, ReadLatencySamples::KV_READ_RANGE, trackedReadType(req));
-			GetKeyValuesReply r = _r;
+			Reply r = _r;
 
 			if (req.options.present() && req.options.get().debugID.present()) {
 				g_traceBatch.addEvent("TransactionDebug",
@@ -3792,8 +3919,12 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 			if (req.taskID.present() && req.taskID.get() == TaskPriority::FetchKeys) {
 				data->counters.kvFetchServed += r.data.size();
-				data->counters.kvFetchBytesServed +=
-				    totalByteSize + (8LL - static_cast<int64_t>(sizeof(KeyValueRef))) * r.data.size();
+				if constexpr (std::is_same_v<Request, GetRangeKeysRequest>) {
+					data->counters.kvFetchBytesServed += totalByteSize + 4LL * r.data.size();
+				} else {
+					data->counters.kvFetchBytesServed +=
+					    totalByteSize + (8LL - static_cast<int64_t>(sizeof(KeyValueRef))) * r.data.size();
+				}
 			}
 
 			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
@@ -3803,12 +3934,18 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			}
 
 			r.penalty = data->getPenalty();
-			if (g_network->isSimulated()) {
-				maybeInjectConsistencyScanCorruption(data->thisServerID, req, r);
+			if constexpr (std::is_same_v<Request, GetKeyValuesRequest>) {
+				if (g_network->isSimulated()) {
+					maybeInjectConsistencyScanCorruption(data->thisServerID, req, r);
+				}
 			}
 			req.reply.send(r);
 
-			resultSize = req.limitBytes - remainingLimitBytes;
+			if constexpr (std::is_same_v<Request, GetRangeKeysRequest>) {
+				resultSize = totalByteSize + sizeof(uint32_t) * r.data.size();
+			} else {
+				resultSize = req.limitBytes - remainingLimitBytes;
+			}
 			data->counters.bytesQueried += resultSize;
 			data->counters.rowsQueried += r.data.size();
 			if (r.data.empty()) {
@@ -3837,6 +3974,14 @@ Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		                                                        abs(req.begin.offset) > maxSelectorOffset ||
 		                                                        abs(req.end.offset) > maxSelectorOffset));
 	}
+}
+
+Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req) {
+	return getRangeQ(data, std::move(req));
+}
+
+Future<Void> getRangeKeysQ(StorageServer* data, GetRangeKeysRequest req) {
+	return getRangeQ(data, std::move(req));
 }
 
 Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
@@ -12399,6 +12544,11 @@ Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<GetKeyV
 	    self, std::move(getKeyValues), TransactionLineage::Operation::GetKeyValues, getKeyValuesQ);
 }
 
+Future<Void> serveGetRangeKeysRequests(StorageServer* self, FutureStream<GetRangeKeysRequest> getRangeKeys) {
+	return serveGuardedReadRequests(
+	    self, std::move(getRangeKeys), TransactionLineage::Operation::GetKeyValues, getRangeKeysQ);
+}
+
 Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
                                              FutureStream<GetMappedKeyValuesRequest> getMappedKeyValues) {
 	// TODO: Is it fine to keep TransactionLineage::Operation::GetKeyValues here?
@@ -12891,6 +13041,7 @@ Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) 
 	self->actors.add(checkBehind(self));
 	self->actors.add(serveGetValueRequests(self, ssi.getValue.getFuture()));
 	self->actors.add(serveGetKeyValuesRequests(self, ssi.getKeyValues.getFuture()));
+	self->actors.add(serveGetRangeKeysRequests(self, ssi.getRangeKeys.getFuture()));
 	self->actors.add(serveGetMappedKeyValuesRequests(self, ssi.getMappedKeyValues.getFuture()));
 	self->actors.add(serveGetKeyValuesStreamRequests(self, ssi.getKeyValuesStream.getFuture()));
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
