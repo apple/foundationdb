@@ -52,7 +52,9 @@ void clearMockS3ChaosRegistry() {
 
 // Helper function to classify S3 operations
 S3Operation classifyS3Operation(const std::string& method, const std::string& resource) {
-	if (method == "PUT" || method == "POST") {
+	if (method == "GET" || method == "HEAD") {
+		return S3Operation::READ;
+	} else if (method == "PUT" || method == "POST") {
 		if (resource.find("uploads") != std::string::npos) {
 			return S3Operation::MULTIPART;
 		}

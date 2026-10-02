@@ -1053,10 +1053,11 @@ static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			auto& req = transactionQueue->front();
 			int tc = req.transactionCount;
 
-			if ((req.priority < TransactionPriority::DEFAULT &&
-			     !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) ||
-			    (req.priority < TransactionPriority::IMMEDIATE &&
-			     !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc))) {
+			if (req.priority < TransactionPriority::DEFAULT &&
+			    !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
+				break;
+			} else if (req.priority < TransactionPriority::IMMEDIATE &&
+			           !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
 				break;
 			}
 

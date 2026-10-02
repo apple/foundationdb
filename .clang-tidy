@@ -3,7 +3,6 @@ Checks: >
   -*,
   bugprone-argument-comment,
   bugprone-assignment-in-if-condition,
-  bugprone-branch-clone,
   bugprone-chained-comparison,
   bugprone-copy-constructor-init,
   bugprone-dangling-handle,

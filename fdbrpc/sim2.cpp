@@ -2206,9 +2206,10 @@ public:
 			std::vector<ProcessInfo*> processesLeft, processesDead;
 			for (auto processInfo : getAllProcesses()) {
 				if (!getSimulationPolicy() || getSimulationPolicy()->shouldIncludeInAvailabilityCheck(*processInfo)) {
-					if (!processInfo->isExcluded() && !processInfo->isCleared() && processInfo->isAvailable() &&
-					    (isProtectedAddress(processInfo->address) ||
-					     !datacenterMachines.contains(processInfo->locality.machineId()))) {
+					if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
+						processesDead.push_back(processInfo);
+					} else if (isProtectedAddress(processInfo->address) ||
+					           !datacenterMachines.contains(processInfo->locality.machineId())) {
 						processesLeft.push_back(processInfo);
 					} else {
 						processesDead.push_back(processInfo);

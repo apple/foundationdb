@@ -138,8 +138,9 @@ Future<Void> checkVersionInternal(const DirectoryLayer* dirLayer, Reference<Tran
 		if (versionBytes.get().size() != 12) {
 			throw invalid_directory_layer_metadata();
 		}
-		if (((uint32_t*)versionBytes.get().begin())[0] > DirectoryLayer::VERSION[0] ||
-		    (((uint32_t*)versionBytes.get().begin())[1] > DirectoryLayer::VERSION[1] && writeAccess)) {
+		if (((uint32_t*)versionBytes.get().begin())[0] > DirectoryLayer::VERSION[0]) {
+			throw incompatible_directory_version();
+		} else if (((uint32_t*)versionBytes.get().begin())[1] > DirectoryLayer::VERSION[1] && writeAccess) {
 			throw incompatible_directory_version();
 		}
 	}

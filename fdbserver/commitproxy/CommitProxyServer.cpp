@@ -1360,7 +1360,9 @@ void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
 	++pProxyCommitData->stats.rangeLockSlowPath;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	for (int i = self->transactionNum; i < trs.size(); i++) {
-		if (self->committed[i] != ConflictBatchStatus::TransactionCommitted || trs[i].isLockAware()) {
+		if (self->committed[i] != ConflictBatchStatus::TransactionCommitted) {
+			continue;
+		} else if (trs[i].isLockAware()) {
 			continue; // rangeLock is transparent to lock-aware transactions
 		}
 		VectorRef<MutationRef>* pMutations = &trs[i].transaction.mutations;

@@ -339,7 +339,9 @@ static std::string formatStringRef(StringRef item, bool fullEscaping = false) {
 			ret += "\\\\";
 		else if (fullEscaping && item[i] == '"')
 			ret += "\\\"";
-		else if (item[i] >= 32 && item[i] < 127 && (!fullEscaping || item[i] != ' '))
+		else if (fullEscaping && item[i] == ' ')
+			ret += format("\\x%02x", item[i]);
+		else if (item[i] >= 32 && item[i] < 127)
 			ret += item[i];
 		else
 			ret += format("\\x%02x", item[i]);

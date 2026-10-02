@@ -130,7 +130,9 @@ struct GetReadVersionRequest : TimedRequest {
 		if (ar.isDeserializing) {
 			if ((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {
 				priority = TransactionPriority::IMMEDIATE;
-			} else if ((flags & PRIORITY_DEFAULT) != PRIORITY_DEFAULT && (flags & PRIORITY_BATCH) == PRIORITY_BATCH) {
+			} else if ((flags & PRIORITY_DEFAULT) == PRIORITY_DEFAULT) {
+				priority = TransactionPriority::DEFAULT;
+			} else if ((flags & PRIORITY_BATCH) == PRIORITY_BATCH) {
 				priority = TransactionPriority::BATCH;
 			} else {
 				priority = TransactionPriority::DEFAULT;

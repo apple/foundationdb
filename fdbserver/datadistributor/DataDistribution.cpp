@@ -4110,8 +4110,12 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 	    .detail("RetryCount", audit->retryCount)
 	    .detail("AuditType", auditType)
 	    .detail("Range", audit->coreState.range);
-	if (err.code() == error_code_movekeys_conflict || err.code() == error_code_audit_storage_task_outdated) {
-		// A superseded DD or audit generation must be resumed through a fresh map entry.
+	if (err.code() == error_code_movekeys_conflict) {
+		removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id); // remove audit
+		// Silently exit
+	} else if (err.code() == error_code_audit_storage_task_outdated) {
+		// DD failover occurred - storage server completed audit with old DD ID
+		// Remove from map so it can be properly resumed/retried
 		removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id);
 		// Silently exit
 	} else if (err.code() == error_code_audit_storage_cancelled) {
@@ -4493,8 +4497,9 @@ Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest r
 			throw audit_storage_failed(); // to trigger dd restart
 		} else if (err.code() == error_code_audit_storage_exceeded_request_limit) {
 			req.reply.sendError(audit_storage_exceeded_request_limit());
-		} else if (err.code() != error_code_persist_new_audit_metadata_error &&
-		           retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+		} else if (err.code() == error_code_persist_new_audit_metadata_error) {
+			req.reply.sendError(audit_storage_failed());
+		} else if (retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			retryCount++;
 			co_await delay(0.1);
 			continue;
@@ -5429,12 +5434,14 @@ Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 			throw e; // handled by scheduleAuditStorageShardOnServer
 		}
 		if (e.code() == error_code_not_implemented || e.code() == error_code_audit_storage_exceeded_request_limit ||
-		    e.code() == error_code_audit_storage_cancelled || e.code() == error_code_audit_storage_task_outdated ||
-		    e.code() == error_code_wrong_shard_server) {
-			// wrong_shard_server is stale location data; the higher-level retry logic handles it.
+		    e.code() == error_code_audit_storage_cancelled || e.code() == error_code_audit_storage_task_outdated) {
 			throw e;
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
+		} else if (e.code() == error_code_wrong_shard_server) {
+			// wrong_shard_server means stale shard location data - treat as transient error
+			// Let the higher-level retry logic handle it
+			throw e;
 		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			throw audit_storage_failed();
 		} else {
