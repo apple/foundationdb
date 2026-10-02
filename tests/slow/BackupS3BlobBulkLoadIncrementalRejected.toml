@@ -18,6 +18,9 @@
 testClass = "Backup"
 
 [configuration]
+# Both guards under test write their user-facing message to stderr, and the harness scores stderr at
+# severity 40 by default -- which fails the run for the very output this test exists to provoke.
+StderrSeverity = 30
 storageEngineExcludeTypes = ["ssd-sharded-rocksdb"] # TODO(BulkLoad): remove after allowing bulkloading with fetchKey and shardedrocksdb
 disableTss = true # TODO(BulkLoad): support TSS
 

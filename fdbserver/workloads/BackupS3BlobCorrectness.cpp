@@ -888,7 +888,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 							                             InconsistentSnapshotOnly::False,
 							                             ::invalidVersion,
 							                             lastBackupContainer->getEncryptionKeyFileName(),
-							                             deterministicRandom()->randomUniqueID(),
+							                             lockUID,
 							                             /*useRangeFileRestore=*/false);
 						} catch (Error& e) {
 							if (e.code() == error_code_actor_cancelled) {
