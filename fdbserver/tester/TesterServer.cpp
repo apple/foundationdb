@@ -141,8 +141,6 @@ void printSimulatedTopology() {
 		return;
 	}
 	auto processes = g_simulator->getAllProcesses();
-	// Locality fields and network addresses determine order, never ProcessInfo pointer values.
-	// NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
 	std::sort(processes.begin(), processes.end(), [](ISimulator::ProcessInfo* lhs, ISimulator::ProcessInfo* rhs) {
 		auto l = lhs->locality;
 		auto r = rhs->locality;

@@ -10,21 +10,18 @@ This guide explains how to run ``clang-tidy`` locally so you can fix issues befo
 What clang-tidy checks
 ======================
 
-FoundationDB configures 59 named checks in the ``.clang-tidy`` file at the repository root.
-Use clang-tidy 22 or later for the complete check set; CI pins a checksum-verified
-clang-tidy 22.1.8 package. Inspect enabled checks with ``clang-tidy --list-checks``.
+FoundationDB configures 57 named checks in the ``.clang-tidy`` file at the repository root.
+Use clang-tidy 19 to match the Clang 19 build toolchain. CI uses the clang-tidy
+provided by the build image and verifies that both tools are version 19.
+Inspect enabled checks with ``clang-tidy --list-checks``.
 The intent is to enable more as we go forward. Here are some example rules:
 
-* **39 Bugprone rules** -- catch potential runtime errors, including unsafe self-assignment, forwarding constructors that hide copy or move constructors, narrow accumulation initializers, mismatched argument comments, obvious infinite loops, chained comparisons, swapped arguments, integer division in floating-point calculations, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, incorrect erase/remove calls, incorrect POSIX error checks, discarded return values, duplicate branches, and address-dependent pointer iteration
+* **38 Bugprone rules** -- catch potential runtime errors, including unsafe self-assignment, forwarding constructors that hide copy or move constructors, narrow accumulation initializers, mismatched argument comments, obvious infinite loops, chained comparisons, swapped arguments, integer division in floating-point calculations, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, incorrect erase/remove calls, incorrect POSIX error checks, discarded return values, and duplicate branches
 * **1 C++ Core Guidelines rule** -- catch unsafe captures in coroutine lambdas (``cppcoreguidelines-avoid-capturing-lambda-coroutines``)
 * **2 Misc rules** -- catch redundant expressions and RAII objects held across coroutine suspension points
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
 * **6 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, repeated vector growth in simple loops, inefficient generic algorithms over associative containers, pointless moves, and move constructors that copy movable members (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-inefficient-vector-operation``, ``performance-inefficient-algorithm``, ``performance-move-const-arg``, ``performance-move-constructor-init``)
-* **7 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
-
-``HeaderFilterRegex: ''`` preserves the scope used before clang-tidy 22:
-included-header diagnostics remain filtered out, while a header checked directly
-is analyzed as the main file. This keeps CI focused on eligible touched files.
+* **6 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
 
 ``misc-coroutine-hostile-raii`` checks Flow's blocking ``MutexHolder`` and
 ``ThreadSpinLockHolder`` guards as well as ``std::lock_guard`` and
@@ -116,19 +113,22 @@ On macOS (with Homebrew LLVM):
 
 .. code-block:: shell
 
-   export TIDY_DIFF=$(find $(brew --prefix llvm)/share/clang -name "clang-tidy-diff.py")
+   export PATH="$(brew --prefix llvm@19)/bin:$PATH"
+   export TIDY_DIFF=$(find $(brew --prefix llvm@19)/share/clang -name "clang-tidy-diff.py")
 
 On Linux:
 
 .. code-block:: shell
 
-   export TIDY_DIFF=$(find /usr/lib/llvm-*/share/clang -name "clang-tidy-diff.py" | head -n 1)
+   export PATH="/usr/lib/llvm-19/bin:$PATH"
+   export TIDY_DIFF=$(find /usr/lib/llvm-19/share/clang -name "clang-tidy-diff.py")
 
-To make this permanent, add to your ``~/.bashrc`` or ``~/.zshrc``:
+To make this permanent, add the corresponding ``PATH`` and ``TIDY_DIFF`` exports
+above to your ``~/.bashrc`` or ``~/.zshrc``, followed by:
 
 .. code-block:: shell
 
-   alias fdb-tidy='python3 $(find $(brew --prefix llvm 2>/dev/null || echo "/usr/lib/llvm-*") -name "clang-tidy-diff.py" | head -n 1) -p 1 -path .'
+   alias fdb-tidy='python3 "$TIDY_DIFF" -p 1 -path .'
 
 Step 3: Run against your changes
 ---------------------------------

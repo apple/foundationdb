@@ -284,7 +284,6 @@ std::vector<UnitTest*> collectTests(const UnitTestRunnerOptions& options, const 
 		}
 	}
 
-	// NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order): The comparator orders names, not addresses.
 	std::sort(tests.begin(), tests.end(), [](auto lhs, auto rhs) {
 		return std::string_view(lhs->name) < std::string_view(rhs->name);
 	});

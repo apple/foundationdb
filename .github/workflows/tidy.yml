@@ -29,17 +29,12 @@ jobs:
           # get history of all branches so we can find merge-base
           fetch-depth: 0
 
-      - name: Install clang-tidy
-        run: |
-          python3 -m venv "$RUNNER_TEMP/clang-tidy"
-          "$RUNNER_TEMP/clang-tidy/bin/python" -m pip install --disable-pip-version-check --only-binary=:all: --no-deps --require-hashes -r /dev/stdin <<'EOF'
-          clang-tidy==22.1.8 --hash=sha256:1a3de07ba82d4403d8b692ae63a5520d4db5c606014c92c24bbcef9259057bf1
-          EOF
-          echo "$RUNNER_TEMP/clang-tidy/bin" >> "$GITHUB_PATH"
-
       - name: Validate clang-tidy configuration
         run: |
+          clang --version
           clang-tidy --version
+          clang --version | grep -q '^clang version 19\.'
+          clang-tidy --version | grep -q 'LLVM version 19\.'
           clang-tidy --verify-config --config-file=.clang-tidy
 
       - name: Configure build

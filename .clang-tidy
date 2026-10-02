@@ -16,7 +16,6 @@ Checks: >
   bugprone-macro-repeated-side-effects,
   bugprone-misplaced-widening-cast,
   bugprone-move-forwarding-reference,
-  bugprone-nondeterministic-pointer-iteration-order,
   bugprone-posix-return,
   bugprone-redundant-branch-condition,
   bugprone-return-const-ref-from-parameter,
@@ -58,9 +57,7 @@ Checks: >
   readability-const-return-type,
   readability-container-size-empty,
   readability-delete-null-pointer,
-  readability-duplicate-include,
-  readability-inconsistent-ifelse-braces
-HeaderFilterRegex: ''
+  readability-duplicate-include
 CheckOptions:
   - key: bugprone-dangling-handle.HandleClasses
     value: 'std::basic_string_view;std::experimental::basic_string_view;std::span;StringRef'
