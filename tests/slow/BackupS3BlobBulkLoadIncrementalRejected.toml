@@ -116,3 +116,6 @@ timeout = 7200
     useRangeFileRestore = false # false = use BulkLoad for restore
     # Probe both guards: submitBackup and submitRestore must refuse --incremental with a bulk mode.
     expectBulkIncrementalRejection = true
+    # And that submitBackup refuses --encryption-key-file with a bulk mode. Backup side only; the
+    # workload comment records why the restore side cannot be probed from here.
+    expectBulkEncryptionRejection = true
