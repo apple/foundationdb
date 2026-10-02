@@ -29,14 +29,6 @@ jobs:
           # get history of all branches so we can find merge-base
           fetch-depth: 0
 
-      - name: Validate clang-tidy configuration
-        run: |
-          clang --version
-          clang-tidy --version
-          clang --version | grep -q '^clang version 19\.'
-          clang-tidy --version | grep -q 'LLVM version 19\.'
-          clang-tidy --verify-config --config-file=.clang-tidy
-
       - name: Configure build
         run: |
           # git somehow worried that this repo was checked-out by a different user

@@ -3,7 +3,7 @@ Clang-Tidy
 ##########
 
 ``clang-tidy`` is a static analysis tool that detects common programming errors, enforces coding standards, and suggests modern C++ improvements.
-It runs as part of CI on pull requests targeting ``main`` and ``release-*``. CI checks entire eligible changed C/C++ files with ``--warnings-as-errors='*'``, so findings fail the clang-tidy job even outside changed lines. It also runs ``clang-tidy --verify-config --config-file=.clang-tidy`` to reject unsupported checks or options, including on configuration-only changes. The workflow currently describes this job as non-required.
+It runs as part of CI on pull requests targeting ``main`` and ``release-*``. CI checks entire eligible changed C/C++ files with ``--warnings-as-errors='*'``, so findings fail the clang-tidy job even outside changed lines. The workflow currently describes this job as non-required.
 
 This guide explains how to run ``clang-tidy`` locally so you can fix issues before pushing.
 
@@ -12,7 +12,7 @@ What clang-tidy checks
 
 FoundationDB configures 57 named checks in the ``.clang-tidy`` file at the repository root.
 Use clang-tidy 19 to match the Clang 19 build toolchain. CI uses the clang-tidy
-provided by the build image and verifies that both tools are version 19.
+provided by the build image.
 Inspect enabled checks with ``clang-tidy --list-checks``.
 The intent is to enable more as we go forward. Here are some example rules:
 
