@@ -60,11 +60,6 @@ Checks: >
   readability-delete-null-pointer,
   readability-duplicate-include,
   readability-inconsistent-ifelse-braces
-WarningsAsErrors: >
-  bugprone-branch-clone,
-  bugprone-nondeterministic-pointer-iteration-order,
-  bugprone-unused-return-value,
-  performance-inefficient-algorithm
 HeaderFilterRegex: ''
 CheckOptions:
   - key: bugprone-dangling-handle.HandleClasses

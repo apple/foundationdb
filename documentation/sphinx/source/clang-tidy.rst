@@ -22,20 +22,6 @@ The intent is to enable more as we go forward. Here are some example rules:
 * **6 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, repeated vector growth in simple loops, inefficient generic algorithms over associative containers, pointless moves, and move constructors that copy movable members (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-inefficient-vector-operation``, ``performance-inefficient-algorithm``, ``performance-move-const-arg``, ``performance-move-constructor-init``)
 * **7 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
 
-The configuration's ``WarningsAsErrors`` policy makes these four checks fatal
-for ordinary and CMake-integrated clang-tidy runs as well as CI:
-
-* ``bugprone-unused-return-value`` checks ignored results of selected standard-library functions, using its default function and return-type lists.
-* ``bugprone-branch-clone`` detects identical conditional branches.
-* ``bugprone-nondeterministic-pointer-iteration-order`` detects pointer iteration whose order depends on addresses.
-* ``performance-inefficient-algorithm`` recommends associative-container member operations in place of slower generic algorithms.
-
-Review any intentional exception and use a check-specific ``NOLINT`` or
-``NOLINTNEXTLINE`` with its safety rationale. For pointer iteration, establish
-that changing the traversal order cannot affect observable behavior or
-simulation determinism. Do not suppress a check across whole files to
-accommodate individual safe cases.
-
 ``HeaderFilterRegex: ''`` preserves the scope used before clang-tidy 22:
 included-header diagnostics remain filtered out, while a header checked directly
 is analyzed as the main file. This keeps CI focused on eligible touched files.
