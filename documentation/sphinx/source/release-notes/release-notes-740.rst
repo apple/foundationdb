@@ -1,8 +1,6 @@
-.. _release-notes:
-
-#############
-Release Notes
-#############
+###################
+Release Notes - 7.4
+###################
 
 7.4.8
 =====
@@ -180,20 +178,4 @@ Earlier release notes
 * :doc:`7.2 (API Version 720) </release-notes/release-notes-720>`
 * :doc:`7.1 (API Version 710) </release-notes/release-notes-710>`
 * :doc:`7.0 (API Version 700) </release-notes/release-notes-700>`
-* :doc:`6.3 (API Version 630) </release-notes/release-notes-630>`
-* :doc:`6.2 (API Version 620) </release-notes/release-notes-620>`
-* :doc:`6.1 (API Version 610) </release-notes/release-notes-610>`
-* :doc:`6.0 (API Version 600) </release-notes/release-notes-600>`
-* :doc:`5.2 (API Version 520) </release-notes/release-notes-520>`
-* :doc:`5.1 (API Version 510) </release-notes/release-notes-510>`
-* :doc:`5.0 (API Version 500) </release-notes/release-notes-500>`
-* :doc:`4.6 (API Version 460) </release-notes/release-notes-460>`
-* :doc:`4.5 (API Version 450) </release-notes/release-notes-450>`
-* :doc:`4.4 (API Version 440) </release-notes/release-notes-440>`
-* :doc:`4.3 (API Version 430) </release-notes/release-notes-430>`
-* :doc:`4.2 (API Version 420) </release-notes/release-notes-420>`
-* :doc:`4.1 (API Version 410) </release-notes/release-notes-410>`
-* :doc:`4.0 (API Version 400) </release-notes/release-notes-400>`
-* :doc:`3.0 (API Version 300) </release-notes/release-notes-300>`
-* :doc:`2.0 (API Version 200) </release-notes/release-notes-200>`
-* :doc:`1.0 (API Version 100) </release-notes/release-notes-100>`
+* :doc:`All earlier releases </earlier-release-notes>`
