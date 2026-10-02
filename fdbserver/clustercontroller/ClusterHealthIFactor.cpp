@@ -350,7 +350,7 @@ TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor
 	ASSERT(isProcessErrorExpired(traceEvent, /*currentTime=*/4600.001, /*maxErrorAge=*/3600.0));
 	ASSERT(!isProcessErrorExpired(traceEvent, /*currentTime=*/1000.0, /*maxErrorAge=*/0.0));
 	ASSERT(isProcessErrorExpired(traceEvent, /*currentTime=*/1000.001, /*maxErrorAge=*/0.0));
-	co_return;
+	return Void();
 }
 
 } // namespace cluster_health
