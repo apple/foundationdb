@@ -49,6 +49,58 @@ public:
 		}
 	}
 
+	// Returns the bulkdump job id recorded in a keyspace snapshot, or empty if the snapshot has none or
+	// cannot be read. The job id is only in the snapshot's JSON body -- the filename carries the snapshot
+	// type but not the id -- and it is what locates the SST tree under bulkdump_data/<jobId>/.
+	//
+	// Deliberately tolerant: expire must not be blocked by one unreadable or unexpectedly shaped
+	// snapshot. Returning empty leaves that snapshot's SSTs in place, which only costs space, whereas
+	// throwing would strand every later expire on the container.
+	static Future<std::string> readBulkDumpJobId(Reference<BackupContainerFileSystem> bc,
+	                                             KeyspaceSnapshotFile snapshot) {
+		try {
+			Reference<IAsyncFile> f = co_await bc->readFile(snapshot.fileName);
+			int64_t size = co_await f->size();
+			// A bulkdump manifest has an empty "files" array and so is a few hundred bytes, while a
+			// rangefile manifest lists every range file and can reach hundreds of megabytes. Size is the
+			// only cheap discriminator available: the snapshot filename carries the type suffix solely in
+			// 'both' mode, so a plain bulkdump snapshot is indistinguishable from a rangefile one by name.
+			// Refusing to read anything over a chunk keeps expire from pulling in a huge manifest just to
+			// discover it has no job id.
+			if (size > CLIENT_KNOBS->BACKUP_MANIFEST_CHUNK_SIZE) {
+				co_return std::string();
+			}
+			std::string buf;
+			buf.resize(size);
+			for (int64_t offset = 0; offset < size;) {
+				int toRead = static_cast<int>(size - offset);
+				int r = co_await f->read((uint8_t*)buf.data() + offset, toRead, offset);
+				if (r != toRead) {
+					co_return std::string();
+				}
+				offset += r;
+			}
+			json_spirit::mValue json;
+			if (!json_spirit::read_string(buf, json)) {
+				co_return std::string();
+			}
+			JSONDoc doc(json);
+			std::string jobId;
+			if (doc.tryGet("bulkDumpJobId", jobId)) {
+				co_return jobId;
+			}
+			co_return std::string();
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "BackupContainerExpireReadBulkDumpJobIdFailed")
+			    .error(e)
+			    .detail("Snapshot", snapshot.fileName);
+			co_return std::string();
+		}
+	}
+
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of
 	// megabytes.
 	static AsyncResult<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
@@ -1090,6 +1142,52 @@ public:
 			}
 		}
 		ranges.clear();
+
+		// A bulkdump snapshot's data is an SST tree under bulkdump_data/<jobId>/, which none of the
+		// listings above cover: they enumerate log, partitioned-log and range files only. Expiring such a
+		// snapshot therefore deleted its descriptor and orphaned the data, so repeated backup-and-expire
+		// cycles grew the container without bound and nothing ever reclaimed the bytes.
+		//
+		// A job id can be shared by more than one snapshot: BulkDumpTaskFunc joins an already-submitted
+		// job instead of starting its own, so a snapshot that survives this expire may point at the same
+		// tree as one being removed. Collect the ids on both sides and delete a tree only when no
+		// surviving snapshot still references it.
+		//
+		// Must run before the loop below, which moves fileName out of the snapshot entries.
+		//
+		// Identification is by job id read from the manifest, not by KeyspaceSnapshotFile::isBulkDump():
+		// the snapshot filename only carries a type suffix in 'both' mode, so a plain bulkdump snapshot
+		// reports an empty snapshotType and isBulkDump() is false for it. Any snapshot naming a job id is
+		// a bulkdump one; the rest read back empty and are skipped.
+		std::set<std::string> expiringBulkDumpJobs;
+		std::set<std::string> retainedBulkDumpJobs;
+		for (auto& f : desc.snapshots) {
+			std::string jobId = co_await readBulkDumpJobId(bc, f);
+			if (jobId.empty()) {
+				continue;
+			}
+			if (f.endVersion < expireEndVersion) {
+				expiringBulkDumpJobs.insert(jobId);
+			} else {
+				retainedBulkDumpJobs.insert(jobId);
+			}
+		}
+		for (const auto& jobId : expiringBulkDumpJobs) {
+			if (retainedBulkDumpJobs.count(jobId) > 0) {
+				TraceEvent("BackupContainerExpireBulkDumpJobStillReferenced")
+				    .detail("URL", bc->getURL())
+				    .detail("BulkDumpJobId", jobId);
+				continue;
+			}
+			BackupContainerFileSystem::FilesAndSizesT sstFiles = co_await bc->listFiles("bulkdump_data/" + jobId + "/");
+			TraceEvent("BackupContainerExpireBulkDumpJob")
+			    .detail("URL", bc->getURL())
+			    .detail("BulkDumpJobId", jobId)
+			    .detail("FileCount", sstFiles.size());
+			for (auto& fs : sstFiles) {
+				toDelete.push_back(fs.first);
+			}
+		}
 
 		for (auto& f : desc.snapshots) {
 			if (f.endVersion < expireEndVersion)
@@ -2792,6 +2890,72 @@ Future<Void> testExpireProgressVersions(std::string url, Optional<std::string> p
 TEST_CASE("/backup/containers/localdir/expireProgressVersions") {
 	co_await testExpireProgressVersions(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
 	                                    Optional<std::string>());
+}
+
+// A bulkdump snapshot's data is an SST tree under bulkdump_data/<jobId>/, which expireData's file
+// listings do not cover. Verify expiring such a snapshot reclaims that tree, and -- because
+// BulkDumpTaskFunc joins an already-submitted job rather than starting its own, so two snapshots can
+// name the same job -- that a tree still referenced by a surviving snapshot is left alone.
+Future<Void> testExpireBulkDumpData(std::string url) {
+	Reference<IBackupContainer> c = IBackupContainer::openContainer(url, {}, {}, 0);
+	try {
+		co_await c->deleteContainer();
+	} catch (Error& e) {
+		if (e.code() != error_code_backup_invalid_url && e.code() != error_code_backup_does_not_exist)
+			throw;
+	}
+	co_await c->create();
+	Reference<BackupContainerFileSystem> bc = c.castTo<BackupContainerFileSystem>();
+	ASSERT(bc.isValid());
+
+	std::string expiringJob = deterministicRandom()->randomUniqueID().toString();
+	std::string sharedJob = deterministicRandom()->randomUniqueID().toString();
+
+	auto plantSst = [&](std::string const& jobId, std::string const& leaf) -> std::string {
+		return "bulkdump_data/" + jobId + "/" + leaf;
+	};
+	co_await bc->writeEntireFile(plantSst(expiringJob, "0-data.sst"), "expiring-sst");
+	co_await bc->writeEntireFile(plantSst(expiringJob, "0-sample.sst"), "expiring-sample");
+	co_await bc->writeEntireFile(plantSst(sharedJob, "0-data.sst"), "shared-sst");
+
+	// Three bulkdump snapshots. Two early ones expire; the late one survives and shares sharedJob
+	// with the early one, so only expiringJob's tree may be reclaimed.
+	Version early = 100;
+	Version late = 5000;
+	co_await bc->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(expiringJob, early, 0, 0));
+	co_await bc->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(sharedJob, early + 1, 0, 0));
+	co_await bc->writeKeyspaceSnapshotFile(
+	    {}, {}, 0, IncludeKeyRangeMap::False, SnapshotMetadata::bulkDump(sharedJob, late, 0, 0));
+
+	// A log file ending exactly at the expire point. It must not straddle that point: expireData rolls
+	// the actual expiration back to a straddling log's begin version, which would move it before both
+	// early snapshots and expire nothing. (That rollback is what testExpireProgressVersions covers.)
+	Version expireTo = 1000; // after both early snapshots, before the late one
+	Reference<IBackupFile> log = co_await bc->writeLogFile(1, expireTo, 1024);
+	co_await log->append("x", 1);
+	co_await log->finish();
+
+	co_await c->expireData(expireTo, true);
+
+	BackupContainerFileSystem::FilesAndSizesT expiringLeft =
+	    co_await bc->listFiles("bulkdump_data/" + expiringJob + "/");
+	BackupContainerFileSystem::FilesAndSizesT sharedLeft = co_await bc->listFiles("bulkdump_data/" + sharedJob + "/");
+
+	fmt::print("expiringJob files left={} sharedJob files left={}\n", expiringLeft.size(), sharedLeft.size());
+
+	// The expired job's tree is gone...
+	ASSERT_EQ(expiringLeft.size(), 0);
+	// ...and the tree a surviving snapshot still names is untouched.
+	ASSERT_EQ(sharedLeft.size(), 1);
+
+	co_await c->deleteContainer();
+	co_return;
+}
+
+TEST_CASE("/backup/containers/localdir/expireBulkDumpData") {
+	co_await testExpireBulkDumpData(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()));
 }
 
 // Verify that writeKeyspaceSnapshotFile correctly writes and reads back a snapshot manifest even when the
