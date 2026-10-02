@@ -1058,6 +1058,24 @@ Future<Reference<CommitProxyInfo>> DatabaseContext::getCommitProxiesFuture(
 	return ::getCommitProxiesFuture(this, useProvisionalProxies);
 }
 
+void GetRangeLimits::decrement(VectorRef<RangeKeyRef> const& data) {
+	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED) {
+		ASSERT(data.size() <= rows);
+		rows -= data.size();
+	}
+	minRows = std::max(0, minRows - data.size());
+	if (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
+		bytes = std::max(0, bytes - (int)data.expectedSize() - (4 - (int)sizeof(RangeKeyRef)) * data.size());
+}
+
+void GetRangeLimits::decrement(RangeKeyRef const& data) {
+	minRows = std::max(0, minRows - 1);
+	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED)
+		rows--;
+	if (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
+		bytes = std::max(0, bytes - 4 - data.expectedSize());
+}
+
 void GetRangeLimits::decrement(VectorRef<KeyValueRef> const& data) {
 	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED) {
 		ASSERT(data.size() <= rows);
@@ -1108,6 +1126,12 @@ bool GetRangeLimits::isReached() const {
 }
 
 // True if data would cause the row or byte limit to be reached
+bool GetRangeLimits::reachedBy(VectorRef<RangeKeyRef> const& data) const {
+	return (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED && data.size() >= rows) ||
+	       (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED &&
+	        (int)data.expectedSize() + (4 - (int)sizeof(RangeKeyRef)) * data.size() >= bytes && data.size() >= minRows);
+}
+
 bool GetRangeLimits::reachedBy(VectorRef<KeyValueRef> const& data) const {
 	return (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED && data.size() >= rows) ||
 	       (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED &&
@@ -2360,8 +2384,10 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trStateInput
 			const KeyRangeRef& range = locations[shard].range;
 
 			GetKeyValuesFamilyRequest req;
-			req.mapper = mapper;
-			req.arena.dependsOn(mapper.arena());
+			if constexpr (std::is_same_v<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>) {
+				req.mapper = mapper;
+				req.arena.dependsOn(mapper.arena());
+			}
 
 			req.version = trState->readVersion();
 			req.begin = firstGreaterOrEqual(range.begin);
@@ -2734,8 +2760,10 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trStateInput,
 			shard = beginServer.range;
 			bool modifiedSelectors{ false };
 			req = GetKeyValuesFamilyRequest();
-			req.mapper = mapper;
-			req.arena.dependsOn(mapper.arena());
+			if constexpr (std::is_same_v<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>) {
+				req.mapper = mapper;
+				req.arena.dependsOn(mapper.arena());
+			}
 			req.options = trState->readOptions;
 			req.version = trState->readVersion();
 			req.taskID = trState->taskID;
