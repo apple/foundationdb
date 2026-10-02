@@ -19,11 +19,13 @@
  */
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 
 #include "ClusterHealthIFactor.h"
 #include "ClusterHealthMonitor.h"
@@ -31,6 +33,15 @@
 namespace cluster_health {
 
 namespace {
+
+bool isProcessErrorExpired(TraceEventFields const& traceEvent, double currentTime, double maxErrorAge) {
+	std::string timeField;
+	double eventTime;
+	// Keep errors whose age cannot be established, including missing or malformed timestamps.
+	return maxErrorAge >= 0 && traceEvent.tryGetValue("Time", timeField) &&
+	       traceEvent.tryGetDouble("Time", eventTime) && std::isfinite(eventTime) &&
+	       currentTime - eventTime > maxErrorAge;
+}
 
 WorkerEvents filterEmptyEvents(WorkerEvents const& events) {
 	WorkerEvents filteredEvents;
@@ -249,6 +260,8 @@ Future<Level> CoordinatorReachabilityFactor::fetchLevel(Reference<IWorkerEventPr
 	co_return level;
 }
 
+ProcessErrorsFactor::ProcessErrorsFactor(double maxErrorAge) : maxErrorAge(maxErrorAge) {}
+
 std::string_view ProcessErrorsFactor::getName() const {
 	return "ProcessErrors";
 }
@@ -261,16 +274,22 @@ Future<Level> ProcessErrorsFactor::fetchLevel(Reference<IWorkerEventProvider con
 	}
 
 	auto const& [events, errors] = eventsAndErrors.get();
-	WorkerEvents filteredEvents = filterEmptyEvents(events);
-	if (filteredEvents.empty()) {
-		bool const hadSuccessfulRequest = events.size() > errors.size();
-		CODE_PROBE(trackCodeProbes && hadSuccessfulRequest, "ClusterHealth ProcessErrorsFactor returns HEALTHY");
-		co_return hadSuccessfulRequest ? Level::HEALTHY : Level::METRICS_MISSING;
+	double const currentTime = TraceEvent::getCurrentTime();
+	for (auto const& [address, traceEvent] : events) {
+		if (traceEvent.size() == 0) {
+			continue;
+		}
+		if (isProcessErrorExpired(traceEvent, currentTime, maxErrorAge)) {
+			continue;
+		}
+		CODE_PROBE(trackCodeProbes,
+		           "ClusterHealth ProcessErrorsFactor returns CRITICAL_INTERVENTION_REQUIRED",
+		           probe::decoration::rare);
+		co_return Level::CRITICAL_INTERVENTION_REQUIRED;
 	}
-	CODE_PROBE(trackCodeProbes,
-	           "ClusterHealth ProcessErrorsFactor returns CRITICAL_INTERVENTION_REQUIRED",
-	           probe::decoration::rare);
-	co_return Level::CRITICAL_INTERVENTION_REQUIRED;
+	bool const hadSuccessfulRequest = events.size() > errors.size();
+	CODE_PROBE(trackCodeProbes && hadSuccessfulRequest, "ClusterHealth ProcessErrorsFactor returns HEALTHY");
+	co_return hadSuccessfulRequest ? Level::HEALTHY : Level::METRICS_MISSING;
 }
 
 RkThrottlingFactor::RkThrottlingFactor(double criticalTpsLimitToReleasedTpsRatioThreshold)
@@ -321,6 +340,17 @@ Future<Level> RkThrottlingFactor::fetchLevel(Reference<IWorkerEventProvider cons
 		TraceEvent(SevWarnAlways, "RkThrottlingFactorFetchFailed").error(e);
 		co_return Level::METRICS_MISSING;
 	}
+}
+
+TEST_CASE("/fdbserver/clustercontroller/ClusterHealthMonitor/ProcessErrorsFactor/AgeBoundary") {
+	TraceEventFields traceEvent;
+	traceEvent.addField("Time", "1000");
+	ASSERT(!isProcessErrorExpired(traceEvent, /*currentTime=*/4599.0, /*maxErrorAge=*/3600.0));
+	ASSERT(!isProcessErrorExpired(traceEvent, /*currentTime=*/4600.0, /*maxErrorAge=*/3600.0));
+	ASSERT(isProcessErrorExpired(traceEvent, /*currentTime=*/4600.001, /*maxErrorAge=*/3600.0));
+	ASSERT(!isProcessErrorExpired(traceEvent, /*currentTime=*/1000.0, /*maxErrorAge=*/0.0));
+	ASSERT(isProcessErrorExpired(traceEvent, /*currentTime=*/1000.001, /*maxErrorAge=*/0.0));
+	co_return;
 }
 
 } // namespace cluster_health
