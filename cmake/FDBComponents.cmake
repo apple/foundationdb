@@ -158,6 +158,26 @@ else()
 endif()
 
 ################################################################################
+# Rust
+################################################################################
+
+# Rust remains opt-in while the imported binding is integrated with the build
+# and binding tester. Other components do not require a Rust toolchain.
+option(BUILD_RUST_BINDING "build rust binding" OFF)
+set(WITH_RUST_BINDING OFF)
+if(BUILD_RUST_BINDING AND NOT OPEN_FOR_IDE)
+  if(NOT WITH_C_BINDING)
+    message(FATAL_ERROR "Rust binding depends on the C binding")
+  endif()
+  if(WIN32 OR CMAKE_CROSSCOMPILING OR USE_SANITIZER)
+    message(FATAL_ERROR "The Rust CMake build currently supports native, non-sanitized Unix builds only")
+  endif()
+  find_program(CARGO_EXECUTABLE cargo REQUIRED)
+  find_program(RUSTC_EXECUTABLE rustc REQUIRED)
+  set(WITH_RUST_BINDING ON)
+endif()
+
+################################################################################
 # Swift
 ################################################################################
 
@@ -372,6 +392,7 @@ function(print_components)
   message(STATUS "Build Python Bindings:                ${WITH_PYTHON_BINDING}")
   message(STATUS "Build Java Bindings:                  ${WITH_JAVA_BINDING}")
   message(STATUS "Build Go bindings:                    ${WITH_GO_BINDING}")
+  message(STATUS "Build Rust bindings:                  ${WITH_RUST_BINDING}")
   message(STATUS "Build Swift bindings:                 ${WITH_SWIFT_BINDING}")
   message(STATUS "Build Ruby bindings:                  ${WITH_RUBY_BINDING}")
   message(STATUS "Build Swift (depends on Swift):       ${WITH_SWIFT}")

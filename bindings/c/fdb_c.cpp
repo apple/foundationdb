@@ -20,7 +20,9 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "flow/ProtocolVersion.h"
+#include <atomic>
 #include <cstdint>
+#include <mutex>
 #define FDB_USE_LATEST_API_VERSION
 #define FDB_INCLUDE_LEGACY_TYPES
 
@@ -32,6 +34,7 @@
 #include "foundationdb/fdb_c_internal.h"
 
 int g_api_version = 0;
+static std::atomic<int> g_header_api_version{ 0 };
 
 /*
  * Our clients might share these ThreadSafe types between threads. It is therefore
@@ -1108,6 +1111,13 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points_with_limi
 		fdb_api_ptr_##func = (void*)&fdb_api_ptr_removed;
 
 extern "C" DLLEXPORT fdb_error_t fdb_select_api_version_impl(int runtime_version, int header_version) {
+	std::unique_lock<std::mutex> selectionLock;
+	RETURN_ON_ERROR(
+	    // Shared by every caller of this C library, including independently loaded language bindings.
+	    // Retain the mutex through process exit so late calls cannot encounter a destroyed lock.
+	    static auto* const selectionMutex = new std::mutex;
+	    selectionLock = std::unique_lock<std::mutex>(*selectionMutex););
+
 	/* Can only call this once */
 	if (g_api_version != 0)
 		return error_code_api_version_already_set;
@@ -1157,7 +1167,15 @@ extern "C" DLLEXPORT fdb_error_t fdb_select_api_version_impl(int runtime_version
 	FDB_API_CHANGED(fdb_transaction_set_option, 14);
 	/* End versioned API changes */
 
+	// Publish only after the runtime version and versioned entry points are final.
+	g_header_api_version.store(header_version, std::memory_order_release);
 	return error_code_success;
+}
+
+extern "C" DLLEXPORT void fdb_get_selected_api_versions(int* runtime_version, int* header_version) {
+	const int headerVersion = g_header_api_version.load(std::memory_order_acquire);
+	*runtime_version = headerVersion == 0 ? 0 : g_api_version;
+	*header_version = headerVersion;
 }
 
 extern "C" DLLEXPORT int fdb_get_max_api_version() {

@@ -437,6 +437,18 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
       COMMENT "Copy generated.go for bindingtester")
   endif()
 
+  if(WITH_RUST_BINDING)
+    add_dependencies(${target_name} fdb_rust_tester)
+    add_custom_command(
+      TARGET ${target_name}
+      POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${build_directory}/tests/rust/bin
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_BINARY_DIR}/bindings/rust/bin/bindingtester
+        ${build_directory}/tests/rust/bin/bindingtester
+      COMMENT "Copy Rust tester for bindingtester")
+  endif()
+
   if(WITH_SWIFT_BINDING)
     add_dependencies(${target_name} stacktester_swift)
     add_custom_command(

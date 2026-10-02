@@ -26,10 +26,10 @@ jobs:
           sudo apt-get install clang-format-19
 
       - name: clang-format
-        # skip contrib dir, find all files named *.c/h/cpp/hpp,
+        # Skip contrib and historical Rust C-header snapshots, find *.c/h/cpp/hpp,
         # run clang-format 19.x on each file, in-place modifications
         run: |
-          find . -name contrib -prune -or -type f \
+          find . '(' -name contrib -or -path ./bindings/rust/foundationdb-sys/include ')' -prune -or -type f \
                  '(' -name \*.c -or -name \*.cpp -or -name \*.h -or -name \*.hpp ')' \
                  -exec clang-format-19 -i '{}' \;
 
