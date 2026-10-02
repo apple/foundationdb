@@ -1298,10 +1298,8 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 				// TODO(psm): The shard id is determined by DD.
 				rrs.dataMove.reset();
 				if (ddEnabledState->shardEncodeLocationMetadata()) {
-					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
-						rrs.dataMoveId = UID();
-					} else if (rrs.bulkLoadTask.present()) {
-						// We have to decide this after prevCleanup completes.
+					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD || rrs.bulkLoadTask.present()) {
+						// For bulk loads, decide this after prevCleanup completes.
 						// For details, see the comment in dataDistributionRelocator.
 						rrs.dataMoveId = UID();
 					} else {

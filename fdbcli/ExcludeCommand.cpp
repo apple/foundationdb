@@ -341,9 +341,7 @@ Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef>
 		std::set<AddressExclusion> absentExclusions;
 		for (const auto& addr : exclusionSet) {
 			auto worker = workerPorts.find(addr.ip);
-			if (worker == workerPorts.end())
-				absentExclusions.insert(addr);
-			else if (addr.port > 0 && !worker->second.contains(addr.port))
+			if (worker == workerPorts.end() || (addr.port > 0 && !worker->second.contains(addr.port)))
 				absentExclusions.insert(addr);
 		}
 

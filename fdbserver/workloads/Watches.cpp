@@ -55,7 +55,9 @@ struct WatchesWorkload : TestWorkload {
 		out.insert("RandomRangeLock");
 	}
 
-	Future<Void> setup(Database const& cx) override {
+	Future<Void> setup(Database const& cx) override { return setupImpl(cx); }
+
+	Future<Void> setupImpl(Database cx) {
 		// return _setup(cx, this);
 		std::vector<Future<Void>> setupActors;
 		for (int i = 0; i < nodes; i++) {

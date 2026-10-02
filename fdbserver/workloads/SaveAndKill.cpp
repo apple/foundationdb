@@ -55,7 +55,9 @@ struct SaveAndKillWorkload : TestWorkload {
 		g_simulator->disableSwapsToAll();
 		return Void();
 	}
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		int i{ 0 };
 		co_await delay(deterministicRandom()->random01() * testDuration);
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);

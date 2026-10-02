@@ -49,7 +49,9 @@ struct MetricLoggingWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> setup(Database const& cx) override {
+	Future<Void> setup(Database const& cx) override { return setupImpl(); }
+
+	Future<Void> setupImpl() {
 		co_await delay(2.0);
 		for (int i = 0; i < metricCount; i++) {
 			if (testBool) {

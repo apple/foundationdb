@@ -499,9 +499,7 @@ public:
 		} else {
 			ASSERT(this->getMoveInShard());
 			const MoveInPhase phase = this->getMoveInShard()->getPhase();
-			if (phase < MoveInPhase::ReadWritePending) {
-				st = StorageServerShard::MovingIn;
-			} else if (phase == MoveInPhase::ReadWritePending) {
+			if (phase == MoveInPhase::ReadWritePending) {
 				st = StorageServerShard::ReadWritePending;
 			} else if (phase == MoveInPhase::Complete) {
 				st = StorageServerShard::ReadWrite;
@@ -8923,10 +8921,7 @@ Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 				co_await fetchShardIngestCheckpoint(data, moveInShard);
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
 				co_await fetchShardApplyUpdates(data, moveInShard, moveInUpdates);
-			} else if (phase == MoveInPhase::Complete) {
-				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
-				break;
-			} else if (phase == MoveInPhase::Error || phase == MoveInPhase::Cancel) {
+			} else if (phase == MoveInPhase::Complete || phase == MoveInPhase::Error || phase == MoveInPhase::Cancel) {
 				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
 			}
@@ -12801,9 +12796,7 @@ Future<Void> serveAuditStorageRequests(StorageServer* self, FutureStream<AuditSt
 			continue;
 		}
 		// Start the new audit task
-		if (req.getType() == AuditType::ValidateHA) {
-			self->actors.add(auditStorageShardReplicaQ(self, req));
-		} else if (req.getType() == AuditType::ValidateReplica) {
+		if (req.getType() == AuditType::ValidateHA || req.getType() == AuditType::ValidateReplica) {
 			self->actors.add(auditStorageShardReplicaQ(self, req));
 		} else if (req.getType() == AuditType::ValidateStorageServerShard) {
 			self->actors.add(auditStorageServerShardQ(self, req));

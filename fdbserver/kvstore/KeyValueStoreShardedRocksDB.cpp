@@ -2948,7 +2948,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				while (i < fetchedRanges.size() && j < intendedRanges.size()) {
 					if (fetchedRanges[i].begin != intendedRanges[j].begin) {
 						break;
-					} else if (fetchedRanges[i] == intendedRanges[j]) {
+					}
+					if (fetchedRanges[i] == intendedRanges[j]) {
 						++i;
 						++j;
 					} else if (fetchedRanges[i].contains(intendedRanges[j])) {

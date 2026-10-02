@@ -91,7 +91,7 @@ public:
 
 // Unit test definition structured as a linked list item
 struct UnitTest {
-	using TestFunction = Future<Void> (*)(const UnitTestParameters&);
+	using TestFunction = Future<Void> (*)(UnitTestParameters);
 
 	const char* name;
 	const char* file;
@@ -120,16 +120,16 @@ extern bool noUnseed;
 
 #ifdef FLOW_DISABLE_UNIT_TESTS
 
-#define TEST_CASE(name) static Future<Void> FILE_UNIQUE_NAME(disabled_testcase_func)(const UnitTestParameters& params)
+#define TEST_CASE(name) static Future<Void> FILE_UNIQUE_NAME(disabled_testcase_func)(const UnitTestParameters params)
 
 #else
 
 #define TEST_CASE(name)                                                                                                \
-	static Future<Void> FILE_UNIQUE_NAME(testcase_func)(const UnitTestParameters& params);                             \
+	static Future<Void> FILE_UNIQUE_NAME(testcase_func)(const UnitTestParameters params);                              \
 	namespace {                                                                                                        \
 	static UnitTest FILE_UNIQUE_NAME(testcase)(name, __FILE__, __LINE__, &FILE_UNIQUE_NAME(testcase_func));            \
 	}                                                                                                                  \
-	static Future<Void> FILE_UNIQUE_NAME(testcase_func)(const UnitTestParameters& params)
+	static Future<Void> FILE_UNIQUE_NAME(testcase_func)(const UnitTestParameters params)
 
 #endif
 

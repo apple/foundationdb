@@ -1087,10 +1087,9 @@ Future<Void> connectionKeeper(Reference<Peer> self,
 			// failure monitoring, wait until connection stays failed for FLOW_KNOBS->FAILURE_DETECTION_DELAY timeout.
 			retryConnect = true;
 			if (e.code() == error_code_connection_failed) {
-				if (!self->destination.isPublic()) {
-					// Can't connect back to non-public addresses.
-					IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
-				} else if (now() - firstConnFailedTime.get() > FLOW_KNOBS->FAILURE_DETECTION_DELAY) {
+				// Can't connect back to non-public addresses.
+				if (!self->destination.isPublic() ||
+				    now() - firstConnFailedTime.get() > FLOW_KNOBS->FAILURE_DETECTION_DELAY) {
 					IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 				}
 			}

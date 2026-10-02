@@ -812,13 +812,8 @@ public:
 			// If we didn't get log versions above then seed them using the first log file
 			if (!desc.contiguousLogEnd.present()) {
 				desc.minLogBegin = logs.begin()->beginVersion;
-				if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
-					// Cannot use the first file's end version, which may not be contiguous
-					// for other partitions. Set to its beginVersion to be safe.
-					desc.contiguousLogEnd = logs.begin()->beginVersion;
-				} else {
-					desc.contiguousLogEnd = logs.begin()->beginVersion;
-				}
+				// The first file's end version may not be contiguous for other partitions.
+				desc.contiguousLogEnd = logs.begin()->beginVersion;
 			}
 
 			if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
@@ -1413,24 +1408,22 @@ public:
 		f.fileName = path;
 		f.fileSize = size;
 		int len;
-		if (sscanf(name.c_str(),
-		           "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u%n",
-		           &f.beginVersion,
-		           &f.endVersion,
-		           &f.blockSize,
-		           &len) == 3 &&
-		    len == name.size()) {
-			out = f;
-			return true;
-		} else if (sscanf(name.c_str(),
-		                  "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%d-of-%d,%u%n",
-		                  &f.beginVersion,
-		                  &f.endVersion,
-		                  &f.tagId,
-		                  &f.totalTags,
-		                  &f.blockSize,
-		                  &len) == 5 &&
-		           len == name.size() && f.tagId >= 0) {
+		if ((sscanf(name.c_str(),
+		            "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u%n",
+		            &f.beginVersion,
+		            &f.endVersion,
+		            &f.blockSize,
+		            &len) == 3 &&
+		     len == name.size()) ||
+		    (sscanf(name.c_str(),
+		            "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%d-of-%d,%u%n",
+		            &f.beginVersion,
+		            &f.endVersion,
+		            &f.tagId,
+		            &f.totalTags,
+		            &f.blockSize,
+		            &len) == 5 &&
+		     len == name.size() && f.tagId >= 0)) {
 			out = f;
 			return true;
 		}

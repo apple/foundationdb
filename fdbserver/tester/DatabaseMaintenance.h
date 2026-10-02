@@ -33,6 +33,6 @@ struct TesterConsistencyScanState {
 };
 
 Future<Void> clearData(Database cx);
-Future<Void> dumpDatabase(Database const& cx, std::string const& outputFilename, KeyRange const& range);
+Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRange range);
 std::vector<PerfMetric> aggregateMetrics(std::vector<std::vector<PerfMetric>> metrics);
 Future<Void> checkConsistencyScanAfterTest(Database cx, TesterConsistencyScanState* csState);

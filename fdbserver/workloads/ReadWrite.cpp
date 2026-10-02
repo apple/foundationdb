@@ -104,6 +104,8 @@ struct ReadWriteCommonImpl {
 		}
 	}
 
+	// The workload outlives setup's future; bulkSetup and these assignments update that original workload.
+	// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	static Future<Void> setup(Database cx, ReadWriteCommon& self) {
 		if (!self.doSetup)
 			co_return;

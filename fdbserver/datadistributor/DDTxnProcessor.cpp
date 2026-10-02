@@ -326,7 +326,10 @@ class DDTxnProcessorImpl {
 	// clear that the top-level function queued on the same tr). Returns
 	// true if any were cleared — caller re-enters until this returns
 	// false.
+	// The directly awaiting owner retains this transaction; committing and resetting it must update that same object.
+	// NOLINTBEGIN(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	static Future<bool> clearShardEncodedDataMoves(Transaction& tr, UID distributorId) {
+		// NOLINTEND(cppcoreguidelines-avoid-reference-coroutine-parameters)
 		RangeResult dmsCheck = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!dmsCheck.more && dmsCheck.size() < CLIENT_KNOBS->TOO_MANY);
 		if (dmsCheck.empty()) {
@@ -346,7 +349,10 @@ class DDTxnProcessorImpl {
 	// entries) of shard-encoded keyServers entries to old format. Caller
 	// owns `beginKey` and re-enters until this returns false, so the
 	// cursor persists across calls to cover the whole prefix.
+	// The directly awaiting owner retains the transaction and output cursor through completion and cancellation.
+	// NOLINTBEGIN(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	static Future<bool> rewriteShardEncodedKeyServers(Transaction& tr, UID distributorId, Key& beginKey) {
+		// NOLINTEND(cppcoreguidelines-avoid-reference-coroutine-parameters)
 		RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -414,12 +420,15 @@ class DDTxnProcessorImpl {
 	// comment for the correctness argument. Returns the number of ranges
 	// rewritten across the entire SS (paginates internally so callers
 	// don't need to re-invoke to finish one SS).
+	// fullyDrained is output in the directly awaiting caller frame, which outlives this helper, including cancellation.
+	// NOLINTBEGIN(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	static Future<int64_t> rewriteOneServerKeysKRM(Database cx,
 	                                               UID ssId,
 	                                               UID distributorId,
 	                                               MoveKeysLock moveKeysLock,
 	                                               const DDEnabledState* ddEnabledState,
 	                                               bool& fullyDrained) {
+		// NOLINTEND(cppcoreguidelines-avoid-reference-coroutine-parameters)
 		Key mapPrefix = serverKeysPrefixFor(ssId);
 		int64_t rewritesForThisSS = 0;
 		double ssStart = now();
@@ -605,11 +614,14 @@ class DDTxnProcessorImpl {
 		    });
 	}
 
+	// The transaction and phase cursor are shared with the directly awaiting owner and must retain their mutations.
+	// NOLINTBEGIN(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	static Future<bool> rewriteShardEncodedMetadata(Transaction& tr,
 	                                                UID distributorId,
 	                                                MoveKeysLock moveKeysLock,
 	                                                const DDEnabledState* ddEnabledState,
 	                                                Key& phase2Cursor) {
+		// NOLINTEND(cppcoreguidelines-avoid-reference-coroutine-parameters)
 		Database cx = tr.getDatabase();
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -776,7 +788,10 @@ class DDTxnProcessorImpl {
 	// Idempotent -- safe on a fresh cluster (sentinel absent) and on
 	// repeat DD inits. Steady-state cost when the target is encoded: one
 	// system-key read per DD init, zero commits after the initial clear.
+	// The directly awaiting owner retains this transaction; committing and resetting it must update that same object.
+	// NOLINTBEGIN(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	static Future<bool> clearStaleShardEncodedRewriteSentinel(Transaction& tr, UID distributorId) {
+		// NOLINTEND(cppcoreguidelines-avoid-reference-coroutine-parameters)
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 

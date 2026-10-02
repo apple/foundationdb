@@ -223,26 +223,25 @@ AsyncResult<Optional<bool>> WorkerEventProvider::areAllCoordinatorsReachable() c
 	}
 }
 
-AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string const& eventName) const {
+AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestEvents(std::string eventName) const {
 	return latestEventOnWorkers(workers, eventName);
 }
 
-AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestRatekeeperEvents(std::string const& eventName) const {
+AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestRatekeeperEvents(std::string eventName) const {
 	if (!ratekeeperWorker.present()) {
 		co_return LatestWorkerEvents();
 	}
 	co_return co_await latestEventOnWorker(ratekeeperWorker.get(), eventName);
 }
 
-AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestDataDistributorEvents(
-    std::string const& eventName) const {
+AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestDataDistributorEvents(std::string eventName) const {
 	if (!dataDistributorWorker.present()) {
 		co_return LatestWorkerEvents();
 	}
 	co_return co_await latestEventOnWorker(dataDistributorWorker.get(), eventName);
 }
 
-AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestStorageServerEvents(std::string const& eventName) const {
+AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestStorageServerEvents(std::string eventName) const {
 	std::unordered_map<NetworkAddress, WorkerInterface> addressWorkers;
 	addressWorkers.reserve(workers.size());
 	for (auto const& worker : workers) {
@@ -251,7 +250,7 @@ AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestStorageServerEvent
 	return latestEventOnInterfaces(storageServers, std::move(addressWorkers), eventName);
 }
 
-AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestTLogEvents(std::string const& eventName) const {
+AsyncResult<LatestWorkerEvents> WorkerEventProvider::getLatestTLogEvents(std::string eventName) const {
 	std::unordered_map<NetworkAddress, WorkerInterface> addressWorkers;
 	addressWorkers.reserve(workers.size());
 	for (auto const& worker : workers) {

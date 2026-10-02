@@ -391,9 +391,12 @@ Future<Version> pullPartitionMapFromTLog(RangePartitionedBackupData* self, Parti
 // Persist the (epoch, version) -> PartitionMap row to SS so older epoch backup workers can read it during
 // recovery. Multiple workers may call this concurrently for the same (epoch, version) but only one succeed in writing
 // to SS.
+// partitionMap is serialized into owned bytes before the first suspension.
+// NOLINTBEGIN(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<Void> persistPartitionMapToSS(RangePartitionedBackupData* self,
                                      Version partitionMapVersion,
                                      PartitionMap const& partitionMap) {
+	// NOLINTEND(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	Key key = backupPartitionMapHistoryKeyFor(self->backupEpoch, partitionMapVersion);
 
@@ -526,17 +529,23 @@ Future<Void> uploadPartitionList(RangePartitionedBackupData* self, PartitionMap 
 
 // Persists partitionMap to SS history (so that catch-up backup workers can find it during recovery) and writes the
 // partitionId_keyRange_Map file for every active backup container.
+// The directly awaiting owner retains this immutable partition map until both operations complete or are cancelled.
+// NOLINTBEGIN(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<Void> persistAndUploadPartitionMap(RangePartitionedBackupData* self,
                                           Version pmVersion,
                                           PartitionMap const& partitionMap) {
+	// NOLINTEND(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	co_await persistPartitionMapToSS(self, pmVersion, partitionMap);
 	co_await uploadPartitionList(self, partitionMap);
 }
 
 // Updates local routing state to use the new partition map.
+// partitionMap is consumed into owned routing state before the first suspension.
+// NOLINTBEGIN(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<Void> setActivePartitionMap(RangePartitionedBackupData* self,
                                    Version pmVersion,
                                    PartitionMap const& partitionMap) {
+	// NOLINTEND(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	self->logFolderBaseVersion = pmVersion;
 	ASSERT(partitionMap.contains(self->tag));
 	const auto& tagPartitions = partitionMap.at(self->tag);

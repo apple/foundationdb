@@ -2755,10 +2755,8 @@ class WorkerServerCore {
 						included = fileExists(d.filename + ".sqlite-wal");
 					} else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
 						included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
-					} else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
-						included =
-						    fileExists(joinPath(d.filename, "CURRENT")) && fileExists(joinPath(d.filename, "IDENTITY"));
-					} else if (d.storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+					} else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1 ||
+					           d.storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
 						included =
 						    fileExists(joinPath(d.filename, "CURRENT")) && fileExists(joinPath(d.filename, "IDENTITY"));
 					} else if (d.storeType == KeyValueStoreType::MEMORY) {
@@ -2890,7 +2888,7 @@ public:
 	    lastSnapReq(lastSnapReq), snapReqMap(snapReqMap), snapReqResultMap(snapReqResultMap),
 	    lastSnapTime(lastSnapTime) {}
 
-	Future<Void> run(Future<Void> const& handleErrors) {
+	Future<Void> run(Future<Void> handleErrors) {
 		auto res = co_await race(interf.clientInterface.reboot.getFuture(),
 		                         serveServerDBInfoUpdates(),
 		                         serveFailureInjectionRequests(),

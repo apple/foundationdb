@@ -156,13 +156,8 @@ bool TSS_doCompare(const GetKeyReply& src, const GetKeyReply& tss) {
 		// There is one case with a positive offset where the shard boundary the incomplete query stopped at is the next
 		// key in the shard that the complete query returned. This is not possible with a negative offset because the
 		// shard boundary is exclusive backwards
-		if (src.sel.offset == 0 && src.sel.orEqual && tss.sel.offset == 1 && !tss.sel.orEqual) {
-			// case where ss was complete and tss was incomplete
-		} else if (tss.sel.offset == 0 && tss.sel.orEqual && src.sel.offset == 1 && !src.sel.orEqual) {
-			// case where tss was complete and ss was incomplete
-		} else {
-			matches = false;
-		}
+		matches = (src.sel.offset == 0 && src.sel.orEqual && tss.sel.offset == 1 && !tss.sel.orEqual) ||
+		          (tss.sel.offset == 0 && tss.sel.orEqual && src.sel.offset == 1 && !src.sel.orEqual);
 	} else {
 		// ss/tss returned different keys, and different offsets and/or orEqual
 		// here we just validate that ordering of the keys matches the ordering of the offsets

@@ -446,12 +446,13 @@ public:
 
 	// Called before sending the main request when retryExtended is true.
 	// Returns true to proceed with the request, false to skip this iteration.
+	// Keep the endpoint and referenced arguments alive until completion or cancellation finishes.
 	virtual Future<bool> preRetryCheck(std::string const& verb,
 	                                   std::string const& resource,
 	                                   ReusableConnection& rconn,
 	                                   int requestTimeout,
 	                                   bool& retryExtended) {
-		co_return true;
+		return true;
 	}
 
 	// Do an HTTP request to the blob store, read the response. Handles connection, retry, and authentication.

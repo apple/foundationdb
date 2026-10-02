@@ -2732,9 +2732,7 @@ public:
 		// at the original page ID, could have a pending read when that version is expired (after which
 		// future reads of the version are not allowed) and the write of the next newest version over top
 		// of the original page begins.
-		if (!cacheEntry.initialized()) {
-			cacheEntry.writeFuture = detach(writePhysicalPage(reason, level, pageIDs, data));
-		} else if (cacheEntry.reading()) {
+		if (cacheEntry.initialized() && cacheEntry.reading()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the outstanding read to finish, then start the write
 			cacheEntry.writeFuture =
@@ -2743,7 +2741,7 @@ public:
 
 		// If the page is being written, wait for this write before issuing the new write to ensure the
 		// writes happen in the correct order
-		else if (cacheEntry.writing()) {
+		else if (cacheEntry.initialized() && cacheEntry.writing()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the previous write to finish, then start new write
 			cacheEntry.writeFuture = writePhysicalPageAfter(this, cacheEntry.writeFuture, reason, level, pageIDs, data);
@@ -9745,18 +9743,8 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 			}
 			IntIntPair q = items[newPos];
 			++q.v;
-			if (old) {
-				if (useHint) {
-					// s.seekLessThanOrEqualOld(q, 0, &s, newPos - pos);
-				} else {
-					// s.seekLessThanOrEqualOld(q, 0, nullptr, 0);
-				}
-			} else {
-				if (useHint) {
-					// s.seekLessThanOrEqual(q, 0, &s, newPos - pos);
-				} else {
-					s2.seekLessThanOrEqual(q);
-				}
+			if (!old && !useHint) {
+				s2.seekLessThanOrEqual(q);
 			}
 			pos = newPos;
 		}
@@ -11201,6 +11189,8 @@ struct KVSource {
 		for (auto& p : prefixes) {
 			prefixesSorted.push_back(&p);
 		}
+		// The comparator orders prefix bytes; pointee addresses never affect ordering.
+		// NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
 		std::sort(prefixesSorted.begin(), prefixesSorted.end(), [](const Prefix* a, const Prefix* b) {
 			return KeyRef((uint8_t*)a->begin(), a->size()) < KeyRef((uint8_t*)b->begin(), b->size());
 		});

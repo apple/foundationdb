@@ -628,12 +628,11 @@ public:
 		// Get the keys from the memory store and compare them
 		for (int i = 0; i < selectors.size(); i++) {
 			Key key = self->store.getKey(selectors[i]);
-			if (keys[i].startsWith(StringRef(self->clientPrefix)) && keys[i] != key)
+			if ((keys[i].startsWith(StringRef(self->clientPrefix)) && keys[i] != key) ||
+			    (keys[i] < StringRef(self->clientPrefix) && key != self->store.startKey()) ||
+			    (keys[i] > StringRef(self->clientPrefix + "\xff") && key != self->store.endKey())) {
 				result = false;
-			else if (keys[i] < StringRef(self->clientPrefix) && key != self->store.startKey())
-				result = false;
-			else if (keys[i] > StringRef(self->clientPrefix + "\xff") && key != self->store.endKey())
-				result = false;
+			}
 
 			// If there was a failure, print some debugging info about the failed key
 			if (!result) {

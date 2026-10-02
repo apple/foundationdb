@@ -64,7 +64,7 @@ Future<std::string> getThreadName(Reference<IThreadPool> pool) {
 	return fut;
 }
 
-Future<bool> waitForThreadName(Reference<IThreadPool> pool, std::string const& expectedName) {
+Future<bool> waitForThreadName(Reference<IThreadPool> pool, std::string expectedName) {
 	// startThread() sets the pthread name from the creating thread after pthread_create(), so the worker may
 	// briefly report its default name before the requested name is visible. Some environments also report
 	// ENOENT from pthread_setname_np(), which startThread() treats as non-fatal.

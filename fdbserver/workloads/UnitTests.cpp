@@ -198,6 +198,8 @@ struct UnitTestWorkload : TestWorkload {
 			}
 		}
 
+		// The comparator orders test-name bytes, never UnitTest pointer addresses.
+		// NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
 		std::sort(tests.begin(), tests.end(), [](auto lhs, auto rhs) {
 			return std::string_view(lhs->name) < std::string_view(rhs->name);
 		});

@@ -269,11 +269,15 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return ManagementAPI::changeConfig(cx.getReference(), config, force);
 	}
 
-	Future<Void> setup(Database const& cx) override {
+	Future<Void> setup(Database const& cx) override { return setupImpl(cx); }
+
+	Future<Void> setupImpl(Database cx) {
 		co_await ManagementAPI::changeConfig(cx.getReference(), "single storage_migration_type=aggressive", true);
 	}
 
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		TraceEvent("ConfigureDatabase_Config").detail("Config", config.toString());
 		if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -314,7 +318,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		co_return false;
 	}
 
-	Future<bool> check(Database const& cx) override {
+	Future<bool> check(Database const& cx) override { return checkImpl(cx); }
+
+	Future<bool> checkImpl(Database cx) {
 		co_await delay(30.0);
 		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
 		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type

@@ -52,7 +52,9 @@ struct WorkerErrorsWorkload : TestWorkload {
 		co_return results;
 	}
 
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(); }
+
+	Future<Void> startImpl() {
 		std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
 		std::vector<TraceEventFields> errors = co_await latestEventOnWorkers(workers);
 		for (const auto& e : errors) {

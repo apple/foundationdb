@@ -373,9 +373,12 @@ class NativeCdcBalancer {
 		co_return fresh;
 	}
 
+	// The directly awaiting sampling frame owns the immutable snapshot and model until completion or cancellation.
+	// NOLINTBEGIN(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	Future<bool> publishLoads(NativeCdcMetadataSnapshot const& snapshot,
 	                          Version validThrough,
 	                          NativeCdcLoadModel const& model) {
+		// NOLINTEND(cppcoreguidelines-avoid-reference-coroutine-parameters)
 		Transaction tr(cx);
 		while (true) {
 			Error err;
@@ -408,10 +411,13 @@ class NativeCdcBalancer {
 		}
 	}
 
+	// The awaiting sampler owns snapshot and the model containing state through completion and cancellation.
+	// NOLINTBEGIN(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	Future<Void> applyMove(NativeCdcMetadataSnapshot const& snapshot,
 	                       Version validThrough,
 	                       NativeCdcTagState const& state,
 	                       NativeCdcRetagDecision decision) {
+		// NOLINTEND(cppcoreguidelines-avoid-reference-coroutine-parameters)
 		Transaction tr(cx);
 		while (true) {
 			Error err;

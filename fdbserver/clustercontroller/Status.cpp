@@ -1886,7 +1886,9 @@ static AsyncResult<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_removing_server";
 				stateSectionObj["description"] = "Removing storage server";
-			} else if (highestPriority == SERVER_KNOBS->PRIORITY_TEAM_HEALTHY) {
+			} else if (highestPriority == SERVER_KNOBS->PRIORITY_TEAM_HEALTHY) { // NOLINT(bugprone-branch-clone)
+				// This exact priority must precede the lower-priority range tests, even though
+				// their fallback has the same healthy status; the thresholds are configurable.
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy";
 			} else if (highestPriority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {

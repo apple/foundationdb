@@ -60,7 +60,7 @@ struct NetworkTestRequest {
 
 Future<Void> networkTestServer();
 
-Future<Void> networkTestClient(std::string const& testServers);
+Future<Void> networkTestClient(std::string testServers);
 
 class NetworkTestIntRange {
 public:

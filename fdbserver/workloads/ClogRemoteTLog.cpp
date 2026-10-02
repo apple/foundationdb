@@ -116,9 +116,8 @@ struct ClogRemoteTLog : TestWorkload {
 		       const bool
 		           allowPrefix /* when true, relaxes match as long as a prefix of actualPath matches expectedPath */)
 		    -> bool {
-			if (!allowPrefix && actualPath.size() != expectedPath.size()) {
-				return false;
-			} else if (allowPrefix && actualPath.size() < expectedPath.size()) {
+			if ((!allowPrefix && actualPath.size() != expectedPath.size()) ||
+			    (allowPrefix && actualPath.size() < expectedPath.size())) {
 				return false;
 			}
 			for (size_t i = 0; i < std::min(actualPath.size(), expectedPath.size()); ++i) {

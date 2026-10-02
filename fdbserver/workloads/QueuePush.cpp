@@ -92,7 +92,9 @@ struct QueuePushWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		for (int i = 0; i < actorCount; i++) {
 			clients.push_back(writeClient(cx, this));
 		}

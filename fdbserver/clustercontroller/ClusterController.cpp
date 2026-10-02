@@ -580,7 +580,7 @@ Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 	}
 }
 
-Future<std::vector<int>> monitorCDCProxies(std::vector<CDCProxyInterface> const& cdcProxies) {
+Future<std::vector<int>> monitorCDCProxies(std::vector<CDCProxyInterface> cdcProxies) {
 	std::vector<Future<Void>> failures;
 	failures.reserve(cdcProxies.size());
 	for (const auto& proxy : cdcProxies) {
@@ -617,8 +617,8 @@ bool containsCDCProxy(std::vector<CDCProxyInterface> const& proxies, UID proxyId
 
 Future<Void> recruitFailedCDCProxies(ClusterControllerData* self,
                                      uint64_t recoveryCount,
-                                     std::vector<CDCProxyInterface> const& monitoredProxies,
-                                     std::vector<int> const& failedIndexes) {
+                                     std::vector<CDCProxyInterface> monitoredProxies,
+                                     std::vector<int> failedIndexes) {
 	if (!self->db.recoveryData.isValid() || self->db.recoveryData->cstate.myDBState.recoveryCount != recoveryCount) {
 		co_return;
 	}

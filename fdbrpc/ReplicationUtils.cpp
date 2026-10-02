@@ -192,13 +192,8 @@ bool findBestPolicySetExpensive(std::vector<LocalityEntry>& bestResults,
 			printf("   rate: %7.5f\n", testRate);
 		}
 
-		if (bestRate < 0.0) {
-			bestResults = results;
-			bestRate = testRate;
-			bestLocalitySet = testLocalitySet;
-		}
-		// Allow the occasional bad comparison, if buggified
-		else if (!buggify() ? (testRate < bestRate) : (testRate > bestRate)) {
+		// Allow the occasional bad comparison, if buggified.
+		if (bestRate < 0.0 || (!buggify() ? (testRate < bestRate) : (testRate > bestRate))) {
 			bestResults = results;
 			bestRate = testRate;
 			bestLocalitySet = testLocalitySet;
@@ -273,14 +268,8 @@ bool validateAllCombinations(std::vector<LocalityData>& offendingCombo,
                              bool bCheckIfValid) {
 	bool bValid = true;
 
-	if (newItems.size() < nCombinationSize) {
-		bValid = false;
-	}
-	// Ensure that the current set alone does not satisfy the
-	// specified policy
-	else if ((bCheckIfValid) && (!localitySet.validate(policy))) {
-		bValid = false;
-	} else if ((!bCheckIfValid) && (localitySet.validate(policy))) {
+	// Check the current set's validity before adding combinations.
+	if (newItems.size() < nCombinationSize || localitySet.validate(policy) != bCheckIfValid) {
 		bValid = false;
 	} else {
 		bool bIsValidGroup;
@@ -699,11 +688,10 @@ Reference<IReplicationPolicy> randomAcrossPolicy(LocalitySet const& serverSet) {
 		lastKeyIndex = keyArray.size() - 1 - keysUsed;
 
 		// Do not allow az and sz within a policy, 90% of the time
-		if ((!keyText.compare("az")) && (deterministicRandom()->random01() > .1) &&
-		    (std::find(keyArray.begin() + lastKeyIndex + 1, keyArray.end(), "sz") != keyArray.end())) {
-			skips++;
-		} else if ((!keyText.compare("sz")) && (deterministicRandom()->random01() > .1) &&
-		           (std::find(keyArray.begin() + lastKeyIndex + 1, keyArray.end(), "az") != keyArray.end())) {
+		if (((!keyText.compare("az")) && (deterministicRandom()->random01() > .1) &&
+		     (std::find(keyArray.begin() + lastKeyIndex + 1, keyArray.end(), "sz") != keyArray.end())) ||
+		    ((!keyText.compare("sz")) && (deterministicRandom()->random01() > .1) &&
+		     (std::find(keyArray.begin() + lastKeyIndex + 1, keyArray.end(), "az") != keyArray.end()))) {
 			skips++;
 		} else {
 			if (g_replicationdebug > 3) {

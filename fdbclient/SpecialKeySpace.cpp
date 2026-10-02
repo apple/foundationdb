@@ -792,10 +792,10 @@ RangeResult rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr, c
 	auto iter2 = res.begin();
 	result.arena().dependsOn(res.arena());
 	while (iter != ranges.end() || iter2 != res.end()) {
-		if (iter == ranges.end()) {
+		if (iter == ranges.end() || (iter2 != res.end() && iter->begin() > iter2->key)) {
 			result.push_back(result.arena(), KeyValueRef(iter2->key, iter2->value));
 			++iter2;
-		} else if (iter2 == res.end()) {
+		} else if (iter2 == res.end() || iter->end() <= iter2->key) {
 			// insert if it is a set entry
 			std::pair<bool, Optional<Value>> entry = iter->value();
 			if (entry.first && entry.second.present()) {
@@ -812,16 +812,6 @@ RangeResult rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr, c
 				// move iter2 outside the range
 				while (iter2 != res.end() && iter->range().contains(iter2->key))
 					++iter2;
-			}
-			++iter;
-		} else if (iter->begin() > iter2->key) {
-			result.push_back(result.arena(), KeyValueRef(iter2->key, iter2->value));
-			++iter2;
-		} else if (iter->end() <= iter2->key) {
-			// insert if it is a set entry
-			std::pair<bool, Optional<Value>> entry = iter->value();
-			if (entry.first && entry.second.present()) {
-				result.push_back_deep(result.arena(), KeyValueRef(iter->begin(), entry.second.get()));
 			}
 			++iter;
 		}

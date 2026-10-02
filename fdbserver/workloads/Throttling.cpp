@@ -182,7 +182,9 @@ struct ThrottlingWorkload : KVWorkload {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		std::vector<Future<Void>> clientActors;
 		clientActors.reserve(static_cast<std::size_t>(actorsPerClient > 0 ? actorsPerClient : 0) + 2);
 		for (int actorId = 0; actorId < actorsPerClient; ++actorId) {

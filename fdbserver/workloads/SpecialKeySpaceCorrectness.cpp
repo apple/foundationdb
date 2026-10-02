@@ -116,7 +116,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 		return Void();
 	}
-	Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override { return startImpl(cx); }
+
+	Future<Void> startImpl(Database cx) {
 		testRywLifetime(cx);
 		co_await timeout(testSpecialKeySpaceErrors(cx, this) && getRangeCallActor(cx, this) &&
 		                     testConflictRanges(cx, /*read*/ true) && testConflictRanges(cx, /*read*/ false) &&

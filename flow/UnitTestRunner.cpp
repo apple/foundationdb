@@ -284,14 +284,15 @@ std::vector<UnitTest*> collectTests(const UnitTestRunnerOptions& options, const 
 		}
 	}
 
+	// NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order): The comparator orders names, not addresses.
 	std::sort(tests.begin(), tests.end(), [](auto lhs, auto rhs) {
 		return std::string_view(lhs->name) < std::string_view(rhs->name);
 	});
 	return tests;
 }
 
-Future<Void> runTests(const UnitTestRunnerOptions& options,
-                      const UnitTestRunnerConfig& config,
+Future<Void> runTests(const UnitTestRunnerOptions options,
+                      const UnitTestRunnerConfig config,
                       UnitTestRunnerResult* result) {
 	std::vector<UnitTest*> tests = collectTests(options, config);
 	result->testsAvailable = tests.size();
@@ -364,11 +365,11 @@ Future<Void> runTests(const UnitTestRunnerOptions& options,
 }
 
 Future<Void> runTestsAfterInitialization(Future<Void> initialization,
-                                         const UnitTestRunnerOptions& options,
-                                         const UnitTestRunnerConfig& config,
+                                         UnitTestRunnerOptions options,
+                                         UnitTestRunnerConfig config,
                                          UnitTestRunnerResult* result) {
 	co_await initialization;
-	co_await runTests(options, config, result);
+	co_await runTests(std::move(options), std::move(config), result);
 }
 
 Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int* exitCode) {
