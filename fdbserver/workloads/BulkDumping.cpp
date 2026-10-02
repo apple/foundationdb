@@ -479,9 +479,7 @@ struct BulkDumping : TestWorkload {
 	// (9) Validate the loaded data in DB is same as the data in DB before dumping within the bulkdump job range and
 	// bulkload job range. Note that the bulkload job can be unretriable error. In this case, we ignore the error range;
 	// (10) Validate the bulk load job history.
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			co_return;
 		}
@@ -538,7 +536,7 @@ struct BulkDumping : TestWorkload {
 		}
 	}
 
-	Future<BulkDumpState> _runDump(Database cx, KeyRangeRef bulkDumpJobRange) {
+	Future<BulkDumpState> _runDump(Database const& cx, KeyRangeRef bulkDumpJobRange) {
 		std::vector<RangeLockOwner> lockOwners = co_await getAllRangeLockOwners(cx);
 		ASSERT(lockOwners.size() == 1 && lockOwners[0].getOwnerUniqueId() == rangeLockNameForBulkLoad);
 
@@ -571,7 +569,7 @@ struct BulkDumping : TestWorkload {
 		co_return bulkDumpJob;
 	}
 
-	Future<Void> _runLoad(Database cx,
+	Future<Void> _runLoad(Database const& cx,
 	                      BulkDumpState bulkDumpJob,
 	                      KeyRangeRef bulkDumpJobRange,
 	                      std::map<Key, Value> kvs) {

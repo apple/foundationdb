@@ -24,11 +24,11 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "flow/UnitTest.h"
 
-Future<Void> testerServerCore(TesterInterface interf,
-                              Reference<IClusterConnectionRecord> ccr,
-                              Reference<AsyncVar<struct ServerDBInfo> const> serverDBInfo,
-                              LocalityData locality,
-                              Optional<std::string> expectedWorkLoad = Optional<std::string>());
+Future<Void> testerServerCore(TesterInterface const& interf,
+                              Reference<IClusterConnectionRecord> const& ccr,
+                              Reference<AsyncVar<struct ServerDBInfo> const> const& serverDBInfo,
+                              LocalityData const& locality,
+                              Optional<std::string> const& expectedWorkLoad = Optional<std::string>());
 
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
 enum test_type_t {
@@ -38,14 +38,14 @@ enum test_type_t {
 	TEST_TYPE_CONSISTENCY_CHECK_URGENT
 };
 
-Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
-                      test_type_t whatToRun,
-                      test_location_t whereToRun,
-                      int minTestersExpected,
-                      std::string fileName = std::string(),
-                      Standalone<StringRef> startingConfiguration = Standalone<StringRef>(),
-                      LocalityData locality = LocalityData(),
-                      UnitTestParameters testOptions = UnitTestParameters(),
-                      bool restartingTest = false);
+Future<Void> runTests(Reference<IClusterConnectionRecord> const& connRecord,
+                      test_type_t const& whatToRun,
+                      test_location_t const& whereToRun,
+                      int const& minTestersExpected,
+                      std::string const& fileName = std::string(),
+                      StringRef const& startingConfiguration = StringRef(),
+                      LocalityData const& locality = LocalityData(),
+                      UnitTestParameters const& testOptions = UnitTestParameters(),
+                      bool const& restartingTest = false);
 
-Future<Void> customShardConfigWorkload(Database cx);
+Future<Void> customShardConfigWorkload(Database const& cx);

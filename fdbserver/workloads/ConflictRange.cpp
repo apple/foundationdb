@@ -67,8 +67,7 @@ struct ConflictRangeWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
-			return timeout(conflictRangeClient(cx, this), testDuration, Void());
-		return Void();
+			co_await timeout(conflictRangeClient(cx, this), testDuration, Void());
 	}
 
 	Future<Void> conflictRangeClient(Database cx, ConflictRangeWorkload* self) {

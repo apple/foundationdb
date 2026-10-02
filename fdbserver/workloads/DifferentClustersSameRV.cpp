@@ -107,7 +107,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<std::pair<Version, Optional<Value>>> doRead(Database cx, Value keyToRead) {
+	static Future<std::pair<Version, Optional<Value>>> doRead(Database cx, Value const& keyToRead) {
 		Transaction tr(cx);
 		while (true) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -233,7 +233,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		co_await unlockDatabase(originalDB, lockUid); // So quietDatabase can finish
 	}
 
-	static Future<Void> writerClient(Database cx, Value keyToRead) {
+	static Future<Void> writerClient(Database cx, Value const& keyToRead) {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
@@ -259,7 +259,10 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Optional<Value>> readAtVersion(Value keyToRead, const char* name, Transaction* tr, Version version) {
+	static Future<Optional<Value>> readAtVersion(Value const& keyToRead,
+	                                             const char* name,
+	                                             Transaction* tr,
+	                                             Version version) {
 		Optional<Value> res;
 		try {
 			tr->reset();
@@ -272,7 +275,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> readerClientSeparateDBs(Database cx, Database extraDB, Value keyToRead) {
+	static Future<Void> readerClientSeparateDBs(Database cx, Database extraDB, Value const& keyToRead) {
 		Transaction tr1(cx);
 		Transaction tr2(extraDB);
 		Version rv1{ 0 };

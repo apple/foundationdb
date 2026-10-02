@@ -42,8 +42,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		// Only use one client to avoid potential conflicts on changing cluster configuration
 		if (clientId == 0)
-			return managementApiCorrectnessActor(cx, this);
-		return Void();
+			co_await managementApiCorrectnessActor(cx, this);
 	}
 
 	bool getRangeResultInOrder(const RangeResult& result) {

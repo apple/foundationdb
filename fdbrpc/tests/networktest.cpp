@@ -218,7 +218,7 @@ static void networkTestnanosleep() {
 	return;
 }
 
-Future<Void> networkTestClient(std::string testServers) {
+Future<Void> networkTestClient(std::string const& testServers) {
 	if (testServers == "nanosleep") {
 		networkTestnanosleep();
 		// return Void();

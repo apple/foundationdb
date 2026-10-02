@@ -461,7 +461,7 @@ bool transaction_done(void) {
 }
 
 template <class DB, class Fun>
-Future<Void> runTransactionWhile(DB db, Fun f) {
+Future<Void> runTransactionWhile(DB const& db, Fun f) {
 	Transaction tr(db);
 	while (true) {
 		Future<Void> onError;
@@ -482,7 +482,7 @@ Future<Void> runTransaction(DB const& db, Fun f) {
 }
 
 template <class DB, class Fun>
-Future<Void> runRYWTransaction(DB db, Fun f) {
+Future<Void> runRYWTransaction(DB const& db, Fun f) {
 	Future<Void> onError;
 	ReadYourWritesTransaction tr(db);
 	while (true) {

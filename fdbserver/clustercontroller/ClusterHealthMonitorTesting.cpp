@@ -75,7 +75,7 @@ public:
 		latestTLogEventsByName[std::move(eventName)] = std::move(latestEvents);
 	}
 
-	AsyncResult<LatestWorkerEvents> getLatestEvents(std::string eventName) const override {
+	AsyncResult<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override {
 		auto it = latestEventsByName.find(eventName);
 		if (it == latestEventsByName.end()) {
 			co_return LatestWorkerEvents();
@@ -89,7 +89,7 @@ public:
 
 	AsyncResult<Optional<bool>> areAllCoordinatorsReachable() const override { co_return allCoordinatorsReachable; }
 
-	AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string eventName) const override {
+	AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override {
 		auto it = latestRatekeeperEventsByName.find(eventName);
 		if (it != latestRatekeeperEventsByName.end()) {
 			co_return it->second;
@@ -97,7 +97,7 @@ public:
 		co_return co_await getLatestEvents(eventName);
 	}
 
-	AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string eventName) const override {
+	AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override {
 		auto it = latestDataDistributorEventsByName.find(eventName);
 		if (it != latestDataDistributorEventsByName.end()) {
 			co_return it->second;
@@ -105,7 +105,7 @@ public:
 		co_return co_await getLatestEvents(eventName);
 	}
 
-	AsyncResult<LatestWorkerEvents> getLatestStorageServerEvents(std::string eventName) const override {
+	AsyncResult<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const override {
 		auto it = latestStorageServerEventsByName.find(eventName);
 		if (it == latestStorageServerEventsByName.end()) {
 			co_return LatestWorkerEvents();
@@ -113,7 +113,7 @@ public:
 		co_return it->second;
 	}
 
-	AsyncResult<LatestWorkerEvents> getLatestTLogEvents(std::string eventName) const override {
+	AsyncResult<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const override {
 		auto it = latestTLogEventsByName.find(eventName);
 		if (it == latestTLogEventsByName.end()) {
 			co_return LatestWorkerEvents();

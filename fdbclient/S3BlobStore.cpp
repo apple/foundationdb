@@ -545,15 +545,11 @@ void S3BlobStoreEndpoint::processRequestFailure(Reference<HTTP::IncomingResponse
 	}
 }
 
-// The directly awaiting request owns these references and cancels this child before destroying its frame.
-// retryExtended deliberately updates that request's retry state.
-// NOLINTBEGIN(cppcoreguidelines-avoid-reference-coroutine-parameters)
 Future<bool> S3BlobStoreEndpoint::preRetryCheck(std::string const& verb,
                                                 std::string const& resource,
                                                 ReusableConnection& rconn,
                                                 int requestTimeout,
                                                 bool& retryExtended) {
-	// NOLINTEND(cppcoreguidelines-avoid-reference-coroutine-parameters)
 	if (!isWriteRequest(verb) || !CLIENT_KNOBS->BACKUP_ALLOW_DRYRUN) {
 		co_return true;
 	}

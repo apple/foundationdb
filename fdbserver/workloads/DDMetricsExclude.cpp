@@ -69,9 +69,7 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 		co_return -1.0;
 	}
 
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		try {
 			std::vector<AddressExclusion> excluded;
 			excluded.push_back(AddressExclusion(IPAddress::parse(excludeIp.toString()).get(), excludePort));

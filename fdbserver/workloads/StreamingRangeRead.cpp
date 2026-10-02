@@ -92,9 +92,7 @@ struct StreamingRangeReadWorkload : KVWorkload {
 		return delay(testDuration);
 	}
 
-	Future<bool> check(Database const& cx) override { return checkImpl(cx); }
-
-	Future<bool> checkImpl(Database cx) {
+	Future<bool> check(Database const& cx) override {
 		client = Void();
 		co_await checkSelectorBoundaries(cx->clone());
 		co_return true;

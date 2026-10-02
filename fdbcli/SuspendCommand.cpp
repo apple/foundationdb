@@ -33,7 +33,7 @@ namespace fdb_cli {
 
 Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                  Reference<ITransaction> tr,
-                                 std::vector<StringRef> tokens,
+                                 std::vector<StringRef> const& tokens,
                                  std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	ASSERT(!tokens.empty());
 	bool result = true;

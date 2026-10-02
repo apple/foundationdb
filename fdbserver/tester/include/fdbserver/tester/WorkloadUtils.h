@@ -112,7 +112,9 @@ public:
 	std::vector<std::string> disabledFailureInjectionWorkloads;
 };
 
-Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec);
+Future<DistributedTestResults> runWorkload(Database const& cx,
+                                           std::vector<TesterInterface> const& testers,
+                                           TestSpec const& spec);
 void logMetrics(std::vector<PerfMetric> metrics);
 Future<Void> databaseWarmer(Database cx);
 

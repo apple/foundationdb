@@ -96,9 +96,7 @@ struct CpuProfilerWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		co_await delay(initialDelay);
 		if (clientId == 0)
 			TraceEvent("SignalProfilerOn").log();
@@ -113,9 +111,7 @@ struct CpuProfilerWorkload : TestWorkload {
 		}
 	}
 
-	Future<bool> check(Database const& cx) override { return checkImpl(cx); }
-
-	Future<bool> checkImpl(Database cx) {
+	Future<bool> check(Database const& cx) override {
 		// If no duration was given, then shut the profiler off now
 		if (duration <= 0) {
 			if (clientId == 0)

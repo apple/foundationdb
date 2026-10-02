@@ -2888,7 +2888,7 @@ public:
 	    lastSnapReq(lastSnapReq), snapReqMap(snapReqMap), snapReqResultMap(snapReqResultMap),
 	    lastSnapTime(lastSnapTime) {}
 
-	Future<Void> run(Future<Void> handleErrors) {
+	Future<Void> run(Future<Void> const& handleErrors) {
 		auto res = co_await race(interf.clientInterface.reboot.getFuture(),
 		                         serveServerDBInfoUpdates(),
 		                         serveFailureInjectionRequests(),

@@ -153,7 +153,7 @@ std::string toHTML(const StringRef& binaryString) {
 
 } // namespace
 
-Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRange range) {
+Future<Void> dumpDatabase(Database const& cx, std::string const& outputFilename, KeyRange const& range) {
 	try {
 		Transaction tr(cx);
 		while (true) {

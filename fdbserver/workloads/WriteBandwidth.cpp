@@ -76,9 +76,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
 
-	Future<Void> setup(Database const& cx) override { return setupImpl(cx); }
-
-	Future<Void> setupImpl(Database cx) {
+	Future<Void> setup(Database const& cx) override {
 		Promise<double> loadTime;
 		Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts;
 
@@ -86,9 +84,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 		this->loadTime = loadTime.getFuture().get();
 	}
 
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		for (int i = 0; i < actorCount; i++) {
 			clients.push_back(writeClient(cx, this));
 		}

@@ -204,9 +204,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return startImpl(cx); }
-
-	Future<Void> startImpl(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> clients;
 		if (enableReadLatencyLogging)
 			clients.push_back(tracePeriodically());

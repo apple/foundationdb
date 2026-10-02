@@ -25,7 +25,8 @@
 #include "fdbclient/DataDistributionConfig.h"
 #include "fdbserver/tester/tester.h"
 
-Future<Void> customShardConfigWorkload(Database cx) {
+Future<Void> customShardConfigWorkload(Database const& cxUnsafe) {
+	auto cx = cxUnsafe;
 	ReadYourWritesTransaction tr(cx);
 	bool verbose = (KEYBACKEDTYPES_DEBUG != 0);
 

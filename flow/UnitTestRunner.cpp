@@ -291,8 +291,8 @@ std::vector<UnitTest*> collectTests(const UnitTestRunnerOptions& options, const 
 	return tests;
 }
 
-Future<Void> runTests(const UnitTestRunnerOptions options,
-                      const UnitTestRunnerConfig config,
+Future<Void> runTests(const UnitTestRunnerOptions& options,
+                      const UnitTestRunnerConfig& config,
                       UnitTestRunnerResult* result) {
 	std::vector<UnitTest*> tests = collectTests(options, config);
 	result->testsAvailable = tests.size();
@@ -365,11 +365,11 @@ Future<Void> runTests(const UnitTestRunnerOptions options,
 }
 
 Future<Void> runTestsAfterInitialization(Future<Void> initialization,
-                                         UnitTestRunnerOptions options,
-                                         UnitTestRunnerConfig config,
+                                         const UnitTestRunnerOptions& options,
+                                         const UnitTestRunnerConfig& config,
                                          UnitTestRunnerResult* result) {
 	co_await initialization;
-	co_await runTests(std::move(options), std::move(config), result);
+	co_await runTests(options, config, result);
 }
 
 Future<Void> stopNetworkAfter(Future<Void> what, std::string_view traceName, int* exitCode) {

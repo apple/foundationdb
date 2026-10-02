@@ -57,11 +57,11 @@ public:
 	virtual Optional<RecoveryState> getRecoveryState() const = 0;
 	virtual bool shouldTreatStorageTeamOneReplicaLeftAsCritical() const = 0;
 	virtual AsyncResult<Optional<bool>> areAllCoordinatorsReachable() const = 0;
-	virtual AsyncResult<LatestWorkerEvents> getLatestEvents(std::string eventName) const = 0;
-	virtual AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string eventName) const = 0;
-	virtual AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string eventName) const = 0;
-	virtual AsyncResult<LatestWorkerEvents> getLatestStorageServerEvents(std::string eventName) const = 0;
-	virtual AsyncResult<LatestWorkerEvents> getLatestTLogEvents(std::string eventName) const = 0;
+	virtual AsyncResult<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const = 0;
+	virtual AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const = 0;
+	virtual AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const = 0;
+	virtual AsyncResult<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const = 0;
+	virtual AsyncResult<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const = 0;
 };
 
 // Production event provider backed by worker event-log RPCs.
@@ -90,11 +90,11 @@ public:
 	Optional<RecoveryState> getRecoveryState() const override;
 	bool shouldTreatStorageTeamOneReplicaLeftAsCritical() const override;
 	AsyncResult<Optional<bool>> areAllCoordinatorsReachable() const override;
-	AsyncResult<LatestWorkerEvents> getLatestEvents(std::string eventName) const override;
-	AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string eventName) const override;
-	AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string eventName) const override;
-	AsyncResult<LatestWorkerEvents> getLatestStorageServerEvents(std::string eventName) const override;
-	AsyncResult<LatestWorkerEvents> getLatestTLogEvents(std::string eventName) const override;
+	AsyncResult<LatestWorkerEvents> getLatestEvents(std::string const& eventName) const override;
+	AsyncResult<LatestWorkerEvents> getLatestRatekeeperEvents(std::string const& eventName) const override;
+	AsyncResult<LatestWorkerEvents> getLatestDataDistributorEvents(std::string const& eventName) const override;
+	AsyncResult<LatestWorkerEvents> getLatestStorageServerEvents(std::string const& eventName) const override;
+	AsyncResult<LatestWorkerEvents> getLatestTLogEvents(std::string const& eventName) const override;
 };
 
 // Periodically evaluates factors and logs the aggregate cluster-health metric.
