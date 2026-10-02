@@ -1,6 +1,7 @@
 [package]
 name = "foundationdb-simulation"
 version = "0.3.0"
+publish = false
 authors = [
     "Eloi DEMOLIS <eloi.demolis@clever-cloud.com>",
     "Pierre Zemb <contact@pierrezemb.fr>"
@@ -10,20 +11,15 @@ description = """
 Embed Rust code within FoundationDB's simulation
 """
 license = "MIT/Apache-2.0"
-documentation = "https://docs.rs/foundationdb-simulation"
 repository = "https://github.com/apple/foundationdb"
 readme = "README.md"
 keywords = ["foundationdb", "simulation"]
-
-[package.metadata.docs.rs]
-features = ["embedded-fdb-include", "fdb-7_4"]
 
 [dependencies]
 foundationdb = { version = "0.11.0", path = "../foundationdb", default-features = false }
 foundationdb-sys = { version = "0.11.0", path = "../foundationdb-sys", default-features = false }
 
 [build-dependencies]
-cc = "1.2.65"
 bindgen = "0.73.2"
 
 [dev-dependencies]
@@ -32,11 +28,7 @@ loom = "0.7.2"
 
 [features]
 default = ["embedded-fdb-include"]
-cpp-abi = []
-fdb-7_1 = ["foundationdb/fdb-7_1", "foundationdb-sys/fdb-7_1", "cpp-abi"]
-fdb-7_3 = ["foundationdb/fdb-7_3", "foundationdb-sys/fdb-7_3", "cpp-abi"]
 fdb-7_4 = ["foundationdb/fdb-7_4", "foundationdb-sys/fdb-7_4"]
-fdb-docker = []
 embedded-fdb-include = [
     "foundationdb/embedded-fdb-include",
     "foundationdb-sys/embedded-fdb-include",

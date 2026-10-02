@@ -80,10 +80,6 @@ async fn check_versionstamped_mutations(version: i32) {
                 Some("versionstamped mutations require runtime API 520 or later")
             );
         }
-        #[cfg(feature = "accounting")]
-        assert_eq!(trx.attempt_usage().call_atomic_op, 0);
-        #[cfg(feature = "accounting")]
-        assert_eq!(trx.attempt_usage().bytes_written, 0);
         // Unsupported versionstamps do not prevent API 510 atomic operations.
         trx.atomic_op(&counter_key, &1_i64.to_le_bytes(), MutationType::Add);
         trx.commit().await.expect("commit API 510 atomic add");

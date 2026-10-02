@@ -106,7 +106,7 @@ macro_rules! details {
 // -----------------------------------------------------------------------------
 // Rust Types
 
-/// A simulator context shared by one workload and its environment handles.
+/// A simulator context shared by one workload and its cloned handles.
 ///
 /// Context operations panic outside the creating thread or after the registered
 /// workload is released. Cloning the context does not extend the native lifetime.
@@ -565,18 +565,16 @@ impl<'a> Metric<'a> {
 mod tests {
     use super::{Severity, capitalize_first_byte, prepare_trace_details, str_for_c};
 
+    use super::WorkloadContext;
+    use super::raw_bindings::*;
+    use crate::registration::register_workload_context;
+    use crate::{Metric, Metrics, RustWorkload, SimDatabase};
     use std::cell::Cell;
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
-    use std::time::Duration;
-
-    use super::WorkloadContext;
-    use super::raw_bindings::*;
-    use crate::registration::register_workload_context;
-    use crate::{Metric, Metrics, RustWorkload, SimDatabase};
 
     struct NativeContext {
         calls: Arc<AtomicUsize>,
@@ -1272,7 +1270,7 @@ mod tests {
     }
 
     #[test]
-    fn environment_rejects_access_after_registered_workload_release() {
+    fn context_rejects_access_after_registered_workload_release() {
         let calls = Arc::new(AtomicUsize::new(0));
         let (native, raw) = native_context(calls.clone());
         let mut escaped = None;
@@ -1284,9 +1282,8 @@ mod tests {
             })
         };
         let context = escaped.unwrap();
-        let environment = context.environment();
-        assert_eq!(environment.clock().monotonic(), Duration::from_secs(12));
-        assert_eq!(environment.rng().next_u32(), 42);
+        assert_eq!(context.now(), 12.0);
+        assert_eq!(context.rnd(), 42);
         // SAFETY: These are the callbacks on the registered, live allocation.
         unsafe {
             assert_eq!((*workload.vt).getCheckTimeout.unwrap()(workload.inner), 7.0);
@@ -1299,8 +1296,7 @@ mod tests {
         );
         drop(native);
         assert!(catch_unwind(AssertUnwindSafe(|| context.now())).is_err());
-        assert!(catch_unwind(AssertUnwindSafe(|| environment.clock().wall())).is_err());
-        assert!(catch_unwind(AssertUnwindSafe(|| environment.rng().next_u64())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| context.rnd())).is_err());
         assert_eq!(
             calls.load(Ordering::Relaxed),
             3,
@@ -1309,31 +1305,32 @@ mod tests {
     }
 
     #[test]
-    fn environment_rejects_other_threads_without_consuming_randomness() {
+    fn context_rejects_other_threads_without_consuming_randomness() {
         let calls = Arc::new(AtomicUsize::new(0));
         let (_native, raw) = native_context(calls.clone());
         let mut escaped = None;
         // SAFETY: Native context stays alive through the same-thread free call.
         let workload = unsafe {
             register_workload_context(raw, |context| {
-                escaped = Some(context.environment());
+                escaped = Some(context);
                 TestWorkload(None).wrap()
             })
         };
-        let environment = escaped.unwrap();
-        let other_thread = environment.clone();
+        let context = escaped.unwrap();
+        let other_thread = context.clone();
         std::thread::spawn(move || {
-            assert!(catch_unwind(AssertUnwindSafe(|| other_thread.clock().monotonic())).is_err());
-            assert!(catch_unwind(AssertUnwindSafe(|| other_thread.rng().next_u32())).is_err());
+            assert!(catch_unwind(AssertUnwindSafe(|| other_thread.now())).is_err());
+            assert!(catch_unwind(AssertUnwindSafe(|| other_thread.rnd())).is_err());
         })
         .join()
         .unwrap();
         assert_eq!(calls.load(Ordering::Relaxed), 0);
-        assert_eq!(environment.rng().next_u64(), (42_u64 << 32) | 43);
+        assert_eq!(context.rnd(), 42);
+        assert_eq!(context.rnd(), 43);
         assert_eq!(calls.load(Ordering::Relaxed), 2);
         // SAFETY: This is the unique release of the registered allocation.
         unsafe { (*workload.vt).free.unwrap()(workload.inner) };
-        assert!(catch_unwind(AssertUnwindSafe(|| environment.rng().next_u32())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| context.rnd())).is_err());
         assert_eq!(calls.load(Ordering::Relaxed), 2);
     }
 
@@ -1346,14 +1343,14 @@ mod tests {
             catch_unwind(AssertUnwindSafe(|| unsafe {
                 // SAFETY: The native context outlives registration, which unwinds.
                 register_workload_context(raw, |context| {
-                    escaped = Some(context.environment());
+                    escaped = Some(context);
                     panic!("factory failed");
                 })
             }))
             .is_err()
         );
         drop(native);
-        assert!(catch_unwind(AssertUnwindSafe(|| escaped.unwrap().rng().next_u32())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| escaped.unwrap().rnd())).is_err());
         assert_eq!(calls.load(Ordering::Relaxed), 0);
     }
 

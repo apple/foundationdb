@@ -1,9 +1,0 @@
-[[test]]
-testTitle = 'TracingDemoWorkload'
-
-  [[test.workload]]
-    testName = 'External'
-    useCAPI = true
-    libraryName = 'tracing_demo'
-    workloadName = 'TracingDemoWorkload'
-    libraryPath = './target/release/examples'

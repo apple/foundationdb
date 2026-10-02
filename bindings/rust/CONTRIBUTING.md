@@ -1,15 +1,13 @@
 # Developing the Rust bindings
 
-Run Cargo commands from `bindings/rust`, where the toolchain and Cargo aliases are
-configured. The minimum Rust version is 1.85.1. Bindgen also requires libclang.
-Follow the FoundationDB repository contribution process for changes to this tree.
+Use Rust 1.85.1 or later, Cargo, and libclang. Follow the FoundationDB repository
+contribution process and preserve the imported licenses and contributor notices.
 
 ## Standalone Cargo
 
-For an installed FoundationDB client, use the existing versioned embedded headers:
+Run commands from `bindings/rust`. For an installed FoundationDB client:
 
 ```sh
-cd bindings/rust
 cargo build-fdb-latest
 cargo fmt --all -- --check
 cargo clippy-all
@@ -17,82 +15,56 @@ cargo test -p foundationdb-tuple --all-features --locked
 cargo test -p foundationdb-macros --locked
 ```
 
-`*-fdb-latest` currently selects `fdb-7_4` and `embedded-fdb-include`. Embedded
-headers remove the need for installed headers, but linking and running binaries
-still require `libfdb_c`. Set `FDB_CLIENT_LIB_PATH` if the library is outside the
-linker's standard search path, and configure the platform's runtime library path
-when needed. Do not use `--all-features` for the client: API-version features are
-mutually exclusive.
+The `*-fdb-latest` aliases select `fdb-7_4` and `embedded-fdb-include`. Embedded
+headers support standalone builds, but linking and execution still require
+`libfdb_c`. Set `FDB_CLIENT_LIB_PATH` and the platform's runtime library path when
+the library is outside the normal search paths. Client API features are mutually
+exclusive; do not use `--all-features` for the client.
 
-For a custom header set, `FDB_INCLUDE_DIR` selects a directory containing
-`fdb_c.h`, its companion headers, and `fdb.options`. It takes precedence over
-embedded headers. CMake supplies this directory from the current repository.
+`FDB_INCLUDE_DIR` overrides embedded headers. For client builds, it must contain
+`fdb_c.h`, its companion headers, and `fdb.options`; for simulator builds it must
+also contain `CWorkload.h`. CMake stages these inputs from the owning source tree.
+Standalone simulator builds otherwise use this repository's canonical
+`bindings/c/foundationdb/CWorkload.h`.
 
 ## Tests
 
-The CMake targets and CTests are described in [README.md](README.md). Enable
-`RUN_RUST_INTEGRATION_TESTS` in addition to `BUILD_RUST_BINDING` to run the client
-integration tests against a temporary local test cluster. Keep
-`BUILD_PYTHON_BINDING=ON` for the shared test-runner fixture, then build and run:
+Configure `BUILD_RUST_BINDING=ON` and build `fdb_rust_tests` for client, tuple,
+option-generator, and macro unit tests. `rust_future_safety_tests` also checks
+that raw future construction cannot bypass the ownership contract.
+
+Enable `RUN_RUST_INTEGRATION_TESTS=ON` and `BUILD_PYTHON_BINDING=ON` for tests
+against a disposable local cluster:
 
 ```sh
 cmake --build build --target fdb_rust_integration_tests fdbserver fdbcli fdbmonitor python_binding
 ctest --test-dir build -R '^rust_' --output-on-failure
 ```
 
-Run these commands from the repository root (or substitute an absolute build
-directory).
+These commands run from the repository root. Direct Cargo client integration tests
+also need a disposable cluster: set `FDB_CLUSTER_FILE`, then run
+`cargo test-fdb-latest --locked`. They write test keys and exercise database-wide
+behavior, so do not use an application cluster.
 
-When testing with Cargo directly, the client integration tests need a disposable
-FoundationDB database. They write test keys and exercise database-wide behavior;
-do not point them at an application cluster. Set `FDB_CLUSTER_FILE` to the test
-cluster file, then run:
+The shared [binding tester](foundationdb-bindingtester/README.md) runs fixed
+regression seeds plus scripted and randomized comparisons against Python. Client
+coverage includes directory-prefix allocation, native retry/error ownership,
+commit uncertainty, and runtime-version-specific versionstamp behavior. Separate
+library subprocess tests cover compatible and incompatible API selection across
+independently loaded Rust libraries.
 
-```sh
-cargo test-fdb-latest --locked
-```
+## Simulator support
 
-Use the in-tree [binding tester instructions](foundationdb-bindingtester/README.md)
-for comparison with Python. Tuple tests and macro tests do not need a cluster.
+Configure `BUILD_RUST_SIMULATION=ON` explicitly and build
+`fdb_rust_simulation_tests` to compile the C-ABI adapter, examples, and unit tests.
+The `rust_simulation_` CTests check context validity, callback metrics lifetimes,
+thread ownership, phase cancellation, and native teardown. The Loom test explores
+wake/dequeue memory ordering in a separate Cargo target directory. These checks do
+not execute the simulator; workload smoke tests use a compatible server as
+described in [foundationdb-simulation/README.md](foundationdb-simulation/README.md).
 
-`rust_unit_tests` also checks simulation context and metrics callbacks, executor
-wakeups, thread ownership, and phase teardown through native workload callbacks.
-The client is built and tested without accounting by default; the separate
-`rust_accounting_unit_tests` and `rust_accounting_integration_tests` enable the
-`accounting` feature. The latter runs budget, metrics, and related transaction
-coverage. `rust_recipes_integration_tests` separately enables `recipes` for library
-unit tests and the leader-election and ranked-register suites.
-`rust_bindingtester_tests` runs fixed regression seeds and the shared scripted
-and randomized suites against Python.
-Client integration tests check timekeeper read-error propagation and versionstamp
-behavior in separate processes selecting runtime APIs 510, 520, and 740.
-The live-cluster tests also cover raw directory-prefix collisions and transaction
-preservation after both retryable and nonretryable bindingtester `ON_ERROR` results,
-including reset and reuse. The library test uses current in-tree headers and two
-independently loaded Rust libraries to check concurrent initial API selection,
-shared selection, and runtime/header-version mismatches.
-The simulation safety doctests check that borrowed
-metrics sinks cannot escape their callback, process switching requires `unsafe`,
-and the tracing guard cannot move between threads.
-`rust_simulation_wake_order_tests` uses Loom to explore weak-memory interleavings of
-the executor's wake and dequeue code. Its separate Cargo target directory keeps
-model synchronization out of normal builds. These checks do not start the simulator;
-workload execution is a separate check against a compatible server.
-
-Hosted compile checks generate the current C headers and options using
-`tests/current_headers.cmake`, then check both the default client and the optional
-accounting build against those inputs. Historical API checks use their embedded
-headers separately.
-
-The simulation crates and their scripts are retained for focused simulator work;
-their READMEs describe the workload ABI and required server versions. The original
-repository's scheduled correctness, simulation, release, and documentation jobs
-are not enabled here. Validation should state the API feature, client/server
-version, tests, and binding-tester seeds actually exercised.
-
-## Contributions and licensing
-
-Keep changes focused and preserve public Rust API compatibility when possible.
-Run rustfmt and the relevant unit, integration, or binding tests. Existing
-changelogs record upstream releases; this migration does not create a new crate
-release. Preserve the imported MIT/Apache-2.0 license and contributor notices.
+Hosted checks cover all retained crates against generated current headers and
+check historical client API configurations against embedded snapshots separately.
+State the actual API feature, client/server versions, tests, and bindingtester
+seeds when reporting validation. Upstream release and scheduled simulation
+campaigns are not imported.

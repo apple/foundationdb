@@ -193,27 +193,32 @@ async fn many_conflict_ranges_are_fully_paginated() -> FdbResult<()> {
     Ok(())
 }
 
-/// Reading the conflict ranges is a binding-internal read: it must not move the
-/// usage counters of the attempt, nor consume the client budget.
+/// A failed transaction exposes the key that caused its commit conflict
+/// before the native error handler resets it.
 #[cfg_api_versions(min = 630)]
-#[cfg(feature = "accounting")]
 #[tokio::test]
-async fn reading_conflict_ranges_is_unmetered() -> FdbResult<()> {
-    const KEY: &[u8] = b"test-rcr-unmetered";
-
+async fn commit_error_reports_conflicting_key() -> FdbResult<()> {
+    const KEY: &[u8] = b"test-conflicting-key-direct";
     let db = common::database().await?;
-    let trx = db.create_trx()?;
+    let first = db.create_trx()?;
+    first.set_option(options::TransactionOption::ReportConflictingKeys)?;
+    first.get(KEY, false).await?;
 
-    trx.set(KEY, b"value");
-    let before = trx.attempt_usage();
+    let second = db.create_trx()?;
+    second.set(KEY, b"other");
+    second.commit().await.expect("second transaction commits");
 
-    trx.read_conflict_ranges().await?;
-    trx.write_conflict_ranges().await?;
-
-    let after = trx.attempt_usage();
-    assert_eq!(after.bytes_read, before.bytes_read);
-    assert_eq!(after.call_get_range, before.call_get_range);
-    assert_eq!(after.keys_values_fetched, before.keys_values_fetched);
-
+    first.set(KEY, b"first");
+    let error = first
+        .commit()
+        .await
+        .expect_err("first transaction conflicts");
+    assert_eq!(error.code(), 1020);
+    let ranges = error.conflicting_keys().await?;
+    assert!(
+        ranges
+            .iter()
+            .any(|range| KEY >= range.begin() && KEY < range.end())
+    );
     Ok(())
 }

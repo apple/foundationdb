@@ -72,16 +72,21 @@ jobs:
           FDB_INCLUDE_DIR: ${{ runner.temp }}/rust-fdb-include
         run: |
           cargo check --locked -p foundationdb --lib --features fdb-7_4
-          cargo check --locked -p foundationdb --lib --features fdb-7_4,accounting
-          cargo check --locked -p foundationdb --test ranked_register --no-default-features --features fdb-7_4,recipes-ranked-register
 
-      - name: Check all workspace targets against current headers
+      - name: Check client targets against current headers
         # API version features are mutually exclusive; do not use --all-features.
         env:
           FDB_INCLUDE_DIR: ${{ runner.temp }}/rust-fdb-include
         run: >-
-          cargo check --locked --workspace --all-targets
-          --features embedded-fdb-include,fdb-7_4,num-bigint,trace,foundationdb/accounting
+          cargo check --locked --workspace --exclude foundationdb-simulation --all-targets
+          --features foundationdb/fdb-7_4,foundationdb/num-bigint,foundationdb/trace,foundationdb-gen/fdb-7_4
+
+      - name: Check simulator C ABI and examples
+        env:
+          FDB_INCLUDE_DIR: ${{ runner.temp }}/rust-fdb-include
+        run: >-
+          cargo check --locked --package foundationdb-simulation --all-targets
+          --features fdb-7_4
 
       - name: Check supported historical APIs
         # Some examples require newer APIs; historical compatibility covers the library.

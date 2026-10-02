@@ -16,7 +16,6 @@ use foundationdb::Database;
 use foundationdb_sys::FDBDatabase as FDBDatabaseAlias;
 
 mod bindings;
-pub mod env;
 mod fdb_rt;
 mod registration;
 
@@ -25,7 +24,6 @@ use bindings::{
     OpaqueWorkload, Promise,
 };
 pub use bindings::{Metric, Metrics, Severity, WorkloadContext};
-pub use env::{SimClock, SimRng};
 use fdb_rt::{TaskId, poll_pending_tasks};
 
 // -----------------------------------------------------------------------------
@@ -415,23 +413,6 @@ pub mod internals {
     pub use crate::bindings::{FDBWorkload, FDBWorkloadContext, str_from_c};
     pub use crate::fdb_rt::poll_pending_tasks;
     pub use crate::registration::register_workload_context;
-
-    #[cfg(feature = "cpp-abi")]
-    unsafe extern "C" {
-        pub fn workloadCppFactory(logger: *const u8) -> *const u8;
-    }
-
-    #[allow(non_snake_case)]
-    #[cfg(not(feature = "cpp-abi"))]
-    pub unsafe extern "C" fn workloadCppFactory(_logger: *const u8) -> *const u8 {
-        eprintln!(
-            "This Rust workload was compiled without the C++ shim adapter. To fix this, either:
-
-- Re-run the simulation with `useCAPI = true` (FoundationDB 7.4 or newer), or
-- Recompile the workload with FoundationDB versions prior to 7.4 or the `cpp-abi` feature"
-        );
-        std::process::exit(1);
-    }
 }
 
 /// Register a [RustWorkloadFactory].
@@ -468,10 +449,6 @@ macro_rules! register_factory {
                     <$name as $crate::RustWorkloadFactory>::create(name, context)
                 })
             }
-        }
-        #[unsafe(no_mangle)]
-        unsafe extern "C" fn workloadFactory(logger: *const u8) -> *const u8 {
-            unsafe { $crate::internals::workloadCppFactory(logger) }
         }
     };
 }
@@ -512,10 +489,6 @@ macro_rules! register_workload {
                     ))
                 })
             }
-        }
-        #[unsafe(no_mangle)]
-        unsafe extern "C" fn workloadFactory(logger: *const u8) -> *const u8 {
-            unsafe { $crate::internals::workloadCppFactory(logger) }
         }
     };
 }

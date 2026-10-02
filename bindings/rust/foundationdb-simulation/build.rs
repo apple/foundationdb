@@ -1,82 +1,24 @@
 use std::{env, path::PathBuf};
 
-extern crate cc;
-
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(coverage)");
     println!("cargo:rustc-check-cfg=cfg(fdb_simulation_loom)");
+    println!("cargo:rerun-if-env-changed=FDB_INCLUDE_DIR");
 
+    let include_dir = env::var_os("FDB_INCLUDE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../../c/foundationdb")
+        });
+    let header = include_dir.join("CWorkload.h");
+    println!("cargo:rerun-if-changed={}", header.display());
     let bindings = bindgen::Builder::default()
-        .header("src/headers/CWorkload.h")
+        .header(header.to_str().expect("UTF-8 workload header path"))
         .generate()
-        .expect("generate bindings");
+        .expect("generate workload bindings");
 
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let out_path = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     bindings
         .write_to_file(out_path.join("bindings.rs"))
-        .expect("write bindings");
-
-    let _api_version: usize;
-
-    #[cfg(feature = "fdb-7_1")]
-    {
-        _api_version = 710;
-    }
-    #[cfg(feature = "fdb-7_3")]
-    {
-        _api_version = 730;
-    }
-    #[cfg(feature = "fdb-7_4")]
-    {
-        _api_version = 740;
-    }
-
-    #[cfg(feature = "cpp-abi")]
-    {
-        if cfg!(feature = "fdb-docker") {
-            if _api_version < 730 {
-                build_with_gcc(_api_version);
-            } else {
-                // FDB 7.3+ is built with clang, so we need to do the same, including the linker
-                build_with_clang(_api_version);
-            }
-        } else {
-            // The Cpp API is not FFI safe, not compiling in the exact same environment leads to undefined behavior
-            display_build_warnings();
-            build_with_gcc(_api_version);
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn display_build_warnings() {
-    println!("cargo:warning=---------------------");
-    println!("cargo:warning=------ Warning ------");
-    println!("cargo:warning=---------------------");
-    println!(
-        "cargo:warning=Building the C++ bindings without the `fdb-docker` feature will be valid from Rust's perspective but not from C++ and FoundationDB"
-    );
-    println!("cargo:warning=Please follow the instructions in the associated README");
-}
-
-#[allow(dead_code)]
-fn build_with_gcc(api_version: usize) {
-    cc::Build::new()
-        .cpp(true)
-        .std("c++14")
-        .define("FDB_API_VERSION", api_version.to_string().as_str())
-        .file("src/CppWorkload.cpp")
-        .compile("ctx");
-}
-
-#[allow(dead_code)]
-fn build_with_clang(api_version: usize) {
-    cc::Build::new()
-        .compiler("clang")
-        .cpp_set_stdlib("c++")
-        .cpp(true)
-        .std("c++14")
-        .define("FDB_API_VERSION", api_version.to_string().as_str())
-        .file("src/CppWorkload.cpp")
-        .compile("ctx");
+        .expect("write workload bindings");
 }

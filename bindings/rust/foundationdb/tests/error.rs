@@ -1,6 +1,6 @@
 use foundationdb::directory::DirectoryError;
 use foundationdb::tuple::hca::HcaError;
-use foundationdb::{FdbBindingError, FdbError, RetryDecision, RetryableError};
+use foundationdb::{FdbBindingError, FdbError};
 use std::fmt;
 
 #[test]
@@ -54,65 +54,6 @@ fn get_fdb_error_boxed_binding_error() {
     let inner = FdbBindingError::from(FdbError::from_code(1020));
     let err = FdbBindingError::new_custom_error(Box::new(inner));
     assert_eq!(err.get_fdb_error().map(|e| e.code()), Some(1020));
-}
-
-/// A layer error enum implementing RetryableError with the default
-/// source-walk classification.
-#[derive(Debug)]
-enum TypedLayerError {
-    Fdb(FdbError),
-    Binding(FdbBindingError),
-    Invalid,
-}
-
-impl fmt::Display for TypedLayerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-impl std::error::Error for TypedLayerError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Fdb(e) => Some(e),
-            Self::Binding(e) => Some(e),
-            Self::Invalid => None,
-        }
-    }
-}
-
-impl From<FdbError> for TypedLayerError {
-    fn from(e: FdbError) -> Self {
-        Self::Fdb(e)
-    }
-}
-
-impl From<FdbBindingError> for TypedLayerError {
-    fn from(e: FdbBindingError) -> Self {
-        Self::Binding(e)
-    }
-}
-
-impl RetryableError for TypedLayerError {}
-
-#[test]
-fn retry_decision_default_walk() {
-    let wrapped = TypedLayerError::Fdb(FdbError::from_code(1020));
-    match wrapped.retry_decision() {
-        RetryDecision::Fdb(e) => assert_eq!(e.code(), 1020),
-        other => panic!("expected Fdb decision, got {other:?}"),
-    }
-
-    let nested = TypedLayerError::Binding(FdbBindingError::from(FdbError::from_code(1020)));
-    match nested.retry_decision() {
-        RetryDecision::Fdb(e) => assert_eq!(e.code(), 1020),
-        other => panic!("expected Fdb decision, got {other:?}"),
-    }
-
-    match TypedLayerError::Invalid.retry_decision() {
-        RetryDecision::Fatal => {}
-        other => panic!("expected Fatal decision, got {other:?}"),
-    }
 }
 
 #[test]

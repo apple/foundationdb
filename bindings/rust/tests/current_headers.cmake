@@ -11,6 +11,7 @@ file(MAKE_DIRECTORY ${OUTPUT_DIR})
 file(COPY
   ${fdb_source_dir}/bindings/c/foundationdb/fdb_c.h
   ${fdb_source_dir}/bindings/c/foundationdb/fdb_c_types.h
+  ${fdb_source_dir}/bindings/c/foundationdb/CWorkload.h
   ${fdb_source_dir}/fdbclient/vexillographer/fdb.options
   DESTINATION ${OUTPUT_DIR})
 configure_file(

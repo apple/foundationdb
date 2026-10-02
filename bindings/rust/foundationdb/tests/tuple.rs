@@ -14,9 +14,6 @@ use futures::StreamExt;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 
-#[cfg(feature = "accounting")]
-use foundationdb::ClientBudget;
-
 mod common;
 
 #[tokio::test]
@@ -237,34 +234,6 @@ async fn commit_error_after_allocation(
 
     trx.set(key, b"original value");
     trx.commit().await.expect_err("transaction must conflict")
-}
-
-#[cfg(feature = "accounting")]
-#[tokio::test]
-async fn user_version_allocator_survives_budget_changes_and_does_not_affect_accounting()
--> Result<(), FdbBindingError> {
-    let db = common::database().await?;
-
-    let trx = db.create_trx()?;
-    assert_eq!(trx.allocate_user_version()?, 0);
-    trx.set_client_budget(ClientBudget::default());
-    assert_eq!(trx.allocate_user_version()?, 1);
-
-    let (version, metrics) = db
-        .instrumented_run(|trx, _| async move {
-            assert_eq!(trx.allocate_user_version()?, 0);
-            trx.allocate_user_version()
-        })
-        .await
-        .map_err(|(error, _metrics)| error)?;
-    assert_eq!(version, 1);
-    let usage = metrics.total_usage();
-    assert_eq!(usage.bytes_read, 0);
-    assert_eq!(usage.bytes_written, 0);
-    assert_eq!(usage.call_set, 0);
-    assert_eq!(usage.call_atomic_op, 0);
-
-    Ok(())
 }
 
 #[tokio::test]

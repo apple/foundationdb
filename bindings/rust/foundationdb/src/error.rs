@@ -8,8 +8,6 @@
 
 //! Error types for the Fdb crate
 
-#[cfg(feature = "accounting")]
-use crate::budget::BudgetExceeded;
 use crate::directory::DirectoryError;
 use crate::options;
 use crate::tuple::PackError;
@@ -110,13 +108,6 @@ pub enum FdbBindingError {
     /// Never box a stringified error (`e.to_string().into()`): the conversion
     /// destroys the source chain, and a retryable error becomes fatal.
     CustomError(Box<dyn std::error::Error + Send + Sync>),
-    /// The client-side budget of the transaction attempt was exceeded, as
-    /// reported by [`crate::Transaction::check_client_budget`]
-    #[cfg(feature = "accounting")]
-    ClientBudgetExceeded(BudgetExceeded),
-    #[cfg(feature = "recipes-leader-election")]
-    /// Leader election specific error
-    LeaderElectionError(crate::recipes::leader_election::LeaderElectionError),
 }
 
 /// Walks an error's `source()` chain, returning the first `FdbError` found.
@@ -172,20 +163,6 @@ impl From<DirectoryError> for FdbBindingError {
     }
 }
 
-#[cfg(feature = "accounting")]
-impl From<BudgetExceeded> for FdbBindingError {
-    fn from(e: BudgetExceeded) -> Self {
-        Self::ClientBudgetExceeded(e)
-    }
-}
-
-#[cfg(feature = "recipes-leader-election")]
-impl From<crate::recipes::leader_election::LeaderElectionError> for FdbBindingError {
-    fn from(error: crate::recipes::leader_election::LeaderElectionError) -> Self {
-        Self::LeaderElectionError(error)
-    }
-}
-
 impl FdbBindingError {
     /// create a new custom error
     pub fn new_custom_error(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
@@ -207,10 +184,6 @@ impl Debug for FdbBindingError {
                 write!(f, "Transaction user version allocator exhausted")
             }
             FdbBindingError::CustomError(err) => write!(f, "{err:?}"),
-            #[cfg(feature = "accounting")]
-            FdbBindingError::ClientBudgetExceeded(err) => write!(f, "{err}"),
-            #[cfg(feature = "recipes-leader-election")]
-            FdbBindingError::LeaderElectionError(err) => write!(f, "{err:?}"),
         }
     }
 }
@@ -229,114 +202,8 @@ impl std::error::Error for FdbBindingError {
             Self::DirectoryError(e) => Some(e),
             Self::PackError(e) => Some(e),
             Self::CustomError(e) => Some(e.as_ref()),
-            #[cfg(feature = "accounting")]
-            Self::ClientBudgetExceeded(e) => Some(e),
             Self::ReferenceToTransactionKept => None,
             Self::UserVersionExhausted => None,
-            #[cfg(feature = "recipes-leader-election")]
-            Self::LeaderElectionError(e) => Some(e),
-        }
-    }
-}
-
-/// What the retry loop of [`crate::Database::run`] does with a closure error.
-///
-/// Produced by [`RetryableError::retry_decision`]. In every case the C API
-/// remains the single retry governor: backoff, max retry delay and
-/// `TransactionOption::RetryLimit` are applied by `fdb_transaction_on_error`,
-/// never by a Rust-side budget.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy)]
-pub enum RetryDecision {
-    /// The error is, or wraps, this `FdbError`: hand it to `on_error` and let
-    /// the C API judge retryability.
-    Fdb(FdbError),
-    /// App-level retry request with no native error underneath (lock
-    /// contention, optimistic-concurrency conditions). Routed through
-    /// `on_error` with code 1020 (not_committed, retryable by definition), so
-    /// backoff and retry limits apply uniformly.
-    Retry,
-    /// Not retryable: the loop returns the original error to the caller as-is.
-    Fatal,
-}
-
-/// What the retry loop of [`crate::Database::run`] asks of a closure error.
-///
-/// The default `retry_decision` walks the `source()` chain looking for an
-/// [`FdbError`], so any error type that keeps its `FdbError` as a source (the
-/// idiomatic thiserror `#[from]`/`#[source]` pattern) is retry-transparent
-/// without overriding anything. Override only to add [`RetryDecision::Retry`]
-/// arms for app-level retry conditions.
-///
-/// The `From` bounds let the loop surface its own failures through your type:
-/// `From<FdbError>` supports `?` on `FdbResult` inside the closure, and
-/// `From<FdbBindingError>` carries loop-level failures such as
-/// [`FdbBindingError::ReferenceToTransactionKept`].
-///
-/// `FdbError` itself cannot implement this trait (there is no lossless
-/// `From<FdbBindingError> for FdbError`); use a wrapper type such as
-/// [`FdbBindingError`] or your own enum.
-///
-/// # Example
-///
-/// ```
-/// use foundationdb::{FdbBindingError, FdbError, RetryableError};
-///
-/// #[derive(Debug)]
-/// enum MyLayerError {
-///     Fdb(FdbError),
-///     Binding(FdbBindingError),
-///     InvalidDocument,
-/// }
-///
-/// impl std::fmt::Display for MyLayerError {
-///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-///         write!(f, "{self:?}")
-///     }
-/// }
-///
-/// impl std::error::Error for MyLayerError {
-///     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-///         match self {
-///             Self::Fdb(e) => Some(e),
-///             Self::Binding(e) => Some(e),
-///             Self::InvalidDocument => None,
-///         }
-///     }
-/// }
-///
-/// impl From<FdbError> for MyLayerError {
-///     fn from(e: FdbError) -> Self {
-///         Self::Fdb(e)
-///     }
-/// }
-///
-/// impl From<FdbBindingError> for MyLayerError {
-///     fn from(e: FdbBindingError) -> Self {
-///         Self::Binding(e)
-///     }
-/// }
-///
-/// // The default source() walk makes wrapped FdbErrors retryable.
-/// impl RetryableError for MyLayerError {}
-/// ```
-pub trait RetryableError:
-    std::error::Error + Send + Sync + Sized + 'static + From<FdbError> + From<FdbBindingError>
-{
-    /// Classifies this error for the retry loop.
-    fn retry_decision(&self) -> RetryDecision {
-        match find_fdb_error(self) {
-            Some(e) => RetryDecision::Fdb(e),
-            None => RetryDecision::Fatal,
-        }
-    }
-}
-
-impl RetryableError for FdbBindingError {
-    fn retry_decision(&self) -> RetryDecision {
-        match self.get_fdb_error() {
-            Some(e) => RetryDecision::Fdb(e),
-            None => RetryDecision::Fatal,
         }
     }
 }

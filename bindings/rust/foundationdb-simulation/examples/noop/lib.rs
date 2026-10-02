@@ -1,33 +1,14 @@
 use std::time::Duration;
 
-use foundationdb::env::Environment;
 use foundationdb_simulation::{
     Metric, Metrics, RustWorkload, RustWorkloadFactory, Severity, SimDatabase, WorkloadContext,
     WrappedWorkload, register_factory,
 };
 
-/// Measures elapsed time through the environment it was given, never through the
-/// machine clock.
-struct SimulatedStopwatch {
-    env: Environment,
-}
-
-impl SimulatedStopwatch {
-    fn new(env: Environment) -> Self {
-        Self { env }
-    }
-
-    /// A reading to compare with a later one, simulated time here.
-    fn mark(&self) -> Duration {
-        self.env.clock().monotonic()
-    }
-}
-
 struct NoopWorkload {
     name: String,
     client_id: i32,
     context: WorkloadContext,
-    stopwatch: SimulatedStopwatch,
 }
 
 impl RustWorkload for NoopWorkload {
@@ -46,13 +27,12 @@ impl RustWorkload for NoopWorkload {
             "Test",
             &[("Layer", "Rust"), ("Stage", "Start")],
         );
-        // Exercise WorkloadContext::delay (requires fdbserver 7.4.6+, the C API path).
-        let before = self.stopwatch.mark();
+        let before = self.context.now();
         self.context
             .delay(Duration::from_secs(1))
             .await
             .expect("delay future should resolve");
-        let after = self.stopwatch.mark();
+        let after = self.context.now();
         // The difference is simulated time, not machine time: the simulator decides
         // when the clock advances, so these readings are deterministic.
         println!(
@@ -82,15 +62,10 @@ impl RustWorkload for NoopWorkload {
 }
 impl NoopWorkload {
     fn new(name: String, client_id: i32, context: WorkloadContext) -> Self {
-        // The same struct runs in production with `Environment::default()`, in tests
-        // with `Environment::with_seed(..)` and here with the simulator's
-        // `context.environment()`: only the environment swaps.
-        let stopwatch = SimulatedStopwatch::new(context.environment());
         Self {
             name,
             client_id,
             context,
-            stopwatch,
         }
     }
 }
@@ -106,10 +81,6 @@ impl RustWorkloadFactory for NoopFactory {
         let client_id = context.client_id();
         let client_count = context.client_count();
         println!("RustWorkloadFactory::create({name})[{client_id}/{client_count}]");
-        println!(
-            "my_c_option: {:?}",
-            context.get_option::<String>("my_c_option")
-        );
         println!(
             "my_c_option: {:?}",
             context.get_option::<String>("my_c_option")

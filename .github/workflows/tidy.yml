@@ -118,14 +118,7 @@ jobs:
               if [[ $FILE == fdbserver/*/*RocksDB*.cpp ]]; then
                 ninja -C build_output fdbserver/rocksdb-prefix/src/rocksdb-stamp/rocksdb-download
               fi
-              COMPILE_ARGS=()
-              case "$FILE" in
-                bindings/rust/foundationdb-simulation/src/CppWorkload.cpp|bindings/rust/foundationdb-simulation/src/headers/CppWorkload.h)
-                  # Cargo owns this bridge, so it has no CMake compilation database entry.
-                  COMPILE_ARGS=(-- -x c++ -std=c++14 -DFDB_API_VERSION=740)
-                  ;;
-              esac
-              if ! clang-tidy -p build_output --warnings-as-errors='*' "$FILE" "${COMPILE_ARGS[@]}"; then
+              if ! clang-tidy -p build_output --warnings-as-errors='*' "$FILE"; then
                 PASSED=false
               fi
               echo

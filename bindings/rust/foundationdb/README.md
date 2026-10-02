@@ -50,13 +50,8 @@ This Rust crate is not tied to any Async Runtime.
 | `uuid`                 | Support for the uuid crate for Tuples                                          |
 | `num-bigint`           | Support for the bigint crate for Tuples                                        |
 | `trace`                | Enable tracing on transaction related operations                               |
-| `accounting`           | Opt in to transaction usage counters, client budgets, and metrics hooks         |
-| `recipes`              | Opt in to all distributed-system recipes                                        |
-| `recipes-leader-election` | Opt in to leader election and its ranked-register dependency                  |
-| `recipes-ranked-register` | Opt in to the ranked-register recipe independently                          |
 
-Only `uuid` is enabled by default. Accounting and recipes are independent opt-in
-extensions; ordinary transactions do not maintain Rust-side usage counters.
+Only `uuid` is enabled by default.
 
 ### Hello, World using the crate
 
@@ -106,18 +101,10 @@ async fn hello_world() -> foundationdb::FdbResult<()> {
 
 ## Additional notes
 
-### The class-scheduling tutorial
+### API examples
 
-The official FoundationDB's tutorial is called the [Class Scheduling](https://apple.github.io/foundationdb/class-scheduling.html). You can find the Rust version in the [examples](https://github.com/apple/foundationdb/tree/main/bindings/rust/foundationdb/examples).
-
-### The blob tutorial
-
-The official FoundationDB documentation provides also [another topic](https://apple.github.io/foundationdb/largeval.html#modeling-large-values)
-which is further discussed inside a [design recipe](https://apple.github.io/foundationdb/blob.html).
-A Rust implementation can be found [here](https://github.com/apple/foundationdb/tree/main/bindings/rust/foundationdb/examples/blob.rs).
-
-Another [example](https://github.com/apple/foundationdb/tree/main/bindings/rust/foundationdb/examples/blob-with-manifest.rs),
-explores how to use subspaces to attach metadata to our blob.
+The `examples/` directory demonstrates native operations, key selectors,
+versionstamps, and multiple client API versions.
 
 ### Must-read documentations
 

@@ -12,16 +12,11 @@ use foundationdb_sys::if_cfg_api_versions;
 extern crate static_assertions;
 
 pub mod api;
-#[deny(missing_docs)]
-#[cfg(feature = "accounting")]
-pub mod budget;
 if_cfg_api_versions! {min = 510, max = 600 =>
     pub mod cluster;
 }
 mod database;
 pub mod directory;
-#[deny(missing_docs)]
-pub mod env;
 mod error;
 if_cfg_api_versions! {min = 700 =>
     #[deny(missing_docs)]
@@ -34,26 +29,10 @@ if_cfg_api_versions! {min = 710 =>
     pub mod mapped_key_values;
 }
 
-#[cfg(feature = "accounting")]
-pub mod metrics;
-
 /// Generated configuration types for use with the various `set_option` functions
 #[allow(clippy::all)]
 pub mod options;
 
-#[cfg(feature = "recipes-ranked-register")]
-pub mod recipes;
-
-// Re-export metrics types for convenience
-#[cfg(feature = "accounting")]
-pub use crate::metrics::{
-    AttemptMetrics, AttemptOutcome, ConflictKeys, MetricsReport, TransactionMetrics,
-};
-
-#[deny(missing_docs)]
-pub mod runner;
-
-pub mod timekeeper;
 mod transaction;
 mod tuple_ext;
 
@@ -66,18 +45,9 @@ if_cfg_api_versions! {min = 510, max = 600 =>
     pub use crate::cluster::Cluster;
 }
 
-#[cfg(feature = "accounting")]
-pub use crate::budget::{AttemptUsage, BudgetExceeded, BudgetKind, ClientBudget, UsageSnapshot};
 pub use crate::database::*;
-pub use crate::env::{Clock, Environment, Rng, SeededRng, WallClock};
-pub use crate::error::{FdbBindingError, RetryDecision, RetryableError};
-pub use crate::error::{FdbError, FdbResult};
+pub use crate::error::{FdbBindingError, FdbError, FdbResult};
 pub use crate::keyselector::*;
-#[cfg(feature = "accounting")]
-pub use crate::runner::MetricsHooks;
-pub use crate::runner::{
-    AttemptFailure, NativeRetryPolicy, RetryPolicy, RunnerHooks, TransactionRunner,
-};
 pub use crate::transaction::*;
 
 /// Initialize the FoundationDB Client API and start the network thread.

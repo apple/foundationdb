@@ -6,13 +6,12 @@
 // copied, modified, or distributed except according to those terms.
 
 //! Retry behavior of `Database::run` for closure errors that wrap an
-//! FdbError, request an app-level retry, or are fatal (#479).
+//! FdbError or are fatal (#479).
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-use foundationdb::runner::{AttemptFailure, RetryPolicy};
-use foundationdb::{FdbBindingError, FdbError, RetryDecision, RetryableError, options};
+use foundationdb::{FdbBindingError, FdbError, options};
 
 mod common;
 
@@ -35,11 +34,9 @@ impl std::error::Error for WrappedFdbError {
     }
 }
 
-/// A typed layer error with an app-level retry condition.
+/// A typed layer error preserving the native error as its source.
 #[derive(Debug)]
 enum RetryTestError {
-    /// App-level retry request, no native error underneath.
-    NeedsRetry,
     /// A domain error with no FdbError anywhere in its chain.
     InvalidDocument,
     Fdb(FdbError),
@@ -57,7 +54,7 @@ impl std::error::Error for RetryTestError {
         match self {
             Self::Fdb(e) => Some(e),
             Self::Binding(e) => Some(e),
-            Self::NeedsRetry | Self::InvalidDocument => None,
+            Self::InvalidDocument => None,
         }
     }
 }
@@ -71,16 +68,6 @@ impl From<FdbError> for RetryTestError {
 impl From<FdbBindingError> for RetryTestError {
     fn from(e: FdbBindingError) -> Self {
         Self::Binding(e)
-    }
-}
-
-impl RetryableError for RetryTestError {
-    fn retry_decision(&self) -> RetryDecision {
-        match self {
-            Self::NeedsRetry => RetryDecision::Retry,
-            Self::Fdb(e) => RetryDecision::Fdb(*e),
-            Self::InvalidDocument | Self::Binding(_) => RetryDecision::Fatal,
-        }
     }
 }
 
@@ -134,32 +121,10 @@ async fn run_retries_typed_wrapped_error() {
     assert_eq!(attempt.load(Ordering::SeqCst), 2);
 }
 
-/// RetryDecision::Retry re-runs the closure through on_error(1020).
+/// Native RetryLimit exhausts the retries while preserving the typed closure
+/// error and its source, rather than replacing it with the on_error result.
 #[tokio::test]
-async fn run_retry_decision_reruns_closure() {
-    let db = common::database().await.expect("failed to open database");
-    let attempt = AtomicU8::new(0);
-    let attempt_ref = &attempt;
-
-    let result = db
-        .run(|trx, _| async move {
-            if attempt_ref.fetch_add(1, Ordering::SeqCst) == 0 {
-                return Err(RetryTestError::NeedsRetry);
-            }
-            trx.set(b"run_retry_decision", b"ok");
-            Ok(())
-        })
-        .await;
-
-    assert!(result.is_ok(), "Retry decision must re-run the closure");
-    assert_eq!(attempt.load(Ordering::SeqCst), 2);
-}
-
-/// RetryDecision::Retry is governed by the C API retry budget: with
-/// RetryLimit(n) the closure runs n + 1 times and exhaustion returns the
-/// ORIGINAL typed error, not a synthetic FdbError.
-#[tokio::test]
-async fn run_retry_decision_honors_retry_limit() {
+async fn run_wrapped_error_honors_retry_limit() {
     let db = common::database().await.expect("failed to open database");
     let attempt = AtomicU8::new(0);
     let attempt_ref = &attempt;
@@ -169,14 +134,11 @@ async fn run_retry_decision_honors_retry_limit() {
         .run(|trx, _| async move {
             trx.set_option(options::TransactionOption::RetryLimit(retry_limit))?;
             attempt_ref.fetch_add(1, Ordering::SeqCst);
-            Err(RetryTestError::NeedsRetry)
+            Err(RetryTestError::from(FdbError::from_code(1020)))
         })
         .await;
 
-    assert!(
-        matches!(result, Err(RetryTestError::NeedsRetry)),
-        "exhaustion must return the original typed error, got {result:?}"
-    );
+    assert!(matches!(result, Err(RetryTestError::Fdb(e)) if e.code() == 1020));
     assert_eq!(attempt.load(Ordering::SeqCst) as i64, retry_limit + 1);
 }
 
@@ -298,48 +260,29 @@ async fn run_keeps_maybe_committed_after_commit_conflicts() {
     assert_eq!(attempt.load(Ordering::SeqCst), 3);
 }
 
-/// A [`RetryPolicy`] rewriting the decision cannot clear `MaybeCommitted`: the
-/// flag is computed from the original error, before the policy is consulted.
+/// A retained clone must not permit commit or reset while user code can still
+/// use the transaction. Exercise both the success and native-retry paths.
 #[tokio::test]
-async fn retry_policy_cannot_clear_maybe_committed() {
-    /// Turns every failure into a plain retry, which on its own would leave
-    /// `MaybeCommitted` untouched.
-    struct AlwaysRetry;
-
-    impl RetryPolicy<RetryTestError> for AlwaysRetry {
-        fn decide(
-            &self,
-            _failure: AttemptFailure<'_, RetryTestError>,
-            _proposed: RetryDecision,
-            _attempt: usize,
-        ) -> RetryDecision {
-            RetryDecision::Retry
-        }
-    }
-
+async fn run_rejects_retained_transaction_clones() {
     let db = common::database().await.expect("failed to open database");
-    let attempt = AtomicU8::new(0);
-    let attempt_ref = &attempt;
-    let seen = AtomicBool::new(false);
-    let seen_ref = &seen;
-
-    let result: Result<(), RetryTestError> = db
-        .runner()
-        .retry_policy(&AlwaysRetry)
-        .run(|trx, maybe_committed| async move {
-            if attempt_ref.fetch_add(1, Ordering::SeqCst) == 0 {
-                return Err(RetryTestError::from(FdbError::from_code(1021)));
-            }
-            seen_ref.store(maybe_committed.into(), Ordering::SeqCst);
-            trx.set(b"run_retry_policy_maybe_committed", b"ok");
-            Ok(())
-        })
-        .await;
-
-    assert!(result.is_ok(), "the policy must retry: {result:?}");
-    assert_eq!(attempt.load(Ordering::SeqCst), 2);
-    assert!(
-        seen.load(Ordering::SeqCst),
-        "the policy must not be able to clear maybe_committed"
-    );
+    for retry in [false, true] {
+        let retained = std::sync::Mutex::new(None);
+        let result: Result<(), FdbBindingError> = db
+            .run(|trx, _| {
+                *retained.lock().expect("retained transaction mutex") = Some(trx.clone());
+                async move {
+                    trx.set(b"run_retained_transaction", b"uncommitted");
+                    if retry {
+                        Err(FdbBindingError::from(FdbError::from_code(1020)))
+                    } else {
+                        Ok(())
+                    }
+                }
+            })
+            .await;
+        assert!(matches!(
+            result,
+            Err(FdbBindingError::ReferenceToTransactionKept)
+        ));
+    }
 }
