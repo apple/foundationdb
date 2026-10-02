@@ -22,10 +22,12 @@ keywords = ["foundationdb", "kv"]
 categories = ["database"]
 
 [package.metadata.docs.rs]
-features = ["embedded-fdb-include", "fdb-7_4", "uuid", "recipes"]
+features = ["embedded-fdb-include", "fdb-7_4", "uuid", "recipes", "accounting"]
 
 [features]
-default = ["uuid", "recipes"]
+# Optional client-side usage counters, budgets, and transaction metrics.
+accounting = []
+default = ["uuid"]
 uuid = ["dep:uuid", "foundationdb-tuple/uuid"]
 num-bigint = ["dep:num-bigint", "foundationdb-tuple/num-bigint"]
 # Use the locally embedded foundationdb fdb_c.h and fdb.options files
@@ -80,3 +82,23 @@ tracing-subscriber = "0.3.23"
 name = "api_version_library"
 crate-type = ["cdylib"]
 required-features = ["fdb-7_4"]
+
+[[test]]
+name = "budget"
+required-features = ["accounting"]
+
+[[test]]
+name = "metrics"
+required-features = ["accounting"]
+
+[[example]]
+name = "budgeted_scan"
+required-features = ["accounting"]
+
+[[example]]
+name = "instrumented"
+required-features = ["accounting"]
+
+[[example]]
+name = "conflict_reporting"
+required-features = ["accounting"]

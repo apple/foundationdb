@@ -13,6 +13,7 @@ extern crate static_assertions;
 
 pub mod api;
 #[deny(missing_docs)]
+#[cfg(feature = "accounting")]
 pub mod budget;
 if_cfg_api_versions! {min = 510, max = 600 =>
     pub mod cluster;
@@ -33,16 +34,18 @@ if_cfg_api_versions! {min = 710 =>
     pub mod mapped_key_values;
 }
 
+#[cfg(feature = "accounting")]
 pub mod metrics;
 
 /// Generated configuration types for use with the various `set_option` functions
 #[allow(clippy::all)]
 pub mod options;
 
-#[cfg(any(feature = "recipes", feature = "recipes-leader-election"))]
+#[cfg(feature = "recipes-ranked-register")]
 pub mod recipes;
 
 // Re-export metrics types for convenience
+#[cfg(feature = "accounting")]
 pub use crate::metrics::{
     AttemptMetrics, AttemptOutcome, ConflictKeys, MetricsReport, TransactionMetrics,
 };
@@ -63,14 +66,17 @@ if_cfg_api_versions! {min = 510, max = 600 =>
     pub use crate::cluster::Cluster;
 }
 
+#[cfg(feature = "accounting")]
 pub use crate::budget::{AttemptUsage, BudgetExceeded, BudgetKind, ClientBudget, UsageSnapshot};
 pub use crate::database::*;
 pub use crate::env::{Clock, Environment, Rng, SeededRng, WallClock};
 pub use crate::error::{FdbBindingError, RetryDecision, RetryableError};
 pub use crate::error::{FdbError, FdbResult};
 pub use crate::keyselector::*;
+#[cfg(feature = "accounting")]
+pub use crate::runner::MetricsHooks;
 pub use crate::runner::{
-    AttemptFailure, MetricsHooks, NativeRetryPolicy, RetryPolicy, RunnerHooks, TransactionRunner,
+    AttemptFailure, NativeRetryPolicy, RetryPolicy, RunnerHooks, TransactionRunner,
 };
 pub use crate::transaction::*;
 

@@ -489,7 +489,7 @@ impl DirectoryLayer {
                     return Err(DirectoryError::Version(msg));
                 }
 
-                if minor > MINOR_VERSION {
+                if minor > MINOR_VERSION && allow_creation {
                     let msg = format!(
                         "directory with version {major}.{minor}.{patch} is read-only when opened using directory layer {MAJOR_VERSION}.{MINOR_VERSION}.{PATCH_VERSION}"
                     );

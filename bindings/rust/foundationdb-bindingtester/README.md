@@ -11,19 +11,27 @@ bindings/rust/scripts/setup_bindingtester.sh /path/to/build
 ```
 
 With a running FoundationDB cluster, run the fixed regression seeds followed by
-one iteration of the API, concurrent API, directory, and directory
-allocator tests:
+the shared scripted suite and one iteration of the API, concurrent API, directory,
+and directory allocator tests:
 
 ```sh
 bindings/rust/scripts/run_bindingtester.sh /path/to/build 1 --cluster-file /path/to/fdb.cluster
 ```
 
-The script uses Python and Rust artifacts from the same build, tests API version
-740, and compares API/directory results with the Python binding. It copies the
+The script uses Python and Rust artifacts from the same build and compares
+API/directory results with the Python binding. Fixed regression seeds retain
+the API version that reproduced each failure;
+the shared runner uses API 740 for scripted cases and samples supported API
+versions for randomized cases. It copies the
 shared harness and Python tester into the build tree so the Python tester imports
 the generated binding there. It does not install a Python package or clone a
 second FoundationDB checkout. Increase the second argument to repeat randomized tests; retain the logged seeds to reproduce
 failures.
+
+Both packaged binding-test launchers include Rust automatically when its tester
+executable is present. `BINDINGTESTS=rust` selects only Rust with either launcher;
+`rust_bindingtester_tests` runs the same suites through CTest when
+`RUN_RUST_INTEGRATION_TESTS=ON`.
 
 For an individual case after the script has staged the shared test harness:
 
@@ -42,6 +50,6 @@ can also select a tester built directly with Cargo.
 The registered tester supports runtime API versions 610 through 740 and the
 shared tuple types, including arbitrary-width integers and versionstamps.
 Directory snapshot operations are disabled because the imported directory layer
-does not implement them. The scripted suite is skipped because it requires the
-current API version (800), beyond the Rust binding's API 740 support. Importing
-the binding does not establish full feature parity.
+does not implement them. Scripted tests use the newest API shared by the selected
+testers, preserving API 800 coverage for bindings that support it. Importing the
+binding does not establish full feature parity.

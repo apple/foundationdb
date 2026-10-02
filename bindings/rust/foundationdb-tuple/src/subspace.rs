@@ -107,6 +107,11 @@ impl Subspace {
     ///
     /// An incomplete versionstamp appends a four-byte offset, suitable for
     /// versionstamped mutations with FoundationDB API 520 or later.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless the subspace and tuple together contain exactly one
+    /// incomplete versionstamp.
     pub fn pack_with_versionstamp<T: TuplePack>(&self, t: &T) -> Vec<u8> {
         let mut output = self.prefix.clone();
         let mut versionstamp_offset = self.versionstamp_offset;
@@ -115,10 +120,11 @@ impl Subspace {
             VersionstampOffset::OneIncomplete { offset } => {
                 output.extend_from_slice(&offset.to_le_bytes());
             }
-            VersionstampOffset::MultipleIncomplete => {
-                panic!("Subspace cannot contain more than one incomplete versionstamp");
+            VersionstampOffset::None { .. } | VersionstampOffset::MultipleIncomplete => {
+                panic!(
+                    "Subspace::pack_with_versionstamp requires exactly one incomplete versionstamp"
+                );
             }
-            _ => {}
         }
         output
     }
@@ -196,11 +202,9 @@ mod tests {
 
     #[test]
     fn subspace_unpack_with_versionstamp() {
-        // On unpack, the versionstamp will be complete, so pack_with_versionstamp won't append
-        // the offset.
         let subspace: Subspace = 1.into();
         let tup = (Versionstamp::complete([1; 10], 0), 2);
-        let packed = subspace.pack_with_versionstamp(&tup);
+        let packed = subspace.pack(&tup);
         let tup_unpack: (Versionstamp, i64) = subspace.unpack(&packed).unwrap();
         assert_eq!(tup, tup_unpack);
 
@@ -215,7 +219,7 @@ mod tests {
     fn unpack_with_subspace_versionstamp() {
         let subspace: Subspace = Versionstamp::complete([1; 10], 2).into();
         let tup = (Versionstamp::complete([1; 10], 0), 2);
-        let packed = subspace.pack_with_versionstamp(&tup);
+        let packed = subspace.pack(&tup);
         let tup_unpack: (Versionstamp, i64) = subspace.unpack(&packed).unwrap();
         assert_eq!(tup, tup_unpack);
         assert!(
@@ -243,6 +247,16 @@ mod tests {
         let packed = subspace.pack_with_versionstamp(&tup);
         let expected = pack_with_versionstamp(&(1, Versionstamp::incomplete(0), 1, 2));
         assert_eq!(expected, packed);
+    }
+
+    #[test]
+    fn subspace_versionstamped_packing_requires_an_incomplete_stamp() {
+        let complete = Versionstamp::complete([1; 10], 0);
+        let subspace: Subspace = 1.into();
+        assert!(std::panic::catch_unwind(|| subspace.pack_with_versionstamp(&2)).is_err());
+        assert!(std::panic::catch_unwind(|| subspace.pack_with_versionstamp(&complete)).is_err());
+        let subspace: Subspace = complete.into();
+        assert!(std::panic::catch_unwind(|| subspace.pack_with_versionstamp(&2)).is_err());
     }
 
     #[test]

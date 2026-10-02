@@ -6,13 +6,16 @@
 // copied, modified, or distributed except according to those terms.
 
 use foundationdb::{
-    ClientBudget, Database, FdbBindingError, FdbError,
+    Database, FdbBindingError, FdbError,
     options::MutationType,
     tuple::{Subspace, Versionstamp},
 };
 use futures::StreamExt;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
+
+#[cfg(feature = "accounting")]
+use foundationdb::ClientBudget;
 
 mod common;
 
@@ -95,7 +98,7 @@ async fn test_subspace_with_versionstamp(db: &Database) {
     );
     // we can read the key back by re-packing with the subspace:
     let trx = db.create_trx().expect("cannot create txn");
-    let key = subspace.pack_with_versionstamp(&key_versionstamp);
+    let key = subspace.pack(&key_versionstamp);
     let value = trx.get(&key, false).await.expect("cannot read key");
     assert_eq!(value.as_deref(), Some(b"hello2".as_ref()));
     trx.commit().await.expect("cannot commit");
@@ -236,6 +239,7 @@ async fn commit_error_after_allocation(
     trx.commit().await.expect_err("transaction must conflict")
 }
 
+#[cfg(feature = "accounting")]
 #[tokio::test]
 async fn user_version_allocator_survives_budget_changes_and_does_not_affect_accounting()
 -> Result<(), FdbBindingError> {

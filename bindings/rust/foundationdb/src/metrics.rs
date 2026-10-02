@@ -1,9 +1,10 @@
 //! Per-attempt metrics collected by [`Database::instrumented_run`](crate::Database::instrumented_run).
 //!
+//! Available with the `accounting` Cargo feature.
+//!
 //! The report is a list of [`AttemptMetrics`], one per transaction attempt, in
 //! order: a retried transaction keeps everything it did in its earlier
-//! attempts. Operation counters come from the always-on
-//! [`UsageSnapshot`] of the attempt, so
+//! attempts. Operation counters come from the attempt's [`UsageSnapshot`], so
 //! instrumentation only adds the timings, the outcome and the aggregates on
 //! top of what the binding already counts.
 
@@ -105,8 +106,8 @@ impl ConflictKeys {
 pub struct AttemptMetrics {
     /// Position of the attempt in the run, starting at 0.
     pub index: usize,
-    /// Operation counters and bytes of the attempt, from the always-on
-    /// accounting. See [`crate::budget`] for how precise they are.
+    /// Operation counters and bytes of the attempt. See [`crate::budget`] for
+    /// how precise they are.
     pub usage: UsageSnapshot,
     /// Application metrics recorded during the attempt with
     /// [`Transaction::set_custom_metric`](crate::Transaction::set_custom_metric).

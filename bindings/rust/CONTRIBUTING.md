@@ -57,6 +57,13 @@ for comparison with Python. Tuple tests and macro tests do not need a cluster.
 
 `rust_unit_tests` also checks simulation context and metrics callbacks, executor
 wakeups, thread ownership, and phase teardown through native workload callbacks.
+The client is built and tested without accounting by default; the separate
+`rust_accounting_unit_tests` and `rust_accounting_integration_tests` enable the
+`accounting` feature. The latter runs budget, metrics, and related transaction
+coverage. `rust_recipes_integration_tests` separately enables `recipes` for library
+unit tests and the leader-election and ranked-register suites.
+`rust_bindingtester_tests` runs fixed regression seeds and the shared scripted
+and randomized suites against Python.
 Client integration tests check timekeeper read-error propagation and versionstamp
 behavior in separate processes selecting runtime APIs 510, 520, and 740.
 The live-cluster tests also cover raw directory-prefix collisions and transaction
@@ -65,11 +72,17 @@ including reset and reuse. The library test uses current in-tree headers and two
 independently loaded Rust libraries to check concurrent initial API selection,
 shared selection, and runtime/header-version mismatches.
 The simulation safety doctests check that borrowed
-metrics sinks cannot escape their callback and process switching requires `unsafe`.
+metrics sinks cannot escape their callback, process switching requires `unsafe`,
+and the tracing guard cannot move between threads.
 `rust_simulation_wake_order_tests` uses Loom to explore weak-memory interleavings of
 the executor's wake and dequeue code. Its separate Cargo target directory keeps
 model synchronization out of normal builds. These checks do not start the simulator;
 workload execution is a separate check against a compatible server.
+
+Hosted compile checks generate the current C headers and options using
+`tests/current_headers.cmake`, then check both the default client and the optional
+accounting build against those inputs. Historical API checks use their embedded
+headers separately.
 
 The simulation crates and their scripts are retained for focused simulator work;
 their READMEs describe the workload ABI and required server versions. The original

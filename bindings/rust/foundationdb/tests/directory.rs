@@ -55,6 +55,59 @@ async fn test_directory_rejects_occupied_ff_suffix() {
     test_directory_rejects_occupied_raw_prefix("test-directory-ff-suffix", &[0xff]).await;
 }
 
+#[tokio::test]
+async fn test_directory_newer_minor_version_is_read_only() {
+    let db = common::database().await.expect("cannot open fdb");
+    let test_root = Subspace::from("test-directory-newer-minor");
+    let nodes = test_root.subspace(&"node");
+    let directory = DirectoryLayer::new(nodes.clone(), test_root.subspace(&"content"), false);
+    let existing = vec![String::from("existing")];
+    let missing = vec![String::from("missing")];
+
+    let trx = db.create_trx().expect("cannot create txn");
+    trx.clear_subspace_range(&test_root);
+    let created = directory
+        .create(&trx, &existing, None, None)
+        .await
+        .expect("cannot create directory");
+    let version_key = nodes.subspace(&nodes.bytes()).pack(&b"version".as_slice());
+    let version: Vec<_> = [1_u32, 1, 0]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    trx.set(&version_key, &version);
+    trx.commit().await.expect("cannot commit directory fixture");
+
+    let trx = db.create_trx().expect("cannot create txn");
+    let opened = directory
+        .open(&trx, &existing, None)
+        .await
+        .expect("newer minor version must allow reads");
+    assert_eq!(created.bytes().unwrap(), opened.bytes().unwrap());
+    assert!(directory.exists(&trx, &existing).await.unwrap());
+    assert!(!directory.exists(&trx, &missing).await.unwrap());
+    assert_eq!(directory.list(&trx, &[]).await.unwrap(), existing);
+    assert!(
+        directory
+            .create_or_open(&trx, &existing, None, None)
+            .await
+            .is_ok()
+    );
+
+    assert!(matches!(
+        directory.create(&trx, &missing, None, None).await,
+        Err(DirectoryError::Version(_))
+    ));
+    assert!(matches!(
+        directory.move_to(&trx, &existing, &missing).await,
+        Err(DirectoryError::Version(_))
+    ));
+    assert!(matches!(
+        directory.remove(&trx, &existing).await,
+        Err(DirectoryError::Version(_))
+    ));
+}
+
 async fn test_directory_rejects_occupied_raw_prefix(name: &str, suffix: &[u8]) {
     let db = common::database().await.expect("cannot open fdb");
     let test_root = Subspace::from(name);

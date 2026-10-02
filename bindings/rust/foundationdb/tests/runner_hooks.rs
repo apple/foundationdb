@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 mod common;
 
 /// Happy path: instrumented_run completes with metrics, no conflicts.
+#[cfg(feature = "accounting")]
 #[tokio::test]
 async fn test_happy_path_instrumented() -> FdbResult<()> {
     let db = common::database().await?;
@@ -35,6 +36,7 @@ async fn test_happy_path_instrumented() -> FdbResult<()> {
 ///
 /// ReportConflictingKeys (option 712) was added in FDB 6.3.
 #[cfg_api_versions(min = 630)]
+#[cfg(feature = "accounting")]
 #[tokio::test]
 async fn test_conflict_reports_in_metrics() -> FdbResult<()> {
     let db = common::database().await?;
@@ -144,7 +146,9 @@ async fn test_conflict_keys_direct_api() -> FdbResult<()> {
 // Hook composition, ordering and lifecycle
 // ---------------------------------------------------------------------------
 
-use foundationdb::runner::{AttemptFailure, MetricsHooks, RetryPolicy, RunnerHooks};
+#[cfg(feature = "accounting")]
+use foundationdb::runner::MetricsHooks;
+use foundationdb::runner::{AttemptFailure, RetryPolicy, RunnerHooks};
 use std::fmt;
 use std::sync::Mutex;
 
@@ -557,6 +561,7 @@ async fn retry_policy_can_retry_an_otherwise_fatal_error() {
 
 /// The wiring case: metrics hooks stacked on a user hook through the plain
 /// `run_with_hooks` produce the same complete report as `instrumented_run`.
+#[cfg(feature = "accounting")]
 #[tokio::test]
 async fn metrics_hooks_stacked_on_user_hooks_produce_a_full_report() {
     let db = common::database().await.expect("failed to open database");

@@ -187,7 +187,7 @@ class TestSet:
             env=self._env,
         ).run()
         try:
-            await asyncio.wait_for(process.wait(), timeout=self._timeout)
+            return_code = await asyncio.wait_for(process.wait(), timeout=self._timeout)
         finally:
             stdout = (await process.stdout.read(-1)).decode("utf-8")
             stderr = (await process.stderr.read(-1)).decode("utf-8")
@@ -199,6 +199,10 @@ class TestSet:
                 logger.warning("API Test stderr:\n{}".format(stderr))
             else:
                 logger.info("API Test stderr: [Empty]")
+        if return_code != 0:
+            raise RuntimeError(
+                f"Binding tester [{api_language}] {test_name} exited with {return_code}"
+            )
 
     async def _run_test(
         self,
@@ -267,13 +271,23 @@ class TestSet:
 
 
 API_LANGUAGES = [
-    "python3",
+    "python",
     "java",
     "java_async",
     "go",
     "flow",
     "swift",
 ]
+if os.access(
+    os.environ.get(
+        "FDB_RUST_BINDINGTESTER",
+        os.path.join(BINARY_DIR, "tests", "rust", "bin", "bindingtester"),
+    ),
+    os.X_OK,
+):
+    API_LANGUAGES.append("rust")
+if os.environ.get("BINDINGTESTS"):
+    API_LANGUAGES = os.environ["BINDINGTESTS"].split()
 
 
 def _log_cluster_lines_with_severity(
@@ -310,7 +324,7 @@ def _generate_test_list(test_set: TestSet, api_languages: List[str] = API_LANGUA
     result = []
     for test in tests:
         for api_language in api_languages:
-            result.append(lambda lang=api_language: test(lang))
+            result.append(lambda lang=api_language, run=test: run(lang))
     return result
 
 

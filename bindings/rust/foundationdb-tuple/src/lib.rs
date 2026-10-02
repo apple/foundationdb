@@ -190,7 +190,8 @@ pub fn pack<T: TuplePack>(v: &T) -> Vec<u8> {
 ///
 /// # Panics
 ///
-/// Panics if there is multiple versionstamp present or if the encoded data size doesn't fit in `u32`.
+/// Panics unless there is exactly one incomplete versionstamp, or if the
+/// encoded data size doesn't fit in `u32`.
 pub fn pack_with_versionstamp<T: TuplePack>(v: &T) -> Vec<u8> {
     v.pack_to_vec_with_versionstamp()
 }
@@ -208,12 +209,14 @@ pub fn pack_into<T: TuplePack>(v: &T, output: &mut Vec<u8>) -> VersionstampOffse
 ///
 /// # Panics
 ///
-/// Panics if there is multiple versionstamp present or if the encoded data size doesn't fit in `u32`.
+/// Panics unless there is exactly one incomplete versionstamp, or if the
+/// encoded data size doesn't fit in `u32`.
 pub fn pack_into_with_versionstamp<T: TuplePack>(v: &T, output: &mut Vec<u8>) {
     let offset = v.pack_into_vec_with_versionstamp(output);
-    if let VersionstampOffset::MultipleIncomplete = offset {
-        panic!("pack_into_with_versionstamp does not allow multiple versionstamps");
-    }
+    assert!(
+        matches!(offset, VersionstampOffset::OneIncomplete { .. }),
+        "pack_into_with_versionstamp requires exactly one incomplete versionstamp"
+    );
 }
 
 /// Unpack input
@@ -696,5 +699,34 @@ mod tests {
                     [..]
             )
         );
+
+        let mut prefixed = b"prefix".to_vec();
+        pack_into_with_versionstamp(&Versionstamp::incomplete(0), &mut prefixed);
+        let mut expected = b"prefix".to_vec();
+        expected.extend_from_slice(&pack(&Versionstamp::incomplete(0)));
+        expected.extend_from_slice(&7_u32.to_le_bytes());
+        assert_eq!(prefixed, expected);
+    }
+
+    #[test]
+    fn versionstamped_packing_requires_one_incomplete_stamp() {
+        let invalid = [
+            vec![Element::String("foo".into())],
+            vec![Element::Versionstamp(Versionstamp::complete([1; 10], 0))],
+            vec![
+                Element::Versionstamp(Versionstamp::incomplete(0)),
+                Element::Versionstamp(Versionstamp::incomplete(1)),
+            ],
+        ];
+        for tuple in invalid {
+            assert!(std::panic::catch_unwind(|| pack_with_versionstamp(&tuple)).is_err());
+            assert!(
+                std::panic::catch_unwind(|| {
+                    let mut output = b"prefix".to_vec();
+                    pack_into_with_versionstamp(&tuple, &mut output);
+                })
+                .is_err()
+            );
+        }
     }
 }

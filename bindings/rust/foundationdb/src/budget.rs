@@ -7,6 +7,9 @@
 
 //! Per-attempt usage accounting and the client-side budget.
 //!
+//! Available with the `accounting` Cargo feature. Without it, transactions do
+//! not allocate accounting state or count operations and result bytes.
+//!
 //! <div class="warning">
 //!
 //! The budget is a **client-side feature of this Rust binding**, not a native
@@ -29,7 +32,7 @@
 //!
 //! # Per-attempt semantics
 //!
-//! Accounting is always on and scoped to a single *transaction attempt*: usage
+//! With this feature enabled, accounting covers each *transaction attempt*: usage
 //! is reset whenever the transaction restarts (`on_error`, `reset`), while the
 //! configured limits survive and apply to the new attempt. A retried
 //! transaction therefore gets a fresh time and byte allowance, exactly like it
@@ -208,8 +211,8 @@ impl std::error::Error for BudgetExceeded {}
 /// Usage accounted for a single transaction attempt.
 ///
 /// Counters are incremented by [`Transaction`](crate::Transaction) as
-/// operations are issued (writes) or resolved (reads). They are always on: no
-/// instrumentation is required to get them.
+/// operations are issued (writes) or resolved (reads). With `accounting`
+/// enabled, no metrics collector is required to get them.
 ///
 /// A new instance is created for every attempt, see the
 /// [module documentation](self).

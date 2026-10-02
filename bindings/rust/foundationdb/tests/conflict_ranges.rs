@@ -196,6 +196,7 @@ async fn many_conflict_ranges_are_fully_paginated() -> FdbResult<()> {
 /// Reading the conflict ranges is a binding-internal read: it must not move the
 /// usage counters of the attempt, nor consume the client budget.
 #[cfg_api_versions(min = 630)]
+#[cfg(feature = "accounting")]
 #[tokio::test]
 async fn reading_conflict_ranges_is_unmetered() -> FdbResult<()> {
     const KEY: &[u8] = b"test-rcr-unmetered";

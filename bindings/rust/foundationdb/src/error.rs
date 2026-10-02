@@ -8,6 +8,7 @@
 
 //! Error types for the Fdb crate
 
+#[cfg(feature = "accounting")]
 use crate::budget::BudgetExceeded;
 use crate::directory::DirectoryError;
 use crate::options;
@@ -111,6 +112,7 @@ pub enum FdbBindingError {
     CustomError(Box<dyn std::error::Error + Send + Sync>),
     /// The client-side budget of the transaction attempt was exceeded, as
     /// reported by [`crate::Transaction::check_client_budget`]
+    #[cfg(feature = "accounting")]
     ClientBudgetExceeded(BudgetExceeded),
     #[cfg(feature = "recipes-leader-election")]
     /// Leader election specific error
@@ -170,6 +172,7 @@ impl From<DirectoryError> for FdbBindingError {
     }
 }
 
+#[cfg(feature = "accounting")]
 impl From<BudgetExceeded> for FdbBindingError {
     fn from(e: BudgetExceeded) -> Self {
         Self::ClientBudgetExceeded(e)
@@ -204,6 +207,7 @@ impl Debug for FdbBindingError {
                 write!(f, "Transaction user version allocator exhausted")
             }
             FdbBindingError::CustomError(err) => write!(f, "{err:?}"),
+            #[cfg(feature = "accounting")]
             FdbBindingError::ClientBudgetExceeded(err) => write!(f, "{err}"),
             #[cfg(feature = "recipes-leader-election")]
             FdbBindingError::LeaderElectionError(err) => write!(f, "{err:?}"),
@@ -225,6 +229,7 @@ impl std::error::Error for FdbBindingError {
             Self::DirectoryError(e) => Some(e),
             Self::PackError(e) => Some(e),
             Self::CustomError(e) => Some(e.as_ref()),
+            #[cfg(feature = "accounting")]
             Self::ClientBudgetExceeded(e) => Some(e),
             Self::ReferenceToTransactionKept => None,
             Self::UserVersionExhausted => None,

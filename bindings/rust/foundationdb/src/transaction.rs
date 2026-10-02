@@ -14,14 +14,20 @@ use foundationdb_sys as fdb_sys;
 use std::fmt;
 use std::ops::{Deref, Range, RangeInclusive};
 use std::ptr::NonNull;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(feature = "accounting")]
+use std::sync::{Mutex, OnceLock};
+#[cfg(feature = "accounting")]
 use std::time::Instant;
 
+#[cfg(feature = "accounting")]
 use crate::budget::{AttemptUsage, BudgetExceeded, ClientBudget, UsageSlot, UsageSnapshot};
+#[cfg(feature = "accounting")]
 use crate::env::Clock;
 use crate::future::*;
 use crate::keyselector::*;
+#[cfg(feature = "accounting")]
 use crate::metrics::{AttemptOutcome, MetricKey, TransactionMetrics};
 use crate::options;
 
@@ -229,13 +235,14 @@ impl TransactionCommitError {
     /// You should not call this method most of the times and use `Database::transact` which
     /// implements a retry loop strategy for you.
     ///
-    /// On success the transaction enters a new attempt: its
-    /// [usage](Transaction::attempt_usage) restarts from zero, while its
-    /// [client budget](Transaction::set_client_budget) is kept. User versions
+    /// On success the transaction enters a new attempt. With `accounting`, its
+    /// usage restarts from zero and its client budget is kept. User versions
     /// allocated by [`Transaction::allocate_user_version`] are invalid for the
     /// new attempt, which starts allocating again at zero.
     pub fn on_error(self) -> impl Future<Output = FdbResult<Transaction>> {
+        #[cfg(feature = "accounting")]
         self.tr.mark_attempt_end();
+        #[cfg(feature = "accounting")]
         let cause = self.err;
 
         unsafe {
@@ -245,7 +252,9 @@ impl TransactionCommitError {
             ))
         }
         .map_ok(move |()| {
+            #[cfg(feature = "accounting")]
             self.tr.end_attempt(AttemptOutcome::Retried { cause });
+            #[cfg(feature = "accounting")]
             self.tr.begin_attempt_usage();
             self.tr.reset_user_version_allocator();
             self.tr
@@ -358,11 +367,14 @@ pub struct Transaction {
     inner: NonNull<fdb_sys::FDBTransaction>,
     /// Metrics collector of the transaction, attached at creation or by a
     /// runner hook, see [`Transaction::attach_metrics`]. Set at most once.
+    #[cfg(feature = "accounting")]
     metrics: OnceLock<TransactionMetrics>,
-    /// Always-on accounting of the current attempt, see [`crate::budget`].
+    /// Accounting of the current attempt, see [`crate::budget`].
+    #[cfg(feature = "accounting")]
     usage: UsageSlot,
     /// Client-side limits applied to the current attempt. Unlike `usage`, they
     /// are configuration: they survive `on_error` and `reset`.
+    #[cfg(feature = "accounting")]
     budget: Mutex<ClientBudget>,
     /// The next user version to issue for an incomplete versionstamp in the
     /// current transaction attempt.
@@ -566,8 +578,11 @@ impl Transaction {
     pub(crate) fn new(inner: NonNull<fdb_sys::FDBTransaction>) -> Self {
         Self {
             inner,
+            #[cfg(feature = "accounting")]
             metrics: OnceLock::new(),
+            #[cfg(feature = "accounting")]
             usage: UsageSlot::default(),
+            #[cfg(feature = "accounting")]
             budget: Mutex::new(ClientBudget::default()),
             user_version: AtomicU32::new(0),
         }
@@ -603,7 +618,10 @@ impl Transaction {
             .map(|current| current as u16)
             .map_err(|_| FdbBindingError::UserVersionExhausted)
     }
+}
 
+#[cfg(feature = "accounting")]
+impl Transaction {
     /// Attaches a metrics collector to this transaction and opens its first
     /// attempt on the accounting generation currently in use.
     ///
@@ -686,7 +704,7 @@ impl Transaction {
 
     /// Returns the usage accounted for the current transaction attempt.
     ///
-    /// Accounting is always on, no instrumentation needed. The counters are
+    /// Available with `accounting`; no metrics collector is needed. The counters are
     /// client-side estimates and are reset on every new attempt, see
     /// [`crate::budget`].
     #[cfg_attr(feature = "trace", tracing::instrument(level = "debug", skip(self)))]
@@ -698,7 +716,7 @@ impl Transaction {
     ///
     /// The limits are **not** enforced by FoundationDB and not enforced
     /// automatically: they are checked when you call
-    /// [`check_client_budget`](Self::check_client_budget). See [`crate::budget`]
+    /// `check_client_budget`. See [`crate::budget`]
     /// for what is counted and how precise it is.
     ///
     /// Setting a budget starts a fresh accounting generation, so the limits
@@ -784,7 +802,9 @@ impl Transaction {
             .clone();
         budget.check(&self.usage())
     }
+}
 
+impl Transaction {
     /// Called to set an option on an FDBTransaction.
     pub fn set_option(&self, opt: options::TransactionOption) -> FdbResult<()> {
         unsafe { opt.apply(self.inner.as_ptr()) }
@@ -844,6 +864,7 @@ impl Transaction {
             )
         }
 
+        #[cfg(feature = "accounting")]
         self.usage().record_set((key.len() + value.len()) as u64);
     }
 
@@ -870,6 +891,7 @@ impl Transaction {
             )
         }
 
+        #[cfg(feature = "accounting")]
         self.usage().record_clear(key.len() as u64);
     }
 
@@ -882,10 +904,10 @@ impl Transaction {
     /// * `key` - the name of the key to be looked up in the database
     /// * `snapshot` - `true` if this is a [snapshot read](https://apple.github.io/foundationdb/api-c.html#snapshots)
     ///
-    /// The [attempt usage](Self::attempt_usage) is recorded when the future
+    /// With `accounting`, attempt usage is recorded when the future
     /// resolves successfully, into the attempt that issued the read: a read
     /// still in flight is not visible to
-    /// [`check_client_budget`](Self::check_client_budget) yet.
+    /// `check_client_budget` yet.
     #[cfg_attr(
         feature = "trace",
         tracing::instrument(level = "debug", skip(self, key))
@@ -895,18 +917,21 @@ impl Transaction {
         key: &[u8],
         snapshot: bool,
     ) -> impl Future<Output = FdbResult<Option<FdbSlice>>> + Send + Sync + Unpin + use<> {
+        #[cfg(feature = "accounting")]
         let usage = self.usage();
+        #[cfg(feature = "accounting")]
         let lenght_key = key.len();
 
-        unsafe {
+        let future = unsafe {
             FdbFuture::<Option<FdbSlice>>::new(fdb_sys::fdb_transaction_get(
                 self.inner.as_ptr(),
                 key.as_ptr(),
                 fdb_len(key.len(), "key"),
                 fdb_bool(snapshot),
             ))
-        }
-        .map(move |result| {
+        };
+        #[cfg(feature = "accounting")]
+        let future = future.map(move |result| {
             if let Ok(value) = &result {
                 let (bytes_count, kv_fetched) = if let Some(values) = value {
                     ((lenght_key + values.len()) as u64, 1)
@@ -917,7 +942,8 @@ impl Transaction {
                 usage.record_get(bytes_count, kv_fetched);
             }
             result
-        })
+        });
+        future
     }
 
     /// Modify the database snapshot represented by transaction to perform the operation indicated
@@ -977,6 +1003,7 @@ impl Transaction {
             )
         }
 
+        #[cfg(feature = "accounting")]
         self.usage()
             .record_atomic_op((key.len() + param.len()) as u64);
     }
@@ -992,7 +1019,7 @@ impl Transaction {
     /// * `selector`: the key selector
     /// * `snapshot`: `true` if this is a [snapshot read](https://apple.github.io/foundationdb/api-c.html#snapshots)
     ///
-    /// In the [attempt usage](Self::attempt_usage), this counts as a `get` of
+    /// With `accounting`, this counts as a `get` of
     /// the selector key plus the resolved key, recorded when the future
     /// resolves successfully.
     #[cfg_attr(
@@ -1005,10 +1032,12 @@ impl Transaction {
         snapshot: bool,
     ) -> impl Future<Output = FdbResult<FdbSlice>> + Send + Sync + Unpin + use<> {
         let key = selector.key();
+        #[cfg(feature = "accounting")]
         let usage = self.usage();
+        #[cfg(feature = "accounting")]
         let length_key = key.len();
 
-        unsafe {
+        let future = unsafe {
             FdbFuture::<FdbSlice>::new(fdb_sys::fdb_transaction_get_key(
                 self.inner.as_ptr(),
                 key.as_ptr(),
@@ -1017,13 +1046,15 @@ impl Transaction {
                 selector.offset(),
                 fdb_bool(snapshot),
             ))
-        }
-        .map(move |result| {
+        };
+        #[cfg(feature = "accounting")]
+        let future = future.map(move |result| {
             if let Ok(resolved_key) = &result {
                 usage.record_get((length_key + resolved_key.len()) as u64, 0);
             }
             result
-        })
+        });
+        future
     }
 
     /// Reads all key-value pairs in the database snapshot represented by transaction (potentially
@@ -1111,7 +1142,7 @@ impl Transaction {
     ///   by 1 for each successive call while reading this range. In all other cases it is ignored.
     /// * `snapshot`: `true` if this is a [snapshot read](https://apple.github.io/foundationdb/api-c.html#snapshots)
     ///
-    /// In the [attempt usage](Self::attempt_usage), each resolved batch counts
+    /// With `accounting`, each resolved batch counts
     /// as one `call_get_range`: a full range scan through
     /// [`get_ranges`](Self::get_ranges) counts once per underlying batch.
     #[cfg_attr(
@@ -1124,11 +1155,16 @@ impl Transaction {
         iteration: usize,
         snapshot: bool,
     ) -> impl Future<Output = FdbResult<FdbValues>> + Send + Sync + Unpin + use<> {
-        self.get_range_impl(opt, iteration, snapshot, Some(self.usage()))
+        self.get_range_impl(
+            opt,
+            iteration,
+            snapshot,
+            #[cfg(feature = "accounting")]
+            Some(self.usage()),
+        )
     }
 
-    /// Same as [`get_range`](Self::get_range), but not accounted in the
-    /// [attempt usage](Self::attempt_usage).
+    /// Same as [`get_range`](Self::get_range), but excluded from accounting.
     ///
     /// For reads the binding performs on behalf of the user, on the special
     /// keyspace, which should neither consume the client budget nor show up in
@@ -1139,7 +1175,13 @@ impl Transaction {
         iteration: usize,
         snapshot: bool,
     ) -> impl Future<Output = FdbResult<FdbValues>> + Send + Sync + Unpin + use<> {
-        self.get_range_impl(opt, iteration, snapshot, None)
+        self.get_range_impl(
+            opt,
+            iteration,
+            snapshot,
+            #[cfg(feature = "accounting")]
+            None,
+        )
     }
 
     /// `usage` is the accounting generation to record into, `None` to skip
@@ -1149,14 +1191,14 @@ impl Transaction {
         opt: &RangeOption,
         iteration: usize,
         snapshot: bool,
-        usage: Option<Arc<AttemptUsage>>,
+        #[cfg(feature = "accounting")] usage: Option<Arc<AttemptUsage>>,
     ) -> impl Future<Output = FdbResult<FdbValues>> + Send + Sync + Unpin + use<> {
         let begin = &opt.begin;
         let end = &opt.end;
         let key_begin = begin.key();
         let key_end = end.key();
 
-        unsafe {
+        let future = unsafe {
             FdbFuture::<FdbValues>::new(fdb_sys::fdb_transaction_get_range(
                 self.inner.as_ptr(),
                 key_begin.as_ptr(),
@@ -1174,9 +1216,10 @@ impl Transaction {
                 fdb_bool(snapshot),
                 fdb_bool(opt.reverse),
             ))
-        }
-        .map(move |result| {
-            if let Ok(values) = &result {
+        };
+        #[cfg(feature = "accounting")]
+        let future = future.map(move |result| {
+            if let (Some(usage), Ok(values)) = (usage.as_ref(), &result) {
                 let kv_fetched = values.len();
                 let mut bytes_count = 0;
 
@@ -1187,13 +1230,12 @@ impl Transaction {
                     bytes_count += (key_len + value_len) as u64
                 }
 
-                if let Some(usage) = usage.as_ref() {
-                    usage.record_get_range(bytes_count, kv_fetched as u64);
-                }
+                usage.record_get_range(bytes_count, kv_fetched as u64);
             };
 
             result
-        })
+        });
+        future
     }
 
     /// Mapped Range is an experimental feature introduced in FDB 7.1.
@@ -1218,7 +1260,7 @@ impl Transaction {
     ///
     /// This is the "raw" version, users are expected to use [Transaction::get_mapped_ranges]
     ///
-    /// In the [attempt usage](Self::attempt_usage), a resolved batch counts as
+    /// With `accounting`, a resolved batch counts as
     /// one `call_get_range` and as the bytes of the primary key-values plus the
     /// nested key-values returned by the secondary queries.
     #[cfg_api_versions(min = 710)]
@@ -1238,9 +1280,10 @@ impl Transaction {
         let key_begin = begin.key();
         let key_end = end.key();
 
+        #[cfg(feature = "accounting")]
         let usage = self.usage();
 
-        unsafe {
+        let future = unsafe {
             FdbFuture::<MappedKeyValues>::new(fdb_sys::fdb_transaction_get_mapped_range(
                 self.inner.as_ptr(),
                 key_begin.as_ptr(),
@@ -1260,8 +1303,9 @@ impl Transaction {
                 fdb_bool(snapshot),
                 fdb_bool(opt.reverse),
             ))
-        }
-        .map(move |result| {
+        };
+        #[cfg(feature = "accounting")]
+        let future = future.map(move |result| {
             if let Ok(values) = &result {
                 let mut bytes_count = 0;
                 let mut kv_fetched = 0;
@@ -1282,7 +1326,8 @@ impl Transaction {
             }
 
             result
-        })
+        });
+        future
     }
 
     /// Mapped Range is an experimental feature introduced in FDB 7.1.
@@ -1340,7 +1385,7 @@ impl Transaction {
     /// The modification affects the actual database only if transaction is later committed with
     /// `Transaction::commit`.
     ///
-    /// In the [attempt usage](Self::attempt_usage), this counts as the two
+    /// With `accounting`, this counts as the two
     /// boundary keys only: the volume of data actually deleted is unknown to
     /// the client.
     #[cfg_attr(
@@ -1358,6 +1403,7 @@ impl Transaction {
             )
         }
 
+        #[cfg(feature = "accounting")]
         self.usage()
             .record_clear_range((begin.len() + end.len()) as u64);
     }
@@ -1407,19 +1453,23 @@ impl Transaction {
     /// On an instrumented transaction, the commit ends the current attempt: its
     /// duration is recorded whatever the result, and a successful commit pushes
     /// the attempt to the metrics report as
-    /// [`AttemptOutcome::Committed`](crate::metrics::AttemptOutcome::Committed).
+    /// `AttemptOutcome::Committed`.
     #[cfg_attr(feature = "trace", tracing::instrument(level = "debug", skip(self)))]
     pub fn commit(self) -> impl Future<Output = TransactionResult> + Send + Sync + Unpin {
+        #[cfg(feature = "accounting")]
         let metrics = self.metrics().cloned();
+        #[cfg(feature = "accounting")]
         let started_at = Instant::now();
 
         unsafe { FdbFuture::<()>::new(fdb_sys::fdb_transaction_commit(self.inner.as_ptr())) }.map(
             move |r| {
+                #[cfg(feature = "accounting")]
                 if let Some(metrics) = &metrics {
                     metrics.record_commit(started_at.elapsed());
                 }
                 match r {
                     Ok(()) => {
+                        #[cfg(feature = "accounting")]
                         self.end_attempt(AttemptOutcome::Committed);
                         Ok(TransactionCommitted { tr: self })
                     }
@@ -1442,9 +1492,8 @@ impl Transaction {
     /// You should not call this method most of the times and use `Database::transact` which
     /// implements a retry loop strategy for you.
     ///
-    /// On success the transaction enters a new attempt: its
-    /// [usage](Self::attempt_usage) restarts from zero, while its
-    /// [client budget](Self::set_client_budget) is kept. User versions
+    /// On success the transaction enters a new attempt. With `accounting`, its
+    /// usage restarts from zero and its client budget is kept. User versions
     /// allocated by [`Self::allocate_user_version`] are invalid for the new
     /// attempt, which starts allocating again at zero.
     ///
@@ -1469,6 +1518,7 @@ impl Transaction {
         self,
         err: FdbError,
     ) -> impl Future<Output = (Transaction, FdbResult<()>)> + Send + Sync + Unpin {
+        #[cfg(feature = "accounting")]
         self.mark_attempt_end();
 
         unsafe {
@@ -1479,7 +1529,9 @@ impl Transaction {
         }
         .map(move |result| {
             if result.is_ok() {
+                #[cfg(feature = "accounting")]
                 self.end_attempt(AttemptOutcome::Retried { cause: err });
+                #[cfg(feature = "accounting")]
                 self.begin_attempt_usage();
                 self.reset_user_version_allocator();
             }
@@ -1500,7 +1552,7 @@ impl Transaction {
     /// Records an application metric for the current attempt, replacing any
     /// value previously recorded under the same name and labels.
     ///
-    /// Custom metrics are always on, like the [usage](Self::attempt_usage)
+    /// Custom metrics require `accounting`, like the attempt usage
     /// counters, and scoped to the current attempt: a retry starts from an
     /// empty set, and the values of the attempt that ended stay attached to it
     /// in the report. Recording one on a transaction nobody collects metrics
@@ -1536,6 +1588,7 @@ impl Transaction {
         feature = "trace",
         tracing::instrument(level = "debug", skip(self, labels))
     )]
+    #[cfg(feature = "accounting")]
     pub fn set_custom_metric(&self, name: &str, value: u64, labels: &[(&str, &str)]) {
         self.usage().set_custom(MetricKey::new(name, labels), value);
     }
@@ -1568,6 +1621,7 @@ impl Transaction {
         feature = "trace",
         tracing::instrument(level = "debug", skip(self, labels))
     )]
+    #[cfg(feature = "accounting")]
     pub fn increment_custom_metric(&self, name: &str, amount: u64, labels: &[(&str, &str)]) {
         self.usage()
             .increment_custom(MetricKey::new(name, labels), amount);
@@ -1693,21 +1747,24 @@ impl Transaction {
     pub fn get_read_version(
         &self,
     ) -> impl Future<Output = FdbResult<i64>> + Send + Sync + Unpin + use<> {
+        #[cfg(feature = "accounting")]
         let recording = self
             .metrics()
             .map(|metrics| (metrics.clone(), self.usage(), Instant::now()));
 
-        unsafe {
+        let future = unsafe {
             FdbFuture::<i64>::new(fdb_sys::fdb_transaction_get_read_version(
                 self.inner.as_ptr(),
             ))
-        }
-        .map(move |result| {
+        };
+        #[cfg(feature = "accounting")]
+        let future = future.map(move |result| {
             if let Some((metrics, usage, started_at)) = recording {
                 metrics.record_grv(&usage, started_at.elapsed(), result.as_ref().ok().copied());
             }
             result
-        })
+        });
+        future
     }
 
     /// Sets the snapshot read version used by a transaction.
@@ -1777,14 +1834,15 @@ impl Transaction {
     /// It is not necessary to call `reset()` when handling an error with `on_error()` since the
     /// transaction has already been reset.
     ///
-    /// This starts a new attempt: the [usage](Self::attempt_usage) restarts from
-    /// zero, while the [client budget](Self::set_client_budget) is kept. On an
-    /// instrumented transaction, the attempt being recorded is abandoned rather
+    /// This starts a new attempt. With `accounting`, usage restarts from zero
+    /// and the client budget is kept. On an instrumented transaction, the
+    /// attempt being recorded is abandoned rather
     /// than reported: it reached no conclusion. User versions allocated before
     /// reset are invalid for the new attempt, which starts allocating again at
     /// zero.
     pub fn reset(&mut self) {
         unsafe { fdb_sys::fdb_transaction_reset(self.inner.as_ptr()) }
+        #[cfg(feature = "accounting")]
         self.begin_attempt_usage();
         self.reset_user_version_allocator();
     }
@@ -1835,8 +1893,7 @@ impl Transaction {
     /// </div>
     ///
     /// The read itself is performed by the binding on your behalf: it is not
-    /// accounted in the [attempt usage](Self::attempt_usage) and does not
-    /// consume the [client budget](Self::set_client_budget).
+    /// counted with `accounting` enabled and does not consume the client budget.
     ///
     /// Only complete ranges are returned, see [`conflicting_keys`](Self::conflicting_keys).
     ///
@@ -1865,8 +1922,7 @@ impl Transaction {
     /// </div>
     ///
     /// The read itself is performed by the binding on your behalf: it is not
-    /// accounted in the [attempt usage](Self::attempt_usage) and does not
-    /// consume the [client budget](Self::set_client_budget).
+    /// counted with `accounting` enabled and does not consume the client budget.
     ///
     /// Only complete ranges are returned, see [`conflicting_keys`](Self::conflicting_keys).
     ///

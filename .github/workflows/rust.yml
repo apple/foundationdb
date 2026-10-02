@@ -7,7 +7,13 @@ on:
       - release-*
     paths:
       - bindings/rust/**
-      - fdbclient/vexillographer/fdb.options
+      - bindings/c/**
+      - bindings/bindingtester/**
+      - contrib/local_cluster/binding_test.py
+      - cmake/AddFdbTest.cmake
+      - cmake/FDBComponents.cmake
+      - fdbclient/vexillographer/**
+      - flow/ApiVersions.cmake
       - .github/workflows/rust.yml
   push:
     branches:
@@ -15,7 +21,13 @@ on:
       - release-*
     paths:
       - bindings/rust/**
-      - fdbclient/vexillographer/fdb.options
+      - bindings/c/**
+      - bindings/bindingtester/**
+      - contrib/local_cluster/binding_test.py
+      - cmake/AddFdbTest.cmake
+      - cmake/FDBComponents.cmake
+      - fdbclient/vexillographer/**
+      - flow/ApiVersions.cmake
       - .github/workflows/rust.yml
   workflow_dispatch:
 
@@ -52,11 +64,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes libclang-dev
 
-      - name: Check all workspace targets
+      - name: Generate current C headers and options
+        run: cmake -DOUTPUT_DIR="$RUNNER_TEMP/rust-fdb-include" -P tests/current_headers.cmake
+
+      - name: Check current headers and options
+        env:
+          FDB_INCLUDE_DIR: ${{ runner.temp }}/rust-fdb-include
+        run: |
+          cargo check --locked -p foundationdb --lib --features fdb-7_4
+          cargo check --locked -p foundationdb --lib --features fdb-7_4,accounting
+          cargo check --locked -p foundationdb --test ranked_register --no-default-features --features fdb-7_4,recipes-ranked-register
+
+      - name: Check all workspace targets against current headers
         # API version features are mutually exclusive; do not use --all-features.
+        env:
+          FDB_INCLUDE_DIR: ${{ runner.temp }}/rust-fdb-include
         run: >-
           cargo check --locked --workspace --all-targets
-          --features embedded-fdb-include,fdb-7_4,num-bigint,trace
+          --features embedded-fdb-include,fdb-7_4,num-bigint,trace,foundationdb/accounting
 
       - name: Check supported historical APIs
         # Some examples require newer APIs; historical compatibility covers the library.
@@ -71,14 +96,6 @@ jobs:
         run: |
           cargo test --locked -p foundationdb-tuple --all-features
           cargo test --locked -p foundationdb-macros
-
-      - name: Generate options from the repository schema
-        env:
-          FDB_INCLUDE_DIR: ${{ github.workspace }}/fdbclient/vexillographer
-        run: >-
-          cargo run --locked -p foundationdb-gen
-          --features embedded-fdb-include,fdb-7_4 --bin foundationdb-options-gen
-          > "$RUNNER_TEMP/rust-fdb-options.rs"
 
   format:
     name: Rustfmt

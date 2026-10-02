@@ -10,6 +10,7 @@ use foundationdb::{FdbResult, TransactOption};
 use futures::prelude::*;
 use std::collections::HashSet;
 use std::iter::FromIterator;
+use std::sync::Barrier;
 
 mod common;
 
@@ -79,6 +80,45 @@ async fn test_hca_concurrent_allocations() -> FdbResult<()> {
 
     eprintln!("ran test {all_ints:?}");
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_hca_independent_allocators_share_transaction() -> FdbResult<()> {
+    const THREADS: usize = 8;
+    const ALLOCATIONS_PER_THREAD: usize = 64;
+    let subspace = Subspace::from_bytes(b"test-hca-shared-trx");
+    let db = common::database().await?;
+    let trx = db.create_trx()?;
+    trx.clear_subspace_range(&subspace);
+    trx.commit().await?;
+
+    let trx = db.create_trx()?;
+    let barrier = Barrier::new(THREADS);
+    // Cooperative tasks cannot interleave the allocator's synchronous read/set
+    // sequence. Separate threads and allocator instances exercise that boundary.
+    let all_ints = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..THREADS)
+            .map(|_| {
+                scope.spawn(|| {
+                    let allocator = HighContentionAllocator::new(subspace.clone());
+                    barrier.wait();
+                    (0..ALLOCATIONS_PER_THREAD)
+                        .map(|_| {
+                            futures::executor::block_on(allocator.allocate(&trx))
+                                .expect("cannot allocate on shared transaction")
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().expect("allocator thread panicked"))
+            .collect::<Vec<_>>()
+    });
+    check_hca_result_uniqueness(&all_ints);
+    trx.commit().await?;
     Ok(())
 }
 

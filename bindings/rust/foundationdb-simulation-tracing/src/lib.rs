@@ -4,6 +4,8 @@
 use std::{
     cell::RefCell,
     env, fmt,
+    marker::PhantomData,
+    rc::Rc,
     sync::{Once, atomic::AtomicU64},
 };
 
@@ -76,7 +78,10 @@ pub fn install(context: &WorkloadContext) -> TracingGuard {
             );
         }
     });
-    TracingGuard { generation }
+    TracingGuard {
+        generation,
+        _thread_bound: PhantomData,
+    }
 }
 
 /// Reads the forwarding level once, while the global subscriber is installed.
@@ -111,8 +116,18 @@ fn parse_level_filter(value: Option<&str>) -> Result<LevelFilter, LevelParseErro
 /// points at the context this guard was created for (a newer [`install`]
 /// wins). Keep it alive for as long as tracing events should be forwarded,
 /// typically by storing it in your workload struct.
+/// The guard must be dropped on the thread where it was installed.
+///
+/// ```compile_fail,E0277
+/// use foundationdb_simulation_tracing::TracingGuard;
+///
+/// fn move_guard_to_thread(guard: TracingGuard) {
+///     std::thread::spawn(move || drop(guard));
+/// }
+/// ```
 pub struct TracingGuard {
     generation: u64,
+    _thread_bound: PhantomData<Rc<()>>,
 }
 
 impl Drop for TracingGuard {

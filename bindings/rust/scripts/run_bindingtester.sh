@@ -64,13 +64,11 @@ run_test --num-ops 1000 --api-version $fdb_api_version --test-name directory --c
 # https://github.com/foundationdb-rs/foundationdb-rs/issues/42
 run_test --num-ops 1000 --api-version $fdb_api_version --test-name directory --concurrency 1 rust --no-directory-snapshot-ops --compare python --seed 584458794
 
-# The shared scripted suite requires the current API version. Enable it once
-# the Rust binding supports that version; the imported binding is capped at 740.
-echo "Skipping scripted tests: they require the current API, newer than Rust's API 740."
-for ((i = 1; i <= iterations; i++)); do
-  echo "Running iteration $i"
-  run_test --num-ops 1000 --api-version $fdb_api_version --test-name api --compare python rust
-  run_test --num-ops 1000 --api-version $fdb_api_version --test-name api --concurrency 5 rust
-  run_test --num-ops 1000 --api-version $fdb_api_version --test-name directory --concurrency 1 rust --no-directory-snapshot-ops --compare python
-  run_test --num-ops 100 --api-version $fdb_api_version --test-name directory_hca --concurrency 1 rust --no-directory-snapshot-ops
-done
+# Database-level directory operations must retry concurrent commit conflicts.
+run_test --num-ops 100 --api-version 610 --test-name directory_hca --concurrency 5 rust --seed 3179331380
+
+# The shared runner selects the newest supported API for scripted cases and
+# samples supported runtime versions for randomized cases.
+BINDINGTESTS=rust DISPLAYERROR=1 BREAKONERROR=1 \
+  bash "${build_dir}/bindings/bindingtester/run_binding_tester.sh" \
+    "$iterations" "${build_dir}/bindings/rust/bindingtester-errors.log" "${extra_options[@]}"

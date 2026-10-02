@@ -22,18 +22,16 @@
 //!
 //! ```no_run
 //! # use foundationdb::*;
-//! # use foundationdb::runner::MetricsHooks;
+//! # struct Hooks;
+//! # impl RunnerHooks for Hooks {}
 //! # async fn example(db: &Database) -> Result<(), FdbBindingError> {
-//! let metrics = TransactionMetrics::new();
 //! db.runner()
-//!     .hooks(&MetricsHooks::new(&metrics))
+//!     .hooks(&Hooks)
 //!     .run(|trx, _maybe_committed| async move {
 //!         trx.set(b"key", b"value");
 //!         Ok::<_, FdbBindingError>(())
 //!     })
 //!     .await?;
-//! let report = metrics.get_metrics_data();
-//! # let _ = report;
 //! # Ok(())
 //! # }
 //! ```
@@ -47,10 +45,13 @@
 //! ([`RetryDecision::Retry`]) is routed through `on_error` with code 1020
 //! (`not_committed`) so that it obeys the same budget.
 
-use std::time::{Duration, Instant};
+#[cfg(feature = "accounting")]
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::database::{Database, MaybeCommitted};
 use crate::error::{FdbBindingError, FdbError, FdbResult, RetryDecision, RetryableError};
+#[cfg(feature = "accounting")]
 use crate::metrics::{AttemptOutcome, ConflictKeys, TransactionMetrics};
 use crate::transaction::{
     RetryableTransaction, Transaction, TransactionCommitError, TransactionCommitted,
@@ -69,7 +70,7 @@ const NOT_COMMITTED: i32 = 1020;
 /// # Ordering
 ///
 /// Every callback receives the index of the attempt it belongs to, starting at
-/// `0` and matching [`AttemptMetrics::index`](crate::metrics::AttemptMetrics::index).
+/// `0`. With `accounting` enabled this matches the metrics report attempt index.
 /// Per attempt, in order:
 ///
 /// 1. [`on_attempt_start`](Self::on_attempt_start)
@@ -348,6 +349,8 @@ impl<A: RunnerHooks + Sync, B: RunnerHooks + Sync> RunnerHooks for (A, B) {
     }
 }
 
+/// Available with the `accounting` Cargo feature.
+///
 /// Hooks collecting a [`MetricsReport`](crate::metrics::MetricsReport) into a
 /// [`TransactionMetrics`].
 ///
@@ -380,11 +383,13 @@ impl<A: RunnerHooks + Sync, B: RunnerHooks + Sync> RunnerHooks for (A, B) {
 /// which is what makes the counters of a plain `run` land in the report. A
 /// transaction only ever reports to one collector: stacking two `MetricsHooks`
 /// leaves the second one empty.
+#[cfg(feature = "accounting")]
 pub struct MetricsHooks {
     metrics: TransactionMetrics,
     start: Instant,
 }
 
+#[cfg(feature = "accounting")]
 impl MetricsHooks {
     /// Collects the metrics of a run into `metrics`.
     ///
@@ -398,6 +403,7 @@ impl MetricsHooks {
     }
 }
 
+#[cfg(feature = "accounting")]
 impl RunnerHooks for MetricsHooks {
     fn on_attempt_start(&self, trx: &Transaction, _attempt: usize) {
         // Wires the collector onto the transaction the runner created, which is
@@ -773,7 +779,8 @@ where
 /// It assembles the [`RunnerHooks`] and the [`RetryPolicy`] of a single call to
 /// [`run`](Self::run): no hooks and [`NativeRetryPolicy`] by default. Both are
 /// borrowed, so the same hooks and policy can be reused across runs (mind
-/// [`MetricsHooks`], which times the run from its own construction).
+/// `MetricsHooks` from the `accounting` feature, which times the run from its
+/// own construction).
 ///
 /// ```no_run
 /// # use foundationdb::*;

@@ -25,6 +25,6 @@ thiserror = "2.0.18"
 tracing = "0.1.44"
 
 [dev-dependencies]
-foundationdb = { version = "0.11.0", path = "../foundationdb", default-features = false, features = ["fdb-7_4", "embedded-fdb-include"] }
+foundationdb = { version = "0.11.0", path = "../foundationdb", default-features = false, features = ["fdb-7_4", "embedded-fdb-include", "accounting"] }
 futures-util = "0.3.32"
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "time"] }

@@ -20,9 +20,12 @@ use fdb_sys::if_cfg_api_versions;
 use foundationdb_macros::cfg_api_versions;
 use foundationdb_sys as fdb_sys;
 
+#[cfg(feature = "accounting")]
 use crate::metrics::{MetricsReport, TransactionMetrics};
 use crate::options;
-use crate::runner::{MetricsHooks, RunnerHooks, TransactionRunner};
+#[cfg(feature = "accounting")]
+use crate::runner::MetricsHooks;
+use crate::runner::{RunnerHooks, TransactionRunner};
 use crate::transaction::*;
 use crate::{FdbError, FdbResult, error};
 
@@ -394,11 +397,11 @@ impl Database {
     ///
     /// ```no_run
     /// # use foundationdb::*;
-    /// # use foundationdb::runner::MetricsHooks;
+    /// # struct Hooks;
+    /// # impl RunnerHooks for Hooks {}
     /// # async fn example(db: &Database) -> Result<(), FdbBindingError> {
-    /// let metrics = TransactionMetrics::new();
     /// db.runner()
-    ///     .hooks(&MetricsHooks::new(&metrics))
+    ///     .hooks(&Hooks)
     ///     .run(|trx, _| async move {
     ///         trx.set(b"key", b"value");
     ///         Ok::<_, FdbBindingError>(())
@@ -434,6 +437,7 @@ impl Database {
     }
 
     /// Runs a transactional function against this Database with retry logic and metrics collection.
+    /// Available with the `accounting` Cargo feature.
     /// The associated closure will be called until a non-retryable FDBError
     /// is thrown or commit() returns success.
     ///
@@ -466,6 +470,7 @@ impl Database {
         feature = "trace",
         tracing::instrument(level = "debug", skip(self, closure))
     )]
+    #[cfg(feature = "accounting")]
     pub async fn instrumented_run<F, Fut, T, E>(
         &self,
         closure: F,

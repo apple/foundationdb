@@ -56,3 +56,14 @@ The in-tree adaptation also corrects public API contracts from this snapshot:
   current C headers, it uses `fdb_get_selected_api_versions` to verify an existing
   process-wide runtime/header pair before initializing another Rust library.
   Historical headers cannot verify another library's selection and return an error.
+- High-level versionstamped tuple and subspace packing requires exactly one
+  incomplete versionstamp, matching the other bindings. Use ordinary packing
+  for tuples containing only completed versionstamps.
+- Transaction usage counters, client budgets, and metrics APIs require the
+  opt-in `accounting` feature. Recipes are also opt-in; the default client
+  enables only `uuid`.
+- Simulation tracing guards are bound to their installation thread so their
+  destruction clears the correct thread-local context.
+- Database-level directory instructions in the binding tester use the native
+  transaction retry loop and publish stack results only after commit, matching
+  the other testers. Transaction-level instructions retain the caller's transaction.

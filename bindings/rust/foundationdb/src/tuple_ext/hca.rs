@@ -36,6 +36,10 @@ use crate::*;
 
 const ONE_BYTES: &[u8] = &[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
 
+// Allocators for the same subspace may share a transaction, so their
+// read-before-write sequences must be serialized across allocator instances.
+static ALLOCATION_MUTEX: Mutex<()> = Mutex::new(());
+
 pub enum HcaError {
     FdbError(FdbError),
     PackError(PackError),
@@ -102,7 +106,6 @@ impl TransactError for HcaError {
 pub struct HighContentionAllocator {
     counters: Subspace,
     recent: Subspace,
-    allocation_mutex: Mutex<()>,
 }
 
 impl HighContentionAllocator {
@@ -112,7 +115,6 @@ impl HighContentionAllocator {
         HighContentionAllocator {
             counters: subspace.subspace(&0i64),
             recent: subspace.subspace(&1i64),
-            allocation_mutex: Mutex::new(()),
         }
     }
 
@@ -147,7 +149,7 @@ impl HighContentionAllocator {
                 let counters_start = self.counters.subspace(&start);
 
                 let count_future = {
-                    let _mutex_guard = self.allocation_mutex.lock()?;
+                    let _mutex_guard = ALLOCATION_MUTEX.lock()?;
                     if window_advanced {
                         trx.clear_range(self.counters.bytes(), counters_start.bytes());
                         trx.set_option(TransactionOption::NextWriteNoWriteConflictRange)?;
@@ -189,7 +191,7 @@ impl HighContentionAllocator {
                 let recent_candidate = self.recent.subspace(&candidate);
 
                 let (latest_counter, candidate_value) = {
-                    let _mutex_guard = self.allocation_mutex.lock()?;
+                    let _mutex_guard = ALLOCATION_MUTEX.lock()?;
                     let latest_counter = trx.get_range(&counters_range, 1, true);
                     let candidate_value = trx.get(recent_candidate.bytes(), false);
                     trx.set_option(TransactionOption::NextWriteNoWriteConflictRange)?;

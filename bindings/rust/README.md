@@ -57,9 +57,10 @@ build selects `fdb-7_4` (API 740), the highest API supported by the imported
 workspace. A newer C client can serve that API, but this does not expose every
 feature of the current FoundationDB main branch. In particular, this import does
 not add API 800 wrappers or the native CDC API. Directory snapshot operations are
-also not supported by the Rust binding tester, and its scripted suite is skipped
-because it requires API 800. Additional wrappers and API-version support can be
-developed separately.
+also not supported by the Rust binding tester. The shared scripted suite selects
+the newest API supported by each tester: API 740 for Rust and API 800 for the
+current bindings. Additional wrappers and API-version support can be developed
+separately.
 
 Versionstamped key and value mutations require runtime API 520 or later. With
 API 510, these mutations panic before reaching the C client; other supported

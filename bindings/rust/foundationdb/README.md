@@ -50,6 +50,13 @@ This Rust crate is not tied to any Async Runtime.
 | `uuid`                 | Support for the uuid crate for Tuples                                          |
 | `num-bigint`           | Support for the bigint crate for Tuples                                        |
 | `trace`                | Enable tracing on transaction related operations                               |
+| `accounting`           | Opt in to transaction usage counters, client budgets, and metrics hooks         |
+| `recipes`              | Opt in to all distributed-system recipes                                        |
+| `recipes-leader-election` | Opt in to leader election and its ranked-register dependency                  |
+| `recipes-ranked-register` | Opt in to the ranked-register recipe independently                          |
+
+Only `uuid` is enabled by default. Accounting and recipes are independent opt-in
+extensions; ordinary transactions do not maintain Rust-side usage counters.
 
 ### Hello, World using the crate
 

@@ -74,13 +74,15 @@ pub trait TuplePack {
     ///
     /// # Panics
     ///
-    /// Panics if there is multiple versionstamp present or if the encoded data size doesn't fit in `u32`.
+    /// Panics unless there is exactly one incomplete versionstamp, or if the
+    /// encoded data size doesn't fit in `u32`.
     fn pack_to_vec_with_versionstamp(&self) -> Vec<u8> {
         let mut vec = Vec::new();
         let offset = self.pack_into_vec_with_versionstamp(&mut vec);
-        if let VersionstampOffset::MultipleIncomplete = offset {
-            panic!("pack_to_vec_with_versionstamp does not allow multiple versionstamps");
-        }
+        assert!(
+            matches!(offset, VersionstampOffset::OneIncomplete { .. }),
+            "pack_to_vec_with_versionstamp requires exactly one incomplete versionstamp"
+        );
         vec
     }
 

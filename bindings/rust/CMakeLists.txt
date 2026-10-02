@@ -65,7 +65,8 @@ set(rust_unit_packages
   --package foundationdb-tuple
   --package foundationdb-gen
   --package foundationdb-macros
-  --package foundationdb-simulation)
+  --package foundationdb-simulation
+  --package foundationdb-simulation-tracing)
 set(rust_unit_args ${rust_cargo_args}
   --features foundationdb-simulation/fdb-7_4)
 add_custom_target(fdb_rust_tests ALL
@@ -74,6 +75,16 @@ add_custom_target(fdb_rust_tests ALL
   DEPENDS fdb_rust
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   COMMENT "Compile Rust library unit tests"
+  COMMAND_EXPAND_LISTS
+  VERBATIM)
+
+add_custom_target(fdb_rust_accounting_tests ALL
+  COMMAND ${CMAKE_COMMAND} -E env ${rust_env}
+    ${CARGO_EXECUTABLE} test ${rust_cargo_args}
+    --features foundationdb/accounting --package foundationdb --lib --no-run
+  DEPENDS fdb_rust_tests
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMENT "Compile Rust accounting unit tests"
   COMMAND_EXPAND_LISTS
   VERBATIM)
 
@@ -91,6 +102,14 @@ add_test(NAME rust_unit_tests
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   COMMAND_EXPAND_LISTS)
 set_tests_properties(rust_unit_tests PROPERTIES TIMEOUT 300 LABELS "rust")
+
+add_test(NAME rust_accounting_unit_tests
+  COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
+    ${CARGO_EXECUTABLE} test ${rust_cargo_args}
+    --features foundationdb/accounting --package foundationdb --lib --offline
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMAND_EXPAND_LISTS)
+set_tests_properties(rust_accounting_unit_tests PROPERTIES TIMEOUT 300 LABELS "rust")
 
 # This compile-fail doctest checks the public raw-pointer ownership boundary.
 # Other client doctests may require a running cluster.
@@ -115,6 +134,16 @@ foreach(symbol str_from_c WorkloadContext::new WorkloadContext::set_process_id r
     TIMEOUT 300 LABELS "rust")
 endforeach()
 
+add_test(NAME rust_simulation_tracing_guard_safety_tests
+  COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
+    ${CARGO_EXECUTABLE} test ${rust_cargo_base_args}
+    --features foundationdb-simulation-tracing/fdb-7_4
+    --package foundationdb-simulation-tracing --doc --offline TracingGuard
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMAND_EXPAND_LISTS)
+set_tests_properties(rust_simulation_tracing_guard_safety_tests PROPERTIES
+  TIMEOUT 300 LABELS "rust")
+
 add_test(NAME rust_simulation_wake_order_tests
   COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
     "RUSTFLAGS=$ENV{RUSTFLAGS} --cfg fdb_simulation_loom"
@@ -129,12 +158,26 @@ set_tests_properties(rust_simulation_wake_order_tests PROPERTIES
   TIMEOUT 300 LABELS "rust")
 
 if(RUN_RUST_INTEGRATION_TESTS)
+  if(NOT WITH_PYTHON_BINDING)
+    message(FATAL_ERROR "Rust integration tests require BUILD_PYTHON_BINDING=ON")
+  endif()
+  set(rust_accounting_test_args ${rust_cargo_args}
+    --features foundationdb/accounting --package foundationdb
+    --test budget --test metrics --test runner_hooks --test conflict_ranges
+    --test tuple --test versionstamp)
+  set(rust_recipes_test_args ${rust_cargo_args}
+    --features foundationdb/recipes --package foundationdb --lib
+    --test leader_election_ranked_register --test ranked_register)
   add_custom_target(fdb_rust_integration_tests ALL
     COMMAND ${CMAKE_COMMAND} -E env ${rust_env}
       ${CARGO_EXECUTABLE} test ${rust_cargo_args} --package foundationdb --package bindingtester --tests --no-run
     COMMAND ${CMAKE_COMMAND} -E env ${rust_env}
+      ${CARGO_EXECUTABLE} test ${rust_accounting_test_args} --no-run
+    COMMAND ${CMAKE_COMMAND} -E env ${rust_env}
+      ${CARGO_EXECUTABLE} test ${rust_recipes_test_args} --no-run
+    COMMAND ${CMAKE_COMMAND} -E env ${rust_env}
       ${CARGO_EXECUTABLE} build ${rust_cargo_args} --package foundationdb --example api_version_library
-    DEPENDS fdb_rust_tests
+    DEPENDS fdb_rust_accounting_tests fdb_rust_tester python_binding
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMENT "Compile Rust client integration tests"
     COMMAND_EXPAND_LISTS
@@ -144,6 +187,20 @@ if(RUN_RUST_INTEGRATION_TESTS)
       ${CARGO_EXECUTABLE} test ${rust_cargo_args} --package foundationdb --tests --offline -- --test-threads=1
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     TEST_TIMEOUT 1200)
+  add_fdbclient_test(NAME rust_accounting_integration_tests
+    COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
+      ${CARGO_EXECUTABLE} test ${rust_accounting_test_args} --offline -- --test-threads=1
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    TEST_TIMEOUT 1200)
+  add_fdbclient_test(NAME rust_recipes_integration_tests
+    COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
+      ${CARGO_EXECUTABLE} test ${rust_recipes_test_args} --offline -- --test-threads=1
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    TEST_TIMEOUT 1200)
+  add_fdbclient_test(NAME rust_bindingtester_tests
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_bindingtester.sh ${CMAKE_BINARY_DIR} 1
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    TEST_TIMEOUT 1800)
   add_fdbclient_test(NAME rust_bindingtester_on_error_tests
     COMMAND ${CMAKE_COMMAND} -E env ${rust_test_env}
       ${CARGO_EXECUTABLE} test ${rust_cargo_base_args} --features foundationdb/fdb-7_4
@@ -159,7 +216,8 @@ if(RUN_RUST_INTEGRATION_TESTS)
     TEST_TIMEOUT 120)
   # tmp_cluster otherwise preserves an inherited default cluster. These tests
   # must always use the disposable cluster created by the test runner.
-  set_tests_properties(rust_integration_tests rust_bindingtester_on_error_tests rust_api_version_libraries_tests PROPERTIES
+  set_tests_properties(rust_integration_tests rust_accounting_integration_tests rust_recipes_integration_tests
+    rust_bindingtester_tests rust_bindingtester_on_error_tests rust_api_version_libraries_tests PROPERTIES
     LABELS "rust;integration"
     ENVIRONMENT_MODIFICATION "FDB_CLUSTER_FILE=unset:")
 endif()
