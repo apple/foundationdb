@@ -1,19 +1,21 @@
 include(AddFdbTest)
 
-# Copy the fdb_test_runner package to the build dir, along with fdb_version.py generated with
-# this build's versions, for the venv to install from there. pyproject.toml is like "dirstamp"
+# Copy the fdb_test_runner package to the build dir, along with fdb_version.py
+# generated with this build's versions, for the venv to install from there.
+# "pyproject.toml" is used as proxy-marker for whether dir is up-to-date.
 set(test_runner_src_dir ${PROJECT_SOURCE_DIR}/tests/TestRunner)
 set(test_runner_pkg_dir ${PROJECT_BINARY_DIR}/tests/TestRunner)
-file(GLOB test_runner_srcs
-  ${test_runner_src_dir}/pyproject.toml
-  ${test_runner_src_dir}/fdb_test_runner/*.py)
+file(GLOB_RECURSE test_runner_srcs ${test_runner_src_dir}/*.py)
 add_custom_command(
   OUTPUT  ${test_runner_pkg_dir}/pyproject.toml
-  DEPENDS ${test_runner_srcs}
+  DEPENDS ${test_runner_src_dir}/pyproject.toml ${test_runner_srcs}
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${test_runner_src_dir} ${test_runner_pkg_dir}
   COMMENT "copy TestRunner")
 configure_file(${test_runner_src_dir}/fdb_version.py.cmake ${test_runner_pkg_dir}/fdb_test_runner/fdb_version.py)
 add_custom_target(test_runner_package ALL DEPENDS ${test_runner_pkg_dir}/pyproject.toml)
+
+# Used for ENABLE_SIMULATION_TESTS
+set(TestRunner "${test_runner_pkg_dir}/run_test_runner.py")
 
 # Test for setting up Python venv for client tests.
 # Adding this test as a fixture to another test allows the use of non-native Python packages within client test scripts
@@ -68,8 +70,6 @@ if(WITH_PYTHON)
   It is recommended to install the current stable version from https://github.com/apple/foundationdb/releases \
   Or provide a path to another fdbserver")
   endif()
-
-  set(TestRunner "${PROJECT_SOURCE_DIR}/tests/TestRunner/run_test_runner.py")
 
   configure_file(${PROJECT_SOURCE_DIR}/tests/CTestCustom.ctest.cmake ${PROJECT_BINARY_DIR}/CTestCustom.ctest @ONLY)
 
