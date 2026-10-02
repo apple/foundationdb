@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Disk snapshot backup and Restore &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Disk snapshot backup and Restore &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -36,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -173,6 +173,7 @@
 <li><p>UID - 32 byte alphanumeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup</p></li>
 <li><p>Version - version string of the FoundationDB binary</p></li>
 <li><p>Path - path of the FoundationDB <code class="docutils literal notranslate"><span class="pre">datadir</span></code> to be snapshotted, <code class="docutils literal notranslate"><span class="pre">datadir</span></code> specified in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a></p></li>
+<li><p>TLog spill path - optional path supplied as <code class="docutils literal notranslate"><span class="pre">--tlog-spill-path</span></code> for the <code class="docutils literal notranslate"><span class="pre">tlog</span></code> role when <code class="docutils literal notranslate"><span class="pre">tlog-spill-datadir</span></code> is configured separately from <code class="docutils literal notranslate"><span class="pre">datadir</span></code></p></li>
 <li><p>Role - <code class="docutils literal notranslate"><span class="pre">tlog</span></code>/<code class="docutils literal notranslate"><span class="pre">storage</span></code>/<code class="docutils literal notranslate"><span class="pre">coordinator</span></code>, identifies the role of the node on which the snapshot is being invoked</p></li>
 </ul>
 </li>
@@ -183,6 +184,7 @@
 </div>
 </li>
 <li><p><code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> should capture any additional data needed to restore the cluster. Additional data can be stored as tags in cloud environments or it can be stored in an additional file/directory in the <code class="docutils literal notranslate"><span class="pre">datadir</span></code> and then snapshotted. The section <a class="reference internal" href="#disk-snapshot-backup-specification"><span class="std std-ref">Disk snapshot backup specification</span></a> describes the recommended specification of the list of things that can be gathered by the binary.</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">--tlog-spill-path</span></code> is supplied, the <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> must take a coordinated crash-consistent snapshot of both the <code class="docutils literal notranslate"><span class="pre">--path</span></code> and <code class="docutils literal notranslate"><span class="pre">--tlog-spill-path</span></code> disks before returning success. Use a storage consistency group, a shared volume group, or quiesce/freeze both filesystems before creating per-volume snapshots so the two paths restore to the same crash point.</p></li>
 <li><p>Program should return a non-zero status for any failures and zero for success</p></li>
 <li><p>If the <code class="docutils literal notranslate"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> process takes longer than 5 minutes to return a status then it will be killed and <code class="docutils literal notranslate"><span class="pre">snapshot</span></code> command will fail. Timeout of 5 minutes is configurable and can be set with <code class="docutils literal notranslate"><span class="pre">SNAP_CREATE_MAX_TIMEOUT</span></code> config parameter in <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section</span></a>. Since the default value is large enough, there should not be a need to modify this configuration.</p></li>
 </ul>
@@ -546,7 +548,7 @@ fdb&gt; get key2
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

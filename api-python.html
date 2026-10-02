@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Python API &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Python API &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -84,7 +84,12 @@
 <li><a class="reference internal" href="#database-options">Database options</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#tenant-objects">Tenant objects</a></li>
+<li><a class="reference internal" href="#native-change-data-capture-cdc">Native change data capture (CDC)</a><ul>
+<li><a class="reference internal" href="#stream-management">Stream management</a></li>
+<li><a class="reference internal" href="#result-types">Result types</a></li>
+<li><a class="reference internal" href="#consumer-lifecycle">Consumer lifecycle</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#transactional-decoration">Transactional decoration</a></li>
 <li><a class="reference internal" href="#transaction-objects">Transaction objects</a><ul>
 <li><a class="reference internal" href="#id1">Attributes</a></li>
@@ -111,7 +116,6 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#module-fdb.locality">Locality information</a></li>
-<li><a class="reference internal" href="#module-fdb.tenant_management">Tenant management</a></li>
 </ul>
 </li>
 </ul>
@@ -172,7 +176,12 @@
 <li><a class="reference internal" href="#database-options">Database options</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#tenant-objects">Tenant objects</a></li>
+<li><a class="reference internal" href="#native-change-data-capture-cdc">Native change data capture (CDC)</a><ul>
+<li><a class="reference internal" href="#stream-management">Stream management</a></li>
+<li><a class="reference internal" href="#result-types">Result types</a></li>
+<li><a class="reference internal" href="#consumer-lifecycle">Consumer lifecycle</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#transactional-decoration">Transactional decoration</a></li>
 <li><a class="reference internal" href="#transaction-objects">Transaction objects</a><ul>
 <li><a class="reference internal" href="#id1">Attributes</a></li>
@@ -199,7 +208,6 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#module-fdb.locality">Locality information</a></li>
-<li><a class="reference internal" href="#module-fdb.tenant_management">Tenant management</a></li>
 </ul>
 </li>
 </ul>
@@ -230,7 +238,7 @@
 <dl class="py function">
 <dt class="sig sig-object py" id="fdb.api_version">
 <span class="sig-prename descclassname"><span class="pre">fdb.</span></span><span class="sig-name descname"><span class="pre">api_version</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">version</span></span></em><span class="sig-paren">)</span></dt>
-<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 740.</p>
+<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 800.</p>
 </dd></dl>
 
 <div class="admonition note">
@@ -245,13 +253,13 @@
 <p class="admonition-title">Warning</p>
 <p>When using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
 </div>
-<p>For API changes between version 13 and 740 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes/release-notes-740.html#release-notes"><span class="std std-ref">Release Notes</span></a> and <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
+<p>For API changes between version 13 and 800 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes/release-notes-740.html#release-notes"><span class="std std-ref">Release Notes</span></a> and <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
 </section>
 <section id="opening-a-database">
 <h2>Opening a database</h2>
 <p>After importing the <code class="docutils literal notranslate"><span class="pre">fdb</span></code> module and selecting an API version, you probably want to open a <a class="reference internal" href="#fdb.Database" title="fdb.Database"><code class="xref py py-class docutils literal notranslate"><span class="pre">Database</span></code></a> using <a class="reference internal" href="#fdb.open" title="fdb.open"><code class="xref py py-func docutils literal notranslate"><span class="pre">open()</span></code></a>:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">fdb</span>
-<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">740</span><span class="p">)</span>
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">800</span><span class="p">)</span>
 <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
 </pre></div>
 </div>
@@ -532,17 +540,6 @@
 </dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="fdb.Database.open_tenant">
-<span class="sig-prename descclassname"><span class="pre">Database.</span></span><span class="sig-name descname"><span class="pre">open_tenant</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tenant_name</span></span></em><span class="sig-paren">)</span></dt>
-<dd><p>Opens an existing tenant to be used for running transactions and returns it as a :class`Tenant` object.</p>
-<p>The tenant name can be either a byte string or a tuple. If a tuple is provided, the tuple will be packed using the tuple layer to generate the byte string tenant name.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Opening a tenant does not check its existence in the cluster. If the tenant does not exist, attempts to read or write data with it will fail.</p>
-</div>
-</dd></dl>
-
-<dl class="py method">
 <dt class="sig sig-object py" id="fdb.Database.get">
 <span class="sig-prename descclassname"><span class="pre">Database.</span></span><span class="sig-name descname"><span class="pre">get</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span></em><span class="sig-paren">)</span></dt>
 <dd><p>Returns the value associated with the specified key in the database (or <code class="docutils literal notranslate"><span class="pre">None</span></code> if the key does not exist). This read is fully synchronous.</p>
@@ -741,23 +738,325 @@ value of the key is also retrieved, using network bandwidth.</p>
 
 </section>
 </section>
-<section id="tenant-objects">
-<h2>Tenant objects</h2>
-<dl class="py class">
-<dt class="sig sig-object py" id="fdb.Tenant">
-<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fdb.</span></span><span class="sig-name descname"><span class="pre">Tenant</span></span></dt>
-<dd></dd></dl>
-
-<p><a class="reference internal" href="#fdb.Tenant" title="fdb.Tenant"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tenant</span></code></a> represents a FoundationDB tenant. Tenants are optional named transaction domains that can be used to provide multiple disjoint key-spaces to client applications. A transaction created in a tenant will be limited to the keys contained within that tenant, and transactions operating on different tenants can use the same key names without interfering with each other.</p>
+<section id="native-change-data-capture-cdc">
+<span id="api-python-cdc"></span><h2>Native change data capture (CDC)</h2>
+<p>CDC provides durable, named streams of committed mutations for a non-empty
+union of half-open user-key ranges. Select API version 800 or later with
+<a class="reference internal" href="#fdb.api_version" title="fdb.api_version"><code class="xref py py-func docutils literal notranslate"><span class="pre">api_version()</span></code></a> before using this interface. New stream registration also
+requires the cluster’s <code class="docutils literal notranslate"><span class="pre">ENABLE_NATIVE_CDC</span></code> admission knob. Existing streams
+can still be listed or removed while admission is disabled; consumer creation,
+resume, consumption, and acknowledgement also remain available. Repeating an
+existing same-name, same-range-union registration remains idempotent.</p>
+<p>Native CDC is experimental. These bindings require the multi-range CDC C
+library and server implementation; older single-range CDC binaries use an
+incompatible interface even if they support API version 800. Drain and remove
+existing streams before upgrading all CDC-capable clients and servers together.</p>
+<p>Unlike the synchronous database key-value methods, the CDC database methods
+and the consumer’s <code class="docutils literal notranslate"><span class="pre">consume()</span></code> and <code class="docutils literal notranslate"><span class="pre">acknowledge()</span></code> methods return
+<a class="reference internal" href="#api-python-future"><span class="std std-ref">futures</span></a>. Use their usual <code class="docutils literal notranslate"><span class="pre">wait()</span></code>, <code class="docutils literal notranslate"><span class="pre">on_ready()</span></code>,
+or <code class="docutils literal notranslate"><span class="pre">result()</span></code> interfaces to observe completion and errors. These operations
+are not methods on <a class="reference internal" href="#fdb.Transaction" title="fdb.Transaction"><code class="xref py py-class docutils literal notranslate"><span class="pre">Transaction</span></code></a>, and cannot be made atomic with
+application writes by using <a class="reference internal" href="#fdb.transactional" title="fdb.transactional"><code class="xref py py-func docutils literal notranslate"><span class="pre">transactional()</span></code></a>.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>A stream has one shared acknowledgement frontier, not one per handle.
+Use only one active logical consumer per stream. Each handle permits only
+one outstanding <code class="docutils literal notranslate"><span class="pre">consume()</span></code> or <code class="docutils literal notranslate"><span class="pre">acknowledge()</span></code> operation at a time.
+Acknowledge only after every mutation through the delivered position and
+the corresponding application checkpoint are durable. Neither consuming
+nor closing a handle acknowledges automatically. An abandoned stream can
+retain unread log history indefinitely until acknowledged or removed.</p>
+</div>
+<section id="stream-management">
+<h3>Stream management</h3>
 <dl class="py method">
-<dt class="sig sig-object py" id="fdb.Tenant.create_transaction">
-<span class="sig-prename descclassname"><span class="pre">Tenant.</span></span><span class="sig-name descname"><span class="pre">create_transaction</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
-<dd><p>Returns a new <a class="reference internal" href="#fdb.Transaction" title="fdb.Transaction"><code class="xref py py-class docutils literal notranslate"><span class="pre">Transaction</span></code></a> object.  Consider using the <a class="reference internal" href="#fdb.transactional" title="fdb.transactional"><code class="xref py py-func docutils literal notranslate"><span class="pre">&#64;fdb.transactional</span></code></a> decorator to create transactions instead, since it will automatically provide you with appropriate retry behavior.</p>
+<dt class="sig sig-object py" id="fdb.Database.register_cdc_stream">
+<span class="sig-prename descclassname"><span class="pre">Database.</span></span><span class="sig-name descname"><span class="pre">register_cdc_stream</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">begin_key</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end_key</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ranges</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">split_points</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>Registers the byte-string <code class="docutils literal notranslate"><span class="pre">name</span></code> for a range union in normal user key
+space. Supply either <code class="docutils literal notranslate"><span class="pre">begin_key</span></code> and <code class="docutils literal notranslate"><span class="pre">end_key</span></code> for one half-open range,
+or the keyword argument <code class="docutils literal notranslate"><span class="pre">ranges</span></code> with an iterable of
+<code class="docutils literal notranslate"><span class="pre">(begin_key,</span> <span class="pre">end_key)</span></code> pairs (including <a class="reference internal" href="#fdb.CdcKeyRange" title="fdb.CdcKeyRange"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcKeyRange</span></code></a> records).
+Combining the two forms raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>. The name, range collection,
+and each range must be non-empty. Supply at most 1024 ranges before
+canonicalization; the encoded union must fit within the native metadata
+value-size limit.</p>
+<p>Registration sorts the ranges and merges overlaps, duplicates, and adjacent
+intervals into a canonical union. Repeating the same name and canonical
+union is idempotent, regardless of input order or partitioning; reusing a
+name with a different union fails. All ranges share one stream ID, cursor,
+and acknowledgement frontier. Mutations in gaps are excluded, and a clear
+spanning multiple ranges produces one clipped clear per intersected range.
+Returns a future whose value is the unsigned 64-bit stream ID as a Python
+<code class="docutils literal notranslate"><span class="pre">int</span></code>. Register long-lived streams rather than a stream per request.</p>
+<p>For example:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">stream_id</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">register_cdc_stream</span><span class="p">(</span>
+    <span class="sa">b</span><span class="s2">"commerce"</span><span class="p">,</span> <span class="n">ranges</span><span class="o">=</span><span class="p">[(</span><span class="sa">b</span><span class="s2">"order/"</span><span class="p">,</span> <span class="sa">b</span><span class="s2">"order0"</span><span class="p">),</span> <span class="p">(</span><span class="sa">b</span><span class="s2">"payment/"</span><span class="p">,</span> <span class="sa">b</span><span class="s2">"payment0"</span><span class="p">)]</span>
+<span class="p">)</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Set <code class="docutils literal notranslate"><span class="pre">split_points</span></code> to an iterable of byte-string boundaries to register
+fixed partitions behind one ordered logical stream. Supply at most 63 points
+in strictly increasing order, strictly inside the union’s outer bounds. A
+point may lie in a gap or at a range boundary, but every resulting partition
+must contain selected keys. <code class="docutils literal notranslate"><span class="pre">split_points=[]</span></code> creates one partition;
+<code class="docutils literal notranslate"><span class="pre">None</span></code> uses ordinary registration. Re-registration must use the same mode,
+canonical ranges, and split points.
+The partition count must not exceed the cluster’s configured CDC tag-pool
+size; otherwise registration fails with <code class="docutils literal notranslate"><span class="pre">client_invalid_operation</span></code>.</p>
+<p>The FDB client reads all partitions and merges their complete version groups.
+Applications use the same consumer methods and scalar <a class="reference internal" href="#fdb.CdcCursor" title="fdb.CdcCursor"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcCursor</span></code></a>;
+no application-side merge or partition checkpoints are needed. Delivery waits
+for every partition to be complete through a version, including quiet
+partitions. A clear crossing a partition boundary can produce multiple
+clipped mutations within one version group. Partition boundaries remain
+fixed for the stream’s lifetime.</p>
+<p>Client read-ahead and replies are bounded. A complete version group exceeding
+either its partition’s RPC quota or the aggregate reply limit fails with
+<code class="docutils literal notranslate"><span class="pre">server_overloaded</span></code>; the client never splits a group to fit the limit.</p>
+<p>Ordered registration requires the additive ordered-stream symbol in the C
+library. If it is absent, an explicit <code class="docutils literal notranslate"><span class="pre">split_points</span></code> argument raises
+<code class="docutils literal notranslate"><span class="pre">FDBError</span></code> with <code class="docutils literal notranslate"><span class="pre">unsupported_operation</span></code> (2108); ordinary CDC remains
+available. All published CDC proxies must advertise ordered-stream support
+before registration can succeed. Registration is committed atomically by a
+CDC proxy. Use ordered-capable clients and serving proxies for the stream’s
+entire lifecycle, and drain and remove ordered streams before rolling back
+to implementations that lack this support.</p>
+<p>For example, register the full user key space in four partitions:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">stream_id</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">register_cdc_stream</span><span class="p">(</span>
+    <span class="sa">b</span><span class="s2">"all-writes"</span><span class="p">,</span> <span class="sa">b</span><span class="s2">""</span><span class="p">,</span> <span class="sa">b</span><span class="s2">"</span><span class="se">\xff</span><span class="s2">"</span><span class="p">,</span> <span class="n">split_points</span><span class="o">=</span><span class="p">[</span><span class="sa">b</span><span class="s2">"</span><span class="se">\x40</span><span class="s2">"</span><span class="p">,</span> <span class="sa">b</span><span class="s2">"</span><span class="se">\x80</span><span class="s2">"</span><span class="p">,</span> <span class="sa">b</span><span class="s2">"</span><span class="se">\xc0</span><span class="s2">"</span><span class="p">]</span>
+<span class="p">)</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+<span class="n">consumer</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">create_cdc_consumer</span><span class="p">(</span><span class="sa">b</span><span class="s2">"all-writes"</span><span class="p">)</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">consumer</span><span class="o">.</span><span class="n">consume</span><span class="p">()</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+<span class="c1"># Durably process result and checkpoint consumer.get_position() first.</span>
+<span class="n">consumer</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+<span class="n">consumer</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="fdb.Database.remove_cdc_stream">
+<span class="sig-prename descclassname"><span class="pre">Database.</span></span><span class="sig-name descname"><span class="pre">remove_cdc_stream</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>Removes the byte-string stream name and relinquishes its unread history.
+Removing a missing name succeeds. Returns a future whose value is
+<code class="docutils literal notranslate"><span class="pre">None</span></code>. Removal is terminal for existing consumers; registering the
+same name again does not redirect their cursors to the new stream.</p>
+<p>Removing an ordered stream requires a published CDC proxy that supports
+ordered streams; it atomically removes the logical stream and all partitions
+while preserving the retention requirements of other streams sharing tags.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="fdb.Database.list_cdc_streams">
+<span class="sig-prename descclassname"><span class="pre">Database.</span></span><span class="sig-name descname"><span class="pre">list_cdc_streams</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
+<dd><p>Returns a future whose value is a list of <a class="reference internal" href="#fdb.CdcStreamInfo" title="fdb.CdcStreamInfo"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcStreamInfo</span></code></a> records.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="fdb.Database.create_cdc_consumer">
+<span class="sig-prename descclassname"><span class="pre">Database.</span></span><span class="sig-name descname"><span class="pre">create_cdc_consumer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>Returns a future whose value is a <a class="reference internal" href="#fdb.CdcConsumer" title="fdb.CdcConsumer"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcConsumer</span></code></a> for the existing
+byte-string stream name at its initial position.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="fdb.Database.resume_cdc_consumer">
+<span class="sig-prename descclassname"><span class="pre">Database.</span></span><span class="sig-name descname"><span class="pre">resume_cdc_consumer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cursor</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>Returns a future whose value is a <a class="reference internal" href="#fdb.CdcConsumer" title="fdb.CdcConsumer"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcConsumer</span></code></a> constructed from
+a checkpointed <a class="reference internal" href="#fdb.CdcCursor" title="fdb.CdcCursor"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcCursor</span></code></a>. The cursor contains no process-local
+state. Stream existence and cursor validity are checked when consuming
+or acknowledging, not by this method. Resume only from a durably processed
+checkpoint. Before the first consume, wait until a fresh database read
+version reaches <code class="docutils literal notranslate"><span class="pre">cursor.last_consumed_version</span></code>, then reissue
+<a class="reference internal" href="#fdb.CdcConsumer.acknowledge" title="fdb.CdcConsumer.acknowledge"><code class="xref py py-meth docutils literal notranslate"><span class="pre">CdcConsumer.acknowledge()</span></code></a> and wait for it to complete to reconcile a
+possibly interrupted acknowledgement. A resumed handle lacks the original
+handle’s delivery proof, so an unacknowledged cursor ahead of that read
+version is rejected with <code class="docutils literal notranslate"><span class="pre">client_invalid_operation</span></code> even if it was
+previously delivered. Bound the read-version wait rather than retrying all
+invalid-operation errors. Unacknowledged mutations may be redelivered after
+CDC proxy replacement, so processing must tolerate replay.</p>
 </dd></dl>
 
 </section>
+<section id="result-types">
+<h3>Result types</h3>
+<p>The following records are immutable tuples with named fields. Returned names,
+keys, and mutation parameters are Python-owned <code class="docutils literal notranslate"><span class="pre">bytes</span></code>, copied from the
+native result. They remain valid after the future or consumer is released.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="fdb.CdcCursor">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fdb.</span></span><span class="sig-name descname"><span class="pre">CdcCursor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stream_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">last_consumed_version</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>A stable unsigned 64-bit stream ID and the signed 64-bit version through
+which mutations have been delivered. Both fields are Python <code class="docutils literal notranslate"><span class="pre">int</span></code>
+values. A delivered cursor is not proof of processing or acknowledgement.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="fdb.CdcKeyRange">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fdb.</span></span><span class="sig-name descname"><span class="pre">CdcKeyRange</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">begin_key</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end_key</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>The inclusive begin and exclusive end byte strings of one registered range.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="fdb.CdcStreamInfo">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fdb.</span></span><span class="sig-name descname"><span class="pre">CdcStreamInfo</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stream_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ranges</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_version</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>A stream’s byte-string name, integer ID, canonical range union as a tuple
+of <a class="reference internal" href="#fdb.CdcKeyRange" title="fdb.CdcKeyRange"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcKeyRange</span></code></a> records, and durable minimum required version.
+<code class="docutils literal notranslate"><span class="pre">min_version</span></code> is a retention frontier, not a snapshot version for the
+registered ranges. The <code class="docutils literal notranslate"><span class="pre">begin_key</span></code> and <code class="docutils literal notranslate"><span class="pre">end_key</span></code> properties are
+available when the canonical union contains exactly one range; accessing
+them on a multi-range stream raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>. Use <code class="docutils literal notranslate"><span class="pre">ranges</span></code> to
+inspect any stream without treating gaps as registered keys.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="fdb.CdcMutation">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fdb.</span></span><span class="sig-name descname"><span class="pre">CdcMutation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">param1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">param2</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>One raw mutation. <code class="docutils literal notranslate"><span class="pre">type</span></code> is an integer, including for unrecognized
+mutation types; <code class="docutils literal notranslate"><span class="pre">param1</span></code> and <code class="docutils literal notranslate"><span class="pre">param2</span></code> are byte strings. For
+<code class="docutils literal notranslate"><span class="pre">SET_VALUE</span></code> they are the key and value; for <code class="docutils literal notranslate"><span class="pre">CLEAR_RANGE</span></code> they are
+the begin and end keys, clipped to a registered range; for atomic
+mutations they are the key and operand. CDC returns raw mutation
+operations, not a materialized post-mutation value for every key.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="fdb.CdcMutationType">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fdb.</span></span><span class="sig-name descname"><span class="pre">CdcMutationType</span></span></dt>
+<dd><p>An <code class="docutils literal notranslate"><span class="pre">enum.IntEnum</span></code> of known raw mutation type values, matching the C API
+constants without the <code class="docutils literal notranslate"><span class="pre">FDB_CDC_MUTATION_TYPE_</span></code> prefix: <code class="docutils literal notranslate"><span class="pre">SET_VALUE</span></code>,
+<code class="docutils literal notranslate"><span class="pre">CLEAR_RANGE</span></code>, <code class="docutils literal notranslate"><span class="pre">ADD</span></code>, <code class="docutils literal notranslate"><span class="pre">AND</span></code>, <code class="docutils literal notranslate"><span class="pre">OR</span></code>, <code class="docutils literal notranslate"><span class="pre">XOR</span></code>, <code class="docutils literal notranslate"><span class="pre">APPEND_IF_FITS</span></code>,
+<code class="docutils literal notranslate"><span class="pre">MAX</span></code>, <code class="docutils literal notranslate"><span class="pre">MIN</span></code>, <code class="docutils literal notranslate"><span class="pre">SET_VERSIONSTAMPED_KEY</span></code>, <code class="docutils literal notranslate"><span class="pre">SET_VERSIONSTAMPED_VALUE</span></code>,
+<code class="docutils literal notranslate"><span class="pre">BYTE_MIN</span></code>, <code class="docutils literal notranslate"><span class="pre">BYTE_MAX</span></code>, <code class="docutils literal notranslate"><span class="pre">MIN_V2</span></code>, <code class="docutils literal notranslate"><span class="pre">AND_V2</span></code>, and <code class="docutils literal notranslate"><span class="pre">COMPARE_AND_CLEAR</span></code>.
+These constants are not exhaustive. Compare <code class="docutils literal notranslate"><span class="pre">mutation.type</span></code> to known
+constants, but handle unknown integers without assuming that constructing
+<code class="docutils literal notranslate"><span class="pre">CdcMutationType(mutation.type)</span></code> will succeed.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="fdb.CdcVersionedMutations">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fdb.</span></span><span class="sig-name descname"><span class="pre">CdcVersionedMutations</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">version</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mutations</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>One complete commit-version group, with an integer <code class="docutils literal notranslate"><span class="pre">version</span></code> and a
+tuple of <a class="reference internal" href="#fdb.CdcMutation" title="fdb.CdcMutation"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcMutation</span></code></a> records. Preserve this grouping when
+processing a reply.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="fdb.CdcConsumeResult">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fdb.</span></span><span class="sig-name descname"><span class="pre">CdcConsumeResult</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mutations</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">last_consumed_version</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">mutations</span></code> is a tuple of <a class="reference internal" href="#fdb.CdcVersionedMutations" title="fdb.CdcVersionedMutations"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcVersionedMutations</span></code></a> groups;
+<code class="docutils literal notranslate"><span class="pre">last_consumed_version</span></code> is the integer delivered cursor after the reply.
+The cursor may advance across commit-version gaps with no returned
+mutations. Even an empty reply can advance the cursor; do not infer it
+from the last mutation group or skip checkpointing and acknowledgement
+solely because <code class="docutils literal notranslate"><span class="pre">mutations</span></code> is empty.</p>
+</dd></dl>
+
+</section>
+<section id="consumer-lifecycle">
+<h3>Consumer lifecycle</h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="fdb.CdcConsumer">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fdb.</span></span><span class="sig-name descname"><span class="pre">CdcConsumer</span></span></dt>
+<dd><p>An owned native consumer handle, obtained from a database create or resume
+future. It remains valid independently of that future. Use it as a
+context manager or call <a class="reference internal" href="#fdb.CdcConsumer.close" title="fdb.CdcConsumer.close"><code class="xref py py-meth docutils literal notranslate"><span class="pre">CdcConsumer.close()</span></code></a> when finished.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="fdb.CdcConsumer.consume">
+<span class="sig-prename descclassname"><span class="pre">CdcConsumer.</span></span><span class="sig-name descname"><span class="pre">consume</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
+<dd><p>Long-polls for the next delivered position and complete commit-version
+groups. Returns a future whose value is <a class="reference internal" href="#fdb.CdcConsumeResult" title="fdb.CdcConsumeResult"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcConsumeResult</span></code></a>.
+Successful consumption advances the in-memory position, but does not
+release durable retention. Finish processing a reply before consuming
+again if that reply may need to be retried. Following proxy replacement,
+the client may rewind to its last successful durable acknowledgement and
+redeliver unacknowledged mutations.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="fdb.CdcConsumer.acknowledge">
+<span class="sig-prename descclassname"><span class="pre">CdcConsumer.</span></span><span class="sig-name descname"><span class="pre">acknowledge</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
+<dd><p>Durably acknowledges the handle’s current delivered position, allowing
+history through that position to be released. Returns a future whose
+value is <code class="docutils literal notranslate"><span class="pre">None</span></code>. Wait for it before starting another consume or
+acknowledgement. This is not atomic with writes to a downstream system
+or an application checkpoint.</p>
+<p>For ordered streams, a canceled or failed consume or acknowledgement
+invalidates unacknowledged read-ahead. Before the next operation, the handle
+rereads the common durable acknowledgement and resets its cursor to that
+frontier. A retry of acknowledgement can therefore acknowledge a reconciled
+cursor earlier than the previously delivered position; inspect
+<a class="reference internal" href="#fdb.CdcConsumer.get_position" title="fdb.CdcConsumer.get_position"><code class="xref py py-meth docutils literal notranslate"><span class="pre">CdcConsumer.get_position()</span></code></a> and tolerate replay on subsequent
+consumption. If the interrupted acknowledgement committed, its durable
+progress is preserved.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="fdb.CdcConsumer.get_position">
+<span class="sig-prename descclassname"><span class="pre">CdcConsumer.</span></span><span class="sig-name descname"><span class="pre">get_position</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
+<dd><p>Returns the current <a class="reference internal" href="#fdb.CdcCursor" title="fdb.CdcCursor"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcCursor</span></code></a> synchronously.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="fdb.CdcConsumer.close">
+<span class="sig-prename descclassname"><span class="pre">CdcConsumer.</span></span><span class="sig-name descname"><span class="pre">close</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
+<dd><p>Releases the local handle. Repeated calls are harmless. It does not
+acknowledge the delivered position or remove the stream. Exiting the
+consumer’s context manager calls this method, including on exceptions.</p>
+</dd></dl>
+
+<p>For example, the following loop supports both an initial start and a restart.
+The application-supplied <code class="docutils literal notranslate"><span class="pre">load_checkpoint</span></code> returns a durable
+<a class="reference internal" href="#fdb.CdcCursor" title="fdb.CdcCursor"><code class="xref py py-class docutils literal notranslate"><span class="pre">CdcCursor</span></code></a>, or <code class="docutils literal notranslate"><span class="pre">None</span></code> on the first start. <code class="docutils literal notranslate"><span class="pre">apply_and_checkpoint</span></code>
+must durably apply complete version groups and record the cursor consistently,
+and must tolerate replay without repeating non-idempotent side effects. It
+must also handle an empty reply. If it raises, the loop does not acknowledge
+the reply:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">fdb</span>
+
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">800</span><span class="p">)</span>
+<span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
+<span class="n">db</span><span class="o">.</span><span class="n">register_cdc_stream</span><span class="p">(</span><span class="sa">b</span><span class="s2">"orders"</span><span class="p">,</span> <span class="sa">b</span><span class="s2">"order/"</span><span class="p">,</span> <span class="sa">b</span><span class="s2">"order0"</span><span class="p">)</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+
+<span class="n">saved_cursor</span> <span class="o">=</span> <span class="n">load_checkpoint</span><span class="p">()</span>
+<span class="k">if</span> <span class="n">saved_cursor</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">consumer_future</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">create_cdc_consumer</span><span class="p">(</span><span class="sa">b</span><span class="s2">"orders"</span><span class="p">)</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="n">consumer_future</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">resume_cdc_consumer</span><span class="p">(</span><span class="n">saved_cursor</span><span class="p">)</span>
+
+<span class="k">with</span> <span class="n">consumer_future</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span> <span class="k">as</span> <span class="n">consumer</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">saved_cursor</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">deadline</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span> <span class="o">+</span> <span class="mi">30</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="n">remaining</span> <span class="o">=</span> <span class="n">deadline</span> <span class="o">-</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">remaining</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">TimeoutError</span><span class="p">(</span><span class="s2">"CDC checkpoint is ahead of the read version"</span><span class="p">)</span>
+            <span class="n">tr</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">create_transaction</span><span class="p">()</span>
+            <span class="n">tr</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_read_lock_aware</span><span class="p">()</span>
+            <span class="n">tr</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_timeout</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">remaining</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">)))</span>
+            <span class="k">if</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_read_version</span><span class="p">()</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span> <span class="o">&gt;=</span> <span class="n">saved_cursor</span><span class="o">.</span><span class="n">last_consumed_version</span><span class="p">:</span>
+                <span class="k">break</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="mf">0.01</span><span class="p">,</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">deadline</span> <span class="o">-</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">())))</span>
+        <span class="n">consumer</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">reply</span> <span class="o">=</span> <span class="n">consumer</span><span class="o">.</span><span class="n">consume</span><span class="p">()</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+        <span class="n">apply_and_checkpoint</span><span class="p">(</span><span class="n">reply</span><span class="o">.</span><span class="n">mutations</span><span class="p">,</span> <span class="n">consumer</span><span class="o">.</span><span class="n">get_position</span><span class="p">())</span>
+        <span class="n">consumer</span><span class="o">.</span><span class="n">acknowledge</span><span class="p">()</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>The acknowledgement after the read-version wait closes the crash gap between
+persisting the checkpoint and completing its acknowledgement; reissuing an
+already durable acknowledgement is safe. This requires a cursor whose
+mutations are known to have been durably processed. Never invent a cursor or
+advance a checkpoint or acknowledgement beyond that position.</p>
+</section>
+</section>
 <section id="transactional-decoration">
-<span id="api-python-transactional-decorator"></span><h2>Transactional decoration</h2>
+<h2>Transactional decoration</h2>
 <dl class="py function">
 <dt class="sig sig-object py" id="fdb.transactional">
 <span class="sig-prename descclassname"><span class="pre">&#64;</span></span><span class="sig-prename descclassname"><span class="pre">fdb.</span></span><span class="sig-name descname"><span class="pre">transactional</span></span></dt>
@@ -770,8 +1069,8 @@ value of the key is also retrieved, using network bandwidth.</p>
 </pre></div>
 </div>
 <p>The <code class="docutils literal notranslate"><span class="pre">&#64;fdb.transactional</span></code> decorator makes <code class="docutils literal notranslate"><span class="pre">simple_function</span></code> a transactional function.  All functions using this decorator must have an argument <strong>named</strong> <code class="docutils literal notranslate"><span class="pre">tr</span></code>.  This specially named argument is passed a transaction that the function can use to do reads and writes.</p>
-<p>A caller of a transactionally decorated function can pass a <a class="reference internal" href="#fdb.Database" title="fdb.Database"><code class="xref py py-class docutils literal notranslate"><span class="pre">Database</span></code></a> or <a class="reference internal" href="#fdb.Tenant" title="fdb.Tenant"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tenant</span></code></a> instead of a transaction for the <code class="docutils literal notranslate"><span class="pre">tr</span></code> parameter.  Then a transaction will be created automatically, and automatically committed before returning to the caller.  The decorator will retry calling the decorated function until the transaction successfully commits.</p>
-<p>If <code class="docutils literal notranslate"><span class="pre">db</span></code> is a <a class="reference internal" href="#fdb.Database" title="fdb.Database"><code class="xref py py-class docutils literal notranslate"><span class="pre">Database</span></code></a> or <a class="reference internal" href="#fdb.Tenant" title="fdb.Tenant"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tenant</span></code></a>, a call like</p>
+<p>A caller of a transactionally decorated function can pass a <a class="reference internal" href="#fdb.Database" title="fdb.Database"><code class="xref py py-class docutils literal notranslate"><span class="pre">Database</span></code></a> instead of a transaction for the <code class="docutils literal notranslate"><span class="pre">tr</span></code> parameter.  Then a transaction will be created automatically, and automatically committed before returning to the caller.  The decorator will retry calling the decorated function until the transaction successfully commits.</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">db</span></code> is a <a class="reference internal" href="#fdb.Database" title="fdb.Database"><code class="xref py py-class docutils literal notranslate"><span class="pre">Database</span></code></a>, a call like</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">simple_function</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="s1">'a'</span><span class="p">,</span> <span class="s1">'b'</span><span class="p">)</span>
 </pre></div>
 </div>
@@ -1077,7 +1376,7 @@ both the caching and the increased network bandwidth.</p>
 <p>Normally, commit will wait for outstanding reads to return. However, if those reads were snapshot reads or the transaction option for disabling “read-your-writes” has been invoked, any outstanding reads will immediately return errors.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Consider using the <a class="reference internal" href="#fdb.transactional" title="fdb.transactional"><code class="xref py py-func docutils literal notranslate"><span class="pre">&#64;fdb.transactional</span></code></a> decorator, which not only calls <a class="reference internal" href="#fdb.Database.create_transaction" title="fdb.Database.create_transaction"><code class="xref py py-meth docutils literal notranslate"><span class="pre">Database.create_transaction()</span></code></a> or :meth`Tenant.create_transaction` and <a class="reference internal" href="#fdb.Transaction.commit" title="fdb.Transaction.commit"><code class="xref py py-meth docutils literal notranslate"><span class="pre">Transaction.commit()</span></code></a> for you but also implements the required error handling and retry logic for transactions.</p>
+<p>Consider using the <a class="reference internal" href="#fdb.transactional" title="fdb.transactional"><code class="xref py py-func docutils literal notranslate"><span class="pre">&#64;fdb.transactional</span></code></a> decorator, which not only calls <a class="reference internal" href="#fdb.Database.create_transaction" title="fdb.Database.create_transaction"><code class="xref py py-meth docutils literal notranslate"><span class="pre">Database.create_transaction()</span></code></a> and <a class="reference internal" href="#fdb.Transaction.commit" title="fdb.Transaction.commit"><code class="xref py py-meth docutils literal notranslate"><span class="pre">Transaction.commit()</span></code></a> for you but also implements the required error handling and retry logic for transactions.</p>
 </div>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
@@ -1203,8 +1502,8 @@ both the caching and the increased network bandwidth.</p>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="fdb.Transaction.get_range_split_points">
-<span class="sig-prename descclassname"><span class="pre">Transaction.</span></span><span class="sig-name descname"><span class="pre">get_range_split_points</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">begin_key</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end_key</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_size</span></span></em><span class="sig-paren">)</span></dt>
-<dd><p>Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code class="docutils literal notranslate"><span class="pre">chunk_size</span></code>. Returns a <code class="xref py py-class docutils literal notranslate"><span class="pre">FutureKeyArray</span></code>.
+<span class="sig-prename descclassname"><span class="pre">Transaction.</span></span><span class="sig-name descname"><span class="pre">get_range_split_points</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">begin_key</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end_key</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">limit</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">-1</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code class="docutils literal notranslate"><span class="pre">chunk_size</span></code>. A non-negative <code class="docutils literal notranslate"><span class="pre">limit</span></code> caps the number of interior split points, including shard boundaries. Returns a <code class="xref py py-class docutils literal notranslate"><span class="pre">FutureKeyArray</span></code>.
 .. note:: The returned split points contain the start key and end key of the given range</p>
 </dd></dl>
 
@@ -2090,29 +2389,6 @@ this subspace and the passed tuple.</p>
 </dd></dl>
 
 </section>
-<section id="module-fdb.tenant_management">
-<span id="tenant-management"></span><h2>Tenant management</h2>
-<p>The FoundationDB API includes functions to manage the set of tenants in a cluster.</p>
-<dl class="py method">
-<dt class="sig sig-object py" id="fdb.tenant_management.fdb.tenant_management.create_tenant">
-<span class="sig-prename descclassname"><span class="pre">fdb.tenant_management.</span></span><span class="sig-name descname"><span class="pre">create_tenant</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_or_tr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tenant_name</span></span></em><span class="sig-paren">)</span></dt>
-<dd><p>Creates a new tenant in the cluster.</p>
-<p>The tenant name can be either a byte string or a tuple and cannot start with the <code class="docutils literal notranslate"><span class="pre">\xff</span></code> byte. If a tuple is provided, the tuple will be packed using the tuple layer to generate the byte string tenant name.</p>
-<p>If a database is provided to this function for the <code class="docutils literal notranslate"><span class="pre">db_or_tr</span></code> parameter, then this function will first check if the tenant already exists. If it does, it will fail with a <code class="docutils literal notranslate"><span class="pre">tenant_already_exists</span></code> error. Otherwise, it will create a transaction and attempt to create the tenant in a retry loop. If the tenant is created concurrently by another transaction, this function may still return successfully.</p>
-<p>If a transaction is provided to this function for the <code class="docutils literal notranslate"><span class="pre">db_or_tr</span></code> parameter, then this function will not check if the tenant already exists. It is up to the user to perform that check if required. The user must also successfully commit the transaction in order for the creation to take effect.</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="fdb.tenant_management.fdb.tenant_management.delete_tenant">
-<span class="sig-prename descclassname"><span class="pre">fdb.tenant_management.</span></span><span class="sig-name descname"><span class="pre">delete_tenant</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_or_tr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tenant_name</span></span></em><span class="sig-paren">)</span></dt>
-<dd><p>Delete a tenant from the cluster.</p>
-<p>The tenant name can be either a byte string or a tuple. If a tuple is provided, the tuple will be packed using the tuple layer to generate the byte string tenant name.</p>
-<p>It is an error to delete a tenant that still has data. To delete a non-empty tenant, first clear all of the keys in the tenant.</p>
-<p>If a database is provided to this function for the <code class="docutils literal notranslate"><span class="pre">db_or_tr</span></code> parameter, then this function will first check if the tenant already exists. If it does not, it will fail with a <code class="docutils literal notranslate"><span class="pre">tenant_not_found</span></code> error. Otherwise, it will create a transaction and attempt to delete the tenant in a retry loop. If the tenant is deleted concurrently by another transaction, this function may still return successfully.</p>
-<p>If a transaction is provided to this function for the <code class="docutils literal notranslate"><span class="pre">db_or_tr</span></code> parameter, then this function will not check if the tenant already exists. It is up to the user to perform that check if required. The user must also successfully commit the transaction in order for the deletion to take effect.</p>
-</dd></dl>
-
-</section>
 </section>
 
 
@@ -2135,7 +2411,7 @@ this subspace and the passed tuple.</p>
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

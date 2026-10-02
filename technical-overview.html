@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Technical Overview &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Technical Overview &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -130,7 +130,7 @@
 <li><p><a class="reference internal" href="experimental-features.html"><span class="doc">Experimental-Features</span></a> describes experimental features of FoundationDB, available for testing.</p></li>
 <li><p><a class="reference internal" href="engineering.html"><span class="doc">Engineering</span></a> summarizes the unique tools and capabilities behind FoundationDB.</p></li>
 <li><p><a class="reference internal" href="fault-tolerance.html"><span class="doc">Fault Tolerance</span></a>: FoundationDB provides fault tolerance by intelligently replicating data across a distributed cluster of machines. Our architecture is designed to minimize service interruption and data loss in the event of machine failures.</p></li>
-<li><p><a class="reference internal" href="flow.html"><span class="doc">Flow</span></a>: FoundationDB faces rigorous engineering challenges for high performance and scalability. To meet these challenges, we implemented Flow, an extension to C++ that supports actor-based concurrency with new keywords and control-flow primitives while retaining speed and I/O efficiency.</p></li>
+<li><p><a class="reference internal" href="flow.html"><span class="doc">Flow</span></a>: FoundationDB faces rigorous engineering challenges for high performance and scalability. To meet these challenges, we implemented Flow, an asynchronous runtime that combines standard C++ coroutines with futures, message streams, and cooperative scheduling while retaining speed and I/O efficiency.</p></li>
 <li><p><a class="reference internal" href="testing.html"><span class="doc">Simulation and Testing</span></a>: FoundationDB uses a combined regime of robust simulation, live performance testing, and hardware-based failure testing to meet exacting standards of correctness and performance.</p></li>
 <li><p><a class="reference internal" href="kv-architecture.html"><span class="doc">FoundationDB Architecture</span></a> provides a description of every major role a process in FoundationDB can fulfill.</p></li>
 <li><p><a class="reference internal" href="read-write-path.html"><span class="doc">FDB Read and Write Path</span></a> describes how FDB read and write path works.</p></li>
@@ -138,6 +138,7 @@
 <li><p><a class="reference internal" href="consistency-check-urgent.html"><span class="doc">Consistency Checker Urgent</span></a> describes how to complete a consistency scan of the entire database in a fast way.</p></li>
 <li><p><a class="reference internal" href="rangelock.html"><span class="doc">FoundationDB Range Locks (WiP)</span></a> describes how to do range locks block write traffic to key ranges.</p></li>
 <li><p><a class="reference internal" href="bulkdump.html"><span class="doc">BulkDump (Dev)</span></a> describes how to do snapshot data dump to blobstore or local file system.</p></li>
+<li><p><a class="reference internal" href="bulkload.html"><span class="doc">BulkLoad (Dev)</span></a> describes the technical implementation of bulk data loading from external sources.</p></li>
 <li><p><a class="reference internal" href="auditstorage.html"><span class="doc">Audit Storage</span></a> describes how to do data replica consistency check and location metadata consistency check efficiently.</p></li>
 </ul>
 <div class="toctree-wrapper compound">
@@ -164,7 +165,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Simulation and Testing &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Simulation and Testing &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -69,7 +69,11 @@
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Simulation and Testing</a><ul>
 <li><a class="reference internal" href="#correctness-and-performance">Correctness and Performance</a></li>
-<li><a class="reference internal" href="#simulation">Simulation</a></li>
+<li><a class="reference internal" href="#simulation">Simulation</a><ul>
+<li><a class="reference internal" href="#running-c-unit-tests">Running C++ unit tests</a></li>
+<li><a class="reference internal" href="#running-unit-tests-in-simulation">Running unit tests in simulation</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#performance-testing-with-circus">Performance testing with Circus</a></li>
 </ul>
 </li>
@@ -116,7 +120,11 @@
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Simulation and Testing</a><ul>
 <li><a class="reference internal" href="#correctness-and-performance">Correctness and Performance</a></li>
-<li><a class="reference internal" href="#simulation">Simulation</a></li>
+<li><a class="reference internal" href="#simulation">Simulation</a><ul>
+<li><a class="reference internal" href="#running-c-unit-tests">Running C++ unit tests</a></li>
+<li><a class="reference internal" href="#running-unit-tests-in-simulation">Running unit tests in simulation</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#performance-testing-with-circus">Performance testing with Circus</a></li>
 </ul>
 </li>
@@ -134,7 +142,7 @@
 </section>
 <section id="simulation">
 <h2>Simulation</h2>
-<p>Simulation is a powerful tool for testing system correctness. Our simulation technology, called Simulation, is enabled by and tightly integrated with <a class="reference internal" href="flow.html"><span class="doc">Flow</span></a>, our programming language for actor-based concurrency. In addition to generating efficient production code, Flow works with Simulation for simulated execution.</p>
+<p>Simulation is a powerful tool for testing system correctness. Our simulation technology, called Simulation, is enabled by and tightly integrated with <a class="reference internal" href="flow.html"><span class="doc">Flow</span></a>, our asynchronous runtime for C++ coroutines. Flow supports both production execution and deterministic simulated execution.</p>
 <p>The major goal of Simulation is to make sure that we find and diagnose issues in simulation rather than the real world. Simulation runs tens of thousands of simulations every night, each one simulating large numbers of component failures. Based on the volume of tests that we run and the increased intensity of the failures in our scenarios, we estimate that we have run the equivalent of roughly one trillion CPU-hours of simulation on FoundationDB.</p>
 <p>Simulation is able to conduct a <em>deterministic</em> simulation of an entire FoundationDB cluster within a single-threaded process. Determinism is crucial in that it allows perfect repeatability of a simulated run, facilitating controlled experiments to home in on issues. The simulation steps through time, synchronized across the system, representing a larger amount of real time in a smaller amount of simulated time. In practice, our simulations usually have about a 10-1 factor of real-to-simulated time, which is advantageous for the efficiency of testing.</p>
 <p>We run a broad range of simulations testing various aspects of the system. For example, we run a cycle test that uses key-values pairs arranged in a ring that executes transactions to change the values in a manner designed to maintain the ring’s integrity, allowing a clear test of transactional isolation.</p>
@@ -142,6 +150,50 @@
 <p>We use Simulation to simulate failures modes at the network, machine, and datacenter levels, including connection failures, degradation of machine performance, machine shutdowns or reboots, machines coming back from the dead, etc. We stress-test all of these failure modes, failing machines at very short intervals, inducing unusually severe loads, and delaying communications channels.</p>
 <p>For a while, there was an informal competition within the engineering team to design failures that found the toughest bugs and issues the most easily. After a period of one-upsmanship, the reigning champion is called “swizzle-clogging”. To swizzle-clog, you first pick a random subset of nodes in the cluster. Then, you “clog” (stop) each of their network connections one by one over a few seconds. Finally, you unclog them in a random order, again one by one, until they are all up. This pattern seems to be particularly good at finding deep issues that only happen in the rarest real-world cases.</p>
 <p>Simulation’s success has surpassed our expectation and has been vital to our engineering team. It seems unlikely that we would have been able to build FoundationDB without this technology.</p>
+<section id="running-c-unit-tests">
+<h3>Running C++ unit tests</h3>
+<p>CTest runs the standalone unit suites once per supported runtime mode. With
+<code class="docutils literal notranslate"><span class="pre">BUILD_TESTING=ON</span></code> (the default), the normal build and the <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> target
+build these executables. To build and run only the unit suites from a configured
+build directory:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>--build<span class="w"> </span>.<span class="w"> </span>--target<span class="w"> </span>unit_tests
+ctest<span class="w"> </span>-L<span class="w"> </span>unit<span class="w"> </span>--output-on-failure<span class="w"> </span>-j<span class="w"> </span><span class="m">2</span>
+</pre></div>
+</div>
+<p>Each entry is named <code class="docutils literal notranslate"><span class="pre">unit/&lt;target&gt;/native</span></code> or
+<code class="docutils literal notranslate"><span class="pre">unit/&lt;target&gt;/simulation</span></code> and has <code class="docutils literal notranslate"><span class="pre">unit</span></code>, runtime-mode, and target-name
+labels. For example, <code class="docutils literal notranslate"><span class="pre">ctest</span> <span class="pre">-L</span> <span class="pre">native</span></code> selects the native suites and
+<code class="docutils literal notranslate"><span class="pre">ctest</span> <span class="pre">-L</span> <span class="pre">'^fdbclient_test$'</span></code> selects both client modes. Flow has only a native
+entry.</p>
+<p><code class="docutils literal notranslate"><span class="pre">UNIT_TEST_SEED</span></code> is a decimal seed shared by these entries, independent of
+the cluster simulation seed. It defaults to <code class="docutils literal notranslate"><span class="pre">1</span></code>; set it to <code class="docutils literal notranslate"><span class="pre">0</span></code> to choose a
+random seed, which each runner prints. <code class="docutils literal notranslate"><span class="pre">UNIT_TEST_TIMEOUT</span></code> defaults to 600
+wall-clock seconds per suite. Each runner uses a separate temporary directory,
+so CTest can run suites concurrently. To reproduce an individual failure:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>./bin/fdbclient_test<span class="w"> </span>--seed<span class="w"> </span><span class="m">1</span><span class="w"> </span>--filter<span class="w"> </span>/fdbclient/example
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">ENABLE_UNIT_TESTS=OFF</span></code> or <code class="docutils literal notranslate"><span class="pre">BUILD_TESTING=OFF</span></code> disables this registration and
+its default build dependencies; the individual executable targets and the
+explicit <code class="docutils literal notranslate"><span class="pre">unit_tests</span></code> build target remain available. IDE and cross-compiling
+configurations also omit these registrations and default dependencies.</p>
+<p>The former <code class="docutils literal notranslate"><span class="pre">AUTO_DISCOVER_UNIT_TESTS</span></code> source-scanning option is deprecated.
+The standalone suites replace its per-case registrations and the focused
+<code class="docutils literal notranslate"><span class="pre">multiversion_client/unit_tests</span></code> and
+<code class="docutils literal notranslate"><span class="pre">threadsafe_threadfuture_to_future/unit_tests</span></code> entries. CI should invoke
+CTest once instead of also invoking these binaries directly. Randomized
+<code class="docutils literal notranslate"><span class="pre">RandomUnitTests</span></code> cluster workloads and correctness packages remain in place:
+they exercise different seeds and schedules, including cases that standalone
+runners exclude.</p>
+</section>
+<section id="running-unit-tests-in-simulation">
+<h3>Running unit tests in simulation</h3>
+<p>Several standalone unit-test binaries can also run their tests under Simulation. The <code class="docutils literal notranslate"><span class="pre">fdbclient_test</span></code>, <code class="docutils literal notranslate"><span class="pre">fdbrpc_test</span></code>, and <code class="docutils literal notranslate"><span class="pre">fdbserver_*_test</span></code> targets support the <code class="docutils literal notranslate"><span class="pre">--simulation</span></code> flag. For example:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>./bin/fdbclient_test<span class="w"> </span>--simulation
+</pre></div>
+</div>
+<p>Without an explicit test filter, simulation mode skips <code class="docutils literal notranslate"><span class="pre">noSim/...</span></code>, incompatible <code class="docutils literal notranslate"><span class="pre">/fdbrpc/grpc</span></code>, and opt-in performance or long-running correctness tests. Normal mode skips standalone-incompatible gRPC and simulation-only HTTP-server, mock-DNS, external-client, and file-shutdown tests, tests requiring an external backup URL, and opt-in performance or long-running correctness tests. An explicit <code class="docutils literal notranslate"><span class="pre">--filter</span></code> can still select any of these tests. The <code class="docutils literal notranslate"><span class="pre">flow_test</span></code> target does not support simulation because it is not linked with simulator support.</p>
+</section>
 </section>
 <section id="performance-testing-with-circus">
 <h2>Performance testing with Circus</h2>
@@ -171,7 +223,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

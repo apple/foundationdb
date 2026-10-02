@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Configuration &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Configuration &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -487,6 +487,7 @@ Coordinators changed
 <li><p><code class="docutils literal notranslate"><span class="pre">public-address</span></code>: The publicly visible IP:Port of the process. If <code class="docutils literal notranslate"><span class="pre">auto</span></code>, the address will be the one used to communicate with the coordination servers.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">listen-address</span></code>: The IP:Port that the server socket should bind to. If <code class="docutils literal notranslate"><span class="pre">public</span></code>, it will be the same as the public-address.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">datadir</span></code>: A writable directory (by root or by the user set in the [fdbmonitor] section) where persistent data files will be stored.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tlog-spill-datadir</span></code>: An optional writable directory where transaction logs store spilled data. Transaction log disk queues remain in <code class="docutils literal notranslate"><span class="pre">datadir</span></code>. If unset, transaction logs store spilled data in <code class="docutils literal notranslate"><span class="pre">datadir</span></code> as well. The directory must be unique for each <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> process. Existing transaction log spill files in <code class="docutils literal notranslate"><span class="pre">datadir</span></code> remain readable after this setting is changed. To move existing spill files to the new disk as well, move the <code class="docutils literal notranslate"><span class="pre">log-*</span></code> and <code class="docutils literal notranslate"><span class="pre">log2-*</span></code> files while the process is stopped. After spill files have been moved to a separate <code class="docutils literal notranslate"><span class="pre">tlog-spill-datadir</span></code>, reverting to a single-directory layout or downgrading to a binary without this option requires moving the <code class="docutils literal notranslate"><span class="pre">log-*</span></code> and <code class="docutils literal notranslate"><span class="pre">log2-*</span></code> files back into <code class="docutils literal notranslate"><span class="pre">datadir</span></code> while the process is stopped. On Linux, when <code class="docutils literal notranslate"><span class="pre">data-filesystem</span></code> validation is enabled and this directory is on a separate mount, configure <code class="docutils literal notranslate"><span class="pre">tlog-spill-filesystem</span></code> with the additional mount path.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">logdir</span></code>: A writable directory (by root or by the user set in the [fdbmonitor] section) where FoundationDB will store log files.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">logsize</span></code>: Roll over to a new log file after the current log file reaches the specified size. The default value is 10MiB.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">maxlogssize</span></code>: Delete the oldest log file when the total size of all log files exceeds the specified size. If set to 0B, old log files will not be deleted. The default value is 100MiB.</p></li>
@@ -519,7 +520,7 @@ Coordinators changed
 <section id="backup-agent-sections">
 <h3>Backup agent sections</h3>
 <div class="highlight-ini notranslate"><div class="highlight"><pre><span></span><span class="k">[backup_agent]</span>
-<span class="na">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/usr/lib/foundationdb/backup_agent/backup_agent</span>
+<span class="na">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/usr/bin/backup_agent</span>
 
 <span class="k">[backup_agent.1]</span>
 </pre></div>
@@ -1014,7 +1015,7 @@ Configuration changed.
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

@@ -29,7 +29,7 @@ Before using the API, we need to specify the API version. This allows programs t
 
 .. code-block:: go
 
-  fdb.MustAPIVersion(740)
+  fdb.MustAPIVersion(800)
 
 Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the :ref:`default cluster file <default-cluster-file>`.
 
@@ -78,7 +78,7 @@ If this is all working, it looks like we are ready to start building a real appl
 
   func main() {
       // Different API versions may expose different runtime behaviors.
-      fdb.MustAPIVersion(740)
+      fdb.MustAPIVersion(800)
 
       // Open the default database from the system cluster
       db := fdb.MustOpenDefault()
@@ -666,7 +666,7 @@ Here's the code for the scheduling tutorial:
   }
 
   func main() {
-    fdb.MustAPIVersion(740)
+    fdb.MustAPIVersion(800)
     db := fdb.MustOpenDefault()
     db.Options().SetTransactionTimeout(60000)  // 60,000 ms = 1 minute
     db.Options().SetTransactionRetryLimit(100)

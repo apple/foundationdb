@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Transport Layer Security &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Transport Layer Security &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -14,7 +14,7 @@
     <script src="_static/doctools.js"></script>
     <script src="_static/sphinx_highlight.js"></script>
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Authorization" href="authorization.html" />
+    <link rel="next" title="BulkLoad User Guide" href="bulkload-user.html" />
     <link rel="prev" title="Moving a Cluster to New Machines" href="moving-a-cluster.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -86,7 +86,7 @@
 <li><a class="reference internal" href="#automatic-tls-certificate-refresh">Automatic TLS certificate refresh</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#the-default-libressl-based-implementation">The default LibreSSL-based implementation</a><ul>
+<li><a class="reference internal" href="#the-default-openssl-based-implementation">The default OpenSSL-based implementation</a><ul>
 <li><a class="reference internal" href="#formats">Formats</a></li>
 <li><a class="reference internal" href="#required-files">Required files</a><ul>
 <li><a class="reference internal" href="#the-certificate-file">The certificate file</a></li>
@@ -120,7 +120,7 @@
     </a>
   </li>
   <li>
-    <a href="authorization.html" title="Next Chapter: Authorization"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Authorization &raquo;</span>
+    <a href="bulkload-user.html" title="Next Chapter: BulkLoad User Guide"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">BulkLoad User Guide &raquo;</span>
     </a>
   </li>
               
@@ -167,7 +167,7 @@
 <li><a class="reference internal" href="#automatic-tls-certificate-refresh">Automatic TLS certificate refresh</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#the-default-libressl-based-implementation">The default LibreSSL-based implementation</a><ul>
+<li><a class="reference internal" href="#the-default-openssl-based-implementation">The default OpenSSL-based implementation</a><ul>
 <li><a class="reference internal" href="#formats">Formats</a></li>
 <li><a class="reference internal" href="#required-files">Required files</a><ul>
 <li><a class="reference internal" href="#the-certificate-file">The certificate file</a></li>
@@ -199,7 +199,7 @@
 <section id="introduction">
 <h2>Introduction</h2>
 <p>Transport Layer Security (TLS) and its predecessor, Secure Sockets Layer (SSL), are protocols designed to provide communication security over public networks. Users exchange a symmetric session key that is used to encrypt data exchanged between the parties.</p>
-<p>By default, a FoundationDB cluster uses <em>unencrypted</em> connections among client and server processes. This document describes the <a class="reference external" href="http://en.wikipedia.org/wiki/Transport_Layer_Security">Transport Layer Security</a> (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is compiled into each FoundationDB binary. This document will describe the basic TLS capabilities of FoundationDB and document its implementation, which is based on <a class="reference external" href="https://www.libressl.org/">LibreSSL</a>. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster’s machines must all enable TLS in order for TLS to be used.</p>
+<p>By default, a FoundationDB cluster uses <em>unencrypted</em> connections among client and server processes. This document describes the <a class="reference external" href="http://en.wikipedia.org/wiki/Transport_Layer_Security">Transport Layer Security</a> (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is compiled into each FoundationDB binary. This document will describe the basic TLS capabilities of FoundationDB and document its implementation, which is based on <a class="reference external" href="https://www.openssl.org/">OpenSSL</a>. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster’s machines must all enable TLS in order for TLS to be used.</p>
 </section>
 <section id="setting-up-foundationdb-to-use-tls">
 <h2>Setting Up FoundationDB to use TLS</h2>
@@ -358,14 +358,14 @@ to trust</p></td>
 <p>The refresh rate is controlled by <code class="docutils literal notranslate"><span class="pre">--knob-tls-cert-refresh-delay-seconds</span></code>. Setting it to 0 will disable the refresh.</p>
 </section>
 </section>
-<section id="the-default-libressl-based-implementation">
-<h2>The default LibreSSL-based implementation</h2>
-<p>FoundationDB offers TLS based on the LibreSSL library. By default, it will be enabled automatically when participating in a TLS-enabled cluster.</p>
+<section id="the-default-openssl-based-implementation">
+<h2>The default OpenSSL-based implementation</h2>
+<p>FoundationDB offers TLS based on the OpenSSL library. By default, it will be enabled automatically when participating in a TLS-enabled cluster.</p>
 <p>For TLS to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and the certificates with which it was signed. When a process begins to communicate with a FoundationDB server process, the peer’s certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.</p>
 <p>If the local certificate and chain is invalid, a FoundationDB server process bound to a TLS address will not start. In the case of invalid certificates on a client, the client will be able to start but will be unable to connect any TLS-enabled cluster.</p>
 <section id="formats">
 <h3>Formats</h3>
-<p>LibreSSL can read certificates and their private keys in base64-encoded DER-formatted X.509 format (which is known as PEM). A PEM file can contain both certificates and a private key or the two can be stored in separate files.</p>
+<p>OpenSSL can read certificates and their private keys in base64-encoded DER-formatted X.509 format (which is known as PEM). A PEM file can contain both certificates and a private key or the two can be stored in separate files.</p>
 </section>
 <section id="required-files">
 <h3>Required files</h3>
@@ -623,7 +623,7 @@ to proceed.</p></td>
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Machine-Readable Status &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Machine-Readable Status &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -36,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -261,8 +261,7 @@
 <span class="w">               </span><span class="s2">"commit_proxy"</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">"grv_proxy"</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">"master"</span><span class="p">,</span>
-<span class="w">               </span><span class="s2">"test"</span><span class="p">,</span>
-<span class="w">               </span><span class="s2">"storage_cache"</span>
+<span class="w">               </span><span class="s2">"test"</span>
 <span class="w">            </span><span class="p">]</span>
 <span class="w">         </span><span class="p">},</span>
 <span class="w">         </span><span class="s2">"degraded"</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
@@ -303,7 +302,6 @@
 <span class="w">                     </span><span class="s2">"cluster_controller"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"data_distributor"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"ratekeeper"</span><span class="p">,</span>
-<span class="w">                     </span><span class="s2">"storage_cache"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"router"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"coordinator"</span>
 <span class="w">                  </span><span class="p">]</span>
@@ -371,6 +369,27 @@
 <span class="w">                  </span><span class="s2">"roughness"</span><span class="o">:</span><span class="mf">0.0</span>
 <span class="w">               </span><span class="p">},</span>
 <span class="w">               </span><span class="s2">"keys_queried"</span><span class="o">:</span><span class="p">{</span>
+<span class="w">                  </span><span class="s2">"hz"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"counter"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"roughness"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"active_watches"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">               </span><span class="s2">"total_watches"</span><span class="o">:</span><span class="p">{</span>
+<span class="w">                  </span><span class="s2">"hz"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"counter"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"roughness"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"triggered_watches"</span><span class="o">:</span><span class="p">{</span>
+<span class="w">                  </span><span class="s2">"hz"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"counter"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"roughness"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"timed_out_watches"</span><span class="o">:</span><span class="p">{</span>
+<span class="w">                  </span><span class="s2">"hz"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"counter"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"roughness"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"errored_watches"</span><span class="o">:</span><span class="p">{</span>
 <span class="w">                  </span><span class="s2">"hz"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
 <span class="w">                  </span><span class="s2">"counter"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
 <span class="w">                  </span><span class="s2">"roughness"</span><span class="o">:</span><span class="mf">0.0</span>
@@ -457,6 +476,102 @@
 <span class="w">                  </span><span class="s2">"p99"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
 <span class="w">                  </span><span class="s2">"p99.9"</span><span class="o">:</span><span class="mf">0.0</span>
 <span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"commit_batch_transactions"</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// Number of transactions in the commit batch</span>
+<span class="w">                  </span><span class="s2">"count"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"min"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"max"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"median"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"mean"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p25"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p90"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p95"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99.9"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"commit_batch_bytes"</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// Total size of transactions in the commit batch (bytes)</span>
+<span class="w">                  </span><span class="s2">"count"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"min"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"max"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"median"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"mean"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p25"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p90"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p95"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99.9"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"commit_batching_waiting"</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// Time transactions spent waiting in queue before commit batch processing (seconds)</span>
+<span class="w">                  </span><span class="s2">"count"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"min"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"max"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"median"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"mean"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p25"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p90"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p95"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99.9"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"commit_preresolution_latency"</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// Latency of the pre-resolution phase (seconds)</span>
+<span class="w">                  </span><span class="s2">"count"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"min"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"max"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"median"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"mean"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p25"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p90"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p95"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99.9"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"commit_resolution_latency"</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// Latency of the resolution phase (seconds)</span>
+<span class="w">                  </span><span class="s2">"count"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"min"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"max"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"median"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"mean"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p25"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p90"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p95"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99.9"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"commit_postresolution_latency"</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// Latency of the post-resolution phase (seconds)</span>
+<span class="w">                  </span><span class="s2">"count"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"min"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"max"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"median"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"mean"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p25"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p90"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p95"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99.9"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"commit_tlog_logging_latency"</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// Latency of the TLog logging phase (seconds)</span>
+<span class="w">                  </span><span class="s2">"count"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"min"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"max"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"median"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"mean"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p25"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p90"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p95"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99.9"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
+<span class="w">               </span><span class="s2">"commit_reply_latency"</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// Latency of the reply phase (seconds)</span>
+<span class="w">                  </span><span class="s2">"count"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"min"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"max"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"median"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"mean"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p25"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p90"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p95"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99"</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">                  </span><span class="s2">"p99.9"</span><span class="o">:</span><span class="mf">0.0</span>
+<span class="w">               </span><span class="p">},</span>
 <span class="w">               </span><span class="s2">"grv_latency_bands"</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// How many GRV requests belong to the latency (in seconds) band (e.g., How many requests belong to [0.01,0.1] latency band). The key is the upper bound of the band and the lower bound is the next smallest band (or 0, if none). Example: {0.01: 27, 0.1: 18, 1: 1, inf: 98,filtered: 10}, we have 18 requests in [0.01, 0.1) band.</span>
 <span class="w">                  </span><span class="s2">"$map_key=upperBoundOfBand"</span><span class="o">:</span><span class="w"> </span><span class="mf">1</span>
 <span class="w">               </span><span class="p">},</span>
@@ -496,11 +611,11 @@
 <span class="w">               </span><span class="s2">"type"</span><span class="o">:</span><span class="s2">"x"</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">"name"</span><span class="o">:</span><span class="p">{</span><span class="w"> </span><span class="c1">// when not limiting</span>
 <span class="w">                  </span><span class="s2">"$enum"</span><span class="o">:</span><span class="p">[</span>
-<span class="w">                     </span><span class="s2">"file_open_error"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"incorrect_cluster_file_contents"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"trace_log_file_write_error"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"trace_log_could_not_create_file"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"trace_log_writer_thread_unresponsive"</span><span class="p">,</span>
+<span class="w">                     </span><span class="s2">"exclude_from_tlog_recruitment_low_disk"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"process_error"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"io_error"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"io_timeout"</span><span class="p">,</span>
@@ -768,8 +883,7 @@
 <span class="w">               </span><span class="s2">"primary_dc_missing"</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">"fetch_primary_dc_timeout"</span><span class="p">,</span>
 <span class="w">               </span><span class="s2">"fetch_storage_wiggler_stats_timeout"</span><span class="p">,</span>
-<span class="w">               </span><span class="s2">"fetch_consistency_scan_status_timeout"</span><span class="p">,</span>
-<span class="w">               </span><span class="s2">"metacluster_metrics_missing"</span>
+<span class="w">               </span><span class="s2">"fetch_consistency_scan_status_timeout"</span>
 <span class="w">            </span><span class="p">]</span>
 <span class="w">         </span><span class="p">},</span>
 <span class="w">         </span><span class="s2">"issues"</span><span class="o">:</span><span class="p">[</span>
@@ -779,7 +893,8 @@
 <span class="w">                     </span><span class="s2">"incorrect_cluster_file_contents"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"trace_log_file_write_error"</span><span class="p">,</span>
 <span class="w">                     </span><span class="s2">"trace_log_could_not_create_file"</span><span class="p">,</span>
-<span class="w">                     </span><span class="s2">"trace_log_writer_thread_unresponsive"</span>
+<span class="w">                     </span><span class="s2">"trace_log_writer_thread_unresponsive"</span><span class="p">,</span>
+<span class="w">                     </span><span class="s2">"exclude_from_tlog_recruitment_low_disk"</span>
 <span class="w">                  </span><span class="p">]</span>
 <span class="w">               </span><span class="p">},</span>
 <span class="w">               </span><span class="s2">"description"</span><span class="o">:</span><span class="s2">"Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally."</span>
@@ -1030,6 +1145,8 @@
 <span class="w">      </span><span class="s2">"grv_proxies"</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span><span class="w"> </span><span class="c1">// this field will be absent if a value has not been explicitly set</span>
 <span class="w">      </span><span class="s2">"proxies"</span><span class="o">:</span><span class="mf">6</span><span class="p">,</span><span class="w"> </span><span class="c1">// this field will be absent if a value has not been explicitly set</span>
 <span class="w">      </span><span class="s2">"backup_worker_enabled"</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
+<span class="w">      </span><span class="s2">"range_partitioned_backup_worker_enabled"</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
+<span class="w">      </span><span class="s2">"range_partitioned_backup_workers"</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
 <span class="w">      </span><span class="s2">"perpetual_storage_wiggle"</span><span class="o">:</span><span class="w"> </span><span class="mf">0</span><span class="p">,</span>
 <span class="w">      </span><span class="s2">"perpetual_storage_wiggle_locality"</span><span class="o">:</span><span class="s2">"0"</span><span class="p">,</span>
 <span class="w">      </span><span class="s2">"perpetual_storage_wiggle_engine"</span><span class="o">:</span><span class="p">{</span>
@@ -1052,17 +1169,6 @@
 <span class="w">          </span><span class="s2">"gradual"</span><span class="p">,</span>
 <span class="w">          </span><span class="s2">"aggressive"</span>
 <span class="w">      </span><span class="p">]},</span>
-<span class="w">      </span><span class="s2">"tenant_mode"</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">          </span><span class="s2">"$enum"</span><span class="o">:</span><span class="p">[</span>
-<span class="w">          </span><span class="s2">"disabled"</span><span class="p">,</span>
-<span class="w">          </span><span class="s2">"optional_experimental"</span><span class="p">,</span>
-<span class="w">          </span><span class="s2">"required_experimental"</span>
-<span class="w">      </span><span class="p">]},</span>
-<span class="w">      </span><span class="s2">"encryption_at_rest_mode"</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">          </span><span class="s2">"$enum"</span><span class="o">:</span><span class="p">[</span>
-<span class="w">          </span><span class="s2">"disabled"</span><span class="p">,</span>
-<span class="w">          </span><span class="s2">"aes_256_ctr"</span>
-<span class="w">      </span><span class="p">]}</span>
 <span class="w">   </span><span class="p">},</span>
 <span class="w">   </span><span class="s2">"data"</span><span class="o">:</span><span class="p">{</span>
 <span class="w">      </span><span class="s2">"least_operating_space_bytes_log_server"</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
@@ -1155,19 +1261,6 @@
 <span class="w">            </span><span class="s2">"logical_core_utilization"</span><span class="o">:</span><span class="mf">0.4</span><span class="w"> </span><span class="c1">// computed as cpu_seconds / elapsed_seconds; value may be capped at 0.5 due to hyper-threading</span>
 <span class="w">         </span><span class="p">}</span>
 <span class="w">      </span><span class="p">}</span>
-<span class="w">   </span><span class="p">},</span>
-<span class="w">   </span><span class="s2">"metacluster"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">      </span><span class="s2">"cluster_type"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s2">"management"</span><span class="p">,</span><span class="w">         </span><span class="c1">// management, data, or standalone</span>
-<span class="w">      </span><span class="s2">"metacluster_name"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s2">"metacluster1"</span><span class="p">,</span>
-<span class="w">      </span><span class="s2">"metacluster_id"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">12345</span><span class="p">,</span>
-<span class="w">      </span><span class="s2">"data_cluster_name"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s2">"data_cluster1"</span><span class="p">,</span><span class="w"> </span><span class="c1">// data cluster only</span>
-<span class="w">      </span><span class="s2">"data_cluster_id"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">12346</span><span class="p">,</span><span class="w">             </span><span class="c1">// data cluster only</span>
-<span class="w">      </span><span class="s2">"num_data_clusters"</span><span class="o">:</span><span class="w"> </span><span class="mf">10</span><span class="w">                </span><span class="c1">// management cluster only</span>
-<span class="w">   </span><span class="p">},</span>
-<span class="w">   </span><span class="s2">"tenants"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">      </span><span class="s2">"num_tenants"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">1</span><span class="p">,</span><span class="w"> </span><span class="c1">// on data cluster, local count; on management cluster, total metacluster count</span>
-<span class="w">      </span><span class="s2">"num_tenant_groups"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">10</span><span class="p">,</span>
-<span class="w">      </span><span class="s2">"tenant_group_capacity"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">20</span><span class="p">,</span>
 <span class="w">   </span><span class="p">},</span>
 <span class="w">   </span><span class="s2">"idempotency_ids"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">      </span><span class="s2">"size_bytes"</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">0</span><span class="p">,</span><span class="w"> </span><span class="c1">// An estimate of the current number of bytes used in the database to store idempotency ids.</span>
@@ -1343,12 +1436,12 @@
 <td><p>Fetching primary DC timed out.</p></td>
 </tr>
 <tr class="row-odd"><td><p>cluster.processes.&lt;process&gt;.messages</p></td>
-<td><p>file_open_error</p></td>
-<td><p>Unable to open ‘&lt;file&gt;’ (&lt;os_error&gt;).</p></td>
-</tr>
-<tr class="row-even"><td><p>cluster.processes.&lt;process&gt;.messages</p></td>
 <td><p>incorrect_cluster_file_contents</p></td>
 <td><p>Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.</p></td>
+</tr>
+<tr class="row-even"><td><p>cluster.processes.&lt;process&gt;.messages</p></td>
+<td><p>trace_log_could_not_create_file</p></td>
+<td><p>Unable to create a trace log file. The file and OS error are included when available.</p></td>
 </tr>
 <tr class="row-odd"><td><p>cluster.processes.&lt;process&gt;.messages</p></td>
 <td><p>io_error</p></td>
@@ -1502,7 +1595,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

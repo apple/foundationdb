@@ -90,8 +90,8 @@ cluster.messages                      unreadable_configuration              Unab
 cluster.messages                      layer_status_incomplete               Some or all of the layers subdocument could not be read.
 cluster.messages                      primary_dc_missing                    Unable to determine primary datacenter.
 cluster.messages                      fetch_primary_dc_timeout              Fetching primary DC timed out.
-cluster.processes.<process>.messages  file_open_error                       Unable to open ‘<file>’ (<os_error>).
 cluster.processes.<process>.messages  incorrect_cluster_file_contents       Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.
+cluster.processes.<process>.messages  trace_log_could_not_create_file       Unable to create a trace log file. The file and OS error are included when available.
 cluster.processes.<process>.messages  io_error                              <error> occurred in <subsystem>
 cluster.processes.<process>.messages  platform_error                        <error> occurred in <subsystem>
 cluster.processes.<process>.messages  process_error                         <error> occurred in <subsystem>

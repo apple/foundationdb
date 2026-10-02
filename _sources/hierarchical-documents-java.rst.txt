@@ -69,7 +69,7 @@ Here’s a basic implementation of the recipe.
         private static final long EMPTY_ARRAY = -1;
 
         static {
-            fdb = FDB.selectAPIVersion(740);
+            fdb = FDB.selectAPIVersion(800);
             db = fdb.open();
             docSpace = new Subspace(Tuple.from("D"));
         }

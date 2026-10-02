@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>BulkLoad (Dev) &#8212; FoundationDB 8.0.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script src="_static/jquery.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/sphinx_highlight.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Audit Storage" href="auditstorage.html" />
+    <link rel="prev" title="BulkDump (Dev)" href="bulkdump.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">BulkLoad (Dev)</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a><ul>
+<li><a class="reference internal" href="#input-and-requirements">Input and Requirements</a></li>
+<li><a class="reference internal" href="#how-to-use">How to use?</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#mechanisms">Mechanisms</a><ul>
+<li><a class="reference internal" href="#workflow">Workflow</a></li>
+<li><a class="reference internal" href="#per-task-range-clear">Per-Task Range Clear</a></li>
+<li><a class="reference internal" href="#range-locking">Range Locking</a></li>
+<li><a class="reference internal" href="#invariants">Invariants</a></li>
+<li><a class="reference internal" href="#data-validation">Data Validation</a></li>
+<li><a class="reference internal" href="#failure-handling">Failure Handling</a></li>
+<li><a class="reference internal" href="#performance-considerations">Performance Considerations</a><ul>
+<li><a class="reference internal" href="#dd-pipeline-headroom">DD Pipeline Headroom</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="bulkdump.html" title="Previous Chapter: BulkDump (Dev)"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; BulkDump (Dev)</span>
+    </a>
+  </li>
+  <li>
+    <a href="auditstorage.html" title="Next Chapter: Audit Storage"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Audit Storage &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">BulkLoad (Dev)</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a><ul>
+<li><a class="reference internal" href="#input-and-requirements">Input and Requirements</a></li>
+<li><a class="reference internal" href="#how-to-use">How to use?</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#mechanisms">Mechanisms</a><ul>
+<li><a class="reference internal" href="#workflow">Workflow</a></li>
+<li><a class="reference internal" href="#per-task-range-clear">Per-Task Range Clear</a></li>
+<li><a class="reference internal" href="#range-locking">Range Locking</a></li>
+<li><a class="reference internal" href="#invariants">Invariants</a></li>
+<li><a class="reference internal" href="#data-validation">Data Validation</a></li>
+<li><a class="reference internal" href="#failure-handling">Failure Handling</a></li>
+<li><a class="reference internal" href="#performance-considerations">Performance Considerations</a><ul>
+<li><a class="reference internal" href="#dd-pipeline-headroom">DD Pipeline Headroom</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="bulkload-dev">
+<h1>BulkLoad (Dev)</h1>
+<section id="overview">
+<h2>Overview</h2>
+<p>The BulkLoad feature works in conjunction with <a class="reference internal" href="bulkdump.html"><span class="doc">BulkDump</span></a> to provide a complete data migration solution.
+BulkLoad takes manifest files and SST files generated by <a class="reference internal" href="bulkdump.html"><span class="doc">BulkDump</span></a> and efficiently loads them into a target FoundationDB cluster.</p>
+<section id="input-and-requirements">
+<h3>Input and Requirements</h3>
+<p>When a user wants to start a bulkload job, the user provides:</p>
+<ol class="arabic simple">
+<li><p><strong>Job ID</strong>: The unique identifier from the corresponding BulkDump job</p></li>
+<li><p><strong>Key Range</strong>: The range of keys to load (must be within the dumped range)</p></li>
+<li><p><strong>Source Path</strong>: Either a local directory or <a class="reference external" href="https://apple.github.io/foundationdb/backups.html#backup-urls">blobstore URL</a> containing the dump files</p></li>
+</ol>
+<p><strong>Required Configuration:</strong>
+BulkLoad requires the following server knobs to be enabled:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">--knob_shard_encode_location_metadata=1</span></code>: Enables shard-aware location metadata</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--knob_enable_read_lock_on_range=1</span></code>: Enables exclusive range locking during load operations</p></li>
+</ul>
+<p><strong>Input File Structure:</strong>
+BulkLoad expects the input files to be organized as produced by <a class="reference internal" href="bulkdump.html"><span class="doc">BulkDump</span></a>.</p>
+</section>
+<section id="how-to-use">
+<h3>How to use?</h3>
+<p>Currently, FDBCLI tools and low-level ManagementAPIs are provided to submit a job or clear a job.
+These operations are achieved by issuing transactions to update the bulkload metadata and taking exclusive locks on the target range.
+Submitting a job involves validating the input parameters, taking an exclusive read lock on the target range, and writing job metadata.
+When submitting a job, the API checks if there is any ongoing bulkload job or conflicting locks. If yes, it will reject the job. Otherwise, it accepts the job.
+Clearing a job releases the range lock and marks the job as cancelled in the metadata.</p>
+<p>FDBCLI provides following interfaces to do the operations:</p>
+<ol class="arabic simple">
+<li><p>Submit a job: bulkload load (JobID) (BeginKey) (EndKey) (RootFolder) // …where JobID is from BulkDump, and RootFolder is a local directory or blobstore URL</p></li>
+<li><p>Clear a job: bulkload cancel (JobID)</p></li>
+<li><p>Enable the feature: bulkload mode on | off // “bulkload mode” command prints the current value (on or off) of the mode</p></li>
+<li><p>Check status: bulkload status // Shows current running job information</p></li>
+<li><p>View history: bulkload history // Shows completed job history</p></li>
+</ol>
+<p>For detailed usage examples and quickstart guide, see <a class="reference internal" href="bulkload-user.html"><span class="doc">BulkLoad User Guide</span></a>.</p>
+<p>ManagementAPI provides following interfaces to do the operations:</p>
+<ol class="arabic simple">
+<li><p>Submit a job: <code class="docutils literal notranslate"><span class="pre">submitBulkLoadJob(BulkLoadJobState</span> <span class="pre">jobState)</span></code></p></li>
+<li><p>Clear a job: <code class="docutils literal notranslate"><span class="pre">cancelBulkLoadJob(UID</span> <span class="pre">jobId)</span></code></p></li>
+<li><p>Enable the feature: <code class="docutils literal notranslate"><span class="pre">setBulkLoadMode(int</span> <span class="pre">mode)</span></code> // Set mode = 1 to enable; Set mode = 0 to disable</p></li>
+<li><p>Get job status: <code class="docutils literal notranslate"><span class="pre">getBulkLoadJobStatus(Database</span> <span class="pre">cx)</span></code></p></li>
+<li><p>BulkLoad job metadata is generated by <code class="docutils literal notranslate"><span class="pre">createBulkLoadJob()</span></code></p></li>
+</ol>
+</section>
+</section>
+<section id="mechanisms">
+<h2>Mechanisms</h2>
+<section id="workflow">
+<h3>Workflow</h3>
+<ul class="simple">
+<li><p>Users submit a BulkLoad job via <code class="docutils literal notranslate"><span class="pre">submitBulkLoadJob()</span></code> specifying the source JobID, target range, and data location</p></li>
+<li><p>The API validates the job parameters and checks for conflicting BulkLoad/BulkDump jobs</p></li>
+<li><p>An exclusive read lock is taken on the entire target range using <code class="docutils literal notranslate"><span class="pre">takeExclusiveReadLockOnRange()</span></code></p></li>
+<li><p>Job metadata is persisted to bulkload job space (<code class="docutils literal notranslate"><span class="pre">\\xff/bulkLoadJob/</span></code> prefix) and task space is initialized</p></li>
+<li><p>DD’s <code class="docutils literal notranslate"><span class="pre">bulkLoadJobManager()</span></code> detects the new job and downloads the global job-manifest.txt file</p></li>
+<li><p>DD parses the job manifest to build a map of manifest entries by key range</p></li>
+<li><p>DD creates BulkLoad tasks by grouping manifest entries (up to <code class="docutils literal notranslate"><span class="pre">MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK</span></code> per task)</p></li>
+<li><p>Each task is persisted to task metadata space (<code class="docutils literal notranslate"><span class="pre">\\xff/bulkLoadTask/</span></code> prefix) and triggers data movement</p></li>
+<li><p>DD’s <code class="docutils literal notranslate"><span class="pre">doBulkLoadTask()</span></code> coordinates with data movement system to load SST files into target shards</p></li>
+<li><p>Storage servers receive data movement requests containing BulkLoad task information</p></li>
+<li><p>Storage servers download SST files, validate integrity, and apply data using storage engine ingestion</p></li>
+<li><p>Tasks complete and are marked as <code class="docutils literal notranslate"><span class="pre">BulkLoadPhase::Complete</span></code> or <code class="docutils literal notranslate"><span class="pre">BulkLoadPhase::Error</span></code></p></li>
+<li><p>When all tasks finish, the job is finalized and moved to job history, and the range lock is released</p></li>
+</ul>
+</section>
+<section id="per-task-range-clear">
+<h3>Per-Task Range Clear</h3>
+<p>Before ingesting SST files for a task, the storage server clears the target
+shard range and waits for the clear to durably commit. This ensures that
+stale data is not retained when the new SST files are ingested over an
+existing range. The clear-then-ingest sequence is performed per shard inside
+the SS (see <code class="docutils literal notranslate"><span class="pre">storageserver.cpp</span></code>):</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">getKeyValueStore()-&gt;clear(keys)</span></code> — clear the target range</p></li>
+<li><p>Wait on <code class="docutils literal notranslate"><span class="pre">durableVersion</span></code> so the clear is committed before ingest</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compactRange(keys)</span></code> to optimize storage before bulk insert</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ingestSSTFiles(localBulkLoadFileSets)</span></code> — ingest the new data</p></li>
+</ol>
+<p>Because the SS clears each shard internally, BulkLoad does not require the
+destination cluster or range to be empty when the job starts. The exclusive
+range lock taken during <code class="docutils literal notranslate"><span class="pre">submitBulkLoadJob()</span></code> (see below) ensures no
+concurrent writes can race with the clear-and-ingest sequence. As a result,
+<code class="docutils literal notranslate"><span class="pre">fdbrestore</span> <span class="pre">start</span> <span class="pre">--mode</span> <span class="pre">bulkload</span></code> is permitted to run against a
+non-empty destination database — unlike rangefile restore, which requires
+an empty destination.</p>
+</section>
+<section id="range-locking">
+<h3>Range Locking</h3>
+<p>BulkLoad uses FoundationDB’s range locking mechanism to ensure data consistency:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">registerRangeLockOwner()</span></code> registers the BulkLoad system as a lock owner with name <code class="docutils literal notranslate"><span class="pre">&quot;BulkLoad&quot;</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">takeExclusiveReadLockOnRange()</span></code> takes an exclusive read lock on the entire job range during <code class="docutils literal notranslate"><span class="pre">submitBulkLoadJob()</span></code></p></li>
+<li><p>This prevents any concurrent transactions from modifying data in the target range</p></li>
+<li><p>Lock-aware transactions can still read from the range during the load process</p></li>
+<li><p>The lock is automatically released via <code class="docutils literal notranslate"><span class="pre">releaseExclusiveReadLockOnRange()</span></code> when the job completes, is cancelled, or errors</p></li>
+<li><p>Range locks are managed through the <code class="docutils literal notranslate"><span class="pre">\\xff/rangeLock/</span></code> keyspace with owner information in <code class="docutils literal notranslate"><span class="pre">\\xff/rangeLockOwner/</span></code></p></li>
+<li><p>BulkLoad jobs will fail with <code class="docutils literal notranslate"><span class="pre">range_lock_reject</span></code> if the target range is already locked by another operation</p></li>
+</ul>
+</section>
+<section id="invariants">
+<h3>Invariants</h3>
+<ul class="simple">
+<li><p>At any time, FDB cluster accepts at most one bulkload job. <code class="docutils literal notranslate"><span class="pre">submitBulkLoadJob()</span></code> checks for existing BulkLoad or BulkDump jobs and rejects with <code class="docutils literal notranslate"><span class="pre">bulkload_task_failed()</span></code> if conflicts exist</p></li>
+<li><p>DD partitions jobs into tasks where each task contains up to <code class="docutils literal notranslate"><span class="pre">MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK</span></code> manifest entries</p></li>
+<li><p>Task ranges are determined by the union of all manifest ranges within the job range</p></li>
+<li><p>Tasks are assigned to data movement operations that target the appropriate storage servers for each shard</p></li>
+<li><p>BulkLoad tasks are tracked in <code class="docutils literal notranslate"><span class="pre">BulkLoadTaskCollection</span></code> to coordinate with data movement and prevent shard boundary changes</p></li>
+<li><p>Each task validates source data integrity through manifest checksums and range validation</p></li>
+<li><p>Tasks complete atomically - either all manifests in a task succeed or the entire task is marked as error</p></li>
+<li><p>The job range remains exclusively locked throughout the entire operation until completion or cancellation</p></li>
+<li><p>Task metadata persists through DD restarts - incomplete tasks are automatically resumed</p></li>
+</ul>
+</section>
+<section id="data-validation">
+<h3>Data Validation</h3>
+<ul class="simple">
+<li><p><strong>Manifest Validation</strong>: Task ranges are validated against source manifest files using <code class="docutils literal notranslate"><span class="pre">getBulkLoadManifestMetadataFromEntry()</span></code></p></li>
+<li><p><strong>Job Coverage Validation</strong>: The job range must be entirely covered by the source dataset or the job fails with <code class="docutils literal notranslate"><span class="pre">bulkload_dataset_not_cover_required_range()</span></code></p></li>
+<li><p><strong>Task Atomicity</strong>: Each task either completes entirely or fails - partial task completion is not supported</p></li>
+<li><p><strong>SST File Integrity</strong>: Storage engines validate SST file integrity during ingestion</p></li>
+<li><p><strong>Range Alignment</strong>: Task ranges are aligned with shard boundaries and manifest boundaries</p></li>
+</ul>
+</section>
+<section id="failure-handling">
+<h3>Failure Handling</h3>
+<ul class="simple">
+<li><p><strong>DD Restart</strong>: Tasks persist through DD restarts via <code class="docutils literal notranslate"><span class="pre">\\xff/bulkLoadTask/</span></code> metadata and are automatically resumed</p></li>
+<li><p><strong>Task Retry</strong>: Failed tasks are retried automatically by the BulkLoad engine up to configured limits</p></li>
+<li><p><strong>Job Cancellation</strong>: <code class="docutils literal notranslate"><span class="pre">cancelBulkLoadJob()</span></code> clears all metadata and releases range locks immediately</p></li>
+<li><p><strong>Data Movement Conflicts</strong>: Tasks coordinate with data movement system through <code class="docutils literal notranslate"><span class="pre">BulkLoadTaskCollection</span></code> to handle shard reassignments</p></li>
+<li><p><strong>Lock Conflicts</strong>: Jobs fail immediately with <code class="docutils literal notranslate"><span class="pre">range_lock_reject</span></code> if the target range is already locked</p></li>
+<li><p><strong>Manifest Download Failures</strong>: Network/S3 failures during manifest download cause the job to error and move to history</p></li>
+<li><p><strong>Task Error Handling</strong>: Individual task failures are marked as <code class="docutils literal notranslate"><span class="pre">BulkLoadPhase::Error</span></code> and can be acknowledged by users</p></li>
+<li><p><strong>Range Coverage Failures</strong>: Jobs fail with <code class="docutils literal notranslate"><span class="pre">bulkload_dataset_not_cover_required_range()</span></code> if source data doesn’t cover the requested range</p></li>
+</ul>
+</section>
+<section id="performance-considerations">
+<h3>Performance Considerations</h3>
+<ul class="simple">
+<li><p><strong>Parallelism</strong>: Controlled by <code class="docutils literal notranslate"><span class="pre">DD_BULKLOAD_PARALLELISM</span></code> knob for DD-level parallelism</p></li>
+<li><p><strong>Storage Server Load</strong>: Each storage server handles one bulkload task at a time</p></li>
+<li><p><strong>Network Bandwidth</strong>: Large SST files may saturate network bandwidth during downloads</p></li>
+<li><p><strong>Storage Engine Impact</strong>: Direct SST ingestion bypasses normal write paths for better performance</p></li>
+<li><p><strong>Memory Usage</strong>: SST files are typically loaded into memory for validation before application</p></li>
+<li><p><strong>DD Pipeline Headroom</strong>: <code class="docutils literal notranslate"><span class="pre">DD_MAX_PIPELINE_MOVES</span></code> must stay well above the cluster’s peak relocation demand, or bulkload data moves are starved. See below.</p></li>
+</ul>
+<section id="dd-pipeline-headroom">
+<h4>DD Pipeline Headroom</h4>
+<p><code class="docutils literal notranslate"><span class="pre">DD_MAX_PIPELINE_MOVES</span></code> caps the total relocations DD tracks at once, queued plus in-flight.
+Bulkload is the workload most exposed to that cap, for three reasons that do not apply to ordinary data movement.</p>
+<p><strong>Bulkload moves are not throttled by source servers.</strong>
+They read from blob storage rather than from source storage servers, so <code class="docutils literal notranslate"><span class="pre">canLaunchSrc()</span></code> admits them unconditionally and they consume no source work factor.
+Every other relocation is self-limiting through the per-server busyness ledger; bulkload is not, which can leave a pipeline cap as the only thing gating it.</p>
+<p><strong>Bulkload moves run at a low priority.</strong>
+They use <code class="docutils literal notranslate"><span class="pre">PRIORITY_TEAM_HEALTHY</span></code> (140), while shard splits use <code class="docutils literal notranslate"><span class="pre">PRIORITY_SPLIT_SHARD</span></code> (950).
+Unlike other low-priority movement such as background rebalance, a bulkload job has a caller waiting on it.</p>
+<p><strong>A bulkload restore generates its own higher-priority competition.</strong>
+Loading a large dataset into a previously empty, contiguous range causes DD to split that range, producing thousands of split relocations that then occupy the pipeline ahead of the bulkload moves that created them.</p>
+<p><code class="docutils literal notranslate"><span class="pre">pipelineGateActor</span></code> is priority-blind, so once the cap binds, admission becomes first-come-first-served in arrival order and a bulkload move cannot be reordered ahead of the splits it caused.
+This is an admission delay rather than a capacity limit: raising the cap adds no concurrency, which fetch, team and per-server budgets continue to bound, it only stops work being parked where the scheduler cannot see it.</p>
+<p>Measured on a 1B-key restore with the cap at 1000, no bulkload data move launched for 1h54m, 43% of the run, with <code class="docutils literal notranslate"><span class="pre">InQueue</span></code> 893 plus <code class="docutils literal notranslate"><span class="pre">InFlight</span></code> 107 pinned at exactly the cap.
+With headroom the first move launched in 7.15s, and in-flight moves were essentially unchanged at 107 to 114, showing the capacity to run them had been available throughout.
+A 3B-key restore reached 6041 to 6815 queued relocations during the same phase, roughly six times the default of 1000.</p>
+<p><strong>Raise the knob before starting a large bulkload job.</strong>
+The default of 1000 corresponds to roughly 500 storage servers at two concurrent moves each, which a large load exceeds.
+Size it above the job’s expected relocation demand but below what the data distributor can hold in memory: DD resident memory grows at roughly 4 GB plus 0.11 GB per 1000 tracked relocations, and in-flight moves converge on the cap while data movement is storming, so an excessive value stops functioning as a backstop.
+At 100000 the distributor needs roughly 15 GB and can exhaust an 8 GB or 12 GB memory limit before the cap ever engages, whereas 20000 costs roughly 6.2 GB and leaves ample headroom over the demand measured above.</p>
+<p>The symptom of an undersized cap is <code class="docutils literal notranslate"><span class="pre">DDPipelineFull</span></code> trace events during a load, with <code class="docutils literal notranslate"><span class="pre">InQueue</span></code> plus <code class="docutils literal notranslate"><span class="pre">InFlight</span></code> sitting at exactly the cap.</p>
+</section>
+</section>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/bulkload.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Oct 02, 2026.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

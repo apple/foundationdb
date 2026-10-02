@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Site Map &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Site Map &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -36,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -105,20 +105,50 @@
 If you are having trouble finding something in particular, try the search box in the navbar.</p>
 <div class="toctree-wrapper compound">
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="index.html">FoundationDB 7.4.8</a><ul>
+<li class="toctree-l1"><a class="reference internal" href="index.html">FoundationDB 8.0.0</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="index.html#overview">Overview</a></li>
 <li class="toctree-l2"><a class="reference internal" href="index.html#documentation">Documentation</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="local-dev.html">Local Development</a><ul>
-<li class="toctree-l4"><a class="reference internal" href="local-dev.html#download-the-foundationdb-package">Download the FoundationDB package</a></li>
-<li class="toctree-l4"><a class="reference internal" href="local-dev.html#install-the-foundationdb-binaries">Install the FoundationDB binaries</a></li>
-<li class="toctree-l4"><a class="reference internal" href="local-dev.html#check-the-status-of-the-local-database">Check the status of the local database</a></li>
-<li class="toctree-l4"><a class="reference internal" href="local-dev.html#basic-tutorial">Basic tutorial</a></li>
+<li class="toctree-l3"><a class="reference internal" href="developer-tools.html">Developer Tools</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="local-dev.html">Local Development</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="local-dev.html#download-the-foundationdb-package">Download the FoundationDB package</a></li>
+<li class="toctree-l5"><a class="reference internal" href="local-dev.html#install-the-foundationdb-binaries">Install the FoundationDB binaries</a></li>
+<li class="toctree-l5"><a class="reference internal" href="local-dev.html#check-the-status-of-the-local-database">Check the status of the local database</a></li>
+<li class="toctree-l5"><a class="reference internal" href="local-dev.html#basic-tutorial">Basic tutorial</a></li>
 </ul>
 </li>
-<li class="toctree-l3"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a><ul>
-<li class="toctree-l4"><a class="reference internal" href="internal-dev-tools.html#code-probes">Code Probes</a></li>
-<li class="toctree-l4"><a class="reference internal" href="internal-dev-tools.html#test-harness">Test Harness</a><ul>
-<li class="toctree-l5"><a class="reference internal" href="internal-dev-tools.html#reporting">Reporting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="clang-format.html">Clang-Format</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="clang-format.html#running-clang-format-locally">Running clang-format locally</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="clang-format.html#format-only-your-changed-lines">Format only your changed lines</a></li>
+<li class="toctree-l6"><a class="reference internal" href="clang-format.html#format-specific-files">Format specific files</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="clang-format.html#ide-integration">IDE integration</a></li>
+<li class="toctree-l5"><a class="reference internal" href="clang-format.html#key-style-rules">Key style rules</a></li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="clang-tidy.html">Clang-Tidy</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="clang-tidy.html#what-clang-tidy-checks">What clang-tidy checks</a></li>
+<li class="toctree-l5"><a class="reference internal" href="clang-tidy.html#clang-tidy-vs-clang-format">clang-tidy vs <span class="xref std std-doc">clang-format</span></a></li>
+<li class="toctree-l5"><a class="reference internal" href="clang-tidy.html#running-clang-tidy-locally">Running clang-tidy locally</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="clang-tidy.html#step-1-generate-the-compilation-database">Step 1: Generate the compilation database</a></li>
+<li class="toctree-l6"><a class="reference internal" href="clang-tidy.html#step-2-locate-the-helper-script">Step 2: Locate the helper script</a></li>
+<li class="toctree-l6"><a class="reference internal" href="clang-tidy.html#step-3-run-against-your-changes">Step 3: Run against your changes</a></li>
+<li class="toctree-l6"><a class="reference internal" href="clang-tidy.html#understanding-the-flags">Understanding the flags</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="clang-tidy.html#running-clang-tidy-during-builds-cmake-integration">Running clang-tidy during builds (CMake integration)</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="clang-tidy.html#known-limitations">Known limitations</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="clang-tidy.html#quick-reference">Quick reference</a></li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="internal-dev-tools.html#code-probes">Code Probes</a></li>
+<li class="toctree-l5"><a class="reference internal" href="internal-dev-tools.html#test-harness">Test Harness</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="internal-dev-tools.html#reporting">Reporting</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -210,7 +240,6 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="benchmarking.html#next-steps">Next steps</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="dtrace-probes.html">DTrace Probes</a><ul>
 <li class="toctree-l7"><a class="reference internal" href="dtrace-probes.html#probes">Probes</a><ul>
-<li class="toctree-l8"><a class="reference internal" href="dtrace-probes.html#actors">Actors</a></li>
 <li class="toctree-l8"><a class="reference internal" href="dtrace-probes.html#main-loop">Main-Loop</a></li>
 </ul>
 </li>
@@ -304,21 +333,23 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="flow.html#a-first-look">A first look</a></li>
 <li class="toctree-l5"><a class="reference internal" href="flow.html#flow-features">Flow features</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="flow.html#promise-t-and-future-t">Promise&lt;T&gt; and Future&lt;T&gt;</a></li>
-<li class="toctree-l6"><a class="reference internal" href="flow.html#wait">wait()</a></li>
-<li class="toctree-l6"><a class="reference internal" href="flow.html#actor">ACTOR</a></li>
-<li class="toctree-l6"><a class="reference internal" href="flow.html#state">State</a></li>
-<li class="toctree-l6"><a class="reference internal" href="flow.html#promisestream-t-futurestream-t">PromiseStream&lt;T&gt;, FutureStream&lt;T&gt;</a></li>
-<li class="toctree-l6"><a class="reference internal" href="flow.html#waitnext">waitNext()</a></li>
-<li class="toctree-l6"><a class="reference internal" href="flow.html#choose-when">choose … when</a></li>
-<li class="toctree-l6"><a class="reference internal" href="flow.html#example-a-server-interface">Example: A Server Interface</a></li>
+<li class="toctree-l6"><a class="reference internal" href="flow.html#co-await-and-co-return">co_await and co_return</a></li>
+<li class="toctree-l6"><a class="reference internal" href="flow.html#local-variables-and-ownership">Local variables and ownership</a></li>
+<li class="toctree-l6"><a class="reference internal" href="flow.html#promisestream-t-and-futurestream-t">PromiseStream&lt;T&gt; and FutureStream&lt;T&gt;</a></li>
+<li class="toctree-l6"><a class="reference internal" href="flow.html#waiting-for-multiple-inputs">Waiting for multiple inputs</a></li>
+<li class="toctree-l6"><a class="reference internal" href="flow.html#example-a-server-interface">Example: A server interface</a></li>
 </ul>
 </li>
-<li class="toctree-l5"><a class="reference internal" href="flow.html#caveats">Caveats</a></li>
+<li class="toctree-l5"><a class="reference internal" href="flow.html#cancellation-and-lifetime-pitfalls">Cancellation and lifetime pitfalls</a></li>
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="testing.html">Simulation and Testing</a><ul>
 <li class="toctree-l5"><a class="reference internal" href="testing.html#correctness-and-performance">Correctness and Performance</a></li>
-<li class="toctree-l5"><a class="reference internal" href="testing.html#simulation">Simulation</a></li>
+<li class="toctree-l5"><a class="reference internal" href="testing.html#simulation">Simulation</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="testing.html#running-c-unit-tests">Running C++ unit tests</a></li>
+<li class="toctree-l6"><a class="reference internal" href="testing.html#running-unit-tests-in-simulation">Running unit tests in simulation</a></li>
+</ul>
+</li>
 <li class="toctree-l5"><a class="reference internal" href="testing.html#performance-testing-with-circus">Performance testing with Circus</a></li>
 </ul>
 </li>
@@ -382,10 +413,13 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l6"><a class="reference internal" href="rangelock.html#comparison-with-general-locking-concepts">Comparison with general locking concepts</a></li>
 <li class="toctree-l6"><a class="reference internal" href="rangelock.html#example-use-cases">Example use cases</a></li>
 <li class="toctree-l6"><a class="reference internal" href="rangelock.html#how-to-use">How to use?</a></li>
+<li class="toctree-l6"><a class="reference internal" href="rangelock.html#using-fdbcli">Using <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code></a></li>
 <li class="toctree-l6"><a class="reference internal" href="rangelock.html#example-usage">Example usage</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="rangelock.html#range-lock-design-exclusive-read-lock">Range Lock Design (Exclusive Read Lock)</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="rangelock.html#steady-state-cost-when-no-locks-are-held">Steady-state cost when no locks are held</a></li>
+<li class="toctree-l6"><a class="reference internal" href="rangelock.html#correctness-across-proxies">Correctness across proxies</a></li>
 <li class="toctree-l6"><a class="reference internal" href="rangelock.html#support-multiple-range-lock-users">Support multiple range lock users</a></li>
 <li class="toctree-l6"><a class="reference internal" href="rangelock.html#transaction-error-handling">Transaction error handling</a></li>
 <li class="toctree-l6"><a class="reference internal" href="rangelock.html#compatibility">Compatibility</a></li>
@@ -403,6 +437,27 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l6"><a class="reference internal" href="bulkdump.html#workflow">Workflow</a></li>
 <li class="toctree-l6"><a class="reference internal" href="bulkdump.html#invariant">Invariant</a></li>
 <li class="toctree-l6"><a class="reference internal" href="bulkdump.html#failure-handling">Failure handling</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="bulkload.html">BulkLoad (Dev)</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="bulkload.html#overview">Overview</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="bulkload.html#input-and-requirements">Input and Requirements</a></li>
+<li class="toctree-l6"><a class="reference internal" href="bulkload.html#how-to-use">How to use?</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="bulkload.html#mechanisms">Mechanisms</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="bulkload.html#workflow">Workflow</a></li>
+<li class="toctree-l6"><a class="reference internal" href="bulkload.html#per-task-range-clear">Per-Task Range Clear</a></li>
+<li class="toctree-l6"><a class="reference internal" href="bulkload.html#range-locking">Range Locking</a></li>
+<li class="toctree-l6"><a class="reference internal" href="bulkload.html#invariants">Invariants</a></li>
+<li class="toctree-l6"><a class="reference internal" href="bulkload.html#data-validation">Data Validation</a></li>
+<li class="toctree-l6"><a class="reference internal" href="bulkload.html#failure-handling">Failure Handling</a></li>
+<li class="toctree-l6"><a class="reference internal" href="bulkload.html#performance-considerations">Performance Considerations</a><ul>
+<li class="toctree-l7"><a class="reference internal" href="bulkload.html#dd-pipeline-headroom">DD Pipeline Headroom</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -473,10 +528,6 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l7"><a class="reference internal" href="developer-guide.html#usage">Usage</a></li>
 <li class="toctree-l7"><a class="reference internal" href="developer-guide.html#subdirectories-and-nested-subspaces">Subdirectories and nested subspaces</a></li>
 <li class="toctree-l7"><a class="reference internal" href="developer-guide.html#directory-partitions">Directory partitions</a></li>
-</ul>
-</li>
-<li class="toctree-l6"><a class="reference internal" href="developer-guide.html#tenants">Tenants</a><ul>
-<li class="toctree-l7"><a class="reference internal" href="developer-guide.html#tenants-and-directories">Tenants and directories</a></li>
 </ul>
 </li>
 </ul>
@@ -736,16 +787,6 @@ If you are having trouble finding something in particular, try the search box in
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#older-api-versions">Older API versions</a></li>
-</ul>
-</li>
-<li class="toctree-l4"><a class="reference internal" href="tenants.html">Tenants</a><ul>
-<li class="toctree-l5"><a class="reference internal" href="tenants.html#overview">Overview</a></li>
-<li class="toctree-l5"><a class="reference internal" href="tenants.html#enabling-tenants">Enabling tenants</a></li>
-<li class="toctree-l5"><a class="reference internal" href="tenants.html#creating-and-deleting-tenants">Creating and deleting tenants</a></li>
-<li class="toctree-l5"><a class="reference internal" href="tenants.html#using-tenants">Using tenants</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="tenants.html#raw-access">Raw access</a></li>
-</ul>
-</li>
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a><ul>
@@ -1025,7 +1066,12 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l6"><a class="reference internal" href="api-python.html#database-options">Database options</a></li>
 </ul>
 </li>
-<li class="toctree-l5"><a class="reference internal" href="api-python.html#tenant-objects">Tenant objects</a></li>
+<li class="toctree-l5"><a class="reference internal" href="api-python.html#native-change-data-capture-cdc">Native change data capture (CDC)</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="api-python.html#stream-management">Stream management</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-python.html#result-types">Result types</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-python.html#consumer-lifecycle">Consumer lifecycle</a></li>
+</ul>
+</li>
 <li class="toctree-l5"><a class="reference internal" href="api-python.html#transactional-decoration">Transactional decoration</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-python.html#transaction-objects">Transaction objects</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="api-python.html#id1">Attributes</a></li>
@@ -1052,7 +1098,6 @@ If you are having trouble finding something in particular, try the search box in
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-python.html#module-fdb.locality">Locality information</a></li>
-<li class="toctree-l5"><a class="reference internal" href="api-python.html#module-fdb.tenant_management">Tenant management</a></li>
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="api-ruby.html">Ruby API</a><ul>
@@ -1108,8 +1153,10 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="api-c.html#api-versioning">API versioning</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-c.html#network">Network</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-c.html#future">Future</a></li>
-<li class="toctree-l5"><a class="reference internal" href="api-c.html#database">Database</a></li>
-<li class="toctree-l5"><a class="reference internal" href="api-c.html#tenant">Tenant</a></li>
+<li class="toctree-l5"><a class="reference internal" href="api-c.html#database">Database</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="api-c.html#cdc">CDC</a></li>
+</ul>
+</li>
 <li class="toctree-l5"><a class="reference internal" href="api-c.html#transaction">Transaction</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="api-c.html#snapshot-reads">Snapshot reads</a></li>
 </ul>
@@ -1357,7 +1404,7 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l6"><a class="reference internal" href="tls.html#automatic-tls-certificate-refresh">Automatic TLS certificate refresh</a></li>
 </ul>
 </li>
-<li class="toctree-l5"><a class="reference internal" href="tls.html#the-default-libressl-based-implementation">The default LibreSSL-based implementation</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="tls.html#the-default-openssl-based-implementation">The default OpenSSL-based implementation</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="tls.html#formats">Formats</a></li>
 <li class="toctree-l6"><a class="reference internal" href="tls.html#required-files">Required files</a><ul>
 <li class="toctree-l7"><a class="reference internal" href="tls.html#the-certificate-file">The certificate file</a></li>
@@ -1376,18 +1423,6 @@ If you are having trouble finding something in particular, try the search box in
 </li>
 </ul>
 </li>
-</ul>
-</li>
-<li class="toctree-l4"><a class="reference internal" href="authorization.html">Authorization</a><ul>
-<li class="toctree-l5"><a class="reference internal" href="authorization.html#introduction">Introduction</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="authorization.html#privilege-levels">Privilege Levels</a></li>
-<li class="toctree-l6"><a class="reference internal" href="authorization.html#access-control">Access Control</a></li>
-</ul>
-</li>
-<li class="toctree-l5"><a class="reference internal" href="authorization.html#enabling-clients-to-use-authorization-tokens">Enabling Clients to use Authorization Tokens</a></li>
-<li class="toctree-l5"><a class="reference internal" href="authorization.html#public-key-rotation">Public Key Rotation</a></li>
-<li class="toctree-l5"><a class="reference internal" href="authorization.html#token-caching">Token Caching</a></li>
-<li class="toctree-l5"><a class="reference internal" href="authorization.html#allowing-untrusted-clients-to-access-tenant-data-without-tokens">Allowing Untrusted Clients to Access Tenant Data Without Tokens</a></li>
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="bulkload-user.html">BulkLoad User Guide</a><ul>
@@ -2443,6 +2478,20 @@ If you are having trouble finding something in particular, try the search box in
 </li>
 </ul>
 </li>
+<li class="toctree-l4"><a class="reference internal" href="release-notes/release-notes-800.html">Release Notes (8.0)</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-800.html#id1">8.0.0</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-800.html#compatibility-and-removed-features">Compatibility and removed features</a></li>
+<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-800.html#features-experimental">Features (Experimental)</a></li>
+<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-800.html#client-apis-and-bindings">Client APIs and bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-800.html#backup-restore-and-object-storage">Backup, restore, and object storage</a></li>
+<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-800.html#cluster-operations-and-reliability">Cluster operations and reliability</a></li>
+<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-800.html#performance-and-observability">Performance and observability</a></li>
+<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-800.html#build-and-packaging">Build and packaging</a></li>
+<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-800.html#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -2473,7 +2522,7 @@ If you are having trouble finding something in particular, try the search box in
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Class Scheduling in Ruby &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Class Scheduling in Ruby &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -181,7 +181,7 @@
 </pre></div>
 </div>
 <p>Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">740</span>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">800</span>
 <span class="o">=&gt;</span> <span class="n">nil</span>
 </pre></div>
 </div>
@@ -202,7 +202,7 @@
 </div>
 <p>If this is all working, it looks like we are ready to start building a real application. For reference, here’s the full code for “hello world”:</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="nb">require</span><span class="w"> </span><span class="s1">'fdb'</span>
-<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span><span class="w"> </span><span class="mi">740</span>
+<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span><span class="w"> </span><span class="mi">800</span>
 <span class="vi">@db</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">.</span><span class="n">open</span>
 <span class="vi">@db</span><span class="o">[</span><span class="s1">'hello'</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'world'</span>
 <span class="nb">print</span><span class="w"> </span><span class="s1">'hello '</span><span class="p">,</span><span class="w"> </span><span class="vi">@db</span><span class="o">[</span><span class="s1">'hello'</span><span class="o">]</span>
@@ -471,7 +471,7 @@
 <p>Here’s the code for the scheduling tutorial:</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="nb">require</span><span class="w"> </span><span class="s1">'fdb'</span>
 
-<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span><span class="w"> </span><span class="mi">740</span>
+<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span><span class="w"> </span><span class="mi">800</span>
 
 <span class="c1">####################################</span>
 <span class="c1">##        Initialization          ##</span>
@@ -643,7 +643,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

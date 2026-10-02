@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>FDB HA Write Path: How a mutation travels in FDB HA &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>FDB HA Write Path: How a mutation travels in FDB HA &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -237,8 +237,8 @@
 </section>
 <section id="at-primary-ss">
 <h3>At primary SS</h3>
-<p><strong>Primary tLog of a SS.</strong> Since a SS’s tag is identically mapped to one tLog. The tLog has all mutations for the SS and is the primary tLog for the SS. When the SS peeks data from tLogs, it will prefer to peek data from its primary tLog. If the primary tLog crashes, it will contact the rest of tLogs, ask for mutations with the SS’s tag, and merge them together. This complex merge operation is abstracted in the TagPartitionedLogSystem interface.</p>
-<p><strong>Pulling data from tLogs.</strong> Each SS in the primary DC keeps pulling mutations, whose tag is the SS’s tag, from tLogs. Once mutations before a version V1 are made durable on a SS, the SS pops the tag upto the version V1 from <em>all</em> tLogs. The pop operation is an RPC to tLogs through the TagPartitionedLogSystem interface.</p>
+<p><strong>Primary tLog of a SS.</strong> Since a SS’s tag is identically mapped to one tLog. The tLog has all mutations for the SS and is the primary tLog for the SS. When the SS peeks data from tLogs, it will prefer to peek data from its primary tLog. If the primary tLog crashes, it will contact the rest of tLogs, ask for mutations with the SS’s tag, and merge them together. This complex merge operation is abstracted in the LogSystem interface.</p>
+<p><strong>Pulling data from tLogs.</strong> Each SS in the primary DC keeps pulling mutations, whose tag is the SS’s tag, from tLogs. Once mutations before a version V1 are made durable on a SS, the SS pops the tag upto the version V1 from <em>all</em> tLogs. The pop operation is an RPC to tLogs through the LogSystem interface.</p>
 <p>Since the mutation m1 has three tags for primary SSes, the mutation will be made durable on three primary SSes. This marks the end of the mutation’s journey in the primary DC.</p>
 <p>Now let’s look at how the mutation m1 is routed to the remote DC.</p>
 </section>
@@ -268,7 +268,7 @@
 </section>
 <section id="mutation-serialization-wip">
 <h2>Mutation Serialization (WiP)</h2>
-<p>This section will go into detail on how mutations are serialized as preparation for ingestion into the TagPartitionedLogSystem. This has also been covered at:</p>
+<p>This section will go into detail on how mutations are serialized as preparation for ingestion into the LogSystem. This has also been covered at:</p>
 <p><a class="reference external" href="https://drive.google.com/file/d/1OaP5bqH2kst1VxD6RWj8h2cdr9rhhBHy/view">https://drive.google.com/file/d/1OaP5bqH2kst1VxD6RWj8h2cdr9rhhBHy/view</a></p>
 <p>The proxy handles splitting transactions into their individual mutations. These mutations are then serialized and synchronously sent to multiple transaction logs.</p>
 <p>The process starts in <em>commitBatch</em>. Eventually, <em>assignMutationsToStorageServers</em> is called to assign mutations to storage servers and serialize them. This function loops over each mutation in each transaction, determining the set of tags for the mutation (which storage servers it will be sent to), and then calling <em>LogPushData.writeTypedMessage</em> on the mutation.</p>
@@ -308,7 +308,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

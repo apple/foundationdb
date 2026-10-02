@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Error Codes &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Error Codes &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -425,61 +425,33 @@ to the <code class="docutils literal notranslate"><span class="pre">SPECIAL_KEY_
 <tr class="row-odd"><td><p>special_keys_api_failure</p></td>
 <td><p>2117</p></td>
 <td><p>Api call through special keys failed. For more information, read the
-<code class="docutils literal notranslate"><span class="pre">0xff0xff/error_message</span></code> key</p></td>
+<code class="docutils literal notranslate"><span class="pre">0xff0xff/error_message</span></code> key within the same transaction.</p></td>
 </tr>
-<tr class="row-even"><td><p>tenant_name_required</p></td>
-<td><p>2130</p></td>
-<td><p>Tenant name must be specified to access data in the cluster</p></td>
-</tr>
-<tr class="row-odd"><td><p>tenant_not_found</p></td>
-<td><p>2131</p></td>
-<td><p>Tenant does not exist</p></td>
-</tr>
-<tr class="row-even"><td><p>tenant_already_exists</p></td>
-<td><p>2132</p></td>
-<td><p>A tenant with the given name already exists</p></td>
-</tr>
-<tr class="row-odd"><td><p>tenant_not_empty</p></td>
-<td><p>2133</p></td>
-<td><p>Cannot delete a non-empty tenant</p></td>
-</tr>
-<tr class="row-even"><td><p>invalid_tenant_name</p></td>
-<td><p>2134</p></td>
-<td><p>Tenant name cannot begin with xff</p></td>
-</tr>
-<tr class="row-odd"><td><p>tenant_prefix_allocator_conflict</p></td>
-<td><p>2135</p></td>
-<td><p>The database already has keys stored at the prefix allocated for the tenant</p></td>
-</tr>
-<tr class="row-even"><td><p>tenants_disabled</p></td>
-<td><p>2136</p></td>
-<td><p>Tenants have been disabled in the cluster</p></td>
-</tr>
-<tr class="row-odd"><td><p>api_version_unset</p></td>
+<tr class="row-even"><td><p>api_version_unset</p></td>
 <td><p>2200</p></td>
 <td><p>API version is not set</p></td>
 </tr>
-<tr class="row-even"><td><p>api_version_already_set</p></td>
+<tr class="row-odd"><td><p>api_version_already_set</p></td>
 <td><p>2201</p></td>
 <td><p>API version may be set only once</p></td>
 </tr>
-<tr class="row-odd"><td><p>api_version_invalid</p></td>
+<tr class="row-even"><td><p>api_version_invalid</p></td>
 <td><p>2202</p></td>
 <td><p>API version not valid</p></td>
 </tr>
-<tr class="row-even"><td><p>api_version_not_supported</p></td>
+<tr class="row-odd"><td><p>api_version_not_supported</p></td>
 <td><p>2203</p></td>
 <td><p>API version not supported</p></td>
 </tr>
-<tr class="row-odd"><td><p>exact_mode_without_limits</p></td>
+<tr class="row-even"><td><p>exact_mode_without_limits</p></td>
 <td><p>2210</p></td>
 <td><p>EXACT streaming mode requires limits, but none were given</p></td>
 </tr>
-<tr class="row-even"><td><p>unknown_error</p></td>
+<tr class="row-odd"><td><p>unknown_error</p></td>
 <td><p>4000</p></td>
 <td><p>An unknown error occurred</p></td>
 </tr>
-<tr class="row-odd"><td><p>internal_error</p></td>
+<tr class="row-even"><td><p>internal_error</p></td>
 <td><p>4100</p></td>
 <td><p>An internal error occurred</p></td>
 </tr>
@@ -507,7 +479,7 @@ to the <code class="docutils literal notranslate"><span class="pre">SPECIAL_KEY_
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

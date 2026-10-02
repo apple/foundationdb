@@ -9,7 +9,7 @@ Introduction
 
 Transport Layer Security (TLS) and its predecessor, Secure Sockets Layer (SSL), are protocols designed to provide communication security over public networks. Users exchange a symmetric session key that is used to encrypt data exchanged between the parties.
 
-By default, a FoundationDB cluster uses *unencrypted* connections among client and server processes. This document describes the `Transport Layer Security <http://en.wikipedia.org/wiki/Transport_Layer_Security>`_ (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is compiled into each FoundationDB binary. This document will describe the basic TLS capabilities of FoundationDB and document its implementation, which is based on `LibreSSL <https://www.libressl.org/>`_. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster's machines must all enable TLS in order for TLS to be used.
+By default, a FoundationDB cluster uses *unencrypted* connections among client and server processes. This document describes the `Transport Layer Security <http://en.wikipedia.org/wiki/Transport_Layer_Security>`_ (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is compiled into each FoundationDB binary. This document will describe the basic TLS capabilities of FoundationDB and document its implementation, which is based on `OpenSSL <https://www.openssl.org/>`_. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster's machines must all enable TLS in order for TLS to be used.
 
 
 Setting Up FoundationDB to use TLS
@@ -160,10 +160,10 @@ The TLS certificate will be automatically refreshed on a configurable cadence. T
 
 The refresh rate is controlled by ``--knob-tls-cert-refresh-delay-seconds``. Setting it to 0 will disable the refresh.
 
-The default LibreSSL-based implementation
-=========================================
+The default OpenSSL-based implementation
+========================================
 
-FoundationDB offers TLS based on the LibreSSL library. By default, it will be enabled automatically when participating in a TLS-enabled cluster.
+FoundationDB offers TLS based on the OpenSSL library. By default, it will be enabled automatically when participating in a TLS-enabled cluster.
 
 For TLS to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and the certificates with which it was signed. When a process begins to communicate with a FoundationDB server process, the peer's certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.
 
@@ -172,7 +172,7 @@ If the local certificate and chain is invalid, a FoundationDB server process bou
 Formats
 -------
 
-LibreSSL can read certificates and their private keys in base64-encoded DER-formatted X.509 format (which is known as PEM). A PEM file can contain both certificates and a private key or the two can be stored in separate files.
+OpenSSL can read certificates and their private keys in base64-encoded DER-formatted X.509 format (which is known as PEM). A PEM file can contain both certificates and a private key or the two can be stored in separate files.
 
 Required files
 --------------

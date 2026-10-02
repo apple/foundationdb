@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Release Notes (8.0) &#8212; FoundationDB 8.0.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/sphinx_highlight.js"></script>
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="Release Notes" href="release-notes-740.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="../_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="../index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="../contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="../index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Release Notes (8.0)</a><ul>
+<li><a class="reference internal" href="#id1">8.0.0</a><ul>
+<li><a class="reference internal" href="#compatibility-and-removed-features">Compatibility and removed features</a></li>
+<li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
+<li><a class="reference internal" href="#client-apis-and-bindings">Client APIs and bindings</a></li>
+<li><a class="reference internal" href="#backup-restore-and-object-storage">Backup, restore, and object storage</a></li>
+<li><a class="reference internal" href="#cluster-operations-and-reliability">Cluster operations and reliability</a></li>
+<li><a class="reference internal" href="#performance-and-observability">Performance and observability</a></li>
+<li><a class="reference internal" href="#build-and-packaging">Build and packaging</a></li>
+<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="release-notes-740.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="../search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Release Notes (8.0)</a><ul>
+<li><a class="reference internal" href="#id1">8.0.0</a><ul>
+<li><a class="reference internal" href="#compatibility-and-removed-features">Compatibility and removed features</a></li>
+<li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
+<li><a class="reference internal" href="#client-apis-and-bindings">Client APIs and bindings</a></li>
+<li><a class="reference internal" href="#backup-restore-and-object-storage">Backup, restore, and object storage</a></li>
+<li><a class="reference internal" href="#cluster-operations-and-reliability">Cluster operations and reliability</a></li>
+<li><a class="reference internal" href="#performance-and-observability">Performance and observability</a></li>
+<li><a class="reference internal" href="#build-and-packaging">Build and packaging</a></li>
+<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="release-notes-8-0">
+<span id="release-notes-800"></span><h1>Release Notes (8.0)</h1>
+<section id="id1">
+<h2>8.0.0</h2>
+<p>AVX enabled release.</p>
+<section id="compatibility-and-removed-features">
+<h3>Compatibility and removed features</h3>
+<ul class="simple">
+<li><p>The API version is now <strong>800</strong>. Native CDC’s C API requires applications to
+select API version 800. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12510">(PR #12510)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13674">(PR #13674)</a></p></li>
+<li><p>Removed the experimental <strong>multitenancy and metacluster</strong> features, including
+their administration commands. The tenant C symbols retained for older
+bindings to load are stubs that <strong>abort the process when called</strong>; they do not
+preserve tenant functionality. Applications using tenants require a migration
+plan before adopting 8.0. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12583">(PR #12583)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12593">(PR #12593)</a></p></li>
+<li><p>Removed experimental <strong>encryption at rest</strong> and its key-management roles.
+This removal does not remove file-level backup encryption. Deployments using
+encryption at rest require a migration plan before adopting 8.0.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12667">(PR #12667)</a></p></li>
+<li><p>Removed experimental <strong>blob granules</strong>, the storage-server <strong>ChangeFeed</strong>
+feature, and <strong>storage cache servers</strong>, together with their associated APIs
+and commands. Native CDC is a separate interface, not a compatible replacement
+for the removed ChangeFeed API.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12435">(PR #12435)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12470">(PR #12470)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12486">(PR #12486)</a></p></li>
+<li><p>Removed the experimental <strong>configuration database and dynamic knobs</strong>,
+including the <code class="docutils literal notranslate"><span class="pre">use_config_database</span></code> database option.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12683">(PR #12683)</a></p></li>
+<li><p>Removed <strong>quota-based global tag throttling</strong> and its proxy-side machinery.
+Manual and automatic tag throttling remain available.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13181">(PR #13181)</a></p></li>
+<li><p>Removed the experimental <strong>parallel restore</strong> implementation and its restore
+worker roles. This does not remove the regular <code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> tool.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12903">(PR #12903)</a></p></li>
+<li><p>Removed the synthetic-data generation feature and the orphaned Azure backup
+integration. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12707">(PR #12707)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13963">(PR #13963)</a></p></li>
+</ul>
+</section>
+<section id="features-experimental">
+<h3>Features (Experimental)</h3>
+<ul class="simple">
+<li><p>Added <strong>Native CDC</strong>: durable named streams over one or more disjoint user-key
+ranges, commit-version-grouped mutations, resumable consumers, and durable
+acknowledgements controlling log retention. Native C++, C, and Python APIs
+support registration, listing, removal, consumption, and acknowledgement;
+ordered fixed-partition streams can merge mutations into commit-version order.
+Operator commands report stream status and guard removal while consumers lag.
+New stream admission is disabled by default through <code class="docutils literal notranslate"><span class="pre">ENABLE_NATIVE_CDC</span></code>.
+Consumers must handle redelivery and acknowledge only durably processed data;
+CDC does not provide exactly-once application side effects. See <a class="reference internal" href="../api-c.html"><span class="doc">C API</span></a>,
+<a class="reference internal" href="../api-python.html"><span class="doc">Python API</span></a>, and the
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/main/design/cdc.md">CDC design</a>.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13287">(PR #13287)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13674">(PR #13674)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13925">(PR #13925)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13926">(PR #13926)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13971">(PR #13971)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14116">(PR #14116)</a></p></li>
+<li><p>Extended <strong>bulk dump and bulk load</strong>, introduced in 7.4, to operate on selected
+key ranges. Bulk-load restore can target a non-empty database; data in the
+destination range is replaced. See <a class="reference internal" href="../bulkdump.html"><span class="doc">BulkDump (Dev)</span></a> and <a class="reference internal" href="../bulkload-user.html"><span class="doc">BulkLoad User Guide</span></a>.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12288">(PR #12288)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12252">(PR #12252)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13340">(PR #13340)</a></p></li>
+<li><p>Integrated bulk dump/load with backup and restore. <code class="docutils literal notranslate"><span class="pre">fdbbackup</span> <span class="pre">start</span></code> accepts
+<code class="docutils literal notranslate"><span class="pre">--mode</span> <span class="pre">bulkdump</span></code> or <code class="docutils literal notranslate"><span class="pre">--mode</span> <span class="pre">both</span></code> for snapshots; <code class="docutils literal notranslate"><span class="pre">fdbrestore</span> <span class="pre">start</span></code>
+accepts <code class="docutils literal notranslate"><span class="pre">--mode</span> <span class="pre">bulkload</span></code> to load an available BulkDump dataset. Traditional
+<code class="docutils literal notranslate"><span class="pre">rangefile</span></code> mode remains the default. An incomplete bulk dataset produces an
+error directing the operator to retry with <code class="docutils literal notranslate"><span class="pre">--mode</span> <span class="pre">rangefile</span></code>.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12608">(PR #12608)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13873">(PR #13873)</a></p></li>
+<li><p>Added <strong>range-partitioned mutation logging (Backup V3)</strong>, including partition
+maps, range backup worker recruitment, and partitioned log uploads. It is
+selected with <code class="docutils literal notranslate"><span class="pre">--mutation-log-type</span> <span class="pre">range-partitioned-log-experimental</span></code>.
+This is under active development and is not ready for general or critical
+workloads; the on-disk layout, knobs, and command-line interface remain
+subject to change. See the
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/main/design/backup_v3_range_partitioned_logs.md">Backup V3 design</a>.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12671">(PR #12671)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13286">(PR #13286)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13304">(PR #13304)</a></p></li>
+<li><p>Added a gRPC <strong>ControlService</strong> and the <code class="docutils literal notranslate"><span class="pre">fdbctl</span></code> library for cluster
+administration, including configuration, status, coordinator management,
+worker inclusion/exclusion, and maintenance. This extends the gRPC integration
+already present in 7.4; it requires a build with gRPC enabled.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12540">(PR #12540)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12555">(PR #12555)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12603">(PR #12603)</a></p></li>
+<li><p>Added the <code class="docutils literal notranslate"><span class="pre">range_digest</span></code> storage audit to compute a partition-independent
+content fingerprint on a quiescent cluster. This can validate a backup and
+restore without reading all data through an external client, and exposes
+per-range progress for localizing mismatches. See
+<a class="reference external" href="https://github.com/apple/foundationdb/blob/main/design/range-digest.md">the range-digest design</a>.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13866">(PR #13866)</a></p></li>
+</ul>
+</section>
+<section id="client-apis-and-bindings">
+<h3>Client APIs and bindings</h3>
+<ul class="simple">
+<li><p>Added the <code class="docutils literal notranslate"><span class="pre">MAX_GRV_QUEUE_DELAY</span></code> transaction option. A GRV proxy can reject a
+request with <code class="docutils literal notranslate"><span class="pre">transaction_grv_queue_rejected</span></code> when its estimated queue delay
+from ratekeeper throttling exceeds the supplied limit in milliseconds. The
+estimate is advisory, not an end-to-end transaction deadline.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13085">(PR #13085)</a></p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">fdb_transaction_get_range_split_points_with_limit</span></code> and Go
+<code class="docutils literal notranslate"><span class="pre">GetRangeSplitPointsWithLimit</span></code> to bound the number of interior split points,
+including shard boundaries. The endpoints are always included; a negative
+limit preserves unlimited behavior.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13693">(PR #13693)</a></p></li>
+<li><p>Added the <code class="docutils literal notranslate"><span class="pre">TRACE_IP</span></code> network option to explicitly select the IPv4 or IPv6
+address recorded in traces.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12645">(PR #12645)</a></p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">Database.GetMainThreadBusyness</span></code> to the Go binding.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12594">(PR #12594)</a></p></li>
+<li><p>Fixed read-your-writes transactions leaving watch futures unresolved when a
+commit is interrupted by a transaction error such as a timeout.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13395">(PR #13395)</a></p></li>
+<li><p>Removed deprecated Java finalizer-based cleanup. Java applications must close
+databases, transactions, and other native-backed objects explicitly.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13997">(PR #13997)</a></p></li>
+</ul>
+</section>
+<section id="backup-restore-and-object-storage">
+<h3>Backup, restore, and object storage</h3>
+<ul class="simple">
+<li><p>Added Google Cloud Storage access through its S3-compatible XML API with
+OAuth2 bearer-token authentication.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12975">(PR #12975)</a></p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">prefix=</span></code> to blobstore backup URLs, placing both backup data and index
+objects under a chosen object-key prefix. All tools accessing such a backup
+must use the same prefix. Upgrade agents and client tools before using this
+option: older versions reject URLs containing it. See <a class="reference internal" href="../backups.html"><span class="doc">Backup, Restore, and Replication for Disaster Recovery</span></a>.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13915">(PR #13915)</a></p></li>
+<li><p>Added SHA-256 integrity checking for multipart S3 uploads and improved S3/REST
+request handling and connection reuse.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12246">(PR #12246)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12447">(PR #12447)</a></p></li>
+<li><p>Coalesced encrypted blobstore backup reads and issued encrypted block reads
+concurrently, reducing small object-store read requests.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13750">(PR #13750)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13992">(PR #13992)</a></p></li>
+<li><p>Fixed backup agents that reopen an existing encrypted backup writing unreadable
+data before the encryption key finished loading, which left restores retrying
+authentication failures without progress.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14072">(PR #14072)</a></p></li>
+<li><p>Fixed reopening the same backup URL with a different proxy, encryption key file,
+or encryption block size silently reusing the first configuration.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14065">(PR #14065)</a></p></li>
+<li><p>Added progress-based timeouts for backup/restore bulk jobs. Failed or incomplete
+bulk dumps and unverifiable bulk-load restores now fail instead of appearing
+successful or waiting indefinitely.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13945">(PR #13945)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13936">(PR #13936)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13873">(PR #13873)</a></p></li>
+<li><p>Split bulk-load tasks that cannot be placed on a destination team and preserved
+tasks across relocation failures, improving restore progress at scale.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13923">(PR #13923)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13873">(PR #13873)</a></p></li>
+<li><p>Rejected path traversal in bulk-load manifest file paths.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13665">(PR #13665)</a></p></li>
+<li><p>Fixed <code class="docutils literal notranslate"><span class="pre">fdbbackup</span> <span class="pre">status</span> <span class="pre">--json</span></code> omitting recorded errors, and made
+<code class="docutils literal notranslate"><span class="pre">fdbdecode</span></code> apply version filters before inspecting snapshot manifests.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14124">(PR #14124)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14122">(PR #14122)</a></p></li>
+</ul>
+</section>
+<section id="cluster-operations-and-reliability">
+<h3>Cluster operations and reliability</h3>
+<ul class="simple">
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">fdbcli</span> <span class="pre">rangelock</span></code> commands to register and list owners, inspect locks,
+and take or release exclusive read locks. These locks reject writes only when
+<code class="docutils literal notranslate"><span class="pre">ENABLE_READ_LOCK_ON_RANGE</span></code> is enabled on commit proxies. Hardened range and
+owner validation, and prevented unregistering owners with active locks.
+See <a class="reference internal" href="../rangelock.html"><span class="doc">FoundationDB Range Locks (WiP)</span></a>.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13323">(PR #13323)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13922">(PR #13922)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13942">(PR #13942)</a></p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">--tlog-spill-datadir</span></code> to place TLog spill data in a separate directory,
+and <code class="docutils literal notranslate"><span class="pre">--tlog-spill-filesystem</span></code> for Linux mount validation. Disk snapshot
+procedures must include the spill directory when it is configured.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13314">(PR #13314)</a></p></li>
+<li><p>Added log-router replacement after failures without requiring full
+transaction-system recovery.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12558">(PR #12558)</a></p></li>
+<li><p>Changed low-disk TLog handling to keep existing logs available while recruiting
+replacements and to avoid repeatedly selecting low-disk workers.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13781">(PR #13781)</a></p></li>
+<li><p>Hardened worker registration checks before recruitment to avoid using stale
+worker interfaces.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13646">(PR #13646)</a></p></li>
+<li><p>Bounded retries for degraded storage teams across data-distribution pipeline
+transitions and avoided publishing transient pipeline capacity, allowing
+stranded shards to make progress without repeated duplicate submissions.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13838">(PR #13838)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14012">(PR #14012)</a></p></li>
+<li><p>Fixed Sharded RocksDB resource lifetime and compaction shutdown handling during
+storage-server rollback.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13726">(PR #13726)</a></p></li>
+<li><p>Enabled stale client-peer eviction and eager proxy refresh by default
+(<code class="docutils literal notranslate"><span class="pre">LOCATION_CACHE_PEER_EVICTOR_ENABLED</span></code>, <code class="docutils literal notranslate"><span class="pre">DBCONTEXT_EAGER_PROXY_UPDATE</span></code>,
+<code class="docutils literal notranslate"><span class="pre">SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD</span></code>). These were available but
+disabled by default in 7.3 and 7.4. This reduces connection-timeout churn after
+storage-server or proxy failures.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14050">(PR #14050)</a></p></li>
+<li><p>Preserved old TLog history until remote replicas have durably copied it, and
+retried lost old-log-router initialization replies during recovery.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13913">(PR #13913)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14047">(PR #14047)</a></p></li>
+<li><p>Fixed commit-proxy recruitment in small configurations and enforced admission
+control on key-location requests after a cluster bounce.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13400">(PR #13400)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14090">(PR #14090)</a></p></li>
+<li><p>Fixed a RocksDB checkpoint-reader initialization race.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14084">(PR #14084)</a></p></li>
+</ul>
+</section>
+<section id="performance-and-observability">
+<h3>Performance and observability</h3>
+<ul class="simple">
+<li><p>Reduced conflict-detection work with word-level bitmap operations and reusable
+buffers, and reduced arena allocations when materializing RocksDB range reads.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12365">(PR #12365)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12367">(PR #12367)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13273">(PR #13273)</a></p></li>
+<li><p>Added watch and version-vector metrics to status JSON, and system-keyspace
+size reporting to <code class="docutils literal notranslate"><span class="pre">fdbcli</span> <span class="pre">status</span></code>.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13814">(PR #13814)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13191">(PR #13191)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12443">(PR #12443)</a></p></li>
+<li><p>Added commit statistics and transaction-size histograms, data-distribution
+maintenance-duration reporting, commit-batch flush reasons, and TLog disk-queue
+write/commit size histograms.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13416">(PR #13416)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13403">(PR #13403)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13767">(PR #13767)</a></p></li>
+</ul>
+</section>
+<section id="build-and-packaging">
+<h3>Build and packaging</h3>
+<ul class="simple">
+<li><p>Migrated Flow actors to standard C++20 coroutines and removed the actor
+compiler and its source-generation step. Updated developer documentation and
+tutorials to use <code class="docutils literal notranslate"><span class="pre">co_await</span></code>, <code class="docutils literal notranslate"><span class="pre">co_return</span></code>, and the Flow coroutine runtime.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13961">(PR #13961)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13958">(PR #13958)</a></p></li>
+<li><p>Added optional build integration for the separately maintained Swift bindings.
+It requires Swift 6.1 or newer and Clang; Linux builds also require libc++.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12428">(PR #12428)</a>,
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12500">(PR #12500)</a></p></li>
+<li><p>Upgraded RocksDB to <strong>11.1.2</strong>. Recent 7.4.x releases use RocksDB <strong>8.11.x</strong>.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14189">(PR #14189)</a></p></li>
+<li><p>Updated the main Docker image base to Rocky Linux <strong>10.2</strong>.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/12549">(PR #12549)</a></p></li>
+<li><p>Upgraded Boost from <strong>1.86.0</strong> to <strong>1.89.0</strong>.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/14137">(PR #14137)</a></p></li>
+<li><p>Removed Flow’s unused <code class="docutils literal notranslate"><span class="pre">CompressionUtils</span></code> abstraction and its zstd support.
+<a class="reference external" href="https://github.com/apple/foundationdb/pull/13708">(PR #13708)</a></p></li>
+</ul>
+</section>
+<section id="earlier-release-notes">
+<h3>Earlier release notes</h3>
+<ul class="simple">
+<li><p><a class="reference internal" href="release-notes-740.html"><span class="doc">7.4 (API Version 740)</span></a></p></li>
+<li><p><a class="reference internal" href="../earlier-release-notes.html"><span class="doc">All earlier releases</span></a></p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="../_sources/release-notes/release-notes-800.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Oct 02, 2026.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

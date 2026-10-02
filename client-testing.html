@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Client Testing &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Client Testing &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -659,7 +659,7 @@ the returned value matches the written one.</p>
 <span class="w">	</span><span class="n">fdb</span><span class="o">::</span><span class="n">Key</span><span class="w"> </span><span class="n">keyPrefix</span><span class="p">;</span>
 <span class="w">	</span><span class="n">Random</span><span class="w"> </span><span class="n">random</span><span class="p">;</span>
 
-<span class="w">	</span><span class="n">SetAndGetWorkload</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">WorkloadConfig</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="p">(</span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">	</span><span class="k">explicit</span><span class="w"> </span><span class="n">SetAndGetWorkload</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">WorkloadConfig</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="p">(</span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
 <span class="w">		</span><span class="n">keyPrefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toBytesRef</span><span class="p">(</span><span class="n">fmt</span><span class="o">::</span><span class="n">format</span><span class="p">(</span><span class="s">"{}/"</span><span class="p">,</span><span class="w"> </span><span class="n">workloadId</span><span class="p">));</span>
 <span class="w">	</span><span class="p">}</span>
 
@@ -847,8 +847,6 @@ cluster change.</p>
 </ul>
 <p>The FDB server configuration can be specialized in the section <code class="docutils literal notranslate"><span class="pre">[[server]]</span></code>:</p>
 <ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">tenants_enabled</span></code>: enable multitenancy (default: true)</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">blob_granules_enabled</span></code>:  enable support for blob granules (default: false)</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">tls_enabled</span></code>: enable TLS (default: false)</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">tls_client_chain_len</span></code>: the length of the client-side TLS chain (default: 2)</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">tls_server_chain_len</span></code>: the length of the server-side TLS chain (default: 3)</p></li>
@@ -909,7 +907,7 @@ a single test:</p>
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

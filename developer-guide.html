@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Developer Guide &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Developer Guide &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -75,10 +75,6 @@
 <li><a class="reference internal" href="#usage">Usage</a></li>
 <li><a class="reference internal" href="#subdirectories-and-nested-subspaces">Subdirectories and nested subspaces</a></li>
 <li><a class="reference internal" href="#directory-partitions">Directory partitions</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#tenants">Tenants</a><ul>
-<li><a class="reference internal" href="#tenants-and-directories">Tenants and directories</a></li>
 </ul>
 </li>
 </ul>
@@ -177,10 +173,6 @@
 <li><a class="reference internal" href="#usage">Usage</a></li>
 <li><a class="reference internal" href="#subdirectories-and-nested-subspaces">Subdirectories and nested subspaces</a></li>
 <li><a class="reference internal" href="#directory-partitions">Directory partitions</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#tenants">Tenants</a><ul>
-<li><a class="reference internal" href="#tenants-and-directories">Tenants and directories</a></li>
 </ul>
 </li>
 </ul>
@@ -433,14 +425,6 @@
 <li><p>Directories in a partition have longer prefixes than their counterparts outside of partitions, which reduces performance. Nesting partitions inside of other partitions results in even longer prefixes.</p></li>
 <li><p>The root directory of a partition cannot be used to pack/unpack keys and therefore cannot be used to create subspaces. You must create at least one subdirectory of a partition in order to store content in it.</p></li>
 </ul>
-</section>
-</section>
-<section id="tenants">
-<h3>Tenants</h3>
-<p><a class="reference internal" href="tenants.html"><span class="doc">Tenants</span></a> in FoundationDB provide a way to divide the cluster key-space into named transaction domains. Each tenant has a byte-string name that can be used to open transactions on the tenant’s data, and tenant transactions are not permitted to access data outside of the tenant. Tenants can be useful for enforcing separation between unrelated use-cases.</p>
-<section id="tenants-and-directories">
-<h4>Tenants and directories</h4>
-<p>Because tenants enforce that transactions operate within the tenant boundaries, it is not recommended to use a global directory layer shared between tenants. It is possible, however, to use the directory layer within each tenant. To do so, simply use the directory layer as normal with tenant transactions.</p>
 </section>
 </section>
 </section>
@@ -1113,7 +1097,7 @@ of the data while concurrently writing the new version.</p>
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

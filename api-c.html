@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>C API &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>C API &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -77,8 +77,10 @@
 <li><a class="reference internal" href="#api-versioning">API versioning</a></li>
 <li><a class="reference internal" href="#network">Network</a></li>
 <li><a class="reference internal" href="#future">Future</a></li>
-<li><a class="reference internal" href="#database">Database</a></li>
-<li><a class="reference internal" href="#tenant">Tenant</a></li>
+<li><a class="reference internal" href="#database">Database</a><ul>
+<li><a class="reference internal" href="#cdc">CDC</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#transaction">Transaction</a><ul>
 <li><a class="reference internal" href="#snapshot-reads">Snapshot reads</a></li>
 </ul>
@@ -138,8 +140,10 @@
 <li><a class="reference internal" href="#api-versioning">API versioning</a></li>
 <li><a class="reference internal" href="#network">Network</a></li>
 <li><a class="reference internal" href="#future">Future</a></li>
-<li><a class="reference internal" href="#database">Database</a></li>
-<li><a class="reference internal" href="#tenant">Tenant</a></li>
+<li><a class="reference internal" href="#database">Database</a><ul>
+<li><a class="reference internal" href="#cdc">CDC</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#transaction">Transaction</a><ul>
 <li><a class="reference internal" href="#snapshot-reads">Snapshot reads</a></li>
 </ul>
@@ -187,8 +191,8 @@
 </section>
 <section id="api-versioning">
 <h2>API versioning</h2>
-<p>Prior to including <code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal notranslate"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 740.</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 740</span>
+<p>Prior to including <code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal notranslate"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 800.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 800</span>
 <span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;foundationdb/fdb_c.h&gt;</span>
 </pre></div>
 </div>
@@ -218,7 +222,7 @@
 <dt><code class="docutils literal notranslate"><span class="pre">runtime_version</span></code></dt><dd><p>The version of run-time behavior the API is requested to provide. Must be less than or equal to <code class="docutils literal notranslate"><span class="pre">header_version</span></code>, and should almost always be equal.</p>
 <p>Language bindings which themselves expose API versioning will usually pass the version requested by the application.</p>
 </dd>
-<dt><code class="docutils literal notranslate"><span class="pre">header_version</span></code></dt><dd><p>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 740). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</p>
+<dt><code class="docutils literal notranslate"><span class="pre">header_version</span></code></dt><dd><p>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 800). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</p>
 </dd>
 </dl>
 <div class="admonition warning">
@@ -380,7 +384,18 @@
 <p class="admonition-title">Note</p>
 <p>This function provides no benefit to most application code. It is designed for use in writing generic, thread-safe language bindings. Applications should normally call <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a> only.</p>
 </div>
-<p>This function may only be called after a successful (zero return value) call to <a class="reference internal" href="#c.fdb_future_get_key" title="fdb_future_get_key"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_key()</span></code></a>, <a class="reference internal" href="#c.fdb_future_get_value" title="fdb_future_get_value"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_value()</span></code></a>, or <a class="reference internal" href="#c.fdb_future_get_keyvalue_array" title="fdb_future_get_keyvalue_array"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_keyvalue_array()</span></code></a>. It indicates that the memory returned by the prior get call is no longer needed by the application. After this function has been called the same number of times as <code class="docutils literal notranslate"><span class="pre">fdb_future_get_*()</span></code>, further calls to <code class="docutils literal notranslate"><span class="pre">fdb_future_get_*()</span></code> will return a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">future_released</span></a> error. It is still necessary to later destroy the future with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+<p>This function may only be called after a successful (zero return value)
+call to an <code class="docutils literal notranslate"><span class="pre">fdb_future_get_*()</span></code> function that returns memory owned by
+the future. This includes <a class="reference internal" href="#c.fdb_future_get_key" title="fdb_future_get_key"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_key()</span></code></a>,
+<a class="reference internal" href="#c.fdb_future_get_value" title="fdb_future_get_value"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_value()</span></code></a>, <a class="reference internal" href="#c.fdb_future_get_keyvalue_array" title="fdb_future_get_keyvalue_array"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_keyvalue_array()</span></code></a>,
+<a class="reference internal" href="#c.fdb_future_get_cdc_stream_info_array" title="fdb_future_get_cdc_stream_info_array"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_cdc_stream_info_array()</span></code></a>, and
+<a class="reference internal" href="#c.fdb_future_get_cdc_versioned_mutations" title="fdb_future_get_cdc_versioned_mutations"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_cdc_versioned_mutations()</span></code></a>. It indicates that the
+memory returned by the prior get call is no longer needed by the
+application. After this function has been called the same number of times
+as <code class="docutils literal notranslate"><span class="pre">fdb_future_get_*()</span></code>, further calls to <code class="docutils literal notranslate"><span class="pre">fdb_future_get_*()</span></code>
+will return a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">future_released</span></a> error.
+It is still necessary to later destroy the future with
+<a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 <p>Calling this function is optional, since <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a> will also release the memory returned by get functions. However, <a class="reference internal" href="#c.fdb_future_release_memory" title="fdb_future_release_memory"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_release_memory()</span></code></a> leaves the future object itself intact and provides a specific error code which can be used for coordination by multiple threads racing to do something with the results of a specific future. This has proven helpful in writing binding code.</p>
 </dd></dl>
 
@@ -394,6 +409,14 @@
 <dt class="sig sig-object c" id="c.fdb_future_get_int64">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_future_get_int64</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">future</span></span>, <span class="n"><span class="pre">int64_t</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out</span></span><span class="sig-paren">)</span><br /></dt>
 <dd><p>Extracts a 64-bit integer from a pointer to <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> into a caller-provided variable of type <code class="docutils literal notranslate"><span class="pre">int64_t</span></code>. <code class="docutils literal notranslate"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
+<p>Returns zero if <code class="docutils literal notranslate"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_future_get_uint64">
+<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_future_get_uint64</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">future</span></span>, <span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Extracts an unsigned 64-bit integer from a pointer to <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a>
+into a caller-provided variable of type <code class="docutils literal notranslate"><span class="pre">uint64_t</span></code>. <code class="docutils literal notranslate"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
 <p>Returns zero if <code class="docutils literal notranslate"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
 </dd></dl>
 
@@ -531,23 +554,9 @@
 </dd></dl>
 
 <dl class="c function">
-<dt class="sig sig-object c" id="c.fdb_database_open_tenant">
-<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_database_open_tenant</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><span class="n"><span class="pre">FDBDatabase</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">database</span></span>, <span class="n"><span class="pre">uint8_t</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">tenant_name</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n"><span class="pre">tenant_name_length</span></span>, <a class="reference internal" href="#c.FDBTenant" title="FDBTenant"><span class="n"><span class="pre">FDBTenant</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out_tenant</span></span><span class="sig-paren">)</span><br /></dt>
-<dd><p>Opens a tenant on the given database. All transactions created by this tenant will operate on the tenant’s key-space. The caller assumes ownership of the <a class="reference internal" href="#c.FDBTenant" title="FDBTenant"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBTenant</span></code></a> object and must destroy it with <a class="reference internal" href="#c.fdb_tenant_destroy" title="fdb_tenant_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_tenant_destroy()</span></code></a>.</p>
-<dl class="simple">
-<dt><code class="docutils literal notranslate"><span class="pre">tenant_name</span></code></dt><dd><p>The name of the tenant being accessed, as a byte string.</p>
-</dd>
-<dt><code class="docutils literal notranslate"><span class="pre">tenant_name_length</span></code></dt><dd><p>The length of the tenant name byte string.</p>
-</dd>
-<dt><code class="docutils literal notranslate"><span class="pre">*out_tenant</span></code></dt><dd><p>Set to point to the newly created <a class="reference internal" href="#c.FDBTenant" title="FDBTenant"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBTenant</span></code></a>.</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="c function">
 <dt class="sig sig-object c" id="c.fdb_database_create_transaction">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_database_create_transaction</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><span class="n"><span class="pre">FDBDatabase</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">database</span></span>, <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><span class="n"><span class="pre">FDBTransaction</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out_transaction</span></span><span class="sig-paren">)</span><br /></dt>
-<dd><p>Creates a new transaction on the given database without using a tenant, meaning that it will operate on the entire database key-space. The caller assumes ownership of the <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBTransaction</span></code></a> object and must destroy it with <a class="reference internal" href="#c.fdb_transaction_destroy" title="fdb_transaction_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_transaction_destroy()</span></code></a>.</p>
+<dd><p>Creates a new transaction on the given database. The caller assumes ownership of the <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBTransaction</span></code></a> object and must destroy it with <a class="reference internal" href="#c.fdb_transaction_destroy" title="fdb_transaction_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_transaction_destroy()</span></code></a>.</p>
 <dl class="simple">
 <dt><code class="docutils literal notranslate"><span class="pre">*out_transaction</span></code></dt><dd><p>Set to point to the newly created <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBTransaction</span></code></a>.</p>
 </dd>
@@ -661,32 +670,223 @@ server roles the client is aware of and their connection status. The schema of t
 </div>
 </dd></dl>
 
-</section>
-<section id="tenant">
-<h2>Tenant</h2>
-<p><code class="docutils literal notranslate"><span class="pre">FDBTenant</span></code> represents a FoundationDB tenant. Tenants are optional named transaction domains that can be used to provide multiple disjoint key-spaces to client applications. A transaction created in a tenant will be limited to the keys contained within that tenant, and transactions operating on different tenants can use the same key names without interfering with each other.</p>
+<section id="cdc">
+<h3>CDC</h3>
+<p>CDC exposes durable, named streams of committed mutations for an immutable union of
+half-open user-key ranges. New stream registration requires CDC admission
+to be enabled on the cluster. Listing, removal, consumer creation, resume,
+consume, and acknowledgement remain available for already durable streams while
+new admission is disabled so that callers can drain or remove them.</p>
+<p>The CDC C API is available beginning with API version 800. Applications must
+select API version 800 or later before calling these functions.</p>
 <dl class="c type">
-<dt class="sig sig-object c" id="c.FDBTenant">
-<span class="k"><span class="pre">type</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">FDBTenant</span></span></span><br /></dt>
-<dd><p>An opaque type that represents a tenant in the FoundationDB C API.</p>
+<dt class="sig sig-object c" id="c.FDBCdcMutationType">
+<span class="k"><span class="pre">type</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">FDBCdcMutationType</span></span></span><br /></dt>
+<dd><p>The raw mutation type returned by CDC. Values match the corresponding
+FoundationDB mutation encoding. <code class="docutils literal notranslate"><span class="pre">SET_VALUE</span></code> uses <code class="docutils literal notranslate"><span class="pre">param1</span></code> as the key and
+<code class="docutils literal notranslate"><span class="pre">param2</span></code> as the value; <code class="docutils literal notranslate"><span class="pre">CLEAR_RANGE</span></code> uses them as the clipped begin and
+end keys; atomic mutations use them as the key and operand.</p>
+<p>The listed constants are not exhaustive. Callers must handle an
+unrecognized raw <code class="docutils literal notranslate"><span class="pre">uint8_t</span></code> value in <code class="docutils literal notranslate"><span class="pre">FDBCdcMutation.type</span></code>.</p>
+</dd></dl>
+
+<dl class="c type">
+<dt class="sig sig-object c" id="c.FDBCdcStreamInfo">
+<span class="k"><span class="pre">type</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">FDBCdcStreamInfo</span></span></span><br /></dt>
+<dd><p>A listed CDC stream, including its name, stable stream ID, registered
+key ranges, and durable minimum required version. <code class="docutils literal notranslate"><span class="pre">ranges</span></code> points to
+<code class="docutils literal notranslate"><span class="pre">range_count</span></code> sorted, non-empty, disjoint ranges; overlapping and adjacent
+registered ranges are merged. The array and its key bytes have the same
+lifetime as the stream-info result.</p>
+</dd></dl>
+
+<dl class="c type">
+<dt class="sig sig-object c" id="c.FDBCdcMutation">
+<span class="k"><span class="pre">type</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">FDBCdcMutation</span></span></span><br /></dt>
+<dd><p>One raw mutation within a CDC commit-version group.</p>
+</dd></dl>
+
+<dl class="c type">
+<dt class="sig sig-object c" id="c.FDBCdcVersionedMutations">
+<span class="k"><span class="pre">type</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">FDBCdcVersionedMutations</span></span></span><br /></dt>
+<dd><p>A complete group of mutations with one FoundationDB commit version. A
+consume reply contains only complete groups; callers should preserve this
+grouping when processing a reply.</p>
+</dd></dl>
+
+<dl class="c type">
+<dt class="sig sig-object c" id="c.FDBCdcConsumer">
+<span class="k"><span class="pre">type</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">FDBCdcConsumer</span></span></span><br /></dt>
+<dd><p>An opaque, reference-counted CDC consumer handle. A handle extracted
+with <a class="reference internal" href="#c.fdb_future_get_cdc_consumer" title="fdb_future_get_cdc_consumer"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_cdc_consumer()</span></code></a> is owned by the caller and
+remains valid after the originating future is destroyed. Destroy it exactly
+once with <a class="reference internal" href="#c.fdb_cdc_consumer_destroy" title="fdb_cdc_consumer_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_cdc_consumer_destroy()</span></code></a>.</p>
 </dd></dl>
 
 <dl class="c function">
-<dt class="sig sig-object c" id="c.fdb_tenant_destroy">
-<span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_tenant_destroy</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTenant" title="FDBTenant"><span class="n"><span class="pre">FDBTenant</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">tenant</span></span><span class="sig-paren">)</span><br /></dt>
-<dd><p>Destroys an <a class="reference internal" href="#c.FDBTenant" title="FDBTenant"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBTenant</span></code></a> object. It must be called exactly once for each successful call to <code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_database_create_tenant()</span></code>. This function only destroys a handle to the tenant – the tenant and its data will be fine!</p>
+<dt class="sig sig-object c" id="c.fdb_database_register_cdc_stream">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_database_register_cdc_stream</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><span class="n"><span class="pre">FDBDatabase</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">database</span></span>, <span class="n"><span class="pre">uint8_t</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">name</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n"><span class="pre">name_length</span></span>, <span class="n"><span class="pre">FDBKeyRange</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">ranges</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n"><span class="pre">range_count</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Registers <code class="docutils literal notranslate"><span class="pre">name</span></code> for the union of <code class="docutils literal notranslate"><span class="pre">range_count</span></code> non-empty half-open
+ranges in normal user key space. The input must contain between 1 and 1024
+ranges. Ranges may arrive in any order; overlapping, duplicate, and adjacent
+ranges are merged. The encoded canonical range set must fit within the
+database value-size limit. Mutations in gaps between the resulting ranges are
+excluded, and clear-range mutations are clipped to each intersecting range.</p>
+<p>A stream’s range set is immutable. Repeating the same name and equivalent
+range union is idempotent; reusing a name with a different union fails.
+All ranges share one consumer cursor and acknowledgement position.
+The range array, key bytes, and name bytes are copied before this function
+returns. Invalid counts, negative lengths, null required pointers, or invalid
+ranges return a future with <code class="docutils literal notranslate"><span class="pre">client_invalid_operation</span></code>. The future returns
+the <code class="docutils literal notranslate"><span class="pre">uint64_t</span></code> stream ID, extracted with <a class="reference internal" href="#c.fdb_future_get_uint64" title="fdb_future_get_uint64"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_uint64()</span></code></a>.</p>
 </dd></dl>
 
 <dl class="c function">
-<dt class="sig sig-object c" id="c.fdb_tenant_create_transaction">
-<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_tenant_create_transaction</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTenant" title="FDBTenant"><span class="n"><span class="pre">FDBTenant</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">tenant</span></span>, <span class="n"><span class="pre">FDBTronsaction</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out_transaction</span></span><span class="sig-paren">)</span><br /></dt>
-<dd><p>Creates a new transaction on the given tenant. This transaction will operate within the tenant’s key-space and cannot access data outside the tenant. The caller assumes ownership of the <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBTransaction</span></code></a> object and must destroy it with <a class="reference internal" href="#c.fdb_transaction_destroy" title="fdb_transaction_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_transaction_destroy()</span></code></a>.</p>
-<dl class="simple">
-<dt><code class="docutils literal notranslate"><span class="pre">*out_transaction</span></code></dt><dd><p>Set to point to the newly created <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBTransaction</span></code></a>.</p>
-</dd>
-</dl>
+<dt class="sig sig-object c" id="c.fdb_database_register_cdc_ordered_stream">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_database_register_cdc_ordered_stream</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><span class="n"><span class="pre">FDBDatabase</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">database</span></span>, <span class="n"><span class="pre">uint8_t</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">name</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n"><span class="pre">name_length</span></span>, <span class="n"><span class="pre">FDBKeyRange</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">ranges</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n"><span class="pre">range_count</span></span>, <span class="n"><span class="pre">FDBKey</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">split_points</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n"><span class="pre">split_point_count</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Registers one logical CDC stream with fixed key-range partitions. The range
+union follows <a class="reference internal" href="#c.fdb_database_register_cdc_stream" title="fdb_database_register_cdc_stream"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_database_register_cdc_stream()</span></code></a> semantics. Supply
+zero to 63 split points in strictly increasing key order, strictly inside
+the range union’s outer bounds. Points may lie in gaps or at range boundaries,
+but each resulting partition must contain selected keys. Zero points creates
+one partition; <code class="docutils literal notranslate"><span class="pre">split_points</span></code> may be <code class="docutils literal notranslate"><span class="pre">NULL</span></code> when its count is zero.
+The partition count must not exceed the cluster’s configured CDC tag-pool
+size; otherwise registration fails with <code class="docutils literal notranslate"><span class="pre">client_invalid_operation</span></code>.
+The input arrays and all referenced bytes are copied before this call returns.</p>
+<p>The FDB client reads partitions concurrently and merges complete commit-version
+groups before returning them through <a class="reference internal" href="#c.fdb_cdc_consumer_consume" title="fdb_cdc_consumer_consume"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_cdc_consumer_consume()</span></code></a>.
+Applications use the existing create, resume, consume, acknowledge, and position
+functions with the logical stream ID. A quiet or lagging partition can delay
+delivery until the client establishes that all partitions are complete through
+the delivered version. A clear crossing a partition boundary may appear as
+multiple clipped clear mutations in the same version group.</p>
+<p>Client read-ahead and replies are bounded. A complete version group exceeding
+either its partition’s RPC quota or the aggregate reply limit fails with
+<code class="docutils literal notranslate"><span class="pre">server_overloaded</span></code>; the client never splits a group to fit the limit.</p>
+<p>Registration is idempotent for the same name, canonical range union, and split
+points. The registration mode and partition boundaries are immutable; changing
+them requires removing the stream and registering again. The future returns
+the logical <code class="docutils literal notranslate"><span class="pre">uint64_t</span></code> stream ID through <a class="reference internal" href="#c.fdb_future_get_uint64" title="fdb_future_get_uint64"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_uint64()</span></code></a>.
+This additive symbol is optional when loading external client libraries;
+an older external client returns <code class="docutils literal notranslate"><span class="pre">unsupported_operation</span></code> for ordered
+registration while retaining its ordinary CDC interface.</p>
+<p>All published CDC proxies must advertise ordered-stream support before
+registration can succeed. Registration is committed atomically by a CDC
+proxy. Use ordered-capable clients and serving proxies for the stream’s
+entire lifecycle, and drain and remove ordered streams before rolling back
+to implementations that lack this support.</p>
 </dd></dl>
 
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_database_remove_cdc_stream">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_database_remove_cdc_stream</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><span class="n"><span class="pre">FDBDatabase</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">database</span></span>, <span class="n"><span class="pre">uint8_t</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">name</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n"><span class="pre">name_length</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Removes the named stream and relinquishes its unread history. Removing a
+missing name succeeds. The returned future contains no value.</p>
+<p>Removing an ordered stream requires a published CDC proxy that supports
+ordered streams; it atomically removes the logical stream and all partitions
+while preserving the retention requirements of other streams sharing tags.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_database_list_cdc_streams">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_database_list_cdc_streams</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><span class="n"><span class="pre">FDBDatabase</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">database</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Returns the currently registered CDC streams. Extract the result with
+<a class="reference internal" href="#c.fdb_future_get_cdc_stream_info_array" title="fdb_future_get_cdc_stream_info_array"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_cdc_stream_info_array()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_future_get_cdc_stream_info_array">
+<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_future_get_cdc_stream_info_array</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">future</span></span>, <a class="reference internal" href="#c.FDBCdcStreamInfo" title="FDBCdcStreamInfo"><span class="n"><span class="pre">FDBCdcStreamInfo</span></span></a><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out_streams</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out_count</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Extracts the stream-info array returned by
+<a class="reference internal" href="#c.fdb_database_list_cdc_streams" title="fdb_database_list_cdc_streams"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_database_list_cdc_streams()</span></code></a>. Returns zero if <code class="docutils literal notranslate"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise
+(in which case the value of any out parameter is undefined).</p>
+<p>The memory referenced by the result is owned by the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> object and will be valid until either <code class="docutils literal notranslate"><span class="pre">fdb_future_destroy(future)</span></code> or <code class="docutils literal notranslate"><span class="pre">fdb_future_release_memory(future)</span></code> is called.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_database_create_cdc_consumer">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_database_create_cdc_consumer</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><span class="n"><span class="pre">FDBDatabase</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">database</span></span>, <span class="n"><span class="pre">uint8_t</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">name</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n"><span class="pre">name_length</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Creates a consumer for an existing stream name at its initial position.
+Extract the returned handle with
+<a class="reference internal" href="#c.fdb_future_get_cdc_consumer" title="fdb_future_get_cdc_consumer"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_cdc_consumer()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_database_resume_cdc_consumer">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_database_resume_cdc_consumer</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><span class="n"><span class="pre">FDBDatabase</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">database</span></span>, <span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n"><span class="pre">stream_id</span></span>, <span class="n"><span class="pre">int64_t</span></span><span class="w"> </span><span class="n"><span class="pre">last_consumed_version</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Constructs a local consumer handle from a checkpointed cursor. A cursor is
+only the stable <code class="docutils literal notranslate"><span class="pre">stream_id</span></code> and the version through which the caller has
+consumed; it does not contain process-local state. This call does not
+validate the stream ID or cursor; those checks occur when the handle
+consumes or acknowledges. Resume from the last durably processed and
+acknowledged position because unacknowledged mutations may be redelivered
+after CDC proxy replacement.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_future_get_cdc_consumer">
+<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_future_get_cdc_consumer</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">future</span></span>, <a class="reference internal" href="#c.FDBCdcConsumer" title="FDBCdcConsumer"><span class="n"><span class="pre">FDBCdcConsumer</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out_consumer</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Extracts the owned consumer handle returned by
+<a class="reference internal" href="#c.fdb_database_create_cdc_consumer" title="fdb_database_create_cdc_consumer"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_database_create_cdc_consumer()</span></code></a> or
+<a class="reference internal" href="#c.fdb_database_resume_cdc_consumer" title="fdb_database_resume_cdc_consumer"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_database_resume_cdc_consumer()</span></code></a>. Returns zero if <code class="docutils literal notranslate"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise
+(in which case the value of any out parameter is undefined).</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_cdc_consumer_destroy">
+<span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_cdc_consumer_destroy</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBCdcConsumer" title="FDBCdcConsumer"><span class="n"><span class="pre">FDBCdcConsumer</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">consumer</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Releases an owned CDC consumer handle.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_cdc_consumer_consume">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_cdc_consumer_consume</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBCdcConsumer" title="FDBCdcConsumer"><span class="n"><span class="pre">FDBCdcConsumer</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">consumer</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Long-polls for the next delivered position and complete commit-version
+mutation groups. Extract the reply with
+<a class="reference internal" href="#c.fdb_future_get_cdc_versioned_mutations" title="fdb_future_get_cdc_versioned_mutations"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_cdc_versioned_mutations()</span></code></a>. Consumption advances
+the in-memory consumer position but does not release durable CDC retention.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_future_get_cdc_versioned_mutations">
+<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_future_get_cdc_versioned_mutations</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">future</span></span>, <a class="reference internal" href="#c.FDBCdcVersionedMutations" title="FDBCdcVersionedMutations"><span class="n"><span class="pre">FDBCdcVersionedMutations</span></span></a><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out_mutations</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out_count</span></span>, <span class="n"><span class="pre">int64_t</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out_last_consumed_version</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Extracts the grouped mutation reply from
+<a class="reference internal" href="#c.fdb_cdc_consumer_consume" title="fdb_cdc_consumer_consume"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_cdc_consumer_consume()</span></code></a>. <code class="docutils literal notranslate"><span class="pre">out_last_consumed_version</span></code> is
+the delivered cursor after the reply and may advance across commit-version
+gaps that contain no returned mutation. Returns zero if <code class="docutils literal notranslate"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise
+(in which case the value of any out parameter is undefined).</p>
+<p>The returned groups, mutation arrays, and parameter bytes are owned by
+<code class="docutils literal notranslate"><span class="pre">future</span></code> and remain valid until <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a> or
+<a class="reference internal" href="#c.fdb_future_release_memory" title="fdb_future_release_memory"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_release_memory()</span></code></a> is called.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_cdc_consumer_acknowledge">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_cdc_consumer_acknowledge</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBCdcConsumer" title="FDBCdcConsumer"><span class="n"><span class="pre">FDBCdcConsumer</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">consumer</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Durably acknowledges the consumer’s current delivered position. Call this
+only after all mutations represented through that position have been durably
+processed. Acknowledgement advances a frontier shared by the stream, not one
+private to the handle, so a stream may have only one active logical
+consumer. Independently, a consumer handle may have only one consume or
+acknowledge operation outstanding at a time. The returned future contains
+no value.</p>
+<p>For ordered streams, a canceled or failed consume or acknowledgement
+invalidates unacknowledged read-ahead. Before the next operation, the handle
+rereads the common durable acknowledgement and resets its cursor to that
+frontier. A retry of acknowledgement can therefore acknowledge a reconciled
+cursor earlier than the previously delivered position; inspect
+<a class="reference internal" href="#c.fdb_cdc_consumer_get_position" title="fdb_cdc_consumer_get_position"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_cdc_consumer_get_position()</span></code></a> and tolerate replay on subsequent
+consumption. If the interrupted acknowledgement committed, its durable
+progress is preserved.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_cdc_consumer_get_position">
+<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_cdc_consumer_get_position</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBCdcConsumer" title="FDBCdcConsumer"><span class="n"><span class="pre">FDBCdcConsumer</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">consumer</span></span>, <span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out_stream_id</span></span>, <span class="n"><span class="pre">int64_t</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out_last_consumed_version</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Returns the consumer’s current cursor.</p>
+</dd></dl>
+
+</section>
 </section>
 <section id="transaction">
 <h2>Transaction</h2>
@@ -766,6 +966,13 @@ server roles the client is aware of and their connection status. The schema of t
 <p class="admonition-title">Note</p>
 <p>The returned split points contain the start key and end key of the given range</p>
 </div>
+<p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> which will be set to the list of split points. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_key_array" title="fdb_future_get_key_array"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_key_array()</span></code></a> to extract the array, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="c function">
+<dt class="sig sig-object c" id="c.fdb_transaction_get_range_split_points_with_limit">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_transaction_get_range_split_points_with_limit</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><span class="n"><span class="pre">FDBTransaction</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">tr</span></span>, <span class="n"><span class="pre">uint8_t</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">begin_key_name</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n"><span class="pre">begin_key_name_length</span></span>, <span class="n"><span class="pre">uint8_t</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">end_key_name</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n"><span class="pre">end_key_name_length</span></span>, <span class="n"><span class="pre">int64_t</span></span><span class="w"> </span><span class="n"><span class="pre">chunk_size</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n"><span class="pre">limit</span></span><span class="sig-paren">)</span><br /></dt>
+<dd><p>Returns at most <code class="docutils literal notranslate"><span class="pre">limit</span></code> interior split points, including shard boundaries. The start and end keys of the given range are always included. A negative <code class="docutils literal notranslate"><span class="pre">limit</span></code> preserves the unlimited behavior of <a class="reference internal" href="#c.fdb_transaction_get_range_split_points" title="fdb_transaction_get_range_split_points"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_transaction_get_range_split_points()</span></code></a>.</p>
 <p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> which will be set to the list of split points. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_key_array" title="fdb_future_get_key_array"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_key_array()</span></code></a> to extract the array, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 </dd></dl>
 
@@ -979,13 +1186,13 @@ server roles the client is aware of and their connection status. The schema of t
 <dl class="c function">
 <dt class="sig sig-object c" id="c.fdb_transaction_get_tag_throttled_duration">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_transaction_get_tag_throttled_duration</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><span class="n"><span class="pre">FDBTransaction</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">transaction</span></span><span class="sig-paren">)</span><br /></dt>
-<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> which will be set to the time (in seconds) that the transaction was throttled by the tag throttler in the returned future. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_double" title="fdb_future_get_double"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_double()</span></code></a> to extract the duration, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> which will be set to <code class="docutils literal notranslate"><span class="pre">0</span></code>. This compatibility API used to report proxy-side tag throttling time, but proxy-side tag throttling has been removed. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_double" title="fdb_future_get_double"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_double()</span></code></a> to extract the duration, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 </dd></dl>
 
 <dl class="c function">
 <dt class="sig sig-object c" id="c.fdb_transaction_get_total_cost">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_transaction_get_total_cost</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><span class="n"><span class="pre">FDBTransaction</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">transaction</span></span><span class="sig-paren">)</span><br /></dt>
-<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> which will be set to the cost of the transaction so far (in bytes) in the returned future, as computed by the tag throttler, and used for tag throttling if throughput quotas are specified. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_int64" title="fdb_future_get_int64"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_int64()</span></code></a> to extract the cost, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+<dd><p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> which will be set to the cost of the transaction so far (in bytes) in the returned future, as computed by the tag throttler. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_int64" title="fdb_future_get_int64"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_int64()</span></code></a> to extract the cost, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 </dd></dl>
 
 <dl class="c function">
@@ -1176,7 +1383,7 @@ server roles the client is aware of and their connection status. The schema of t
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

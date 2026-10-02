@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Clang-Tidy &#8212; FoundationDB 8.0.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script src="_static/jquery.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/sphinx_highlight.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Internal Dev Tools" href="internal-dev-tools.html" />
+    <link rel="prev" title="Clang-Format" href="clang-format.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Clang-Tidy</a><ul>
+<li><a class="reference internal" href="#what-clang-tidy-checks">What clang-tidy checks</a></li>
+<li><a class="reference internal" href="#clang-tidy-vs-clang-format">clang-tidy vs <span class="xref std std-doc">clang-format</span></a></li>
+<li><a class="reference internal" href="#running-clang-tidy-locally">Running clang-tidy locally</a><ul>
+<li><a class="reference internal" href="#step-1-generate-the-compilation-database">Step 1: Generate the compilation database</a></li>
+<li><a class="reference internal" href="#step-2-locate-the-helper-script">Step 2: Locate the helper script</a></li>
+<li><a class="reference internal" href="#step-3-run-against-your-changes">Step 3: Run against your changes</a></li>
+<li><a class="reference internal" href="#understanding-the-flags">Understanding the flags</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#running-clang-tidy-during-builds-cmake-integration">Running clang-tidy during builds (CMake integration)</a><ul>
+<li><a class="reference internal" href="#known-limitations">Known limitations</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#quick-reference">Quick reference</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="clang-format.html" title="Previous Chapter: Clang-Format"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Clang-Format</span>
+    </a>
+  </li>
+  <li>
+    <a href="internal-dev-tools.html" title="Next Chapter: Internal Dev Tools"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Internal Dev Tools &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Clang-Tidy</a><ul>
+<li><a class="reference internal" href="#what-clang-tidy-checks">What clang-tidy checks</a></li>
+<li><a class="reference internal" href="#clang-tidy-vs-clang-format">clang-tidy vs <span class="xref std std-doc">clang-format</span></a></li>
+<li><a class="reference internal" href="#running-clang-tidy-locally">Running clang-tidy locally</a><ul>
+<li><a class="reference internal" href="#step-1-generate-the-compilation-database">Step 1: Generate the compilation database</a></li>
+<li><a class="reference internal" href="#step-2-locate-the-helper-script">Step 2: Locate the helper script</a></li>
+<li><a class="reference internal" href="#step-3-run-against-your-changes">Step 3: Run against your changes</a></li>
+<li><a class="reference internal" href="#understanding-the-flags">Understanding the flags</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#running-clang-tidy-during-builds-cmake-integration">Running clang-tidy during builds (CMake integration)</a><ul>
+<li><a class="reference internal" href="#known-limitations">Known limitations</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#quick-reference">Quick reference</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="clang-tidy">
+<h1>Clang-Tidy</h1>
+<p><code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> is a static analysis tool that detects common programming errors, enforces coding standards, and suggests modern C++ improvements.
+It runs as part of CI on pull requests targeting <code class="docutils literal notranslate"><span class="pre">main</span></code>. CI checks eligible changed C/C++ files with <code class="docutils literal notranslate"><span class="pre">--warnings-as-errors='*'</span></code>, so findings fail the clang-tidy job. The workflow currently describes this job as non-required.</p>
+<p>This guide explains how to run <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> locally so you can fix issues before pushing.</p>
+<section id="what-clang-tidy-checks">
+<h2>What clang-tidy checks</h2>
+<p>FoundationDB configures 55 named checks in the <code class="docutils literal notranslate"><span class="pre">.clang-tidy</span></code> file at the repository root. The
+active set depends on the clang-tidy version and can be inspected with <code class="docutils literal notranslate"><span class="pre">clang-tidy</span> <span class="pre">--list-checks</span></code>.
+The intent is to enable more as we go forward. Here are some example rules:</p>
+<ul class="simple">
+<li><p><strong>36 Bugprone rules</strong> – catch potential runtime errors, including unsafe self-assignment, forwarding constructors that hide copy or move constructors, narrow accumulation initializers, mismatched argument comments, obvious infinite loops, chained comparisons, swapped arguments, integer division in floating-point calculations, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, incorrect erase/remove calls, and incorrect POSIX error checks</p></li>
+<li><p><strong>1 C++ Core Guidelines rule</strong> – catch unsafe captures in coroutine lambdas (<code class="docutils literal notranslate"><span class="pre">cppcoreguidelines-avoid-capturing-lambda-coroutines</span></code>)</p></li>
+<li><p><strong>2 Misc rules</strong> – catch redundant expressions and RAII objects held across coroutine suspension points</p></li>
+<li><p><strong>4 Modernize rules</strong> – encourage modern C++ practices (e.g., <code class="docutils literal notranslate"><span class="pre">modernize-use-auto</span></code>, <code class="docutils literal notranslate"><span class="pre">modernize-use-override</span></code>)</p></li>
+<li><p><strong>5 Performance rules</strong> – avoid unnecessary copies, hidden range-loop conversions, repeated vector growth in simple loops, pointless moves, and move constructors that copy movable members (<code class="docutils literal notranslate"><span class="pre">performance-for-range-copy</span></code>, <code class="docutils literal notranslate"><span class="pre">performance-implicit-conversion-in-loop</span></code>, <code class="docutils literal notranslate"><span class="pre">performance-inefficient-vector-operation</span></code>, <code class="docutils literal notranslate"><span class="pre">performance-move-const-arg</span></code>, <code class="docutils literal notranslate"><span class="pre">performance-move-constructor-init</span></code>)</p></li>
+<li><p><strong>7 Readability rules</strong> – improve code clarity (e.g., <code class="docutils literal notranslate"><span class="pre">readability-container-contains</span></code>, <code class="docutils literal notranslate"><span class="pre">readability-container-size-empty</span></code>)</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">misc-coroutine-hostile-raii</span></code> checks Flow’s blocking <code class="docutils literal notranslate"><span class="pre">MutexHolder</span></code> and
+<code class="docutils literal notranslate"><span class="pre">ThreadSpinLockHolder</span></code> guards as well as <code class="docutils literal notranslate"><span class="pre">std::lock_guard</span></code> and
+<code class="docutils literal notranslate"><span class="pre">std::scoped_lock</span></code>. These guards must leave scope before a coroutine suspension
+point; asynchronous locks designed to span suspension are not included.</p>
+<p><code class="docutils literal notranslate"><span class="pre">bugprone-unhandled-self-assignment</span></code> retains its default restriction to types
+with suspicious fields. Reference-counted assignments that acquire the incoming
+reference before releasing the old one use documented, check-specific
+<code class="docutils literal notranslate"><span class="pre">NOLINTNEXTLINE</span></code> annotations where the checker cannot recognize their safety.</p>
+<p>Basic examples of <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> style and performance improvement changes:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// Use empty() instead of size() == 0</span>
+<span class="o">-</span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">str</span><span class="p">.</span><span class="n">size</span><span class="p">()</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="o">+</span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">str</span><span class="p">.</span><span class="n">empty</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+
+<span class="c1">// Use contains() instead of count() &gt; 0</span>
+<span class="o">-</span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">classPath</span><span class="p">.</span><span class="n">count</span><span class="p">(</span><span class="n">path</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="o">+</span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">classPath</span><span class="p">.</span><span class="n">contains</span><span class="p">(</span><span class="n">path</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+
+<span class="c1">// Avoid unnecessary copies in range-for loops</span>
+<span class="o">-</span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">auto</span><span class="w"> </span><span class="n">state</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">states</span><span class="p">)</span>
+<span class="o">+</span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">state</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">states</span><span class="p">)</span>
+
+<span class="c1">// Remove unnecessary const on return types</span>
+<span class="o">-</span><span class="k">const</span><span class="w"> </span><span class="n">Key</span><span class="w"> </span><span class="n">keyServersKey</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">KeyRef</span><span class="o">&amp;</span><span class="w"> </span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="o">+</span><span class="n">Key</span><span class="w"> </span><span class="n">keyServersKey</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">KeyRef</span><span class="o">&amp;</span><span class="w"> </span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+</pre></div>
+</div>
+</section>
+<section id="clang-tidy-vs-clang-format">
+<h2>clang-tidy vs <a class="reference internal" href="clang-format.html"><span class="doc">Clang-Format</span></a></h2>
+<p>Both run in CI but serve different purposes:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 15.0%" />
+<col style="width: 40.0%" />
+<col style="width: 45.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Feature</p></th>
+<th class="head"><p><code class="docutils literal notranslate"><span class="pre">clang-format</span></code> (Code Style)</p></th>
+<th class="head"><p><code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> (Code Quality)</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>Focus</strong></p></td>
+<td><p>Whitespace, indentation, braces</p></td>
+<td><p>Bugs, performance, modern practices</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Speed</strong></p></td>
+<td><p>Very fast (syntax-only)</p></td>
+<td><p>Slower (requires compilation database)</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Action</strong></p></td>
+<td><p>Modifies files in-place (<code class="docutils literal notranslate"><span class="pre">-i</span></code>)</p></td>
+<td><p>Reports violations (read-only)</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Example</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">if(x){...}</span></code> to <code class="docutils literal notranslate"><span class="pre">if</span> <span class="pre">(x)</span> <span class="pre">{</span> <span class="pre">...</span> <span class="pre">}</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">vec.size()</span> <span class="pre">==</span> <span class="pre">0</span></code> to <code class="docutils literal notranslate"><span class="pre">vec.empty()</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="running-clang-tidy-locally">
+<h2>Running clang-tidy locally</h2>
+<section id="step-1-generate-the-compilation-database">
+<h3>Step 1: Generate the compilation database</h3>
+<p><code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> needs a <code class="docutils literal notranslate"><span class="pre">compile_commands.json</span></code> file to understand include paths and macros. Add <code class="docutils literal notranslate"><span class="pre">-DCMAKE_EXPORT_COMPILE_COMMANDS=ON</span></code> when you configure your build:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-B<span class="w"> </span>~/build_output<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DCMAKE_EXPORT_COMPILE_COMMANDS<span class="o">=</span>ON
+</pre></div>
+</div>
+<p>Then symlink it to your source root:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>ln<span class="w"> </span>-sf<span class="w"> </span>~/build_output/compile_commands.json<span class="w"> </span>.
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>A full build is recommended so that generated headers exist and include paths resolve correctly. Without a build, <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> may report false errors on files that depend on generated code. If your <code class="docutils literal notranslate"><span class="pre">compile_commands.json</span></code> was generated on a different machine (e.g., Okteto), fix the paths with:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sed<span class="w"> </span>-i<span class="w"> </span><span class="s1">''</span><span class="w"> </span><span class="s1">'s|/root/src/foundationdb/|/Users/YOU/checkouts/foundationdb/|g'</span><span class="w"> </span>compile_commands.json
+</pre></div>
+</div>
+</div>
+</section>
+<section id="step-2-locate-the-helper-script">
+<h3>Step 2: Locate the helper script</h3>
+<p><code class="docutils literal notranslate"><span class="pre">clang-tidy-diff.py</span></code> runs <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> only on the lines changed in your diff, avoiding noise from existing code you did not touch.</p>
+<p>On macOS (with Homebrew LLVM):</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span><span class="nb">export</span><span class="w"> </span><span class="nv">TIDY_DIFF</span><span class="o">=</span><span class="k">$(</span>find<span class="w"> </span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>llvm<span class="k">)</span>/share/clang<span class="w"> </span>-name<span class="w"> </span><span class="s2">"clang-tidy-diff.py"</span><span class="k">)</span>
+</pre></div>
+</div>
+<p>On Linux:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span><span class="nb">export</span><span class="w"> </span><span class="nv">TIDY_DIFF</span><span class="o">=</span><span class="k">$(</span>find<span class="w"> </span>/usr/lib/llvm-*/share/clang<span class="w"> </span>-name<span class="w"> </span><span class="s2">"clang-tidy-diff.py"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-n<span class="w"> </span><span class="m">1</span><span class="k">)</span>
+</pre></div>
+</div>
+<p>To make this permanent, add to your <code class="docutils literal notranslate"><span class="pre">~/.bashrc</span></code> or <code class="docutils literal notranslate"><span class="pre">~/.zshrc</span></code>:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span><span class="nb">alias</span><span class="w"> </span>fdb-tidy<span class="o">=</span><span class="s1">'python3 $(find $(brew --prefix llvm 2&gt;/dev/null || echo "/usr/lib/llvm-*") -name "clang-tidy-diff.py" | head -n 1) -p 1 -path .'</span>
+</pre></div>
+</div>
+</section>
+<section id="step-3-run-against-your-changes">
+<h3>Step 3: Run against your changes</h3>
+<p>Check all changes between your branch and <code class="docutils literal notranslate"><span class="pre">main</span></code>:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>diff<span class="w"> </span>-U0<span class="w"> </span>origin/main...HEAD<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span><span class="s2">"</span><span class="nv">$TIDY_DIFF</span><span class="s2">"</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1</span><span class="w"> </span>-path<span class="w"> </span>.
+
+<span class="c1"># Or with the alias:</span>
+git<span class="w"> </span>diff<span class="w"> </span>-U0<span class="w"> </span>origin/main...HEAD<span class="w"> </span><span class="p">|</span><span class="w"> </span>fdb-tidy
+</pre></div>
+</div>
+<p>Check a specific commit:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>show<span class="w"> </span>-U0<span class="w"> </span>&lt;commit_hash&gt;<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span><span class="s2">"</span><span class="nv">$TIDY_DIFF</span><span class="s2">"</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1</span><span class="w"> </span>-path<span class="w"> </span>.
+</pre></div>
+</div>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>Use <code class="docutils literal notranslate"><span class="pre">-U0</span></code> (no context lines). Without it, <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> may lint surrounding lines that you did not change, reporting pre-existing issues.</p>
+</div>
+</section>
+<section id="understanding-the-flags">
+<h3>Understanding the flags</h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">clang-tidy-diff.py</span></code> script has different flag conventions from <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> itself:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">-p</span> <span class="pre">1</span></code> – strip one directory prefix from git diff paths (<code class="docutils literal notranslate"><span class="pre">a/src/main.cpp</span></code> becomes <code class="docutils literal notranslate"><span class="pre">src/main.cpp</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">-path</span> <span class="pre">.</span></code> – directory containing <code class="docutils literal notranslate"><span class="pre">compile_commands.json</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">-quiet</span></code> – suppress per-file warning count summaries</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">-j</span> <span class="pre">N</span></code> – run N clang-tidy instances in parallel</p></li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>In the standard <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> command, <code class="docutils literal notranslate"><span class="pre">-p</span></code> points to the build directory. In <code class="docutils literal notranslate"><span class="pre">clang-tidy-diff.py</span></code>, <code class="docutils literal notranslate"><span class="pre">-path</span></code> points to the build directory and <code class="docutils literal notranslate"><span class="pre">-p</span></code> is for path stripping.</p>
+</div>
+</section>
+</section>
+<section id="running-clang-tidy-during-builds-cmake-integration">
+<h2>Running clang-tidy during builds (CMake integration)</h2>
+<p>FoundationDB’s CMake build supports running <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> automatically during C/C++ compilation:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DUSE_CLANG_TIDY<span class="o">=</span>ON
+ninja<span class="w"> </span>-C<span class="w"> </span>build<span class="w"> </span>fdbserver
+</pre></div>
+</div>
+<p>This runs <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> on every file as it compiles. It is slower than using <code class="docutils literal notranslate"><span class="pre">clang-tidy-diff.py</span></code> on your diff but catches issues in all compiled code.</p>
+<p>Optional CMake variables:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CLANG_TIDY</span></code> – path to the <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> executable (auto-detected by default)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CLANG_TIDY_EXTRA_ARGS</span></code> – additional space-separated arguments passed to <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code></p></li>
+</ul>
+<section id="known-limitations">
+<h3>Known limitations</h3>
+<p>Build-integrated clang-tidy skips bundled external-library targets, including <code class="docutils literal notranslate"><span class="pre">crc32</span></code>, <code class="docutils literal notranslate"><span class="pre">libb64</span></code>, <code class="docutils literal notranslate"><span class="pre">md5</span></code>, <code class="docutils literal notranslate"><span class="pre">libeio</span></code>, and <code class="docutils literal notranslate"><span class="pre">libcoroutine</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">cppcoreguidelines-slicing</span></code> is not enabled: <code class="docutils literal notranslate"><span class="pre">Standalone&lt;T&gt;</span></code> inherits <code class="docutils literal notranslate"><span class="pre">T</span></code> and
+owns its bytes in an <code class="docutils literal notranslate"><span class="pre">Arena</span></code>, while passing a borrowed <code class="docutils literal notranslate"><span class="pre">T</span></code> view by value is
+an intentional FoundationDB pattern. The check cannot distinguish those borrows
+from unintended slicing; the borrow must still not outlive its owner.</p>
+<p><code class="docutils literal notranslate"><span class="pre">readability-simplify-boolean-expr</span></code> is not enabled because it diagnoses ordinary
+uses of FoundationDB’s <code class="docutils literal notranslate"><span class="pre">ASSERT</span></code> macro after macro expansion.</p>
+</section>
+</section>
+<section id="quick-reference">
+<h2>Quick reference</h2>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>diff<span class="w"> </span>-U0<span class="w"> </span>origin/main...HEAD<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span><span class="s2">"</span><span class="nv">$TIDY_DIFF</span><span class="s2">"</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1</span><span class="w"> </span>-path<span class="w"> </span>.
+</pre></div>
+</div>
+<p><strong>GCC-built compile_commands.json with clang-tidy.</strong> If your <code class="docutils literal notranslate"><span class="pre">compile_commands.json</span></code> was generated with GCC, it may contain GCC-specific flags that <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> (which uses the clang frontend) does not recognize. Add <code class="docutils literal notranslate"><span class="pre">-extra-arg=-Wno-unknown-warning-option</span></code> to suppress these errors:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>diff<span class="w"> </span>-U0<span class="w"> </span>origin/main...HEAD<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span><span class="s2">"</span><span class="nv">$TIDY_DIFF</span><span class="s2">"</span><span class="w"> </span>-p<span class="w"> </span><span class="m">1</span><span class="w"> </span>-path<span class="w"> </span>.<span class="w"> </span>-extra-arg<span class="o">=</span>-Wno-unknown-warning-option
+</pre></div>
+</div>
+<p>Quick reference</p>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/clang-tidy.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Oct 02, 2026.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>FoundationDB Range Locks (WiP) &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>FoundationDB Range Locks (WiP) &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -72,10 +72,13 @@
 <li><a class="reference internal" href="#comparison-with-general-locking-concepts">Comparison with general locking concepts</a></li>
 <li><a class="reference internal" href="#example-use-cases">Example use cases</a></li>
 <li><a class="reference internal" href="#how-to-use">How to use?</a></li>
+<li><a class="reference internal" href="#using-fdbcli">Using <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code></a></li>
 <li><a class="reference internal" href="#example-usage">Example usage</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#range-lock-design-exclusive-read-lock">Range Lock Design (Exclusive Read Lock)</a><ul>
+<li><a class="reference internal" href="#steady-state-cost-when-no-locks-are-held">Steady-state cost when no locks are held</a></li>
+<li><a class="reference internal" href="#correctness-across-proxies">Correctness across proxies</a></li>
 <li><a class="reference internal" href="#support-multiple-range-lock-users">Support multiple range lock users</a></li>
 <li><a class="reference internal" href="#transaction-error-handling">Transaction error handling</a></li>
 <li><a class="reference internal" href="#compatibility">Compatibility</a></li>
@@ -129,10 +132,13 @@
 <li><a class="reference internal" href="#comparison-with-general-locking-concepts">Comparison with general locking concepts</a></li>
 <li><a class="reference internal" href="#example-use-cases">Example use cases</a></li>
 <li><a class="reference internal" href="#how-to-use">How to use?</a></li>
+<li><a class="reference internal" href="#using-fdbcli">Using <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code></a></li>
 <li><a class="reference internal" href="#example-usage">Example usage</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#range-lock-design-exclusive-read-lock">Range Lock Design (Exclusive Read Lock)</a><ul>
+<li><a class="reference internal" href="#steady-state-cost-when-no-locks-are-held">Steady-state cost when no locks are held</a></li>
+<li><a class="reference internal" href="#correctness-across-proxies">Correctness across proxies</a></li>
 <li><a class="reference internal" href="#support-multiple-range-lock-users">Support multiple range lock users</a></li>
 <li><a class="reference internal" href="#transaction-error-handling">Transaction error handling</a></li>
 <li><a class="reference internal" href="#compatibility">Compatibility</a></li>
@@ -191,30 +197,45 @@ The following API can be used to register an identity and lock a range.</p>
 <p>Put an exclusive read lock on a range. The range must be within the user key space, aka <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span> <span class="pre">~</span> <span class="pre">\xff</span></code>.
 The locking request is rejected with a range_lock_reject error if the range contains any existing lock with a different range, user, or lock type.
 Currently, only the ExclusiveReadLock type is supported, but the design allows for future extension.</p>
-<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">takeExclusiveReadLockOnRange(Database</span> <span class="pre">cx,</span> <span class="pre">KeyRange</span> <span class="pre">range,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">Future&lt;Void&gt;</span> <span class="pre">takeExclusiveReadLockOnRange(Database</span> <span class="pre">cx,</span> <span class="pre">KeyRange</span> <span class="pre">range,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
 <p>Release an exclusive read lock on a range. The range must be within the user key space, aka <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span> <span class="pre">~</span> <span class="pre">\xff</span></code>.
 The release request is rejected with a range_lock_reject error if the range contains any existing lock with a different range, user, or lock type.</p>
-<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">releaseExclusiveReadLockOnRange(Database</span> <span class="pre">cx,</span> <span class="pre">KeyRange</span> <span class="pre">range,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">Future&lt;Void&gt;</span> <span class="pre">releaseExclusiveReadLockOnRange(Database</span> <span class="pre">cx,</span> <span class="pre">KeyRange</span> <span class="pre">range,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
 <p>Note that takeExclusiveReadLockOnRange and releaseExclusiveReadLockOnRange are transactional.
 If the execution of the API is successful, all ranges are guaranteed to be locked/unlocked at a single version.
 If the execution is failed, no range is locked/unlocked.</p>
-<p>Get exclusive read locks on the input range</p>
-<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;std::vector&lt;std::pair&lt;KeyRange,</span> <span class="pre">RangeLockState&gt;&gt;&gt;</span> <span class="pre">findExclusiveReadLockOnRange(Database</span> <span class="pre">cx,</span> <span class="pre">KeyRange</span> <span class="pre">range);</span></code></p>
+<p>Get exclusive read locks on the input range, optionally filtering by owner.</p>
+<p><code class="docutils literal notranslate"><span class="pre">Future&lt;std::vector&lt;std::pair&lt;KeyRange,</span> <span class="pre">RangeLockState&gt;&gt;&gt;</span> <span class="pre">findExclusiveReadLockOnRange(Database</span> <span class="pre">cx,</span> <span class="pre">KeyRange</span> <span class="pre">range,</span> <span class="pre">Optional&lt;RangeLockOwnerName&gt;</span> <span class="pre">ownerName</span> <span class="pre">=</span> <span class="pre">Optional&lt;RangeLockOwnerName&gt;());</span></code></p>
 <p>Register a range lock owner to database metadata.</p>
-<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">registerRangeLockOwner(Database</span> <span class="pre">cx,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID,</span> <span class="pre">std::string</span> <span class="pre">description);</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">Future&lt;Void&gt;</span> <span class="pre">registerRangeLockOwner(Database</span> <span class="pre">cx,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID,</span> <span class="pre">std::string</span> <span class="pre">description);</span></code></p>
 <p>Remove an owner from the database metadata</p>
-<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">removeRangeLockOwner(Database</span> <span class="pre">cx,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">Future&lt;Void&gt;</span> <span class="pre">removeRangeLockOwner(Database</span> <span class="pre">cx,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
 <p>Get all registered range lock owners</p>
-<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;std::vector&lt;RangeLockOwner&gt;&gt;</span> <span class="pre">getAllRangeLockOwners(Database</span> <span class="pre">cx);</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">AsyncResult&lt;std::vector&lt;RangeLockOwner&gt;&gt;</span> <span class="pre">getAllRangeLockOwners(Database</span> <span class="pre">cx);</span></code></p>
 <p>Get a range lock owner by uniqueId</p>
-<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Optional&lt;RangeLockOwner&gt;&gt;</span> <span class="pre">getRangeLockOwner(Database</span> <span class="pre">cx,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">Future&lt;Optional&lt;RangeLockOwner&gt;&gt;</span> <span class="pre">getRangeLockOwner(Database</span> <span class="pre">cx,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
+</section>
+<section id="using-fdbcli">
+<h3>Using <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code></h3>
+<p>For ad-hoc operational use — inspecting active locks, releasing a lock left behind by a failed bulkload job, taking a lock for a maintenance window, or driving a perf test — <code class="docutils literal notranslate"><span class="pre">fdbcli</span></code> exposes a thin wrapper around the management API:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">rangelock</span> <span class="n">register</span> <span class="o">&lt;</span><span class="n">OWNER_ID</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">DESCRIPTION</span><span class="o">&gt;</span>
+<span class="n">rangelock</span> <span class="n">unregister</span> <span class="o">&lt;</span><span class="n">OWNER_ID</span><span class="o">&gt;</span>
+<span class="n">rangelock</span> <span class="n">owners</span>
+<span class="n">rangelock</span> <span class="n">take</span> <span class="o">&lt;</span><span class="n">BEGIN_KEY</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">END_KEY</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">OWNER_ID</span><span class="o">&gt;</span>
+<span class="n">rangelock</span> <span class="n">release</span> <span class="o">&lt;</span><span class="n">BEGIN_KEY</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">END_KEY</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">OWNER_ID</span><span class="o">&gt;</span>
+<span class="n">rangelock</span> <span class="n">release</span><span class="o">-</span><span class="nb">all</span> <span class="o">&lt;</span><span class="n">OWNER_ID</span><span class="o">&gt;</span>
+<span class="n">rangelock</span> <span class="nb">list</span> <span class="p">[</span><span class="o">&lt;</span><span class="n">BEGIN_KEY</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">END_KEY</span><span class="o">&gt;</span><span class="p">]</span>
+</pre></div>
+</div>
+<p>Range locks only take effect when commit proxies are started with <code class="docutils literal notranslate"><span class="pre">knob_enable_read_lock_on_range=true</span></code>. <code class="docutils literal notranslate"><span class="pre">rangelock</span> <span class="pre">take</span></code> prints an advisory notice as a reminder, but cannot probe the server-side knob — the take itself succeeds either way; the lock simply has no effect when the knob is off.</p>
+<p>The bulkload-specific commands (<code class="docutils literal notranslate"><span class="pre">bulkload</span> <span class="pre">addlockowner</span></code> / <code class="docutils literal notranslate"><span class="pre">bulkload</span> <span class="pre">clearlock</span></code> / <code class="docutils literal notranslate"><span class="pre">bulkload</span> <span class="pre">printlockowner</span></code>) remain available; they are a constrained subset of the above scoped to the bulkload workflow.</p>
 </section>
 <section id="example-usage">
 <h3>Example usage</h3>
 <p>When submitting a bulk load task on a range, we block user write traffic to the range.</p>
-<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">setBulkLoadSubmissionTransaction(Transaction*</span> <span class="pre">tr,</span> <span class="pre">BulkLoadTaskState</span> <span class="pre">bulkLoadTask);</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">Future&lt;Void&gt;</span> <span class="pre">setBulkLoadSubmissionTransaction(Transaction*</span> <span class="pre">tr,</span> <span class="pre">BulkLoadTaskState</span> <span class="pre">bulkLoadTask);</span></code></p>
 <p>Upon a bulk load task completes on a range, we unblock user write traffic on the range.</p>
-<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">setBulkLoadFinalizeTransaction(Transaction*</span> <span class="pre">tr,</span> <span class="pre">KeyRange</span> <span class="pre">range,</span> <span class="pre">UID</span> <span class="pre">taskId);</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">Future&lt;Void&gt;</span> <span class="pre">setBulkLoadFinalizeTransaction(Transaction*</span> <span class="pre">tr,</span> <span class="pre">KeyRange</span> <span class="pre">range,</span> <span class="pre">UID</span> <span class="pre">taskId);</span></code></p>
 </section>
 </section>
 <section id="range-lock-design-exclusive-read-lock">
@@ -240,6 +261,26 @@ Note that it is possible that this locking mutation is batched with other mutati
 The locking mutation takes effect on all mutations after the locking mutation in the same batch.
 To achieve this, the locking transaction adds a write_conflict_range on the lock range.
 As a result, any following transactions in the batch that writes to the locked range will be marked as <code class="docutils literal notranslate"><span class="pre">Conflict</span></code>.</p>
+<section id="steady-state-cost-when-no-locks-are-held">
+<h3>Steady-state cost when no locks are held</h3>
+<p>The per-mutation lookup described above runs only when at least one exclusive read lock is held cluster-wide. Each commit proxy tracks an <code class="docutils literal notranslate"><span class="pre">anyExclusiveLockHeld_</span></code> flag on its <code class="docutils literal notranslate"><span class="pre">RangeLock</span></code> struct, refreshed when the lock set changes (during <code class="docutils literal notranslate"><span class="pre">consumePendingRequest</span></code> and recovery’s <code class="docutils literal notranslate"><span class="pre">initKeyPoint</span></code>). When the flag is false — the steady state for any cluster running with <code class="docutils literal notranslate"><span class="pre">--knob_enable_read_lock_on_range=1</span></code> but no active bulkload — <code class="docutils literal notranslate"><span class="pre">rejectMutationsForReadLockOnRange</span></code> short-circuits at the top of the function and the per-mutation work is skipped entirely.</p>
+<p>Two <code class="docutils literal notranslate"><span class="pre">ProxyMetrics</span></code> counters expose which path the proxy took:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">RangeLockFastPath</span></code> increments once per commit batch when the early return fired (no locks held).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">RangeLockSlowPath</span></code> increments once per commit batch when the per-mutation check loop ran (at least one lock held).</p></li>
+</ul>
+<p>Operators can use these counters to confirm in production that the optimization is firing, and to detect the silent-degradation case where the flag fails to clear after a release. In normal operation only one counter advances at a time per proxy.</p>
+</section>
+<section id="correctness-across-proxies">
+<h3>Correctness across proxies</h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">anyExclusiveLockHeld_</span></code> flag is per-proxy and never directly synchronized between proxies. Convergence comes from the <code class="docutils literal notranslate"><span class="pre">txnStateStore</span></code> mutation broadcast already used by the in-memory <code class="docutils literal notranslate"><span class="pre">coreMap</span></code>: every proxy applies the same <code class="docutils literal notranslate"><span class="pre">\xff/rangeLock/</span></code> mutation stream in commit-version order, so each proxy’s flag value at version V is a deterministic function of the same prefix of the log.</p>
+<ul class="simple">
+<li><p><strong>Within a single batch.</strong> <code class="docutils literal notranslate"><span class="pre">applyMetadataMutations</span></code> (Phase 3a) runs before <code class="docutils literal notranslate"><span class="pre">rejectMutationsForReadLockOnRange</span></code> (Phase 3b). If the batch took a lock, <code class="docutils literal notranslate"><span class="pre">consumePendingRequest</span></code> has already set the flag by the time the reject loop reads it. Mutations ordered after the lock in the same batch are caught by the existing <code class="docutils literal notranslate"><span class="pre">write_conflict_range</span></code> mechanism, not by the flag.</p></li>
+<li><p><strong>Across batches.</strong> A proxy never starts processing batch <code class="docutils literal notranslate"><span class="pre">V+1</span></code> until version <code class="docutils literal notranslate"><span class="pre">V</span></code>‘s metadata mutations are applied locally. So when batch <code class="docutils literal notranslate"><span class="pre">V+1</span></code> reaches Phase 3b, every lock taken at version <code class="docutils literal notranslate"><span class="pre">&lt;=</span> <span class="pre">V</span></code> is reflected in the flag.</p></li>
+<li><p><strong>During recovery.</strong> <code class="docutils literal notranslate"><span class="pre">initKeyPoint</span></code> is monotonic-up — it only sets the flag to true. Combined with <code class="docutils literal notranslate"><span class="pre">consumePendingRequest</span></code>‘s post-coalesce full recompute at runtime, the flag can be temporarily stuck at true (harmless: the slow path runs, finds no locks, rejects nothing — extra CPU, no behavior change) but cannot be stuck at false while locks are actually held. Stuck-true is observable through the <code class="docutils literal notranslate"><span class="pre">RangeLockFastPath</span></code> counter; stuck-false would manifest as missing <code class="docutils literal notranslate"><span class="pre">transaction_rejected_range_locked</span></code> rejections, which existing simulation workloads (<code class="docutils literal notranslate"><span class="pre">tests/fast/RangeLocking.toml</span></code>, <code class="docutils literal notranslate"><span class="pre">tests/fast/RangeLockCycle.toml</span></code>) already assert against.</p></li>
+</ul>
+<p>The flag is therefore a layer on top of an already-coordinated invariant — the consistency of <code class="docutils literal notranslate"><span class="pre">coreMap</span></code> itself across proxies — rather than introducing a new coordination requirement of its own.</p>
+</section>
 <section id="support-multiple-range-lock-users">
 <h3>Support multiple range lock users</h3>
 <p>To support rangeLock for multiple applications, we add ownership concept to rangeLock.
@@ -259,9 +300,8 @@ Transaction.onError can automatically retry with this error code, similar to oth
 <ul class="simple">
 <li><p>Database lock: RangeLock is transparent to the database lock. When the database lock is on, the rangeLock metadata transaction with LockAware can still update the rangeLock metadata, but rangeLock does not reject any transaction.</p></li>
 <li><p>Backup and restore: RangeLock can cause losing mutations when restoring. Restoring should automatically detect the failure due to rangeLock and self-retry from a clean state.</p></li>
-<li><p>ChangeFeed: RangeLock can trigger assertion failure. The reason is unclear yet.</p></li>
 <li><p>Version vector: Version vector has a different path of updating metadata at proxies than the default one. Therefore, rangeLock temporarily is not available when the version vector is on.</p></li>
-<li><p>Encryption and tenant: Currently, RangeLock does not have a clear functionality in the context of encryption and tenant, so when the encryption and tenant are on, we disable rangeLock for the clarity.</p></li>
+<li><p>Encryption: Currently, RangeLock does not have a clear functionality in the context of encryption, so when encryption is enabled, we disable rangeLock for clarity.</p></li>
 </ul>
 </section>
 </section>
@@ -287,7 +327,7 @@ Transaction.onError can automatically retry with this error code, similar to oth
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

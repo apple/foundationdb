@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Flow &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Flow &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -72,16 +72,14 @@
 <li><a class="reference internal" href="#a-first-look">A first look</a></li>
 <li><a class="reference internal" href="#flow-features">Flow features</a><ul>
 <li><a class="reference internal" href="#promise-t-and-future-t">Promise&lt;T&gt; and Future&lt;T&gt;</a></li>
-<li><a class="reference internal" href="#wait">wait()</a></li>
-<li><a class="reference internal" href="#actor">ACTOR</a></li>
-<li><a class="reference internal" href="#state">State</a></li>
-<li><a class="reference internal" href="#promisestream-t-futurestream-t">PromiseStream&lt;T&gt;, FutureStream&lt;T&gt;</a></li>
-<li><a class="reference internal" href="#waitnext">waitNext()</a></li>
-<li><a class="reference internal" href="#choose-when">choose … when</a></li>
-<li><a class="reference internal" href="#example-a-server-interface">Example: A Server Interface</a></li>
+<li><a class="reference internal" href="#co-await-and-co-return">co_await and co_return</a></li>
+<li><a class="reference internal" href="#local-variables-and-ownership">Local variables and ownership</a></li>
+<li><a class="reference internal" href="#promisestream-t-and-futurestream-t">PromiseStream&lt;T&gt; and FutureStream&lt;T&gt;</a></li>
+<li><a class="reference internal" href="#waiting-for-multiple-inputs">Waiting for multiple inputs</a></li>
+<li><a class="reference internal" href="#example-a-server-interface">Example: A server interface</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#caveats">Caveats</a></li>
+<li><a class="reference internal" href="#cancellation-and-lifetime-pitfalls">Cancellation and lifetime pitfalls</a></li>
 </ul>
 </li>
 </ul>
@@ -130,16 +128,14 @@
 <li><a class="reference internal" href="#a-first-look">A first look</a></li>
 <li><a class="reference internal" href="#flow-features">Flow features</a><ul>
 <li><a class="reference internal" href="#promise-t-and-future-t">Promise&lt;T&gt; and Future&lt;T&gt;</a></li>
-<li><a class="reference internal" href="#wait">wait()</a></li>
-<li><a class="reference internal" href="#actor">ACTOR</a></li>
-<li><a class="reference internal" href="#state">State</a></li>
-<li><a class="reference internal" href="#promisestream-t-futurestream-t">PromiseStream&lt;T&gt;, FutureStream&lt;T&gt;</a></li>
-<li><a class="reference internal" href="#waitnext">waitNext()</a></li>
-<li><a class="reference internal" href="#choose-when">choose … when</a></li>
-<li><a class="reference internal" href="#example-a-server-interface">Example: A Server Interface</a></li>
+<li><a class="reference internal" href="#co-await-and-co-return">co_await and co_return</a></li>
+<li><a class="reference internal" href="#local-variables-and-ownership">Local variables and ownership</a></li>
+<li><a class="reference internal" href="#promisestream-t-and-futurestream-t">PromiseStream&lt;T&gt; and FutureStream&lt;T&gt;</a></li>
+<li><a class="reference internal" href="#waiting-for-multiple-inputs">Waiting for multiple inputs</a></li>
+<li><a class="reference internal" href="#example-a-server-interface">Example: A server interface</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#caveats">Caveats</a></li>
+<li><a class="reference internal" href="#cancellation-and-lifetime-pitfalls">Cancellation and lifetime pitfalls</a></li>
 </ul>
 </li>
 </ul>
@@ -152,130 +148,104 @@
 <h1>Flow</h1>
 <section id="engineering-challenges">
 <h2>Engineering challenges</h2>
-<p>FoundationDB began with ambitious goals for both <a class="reference internal" href="performance.html"><span class="doc">high performance</span></a> per node and <a class="reference internal" href="scalability.html"><span class="doc">scalability</span></a>. We knew that to achieve these goals we would face serious engineering challenges while developing the FoundationDB core. We’d need to implement efficient asynchronous communicating processes of the sort supported by <a class="reference external" href="http://en.wikipedia.org/wiki/Erlang_(programming_language)">Erlang</a> or the <a class="reference external" href="http://msdn.microsoft.com/en-us/library/vstudio/hh191443.aspx">Async library in .NET</a>, but we’d also need the raw speed and I/O efficiency of C++. Finally, we’d need to perform extensive simulation to engineer for reliability and fault tolerance on large clusters.</p>
-<p>To meet these challenges, we developed several new tools, the first of which is Flow, a new programming language that brings <a class="reference external" href="http://en.wikipedia.org/wiki/Actor_model">actor-based concurrency</a> to C++11. To add this capability, Flow introduces a number of new keywords and control-flow primitives for managing concurrency. Flow is implemented as a compiler which analyzes an asynchronous function (actor) and rewrites it as an object with many different sub-functions that use callbacks to avoid blocking (see <a class="reference external" href="https://github.com/Sage/streamlinejs">streamlinejs</a> for a similar concept using JavaScript). The Flow compiler’s output is normal C++11 code, which is then compiled to a binary using traditional tools. Flow also provides input to our simulation tool, which conducts deterministic simulations of the entire system, including its physical interfaces and failure modes. In short, Flow allows efficient concurrency within C++ in a maintainable and extensible manner, achieving all three major engineering goals:</p>
+<p>FoundationDB began with ambitious goals for both <a class="reference internal" href="performance.html"><span class="doc">high performance</span></a> per node and <a class="reference internal" href="scalability.html"><span class="doc">scalability</span></a>. We knew that to achieve these goals we would face serious engineering challenges while developing the FoundationDB core. We’d need efficient asynchronous communicating processes, the speed and I/O efficiency of C++, and extensive simulation to engineer for reliability and fault tolerance on large clusters.</p>
+<p>Flow provides the asynchronous runtime for these processes. FoundationDB uses standard C++ coroutines with Flow futures, streams, and cooperative scheduling. The C++ compiler preserves each coroutine’s execution state across suspension points, and Flow connects awaited operations to the event loop. The same runtime supports deterministic simulation of the system, including its physical interfaces and failure modes.</p>
+<p>Flow supports three major engineering goals:</p>
 <ul class="simple">
-<li><p>high performance (by compiling to native code),</p></li>
-<li><p>actor-based concurrency (for high productivity development),</p></li>
-<li><p>simulation support (for testing).</p></li>
+<li><p>high performance through native code,</p></li>
+<li><p>asynchronous concurrency through coroutines and message passing,</p></li>
+<li><p>simulation support for testing.</p></li>
 </ul>
 </section>
 <section id="a-first-look">
 <h2>A first look</h2>
-<p>Actors in Flow receive asynchronous messages from each other using a data type called a <em>future</em>. When an actor requires a data value to continue computation, it waits for it without blocking other actors. The following simple actor performs asynchronous addition. It takes a future integer and a normal integer as an offset, waits on the future integer, and returns the sum of the value and the offset:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">asyncAdd</span><span class="p">(</span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">offset</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">wait</span><span class="p">(</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="p">);</span>
-<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset</span><span class="p">;</span>
+<p>Coroutines receive asynchronous results through futures. When a coroutine needs a result, it can suspend without blocking other work on the event loop. This function waits for an integer, adds an offset, and returns the sum:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">"flow/flow.h"</span>
+
+<span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">asyncAdd</span><span class="p">(</span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">offset</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">    </span><span class="k">co_return</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>A coroutine returning <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> starts immediately when called and runs until it completes or awaits an operation that is not ready. Its returned future represents the eventual result. Coroutine code lives in ordinary <code class="docutils literal notranslate"><span class="pre">.cpp</span></code> and <code class="docutils literal notranslate"><span class="pre">.h</span></code> files.</p>
+</section>
+<section id="flow-features">
+<h2>Flow features</h2>
+<section id="promise-t-and-future-t">
+<h3>Promise&lt;T&gt; and Future&lt;T&gt;</h3>
+<p><code class="docutils literal notranslate"><span class="pre">Promise&lt;T&gt;</span></code> and <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> connect an asynchronous sender and receiver. A promise can deliver one value of type <code class="docutils literal notranslate"><span class="pre">T</span></code> or an error. The future lets its holder observe that result. A future may have multiple holders.</p>
+<p>These are local process handles. FoundationDB’s RPC layer uses <code class="docutils literal notranslate"><span class="pre">RequestStream&lt;T&gt;</span></code> and <code class="docutils literal notranslate"><span class="pre">ReplyPromise&lt;T&gt;</span></code> for network requests and replies. A request can carry a reply promise to another process; sending the reply there makes the caller’s future ready.</p>
+</section>
+<section id="co-await-and-co-return">
+<h3>co_await and co_return</h3>
+<p><code class="docutils literal notranslate"><span class="pre">co_await</span></code> waits for a future without blocking the event loop. Awaiting a ready future continues immediately; otherwise the coroutine suspends until it becomes ready. If the future contains an error, awaiting it throws that <code class="docutils literal notranslate"><span class="pre">Error</span></code>.</p>
+<p>A coroutine returning <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> completes with <code class="docutils literal notranslate"><span class="pre">co_return</span> <span class="pre">value;</span></code>. For <code class="docutils literal notranslate"><span class="pre">Future&lt;Void&gt;</span></code>, use <code class="docutils literal notranslate"><span class="pre">co_return;</span></code> to signal completion without a payload. Awaiting a <code class="docutils literal notranslate"><span class="pre">Future&lt;Void&gt;</span></code> does not produce a value to assign.</p>
+</section>
+<section id="local-variables-and-ownership">
+<h3>Local variables and ownership</h3>
+<p>Local variables obey normal C++ scope rules and remain alive across suspension while their scope is active. Value parameters are stored in the coroutine frame. References, pointers, and views such as <code class="docutils literal notranslate"><span class="pre">StringRef</span></code> do not extend the lifetime of their referents or backing storage. Use owning types such as <code class="docutils literal notranslate"><span class="pre">Reference&lt;T&gt;</span></code> and <code class="docutils literal notranslate"><span class="pre">Standalone&lt;T&gt;</span></code> when the coroutine needs to retain an object or its bytes.</p>
+</section>
+<section id="promisestream-t-and-futurestream-t">
+<h3>PromiseStream&lt;T&gt; and FutureStream&lt;T&gt;</h3>
+<p><code class="docutils literal notranslate"><span class="pre">PromiseStream&lt;T&gt;</span></code> and <code class="docutils literal notranslate"><span class="pre">FutureStream&lt;T&gt;</span></code> represent a series of asynchronous messages. Awaiting a <code class="docutils literal notranslate"><span class="pre">FutureStream&lt;T&gt;</span></code> consumes its next value. If an item is already queued, execution continues without suspension:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="n">Future</span><span class="o">&lt;</span><span class="n">Void</span><span class="o">&gt;</span><span class="w"> </span><span class="n">forwardWithOffset</span><span class="p">(</span><span class="n">FutureStream</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">input</span><span class="p">,</span>
+<span class="w">                               </span><span class="n">PromiseStream</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">output</span><span class="p">,</span>
+<span class="w">                               </span><span class="kt">int</span><span class="w"> </span><span class="n">offset</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="nb">true</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">input</span><span class="p">;</span>
+<span class="w">        </span><span class="n">output</span><span class="p">.</span><span class="n">send</span><span class="p">(</span><span class="n">value</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
 <span class="p">}</span>
 </pre></div>
 </div>
 </section>
-<section id="flow-features">
-<h2>Flow features</h2>
-<p>Flow’s new keywords and control-flow primitives support the capability to pass messages asynchronously between components. Here’s a brief overview.</p>
-<section id="promise-t-and-future-t">
-<h3>Promise&lt;T&gt; and Future&lt;T&gt;</h3>
-<p>The data types that connect asynchronous senders and receivers are <code class="docutils literal notranslate"><span class="pre">Promise&lt;T&gt;</span></code> and <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> for some C++ type <code class="docutils literal notranslate"><span class="pre">T</span></code>. When a sender holds a <code class="docutils literal notranslate"><span class="pre">Promise&lt;T&gt;</span></code>, it represents a promise to deliver a value of type <code class="docutils literal notranslate"><span class="pre">T</span></code> at some point in the future to the holder of the <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code>. Conversely, a receiver holding a <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> can asynchronously continue computation until the point at which it actually needs the <code class="docutils literal notranslate"><span class="pre">T.</span></code></p>
-<p>Promises and futures can be used within a single process, but their real strength in a distributed system is that they can traverse the network. For example, one computer could create a promise/future pair, then send the promise to another computer over the network. The promise and future will still be connected, and when the promise is fulfilled by the remote computer, the original holder of the future will see the value appear.</p>
-</section>
-<section id="wait">
-<h3>wait()</h3>
-<p>At the point when a receiver holding a <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> needs the <code class="docutils literal notranslate"><span class="pre">T</span></code> to continue computation, it invokes the <code class="docutils literal notranslate"><span class="pre">wait()</span></code> statement with the <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> as its parameter. The <code class="docutils literal notranslate"><span class="pre">wait()</span></code> statement allows the calling actor to pause execution until the value of the future is set, returning a value of type <code class="docutils literal notranslate"><span class="pre">T</span></code>. During the wait, other actors can continue execution, providing asynchronous concurrency within a single process.</p>
-</section>
-<section id="actor">
-<h3>ACTOR</h3>
-<p>Only functions labeled with the <code class="docutils literal notranslate"><span class="pre">ACTOR</span></code> tag can call <code class="docutils literal notranslate"><span class="pre">wait()</span></code>. Actors are the essential unit of asynchronous work and can be composed to create complex message-passing systems. By composing actors, futures can be chained together so that the result of one depends on the output of another.</p>
-<p>An actor is declared as returning a <code class="docutils literal notranslate"><span class="pre">Future&lt;T&gt;</span></code> where <code class="docutils literal notranslate"><span class="pre">T</span></code> may be <code class="docutils literal notranslate"><span class="pre">Void</span></code> if the actor’s return value is used only for signaling. Each actor is preprocessed into a C++11 class with internal callbacks and supporting functions.</p>
-</section>
-<section id="state">
-<h3>State</h3>
-<p>The <code class="docutils literal notranslate"><span class="pre">state</span></code> keyword is used to scope a variable so that it is visible across multiple <code class="docutils literal notranslate"><span class="pre">wait()</span></code> statements within an actor. The use of a <code class="docutils literal notranslate"><span class="pre">state</span></code> variable is illustrated in the example actor below.</p>
-</section>
-<section id="promisestream-t-futurestream-t">
-<h3>PromiseStream&lt;T&gt;, FutureStream&lt;T&gt;</h3>
-<p>When a component wants to work with a <em>stream</em> of asynchronous messages rather than a single message, it can use <code class="docutils literal notranslate"><span class="pre">PromiseStream&lt;T&gt;</span></code> and <code class="docutils literal notranslate"><span class="pre">FutureStream&lt;T&gt;</span></code>. These constructs allow for two important features: multiplexing and reliable delivery of messages. They also play an important role in Flow design patterns. For example, many of the servers in FoundationDB expose their interfaces as a <code class="docutils literal notranslate"><span class="pre">struct</span></code> of promise streams—one for each request type.</p>
-</section>
-<section id="waitnext">
-<h3>waitNext()</h3>
-<p><code class="docutils literal notranslate"><span class="pre">waitNext()</span></code> is the counterpart of <code class="docutils literal notranslate"><span class="pre">wait()</span></code> for streams. It pauses program execution and waits for the next value in a <code class="docutils literal notranslate"><span class="pre">FutureStream</span></code>. If there is a value ready in the stream, execution continues without delay.</p>
-</section>
-<section id="choose-when">
-<h3>choose … when</h3>
-<p>The <code class="docutils literal notranslate"><span class="pre">choose</span></code> and <code class="docutils literal notranslate"><span class="pre">when</span></code> constructs allow an actor to wait for multiple futures at once in a ordered and predictable way.</p>
+<section id="waiting-for-multiple-inputs">
+<h3>Waiting for multiple inputs</h3>
+<p><code class="docutils literal notranslate"><span class="pre">race()</span></code> from <code class="docutils literal notranslate"><span class="pre">flow/CoroUtils.h</span></code> waits for the first ready input. It returns a <code class="docutils literal notranslate"><span class="pre">std::variant</span></code> whose index matches the winning argument. Inputs can be futures or streams; a winning stream consumes one item. If several inputs are already ready, the lowest argument index wins. Errors propagate from the winning input.</p>
+<p>Losing inputs are detached from the race, not explicitly cancelled. They may still be cancelled if releasing the race drops their last future reference. Retain a future separately when its operation must continue after losing. A completed non-stream future stays ready, so replace it or remove it from a repeated race after handling it.</p>
 </section>
 <section id="example-a-server-interface">
-<h3>Example: A Server Interface</h3>
-<p>Below is a actor that runs on single server communicating over the network. Its functionality is to maintain a count in response to asynchronous messages from other actors. It supports an interface implemented with a loop containing a <code class="docutils literal notranslate"><span class="pre">choose</span></code> statement with a <code class="docutils literal notranslate"><span class="pre">when</span></code> for each request type. Each <code class="docutils literal notranslate"><span class="pre">when</span></code> uses <code class="docutils literal notranslate"><span class="pre">waitNext()</span></code> to asynchronously wait for the next request in the stream. The add and subtract interfaces modify the count itself, stored with a state variable. The get interface takes a <code class="docutils literal notranslate"><span class="pre">Promise&lt;int&gt;</span></code> instead of just an <code class="docutils literal notranslate"><span class="pre">int</span></code> to facilitate sending back the return message.</p>
-<p>To write the equivalent code directly in C++, a developer would have to implement a complex set of callbacks with exception-handling, requiring far more engineering effort. Flow makes it much easier to implement this sort of asynchronous coordination, with no loss of performance:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">serveCountingServerInterface</span><span class="p">(</span>
-<span class="w">           </span><span class="n">CountingServerInterface</span><span class="w"> </span><span class="n">csi</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
-<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">        </span><span class="n">choose</span><span class="w"> </span><span class="p">{</span>
-<span class="w">            </span><span class="n">when</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">addCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span>
-<span class="w">                </span><span class="n">count</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
-<span class="w">            </span><span class="p">}</span>
-<span class="w">            </span><span class="n">when</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">subtractCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span>
-<span class="w">                </span><span class="n">count</span><span class="w"> </span><span class="o">-=</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
-<span class="w">            </span><span class="p">}</span>
-<span class="w">            </span><span class="n">when</span><span class="w"> </span><span class="p">(</span><span class="n">Promise</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">getCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span>
-<span class="w">                </span><span class="n">r</span><span class="p">.</span><span class="n">send</span><span class="p">(</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="p">);</span><span class="w"> </span><span class="c1">// goes to client</span>
-<span class="w">            </span><span class="p">}</span>
+<h3>Example: A server interface</h3>
+<p>This local server maintains a count in response to asynchronous messages. It has one promise stream per request type and races those streams in a loop. A request for the current count carries a <code class="docutils literal notranslate"><span class="pre">Promise&lt;int&gt;</span></code> through which the server replies. A network interface uses the RPC types described above and also needs serialization.</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">"flow/CoroUtils.h"</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">CountingServerInterface</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">PromiseStream</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">addCount</span><span class="p">;</span>
+<span class="w">    </span><span class="n">PromiseStream</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">subtractCount</span><span class="p">;</span>
+<span class="w">    </span><span class="n">PromiseStream</span><span class="o">&lt;</span><span class="n">Promise</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">getCount</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="n">Future</span><span class="o">&lt;</span><span class="n">Void</span><span class="o">&gt;</span><span class="w"> </span><span class="n">serveCountingServerInterface</span><span class="p">(</span><span class="n">CountingServerInterface</span><span class="w"> </span><span class="n">csi</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="nb">true</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">request</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">race</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">addCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">(),</span>
+<span class="w">                                     </span><span class="n">csi</span><span class="p">.</span><span class="n">subtractCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">(),</span>
+<span class="w">                                     </span><span class="n">csi</span><span class="p">.</span><span class="n">getCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">());</span>
+<span class="w">        </span><span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">request</span><span class="p">.</span><span class="n">index</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="mi">0</span><span class="p">:</span>
+<span class="w">            </span><span class="n">count</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">get</span><span class="o">&lt;</span><span class="mi">0</span><span class="o">&gt;</span><span class="p">(</span><span class="n">request</span><span class="p">);</span>
+<span class="w">            </span><span class="k">break</span><span class="p">;</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="mi">1</span><span class="p">:</span>
+<span class="w">            </span><span class="n">count</span><span class="w"> </span><span class="o">-=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">get</span><span class="o">&lt;</span><span class="mi">1</span><span class="o">&gt;</span><span class="p">(</span><span class="n">request</span><span class="p">);</span>
+<span class="w">            </span><span class="k">break</span><span class="p">;</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="mi">2</span><span class="p">:</span>
+<span class="w">            </span><span class="n">std</span><span class="o">::</span><span class="n">get</span><span class="o">&lt;</span><span class="mi">2</span><span class="o">&gt;</span><span class="p">(</span><span class="n">request</span><span class="p">).</span><span class="n">send</span><span class="p">(</span><span class="n">count</span><span class="p">);</span>
+<span class="w">            </span><span class="k">break</span><span class="p">;</span>
 <span class="w">        </span><span class="p">}</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="p">}</span>
 </pre></div>
 </div>
+<p>The caller must keep the returned <code class="docutils literal notranslate"><span class="pre">Future&lt;Void&gt;</span></code> alive while the server is needed. The local <code class="docutils literal notranslate"><span class="pre">count</span></code> remains alive across each suspension.</p>
 </section>
 </section>
-<section id="caveats">
-<h2>Caveats</h2>
-<p>Even though Flow code looks a lot like C++, it is not. It has different rules and the files are preprocessed. It is always important to keep this in mind when programming flow.</p>
-<p>We still want to be able to use IDEs and modern editors (with language servers like cquery or clang-based completion engines like ycm). Because of this there is a header-file <code class="docutils literal notranslate"><span class="pre">actorcompiler.h</span></code> in flow which defines preprocessor definitions to make flow compile as normal C++ code. CMake even supports a special mode so that it doesn’t preprocess flow files. This mode can be used by passing <code class="docutils literal notranslate"><span class="pre">-DOPEN_FOR_IDE=ON</span></code> to cmake. Additionally we generate a special <code class="docutils literal notranslate"><span class="pre">compile_commands.json</span></code> into the source-directory which will support opening the project in IDEs and editors that look for a compilation database.</p>
-<p>Some preprocessor definitions will not fix all issues though. When programming Flow the following things have to be taken care of by the programmer:</p>
-<ul>
-<li><p>Local variables don’t survive a call to <code class="docutils literal notranslate"><span class="pre">wait</span></code>. So this would be legal Flow code, but NOT legal C++ code:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">foo</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
-<span class="w">    </span><span class="n">wait</span><span class="p">(</span><span class="n">someFuture</span><span class="p">);</span>
-<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
-<span class="w">    </span><span class="n">wait</span><span class="p">(</span><span class="n">someOtherFuture</span><span class="p">)</span>
-<span class="p">}</span>
-</pre></div>
-</div>
-<p>In order to make this not break IDE-support one can either rename the second occurrence of this variable or, if this is not desired as it might make the code unreadable, one can use scoping:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">foo</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="p">{</span>
-<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
-<span class="w">        </span><span class="n">wait</span><span class="p">(</span><span class="n">someFuture</span><span class="p">);</span>
-<span class="w">    </span><span class="p">}</span>
-<span class="w">    </span><span class="p">{</span>
-<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
-<span class="w">        </span><span class="n">wait</span><span class="p">(</span><span class="n">someOtherFuture</span><span class="p">)</span>
-<span class="w">    </span><span class="p">}</span>
-<span class="p">}</span>
-</pre></div>
-</div>
-</li>
-<li><p>An <code class="docutils literal notranslate"><span class="pre">ACTOR</span></code> is compiled into a class internally. Which means that within an actor-function, <code class="docutils literal notranslate"><span class="pre">this</span></code> is a valid pointer to this class. But using them explicitly (or as described later implicitly) will break IDE support. One can use <code class="docutils literal notranslate"><span class="pre">THIS</span></code> and <code class="docutils literal notranslate"><span class="pre">THIS_ADDR</span></code> instead. But be careful as <code class="docutils literal notranslate"><span class="pre">THIS</span></code> will be of type <code class="docutils literal notranslate"><span class="pre">nullptr_t</span></code> in IDE-mode and of the actor-type in normal compilation mode.</p></li>
-<li><p>Lambdas and state variables are weird in a sense. After actor compilation, a state variable is a member of the compiled actor class. In IDE mode it is considered a normal local variable. This can result in some surprising side-effects. So the following code will only compile if the method <code class="docutils literal notranslate"><span class="pre">Foo::bar</span></code> is defined as <code class="docutils literal notranslate"><span class="pre">const</span></code>:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="nf">foo</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="n">Foo</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
-<span class="w">    </span><span class="n">foo</span><span class="p">([</span><span class="o">=</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">f</span><span class="p">.</span><span class="n">bar</span><span class="p">();</span><span class="w"> </span><span class="p">})</span>
-<span class="p">}</span>
-</pre></div>
-</div>
-<p>If it is not, one has to pass the member explicitly as a reference:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="nf">foo</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="n">Foo</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
-<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">f</span><span class="p">;</span>
-<span class="w">    </span><span class="n">foo</span><span class="p">([</span><span class="n">x</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">x</span><span class="o">-&gt;</span><span class="n">bar</span><span class="p">();</span><span class="w"> </span><span class="p">})</span>
-<span class="p">}</span>
-</pre></div>
-</div>
-</li>
-<li><p>state variables in Flow don’t follow the normal scoping rules. So in Flow a state variable can be defined in an inner scope and later it can be used in the outer scope. In order to not break compilation in IDE-mode, always define state variables in the outermost scope they will be used.</p></li>
-</ul>
+<section id="cancellation-and-lifetime-pitfalls">
+<h2>Cancellation and lifetime pitfalls</h2>
+<p>By default, dropping the last reference to a pending coroutine’s returned future cancels it. An explicit <code class="docutils literal notranslate"><span class="pre">Future::cancel()</span></code> also requests cancellation. A suspended coroutine resumes by throwing <code class="docutils literal notranslate"><span class="pre">actor_cancelled</span></code> from its await. Local objects are destroyed as their scopes unwind. Keep the future alive, or await it directly, when the work must continue.</p>
+<p>Error and retry handlers must propagate <code class="docutils literal notranslate"><span class="pre">actor_cancelled</span></code> after any required synchronous cleanup. Do not silently swallow <code class="docutils literal notranslate"><span class="pre">broken_promise</span></code> or other errors unless the caller’s contract explicitly handles them. C++ does not allow <code class="docutils literal notranslate"><span class="pre">co_await</span></code> inside a <code class="docutils literal notranslate"><span class="pre">catch</span></code> handler; save the error and await asynchronous recovery after leaving the handler.</p>
+<p>Captures in a coroutine lambda belong to the lambda’s closure, which may be destroyed while the coroutine is suspended. Prefer a named coroutine with explicit value parameters when the work can outlive the call that starts it.</p>
+<p>See the <a class="reference external" href="https://github.com/apple/foundationdb/blob/main/flow/README.md">Flow tutorial</a>, the <a class="reference external" href="https://github.com/apple/foundationdb/blob/main/design/coroutines.md">coroutine design guide</a>, and the <a class="reference external" href="https://github.com/apple/foundationdb/blob/main/documentation/coro_tutorial/tutorial.cpp">runnable coroutine tutorial</a> for further examples.</p>
 </section>
 </section>
 
@@ -299,7 +269,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>

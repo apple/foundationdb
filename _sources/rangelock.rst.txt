@@ -48,47 +48,66 @@ Put an exclusive read lock on a range. The range must be within the user key spa
 The locking request is rejected with a range_lock_reject error if the range contains any existing lock with a different range, user, or lock type.
 Currently, only the ExclusiveReadLock type is supported, but the design allows for future extension.
 
-``ACTOR Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
+``Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
 
 Release an exclusive read lock on a range. The range must be within the user key space, aka ``"" ~ \xff``.
 The release request is rejected with a range_lock_reject error if the range contains any existing lock with a different range, user, or lock type.
 
-``ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
+``Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
 
 Note that takeExclusiveReadLockOnRange and releaseExclusiveReadLockOnRange are transactional. 
 If the execution of the API is successful, all ranges are guaranteed to be locked/unlocked at a single version.
 If the execution is failed, no range is locked/unlocked.
 
-Get exclusive read locks on the input range
+Get exclusive read locks on the input range, optionally filtering by owner.
 
-``ACTOR Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(Database cx, KeyRange range);``
+``Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwnerName> ownerName = Optional<RangeLockOwnerName>());``
 
 Register a range lock owner to database metadata.
 
-``ACTOR Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);``
+``Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);``
 
 Remove an owner from the database metadata
 
-``ACTOR Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
+``Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
 
 Get all registered range lock owners
 
-``ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);``
+``AsyncResult<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);``
 
 Get a range lock owner by uniqueId
 
-``ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
+``Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
+
+
+Using ``fdbcli``
+----------------
+For ad-hoc operational use — inspecting active locks, releasing a lock left behind by a failed bulkload job, taking a lock for a maintenance window, or driving a perf test — ``fdbcli`` exposes a thin wrapper around the management API:
+
+::
+
+    rangelock register <OWNER_ID> <DESCRIPTION>
+    rangelock unregister <OWNER_ID>
+    rangelock owners
+    rangelock take <BEGIN_KEY> <END_KEY> <OWNER_ID>
+    rangelock release <BEGIN_KEY> <END_KEY> <OWNER_ID>
+    rangelock release-all <OWNER_ID>
+    rangelock list [<BEGIN_KEY> <END_KEY>]
+
+Range locks only take effect when commit proxies are started with ``knob_enable_read_lock_on_range=true``. ``rangelock take`` prints an advisory notice as a reminder, but cannot probe the server-side knob — the take itself succeeds either way; the lock simply has no effect when the knob is off.
+
+The bulkload-specific commands (``bulkload addlockowner`` / ``bulkload clearlock`` / ``bulkload printlockowner``) remain available; they are a constrained subset of the above scoped to the bulkload workflow.
 
 
 Example usage
 -------------
 When submitting a bulk load task on a range, we block user write traffic to the range.
 
-``ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);``
+``Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);``
 
 Upon a bulk load task completes on a range, we unblock user write traffic on the range.
 
-``ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);``
+``Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);``
 
 Range Lock Design (Exclusive Read Lock)
 =======================================
@@ -116,6 +135,29 @@ The locking mutation takes effect on all mutations after the locking mutation in
 To achieve this, the locking transaction adds a write_conflict_range on the lock range.
 As a result, any following transactions in the batch that writes to the locked range will be marked as ``Conflict``.
 
+Steady-state cost when no locks are held
+----------------------------------------
+The per-mutation lookup described above runs only when at least one exclusive read lock is held cluster-wide. Each commit proxy tracks an ``anyExclusiveLockHeld_`` flag on its ``RangeLock`` struct, refreshed when the lock set changes (during ``consumePendingRequest`` and recovery's ``initKeyPoint``). When the flag is false — the steady state for any cluster running with ``--knob_enable_read_lock_on_range=1`` but no active bulkload — ``rejectMutationsForReadLockOnRange`` short-circuits at the top of the function and the per-mutation work is skipped entirely.
+
+Two ``ProxyMetrics`` counters expose which path the proxy took:
+
+* ``RangeLockFastPath`` increments once per commit batch when the early return fired (no locks held).
+* ``RangeLockSlowPath`` increments once per commit batch when the per-mutation check loop ran (at least one lock held).
+
+Operators can use these counters to confirm in production that the optimization is firing, and to detect the silent-degradation case where the flag fails to clear after a release. In normal operation only one counter advances at a time per proxy.
+
+Correctness across proxies
+--------------------------
+The ``anyExclusiveLockHeld_`` flag is per-proxy and never directly synchronized between proxies. Convergence comes from the ``txnStateStore`` mutation broadcast already used by the in-memory ``coreMap``: every proxy applies the same ``\xff/rangeLock/`` mutation stream in commit-version order, so each proxy's flag value at version V is a deterministic function of the same prefix of the log.
+
+* **Within a single batch.** ``applyMetadataMutations`` (Phase 3a) runs before ``rejectMutationsForReadLockOnRange`` (Phase 3b). If the batch took a lock, ``consumePendingRequest`` has already set the flag by the time the reject loop reads it. Mutations ordered after the lock in the same batch are caught by the existing ``write_conflict_range`` mechanism, not by the flag.
+
+* **Across batches.** A proxy never starts processing batch ``V+1`` until version ``V``\ 's metadata mutations are applied locally. So when batch ``V+1`` reaches Phase 3b, every lock taken at version ``<= V`` is reflected in the flag.
+
+* **During recovery.** ``initKeyPoint`` is monotonic-up — it only sets the flag to true. Combined with ``consumePendingRequest``\ 's post-coalesce full recompute at runtime, the flag can be temporarily stuck at true (harmless: the slow path runs, finds no locks, rejects nothing — extra CPU, no behavior change) but cannot be stuck at false while locks are actually held. Stuck-true is observable through the ``RangeLockFastPath`` counter; stuck-false would manifest as missing ``transaction_rejected_range_locked`` rejections, which existing simulation workloads (``tests/fast/RangeLocking.toml``, ``tests/fast/RangeLockCycle.toml``) already assert against.
+
+The flag is therefore a layer on top of an already-coordinated invariant — the consistency of ``coreMap`` itself across proxies — rather than introducing a new coordination requirement of its own.
+
 Support multiple range lock users
 ---------------------------------
 To support rangeLock for multiple applications, we add ownership concept to rangeLock. 
@@ -136,9 +178,6 @@ Compatibility
 
 * Backup and restore: RangeLock can cause losing mutations when restoring. Restoring should automatically detect the failure due to rangeLock and self-retry from a clean state.
 
-* ChangeFeed: RangeLock can trigger assertion failure. The reason is unclear yet.
-
 * Version vector: Version vector has a different path of updating metadata at proxies than the default one. Therefore, rangeLock temporarily is not available when the version vector is on.
 
-* Encryption and tenant: Currently, RangeLock does not have a clear functionality in the context of encryption and tenant, so when the encryption and tenant are on, we disable rangeLock for the clarity.
-
+* Encryption: Currently, RangeLock does not have a clear functionality in the context of encryption, so when encryption is enabled, we disable rangeLock for clarity.

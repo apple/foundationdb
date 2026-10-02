@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB 7.4.8 documentation</title>
+    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB 8.0.0 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script src="_static/jquery.js"></script>
@@ -36,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.8</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>8.0.0</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -105,6 +105,22 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#dr-agent-command-line-tool"><code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> command line tool</a></li>
+<li><a class="reference internal" href="#fdbdecode-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbdecode</span></code> command line tool</a><ul>
+<li><a class="reference internal" href="#output-format">Output format</a></li>
+<li><a class="reference internal" href="#basic-usage">Basic usage</a><ul>
+<li><a class="reference internal" href="#required-options">Required options</a></li>
+<li><a class="reference internal" href="#file-selection-options">File selection options</a></li>
+<li><a class="reference internal" href="#filtering-options">Filtering options</a></li>
+<li><a class="reference internal" href="#encryption-and-credentials">Encryption and credentials</a></li>
+<li><a class="reference internal" href="#local-file-caching">Local file caching</a></li>
+<li><a class="reference internal" href="#trace-logging-options">Trace logging options</a></li>
+<li><a class="reference internal" href="#miscellaneous-options">Miscellaneous options</a></li>
+<li><a class="reference internal" href="#tls-options">TLS options</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#examples">Examples</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -180,6 +196,22 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#dr-agent-command-line-tool"><code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> command line tool</a></li>
+<li><a class="reference internal" href="#fdbdecode-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbdecode</span></code> command line tool</a><ul>
+<li><a class="reference internal" href="#output-format">Output format</a></li>
+<li><a class="reference internal" href="#basic-usage">Basic usage</a><ul>
+<li><a class="reference internal" href="#required-options">Required options</a></li>
+<li><a class="reference internal" href="#file-selection-options">File selection options</a></li>
+<li><a class="reference internal" href="#filtering-options">Filtering options</a></li>
+<li><a class="reference internal" href="#encryption-and-credentials">Encryption and credentials</a></li>
+<li><a class="reference internal" href="#local-file-caching">Local file caching</a></li>
+<li><a class="reference internal" href="#trace-logging-options">Trace logging options</a></li>
+<li><a class="reference internal" href="#miscellaneous-options">Miscellaneous options</a></li>
+<li><a class="reference internal" href="#tls-options">TLS options</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#examples">Examples</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -209,7 +241,7 @@
 </section>
 <section id="tools">
 <h2>Tools</h2>
-<p>There are 5 command line tools for working with Backup and DR operations:</p>
+<p>There are 6 command line tools for working with Backup and DR operations:</p>
 <dl class="simple">
 <dt><code class="docutils literal notranslate"><span class="pre">fdbbackup</span></code></dt><dd><p>This command line tool is used to control (but not execute) backup jobs and manage backup data.  It can <code class="docutils literal notranslate"><span class="pre">start</span></code>, <code class="docutils literal notranslate"><span class="pre">modify</span></code> or <code class="docutils literal notranslate"><span class="pre">abort</span></code> a backup, <code class="docutils literal notranslate"><span class="pre">discontinue</span></code> a continuous backup, get the <code class="docutils literal notranslate"><span class="pre">status</span></code> of an ongoing backup, or <code class="docutils literal notranslate"><span class="pre">wait</span></code> for a backup to complete.  It can also <code class="docutils literal notranslate"><span class="pre">describe</span></code>, <code class="docutils literal notranslate"><span class="pre">delete</span></code>, <code class="docutils literal notranslate"><span class="pre">expire</span></code> data in a backup, or <code class="docutils literal notranslate"><span class="pre">list</span></code> the backups at a destination folder URL.</p>
 </dd>
@@ -220,6 +252,8 @@
 <dt><code class="docutils literal notranslate"><span class="pre">fdbdr</span></code></dt><dd><p>This command line tool is used to control (but not execute) DR jobs - backups from one database to another.  It can <code class="docutils literal notranslate"><span class="pre">start</span></code>, <code class="docutils literal notranslate"><span class="pre">abort</span></code> a DR job, or <code class="docutils literal notranslate"><span class="pre">switch</span></code> the DR direction.  It can also get the <code class="docutils literal notranslate"><span class="pre">status</span></code> of a running DR job.</p>
 </dd>
 <dt><code class="docutils literal notranslate"><span class="pre">dr_agent</span></code></dt><dd><p>The database backup agent is a daemon that actually executes the work of the DR jobs, writing snapshot and log data to the destination database.  Any number of agents pointed at the same databases will cooperate to perform the backup.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">fdbdecode</span></code></dt><dd><p>This command line tool decodes and inspects the raw contents of a backup container.  It reads mutation log files and range snapshot files directly from a backup URL and prints their contents to stdout in hexadecimal format.  It is primarily useful for debugging backups and auditing the mutations recorded during a backup window.</p>
 </dd>
 </dl>
 <p>By default, the FoundationDB packages are configured to start a single <code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> process on each FoundationDB server. If you want to perform a backup to a network drive or blob store instance that is accessible to every server, you can immediately use the <code class="docutils literal notranslate"><span class="pre">fdbbackup</span> <span class="pre">start</span></code> command from any machine with access to your cluster to start the backup</p>
@@ -240,7 +274,7 @@
 Note that since paths must be absolute this will result in three slashes (/) in a row in the URL.</p>
 <p>For local directory URLs the actual backup files will not be written to &lt;base_dir&gt; directly but rather to a uniquely timestamped subdirectory.  When starting a restore the path to the timestamped subdirectory must be specified.</p>
 <p>For blob store backup locations, the Backup URL format is</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>blobstore://[&lt;api_key&gt;][:&lt;secret&gt;[:&lt;security_token&gt;]]@&lt;hostname&gt;[:&lt;port&gt;]/&lt;name&gt;?bucket=&lt;bucket_name&gt;[&amp;region=&lt;region_name&gt;][&amp;&lt;param&gt;=&lt;value&gt;]...]
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>blobstore://[&lt;api_key&gt;][:&lt;secret&gt;[:&lt;security_token&gt;]]@&lt;hostname&gt;[:&lt;port&gt;]/&lt;name&gt;?bucket=&lt;bucket_name&gt;[&amp;prefix=&lt;key_prefix&gt;][&amp;region=&lt;region_name&gt;][&amp;&lt;param&gt;=&lt;value&gt;]...]
 
   &lt;api_key&gt;         API key to use for authentication. If S3, it is AWS_ACCESS_KEY_ID. Optional.
   &lt;secret&gt;          API key's secret.  If S3, it is AWS_SECRET_ACCESS_KEY. Optional.
@@ -249,11 +283,14 @@ Note that since paths must be absolute this will result in three slashes (/) in 
   &lt;port&gt;            Remote port to connect to.  Optional.  Default is 80.
   &lt;name&gt;            Name of the backup within the backup bucket.  It can contain '/' characters in order to organize backups into a folder-like structure.
   &lt;bucket_name&gt;     Name of the bucket to use for backup data.
+  &lt;key_prefix&gt;      Optional object key prefix.  When present, the backup's object key trees ('data/' and 'backups/') are placed under this prefix in the bucket instead of the bucket root.  Each path segment may contain only ASCII alphanumerics, '_', '-' and '.'; '/' separates segments.  Leading and trailing '/' are ignored, while empty, '.' and '..' path segments and the reserved first segments 'data' and 'backups' are rejected.  A value containing only '/' characters is normalized to an empty prefix and uses the existing bucket-root layout.
   &lt;region_name&gt;     If &lt;hostname&gt; is not in s3 compatible form (s3.region-name.example.com) and aws v4 signature is enabled, region name is required.
   &lt;param&gt;=&lt;value&gt;   Optional URL parameters.  See below for details.
 </pre></div>
 </div>
 <p>A single bucket (specified by &lt;bucket_name&gt;) can hold any number of backups, each with a different &lt;name&gt;.</p>
+<p>By default backup objects are written under two top-level folders in the bucket: backup data under <code class="docutils literal notranslate"><span class="pre">data/&lt;name&gt;/...</span></code> and an index entry under <code class="docutils literal notranslate"><span class="pre">backups/&lt;name&gt;</span></code>.  When the bucket is shared with other applications or tenants this can be undesirable, for example when IAM policies, replication rules or lifecycle rules are scoped to a key prefix.  Specifying <code class="docutils literal notranslate"><span class="pre">prefix=&lt;key_prefix&gt;</span></code> places both trees under the given prefix instead (<code class="docutils literal notranslate"><span class="pre">&lt;key_prefix&gt;/data/&lt;name&gt;/...</span></code> and <code class="docutils literal notranslate"><span class="pre">&lt;key_prefix&gt;/backups/&lt;name&gt;</span></code>), so all objects of the backup live under a single configurable prefix.  Backups whose resulting object key trees do not overlap are independent namespaces: <code class="docutils literal notranslate"><span class="pre">fdbbackup</span> <span class="pre">list</span></code> with a <code class="docutils literal notranslate"><span class="pre">prefix</span></code> parameter in the base URL enumerates only the backups under that prefix.  All tools must use the same <code class="docutils literal notranslate"><span class="pre">prefix</span></code> parameter to operate on a backup that was created with one.  Note that versions of the client tools and backup agents that predate this parameter reject URLs containing it, so upgrade all agents before using it.</p>
+<p>The backup URL is not a security boundary.  The <code class="docutils literal notranslate"><span class="pre">prefix</span></code> value is used byte-for-byte after stripping leading and trailing slashes; percent-encoding is not decoded, and characters within each segment are limited to <code class="docutils literal notranslate"><span class="pre">[A-Za-z0-9._-]</span></code>.  The normalized first segment cannot be <code class="docutils literal notranslate"><span class="pre">data</span></code> or <code class="docutils literal notranslate"><span class="pre">backups</span></code>.  Within one bucket, other combinations of <code class="docutils literal notranslate"><span class="pre">&lt;key_prefix&gt;</span></code> and <code class="docutils literal notranslate"><span class="pre">&lt;name&gt;</span></code> whose resulting object key trees overlap (for example <code class="docutils literal notranslate"><span class="pre">prefix=tenant</span></code> with <code class="docutils literal notranslate"><span class="pre">name=data/foo</span></code> and <code class="docutils literal notranslate"><span class="pre">prefix=tenant/data</span></code> with <code class="docutils literal notranslate"><span class="pre">name=foo</span></code>) must be avoided, or the result is undefined.</p>
 <p>If &lt;secret&gt; is not specified on the URL, it will be looked up in <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">blob credential sources</span></a>.</p>
 <p>An example blob store Backup URL would be <code class="docutils literal notranslate"><span class="pre">blobstore://myKey:mySecret&#64;something.domain.com:80/dec_1_2017_0400?bucket=backups</span></code>.
 If S3 is the target blobstore, the URL would look like: <code class="docutils literal notranslate"><span class="pre">blobstore://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}:${AWS_SESSION_TOKEN}&#64;backup-12345-us-west-2.s3.amazonaws.com/dailies?bucket=backup-12345-us-west-2&amp;region=us-west-2</span></code>
@@ -704,6 +741,151 @@ user@host$ fdbbackup start -k '@pp1e b*n*nn*' -k '#an&amp;0 p^n3app!e' -d &lt;BA
 </dd>
 </dl>
 </section>
+<section id="fdbdecode-command-line-tool">
+<span id="fdbdecode-intro"></span><h2><code class="docutils literal notranslate"><span class="pre">fdbdecode</span></code> command line tool</h2>
+<p><code class="docutils literal notranslate"><span class="pre">fdbdecode</span></code> reads backup files directly from a backup container and prints their decoded contents to stdout.  It is a diagnostic and inspection tool — it does not modify any data.  Its output is useful for auditing which mutations were captured in a backup, verifying backup contents after an incident, or troubleshooting backup and restore issues.</p>
+<p>There are two kinds of files in a FoundationDB backup:</p>
+<ul class="simple">
+<li><p><strong>Mutation log files</strong> record every individual mutation (set, clear, atomic operation) that occurred in the database during the backup window, grouped by version.</p></li>
+<li><p><strong>Range snapshot files</strong> record a point-in-time snapshot of the full key-value state for a key range at a specific version.</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">fdbdecode</span></code> can decode either or both file types from the same container in a single invocation.</p>
+<section id="output-format">
+<h3>Output format</h3>
+<p>For each mutation in a log file, one line is printed per mutation:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&lt;</span><span class="n">version</span><span class="o">&gt;.&lt;</span><span class="n">subsequence</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">mutation_type</span><span class="o">&gt;</span> <span class="n">param1</span><span class="p">:</span> <span class="o">&lt;</span><span class="n">hex_key</span><span class="o">&gt;</span> <span class="n">param2</span><span class="p">:</span> <span class="o">&lt;</span><span class="n">hex_value</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p>For each key-value pair in a range snapshot file, one line is printed:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&lt;</span><span class="n">version</span><span class="o">&gt;</span> <span class="n">key</span><span class="p">:</span> <span class="o">&lt;</span><span class="n">hex_key</span><span class="o">&gt;</span>  <span class="n">value</span><span class="p">:</span> <span class="o">&lt;</span><span class="n">hex_value</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p>All keys and values are printed as hexadecimal strings.  The backup description (version range, restorable versions, etc.) is also printed before the file contents.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><strong>Range snapshot files do not all share the same version.</strong></p>
+<p>A FoundationDB backup snapshot is <em>inconsistent</em>: different key ranges (shards) are read at different FDB versions spread across the snapshot window (<code class="docutils literal notranslate"><span class="pre">snapshotBeginVersion</span></code> to <code class="docutils literal notranslate"><span class="pre">snapshotTargetEndVersion</span></code>).  Each range file covers exactly one shard and all key-value pairs within it are read in a single transaction at one specific version, but that version differs between files covering different shards.</p>
+<p>As a result:</p>
+<ul class="simple">
+<li><p>The <code class="docutils literal notranslate"><span class="pre">&lt;version&gt;</span></code> prefix in range file output is the <strong>shard read version</strong> — the version at which that entire shard was fetched — not the version at which each individual key was last written.</p></li>
+<li><p>Two keys that appear in different range files may carry different version numbers even though they were both captured in the same logical snapshot.</p></li>
+<li><p>Range file output alone does <strong>not</strong> represent a consistent point-in-time view of the database.  To reconstruct the database state at any specific version you must combine the range files with the mutation log files: the log files record every mutation between <code class="docutils literal notranslate"><span class="pre">snapshotBeginVersion</span></code> and the restore target, allowing each shard to be “rolled forward” to a common consistent version.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">--begin-version-filter</span></code> and <code class="docutils literal notranslate"><span class="pre">--end-version-filter</span></code> options filter range files by their shard read version (one version per file), <strong>not</strong> by the write version of individual keys.  A key whose shard was read at version 1,500,000 will be excluded if you filter <code class="docutils literal notranslate"><span class="pre">--end-version-filter</span> <span class="pre">1,000,000</span></code>, even if the key itself was written long before that.</p></li>
+</ul>
+<p>Mutation log files do not have this ambiguity: every mutation is stamped with the exact FDB commit version at which it was written.</p>
+</div>
+</section>
+<section id="basic-usage">
+<h3>Basic usage</h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbdecode -r &lt;BACKUP_URL&gt; [OPTIONS]
+</pre></div>
+</div>
+<section id="required-options">
+<h4>Required options</h4>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-r</span> <span class="pre">&lt;BACKUP_URL&gt;</span></code> or <code class="docutils literal notranslate"><span class="pre">--container</span> <span class="pre">&lt;BACKUP_URL&gt;</span></code></dt><dd><p>The <a class="reference internal" href="#backup-urls"><span class="std std-ref">Backup URL</span></a> of the backup container to decode.  Supports the same URL formats as <code class="docutils literal notranslate"><span class="pre">fdbbackup</span></code> (<code class="docutils literal notranslate"><span class="pre">file://</span></code>, <code class="docutils literal notranslate"><span class="pre">blobstore://</span></code>, etc.).</p>
+</dd>
+</dl>
+</section>
+<section id="file-selection-options">
+<h4>File selection options</h4>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-t</span> <span class="pre">[log|range|both]</span></code> or <code class="docutils literal notranslate"><span class="pre">--file-type</span> <span class="pre">[log|range|both]</span></code></dt><dd><p>Selects which type of backup file to decode.  <code class="docutils literal notranslate"><span class="pre">log</span></code> decodes only mutation log files, <code class="docutils literal notranslate"><span class="pre">range</span></code> decodes only range snapshot files, and <code class="docutils literal notranslate"><span class="pre">both</span></code> (the default) decodes both.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">-i</span> <span class="pre">&lt;PATTERN&gt;</span></code> or <code class="docutils literal notranslate"><span class="pre">--input</span> <span class="pre">&lt;PATTERN&gt;</span></code></dt><dd><p>Restricts decoding to files whose names contain <code class="docutils literal notranslate"><span class="pre">&lt;PATTERN&gt;</span></code>.  Useful for narrowing to a specific file or subset of files within a large backup.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--list-only</span></code></dt><dd><p>Prints the list of matching files and then exits without decoding any file contents.</p>
+</dd>
+</dl>
+</section>
+<section id="filtering-options">
+<h4>Filtering options</h4>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-k</span> <span class="pre">&lt;KEY_PREFIX&gt;</span></code></dt><dd><p>Only output mutations and key-value pairs whose key starts with <code class="docutils literal notranslate"><span class="pre">&lt;KEY_PREFIX&gt;</span></code>.  The prefix is interpreted as a raw byte string.  Can be specified multiple times to filter on multiple prefixes.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--hex-prefix</span> <span class="pre">&lt;HEX_PREFIX&gt;</span></code></dt><dd><p>Same as <code class="docutils literal notranslate"><span class="pre">-k</span></code> but the prefix is given in hexadecimal escape notation, for example <code class="docutils literal notranslate"><span class="pre">--hex-prefix</span> <span class="pre">&quot;\\x05\\x01&quot;</span></code>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--filters</span> <span class="pre">&lt;PREFIX_FILTER_FILE&gt;</span></code></dt><dd><p>Path to a file containing one or more key prefixes in hexadecimal format, separated by <code class="docutils literal notranslate"><span class="pre">;</span></code> (semicolons can be escaped as <code class="docutils literal notranslate"><span class="pre">\;</span></code>).  For example, the file might contain <code class="docutils literal notranslate"><span class="pre">\\x05\\x01;\\x15\\x2b</span></code>.  All prefixes in the file are applied as an OR filter — a mutation is printed if its key matches any of them.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--begin-version-filter</span> <span class="pre">&lt;VERSION&gt;</span></code></dt><dd><p>Only output mutations at or after <code class="docutils literal notranslate"><span class="pre">&lt;VERSION&gt;</span></code> (inclusive).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--end-version-filter</span> <span class="pre">&lt;VERSION&gt;</span></code></dt><dd><p>Only output mutations before <code class="docutils literal notranslate"><span class="pre">&lt;VERSION&gt;</span></code> (exclusive).</p>
+</dd>
+</dl>
+</section>
+<section id="encryption-and-credentials">
+<h4>Encryption and credentials</h4>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">--encryption-key-file</span> <span class="pre">&lt;FILE&gt;</span></code></dt><dd><p>Path to an AES-128-GCM encryption key file.  Required when decoding an encrypted backup.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--blob-credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt><dd><p>Path to a <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">Blob Credential File</span></a> for accessing a blobstore backup container.</p>
+</dd>
+</dl>
+</section>
+<section id="local-file-caching">
+<h4>Local file caching</h4>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">-s</span></code> or <code class="docutils literal notranslate"><span class="pre">--save</span></code></dt><dd><p>Save a local copy of each downloaded backup file into the current directory (mirroring the container’s directory structure).  By default downloaded files are not saved.</p>
+</dd>
+</dl>
+</section>
+<section id="trace-logging-options">
+<h4>Trace logging options</h4>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">--log</span></code></dt><dd><p>Enable trace file logging for the session.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--logdir</span> <span class="pre">&lt;PATH&gt;</span></code></dt><dd><p>Directory for trace files.  Defaults to the current directory.  Has no effect unless <code class="docutils literal notranslate"><span class="pre">--log</span></code> is specified.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--loggroup</span> <span class="pre">&lt;LOG_GROUP&gt;</span></code></dt><dd><p>Sets the <code class="docutils literal notranslate"><span class="pre">LogGroup</span></code> field for all trace events.  Defaults to <code class="docutils literal notranslate"><span class="pre">default</span></code>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--trace-format</span> <span class="pre">[xml|json]</span></code></dt><dd><p>Format for trace files.  Defaults to <code class="docutils literal notranslate"><span class="pre">json</span></code>.  Has no effect unless <code class="docutils literal notranslate"><span class="pre">--log</span></code> is specified.</p>
+</dd>
+</dl>
+</section>
+<section id="miscellaneous-options">
+<h4>Miscellaneous options</h4>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">--crash</span></code></dt><dd><p>Crash the process on a serious error instead of returning an error code.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--build-flags</span></code></dt><dd><p>Print build information (version, compile-time flags) and exit.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--validate-filters</span></code></dt><dd><p>Cross-check the fast <code class="docutils literal notranslate"><span class="pre">RangeMap</span></code>-based prefix filter against a slower linear scan and assert that both produce identical results.  Intended for development and testing.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">--knob-&lt;KNOBNAME&gt;</span> <span class="pre">&lt;VALUE&gt;</span></code></dt><dd><p>Override an internal knob at runtime.  <code class="docutils literal notranslate"><span class="pre">&lt;KNOBNAME&gt;</span></code> must be lowercase.</p>
+</dd>
+</dl>
+</section>
+<section id="tls-options">
+<h4>TLS options</h4>
+<p>In-flight traffic to a blobstore or DR backup can be encrypted.  See <a class="reference internal" href="tls.html#enable-tls"><span class="std std-ref">TLS Support</span></a> for details.  The relevant flags are <code class="docutils literal notranslate"><span class="pre">--tls-certificate-file</span></code>, <code class="docutils literal notranslate"><span class="pre">--tls-key-file</span></code>, <code class="docutils literal notranslate"><span class="pre">--tls-password</span></code>, <code class="docutils literal notranslate"><span class="pre">--tls-ca-file</span></code>, and <code class="docutils literal notranslate"><span class="pre">--tls-verify-peers</span></code>.</p>
+</section>
+</section>
+<section id="examples">
+<h3>Examples</h3>
+<p>List all files in a local backup without decoding:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbdecode -r file:///path/to/backup --list-only
+</pre></div>
+</div>
+<p>Decode all mutation log files from a local backup:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbdecode -r file:///path/to/backup -t log
+</pre></div>
+</div>
+<p>Decode all log and range files, filtering to a specific key prefix:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbdecode -r file:///path/to/backup --hex-prefix "\\x05\\x01"
+</pre></div>
+</div>
+<p>Decode mutations in a specific version window:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbdecode -r file:///path/to/backup -t log \
+    --begin-version-filter 1000000 --end-version-filter 2000000
+</pre></div>
+</div>
+<p>Decode a blobstore backup with saved local copies and trace logging:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>user@host$ fdbdecode -r blobstore://key:secret@s3.example.com/mybackup?bucket=mybucket \
+    -s --log --logdir /tmp/traces
+</pre></div>
+</div>
+</section>
+</section>
 </section>
 
 
@@ -726,7 +908,7 @@ user@host$ fdbbackup start -k '@pp1e b*n*nn*' -k '#an&amp;0 p^n3app!e' -d &lt;BA
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 24, 2026.<br/>
+      Last updated on Oct 02, 2026.<br/>
     </p>
   </div>
 </footer>
