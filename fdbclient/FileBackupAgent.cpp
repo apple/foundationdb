@@ -4293,13 +4293,17 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 		{
 			Error savedError;
 			try {
-				// Open backup container for metadata access
-				Reference<IBackupContainer> bcRef = IBackupContainer::openContainer(backupUrl, {}, {}, 0);
-
 				// Get restore ranges using a transaction
 				auto tr = makeReference<ReadYourWritesTransaction>(cx);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				// Take the container from the restore config rather than reopening it from the bare URL:
+				// the config's codec round-trips the proxy, encryption key file and block size the caller
+				// supplied, and reopening dropped all three. Losing the proxy made a proxied container
+				// unreadable here, and the resulting abort blamed the backup for having no bulkdump data.
+				Reference<IBackupContainer> bcRef = co_await restore.sourceContainer().getOrThrow(tr);
+
 				std::vector<KeyRange> restoreRanges = co_await restore.getRestoreRangesOrDefault(tr);
 
 				// If bulkDumpJobId is empty, read it from the snapshot file metadata
@@ -7158,6 +7162,22 @@ public:
 			throw backup_error();
 		}
 
+		// Encryption is applied by the container file wrappers, which the SST path does not go through:
+		// there is no encryption anywhere in BulkDumpUtil/BulkSstFiles. A bulkdump under an encryption
+		// key would encrypt the logs and the manifest and leave the bulk data in the clear, so an
+		// operator who believes the backup is encrypted would be wrong about most of its bytes. Refuse
+		// until the SST path can encrypt; see design/bulkload-restore-integration.md.
+		if (snapshotMode != static_cast<int>(SnapshotMode::RANGEFILE) && encryptionKeyFileName.present()) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkDumpEncryption")
+			    .detail("TagName", tagName)
+			    .detail("SnapshotMode", snapshotMode);
+			fprintf(stderr,
+			        "ERROR: --encryption-key-file cannot be combined with --mode bulkdump or --mode both; the "
+			        "SST files those modes produce are not encrypted, so the backup would be only partly "
+			        "encrypted. Use --mode rangefile.\n");
+			throw backup_error();
+		}
+
 		config.clear(tr);
 
 		Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
@@ -7267,6 +7287,17 @@ public:
 			fprintf(stderr,
 			        "ERROR: --incremental cannot be combined with --mode bulkload; bulkload restores the "
 			        "snapshot that --incremental skips. Use --mode rangefile for a logs-only restore.\n");
+			throw restore_error();
+		}
+
+		// Mirror of the backup-side encryption refusal. Nothing on the SST path can decrypt, so a
+		// bulkload restore of an encrypted backup cannot work; refusing here says so plainly instead of
+		// failing later with an abort that blames the backup for having no bulkdump data.
+		if (!useRangeFileRestore && encryptionKeyFileName.present()) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadEncryption").detail("TagName", tagName);
+			fprintf(stderr,
+			        "ERROR: --encryption-key-file cannot be combined with --mode bulkload; the SST files a "
+			        "bulkload restore ingests are not encrypted. Use --mode rangefile.\n");
 			throw restore_error();
 		}
 
