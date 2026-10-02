@@ -106,6 +106,13 @@ extern std::atomic<int> g_bulkLoadRestoreTaskCompleteCount;
 // S3-specific backup correctness workload - see file header for differences from BackupAndRestoreCorrectness
 struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "BackupS3BlobCorrectness";
+
+	// Inside normalKeys but below every alphanumeric key, so these sort outside any range this workload
+	// generates while still being ordinary user keys. The '_' after the escape keeps \x01 from swallowing
+	// a following hex digit.
+	static inline const StringRef SENTINEL_PREFIX = "\x01_bs3bc_outside/"_sr;
+	static inline const ValueRef SENTINEL_BEFORE_BACKUP = "before_backup"_sr;
+	static inline const ValueRef SENTINEL_AFTER_BACKUP = "after_backup"_sr;
 	double backupAfter, restoreAfter, abortAndRestartAfter;
 	double minBackupAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
@@ -114,6 +121,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	bool differentialBackup, performRestore, agentRequest;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	std::vector<KeyRange> skippedRestoreRanges;
+	std::vector<Key> outOfRangeSentinels;
 	Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 	static int backupAgentRequests;
 	LockDB locked{ false };
@@ -317,9 +325,37 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		// Backup everything
-		self->backupRanges.push_back_deep(self->backupRanges.arena(), normalKeys);
-		self->restoreRanges.push_back_deep(self->restoreRanges.arena(), normalKeys);
+		// Keys planted outside the backup ranges, each holding SENTINEL_BEFORE_BACKUP. Once the backup has
+		// stopped they are rewritten to SENTINEL_AFTER_BACKUP, so a restore that widens beyond the backup
+		// ranges reverts them and is caught. The rewrite has to follow the backup rather than precede it:
+		// a value the backup captured would be restored to the value the check expects, and the widening
+		// would pass unnoticed. When the ranges cover all of normalKeys there is no outside and the set is
+		// empty.
+		for (int i = 0; i < 3; i++) {
+			Key candidate(SENTINEL_PREFIX.toString() + std::to_string(i));
+			bool covered = false;
+			for (const auto& range : self->backupRanges) {
+				if (range.contains(candidate)) {
+					covered = true;
+					break;
+				}
+			}
+			if (!covered) {
+				self->outOfRangeSentinels.push_back(candidate);
+			}
+		}
+
+		if (!self->outOfRangeSentinels.empty()) {
+			co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				for (const auto& key : self->outOfRangeSentinels) {
+					tr->set(key, SENTINEL_BEFORE_BACKUP);
+				}
+				return Void();
+			});
+			TraceEvent("BS3BCW_PlantedOutOfRangeSentinels").detail("Count", self->outOfRangeSentinels.size());
+		}
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -334,6 +370,21 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	static Future<Void> checkOutOfRangeSentinels(Reference<ReadYourWritesTransaction> tr, std::vector<Key> sentinels) {
+		for (const auto& key : sentinels) {
+			Optional<Value> value = co_await tr->get(key);
+			bool intact = value.present() && value.get() == SENTINEL_AFTER_BACKUP;
+			if (!intact) {
+				TraceEvent(SevError, "BS3BCW_RestoreWroteOutsideBackupRanges")
+				    .detail("Key", printable(key))
+				    .detail("Expected", printable(SENTINEL_AFTER_BACKUP))
+				    .detail("Actual", value.present() ? printable(value.get()) : std::string("<missing>"));
+			}
+			ASSERT(intact);
+		}
+		co_return;
+	}
 
 	static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		while (true) {
@@ -753,6 +804,19 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						});
 					}
 
+					// The backup has stopped, so this value cannot reach the snapshot or the mutation logs.
+					if (!outOfRangeSentinels.empty()) {
+						co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							for (const auto& key : outOfRangeSentinels) {
+								tr->set(key, SENTINEL_AFTER_BACKUP);
+							}
+							return Void();
+						});
+						TraceEvent("BS3BCW_BumpedOutOfRangeSentinels").detail("Count", outOfRangeSentinels.size());
+					}
+
 					// Step 3: Perform the restore (with BulkLoad if configured)
 					TraceEvent("BS3BCW_Restore")
 					    .detail("LastBackupContainer", lastBackupContainer->getURL())
@@ -840,6 +904,15 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						    .detail("BulkLoadRestoreTaskCompleteCount", bulkLoadCount);
 						// FAIL if BulkLoad didn't run
 						ASSERT(bulkLoadCount > 0);
+					}
+
+					// A restore confined to the backup ranges cannot have touched these keys.
+					if (!outOfRangeSentinels.empty()) {
+						co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							return checkOutOfRangeSentinels(tr, outOfRangeSentinels);
+						});
 					}
 
 					// Step 4: Run audit to compare BulkLoad-restored vs traditional-restored
