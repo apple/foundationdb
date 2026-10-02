@@ -53,14 +53,29 @@ ACTOR Future<Void> AsyncFileDetachable::doShutdown(AsyncFileDetachable* self) {
 }
 
 ACTOR Future<Reference<IAsyncFile>> AsyncFileDetachable::open(Future<Reference<IAsyncFile>> wrappedFile) {
+	state ISimulator::ProcessInfo* process = g_simulator->getCurrentProcess();
+	state TaskPriority task = g_network->getCurrentTask();
+	state Future<Void> shutdown = success(process->shutdownSignal.getFuture());
+
+	// Wait for readiness rather than for the value, so a failed open also reaches the context
+	// restoration below and is rethrown as the caller rather than as the producer.
 	choose {
-		when(wait(success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture()))) {
+		when(wait(shutdown)) {
 			throw io_error().asInjectedFault();
 		}
-		when(Reference<IAsyncFile> f = wait(wrappedFile)) {
-			return makeReference<AsyncFileDetachable>(f);
+		when(wait(ready(wrappedFile))) {}
+	}
+	// Pending opens are shared within a machine. Restore the caller before delivering the result
+	// or binding the detachable file to a process's shutdown signal.
+	if (g_simulator->getCurrentProcess() != process || g_network->getCurrentTask() != task) {
+		choose {
+			when(wait(shutdown)) {
+				throw io_error().asInjectedFault();
+			}
+			when(wait(g_simulator->onProcess(process, task))) {}
 		}
 	}
+	return makeReference<AsyncFileDetachable>(wrappedFile.get());
 }
 
 Future<int> AsyncFileDetachable::read(void* data, int length, int64_t offset) {
