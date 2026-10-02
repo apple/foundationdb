@@ -578,9 +578,7 @@ private:
 
 	void closeSocket() {
 		boost::system::error_code error;
-		// NOLINTNEXTLINE(bugprone-unused-return-value): The returned error also populates error, checked below.
-		socket.close(error);
-		if (error) {
+		if (socket.close(error)) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("PeerAddr", peer_address)
@@ -726,9 +724,7 @@ public:
 
 	void bind(NetworkAddress const& addr) override {
 		boost::system::error_code ec;
-		// NOLINTNEXTLINE(bugprone-unused-return-value): The returned error also populates ec, checked below.
-		socket.bind(udpEndpoint(addr), ec);
-		if (ec) {
+		if (socket.bind(udpEndpoint(addr), ec)) {
 			Error x;
 			if (ec.value() == EADDRINUSE)
 				x = address_in_use();
@@ -760,9 +756,7 @@ private:
 
 	void closeSocket() {
 		boost::system::error_code error;
-		// NOLINTNEXTLINE(bugprone-unused-return-value): The returned error also populates error, checked below.
-		socket.close(error);
-		if (error) {
+		if (socket.close(error)) {
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
 			    .detail("ErrorCode", error.value())
@@ -867,17 +861,9 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 
 	void action(Handshake& h) {
 		try {
-			// NOLINTNEXTLINE(bugprone-unused-return-value): h.err receives the same error and controls the handshake.
-			h.socket.next_layer().non_blocking(false, h.err);
-			if (!h.err.failed()) {
-				// NOLINTNEXTLINE(bugprone-unused-return-value): h.err receives the same error and is checked below.
-				h.socket.handshake(h.type, h.err);
-			}
-			if (!h.err.failed()) {
-				// NOLINTNEXTLINE(bugprone-unused-return-value): h.err receives the same error and is checked below.
-				h.socket.next_layer().non_blocking(true, h.err);
-			}
-			if (h.err.failed()) {
+			if (h.socket.next_layer().non_blocking(false, h.err).failed() ||
+			    h.socket.handshake(h.type, h.err).failed() ||
+			    h.socket.next_layer().non_blocking(true, h.err).failed()) {
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
 				                                                        : "N2_AcceptHandshakeError"_audit)
