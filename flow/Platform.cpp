@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <iostream>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <cstring>
 #include <string>
@@ -716,6 +717,22 @@ const char* getInterfaceName(const IPAddress& _ip) {
 	else
 		return nullptr;
 }
+
+// Cached because getifaddrs() can take tens of milliseconds
+static const char* getCachedInterfaceName(const IPAddress& ip) {
+	thread_local std::optional<IPAddress> cachedIp;
+	thread_local std::string cachedName;
+	if (cachedIp == ip) {
+		return cachedName.c_str();
+	}
+	const char* name = getInterfaceName(ip);
+	if (!name) {
+		return nullptr;
+	}
+	cachedIp = ip;
+	cachedName = name;
+	return cachedName.c_str();
+}
 #endif
 
 #if defined(__linux__)
@@ -730,7 +747,7 @@ void getNetworkTraffic(const IPAddress& ip,
 	                          // other platforms do, and since all of our simulation testing is on Linux...
 	const char* ifa_name = nullptr;
 	try {
-		ifa_name = getInterfaceName(ip);
+		ifa_name = getCachedInterfaceName(ip);
 	} catch (Error& e) {
 		if (e.code() != error_code_platform_error) {
 			throw;
@@ -978,7 +995,7 @@ void getNetworkTraffic(const IPAddress ip,
 
 	const char* ifa_name = nullptr;
 	try {
-		ifa_name = getInterfaceName(ip);
+		ifa_name = getCachedInterfaceName(ip);
 	} catch (Error& e) {
 		if (e.code() != error_code_platform_error) {
 			throw;
@@ -1170,7 +1187,7 @@ void getNetworkTraffic(const IPAddress& ip,
 
 	const char* ifa_name = nullptr;
 	try {
-		ifa_name = getInterfaceName(ip);
+		ifa_name = getCachedInterfaceName(ip);
 	} catch (Error& e) {
 		if (e.code() != error_code_platform_error) {
 			throw;
@@ -4550,3 +4567,20 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	ASSERT(errors == 0);
 	return Void();
 }
+
+#ifdef __linux__
+// The first call looks the interface up and caches it; later calls use the cache. Both report the same interface.
+TEST_CASE("/flow/Platform/getNetworkTraffic") {
+	const IPAddress loopback(0x7f000001);
+	uint64_t sent[2], received[2], outSegs[2], retransSegs[2];
+	for (int i = 0; i < 2; i++) {
+		getNetworkTraffic(loopback, sent[i], received[i], outSegs[i], retransSegs[i]);
+	}
+	ASSERT_GE(sent[1], sent[0]);
+	ASSERT_GE(received[1], received[0]);
+	ASSERT_GE(outSegs[1], outSegs[0]);
+	const char* name = getCachedInterfaceName(loopback);
+	ASSERT(name != nullptr && std::string(name) == "lo");
+	return Void();
+}
+#endif
