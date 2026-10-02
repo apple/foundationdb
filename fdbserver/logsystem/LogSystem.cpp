@@ -561,7 +561,19 @@ void LogSystem::toCoreState(DBCoreState& newState) const {
 	}
 
 	newState.oldTLogData.clear();
+	// This branch retains for recovery's own needs only; the backup-worker gate lives in the
+	// incremental purge path.
 	if (!storageRecovered() || !remoteLogPrefixRecovered()) {
+		if (oldLogData.size()) {
+			// finalUpdate requires oldTLogData to be empty, so a list that never drains blocks
+			// FULLY_RECOVERED with no other symptom. Record which clause held it.
+			TraceEvent("BWToCoreRetainReason", dbgid)
+			    .detail("Generations", oldLogData.size())
+			    .detail("StorageRecovered", storageRecovered())
+			    .detail("RemoteLogPrefixRecovered", remoteLogPrefixRecovered())
+			    .detail("Epoch", epoch)
+			    .detail("OldestBackupEpoch", oldestBackupEpoch);
+		}
 		for (const auto& oldData : oldLogData) {
 			newState.oldTLogData.push_back(toOldTLogCoreData(oldData));
 			TraceEvent("BWToCore")
@@ -2880,8 +2892,18 @@ Future<Reference<LogSystem>> LogSystem::newEpoch(Reference<LogSystem> oldLogSyst
 		if (oldLogGen.recoverAt <= 0) {
 			// When we have an invalid recover at value, it's possible that the previous generations' recover at is not
 			// properly recorded in cstate. Therefore, we skip tracking old tlog generation recovery.
+			// With RECORD_RECOVER_AT_IN_CSTATE off, recoverAt is never persisted, so every generation
+			// read back from cstate is 0 and this fires on each recovery, leaving tracking inert. That
+			// is a real defect, but it is not what blocks generation purging: measured, enabling the
+			// knob stopped this firing and left the retention unchanged.
 			oldGenerationRecoverAtVersions.clear();
-			TraceEvent("DisableTrackingOldGenerationRecovery").log();
+			TraceEvent("DisableTrackingOldGenerationRecovery", logSystem->dbgid)
+			    .detail("Generations", logSystem->oldLogData.size())
+			    .detail("RecoverAt", oldLogGen.recoverAt)
+			    .detail("Epoch", oldLogGen.epoch)
+			    .detail("EpochBegin", oldLogGen.epochBegin)
+			    .detail("EpochEnd", oldLogGen.epochEnd)
+			    .detail("RecoveryCount", recoveryCount);
 			break;
 		}
 		oldGenerationRecoverAtVersions.push_back(oldLogGen.recoverAt);

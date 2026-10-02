@@ -595,6 +595,16 @@ Future<Void> monitorBackupProgress(BackupData* self) {
 		std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
 		std::map<UID, Version> savedLogVersions;
 		if (tagVersions.size() != self->totalTags) {
+			// Symptom, not the wedge itself: this watches the current epoch only. A tag missing here
+			// means a worker was displaced before it saved, which is the same condition that strands an
+			// old epoch and pins oldestBackupEpoch. Suppressed far above the 2.5s retry, because a
+			// wedge holds this condition for the rest of the run.
+			TraceEvent(SevWarnAlways, "BackupWorkerEpochProgressIncomplete", self->myId)
+			    .suppressFor(60.0)
+			    .detail("RecruitedEpoch", self->recruitedEpoch)
+			    .detail("OldestBackupEpoch", self->oldestBackupEpoch)
+			    .detail("TagsWithProgress", tagVersions.size())
+			    .detail("TotalTags", self->totalTags);
 			co_await interval;
 			continue;
 		}
@@ -841,6 +851,13 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 // Uploads self->messages to cloud storage and updates savedVersion.
 Future<Void> uploadData(BackupData* self) {
 	Version popVersion = invalidVersion;
+
+	// A worker displaced before its first upload must still leave a record. Absence is not the same
+	// as zero: getUnfinishedBackup re-recruits a tag that has no record unconditionally, while a
+	// record at or past epochEnd - 1 lets the epoch retire and release oldestBackupEpoch. For an
+	// old-epoch worker onBackupChanges has already raised savedVersion, so this is not merely
+	// startVersion - 1, and the per-(epoch, tag) max merge makes re-recruitments accumulate.
+	co_await saveProgress(self, self->savedVersion);
 
 	while (true) {
 		// Too large uploadDelay will delay popping tLog data for too long.
