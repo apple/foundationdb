@@ -44,6 +44,24 @@ struct CheckpointRequest {
 	  : version(version), ranges(ranges), format(format), checkpointID(id), checkpointDir(checkpointDir) {}
 };
 
+// Logical bytes visited by the engine, separate from the key-only response size and physical I/O
+struct StorageRangeKeysResult {
+	RangeKeysResult keys;
+	int64_t scannedBytes;
+};
+
+template <class Result>
+using StorageRangeReadResult =
+    std::conditional_t<std::is_same_v<Result, RangeResult>, RangeResult, StorageRangeKeysResult>;
+
+inline RangeResult makeStorageRangeReadResult(RangeResult result, int64_t) {
+	return result;
+}
+
+inline StorageRangeKeysResult makeStorageRangeReadResult(RangeKeysResult keys, int64_t scannedBytes) {
+	return { std::move(keys), scannedBytes };
+}
+
 class IKeyValueStore : public IClosable {
 public:
 	virtual KeyValueStoreType getType() const = 0;
@@ -72,6 +90,17 @@ public:
 	                                      int rowLimit = 1 << 30,
 	                                      int byteLimit = 1 << 30,
 	                                      Optional<ReadOptions> options = Optional<ReadOptions>()) = 0;
+
+	// Both byte limits permit a final row to exceed them; callers carry the scan budget across MVCC segments
+	// The fallback projects a full read, while overrides may avoid copying or loading values
+	virtual Future<StorageRangeKeysResult> readRangeKeys(KeyRangeRef keys,
+	                                                     int rowLimit,
+	                                                     int byteLimit,
+	                                                     int scanByteLimit,
+	                                                     Optional<ReadOptions> options = Optional<ReadOptions>()) {
+		RangeResult values = co_await readRange(keys, rowLimit, std::min(byteLimit, scanByteLimit), options);
+		co_return StorageRangeKeysResult{ projectRangeKeys(values), values.logicalSize() };
+	}
 
 	// Shard management APIs.
 	// Adds key range to a physical shard.

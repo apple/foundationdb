@@ -1892,21 +1892,28 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
-		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
+		template <class Result>
+		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction<Result>>, FastAllocated<ReadRangeAction<Result>> {
 			KeyRange keys;
-			int rowLimit, byteLimit;
+			int rowLimit, byteLimit, scanByteLimit;
 			ReadType type;
 			bool cacheResult;
 			double startTime;
 			bool getHistograms;
-			ThreadReturnPromise<RangeResult> result;
-			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit, ReadType type, bool cacheResult)
-			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), type(type), cacheResult(cacheResult),
-			    startTime(timer_monotonic()),
+			ThreadReturnPromise<StorageRangeReadResult<Result>> result;
+			ReadRangeAction(KeyRange keys,
+			                int rowLimit,
+			                int byteLimit,
+			                int scanByteLimit,
+			                ReadType type,
+			                bool cacheResult)
+			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), scanByteLimit(scanByteLimit), type(type),
+			    cacheResult(cacheResult), startTime(timer_monotonic()),
 			    getHistograms(deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
-		void action(ReadRangeAction& a) {
+		template <class Result>
+		void action(ReadRangeAction<Result>& a) {
 			bool doPerfContextMetrics =
 			    SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE &&
 			    (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE);
@@ -1928,13 +1935,25 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			RangeResult result;
+			Result result;
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
 				result.more = false;
-				a.result.send(result);
+				a.result.send(makeStorageRangeReadResult(std::move(result), 0));
 				return;
 			}
-			int accumulatedBytes = 0;
+			int resultBytes = 0;
+			int64_t scanBytes = 0;
+			int64_t scanByteLimit = a.scanByteLimit;
+			auto append = [&](KeyRef key, ValueRef value) {
+				if constexpr (std::is_same_v<Result, RangeResult>) {
+					result.emplace_back_deep(result.arena(), key, value);
+					resultBytes += sizeof(KeyValueRef) + key.expectedSize() + value.expectedSize();
+				} else {
+					scanBytes += key.expectedSize() + value.expectedSize();
+					result.push_back_deep(result.arena(), RangeKeyRef{ key });
+					resultBytes += sizeof(uint32_t) + key.expectedSize();
+				}
+			};
 			rocksdb::Status s;
 			if (a.rowLimit >= 0) {
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
@@ -1947,12 +1966,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				cursor->Seek(toSlice(a.keys.begin));
 				while (cursor->Valid() && toStringRef(cursor->key()) < a.keys.end) {
 					KeyRef key = toStringRef(cursor->key());
-					ValueRef value = toStringRef(cursor->value());
 
-					accumulatedBytes += sizeof(KeyValueRef) + key.expectedSize() + value.expectedSize();
-					result.emplace_back_deep(result.arena(), key, value);
+					append(key, toStringRef(cursor->value()));
 					// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
-					if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
+					if (result.size() >= a.rowLimit || resultBytes >= a.byteLimit || scanBytes >= scanByteLimit) {
 						break;
 					}
 					if (shouldThrottle(a.type, a.keys.begin) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT &&
@@ -1982,12 +1999,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				}
 				while (cursor->Valid() && toStringRef(cursor->key()) >= a.keys.begin) {
 					KeyRef key = toStringRef(cursor->key());
-					ValueRef value = toStringRef(cursor->value());
 
-					accumulatedBytes += sizeof(KeyValueRef) + key.expectedSize() + value.expectedSize();
-					result.emplace_back_deep(result.arena(), key, value);
+					append(key, toStringRef(cursor->value()));
 					// Calling `cursor->Prev()` is potentially expensive, so short-circut here just in case.
-					if (result.size() >= -a.rowLimit || accumulatedBytes >= a.byteLimit) {
+					if (result.size() >= -a.rowLimit || resultBytes >= a.byteLimit || scanBytes >= scanByteLimit) {
 						break;
 					}
 					if (shouldThrottle(a.type, a.keys.begin) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT &&
@@ -2010,16 +2025,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.result.sendError(statusToError(s));
 				return;
 			}
-			result.more =
-			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
-			a.result.send(result);
+			result.more = (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) ||
+			              (resultBytes >= a.byteLimit) || (scanBytes >= scanByteLimit);
+			const int64_t returnedBytes = a.getHistograms ? result.logicalSize() : 0;
+			const int returnedRows = result.size();
+			a.result.send(makeStorageRangeReadResult(std::move(result), scanBytes));
 
 			const double endTime = timer_monotonic();
 			if (a.getHistograms) {
 				metricPromiseStream->send(
-				    std::make_pair(ROCKSDB_READ_RANGE_BYTES_RETURNED_HISTOGRAM.toString(), result.logicalSize()));
+				    std::make_pair(ROCKSDB_READ_RANGE_BYTES_RETURNED_HISTOGRAM.toString(), returnedBytes));
 				metricPromiseStream->send(
-				    std::make_pair(ROCKSDB_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM.toString(), result.size()));
+				    std::make_pair(ROCKSDB_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM.toString(), returnedRows));
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_READRANGE_ACTION_HISTOGRAM.toString(), endTime - readBeginTime));
 				metricPromiseStream->send(
@@ -2483,11 +2500,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
-	static Future<Standalone<RangeResultRef>> read(Reader::ReadRangeAction* action,
-	                                               FlowLock* semaphore,
-	                                               IThreadPool* pool,
-	                                               Counter* counter) {
-		std::unique_ptr<Reader::ReadRangeAction> a(action);
+	template <class Result>
+	static Future<StorageRangeReadResult<Result>> read(Reader::ReadRangeAction<Result>* action,
+	                                                   FlowLock* semaphore,
+	                                                   IThreadPool* pool,
+	                                                   Counter* counter) {
+		std::unique_ptr<Reader::ReadRangeAction<Result>> a(action);
 		Optional<Void> slot = co_await timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT);
 		if (!slot.present()) {
 			++(*counter);
@@ -2498,7 +2516,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		auto fut = a->result.getFuture();
 		pool->post(a.release());
-		Standalone<RangeResultRef> result = co_await fut;
+		StorageRangeReadResult<Result> result = co_await fut;
 
 		co_return result;
 	}
@@ -2507,6 +2525,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	                              int rowLimit,
 	                              int byteLimit,
 	                              Optional<ReadOptions> options) override {
+		return readRangeImpl<RangeResult>(keys, rowLimit, byteLimit, byteLimit, options);
+	}
+
+	Future<StorageRangeKeysResult> readRangeKeys(KeyRangeRef keys,
+	                                             int rowLimit,
+	                                             int byteLimit,
+	                                             int scanByteLimit,
+	                                             Optional<ReadOptions> options) override {
+		return readRangeImpl<RangeKeysResult>(keys, rowLimit, byteLimit, scanByteLimit, options);
+	}
+
+	template <class Result>
+	Future<StorageRangeReadResult<Result>> readRangeImpl(KeyRangeRef keys,
+	                                                     int rowLimit,
+	                                                     int byteLimit,
+	                                                     int scanByteLimit,
+	                                                     Optional<ReadOptions> options) {
 		ReadType type = ReadType::NORMAL;
 		bool cacheResult = true;
 
@@ -2517,7 +2552,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		if (!shouldThrottle(type, keys.begin)) {
 			++counters.rocksdbReadRangeQueries;
-			auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit, type, cacheResult);
+			auto a = new Reader::ReadRangeAction<Result>(keys, rowLimit, byteLimit, scanByteLimit, type, cacheResult);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2528,7 +2563,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		checkWaiters(semaphore, maxWaiters);
 		++counters.rocksdbReadRangeQueries;
-		auto a = std::make_unique<Reader::ReadRangeAction>(keys, rowLimit, byteLimit, type, cacheResult);
+		auto a = std::make_unique<Reader::ReadRangeAction<Result>>(
+		    keys, rowLimit, byteLimit, scanByteLimit, type, cacheResult);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
