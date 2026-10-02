@@ -1,6 +1,2 @@
-Sphinx==6.2.1
-sphinx-bootstrap-theme==0.8.1
-sphinxcontrib-jquery==4.1
-docutils==0.19
-Jinja2==3.1.6
-urllib3<3
+sphinx
+shibuya
