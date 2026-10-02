@@ -202,35 +202,134 @@ Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<ReadYo
 	co_return storageServerInterfaces;
 }
 
-// returns error count
-Future<int> consistencyCheckReadData(UID myId,
-                                     Database cx,
-                                     KeyRange range,
-                                     Version version,
-                                     std::vector<StorageServerInterface>* storageServerInterfaces,
-                                     std::vector<Future<ErrorOr<GetKeyValuesReply>>>* keyValueFutures,
-                                     Optional<int>* firstValidServer,
-                                     int64_t* totalReadAmount,
-                                     Optional<Version> consistencyCheckStartVersion) {
-	ASSERT(!range.empty());
-	GetKeyValuesRequest req;
-	req.begin = firstGreaterOrEqual(range.begin);
-	req.end = firstGreaterOrEqual(range.end);
-	req.limit = 1e4;
-	req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-	req.version = version;
-	req.tags = TagSet();
+// Whether a key is "beyond" some optional bound key. Here, boundKey represents some watermark
+// through a scan that may or may not be in reverse. If the scan consumed the entire range, then
+// there is no bound key, and this should always return false. Otherwise, it needs to return
+// if the key is greater than the bound (for forward scans) or less than the bound (for reverse).
+bool isKeyBeyond(const KeyRef& key, const Optional<KeyRef>& boundKey, const Reverse reverse) {
+	return boundKey.present() && (reverse ? key < boundKey.get() : key > boundKey.get());
+}
 
-	// buggify read limits in simulation
-	if (g_network->isSimulated() && buggify(0.01)) {
-		if (deterministicRandom()->coinflip()) {
-			req.limit = deterministicRandom()->randomInt(2, 10);
+// The result of diffing two GetKeyValuesReplies against each other. Of the replies from the replicas
+// one gets selected to be the "reference" replica arbitrarily, and all others are compared against it.
+struct ReplyDiff {
+	int64_t currentUniques = 0;
+	int64_t referenceUniques = 0;
+	int64_t valueMismatches = 0;
+	int64_t matchingKVPairs = 0;
+	// These optionals are example keys included for logging. They are only set if their
+	// corresponding counters are greater than 0.
+	Optional<KeyRef> currentUniqueKey;
+	Optional<KeyRef> referenceUniqueKey;
+	Optional<KeyRef> valueMismatchKey;
+};
+
+// Merges `current` and `reference`, counting keys unique to either side and value mismatches on keys
+// present in both. Both replies must be sorted the same way (matching the `reverse` parameter)
+// If `boundKey` is present, keys beyond it are ignored on both sides. This is what lets two replies
+// that were paginated to different cutoff points be compared without resulting in missing or unique keys.
+// This should never happen in a fully consistent cluster, but it can happen if some servers are missing
+// keys present on other servers.
+ReplyDiff diffReplies(const GetKeyValuesReply& current,
+                      const GetKeyValuesReply& reference,
+                      Optional<KeyRef> boundKey,
+                      const Reverse reverse = Reverse::False) {
+	ReplyDiff diff;
+	int currentI = 0;
+	int referenceI = 0;
+	while (currentI < current.data.size() && referenceI < reference.data.size()) {
+		KeyValueRef currentKV = current.data[currentI];
+		KeyValueRef referenceKV = reference.data[referenceI];
+		if (isKeyBeyond(currentKV.key, boundKey, reverse) || isKeyBeyond(referenceKV.key, boundKey, reverse)) {
+			// We have exceeded the boundary key on at least one server. Stop checking
+			break;
 		}
-		if (deterministicRandom()->coinflip()) {
-			req.limitBytes /= deterministicRandom()->randomInt(2, 100);
-			req.limitBytes = std::max<int>(1, req.limitBytes);
+		if (currentKV.key == referenceKV.key) {
+			if (currentKV.value == referenceKV.value) {
+				diff.matchingKVPairs++;
+			} else {
+				diff.valueMismatchKey = currentKV.key;
+				diff.valueMismatches++;
+			}
+			currentI++;
+			referenceI++;
+		} else if (reverse ? currentKV.key > referenceKV.key : currentKV.key < referenceKV.key) {
+			diff.currentUniqueKey = currentKV.key;
+			diff.currentUniques++;
+			currentI++;
+		} else {
+			diff.referenceUniqueKey = referenceKV.key;
+			diff.referenceUniques++;
+			referenceI++;
 		}
 	}
+
+	// At this point, we've consumed one (or both) of the replies through boundKey.
+	// Any data present on either reply (but not beyond boundKey) must be unique.
+	while (referenceI < reference.data.size() && !isKeyBeyond(reference.data[referenceI].key, boundKey, reverse)) {
+		diff.referenceUniqueKey = reference.data[referenceI].key;
+		diff.referenceUniques++;
+		referenceI++;
+	}
+	while (currentI < current.data.size() && !isKeyBeyond(current.data[currentI].key, boundKey, reverse)) {
+		diff.currentUniqueKey = current.data[currentI].key;
+		diff.currentUniques++;
+		currentI++;
+	}
+
+	return diff;
+}
+
+// Dumps both replies to stdout for debugging when running in simulation.
+void printReplyMismatchDebug(int currentIdx,
+                             const StorageServerInterface& currentSSI,
+                             const GetKeyValuesReply& current,
+                             int referenceIdx,
+                             const StorageServerInterface& referenceSSI,
+                             const GetKeyValuesReply& reference,
+                             KeyRef beginKey,
+                             KeyRef endKey) {
+	int invalidIndex = -1;
+	printf("\nSERVER %d (%s); shard = %s - %s:\n",
+	       currentIdx,
+	       currentSSI.address().toString().c_str(),
+	       printable(beginKey).c_str(),
+	       printable(endKey).c_str());
+	for (int k = 0; k < current.data.size(); k++) {
+		printf("%d. %s => %s\n", k, printable(current.data[k].key).c_str(), printable(current.data[k].value).c_str());
+		if (invalidIndex < 0 && (k >= reference.data.size() || current.data[k].key != reference.data[k].key ||
+		                         current.data[k].value != reference.data[k].value))
+			invalidIndex = k;
+	}
+
+	printf("\nSERVER %d (%s); shard = %s - %s:\n",
+	       referenceIdx,
+	       referenceSSI.address().toString().c_str(),
+	       printable(beginKey).c_str(),
+	       printable(endKey).c_str());
+	for (int k = 0; k < reference.data.size(); k++) {
+		printf(
+		    "%d. %s => %s\n", k, printable(reference.data[k].key).c_str(), printable(reference.data[k].value).c_str());
+		if (invalidIndex < 0 && (k >= current.data.size() || reference.data[k].key != current.data[k].key ||
+		                         reference.data[k].value != current.data[k].value))
+			invalidIndex = k;
+	}
+
+	printf("\nMISMATCH AT %d\n\n", invalidIndex);
+}
+
+// returns error count
+Future<int64_t> consistencyCheckReadData(UID myId,
+                                         Database cx,
+                                         KeyRange range,
+                                         Version version,
+                                         std::vector<StorageServerInterface>* storageServerInterfaces,
+                                         std::vector<Future<ErrorOr<GetKeyValuesReply>>>* keyValueFutures,
+                                         Optional<int>* firstValidServer,
+                                         int64_t* totalReadAmount,
+                                         Optional<KeyRef>* nextKey,
+                                         Optional<Version> consistencyCheckStartVersion) {
+	ASSERT(!range.empty());
 
 	// Set read options to minimize interference with live traffic
 	// TODO: also use batch priority transaction?
@@ -239,24 +338,30 @@ Future<int> consistencyCheckReadData(UID myId,
 	readOptions.type = ReadType::LOW;
 	readOptions.consistencyCheckStartVersion = consistencyCheckStartVersion;
 
-	req.options = readOptions;
-
 	DisabledTraceEvent("ConsistencyCheck_ReadDataStart", myId)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("Servers", storageServerInterfaces->size());
 
-	// Try getting the entries in the specified range
-
-	for (int j = 0; j < storageServerInterfaces->size(); j++) {
-		resetReply(req);
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-			cx->getLatestCommitVersion((*storageServerInterfaces)[j], req.version, req.ssLatestCommitVersions);
-		}
-		keyValueFutures->push_back((*storageServerInterfaces)[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+	// Issue the requests and wait for all replies via the shared helper -- this reads at `version` (rather
+	// than a freshly fetched one) so that later rounds of the caller's scan keep comparing at the same
+	// transaction-consistent version, and buggifies req.limit/req.limitBytes as this function always has.
+	std::vector<ErrorOr<GetKeyValuesReply>> readReplies =
+	    co_await readFromAllStorageServers(cx,
+	                                       *storageServerInterfaces,
+	                                       range,
+	                                       firstGreaterOrEqual(range.begin),
+	                                       Reverse::False,
+	                                       version,
+	                                       readOptions,
+	                                       /*buggifyLimits=*/g_network->isSimulated());
+	// The rest of this function (and this function's own caller, afterwards) expects to find replies here as
+	// Futures it can .get() -- readFromAllStorageServers() has already waited for them, so just wrap each
+	// resolved value back into an already-set Future rather than changing that established contract.
+	keyValueFutures->reserve(readReplies.size());
+	for (ErrorOr<GetKeyValuesReply>& reply : readReplies) {
+		keyValueFutures->push_back(reply);
 	}
-
-	co_await waitForAll(*keyValueFutures);
 
 	bool expectInjected =
 	    storageServerInterfaces->size() > 1 && g_network->isSimulated() && consistencyCheckStartVersion.present() &&
@@ -275,249 +380,31 @@ Future<int> consistencyCheckReadData(UID myId,
 		            consistencyCheckStartVersion.present() ? consistencyCheckStartVersion.get() : invalidVersion);
 	}
 
-	// Read the resulting entries
-	bool allSucceeded = true;
-	bool foundInjected = false;
-	for (int j = 0; j < storageServerInterfaces->size(); j++) {
-		ErrorOr<GetKeyValuesReply> rangeResult = (*keyValueFutures)[j].get();
-
-		// Compare the results with other storage servers
-		if (rangeResult.present() && !rangeResult.get().error.present()) {
-			GetKeyValuesReply current = rangeResult.get();
-			DisabledTraceEvent("ConsistencyCheck_GetKeyValuesStream", myId)
-			    .detail("DataSize", current.data.size())
-			    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id());
-			*totalReadAmount += current.data.expectedSize();
-			// If we haven't encountered a valid storage server yet, then mark this as the baseline
-			// to compare against
-			if (!firstValidServer->present()) {
-				DisabledTraceEvent("ConsistencyCheck_FirstValidServer", myId).detail("Iter", j);
-				*firstValidServer = j;
-				// Compare this shard against the first
-			} else {
-				GetKeyValuesReply reference = (*keyValueFutures)[firstValidServer->get()].get().get();
-
-				if (current.data != reference.data || current.more != reference.more) {
-					// Be especially verbose if in simulation
-					if (g_network->isSimulated()) {
-						int invalidIndex = -1;
-						fmt::print("MISMATCH AT VERSION {0}\n", req.version);
-						printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-						       "",
-						       j,
-						       (*storageServerInterfaces)[j].address().toString().c_str(),
-						       printable(req.begin.getKey()).c_str(),
-						       printable(req.end.getKey()).c_str());
-						for (int k = 0; k < current.data.size(); k++) {
-							printf("%d. %s => %s\n",
-							       k,
-							       printable(current.data[k].key).c_str(),
-							       printable(current.data[k].value).c_str());
-							if (invalidIndex < 0 &&
-							    (k >= reference.data.size() || current.data[k].key != reference.data[k].key ||
-							     current.data[k].value != reference.data[k].value))
-								invalidIndex = k;
-						}
-
-						printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-						       "",
-						       firstValidServer->get(),
-						       (*storageServerInterfaces)[firstValidServer->get()].address().toString().c_str(),
-						       printable(req.begin.getKey()).c_str(),
-						       printable(req.end.getKey()).c_str());
-						for (int k = 0; k < reference.data.size(); k++) {
-							printf("%d. %s => %s\n",
-							       k,
-							       printable(reference.data[k].key).c_str(),
-							       printable(reference.data[k].value).c_str());
-							if (invalidIndex < 0 &&
-							    (k >= current.data.size() || reference.data[k].key != current.data[k].key ||
-							     reference.data[k].value != current.data[k].value))
-								invalidIndex = k;
-						}
-
-						printf("\nMISMATCH AT %d\n\n", invalidIndex);
-					}
-
-					// Data for trace event
-					// The number of keys unique to the current shard
-					int currentUniques = 0;
-					// The number of keys unique to the reference shard
-					int referenceUniques = 0;
-					// The number of keys in both shards with conflicting values
-					int valueMismatches = 0;
-					// The number of keys in both shards with matching values
-					int matchingKVPairs = 0;
-					// Last unique key on the current shard
-					KeyRef currentUniqueKey;
-					// Last unique key on the reference shard
-					KeyRef referenceUniqueKey;
-					// Last value mismatch
-					KeyRef valueMismatchKey;
-
-					// Loop indexes
-					int currentI = 0;
-					int referenceI = 0;
-					while (currentI < current.data.size() || referenceI < reference.data.size()) {
-						if (currentI >= current.data.size()) {
-							referenceUniqueKey = reference.data[referenceI].key;
-							referenceUniques++;
-							referenceI++;
-						} else if (referenceI >= reference.data.size()) {
-							currentUniqueKey = current.data[currentI].key;
-							currentUniques++;
-							currentI++;
-						} else {
-							KeyValueRef currentKV = current.data[currentI];
-							KeyValueRef referenceKV = reference.data[referenceI];
-
-							if (currentKV.key == referenceKV.key) {
-								if (currentKV.value == referenceKV.value)
-									matchingKVPairs++;
-								else {
-									valueMismatchKey = currentKV.key;
-									valueMismatches++;
-								}
-
-								currentI++;
-								referenceI++;
-							} else if (currentKV.key < referenceKV.key) {
-								currentUniqueKey = currentKV.key;
-								currentUniques++;
-								currentI++;
-							} else {
-								referenceUniqueKey = referenceKV.key;
-								referenceUniques++;
-								referenceI++;
-							}
-						}
-					}
-
-					bool isTss = (*storageServerInterfaces)[j].isTss() ||
-					             (*storageServerInterfaces)[firstValidServer->get()].isTss();
-					bool isExpectedTSSMismatch =
-					    g_network->isSimulated() &&
-					    fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch) && isTss;
-					// It's possible that the storage servers are inconsistent in KillRegion
-					// workload where a forced recovery is performed. The killed storage server
-					// in the killed region returned first with a higher version, and a later
-					// response from a different region returned with a lower version (because
-					// of the rollback of the forced recovery). In this case, we should not fail
-					// the test. So we double check both process are live.
-					bool isFailed =
-					    g_network->isSimulated() &&
-					    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())->failed ||
-					     g_simulator->getProcessByAddress((*storageServerInterfaces)[firstValidServer->get()].address())
-					         ->failed) &&
-					    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())->locality.dcId() !=
-					     g_simulator->getProcessByAddress((*storageServerInterfaces)[firstValidServer->get()].address())
-					         ->locality.dcId());
-
-					if (!isTss && !isFailed && expectInjected) {
-						// Ensure the only corruption we see is the one that was expected to be injected
-						ASSERT(fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.present());
-						if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
-						    FDBSimConsistencyScanCorruptionType::FlipMoreFlag) {
-							// only more flag should be different
-							expectInjected = (current.more != reference.more && currentUniques == 0 &&
-							                  referenceUniques == 0 && valueMismatches == 0);
-						} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
-						           FDBSimConsistencyScanCorruptionType::AddToEmpty) {
-							expectInjected =
-							    (current.more == reference.more && current.data.size() + reference.data.size() == 1);
-							if (expectInjected) {
-								KeyValueRef& kv = current.data.empty() ? reference.data[0] : current.data[0];
-								expectInjected =
-								    kv.key == fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get() &&
-								    kv.value == "consistencyCheckCorruptValue"_sr;
-							}
-						} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
-						           FDBSimConsistencyScanCorruptionType::RemoveLastRow) {
-							expectInjected = (current.more == reference.more && valueMismatches == 0 &&
-							                  currentUniques + referenceUniques == 1 &&
-							                  std::abs(current.data.size() - reference.data.size()) == 1);
-							if (expectInjected) {
-								// make sure the unique was the last key
-								for (int i = 0; i < current.data.size() && i < reference.data.size(); i++) {
-									if (current.data[i] != reference.data[i]) {
-										expectInjected = false;
-										break;
-									}
-								}
-							}
-						} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
-						           FDBSimConsistencyScanCorruptionType::ChangeFirstValue) {
-							expectInjected =
-							    (current.more == reference.more && valueMismatches == 1 && currentUniques == 0 &&
-							     referenceUniques == 0 && valueMismatchKey == current.data[0].key &&
-							     std::abs(current.data[0].value.size() - reference.data[0].value.size()) == 1);
-							if (expectInjected) {
-								// make sure the value difference was just truncating the last byte
-								Value shorter = current.data[0].value < reference.data[0].value
-								                    ? current.data[0].value
-								                    : reference.data[0].value;
-								Value longer = current.data[0].value < reference.data[0].value ? reference.data[0].value
-								                                                               : current.data[0].value;
-								expectInjected = (shorter == longer.substr(0, shorter.size()));
-							}
-						} else {
-							ASSERT(false);
-						}
-					}
-
-					TraceEvent(isExpectedTSSMismatch || isFailed || expectInjected ? SevWarn : SevError,
-					           "ConsistencyCheck_DataInconsistent",
-					           myId)
-					    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id())
-					    .detail(format("StorageServer%d", firstValidServer->get()).c_str(),
-					            (*storageServerInterfaces)[firstValidServer->get()].id())
-					    .detail("ShardBegin", req.begin.getKey())
-					    .detail("ShardEnd", req.end.getKey())
-					    .detail("VersionNumber", req.version)
-					    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-					    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
-					    .detail(format("Server%dUniques", firstValidServer->get()).c_str(), referenceUniques)
-					    .detail(format("Server%dUniqueKey", firstValidServer->get()).c_str(), referenceUniqueKey)
-					    .detail("ValueMismatches", valueMismatches)
-					    .detail("ValueMismatchKey", valueMismatchKey)
-					    .detail("MatchingKVPairs", matchingKVPairs)
-					    .detail(format("Server%dHasMore", j).c_str(), current.more)
-					    .detail(format("Server%dHasMore", firstValidServer->get()).c_str(), reference.more)
-					    .detail("IsTSS", isTss)
-					    .detail("IsInjected", expectInjected);
-
-					if (expectInjected) {
-						foundInjected = true;
-						CODE_PROBE(true, "consistency check detected injected corruption");
-						// we found the injected corruption, clear the state
-						TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption", myId)
-						    .detail("CorruptionType",
-						            fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get())
-						    .detail("Version", req.version);
-						fdbSimulationPolicyState().updateConsistencyScanState(
-						    FDBSimConsistencyScanState::Enabled_InjectCorruption,
-						    FDBSimConsistencyScanState::Enabled_FoundCorruption);
-					}
-
-					if (!isExpectedTSSMismatch) {
-						int issues = currentUniques + referenceUniques + valueMismatches +
-						             ((current.more == reference.more) ? 0 : 1);
-						ASSERT(issues > 0);
-						co_return issues;
-					}
-
-					if (isFailed) {
-						throw wrong_shard_server();
-					}
-				}
-			}
-		} else {
-			allSucceeded = false;
-		}
+	RangeConsistencyResult rangeConsistencyResult = checkRangeReplies(*storageServerInterfaces,
+	                                                                  readReplies,
+	                                                                  range,
+	                                                                  firstGreaterOrEqual(range.begin),
+	                                                                  Reverse::False,
+	                                                                  myId,
+	                                                                  expectInjected);
+	*totalReadAmount = rangeConsistencyResult.totalReadAmount;
+	*nextKey = rangeConsistencyResult.nextKey;
+	if (rangeConsistencyResult.firstValidServer >= 0) {
+		*firstValidServer = rangeConsistencyResult.firstValidServer;
 	}
 
-	if (expectInjected && !foundInjected) {
-		if (allSucceeded) {
+	if (!rangeConsistencyResult.success) {
+		if (rangeConsistencyResult.issues == 0) {
+			// The only case where we don't count any issues but the result is not successful
+			// should be on a failed read. Report wrong_shard_server()
+			ASSERT(rangeConsistencyResult.readFailed);
+			throw wrong_shard_server();
+		}
+		co_return rangeConsistencyResult.issues;
+	}
+
+	if (expectInjected && !rangeConsistencyResult.foundInjected) {
+		if (rangeConsistencyResult.allSucceeded) {
 			// should for sure have found it
 			TraceEvent(SevError, "ConsistencyCheck_ShouldHaveFoundInjectedCorruption", myId);
 		} else {
@@ -873,17 +760,19 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 						while (true) {
 							std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
 							Optional<int> firstValidServer;
+							Optional<KeyRef> consistencyCheckNextKey;
 							memState->stats.requests += storageServerInterfaces.size();
 							int64_t replicatedBytesReadThisLoop = 0;
-							int newErrors = co_await consistencyCheckReadData(memState->csId,
-							                                                  db,
-							                                                  targetRange,
-							                                                  tr->getReadVersion().get(),
-							                                                  &storageServerInterfaces,
-							                                                  &keyValueFutures,
-							                                                  &firstValidServer,
-							                                                  &replicatedBytesReadThisLoop,
-							                                                  statsCurrentRound.startVersion);
+							int64_t newErrors = co_await consistencyCheckReadData(memState->csId,
+							                                                      db,
+							                                                      targetRange,
+							                                                      tr->getReadVersion().get(),
+							                                                      &storageServerInterfaces,
+							                                                      &keyValueFutures,
+							                                                      &firstValidServer,
+							                                                      &replicatedBytesReadThisLoop,
+							                                                      &consistencyCheckNextKey,
+							                                                      statsCurrentRound.startVersion);
 							errors += newErrors;
 							memState->stats.inconsistencies += newErrors;
 
@@ -901,49 +790,24 @@ Future<Void> consistencyScanCore(Database db, Reference<ConsistencyScanMemorySta
 
 							// throttle always includes replicated bytes read in total read bytes for throttling
 							totalReadBytesFromStorageServers += replicatedBytesReadThisLoop;
-							if (!failedRequest.present() && !newErrors) {
+							if (!failedRequest.present()) {
 								ASSERT(firstValidServer.present());
 								GetKeyValuesReply rangeResult = keyValueFutures[firstValidServer.get()].get().get();
 								logicalBytesRead += rangeResult.data.expectedSize();
 								replicatedBytesRead += replicatedBytesReadThisLoop;
-								if (!rangeResult.more) {
+								if (!consistencyCheckNextKey.present()) {
 									statsCurrentRound.lastEndKey = targetRange.end;
 									noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
 									break;
-								} else {
-									VectorRef<KeyValueRef> result =
-									    keyValueFutures[firstValidServer.get()].get().get().data;
-									ASSERT(!result.empty());
-									statsCurrentRound.lastEndKey = keyAfter(result.back().key);
-									targetRange = KeyRangeRef(statsCurrentRound.lastEndKey, targetRange.end);
-									if (targetRange.empty()) {
-										noMoreRecords = targetRange.end == allKeys.end;
-										break;
-									}
 								}
-							} else if (!failedRequest.present() && newErrors) {
-								// responses will disagree on the next key, just take the max of the possible ones to
-								// ensure we can make progress past this corruption
-								Key nextKey = statsCurrentRound.lastEndKey;
-								for (int i = 0; i < storageServerInterfaces.size(); i++) {
-									GetKeyValuesReply rangeResult = keyValueFutures[i].get().get();
-									if (i == firstValidServer.get()) {
-										logicalBytesRead += rangeResult.data.expectedSize();
-									}
-									Key storageNextKey = (rangeResult.more && !rangeResult.data.empty())
-									                         ? keyAfter(rangeResult.data.back().key)
-									                         : targetRange.end;
-									if (storageNextKey > nextKey) {
-										nextKey = storageNextKey;
-									}
-								}
-								replicatedBytesRead += replicatedBytesReadThisLoop;
-								statsCurrentRound.lastEndKey = nextKey;
-								if (nextKey == targetRange.end) {
-									noMoreRecords = nextKey == allKeys.end;
+								// Resume from consistencyCheckNextKey (the minimum last key among replies
+								// still reporting more data). This represents the maximum key that we
+								// can progress to without skipping any individual key
+								statsCurrentRound.lastEndKey = keyAfter(consistencyCheckNextKey.get());
+								targetRange = KeyRangeRef(statsCurrentRound.lastEndKey, targetRange.end);
+								if (targetRange.empty()) {
+									noMoreRecords = targetRange.end == allKeys.end;
 									break;
-								} else {
-									targetRange = KeyRangeRef(nextKey, targetRange.end);
 								}
 							} else {
 								// transaction too old expected here for large shards
@@ -1373,6 +1237,326 @@ void testFailure(std::string message, bool performQuiescentChecks, bool* success
 		failEvent.detail("Workload", "ConsistencyCheck");
 
 	failEvent.detail("Reason", "Consistency check: " + message);
+}
+
+// Reads a single range from every storage server in storageServerInterfaces at the same read version.
+// Used by callers that need to compare replies themselves via checkRangeReplies() below. `cursor` is the
+// resumption point from a prior round: for a forward read it's a lower-bound KeySelector (advances upward,
+// terminates at range.end); for a backward (reverse) read it's an upper-bound KeySelector (shrinks
+// downward, terminates at range.begin).
+//
+// The `readOptions` are attached to the request as-is. Defaults to ReadType::LOW to minimize interference
+// with live traffic. Callers can also use this to set consistencyCheckStartVersion so storage servers know
+// to inject corruption.
+//
+// If `buggifyLimits` is set, then this randomizes req.limit/req.limitBytes in simulation to exercise
+// pagination more thoroughly.
+Future<std::vector<ErrorOr<GetKeyValuesReply>>> readFromAllStorageServers(
+    Database cx,
+    const std::vector<StorageServerInterface>& storageServerInterfaces,
+    KeyRangeRef range,
+    KeySelector cursor,
+    Reverse reverse,
+    Optional<Version> version,
+    ReadOptions readOptions,
+    bool buggifyLimits) {
+	// Get the current DB read version, unless the caller already committed to one
+	Version readVersion = version.present() ? version.get() : co_await getStorageServerReadVersion(cx);
+
+	GetKeyValuesRequest req;
+	if (reverse) {
+		req.begin = firstGreaterOrEqual(range.begin);
+		req.end = cursor;
+		req.limit = -1e4;
+	} else {
+		req.begin = cursor;
+		req.end = firstGreaterOrEqual(range.end);
+		req.limit = 1e4;
+	}
+	req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+	req.version = readVersion;
+	req.tags = TagSet();
+	req.options = readOptions;
+
+	// buggify read limits in simulation, preserving the sign convention (and thus direction) set above
+	if (buggifyLimits && buggify(0.01)) {
+		if (deterministicRandom()->coinflip()) {
+			int64_t limit = deterministicRandom()->randomInt(2, 10);
+			req.limit = reverse ? -limit : limit;
+		}
+		if (deterministicRandom()->coinflip()) {
+			req.limitBytes /= deterministicRandom()->randomInt(2, 100);
+			req.limitBytes = std::max<int>(1, req.limitBytes);
+		}
+	}
+
+	// Try getting the entries in the specified range
+	std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
+	for (int j = 0; j < storageServerInterfaces.size(); j++) {
+		resetReply(req);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+			cx->getLatestCommitVersion(storageServerInterfaces[j], req.version, req.ssLatestCommitVersions);
+		}
+		keyValueFutures.push_back(storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+	}
+
+	co_await waitForAll(keyValueFutures);
+
+	std::vector<ErrorOr<GetKeyValuesReply>> readReplies;
+	readReplies.reserve(storageServerInterfaces.size());
+	for (int j = 0; j < storageServerInterfaces.size(); j++) {
+		readReplies.push_back(keyValueFutures[j].get());
+	}
+	co_return readReplies;
+}
+
+// Compares the replies collected by readFromAllStorageServers() above against each other, reporting any
+// mismatch via ConsistencyCheck_DataInconsistent. Returns the range up to which all servers agree
+// (result.nextKey/result.lastReadKey) so the caller can page through the rest of the shard. `reverse` must
+// match whatever was passed to readFromAllStorageServers() for these replies -- see its comment for what
+// that changes about the replies' sort order.
+RangeConsistencyResult checkRangeReplies(const std::vector<StorageServerInterface>& storageServerInterfaces,
+                                         const std::vector<ErrorOr<GetKeyValuesReply>>& readReplies,
+                                         KeyRangeRef range,
+                                         KeySelector begin,
+                                         Reverse reverse,
+                                         UID myId,
+                                         const bool expectInjected) {
+	RangeConsistencyResult result(readReplies.size());
+
+	// The bounds of the request actually issued for this round (as opposed to `range`, which is the whole
+	// shard being scanned across potentially many rounds of pagination).
+	KeyRef roundBegin = reverse ? range.begin : begin.getKey();
+	KeyRef roundEnd = reverse ? begin.getKey() : range.end;
+
+	// Determine the first valid server and the correct stopping point, which is the minimum end key of all
+	// ranges with more data. When doing comparisons, we only look at the ranges of data up to that key.
+	// If all range replies have read to the end (i.e., more = false), we then look at the full reply.
+	// Note that "minima" are really "maxima" if reverse = true.
+	Version version = invalidVersion;
+	for (int j = 0; j < readReplies.size(); j++) {
+		ErrorOr<GetKeyValuesReply> rangeResult = readReplies[j];
+		if (isSuccessReply(rangeResult)) {
+			GetKeyValuesReply rangeReply = rangeResult.get();
+			DisabledTraceEvent("ConsistencyCheck_GetKeyValuesStream", myId)
+			    .detail("DataSize", rangeReply.data.size())
+			    .detail(format("StorageServer%d", j).c_str(), storageServerInterfaces[j].toString());
+			result.totalReadAmount += rangeReply.data.expectedSize();
+
+			Optional<KeyRef> lastKeyInReply;
+			if (!rangeReply.data.empty()) {
+				lastKeyInReply = rangeReply.data[rangeReply.data.size() - 1].key;
+			}
+
+			if (result.firstValidServer < 0) {
+				// First result with a valid response. All other responses will be judged against this one
+				DisabledTraceEvent("ConsistencyCheck_FirstValidServer", myId).detail("Iter", j);
+				result.firstValidServer = j;
+				version = rangeReply.version;
+				// A reply reporting more data ought to always have at least one key (that's what a
+				// resumption cursor would be based on), but tolerate the combination defensively rather
+				// than asserting/crashing over what should be an SS-side contract violation.
+				if (rangeReply.more && lastKeyInReply.present()) {
+					result.nextKey = lastKeyInReply;
+				}
+			} else if (rangeReply.more && lastKeyInReply.present() &&
+			           (!result.nextKey.present() || isKeyBeyond(result.nextKey.get(), lastKeyInReply, reverse))) {
+				// Keep track in nextKey the key in the replies that has made the least progress, i.e., the reply
+				// with "more" data that has the least-advanced final key. This serves as a water-mark as the
+				// furthest we have gone.
+				result.nextKey = lastKeyInReply;
+			}
+		} else {
+			result.allSucceeded = false;
+		}
+	}
+
+	// None of the servers returned valid data. We have to move on
+	if (result.firstValidServer < 0) {
+		return result;
+	}
+	GetKeyValuesReply reference = readReplies[result.firstValidServer].get();
+
+	// Read the resulting entries and compare against the reference
+	for (int j = 0; j < storageServerInterfaces.size(); j++) {
+		if (j == result.firstValidServer) {
+			// We are comparing servers to the reference server, so we skip comparing it to itself
+			continue;
+		}
+		ErrorOr<GetKeyValuesReply> rangeResult = readReplies[j];
+		if (!isSuccessReply(rangeResult)) {
+			// Unsuccessful read. Nothing to be read here, so move on to the next server
+			continue;
+		}
+
+		GetKeyValuesReply current = rangeResult.get();
+		if (current.data == reference.data && current.more == reference.more) {
+			// Replies match without doing more precise diff work. Move on to the next server
+			continue;
+		}
+
+		// If two storage servers paginated to different places, then the initial comparison could
+		// trigger even if both servers had identical data. That shouldn't be allowed by the API
+		// (as the read options determine the limits), but if it did happen or if the API changes,
+		// we wouldn't want to report that as a consistency violation.
+		//
+		// Note that the most extreme version of this is that both servers return identical data, but
+		// one has more set to true while the other has it set to false. This would represent an
+		// inconsistency (the one with "more" has keys that the one without it does not), but we will
+		// report that in the next iteration.
+		ReplyDiff diff = diffReplies(current, reference, result.nextKey, reverse);
+		if (diff.currentUniques == 0 && diff.referenceUniques == 0 && diff.valueMismatches == 0) {
+			if (current.more != reference.more && expectInjected &&
+			    fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+			        FDBSimConsistencyScanCorruptionType::FlipMoreFlag) {
+				result.foundInjected = true;
+			}
+			continue;
+		}
+
+		// Record the mismatches in the result
+		result.uniqueRefKeys[j] = diff.referenceUniques;
+		result.uniqueCmpKeys[j] = diff.currentUniques;
+		result.mismatchedValues[j] = diff.valueMismatches;
+		result.issues += diff.referenceUniques + diff.currentUniques + diff.valueMismatches;
+
+		// Be especially verbose if in simulation
+		if (g_network->isSimulated()) {
+			fmt::print("MISMATCH AT VERSION {0}\n", version);
+			printReplyMismatchDebug(j,
+			                        storageServerInterfaces[j],
+			                        current,
+			                        result.firstValidServer,
+			                        storageServerInterfaces[result.firstValidServer],
+			                        reference,
+			                        begin.getKey(),
+			                        range.end);
+		}
+
+		bool isTss = storageServerInterfaces[j].isTss() || storageServerInterfaces[result.firstValidServer].isTss();
+		bool isExpectedTSSMismatch = g_network->isSimulated() &&
+		                             fdbSimulationHasCapability(FDBSimulationCapability::WarnOnStorageMismatch) &&
+		                             isTss;
+
+		// It's possible that the storage servers are inconsistent in KillRegion
+		// workload where a forced recovery is performed. The killed storage server
+		// in the killed region returned first with a higher version, and a later
+		// response from a different region returned with a lower version (because
+		// of the rollback of the forced recovery). In this case, we should not fail
+		// the test. So we double-check both process are live.
+		bool isFailed =
+		    g_network->isSimulated() &&
+		    (g_simulator->getProcessByAddress(storageServerInterfaces[j].address())->failed ||
+		     g_simulator->getProcessByAddress(storageServerInterfaces[result.firstValidServer].address())->failed) &&
+		    (g_simulator->getProcessByAddress(storageServerInterfaces[j].address())->locality.dcId() !=
+		     g_simulator->getProcessByAddress(storageServerInterfaces[result.firstValidServer].address())
+		         ->locality.dcId());
+
+		bool matchedInjected = false;
+		if (!isTss && !isFailed && expectInjected) {
+			// Ensure the only corruption we see is the one that was expected to be injected.
+			ASSERT(fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.present());
+			if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+			    FDBSimConsistencyScanCorruptionType::FlipMoreFlag) {
+				// only more flag should be different
+				matchedInjected = false;
+			} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+			           FDBSimConsistencyScanCorruptionType::AddToEmpty) {
+				matchedInjected = (current.more == reference.more && current.data.size() + reference.data.size() == 1);
+				if (matchedInjected) {
+					KeyValueRef& kv = current.data.empty() ? reference.data[0] : current.data[0];
+					matchedInjected = kv.key == fdbSimulationPolicyState().consistencyScanCorruptRequestKey.get() &&
+					                  kv.value == "consistencyCheckCorruptValue"_sr;
+				}
+			} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+			           FDBSimConsistencyScanCorruptionType::RemoveLastRow) {
+				matchedInjected = (current.more == reference.more && diff.valueMismatches == 0 &&
+				                   diff.currentUniques + diff.referenceUniques == 1 &&
+				                   std::abs(current.data.size() - reference.data.size()) == 1);
+				if (matchedInjected) {
+					// make sure the unique was the last key
+					for (int i = 0; i < current.data.size() && i < reference.data.size(); i++) {
+						if (current.data[i] != reference.data[i]) {
+							matchedInjected = false;
+							break;
+						}
+					}
+				}
+			} else if (fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get() ==
+			           FDBSimConsistencyScanCorruptionType::ChangeFirstValue) {
+				matchedInjected =
+				    (current.more == reference.more && diff.valueMismatches == 1 && diff.currentUniques == 0 &&
+				     diff.referenceUniques == 0 && diff.valueMismatchKey == current.data[0].key &&
+				     std::abs(current.data[0].value.size() - reference.data[0].value.size()) == 1);
+				if (matchedInjected) {
+					// make sure the value difference was just truncating the last byte
+					Value shorter = current.data[0].value < reference.data[0].value ? current.data[0].value
+					                                                                : reference.data[0].value;
+					Value longer = current.data[0].value < reference.data[0].value ? reference.data[0].value
+					                                                               : current.data[0].value;
+					matchedInjected = (shorter == longer.substr(0, shorter.size()));
+				}
+			} else {
+				ASSERT(false);
+			}
+		}
+		if (matchedInjected) {
+			result.foundInjected = true;
+		}
+
+		TraceEvent(isExpectedTSSMismatch || isFailed || (expectInjected && matchedInjected) ? SevWarn : SevError,
+		           "ConsistencyCheck_DataInconsistent",
+		           myId)
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
+		    .detail(format("StorageServer%d", j).c_str(), storageServerInterfaces[j].id())
+		    .detail(format("StorageServer%d", result.firstValidServer).c_str(),
+		            storageServerInterfaces[result.firstValidServer].id())
+		    .detail("ShardBegin", range.begin)
+		    .detail("ShardEnd", range.end)
+		    .detail("RangeBegin", roundBegin)
+		    .detail("RangeEnd", roundEnd)
+		    .detail("VersionNumber", version)
+		    .detail(format("Server%dUniques", j).c_str(), diff.currentUniques)
+		    .detail(format("Server%dUniqueKey", j).c_str(), diff.currentUniqueKey)
+		    .detail(format("Server%dUniques", result.firstValidServer).c_str(), diff.referenceUniques)
+		    .detail(format("Server%dUniqueKey", result.firstValidServer).c_str(), diff.referenceUniqueKey)
+		    .detail("ValueMismatches", diff.valueMismatches)
+		    .detail("ValueMismatchKey", diff.valueMismatchKey)
+		    .detail("MatchingKVPairs", diff.matchingKVPairs)
+		    .detail(format("Server%dHasMore", j).c_str(), current.more)
+		    .detail(format("Server%dHasMore", result.firstValidServer).c_str(), reference.more)
+		    .detail("IsTSS", isTss ? "True" : "False")
+		    .detail("IsInjected", matchedInjected ? "True" : "False");
+
+		if (!isExpectedTSSMismatch && !isFailed) {
+			result.success = false;
+		} else if (isFailed) {
+			// If the storage servers are not live, we should retry. Report the read failure and let
+			// the caller decide whether to throw wrong_shard_server()
+			TraceEvent("ConsistencyCheck_StorageServerUnavailable", myId)
+			    .detail("StorageServer0", storageServerInterfaces[result.firstValidServer].id())
+			    .detail("StorageServer1", storageServerInterfaces[j].id())
+			    .detail("ShardBegin", printable(range.begin))
+			    .detail("ShardEnd", printable(range.end));
+			result.success = false;
+			result.readFailed = true;
+		}
+	}
+
+	if (expectInjected && result.foundInjected) {
+		// We found the expected injected fault. Log so and clear the state.
+		// Note that this is done outside the loop rather than the first time we see such an error. This is
+		// because the same injected fault can be seen multiple times in a single run if the reference server
+		// is the one that returned the injected corruption.
+		CODE_PROBE(true, "consistency check detected injected corruption");
+		TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption", myId)
+		    .detail("CorruptionType", fdbSimulationPolicyState().consistencyScanInjectedCorruptionType.get())
+		    .detail("Version", version);
+		fdbSimulationPolicyState().updateConsistencyScanState(FDBSimConsistencyScanState::Enabled_InjectCorruption,
+		                                                      FDBSimConsistencyScanState::Enabled_FoundCorruption);
+	}
+	return result;
 }
 
 // Get a list of storage servers(persisting keys within range "kr") from the master and compares them with the
@@ -1943,6 +2127,7 @@ Future<Void> checkDataConsistency(Database cx,
 			Key lastStartSampleKey;
 			int64_t totalReadAmount = 0;
 			KeyRange readRange = range;
+			KeySelector begin = firstGreaterOrEqual(range.begin);
 			Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 			// Read a limited number of entries at a time, repeating until all keys in the shard have been read
@@ -1951,31 +2136,21 @@ Future<Void> checkDataConsistency(Database cx,
 				try {
 					lastSampleKey = lastStartSampleKey;
 
-					// Get the min version of the storage servers
-					Version version = co_await getStorageServerReadVersion(cx);
-
-					std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
-					Optional<int> firstValidServer;
 					double dataConsistencyCheckBeginTime = now();
 
-					totalReadAmount = 0;
-					int failures = co_await consistencyCheckReadData(UID(),
-					                                                 cx,
-					                                                 readRange,
-					                                                 version,
-					                                                 &storageServerInterfaces,
-					                                                 &keyValueFutures,
-					                                                 &firstValidServer,
-					                                                 &totalReadAmount,
-					                                                 {});
-					if (failures > 0) {
-						testFailure("Data inconsistent", performQuiescentChecks, success, true);
-					}
-					dataConsistencyCheckTimeForThisShard += (now() - dataConsistencyCheckBeginTime);
+					std::vector<ErrorOr<GetKeyValuesReply>> readReplies =
+					    co_await readFromAllStorageServers(cx,
+					                                       storageServerInterfaces,
+					                                       range,
+					                                       begin,
+					                                       Reverse::False,
+					                                       Optional<Version>(),
+					                                       ReadOptions(ReadType::LOW, CacheResult::False),
+					                                       /*buggifyLimits=*/g_network->isSimulated());
 
 					// If the data is not available and we aren't relocating this shard
 					for (int i = 0; i < storageServerInterfaces.size(); i++) {
-						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[i].get();
+						ErrorOr<GetKeyValuesReply> rangeResult = readReplies[i];
 						if (!isRelocating && (!rangeResult.present() || rangeResult.get().error.present())) {
 							Error e = rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
 
@@ -1999,7 +2174,7 @@ Future<Void> checkDataConsistency(Database cx,
 								*success = false;
 								co_return;
 							}
-							// All shards should be available in quiscence
+							// All shards should be available in quiescence
 							if (performQuiescentChecks && !storageServerInterfaces[i].isTss()) {
 								testFailure(
 								    "Storage server unavailable", performQuiescentChecks, success, failureIsError);
@@ -2008,12 +2183,45 @@ Future<Void> checkDataConsistency(Database cx,
 						}
 					}
 
-					if (firstValidServer.present()) {
-						VectorRef<KeyValueRef> data = keyValueFutures[firstValidServer.get()].get().get().data;
+					// checkRangeReplies() only compares each server's reply up through the minimum key that
+					// every server (which reported more data remaining) actually reached. This avoids treating
+					// a misaligned pagination boundary between replies -- e.g. one server's reply happening to
+					// stop a few keys earlier than another's, even though both are otherwise consistent -- as a
+					// spurious set of "missing"/unique keys.
+					RangeConsistencyResult rangeConsistencyResult =
+					    checkRangeReplies(storageServerInterfaces, readReplies, range, begin, Reverse::False);
+					if (!rangeConsistencyResult.success) {
+						if (rangeConsistencyResult.issues > 0) {
+							testFailure("Data inconsistent", performQuiescentChecks, success, true);
+						}
+						if (rangeConsistencyResult.readFailed) {
+							// A storage server looks dead (e.g. mid forced-recovery). Retry this same batch
+							// rather than failing the check, mirroring the old wrong_shard_server()-triggered
+							// retry below.
+							co_await delay(1.0);
+							continue;
+						}
+					}
+					dataConsistencyCheckTimeForThisShard += (now() - dataConsistencyCheckBeginTime);
+
+					totalReadAmount = rangeConsistencyResult.totalReadAmount;
+
+					if (rangeConsistencyResult.firstValidServer >= 0) {
+						VectorRef<KeyValueRef> data = readReplies[rangeConsistencyResult.firstValidServer].get().data;
 
 						// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 						// shard size estimate
+						int countedKeys = 0;
 						for (int k = 0; k < data.size(); k++) {
+							if (isKeyBeyond(data[k].key, rangeConsistencyResult.nextKey, Reverse::False)) {
+								// We will resume the next round from nextKey (if set), and we don't want to double
+								// count anything. On a consistent cluster, there shouldn't be any such keys,
+								// but it is possible on a cluster with inconsistencies (including TSS-only
+								// inconsistencies) or if the storage server contract were only slightly modified
+								// to allow server-driven early termination.
+								break;
+							}
+							countedKeys++;
 							ByteSampleInfo sampleInfo = isKeyValueInSample(data[k]);
 							shardBytes += sampleInfo.size;
 
@@ -2033,16 +2241,20 @@ Future<Void> checkDataConsistency(Database cx,
 									splitBytes = sampledBytes;
 								}
 
-								/*TraceEvent("ConsistencyCheck_ByteSample").detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
-								  .detail("SampledBytes", sampleInfo.sampledSize).detail("Key",
-								  printable(data[k].key)).detail("KeySize", data[k].key.size()).detail("ValueSize",
-								  data[k].value.size());*/
+								DisabledTraceEvent("ConsistencyCheck_ByteSample")
+								    .detail("ShardBegin", printable(range.begin))
+								    .detail("ShardEnd", printable(range.end))
+								    .detail("SampledBytes", sampleInfo.sampledSize)
+								    .detail("Key", printable(data[k].key))
+								    .detail("KeySize", data[k].key.size())
+								    .detail("ValueSize", data[k].value.size());
 
 								// In data distribution, the splitting process ignores the first key in a shard.
 								// Thus, we shouldn't consider it when validating the upper bound of estimated shard
 								// sizes
-								if (k == 0)
+								if (k == 0) {
 									firstKeySampledBytes += sampleInfo.sampledSize;
+								}
 
 								sampledKeys++;
 
@@ -2057,8 +2269,8 @@ Future<Void> checkDataConsistency(Database cx,
 							}
 						}
 
-						// Accumulate number of keys in this shard
-						shardKeys += data.size();
+						// Accumulate the number of keys read from this shard
+						shardKeys += countedKeys;
 					}
 					// after requesting each shard, enforce rate limit based on how much data will likely be read
 					if (rateLimitForThisRound > 0) {
@@ -2087,12 +2299,14 @@ Future<Void> checkDataConsistency(Database cx,
 					    .detail("BytesReadInRange", bytesReadInRange)
 					    .detail("BytesReadInthisRound", bytesReadInthisRound);
 
-					// Advance to the next set of entries
-					if (firstValidServer.present() && keyValueFutures[firstValidServer.get()].get().get().more) {
-						VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer.get()].get().get().data;
-						ASSERT(!result.empty());
-						ASSERT(result[result.size() - 1].key != allKeys.end);
-						readRange = KeyRangeRef(keyAfter(result[result.size() - 1].key), range.end);
+					// Advance to the next set of entries. rangeConsistencyResult.nextKey is the minimum last key
+					// reported by any server that still had more data, i.e. the point through which every
+					// server's reply was actually compared -- not just where the first valid server happened
+					// to stop -- so the next read can't skip over data other replicas hadn't gotten to yet.
+					if (rangeConsistencyResult.nextKey.present()) {
+						ASSERT(rangeConsistencyResult.nextKey.get() != allKeys.end);
+						begin = firstGreaterThan(rangeConsistencyResult.nextKey.get());
+						readRange = KeyRangeRef(keyAfter(rangeConsistencyResult.nextKey.get()), range.end);
 						lastStartSampleKey = lastSampleKey;
 						if (readRange.empty()) {
 							break;
@@ -2107,7 +2321,7 @@ Future<Void> checkDataConsistency(Database cx,
 				}
 
 				if (err.code() == error_code_wrong_shard_server) {
-					// consistencyCheckReadData throws this error when a storage server is dead in simulation.
+					// A storage server is dead in simulation.
 					co_await delay(1.0);
 				} else {
 					co_await onErrorTr.onError(err);
