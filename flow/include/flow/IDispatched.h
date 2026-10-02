@@ -44,7 +44,7 @@ struct IDispatched {
 #define REGISTER_DISPATCHED(Type, Instance, Key, Func)                                                                 \
 	struct Type##Instance {                                                                                            \
 		Type##Instance() {                                                                                             \
-			ASSERT(Type::dispatches().find(Key) == Type::dispatches().end());                                          \
+			ASSERT(!Type::dispatches().contains(Key));                                                                 \
 			Type::dispatches()[Key] = Func;                                                                            \
 		}                                                                                                              \
 	};                                                                                                                 \

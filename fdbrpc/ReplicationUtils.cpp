@@ -869,7 +869,7 @@ void filterLocalityDataForPolicy(const std::set<std::string>& keys, LocalityData
 	for (auto iter = ld->_data.begin(); iter != ld->_data.end();) {
 		auto prev = iter;
 		iter++;
-		if (keys.find(prev->first.toString()) == keys.end()) {
+		if (!keys.contains(prev->first.toString())) {
 			ld->_data.erase(prev);
 		}
 	}

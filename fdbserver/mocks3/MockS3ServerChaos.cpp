@@ -230,7 +230,7 @@ Future<Void> maybeCorruptResponse(Reference<HTTP::OutgoingResponse> response, S3
 	// Only corrupt successful responses
 	if (response->code >= 200 && response->code < 300) {
 		// Invalidate ETag to simulate data corruption
-		if (response->data.headers.find("ETag") != response->data.headers.end()) {
+		if (response->data.headers.contains("ETag")) {
 			response->data.headers["ETag"] = "\"corrupted-" + deterministicRandom()->randomUniqueID().toString() + "\"";
 		}
 

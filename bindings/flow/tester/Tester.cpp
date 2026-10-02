@@ -1516,7 +1516,7 @@ struct AtomicOPFunc : InstructionFunc {
 		Standalone<StringRef> s3 = co_await items[2].value;
 		Standalone<StringRef> value = Tuple::unpack(s3).getString(0);
 
-		ASSERT(optionInfo.find(op.toString()) != optionInfo.end());
+		ASSERT(optionInfo.contains(op.toString()));
 
 		FDBMutationType atomicOp = optionInfo[op.toString()];
 
@@ -1569,7 +1569,7 @@ struct UnitTestsFunc : InstructionFunc {
 
 		const uint64_t locationCacheSize = 100001;
 		const uint64_t maxWatches = 10001;
-		const uint64_t timeout = 60 * 1000;
+		const uint64_t timeout = 60ULL * 1000;
 		const uint64_t noTimeout = 0;
 		const uint64_t retryLimit = 50;
 		const uint64_t noRetryLimit = -1;

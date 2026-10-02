@@ -163,9 +163,9 @@ public:
 	               Optional<StringRef> arg,
 	               bool intrans) {
 		auto transactionItr = transactionOptions.legalOptions.find(optionStr.toString());
-		if (transactionItr != transactionOptions.legalOptions.end())
+		if (transactionItr != transactionOptions.legalOptions.end()) {
 			setTransactionOption(tr, transactionItr->second, enabled, arg, intrans);
-		else {
+		} else {
 			fprintf(stderr,
 			        "ERROR: invalid option '%s'. Try `help options' for a list of available options.\n",
 			        optionStr.toString().c_str());
