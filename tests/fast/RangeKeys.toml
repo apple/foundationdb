@@ -1,0 +1,18 @@
+[configuration]
+minimumReplication = 2
+
+[[test]]
+testTitle = 'RangeKeysApi810'
+
+    [[test.workload]]
+    testName = 'RangeKeys'
+    apiVersion = 810
+    checkReplicas = true
+
+[[test]]
+testTitle = 'RangeKeysApi800Fallback'
+
+    [[test.workload]]
+    testName = 'RangeKeys'
+    apiVersion = 800
+    checkReplicas = true
