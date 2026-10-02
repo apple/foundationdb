@@ -582,6 +582,36 @@ ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcStream(const KeyRef& name
 	});
 }
 
+ThreadFuture<CDCStreamId> DLDatabase::registerNativeCdcOrderedStream(const KeyRef& name,
+                                                                     const std::vector<KeyRange>& ranges,
+                                                                     const std::vector<Key>& splitPoints) {
+	if (!api->databaseRegisterNativeCdcOrderedStream) {
+		return unsupported_operation();
+	}
+	if (ranges.empty() || ranges.size() > NATIVE_CDC_MAX_RANGES ||
+	    splitPoints.size() >= NATIVE_CDC_MAX_ORDERED_PARTITIONS) {
+		return client_invalid_operation();
+	}
+	std::vector<FdbCApi::FDBKeyRange> cRanges;
+	cRanges.reserve(ranges.size());
+	for (auto const& range : ranges) {
+		cRanges.push_back({ range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size() });
+	}
+	std::vector<FdbCApi::FDBKey> cSplitPoints;
+	cSplitPoints.reserve(splitPoints.size());
+	for (auto const& splitPoint : splitPoints) {
+		cSplitPoints.push_back({ splitPoint.begin(), splitPoint.size() });
+	}
+	FdbCApi::FDBFuture* f = api->databaseRegisterNativeCdcOrderedStream(
+	    db, name.begin(), name.size(), cRanges.data(), cRanges.size(), cSplitPoints.data(), cSplitPoints.size());
+	return toThreadFuture<CDCStreamId>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		uint64_t streamId;
+		FdbCApi::fdb_error_t error = api->futureGetUInt64(f, &streamId);
+		ASSERT(!error);
+		return streamId;
+	});
+}
+
 ThreadFuture<Void> DLDatabase::removeNativeCdcStream(const KeyRef& name) {
 	if (!api->databaseRemoveNativeCdcStream) {
 		return unsupported_operation();
@@ -794,6 +824,8 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_register_cdc_stream",
 	                   headerVersion >= ApiVersion::withNativeCdcApi().version());
+	loadClientFunction(
+	    &api->databaseRegisterNativeCdcOrderedStream, lib, fdbCPath, "fdb_database_register_cdc_ordered_stream", false);
 	loadClientFunction(&api->databaseRemoveNativeCdcStream,
 	                   lib,
 	                   fdbCPath,
@@ -1671,6 +1703,12 @@ ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, co
 ThreadFuture<CDCStreamId> MultiVersionDatabase::registerNativeCdcStream(const KeyRef& name,
                                                                         const std::vector<KeyRange>& ranges) {
 	return executeOperation(&IDatabase::registerNativeCdcStream, name, ranges);
+}
+
+ThreadFuture<CDCStreamId> MultiVersionDatabase::registerNativeCdcOrderedStream(const KeyRef& name,
+                                                                               const std::vector<KeyRange>& ranges,
+                                                                               const std::vector<Key>& splitPoints) {
+	return executeOperation(&IDatabase::registerNativeCdcOrderedStream, name, ranges, splitPoints);
 }
 
 ThreadFuture<Void> MultiVersionDatabase::removeNativeCdcStream(const KeyRef& name) {

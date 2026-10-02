@@ -29,6 +29,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "NativeCdcInternal.h"
+#include "NativeCdcOrderedMetadata.h"
 #include "fdbserver/core/NativeCdcMetadata.h"
 #include "flow/CodeProbe.h"
 #include "flow/Error.h"
@@ -49,6 +50,7 @@ class NativeCdcIdentifierAllocator {
 	bool sawStream = false;
 	CDCStreamId maxStreamId = 0;
 	std::unordered_map<CDCTagId, uint32_t> tagStreamCounts;
+	std::unordered_map<CDCTagId, int64_t> tagWriteRates;
 
 public:
 	void observeStreamId(CDCStreamId streamId) {
@@ -61,9 +63,17 @@ public:
 		++tagStreamCounts[tag.id];
 	}
 
+	void observeTagLoad(Tag tag, CDCTagLoadSample const& sample, ValueRef generation, Version readVersion) {
+		if (tag.locality == tagLocalityCDC && sample.assignmentChange == generation && sample.sampleVersion >= 0 &&
+		    sample.sampleVersion <= readVersion && sample.validThrough >= readVersion &&
+		    sample.bytesWrittenPerKSecond >= 0) {
+			tagWriteRates[tag.id] = sample.bytesWrittenPerKSecond;
+		}
+	}
+
 	bool hasStreams(Tag tag) const { return tagStreamCounts.contains(tag.id); }
 
-	std::pair<CDCStreamId, Tag> allocate(int tagCount) const {
+	std::pair<CDCStreamId, Tag> allocate(int tagCount, std::set<Tag> const& excluded = {}) const {
 		if (sawStream && maxStreamId == std::numeric_limits<CDCStreamId>::max()) {
 			throw operation_failed();
 		}
@@ -72,19 +82,46 @@ public:
 		if (!validNativeCdcTagCount(tagCount)) {
 			throw invalid_option_value();
 		}
+		const bool completeLoad = !tagStreamCounts.empty() &&
+		                          std::all_of(tagStreamCounts.begin(), tagStreamCounts.end(), [&](auto const& entry) {
+			                          return entry.first >= tagCount || tagWriteRates.contains(entry.first);
+		                          });
 		uint32_t leastStreams = std::numeric_limits<uint32_t>::max();
+		int64_t leastWriteRate = std::numeric_limits<int64_t>::max();
 		CDCTagId selectedTagId = 0;
 		for (uint32_t tagId = 0; tagId < static_cast<uint32_t>(tagCount); ++tagId) {
+			if (excluded.contains(Tag(tagLocalityCDC, static_cast<CDCTagId>(tagId)))) {
+				continue;
+			}
 			auto count = tagStreamCounts.find(static_cast<CDCTagId>(tagId));
 			const uint32_t streamCount = count == tagStreamCounts.end() ? 0 : count->second;
-			if (streamCount < leastStreams) {
+			const int64_t writeRate = completeLoad && streamCount > 0 ? tagWriteRates.at(tagId) : 0;
+			if (writeRate < leastWriteRate || (writeRate == leastWriteRate && streamCount < leastStreams)) {
+				leastWriteRate = writeRate;
 				leastStreams = streamCount;
 				selectedTagId = static_cast<CDCTagId>(tagId);
 			}
 		}
+		CODE_PROBE(completeLoad, "Native CDC registration places streams using fresh producer throughput");
+		if (leastStreams == std::numeric_limits<uint32_t>::max()) {
+			throw client_invalid_operation();
+		}
 		return { streamId, Tag(tagLocalityCDC, selectedTagId) };
 	}
 };
+
+CDCStreamId readStreamId(ValueRef value) {
+	const Value reference = cdcStreamNameValue(0);
+	if (value.size() != reference.size() ||
+	    !value.startsWith(reference.substr(0, reference.size() - sizeof(CDCStreamId)))) {
+		throw serialization_failed();
+	}
+	const CDCStreamId streamId = decodeCDCStreamNameValue(value);
+	if (streamId == 0) {
+		throw serialization_failed();
+	}
+	return streamId;
+}
 
 Future<Optional<UID>> getNativeCdcProxyAssignment(Transaction* tr, CDCStreamId streamId) {
 	RangeResult assignments = co_await tr->getRange(cdcProxyRangeFor(streamId), 2);
@@ -211,6 +248,22 @@ Future<Void> observeNativeCdcMetadata(Transaction* tr, NativeCdcIdentifierAlloca
 	co_await readNativeCdcCurrentTags(tr, &currentTags, allocator);
 	for (const auto& tagAssignment : currentTags) {
 		allocator->observeTag(tagAssignment.second);
+	}
+	if (!currentTags.empty()) {
+		const Value generation = (co_await tr->get(cdcProxyAssignmentChangeKey)).orDefault(Value());
+		const Version readVersion = co_await tr->getReadVersion();
+		Key begin = cdcTagLoadKeys.begin;
+		while (begin < cdcTagLoadKeys.end) {
+			RangeResult samples = co_await tr->getRange(KeyRangeRef(begin, cdcTagLoadKeys.end), CLIENT_KNOBS->TOO_MANY);
+			for (const auto& sample : samples) {
+				allocator->observeTagLoad(
+				    decodeCDCTagLoadKey(sample.key), decodeCDCTagLoadValue(sample.value), generation, readVersion);
+			}
+			if (!samples.more) {
+				break;
+			}
+			begin = keyAfter(samples.back().key);
+		}
 	}
 }
 
@@ -417,6 +470,196 @@ Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, std::vector<K
 	}
 }
 
+Future<CDCStreamId> registerNativeCdcOrderedStream(Database cx,
+                                                   Key name,
+                                                   std::vector<KeyRange> ranges,
+                                                   std::vector<Key> splitPoints) {
+	normalizeNativeCdcStreamRanges(name, ranges);
+	const auto partitionRanges = nativeCdcOrderedPartitionRanges(ranges, splitPoints);
+	Transaction tr(cx);
+	while (true) {
+		Error error;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			const Key nameKey = cdcStreamNameKeyFor(name);
+			const Optional<Value> existing = co_await tr.get(nameKey);
+			if (existing.present()) {
+				const CDCStreamId streamId = decodeCDCStreamNameValue(existing.get());
+				const auto snapshot = co_await readNativeCdcOrderedSnapshot(&tr, streamId);
+				if (!snapshot.present() || snapshot.get().metadata.ranges() != ranges ||
+				    snapshot.get().metadata.splitPoints() != splitPoints) {
+					throw client_invalid_operation();
+				}
+				co_return streamId;
+			}
+			const ClientDBInfo clientInfo = cx->clientInfo->get();
+			validateNativeCdcEnabled(clientInfo.nativeCdcEnabled);
+			if (!validNativeCdcTagCount(clientInfo.nativeCdcTagCount) ||
+			    partitionRanges.size() > clientInfo.nativeCdcTagCount) {
+				throw client_invalid_operation();
+			}
+			if (clientInfo.cdcProxies.empty()) {
+				tr.reset();
+				co_await cx->clientInfo->onChange();
+				continue;
+			}
+			if (std::any_of(clientInfo.cdcProxies.begin(),
+			                clientInfo.cdcProxies.end(),
+			                [](const CDCProxyInterface& proxy) { return !proxy.supportsOrderedStreams; })) {
+				throw unsupported_operation();
+			}
+			NativeCdcIdentifierAllocator allocator;
+			co_await observeNativeCdcMetadata(&tr, &allocator);
+			const CDCStreamId logicalId = allocator.allocate(clientInfo.nativeCdcTagCount).first;
+			allocator.observeStreamId(logicalId);
+			const Version registrationVersion = co_await tr.getReadVersion();
+			std::vector<CDCStreamId> partitions;
+			std::set<Tag> selectedTags;
+			for (size_t i = 0; i < partitionRanges.size(); ++i) {
+				const auto [streamId, tag] = allocator.allocate(clientInfo.nativeCdcTagCount, selectedTags);
+				Optional<UID> sharedOwner;
+				if (allocator.hasStreams(tag)) {
+					sharedOwner = co_await getNativeCdcProxyAssignmentForTag(&tr, tag);
+				}
+				if (sharedOwner.present() &&
+				    std::none_of(clientInfo.cdcProxies.begin(),
+				                 clientInfo.cdcProxies.end(),
+				                 [&](const CDCProxyInterface& proxy) { return proxy.id() == sharedOwner.get(); })) {
+					throw wrong_shard_server();
+				}
+				const UID owner = sharedOwner.present() ? sharedOwner.get()
+				                                        : clientInfo.cdcProxies[i % clientInfo.cdcProxies.size()].id();
+				tr.set(cdcStreamKeyFor(streamId), cdcStreamKeysValue(partitionRanges[i]));
+				tr.set(cdcTagHistoryKeyFor(streamId, registrationVersion, tag), Value());
+				tr.set(cdcProxyKeyFor(streamId, owner), Value());
+				tr.set(cdcOrderedParentKeyFor(streamId), cdcOrderedParentValue(logicalId));
+				tr.atomicOp(cdcMinVersionKeyFor(streamId),
+				            cdcVersionstampedMinVersionValue(),
+				            MutationRef::SetVersionstampedValue);
+				if (!sharedOwner.present()) {
+					tr.set(cdcTagOwnerKeyFor(tag), cdcTagOwnerValue(streamId));
+				}
+				partitions.push_back(streamId);
+				selectedTags.insert(tag);
+				allocator.observeStreamId(streamId);
+				allocator.observeTag(tag);
+			}
+			tr.set(nameKey, cdcStreamNameValue(logicalId));
+			tr.set(cdcMaxStreamIdKey, cdcMaxStreamIdValue(partitions.back()));
+			tr.set(cdcOrderedStreamKeyFor(logicalId),
+			       cdcOrderedStreamValue(NativeCdcOrderedMetadata(ranges, splitPoints, partitions)));
+			signalNativeCdcProxyAssignmentChange(&tr);
+			co_await tr.commit();
+			co_return logicalId;
+		} catch (Error& e) {
+			error = e;
+		}
+		co_await tr.onError(error);
+	}
+}
+
+Future<bool> removeNativeCdcOrderedStream(Database cx, Key name, CDCStreamId expectedId) {
+	if (name.empty() || expectedId == 0) {
+		throw client_invalid_operation();
+	}
+	Optional<NativeCdcOrderedMetadata> expectedMetadata;
+	Transaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			const Optional<Value> groupValue = co_await tr.get(cdcOrderedStreamKeyFor(expectedId));
+			if (!groupValue.present()) {
+				co_return expectedMetadata.present();
+			}
+			const NativeCdcOrderedMetadata currentMetadata = decodeCDCOrderedStreamValue(groupValue.get());
+			if (!expectedMetadata.present()) {
+				expectedMetadata = currentMetadata;
+			} else if (currentMetadata != expectedMetadata.get()) {
+				throw client_invalid_operation();
+			}
+			const Key nameKey = cdcStreamNameKeyFor(name);
+			const Optional<Value> currentId = co_await tr.get(nameKey);
+			if (!currentId.present() || readStreamId(currentId.get()) != expectedId) {
+				co_return true;
+			}
+			const Optional<NativeCdcOrderedSnapshot> snapshot = co_await readNativeCdcOrderedSnapshot(&tr, expectedId);
+			if (!snapshot.present() || snapshot.get().metadata != expectedMetadata.get()) {
+				throw serialization_failed();
+			}
+
+			std::set<Tag> removedTags;
+			for (const CDCStreamId child : expectedMetadata.get().partitions()) {
+				const KeyRange historyRange = cdcTagHistoryRangeFor(child);
+				const int historyKeyBytes = cdcTagHistoryKeyFor(child, 0, Tag(tagLocalityCDC, 0)).size();
+				Key begin = historyRange.begin;
+				bool foundHistory = false;
+				while (begin < historyRange.end) {
+					const RangeResult history =
+					    co_await tr.getRange(KeyRangeRef(begin, historyRange.end), CLIENT_KNOBS->TOO_MANY);
+					for (const auto& entry : history) {
+						if (entry.key.size() != historyKeyBytes) {
+							throw serialization_failed();
+						}
+						const auto decoded = decodeCDCTagHistoryKey(entry.key);
+						if (decoded.streamId != child || decoded.tag.locality != tagLocalityCDC ||
+						    decoded.version < 0) {
+							throw serialization_failed();
+						}
+						removedTags.insert(decoded.tag);
+						foundHistory = true;
+					}
+					if (!history.more) {
+						break;
+					}
+					if (history.empty()) {
+						throw serialization_failed();
+					}
+					begin = keyAfter(history.back().key);
+				}
+				if (!foundHistory) {
+					throw serialization_failed();
+				}
+			}
+			for (const Tag tag : removedTags) {
+				const Key ownerKey = cdcTagOwnerKeyFor(tag);
+				const Optional<Value> owner = co_await tr.get(ownerKey);
+				if (owner.present()) {
+					const CDCStreamId ownerId = readStreamId(owner.get());
+					const auto& children = expectedMetadata.get().partitions();
+					if (std::find(children.begin(), children.end(), ownerId) != children.end()) {
+						tr.clear(ownerKey);
+					}
+				}
+				retireNativeCdcTag(&tr, tag);
+			}
+			tr.clear(nameKey);
+			tr.clear(cdcOrderedStreamKeyFor(expectedId));
+			for (const CDCStreamId child : expectedMetadata.get().partitions()) {
+				tr.clear(cdcStreamKeyFor(child));
+				tr.clear(cdcTagHistoryRangeFor(child));
+				tr.clear(cdcProxyRangeFor(child));
+				tr.clear(cdcMinVersionKeyFor(child));
+				tr.clear(cdcOrderedParentKeyFor(child));
+			}
+			signalNativeCdcProxyAssignmentChange(&tr);
+			co_await tr.commit();
+			CODE_PROBE(true, "Ordered native CDC removal retires all partition tags atomically");
+			TraceEvent("NativeCdcOrderedStreamRemoved")
+			    .detail("StreamId", expectedId)
+			    .detail("PartitionCount", expectedMetadata.get().partitions().size())
+			    .detail("RetiredTagCount", removedTags.size())
+			    .detail("CommitVersion", tr.getCommittedVersion());
+			co_return true;
+		} catch (Error& error) {
+			err = error;
+		}
+		co_await tr.onError(err);
+	}
+}
+
 Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, UID proxyId) {
 	if (name.empty() || streamId == 0) {
 		throw client_invalid_operation();
@@ -577,5 +820,41 @@ TEST_CASE("/NativeCDC/LifecycleAllocation") {
 	ASSERT_EQ(sharedId, 1);
 	ASSERT_EQ(sharedTag, Tag(tagLocalityCDC, 0));
 
+	return Void();
+}
+
+TEST_CASE("/NativeCDC/ThroughputPlacement") {
+	const Value generation = "current"_sr;
+	const Tag hotTag(tagLocalityCDC, 0);
+	const Tag coldTag(tagLocalityCDC, 1);
+	const CDCTagLoadSample hot{ generation, 100, 200, 100000 };
+	const CDCTagLoadSample cold{ generation, 100, 200, 0 };
+	auto select = [&](CDCTagLoadSample const& hotSample, Optional<CDCTagLoadSample> coldSample, int tagCount = 2) {
+		NativeCdcIdentifierAllocator allocator;
+		allocator.observeTag(hotTag);
+		allocator.observeTag(coldTag);
+		allocator.observeTag(coldTag);
+		allocator.observeTagLoad(hotTag, hotSample, generation, 150);
+		if (coldSample.present()) {
+			allocator.observeTagLoad(coldTag, coldSample.get(), generation, 150);
+		}
+		return allocator.allocate(tagCount).second;
+	};
+	ASSERT_EQ(select(hot, cold), coldTag);
+	ASSERT_EQ(select(hot, Optional<CDCTagLoadSample>()), hotTag);
+	ASSERT_EQ(select(hot, cold, 3), Tag(tagLocalityCDC, 2));
+
+	CDCTagLoadSample invalid = cold;
+	invalid.assignmentChange = "previous"_sr;
+	ASSERT_EQ(select(hot, invalid), hotTag);
+	invalid = cold;
+	invalid.validThrough = 149;
+	ASSERT_EQ(select(hot, invalid), hotTag);
+	invalid = cold;
+	invalid.sampleVersion = 151;
+	ASSERT_EQ(select(hot, invalid), hotTag);
+	invalid = cold;
+	invalid.bytesWrittenPerKSecond = -1;
+	ASSERT_EQ(select(hot, invalid), hotTag);
 	return Void();
 }

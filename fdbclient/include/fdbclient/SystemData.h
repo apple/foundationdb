@@ -176,6 +176,32 @@ Value dataMoveValue(const DataMoveMetaData& dataMove);
 UID decodeDataMoveKey(const KeyRef& key);
 DataMoveMetaData decodeDataMoveValue(const ValueRef& value);
 
+// Migration-state sentinel: written by DD after a shard-encode
+// migration rewrite pass completes with no more work in the current
+// direction. Fast-path skip for subsequent DD inits — a single-key
+// read tells DD whether the metadata is already at the target
+// encoding for the effective shard_metadata_format target (config, or
+// the SHARD_ENCODE_LOCATION_METADATA knob when the config is UNSET).
+//
+// Values:
+//   "old"    -> rollback (tag-based) rewrite drained; safe to downgrade.
+//   "new"    -> reserved for a sealed forward completion; NOT currently
+//               written (see below).
+//   absent   -> unknown / in-progress. In the rollback direction DD does
+//               the full scan. In the forward direction DD does not scan;
+//               it only clears a stale "old" sentinel if present.
+//
+// The rollback rewriter CLEARS this key as the first commit of its pass
+// (so an audit tool observing the cluster during a rewrite doesn't see a
+// stale "complete" marker) and SETS it to "old" only when a pass finds no
+// more new-format entries anywhere. The forward path does NOT seal a
+// "new" value — it only clears any stale "old"
+// (clearStaleShardEncodedRewriteSentinel); forward completion is reached
+// lazily by natural DD moves and is not marked here.
+extern const KeyRef shardEncodeMigrationCompleteKey;
+extern const ValueRef shardEncodeMigrationValueOld;
+extern const ValueRef shardEncodeMigrationValueNew;
+
 //    "\xff/serverKeys/[[serverID]]/[[begin]]" := "[[serverKeysTrue]]" |" [[serverKeysFalse]]"
 //	An internal mapping of what shards any given server currently has ownership of
 //	Using the serverID as a prefix, then followed by the beginning of the shard range
@@ -325,6 +351,21 @@ Key cdcTagHistoryKeyFor(CDCStreamId streamId, Version version, Tag tag);
 KeyRange cdcTagHistoryRangeFor(CDCStreamId streamId);
 CDCTagHistoryEntry decodeCDCTagHistoryKey(KeyRef const& key);
 CDCTagHistoryEntry decodeCDCTagHistoryEntry(KeyRef const& key, ValueRef const& value);
+
+// Advisory producer-write samples. The assignment generation invalidates every
+// comparison when registrations, tag histories, or durable ownership change.
+struct CDCTagLoadSample {
+	Value assignmentChange;
+	Version sampleVersion = invalidVersion;
+	Version validThrough = invalidVersion;
+	int64_t bytesWrittenPerKSecond = 0;
+};
+
+extern const KeyRangeRef cdcTagLoadKeys;
+Key cdcTagLoadKeyFor(Tag tag);
+Tag decodeCDCTagLoadKey(KeyRef const& key);
+Value cdcTagLoadValue(CDCTagLoadSample const& sample);
+CDCTagLoadSample decodeCDCTagLoadValue(ValueRef const& value);
 
 // "\xff\x02/cdc/tagOwner/[[Tag]]" := "[[CDCStreamId]]"
 // Derived lookup hint, not authoritative ownership. Validate the stream is active

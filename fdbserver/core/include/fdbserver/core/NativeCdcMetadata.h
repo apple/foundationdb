@@ -63,6 +63,13 @@ Future<NativeCdcRegistrationResult> prepareNativeCdcStreamRegistration(Transacti
 // feature gated; drain and cleanup operations remain available for streams
 // persisted before native CDC is disabled.
 Future<CDCStreamId> registerNativeCdcStream(Database cx, Key name, std::vector<KeyRange> ranges, UID proxyId);
+Future<CDCStreamId> registerNativeCdcOrderedStream(Database cx,
+                                                   Key name,
+                                                   std::vector<KeyRange> ranges,
+                                                   std::vector<Key> splitPoints);
+// False delegates a stream without ordered metadata to ordinary removal. True also covers a completed retry;
+// only an exact logical identity match can remove a group and its children.
+Future<bool> removeNativeCdcOrderedStream(Database cx, Key name, CDCStreamId expectedId);
 // Persists per-tag final-pop watermarks before removing stream metadata.
 Future<bool> removeNativeCdcStream(Database cx, Key name, CDCStreamId streamId, UID proxyId);
 // Atomically moves any streams assigned to a failed proxy to its replacement.

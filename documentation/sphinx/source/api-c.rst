@@ -625,10 +625,52 @@ select API version 800 or later before calling these functions.
    ranges return a future with ``client_invalid_operation``. The future returns
    the ``uint64_t`` stream ID, extracted with :func:`fdb_future_get_uint64()`.
 
+.. function:: FDBFuture* fdb_database_register_cdc_ordered_stream(FDBDatabase* database, uint8_t const* name, int name_length, FDBKeyRange const* ranges, int range_count, FDBKey const* split_points, int split_point_count)
+
+   Registers one logical CDC stream with fixed key-range partitions. The range
+   union follows :func:`fdb_database_register_cdc_stream()` semantics. Supply
+   zero to 63 split points in strictly increasing key order, strictly inside
+   the range union's outer bounds. Points may lie in gaps or at range boundaries,
+   but each resulting partition must contain selected keys. Zero points creates
+   one partition; ``split_points`` may be ``NULL`` when its count is zero.
+   The partition count must not exceed the cluster's configured CDC tag-pool
+   size; otherwise registration fails with ``client_invalid_operation``.
+   The input arrays and all referenced bytes are copied before this call returns.
+
+   The FDB client reads partitions concurrently and merges complete commit-version
+   groups before returning them through :func:`fdb_cdc_consumer_consume()`.
+   Applications use the existing create, resume, consume, acknowledge, and position
+   functions with the logical stream ID. A quiet or lagging partition can delay
+   delivery until the client establishes that all partitions are complete through
+   the delivered version. A clear crossing a partition boundary may appear as
+   multiple clipped clear mutations in the same version group.
+
+   Client read-ahead and replies are bounded. A complete version group exceeding
+   either its partition's RPC quota or the aggregate reply limit fails with
+   ``server_overloaded``; the client never splits a group to fit the limit.
+
+   Registration is idempotent for the same name, canonical range union, and split
+   points. The registration mode and partition boundaries are immutable; changing
+   them requires removing the stream and registering again. The future returns
+   the logical ``uint64_t`` stream ID through :func:`fdb_future_get_uint64()`.
+   This additive symbol is optional when loading external client libraries;
+   an older external client returns ``unsupported_operation`` for ordered
+   registration while retaining its ordinary CDC interface.
+
+   All published CDC proxies must advertise ordered-stream support before
+   registration can succeed. Registration is committed atomically by a CDC
+   proxy. Use ordered-capable clients and serving proxies for the stream's
+   entire lifecycle, and drain and remove ordered streams before rolling back
+   to implementations that lack this support.
+
 .. function:: FDBFuture* fdb_database_remove_cdc_stream(FDBDatabase* database, uint8_t const* name, int name_length)
 
    Removes the named stream and relinquishes its unread history. Removing a
    missing name succeeds. The returned future contains no value.
+
+   Removing an ordered stream requires a published CDC proxy that supports
+   ordered streams; it atomically removes the logical stream and all partitions
+   while preserving the retention requirements of other streams sharing tags.
 
 .. function:: FDBFuture* fdb_database_list_cdc_streams(FDBDatabase* database)
 
@@ -698,6 +740,15 @@ select API version 800 or later before calling these functions.
    consumer. Independently, a consumer handle may have only one consume or
    acknowledge operation outstanding at a time. The returned future contains
    no value.
+
+   For ordered streams, a canceled or failed consume or acknowledgement
+   invalidates unacknowledged read-ahead. Before the next operation, the handle
+   rereads the common durable acknowledgement and resets its cursor to that
+   frontier. A retry of acknowledgement can therefore acknowledge a reconciled
+   cursor earlier than the previously delivered position; inspect
+   :func:`fdb_cdc_consumer_get_position()` and tolerate replay on subsequent
+   consumption. If the interrupted acknowledgement committed, its durable
+   progress is preserved.
 
 .. function:: fdb_error_t fdb_cdc_consumer_get_position(FDBCdcConsumer* consumer, uint64_t* out_stream_id, int64_t* out_last_consumed_version)
 

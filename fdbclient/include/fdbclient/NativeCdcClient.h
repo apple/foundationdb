@@ -32,6 +32,7 @@
 // bindings. Keep this header independent from NativeAPI so multi-version
 // client plumbing does not depend on the native client implementation.
 constexpr int NATIVE_CDC_MAX_RANGES = 1024;
+constexpr int NATIVE_CDC_MAX_ORDERED_PARTITIONS = 64;
 
 struct NativeCdcStreamInfo {
 	Key name;

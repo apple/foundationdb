@@ -18,9 +18,6 @@
  * limitations under the License.
  */
 
-#ifndef BOOST_SYSTEM_NO_LIB
-#define BOOST_SYSTEM_NO_LIB
-#endif
 #ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #endif
@@ -43,7 +40,7 @@
 
 using namespace boost::asio;
 
-static io_service ios;
+static io_context ios;
 
 class SimExternalConnectionImpl {
 public:
@@ -150,7 +147,7 @@ NetworkAddress SimExternalConnection::getPeerAddress() const {
 	if (addr.is_v6()) {
 		return NetworkAddress(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
 	} else {
-		return NetworkAddress(addr.to_v4().to_ulong(), endpoint.port());
+		return NetworkAddress(addr.to_v4().to_uint(), endpoint.port());
 	}
 }
 
@@ -167,20 +164,18 @@ std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(co
                                                                               DNSCache* dnsCache) {
 	ip::tcp::resolver resolver(ios);
 	try {
-		auto iter = resolver.resolve(host, service);
-		decltype(iter) end;
+		auto results = resolver.resolve(host, service);
 		std::vector<NetworkAddress> addrs;
-		while (iter != end) {
-			auto endpoint = iter->endpoint();
+		for (const auto& entry : results) {
+			auto endpoint = entry.endpoint();
 			auto addr = endpoint.address();
 			// register the endpoint as public so that if it does happen to be an fdb process, we can connect to it
 			// successfully
 			if (addr.is_v6()) {
 				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port(), true, false);
 			} else {
-				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port(), true, false);
+				addrs.emplace_back(addr.to_v4().to_uint(), endpoint.port(), true, false);
 			}
-			++iter;
 		}
 		if (addrs.empty()) {
 			throw lookup_failed();
@@ -218,14 +213,14 @@ static void testEchoServer(size_t expectedBytes) {
 	static constexpr auto readBufferSize = 1000;
 	bool delayedFirstResponse = false;
 	size_t bytesRead = 0;
-	io_service ios;
+	io_context ios;
 	ip::tcp::acceptor acceptor(ios, ip::tcp::endpoint(ip::tcp::v4(), testEchoServerPort));
 	ip::tcp::socket socket(ios);
 	acceptor.accept(socket);
 	while (bytesRead < expectedBytes) {
 		char readBuffer[readBufferSize];
 		boost::system::error_code err;
-		auto length = socket.read_some(mutable_buffers_1(readBuffer, readBufferSize), err);
+		auto length = socket.read_some(mutable_buffer(readBuffer, readBufferSize), err);
 		if (err == boost::asio::error::eof) {
 			return;
 		}

@@ -11,6 +11,9 @@ faultInjection = false
 enable_native_cdc = true
 native_cdc_tag_count = 2
 native_cdc_retag_cleanup_interval = 0.25
+# Fixture commits the retag; disabling production moves must leave finalization active.
+native_cdc_live_retagging_enabled = false
+native_cdc_tag_sample_interval = 0.25
 cdc_proxy_buffer_bytes = 4608
 maximum_peek_bytes = 1152
 cdc_proxy_consume_reply_bytes = 4096

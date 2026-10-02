@@ -27,6 +27,11 @@
 #include "fdbclient/NativeAPI.h"
 
 class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
+	class OrderedState;
+	Reference<OrderedState> ordered;
+	static Future<Void> initialize(Reference<NativeCdcConsumer> self);
+	static Future<CDCConsumeReply> consumeOrdered(Reference<NativeCdcConsumer> self);
+	static Future<Void> acknowledgeOrdered(Reference<NativeCdcConsumer> self);
 	static Future<CDCConsumeReply> consumeImpl(Reference<NativeCdcConsumer> self);
 	static Future<Void> acknowledgeImpl(Reference<NativeCdcConsumer> self);
 
@@ -37,14 +42,17 @@ class NativeCdcConsumer : public ReferenceCounted<NativeCdcConsumer> {
 	Optional<UID> deliveryProxyId;
 	UID consumerId = deterministicRandom()->randomUniqueID();
 	bool operationOutstanding = false;
+	bool initialized = false;
+	int64_t replyByteLimit = 0;
 
 public:
-	NativeCdcConsumer(Database cx, CDCCursor position)
-	  : cx(cx), currentPosition(position), lastAcknowledgedVersion(position.lastConsumedVersion) {}
-	NativeCdcConsumer(Database cx, CDCCursor position, Version lastAcknowledgedVersion)
-	  : cx(cx), currentPosition(position), lastAcknowledgedVersion(lastAcknowledgedVersion) {}
+	NativeCdcConsumer(Database cx, CDCCursor position);
+	NativeCdcConsumer(Database cx, CDCCursor position, Version lastAcknowledgedVersion);
+	~NativeCdcConsumer();
 
 	// Operations advance shared delivery state; only one may be outstanding.
+	// Ordered consumes can fail with server_overloaded when a complete version exceeds a reply limit or
+	// unacknowledged proxy buffers block another partition's read. The durable group acknowledgement is unchanged.
 	Future<CDCConsumeReply> consume();
 	Future<Void> acknowledge();
 	const CDCCursor& position() const { return currentPosition; }
@@ -57,6 +65,12 @@ public:
 // Ranges form an immutable union. Registration normalizes overlap and adjacency
 // so equivalent range sets have the same identity regardless of input order.
 Future<CDCStreamId> registerNativeCdcStreamClient(Database cx, Key name, std::vector<KeyRange> ranges);
+// Split points fix physical delivery partitions. Consumption remains one complete,
+// commit-version-ordered feed with one cursor and one durable acknowledgement.
+Future<CDCStreamId> registerNativeCdcOrderedStreamClient(Database cx,
+                                                         Key name,
+                                                         std::vector<KeyRange> ranges,
+                                                         std::vector<Key> splitPoints);
 Future<Void> removeNativeCdcStreamClient(Database cx, Key name);
 Future<std::vector<NativeCdcStreamInfo>> listNativeCdcStreamsClient(Database cx);
 
@@ -65,6 +79,8 @@ struct NativeCdcStreamStatus {
 	Optional<UID> owner;
 	bool ownerPublished = false;
 	std::vector<Tag> tags;
+	Optional<CDCStreamId> orderedParent;
+	std::vector<CDCStreamId> partitions;
 };
 
 struct NativeCdcTagStatus {

@@ -193,6 +193,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	bool testRetiredRecovery;
 	bool blockRetiredPopWithLiveStream;
 	bool testRetiredSharedTagSnapshot;
+	bool testThroughputRetagging;
 	bool testRetagCompatibility;
 	bool testRetaggingMemoryBound;
 	bool prepareRestartDrain;
@@ -434,6 +435,25 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		co_return committed;
 	}
 
+	Future<Void> writeRetagTraffic(Database cx,
+	                               std::vector<int> indices,
+	                               std::vector<Reference<RetagMarkerLedger>> ledgers,
+	                               Future<Void> stop) {
+		while (!stop.isReady()) {
+			co_await writeRetagMarkers(cx, indices, ledgers);
+			co_await (stop || delay(delayBetweenRounds));
+		}
+	}
+
+	Future<Void> consumeRetagTraffic(Reference<NativeCdcConsumer> consumer,
+	                                 Reference<RetagMarkerLedger> ledger,
+	                                 Future<Void> stop) {
+		while (!stop.isReady()) {
+			ledger->observe(co_await timeoutError(consumer->consume(), operationTimeout));
+			co_await (stop || delay(0.01));
+		}
+	}
+
 	Future<Void> drainRetagMarkers(int index, Reference<RetagMarkerLedger> ledger, bool acknowledge) {
 		const double deadline = now() + operationTimeout;
 		while (streams[index].consumer->position().lastConsumedVersion < ledger->lastCommittedVersion()) {
@@ -446,6 +466,23 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			const Version position = streams[index].consumer->position().lastConsumedVersion;
 			co_await timeoutError(streams[index].consumer->acknowledge(), operationTimeout);
 			ledger->acknowledged(position);
+		}
+	}
+
+	Future<std::pair<int, RetagSnapshot>> waitForPendingRetag(Database cx, std::vector<int> candidates, Tag oldTag) {
+		const double deadline = now() + operationTimeout;
+		while (true) {
+			for (const int index : candidates) {
+				RetagSnapshot snapshot = co_await readRetagSnapshot(cx, index);
+				if (snapshot.state.pending && snapshot.state.assignment.tag != oldTag) {
+					ASSERT_EQ(snapshot.history.size(), 2);
+					ASSERT_EQ(snapshot.history.front().tag, oldTag);
+					ASSERT_LT(snapshot.state.minVersion, snapshot.state.assignment.version);
+					co_return std::make_pair(index, std::move(snapshot));
+				}
+			}
+			ASSERT_LT(now(), deadline);
+			co_await delay(0.05);
 		}
 	}
 
@@ -462,6 +499,81 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			ASSERT_LT(now(), deadline);
 			co_await delay(0.05);
 		}
+	}
+
+	Future<bool> retagLoadReady(Transaction* tr, Tag coldTag, Tag hotTag) {
+		const Optional<Value> generation = co_await tr->get(cdcProxyAssignmentChangeKey);
+		const Version readVersion = co_await tr->getReadVersion();
+		const auto current = [&](CDCTagLoadSample const& sample) {
+			return generation.present() && sample.assignmentChange == generation.get() && sample.sampleVersion >= 0 &&
+			       sample.sampleVersion <= readVersion && sample.validThrough >= readVersion;
+		};
+		const Optional<Value> coldValue = co_await tr->get(cdcTagLoadKeyFor(coldTag));
+		if (!coldValue.present()) {
+			co_return false;
+		}
+		const CDCTagLoadSample cold = decodeCDCTagLoadValue(coldValue.get());
+		if (!current(cold) || cold.bytesWrittenPerKSecond != 0) {
+			co_return false;
+		}
+		const Optional<Value> hotValue = co_await tr->get(cdcTagLoadKeyFor(hotTag));
+		if (!hotValue.present()) {
+			co_return false;
+		}
+		const CDCTagLoadSample hot = decodeCDCTagLoadValue(hotValue.get());
+		co_return current(hot) && hot.bytesWrittenPerKSecond > 0;
+	}
+
+	Future<Void> addStreamWithRetagLoad(Database cx, KeyRange keys, Tag coldTag, Tag hotTag) {
+		StreamState stream;
+		stream.name = Key(StringRef(format("native-cdc-e2e/stream/%04d", nextStreamNumber++)));
+		stream.keys = std::move(keys);
+		const std::vector<KeyRange> ranges{ stream.keys };
+		const double deadline = now() + operationTimeout;
+		const CDCProxyInterface proxy = co_await timeoutError(
+		    waitForAssignedProxy(cx, streams.front().consumer->position().streamId), operationTimeout);
+		Transaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				ASSERT_LT(now(), deadline);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				const Optional<Value> currentId = co_await tr.get(cdcStreamNameKeyFor(stream.name));
+				if (currentId.present()) {
+					// A successful but ambiguous registration invalidates its own sample generation.
+					const CDCStreamId streamId = decodeCDCStreamNameValue(currentId.get());
+					const Optional<NativeCdcTagState> state = co_await readNativeCdcTagState(&tr, streamId);
+					ASSERT(state.present() && !state.get().pending);
+					ASSERT(state.get().ranges == std::vector<KeyRange>{ stream.keys });
+					ASSERT_EQ(state.get().assignment.tag, coldTag);
+				} else {
+					// A recovery can expire a sample between separate transactions. Guard the actual allocation
+					// snapshot with ordinary reads, and recheck the guard after every transaction retry.
+					if (!(co_await retagLoadReady(&tr, coldTag, hotTag))) {
+						tr.reset();
+						co_await delay(0.05);
+						continue;
+					}
+				}
+				const NativeCdcRegistrationResult registration =
+				    co_await prepareNativeCdcStreamRegistration(&tr, stream.name, ranges, proxy.id());
+				if (currentId.present()) {
+					ASSERT_EQ(registration.streamId, decodeCDCStreamNameValue(currentId.get()));
+				} else {
+					ASSERT(registration.requiresCommit);
+				}
+				if (registration.requiresCommit) {
+					co_await tr.commit();
+				}
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+		stream.consumer = co_await timeoutError(createNativeCdcConsumer(cx, stream.name), operationTimeout);
+		streams.push_back(std::move(stream));
 	}
 
 	Future<RetagSnapshot> commitRetagFixture(Database cx,
@@ -640,6 +752,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> validateRetaggingMemoryBound(Database cx) {
+		ASSERT(!SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED);
 		ASSERT_EQ(streams.size(), 2);
 		const RetagSnapshot original = co_await readRetagSnapshot(cx, 0);
 		const RetagSnapshot destination = co_await readRetagSnapshot(cx, 1);
@@ -779,6 +892,149 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 		}
 		CODE_PROBE(true,
 		           "Native CDC retag compatibility preserves shared-tag data and supports returning to an old tag");
+		for (const auto& stream : streams) {
+			co_await timeoutError(removeNativeCdcStreamClient(cx, stream.name), operationTimeout);
+		}
+		streams.clear();
+		co_await timeoutError(waitForRetiredTagCleanup(cx), operationTimeout);
+		co_await timeoutError(waitForFullyRecovered(), operationTimeout);
+	}
+
+	Future<Void> validateThroughputRetagging(Database cx) {
+		ASSERT(SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED);
+		ASSERT_EQ(streams.size(), 4);
+		ASSERT_EQ(cx->clientInfo->get().nativeCdcTagCount, 2);
+		std::vector<Reference<RetagMarkerLedger>> ledgers;
+		std::vector<RetagSnapshot> initial;
+		for (int i = 0; i < static_cast<int>(streams.size()); ++i) {
+			ledgers.push_back(makeReference<RetagMarkerLedger>(streams[i].keys.begin));
+			initial.push_back(co_await readRetagSnapshot(cx, i));
+			ASSERT(!initial.back().state.pending);
+			ASSERT_EQ(initial.back().state.proxyId, initial.front().state.proxyId);
+		}
+		const Tag originalTag = initial.front().state.assignment.tag;
+		std::vector<int> hotStreams;
+		for (int i = 0; i < static_cast<int>(initial.size()); ++i) {
+			if (initial[i].state.assignment.tag == originalTag) {
+				hotStreams.push_back(i);
+			}
+		}
+		ASSERT_EQ(hotStreams.size(), 2);
+		co_await writeRetagMarkers(cx, { 0, 1, 2, 3 }, ledgers);
+
+		Promise<Void> firstWriterStop;
+		Promise<Void> firstConsumerStop;
+		Future<Void> firstWriter = writeRetagTraffic(cx, hotStreams, ledgers, firstWriterStop.getFuture());
+		std::vector<Future<Void>> firstConsumers;
+		firstConsumers.reserve(hotStreams.size());
+		for (const int index : hotStreams) {
+			firstConsumers.push_back(
+			    consumeRetagTraffic(streams[index].consumer, ledgers[index], firstConsumerStop.getFuture()));
+		}
+		const auto firstMove = co_await waitForPendingRetag(cx, hotStreams, originalTag);
+		const int moved = firstMove.first;
+		const int sibling = hotStreams.front() == moved ? hotStreams.back() : hotStreams.front();
+		const CDCTagHistoryEntry firstAssignment = firstMove.second.state.assignment;
+		const Tag otherTag = firstAssignment.tag;
+		co_await writeRetagMarkers(cx, hotStreams, ledgers);
+		co_await delay(3 * SERVER_KNOBS->NATIVE_CDC_TAG_SAMPLE_INTERVAL);
+		const RetagSnapshot held = co_await readRetagSnapshot(cx, moved);
+		ASSERT_EQ(held.history.size(), 2);
+		ASSERT_EQ(held.state.assignment.version, firstAssignment.version);
+		ASSERT_EQ(held.state.minVersion, initial[moved].state.minVersion);
+		firstWriterStop.send(Void());
+		co_await firstWriter;
+		firstConsumerStop.send(Void());
+		co_await waitForAll(firstConsumers);
+		co_await drainRetagMarkers(moved, ledgers[moved], false);
+		ledgers[moved]->verifyBoundary(firstAssignment.version);
+		CODE_PROBE(true, "Native CDC measured producer imbalance retags a stream with unacknowledged live consumption");
+
+		const CDCProxyInterface originalOwner =
+		    co_await timeoutError(waitForAssignedProxy(cx, held.state.streamId), operationTimeout);
+		ledgers[moved]->allowReplay();
+		const int previousReplays = ledgers[moved]->replayCount();
+		co_await timeoutError(haltProxyUntilReplaced(cx, originalOwner, false), operationTimeout);
+		co_await timeoutError(waitForAssignedProxy(cx, held.state.streamId, originalOwner.id()), operationTimeout);
+		co_await forceTransactionSystemRecovery();
+		co_await writeRetagMarkers(cx, { moved, sibling }, ledgers);
+		co_await drainRetagMarkers(moved, ledgers[moved], false);
+		ASSERT_GT(ledgers[moved]->replayCount(), previousReplays);
+		ledgers[moved]->verifyBoundary(firstAssignment.version);
+		const RetagSnapshot recovered = co_await readRetagSnapshot(cx, moved);
+		ASSERT_EQ(recovered.state.minVersion, held.state.minVersion);
+		co_await drainRetagMarkers(moved, ledgers[moved], true);
+		co_await waitForCanonicalRetag(cx, moved, firstAssignment);
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) Database::run owns the closure.
+		co_await cx.run([originalTag, firstAssignment](Transaction* tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			const Optional<Value> retired = co_await tr->get(cdcRetiredTagPopKeyFor(originalTag));
+			const Optional<Value> watermark = co_await tr->get(cdcRetiredTagPopVersionKeyFor(originalTag));
+			ASSERT(retired.present() && watermark.present());
+			ASSERT_GE(decodeCDCMinVersionValue(watermark.get()), firstAssignment.version);
+		});
+		CODE_PROBE(true, "Native CDC pending retag survives owner replacement and transaction system recovery");
+
+		// A sole hot stream cannot improve the peak by moving. Its tag now has one stream while the idle tag has three,
+		// so registration must use measured producer load rather than the otherwise preferable stream count.
+		Promise<Void> siblingWriterStop;
+		Future<Void> siblingWriter = writeRetagTraffic(cx, { sibling }, ledgers, siblingWriterStop.getFuture());
+		const Key extraKey = keyForIndex(4);
+		co_await timeoutError(
+		    addStreamWithRetagLoad(cx, KeyRange(KeyRangeRef(extraKey, keyAfter(extraKey))), otherTag, originalTag),
+		    operationTimeout);
+		const int extra = static_cast<int>(streams.size()) - 1;
+		ledgers.push_back(makeReference<RetagMarkerLedger>(extraKey));
+		const RetagSnapshot extraState = co_await readRetagSnapshot(cx, extra);
+		ASSERT_EQ(extraState.state.assignment.tag, otherTag);
+		siblingWriterStop.send(Void());
+		co_await siblingWriter;
+		CODE_PROBE(true, "Native CDC registration chooses a measured cooler tag despite a larger stream count");
+
+		// Replica-local load windows can disagree even after one reports zero. Keep the hot sibling pending so
+		// measured balancing must return the acknowledged stream, independently of load estimates or tie-breaking.
+		const RetagSnapshot siblingState = co_await readRetagSnapshot(cx, sibling);
+		ASSERT_EQ(siblingState.state.assignment.tag, originalTag);
+		const RetagSnapshot pendingSibling = co_await commitRetagFixture(cx, sibling, siblingState, otherTag, 16, {});
+		Promise<Void> secondWriterStop;
+		Promise<Void> secondConsumerStop;
+		Future<Void> secondWriter = writeRetagTraffic(cx, { moved, sibling }, ledgers, secondWriterStop.getFuture());
+		Future<Void> secondConsumer =
+		    consumeRetagTraffic(streams[moved].consumer, ledgers[moved], secondConsumerStop.getFuture());
+		const auto secondMove = co_await waitForPendingRetag(cx, { moved, sibling }, otherTag);
+		ASSERT_EQ(secondMove.first, moved);
+		const CDCTagHistoryEntry secondAssignment = secondMove.second.state.assignment;
+		ASSERT_EQ(secondAssignment.tag, originalTag);
+		co_await writeRetagMarkers(cx, { moved, sibling }, ledgers);
+		secondWriterStop.send(Void());
+		co_await secondWriter;
+		secondConsumerStop.send(Void());
+		co_await secondConsumer;
+		co_await drainRetagMarkers(moved, ledgers[moved], true);
+		ledgers[moved]->verifyBoundary(secondAssignment.version);
+		co_await waitForCanonicalRetag(cx, moved, secondAssignment);
+		CODE_PROBE(true,
+		           "Native CDC measured retagging returns to an old tag only after the first move is acknowledged");
+
+		co_await writeRetagMarkers(cx, { extra }, ledgers);
+		const RetagSnapshot lagging = co_await readRetagSnapshot(cx, sibling);
+		ASSERT_EQ(lagging.state.minVersion, initial[sibling].state.minVersion);
+		ASSERT(lagging.state.pending);
+		ASSERT_EQ(lagging.history.size(), 2);
+		ASSERT_EQ(lagging.history.front().tag, originalTag);
+		ASSERT_EQ(lagging.history.front().version, initial[sibling].state.assignment.version);
+		ASSERT_EQ(lagging.state.assignment.tag, pendingSibling.state.assignment.tag);
+		ASSERT_EQ(lagging.state.assignment.version, pendingSibling.state.assignment.version);
+		ledgers[sibling]->allowReplay();
+		streams[sibling].consumer = resumeNativeCdcConsumer(cx, CDCCursor(lagging.state.streamId, invalidVersion));
+		for (int i = 0; i < static_cast<int>(streams.size()); ++i) {
+			if (i != moved) {
+				co_await drainRetagMarkers(i, ledgers[i], true);
+			}
+		}
+		ledgers[sibling]->verifyBoundary(pendingSibling.state.assignment.version);
+		CODE_PROBE(true, "Native CDC repeated retag cleanup preserves an unacknowledged shared tag sibling");
 		for (const auto& stream : streams) {
 			co_await timeoutError(removeNativeCdcStreamClient(cx, stream.name), operationTimeout);
 		}
@@ -2756,6 +3012,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<RetagRestartMarkers> loadRetaggedRestartState(Database cx, Key name, Reference<NativeCdcConsumer> consumer) {
+		ASSERT(!SERVER_KNOBS->NATIVE_CDC_TAG_BALANCING_ENABLED);
 		const std::vector<NativeCdcStreamInfo> listed =
 		    co_await timeoutError(listNativeCdcStreamsClient(cx), operationTimeout);
 		ASSERT_EQ(listed.size(), 1);
@@ -2789,6 +3046,7 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 	}
 
 	Future<Void> finishRetaggedRestartState(Database cx, RetagRestartMarkers markers) {
+		ASSERT(!SERVER_KNOBS->NATIVE_CDC_LIVE_RETAGGING_ENABLED);
 		const RetagSnapshot acknowledged = co_await readRetagSnapshot(cx, 0);
 		co_await waitForCanonicalRetag(cx, 0, acknowledged.state.assignment);
 		// NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines) Database::run owns the closure.
@@ -2801,7 +3059,8 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			const bool prepared = co_await retagNativeCdcStream(tr, completed.state, markers.oldTag);
 			ASSERT(!prepared);
 		});
-		CODE_PROBE(true, "Native CDC disabled admission finishes pending retags without admitting new moves");
+		CODE_PROBE(true,
+		           "Native CDC disabled admission and balancing finish pending retags without admitting new moves");
 	}
 
 	Future<Void> prepareRestartDrainState(Database cx) {
@@ -2974,6 +3233,10 @@ class NativeCdcEndToEndWorkload : public TestWorkload {
 			co_await validateRetagCompatibility(cx);
 			co_return;
 		}
+		if (testThroughputRetagging) {
+			co_await validateThroughputRetagging(cx);
+			co_return;
+		}
 		if (testRetaggingMemoryBound) {
 			co_await validateRetaggingMemoryBound(cx);
 			co_return;
@@ -3098,6 +3361,7 @@ public:
 		testRetiredRecovery = getOption(options, "testRetiredRecovery"_sr, false);
 		blockRetiredPopWithLiveStream = getOption(options, "blockRetiredPopWithLiveStream"_sr, false);
 		testRetiredSharedTagSnapshot = getOption(options, "testRetiredSharedTagSnapshot"_sr, false);
+		testThroughputRetagging = getOption(options, "testThroughputRetagging"_sr, false);
 		testRetagCompatibility = getOption(options, "testRetagCompatibility"_sr, false);
 		testRetaggingMemoryBound = getOption(options, "testRetaggingMemoryBound"_sr, false);
 		prepareRestartDrain = getOption(options, "prepareRestartDrain"_sr, false);
@@ -3123,13 +3387,20 @@ public:
 		ASSERT_GE(retentionValidationDelay, 0.0);
 		ASSERT(!(prepareRestartDrain && drainAfterRestart));
 		ASSERT(!testRetaggedRestart || prepareRestartDrain || drainAfterRestart);
-		ASSERT(!testRetagTransactionRetries || testRetagCompatibility || testRetaggedRestart);
+		ASSERT(!testRetagTransactionRetries || testThroughputRetagging || testRetagCompatibility ||
+		       testRetaggedRestart);
 		ASSERT(!(testReplyChunking && (testOversizedPeek || testDurableAckScan)));
 		ASSERT(!(testOversizedPeek && testDurableAckScan));
 		ASSERT(!(testRetiredSharedTagSnapshot && testRetiredRecovery));
-		ASSERT(!(testRetagCompatibility && testMemoryBound));
-		ASSERT(!testRetaggingMemoryBound || (!testRetagCompatibility && !testMemoryBound && !prepareRestartDrain &&
-		                                     !drainAfterRestart && initialStreamCount == 2 && keyCount >= 2));
+		ASSERT(!(testThroughputRetagging && testMemoryBound));
+		ASSERT(!(testRetagCompatibility && (testThroughputRetagging || testMemoryBound)));
+		ASSERT(!testRetaggingMemoryBound ||
+		       (!testThroughputRetagging && !testRetagCompatibility && !testMemoryBound && !prepareRestartDrain &&
+		        !drainAfterRestart && initialStreamCount == 2 && keyCount >= 2));
+		ASSERT(!testThroughputRetagging ||
+		       (initialStreamCount == 4 && maxStreamCount >= 5 && keyCount >= 5 && memoryTestValueBytes >= 32 &&
+		        delayBetweenRounds > 0 && !prepareRestartDrain && !drainAfterRestart && !testRetiredSharedTagSnapshot &&
+		        !testOversizedPeek && !testReplyChunking && !testDurableAckScan));
 		ASSERT(!testRetagCompatibility ||
 		       (initialStreamCount == 4 && keyCount >= 4 && memoryTestValueBytes >= 32 && !prepareRestartDrain &&
 		        !drainAfterRestart && !testRetiredSharedTagSnapshot && !testOversizedPeek && !testReplyChunking &&
@@ -3153,7 +3424,7 @@ public:
 		if (prepareRestartDrain) {
 			return prepareRestartDrainSetup(cx);
 		}
-		if (testRetagCompatibility || testRetaggingMemoryBound) {
+		if (testThroughputRetagging || testRetagCompatibility || testRetaggingMemoryBound) {
 			return initializeRetaggingStreams(cx);
 		}
 		if (testRetiredSharedTagSnapshot) {

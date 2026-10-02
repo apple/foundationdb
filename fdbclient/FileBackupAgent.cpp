@@ -7712,6 +7712,7 @@ public:
 						errDoc.setKey("Message", msg.c_str());
 						errDoc.setKey("RelativeSeconds",
 						              (ver - recentReadVersion) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+						errorList.push_back(errDoc);
 					}
 					doc.setKey("Errors", errorList);
 				}

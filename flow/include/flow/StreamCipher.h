@@ -37,8 +37,6 @@
 // Wrapper class for openssl implementation of AES GCM
 // encryption/decryption
 class StreamCipherKey : NonCopyable {
-	static UID globalKeyId;
-	static std::unique_ptr<StreamCipherKey> globalKey;
 	static std::unordered_map<UID, StreamCipherKey*> cipherKeys;
 	UID id;
 	std::unique_ptr<uint8_t[]> arr;
