@@ -3,6 +3,7 @@ Checks: >
   -*,
   bugprone-argument-comment,
   bugprone-assignment-in-if-condition,
+  bugprone-branch-clone,
   bugprone-chained-comparison,
   bugprone-copy-constructor-init,
   bugprone-dangling-handle,
@@ -15,6 +16,7 @@ Checks: >
   bugprone-macro-repeated-side-effects,
   bugprone-misplaced-widening-cast,
   bugprone-move-forwarding-reference,
+  bugprone-nondeterministic-pointer-iteration-order,
   bugprone-posix-return,
   bugprone-redundant-branch-condition,
   bugprone-return-const-ref-from-parameter,
@@ -35,9 +37,11 @@ Checks: >
   bugprone-undefined-memory-manipulation,
   bugprone-unhandled-self-assignment,
   bugprone-unique-ptr-array-mismatch,
+  bugprone-unused-return-value,
   bugprone-use-after-move,
   bugprone-virtual-near-miss,
   cppcoreguidelines-avoid-capturing-lambda-coroutines,
+  cppcoreguidelines-avoid-reference-coroutine-parameters,
   misc-coroutine-hostile-raii,
   misc-redundant-expression,
   modernize-use-auto,
@@ -46,6 +50,7 @@ Checks: >
   modernize-use-using,
   performance-for-range-copy,
   performance-implicit-conversion-in-loop,
+  performance-inefficient-algorithm,
   performance-inefficient-vector-operation,
   performance-move-const-arg,
   performance-move-constructor-init,
@@ -56,6 +61,13 @@ Checks: >
   readability-delete-null-pointer,
   readability-duplicate-include,
   readability-inconsistent-ifelse-braces
+WarningsAsErrors: >
+  bugprone-branch-clone,
+  bugprone-nondeterministic-pointer-iteration-order,
+  bugprone-unused-return-value,
+  cppcoreguidelines-avoid-reference-coroutine-parameters,
+  performance-inefficient-algorithm
+HeaderFilterRegex: ''
 CheckOptions:
   - key: bugprone-dangling-handle.HandleClasses
     value: 'std::basic_string_view;std::experimental::basic_string_view;std::span;StringRef'

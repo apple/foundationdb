@@ -3,23 +3,45 @@ Clang-Tidy
 ##########
 
 ``clang-tidy`` is a static analysis tool that detects common programming errors, enforces coding standards, and suggests modern C++ improvements.
-It runs as part of CI on pull requests targeting ``main``. CI checks eligible changed C/C++ files with ``--warnings-as-errors='*'``, so findings fail the clang-tidy job. The workflow currently describes this job as non-required.
+It runs as part of CI on pull requests targeting ``main`` and ``release-*``. CI checks entire eligible changed C/C++ files with ``--warnings-as-errors='*'``, so findings fail the clang-tidy job even outside changed lines. It also runs ``clang-tidy --verify-config --config-file=.clang-tidy`` to reject unsupported checks or options, including on configuration-only changes. The workflow currently describes this job as non-required.
 
 This guide explains how to run ``clang-tidy`` locally so you can fix issues before pushing.
 
 What clang-tidy checks
 ======================
 
-FoundationDB configures 55 named checks in the ``.clang-tidy`` file at the repository root. The
-active set depends on the clang-tidy version and can be inspected with ``clang-tidy --list-checks``.
+FoundationDB configures 60 named checks in the ``.clang-tidy`` file at the repository root.
+Use clang-tidy 22 or later for the complete check set; CI pins a checksum-verified
+clang-tidy 22.1.8 package. Inspect enabled checks with ``clang-tidy --list-checks``.
 The intent is to enable more as we go forward. Here are some example rules:
 
-* **36 Bugprone rules** -- catch potential runtime errors, including unsafe self-assignment, forwarding constructors that hide copy or move constructors, narrow accumulation initializers, mismatched argument comments, obvious infinite loops, chained comparisons, swapped arguments, integer division in floating-point calculations, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, incorrect erase/remove calls, and incorrect POSIX error checks
-* **1 C++ Core Guidelines rule** -- catch unsafe captures in coroutine lambdas (``cppcoreguidelines-avoid-capturing-lambda-coroutines``)
+* **39 Bugprone rules** -- catch potential runtime errors, including unsafe self-assignment, forwarding constructors that hide copy or move constructors, narrow accumulation initializers, mismatched argument comments, obvious infinite loops, chained comparisons, swapped arguments, integer division in floating-point calculations, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, incorrect erase/remove calls, incorrect POSIX error checks, discarded return values, duplicate branches, and address-dependent pointer iteration
+* **2 C++ Core Guidelines rules** -- catch unsafe captures in coroutine lambdas and reference parameters in coroutines (``cppcoreguidelines-avoid-capturing-lambda-coroutines``, ``cppcoreguidelines-avoid-reference-coroutine-parameters``)
 * **2 Misc rules** -- catch redundant expressions and RAII objects held across coroutine suspension points
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
-* **5 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, repeated vector growth in simple loops, pointless moves, and move constructors that copy movable members (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-inefficient-vector-operation``, ``performance-move-const-arg``, ``performance-move-constructor-init``)
+* **6 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, repeated vector growth in simple loops, inefficient generic algorithms over associative containers, pointless moves, and move constructors that copy movable members (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-inefficient-vector-operation``, ``performance-inefficient-algorithm``, ``performance-move-const-arg``, ``performance-move-constructor-init``)
 * **7 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
+
+The configuration's ``WarningsAsErrors`` policy makes these five checks fatal
+for ordinary and CMake-integrated clang-tidy runs as well as CI:
+
+* ``bugprone-unused-return-value`` checks ignored results of selected standard-library functions, using its default function and return-type lists.
+* ``bugprone-branch-clone`` detects identical conditional branches.
+* ``bugprone-nondeterministic-pointer-iteration-order`` detects pointer iteration whose order depends on addresses.
+* ``cppcoreguidelines-avoid-reference-coroutine-parameters`` detects reference parameters that may outlive their referents when a coroutine suspends.
+* ``performance-inefficient-algorithm`` recommends associative-container member operations in place of slower generic algorithms.
+
+Review any intentional exception and use a check-specific ``NOLINT`` or
+``NOLINTNEXTLINE`` with its safety rationale. For coroutine reference parameters,
+establish that the referent outlives every use, or that the coroutine copies the
+value before it can suspend and never uses the reference afterward. For pointer
+iteration, establish that changing the traversal order cannot affect observable
+behavior or simulation determinism. Do not suppress either check across whole
+files to accommodate individual safe cases.
+
+``HeaderFilterRegex: ''`` preserves the scope used before clang-tidy 22:
+included-header diagnostics remain filtered out, while a header checked directly
+is analyzed as the main file. This keeps CI focused on eligible touched files.
 
 ``misc-coroutine-hostile-raii`` checks Flow's blocking ``MutexHolder`` and
 ``ThreadSpinLockHolder`` guards as well as ``std::lock_guard`` and
