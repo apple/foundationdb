@@ -2950,7 +2950,17 @@ Future<Void> testExpireBulkDumpData(std::string url) {
 	// ...and the tree a surviving snapshot still names is untouched.
 	ASSERT_EQ(sharedLeft.size(), 1);
 
+	// deleteContainer was only ever assumed to reclaim this data, as a side effect of removing the
+	// container's data path -- which is why expire was the command that needed teaching. Assert it, so
+	// the two commands cannot start leaking in different ways unnoticed.
+	std::string containerDir = url.substr(std::string("file://").size());
+	std::string sharedDir = joinPath(joinPath(containerDir, "bulkdump_data"), sharedJob);
+	ASSERT(directoryExists(sharedDir));
+
 	co_await c->deleteContainer();
+
+	fmt::print("after deleteContainer: sharedJob tree present={}\n", directoryExists(sharedDir));
+	ASSERT(!directoryExists(sharedDir));
 	co_return;
 }
 
