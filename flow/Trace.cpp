@@ -40,6 +40,7 @@
 #include "flow/TDMetric.h"
 #include "MetricSample.h"
 #include "flow/network.h"
+#include "flow/UnitTest.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -382,13 +383,28 @@ public:
 		fields.setAnnotated();
 	}
 
-	void writeEvent(TraceEventFields fields, std::string trackLatestKey, bool trackError) {
+	void writeEvent(TraceEventFields fields, std::string trackLatestKey, bool trackError, bool logLine = true) {
 		MutexHolder hold(mutex);
 
 		annotateEvent(fields);
 
 		if (!trackLatestKey.empty()) {
 			fields.addField("TrackLatestType", "Original");
+		}
+
+		// latestEventCache is a snapshot of the most recent fields for a key (used by status/introspection),
+		// independent of whether this particular line ends up written to the trace log. Update it before any of
+		// the log-buffering logic below, so a dropped/overflowed/never-logged (logLine=false) line never leaves
+		// the cache stale.
+		if (trackError) {
+			latestEventCache.setLatestError(fields);
+		}
+		if (!trackLatestKey.empty()) {
+			latestEventCache.set(trackLatestKey, fields);
+		}
+
+		if (!logLine) {
+			return;
 		}
 
 		if (!isOpen() &&
@@ -418,13 +434,6 @@ public:
 			if (++tracedLines > FLOW_KNOBS->MAX_TRACE_LINES && failedLineOverflow == 0) {
 				failedLineOverflow = 1; // we only want to do this once
 			}
-		}
-
-		if (trackError) {
-			latestEventCache.setLatestError(fields);
-		}
-		if (!trackLatestKey.empty()) {
-			latestEventCache.set(trackLatestKey, fields);
 		}
 	}
 
@@ -1032,7 +1041,14 @@ BaseTraceEvent::State BaseTraceEvent::init() {
 		}
 	}
 
-	if (enabled) {
+	// If trackLatest() was already called (i.e. before this, our first detail()/init()-triggering
+	// call), an otherwise fully-disabled event still gets its fields captured -- just never logged.
+	// Never touches an event that would have been logged anyway (see promoteToTrackedIfDisabled()).
+	if (!trackingKey.empty()) {
+		enabled.promoteToTrackedIfDisabled();
+	}
+
+	if (enabled.capturesDetails()) {
 		//    fprintf(stderr, "[%s:%d](%s) [%p] enabled tmpEventMetric [%s]\n", __FILE_NAME__, __LINE__, __FUNCTION__,
 		//            this, type);
 		tmpEventMetric = std::make_unique<DynamicEventMetric>(MetricNameRef());
@@ -1119,7 +1135,7 @@ BaseTraceEvent& TraceEvent::error(class Error const& error) {
 
 BaseTraceEvent& BaseTraceEvent::detailImpl(std::string&& key, std::string&& value, bool writeEventMetricField) {
 	init();
-	if (enabled) {
+	if (enabled.capturesDetails()) {
 		++g_allocation_tracing_disabled;
 		if (maxFieldLength >= 0 && value.size() > maxFieldLength) {
 			value = value.substr(0, maxFieldLength) + "...";
@@ -1161,7 +1177,7 @@ void BaseTraceEvent::setField(const char* key, const std::string& value) {
 }
 
 BaseTraceEvent& BaseTraceEvent::detailf(std::string key, const char* valueFormat, ...) {
-	if (enabled) {
+	if (enabled.capturesDetails()) {
 		va_list args;
 		va_start(args, valueFormat);
 		std::string value;
@@ -1175,7 +1191,7 @@ BaseTraceEvent& BaseTraceEvent::detailf(std::string key, const char* valueFormat
 }
 
 BaseTraceEvent& BaseTraceEvent::log(const char* valueFormat, ...) {
-	if (enabled) {
+	if (enabled.capturesDetails()) {
 		va_list args;
 		va_start(args, valueFormat);
 		std::string value;
@@ -1190,7 +1206,7 @@ BaseTraceEvent& BaseTraceEvent::log(const char* valueFormat, ...) {
 }
 
 BaseTraceEvent& BaseTraceEvent::detailfNoMetric(std::string&& key, const char* valueFormat, ...) {
-	if (enabled) {
+	if (enabled.capturesDetails()) {
 		va_list args;
 		va_start(args, valueFormat);
 		std::string value;
@@ -1382,6 +1398,17 @@ void BaseTraceEvent::writeEvent() {
 						g_traceLog.logMetrics(severity, type, id, event_ts);
 					}
 				}
+			} else if (enabled.capturesDetails()) {
+				// TRACKED: fields were captured (trackLatest() was called before our first detail()), but this
+				// event must never be written to the trace log or counted toward any log-volume accounting --
+				// only latestEventCache gets updated.
+				double time = TraceEvent::getCurrentTime();
+				fields.mutate(timeIndex).second = format("%.6f", time);
+				if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+					fields.mutate(timeIndex + 1).second = TraceEvent::printRealTime(time);
+				}
+				setThreadId();
+				g_traceLog.writeEvent(fields, trackingKey, /*trackError=*/false, /*logLine=*/false);
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "TraceEventLoggingError").errorUnsuppressed(e);
@@ -1831,3 +1858,88 @@ std::string traceableStringToString(const char* value, size_t S) {
 // correct outcome
 static_assert("InvalidToken"_audit, "Either AuditedEvent has a bug or whitelisting for this event type has changed");
 static_assert(!"nvalidToken"_audit, "AuditedEvent has a bug");
+
+TEST_CASE("/flow/Trace/trackLatestBypassesSuppression") {
+	// trackLatest() called before the first detail() should still get its fields into
+	// latestEventCache even if the event itself ends up fully suppressed -- this is the guarantee
+	// BaseTraceEvent::State::TRACKED exists to provide.
+	//
+	// suppressFor()'s suppression decision only runs if isNetworkThread() -- true for every real
+	// production trace event (always run from within g_network->run()'s scheduler), but this test
+	// body executes synchronously before main() ever reaches g_network->run() (UnitTestRunner's
+	// own runTests() actor runs synchronously up to its first real co_await), so it isn't true yet
+	// on this thread unless we say so explicitly.
+	TraceEvent::setNetworkThread();
+
+	std::string type = "UnitTestTrackLatestBypass_" + deterministicRandom()->randomUniqueID().toString();
+	std::string key = "UnitTestTrackLatestBypassKey_" + deterministicRandom()->randomUniqueID().toString();
+
+	// First event of this type establishes suppression for the next 1000s; it is itself unsuppressed.
+	TraceEvent(SevInfo, type.c_str()).suppressFor(1000.0).detail("Iteration", 0);
+
+	// Second event of the same type, within the suppression window, would normally be fully
+	// disabled (its detail() calls would be no-ops) -- but trackLatest() is called first here.
+	// Called as separate statements, not chained, because trackLatest() returns BaseTraceEvent&,
+	// which narrows away TraceEvent::suppressFor() for any call chained after it. The nested scope
+	// makes ev's destructor (which actually writes the event) run before we check the cache below.
+	{
+		TraceEvent ev(SevInfo, type.c_str());
+		ev.trackLatest(key);
+		ev.suppressFor(1000.0);
+		// Sanity check the premise: this event must actually be suppressed for the rest of the
+		// test to mean anything.
+		ASSERT(!ev.isEnabled());
+		ev.detail("Iteration", 1);
+	}
+
+	TraceEventFields const& latest = latestEventCache.get(key);
+	ASSERT(latest.size() > 0);
+	ASSERT_EQ(latest.getInt64("Iteration"), 1);
+	ASSERT(latest.getValue("Type") == type);
+
+	return Void();
+}
+
+TEST_CASE("/flow/Trace/trackLatestAfterDetailStaysNoopWhenSuppressed") {
+	// Calling trackLatest() after detail() -- the convention used everywhere else in the codebase
+	// today -- must behave exactly as before: if the event ends up suppressed, nothing reaches
+	// latestEventCache, regardless of trackLatest() having been called.
+	TraceEvent::setNetworkThread();
+
+	std::string type = "UnitTestTrackLatestNoop_" + deterministicRandom()->randomUniqueID().toString();
+	std::string key = "UnitTestTrackLatestNoopKey_" + deterministicRandom()->randomUniqueID().toString();
+
+	TraceEvent(SevInfo, type.c_str()).suppressFor(1000.0).detail("Iteration", 0);
+
+	{
+		TraceEvent ev(SevInfo, type.c_str());
+		ev.suppressFor(1000.0);
+		// Sanity check the premise: this second same-type event, within the suppression window
+		// established above, must actually be suppressed before we can test what happens next.
+		ASSERT(!ev.isEnabled());
+		ev.detail("Iteration", 1);
+		ev.trackLatest(key);
+	}
+
+	TraceEventFields const& latest = latestEventCache.get(key);
+	ASSERT_EQ(latest.size(), 0);
+
+	return Void();
+}
+
+TEST_CASE("/flow/Trace/trackLatestFirstStillWorksWhenNotSuppressed") {
+	// trackLatest() called first must not change behavior for an event that wouldn't have been
+	// suppressed anyway -- promoteToTrackedIfDisabled() only ever touches an already-DISABLED state.
+	TraceEvent::setNetworkThread();
+
+	std::string type = "UnitTestTrackLatestNormal_" + deterministicRandom()->randomUniqueID().toString();
+	std::string key = "UnitTestTrackLatestNormalKey_" + deterministicRandom()->randomUniqueID().toString();
+
+	TraceEvent(SevInfo, type.c_str()).trackLatest(key).detail("Iteration", 0);
+
+	TraceEventFields const& latest = latestEventCache.get(key);
+	ASSERT(latest.size() > 0);
+	ASSERT_EQ(latest.getInt64("Iteration"), 0);
+
+	return Void();
+}
