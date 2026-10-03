@@ -58,7 +58,7 @@ public:
 
 	void set(StringRef key, Optional<Standalone<StringRef>> value) { _data[key] = value; }
 
-	bool isPresent(StringRef key) const { return (_data.find(key) != _data.end()); }
+	bool isPresent(StringRef key) const { return _data.contains(key); }
 	bool isPresent(StringRef key, Optional<Standalone<StringRef>> value) const {
 		auto pos = _data.find(key);
 		return pos != _data.end() && pos->second == value;

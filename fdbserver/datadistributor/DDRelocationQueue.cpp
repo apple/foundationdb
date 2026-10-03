@@ -927,9 +927,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		}
 
 		if (rd.keys.contains(rrs.keys)) {
-			if (foundActiveFetching)
+			if (foundActiveFetching) {
 				fetchingSourcesQueue.erase(fetchingSourcesItr);
-			else if (foundActiveRelocation) {
+			} else if (foundActiveRelocation) {
 				firstQueue->erase(firstRelocationItr);
 				for (int i = 1; i < rrs.src.size(); i++)
 					queue[rrs.src[i]].erase(rrs);

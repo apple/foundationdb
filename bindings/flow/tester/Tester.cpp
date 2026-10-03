@@ -43,9 +43,7 @@ std::map<Standalone<StringRef>, Reference<Transaction>> trMap;
 const int ITERATION_PROGRESSION[] = { 256, 1000, 4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000 };
 const int MAX_ITERATION = sizeof(ITERATION_PROGRESSION) / sizeof(int);
 
-static Future<Void> runTest(Reference<FlowTesterData> const& data,
-                            Reference<Database> const& db,
-                            StringRef const& prefix);
+static Future<Void> runTest(Reference<FlowTesterData> data, Reference<Database> db, Standalone<StringRef> prefix);
 
 THREAD_FUNC networkThread(void* api) {
 	// This is the fdb_flow network we're running on a thread
@@ -1516,7 +1514,7 @@ struct AtomicOPFunc : InstructionFunc {
 		Standalone<StringRef> s3 = co_await items[2].value;
 		Standalone<StringRef> value = Tuple::unpack(s3).getString(0);
 
-		ASSERT(optionInfo.find(op.toString()) != optionInfo.end());
+		ASSERT(optionInfo.contains(op.toString()));
 
 		FDBMutationType atomicOp = optionInfo[op.toString()];
 
@@ -1569,7 +1567,7 @@ struct UnitTestsFunc : InstructionFunc {
 
 		const uint64_t locationCacheSize = 100001;
 		const uint64_t maxWatches = 10001;
-		const uint64_t timeout = 60 * 1000;
+		const uint64_t timeout = 60ULL * 1000;
 		const uint64_t noTimeout = 0;
 		const uint64_t retryLimit = 50;
 		const uint64_t noRetryLimit = -1;
@@ -1671,9 +1669,7 @@ static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 				}
 			}
 
-			if (isDatabase)
-				op = op.substr(0, op.size() - 9);
-			else if (isSnapshot)
+			if (isDatabase || isSnapshot)
 				op = op.substr(0, op.size() - 9);
 
 			// printf("[==========]%ld/%ld:%s:%s: isDatabase:%d, isSnapshot:%d, stack count:%ld\n",
@@ -1717,9 +1713,7 @@ static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 	// printf("Total num instructions:%d\n", data->instructions.size());
 }
 
-static Future<Void> runTest(Reference<FlowTesterData> const& data,
-                            Reference<Database> const& db,
-                            StringRef const& prefix) {
+static Future<Void> runTest(Reference<FlowTesterData> data, Reference<Database> db, Standalone<StringRef> prefix) {
 	ASSERT(data);
 	try {
 		data->db = db;

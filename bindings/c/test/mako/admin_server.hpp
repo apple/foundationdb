@@ -70,19 +70,19 @@ using Request = boost::variant<PingRequest, StopRequest>;
 class AdminServer {
 	const Arguments& args;
 	pid_t server_pid;
-	boost::process::pstream pipe_to_server;
-	boost::process::pstream pipe_to_client;
+	boost::process::v1::pstream pipe_to_server;
+	boost::process::v1::pstream pipe_to_client;
 	void start();
 	void configure();
 
 	template <class T>
-	static void sendObject(boost::process::pstream& pipe, T obj) {
+	static void sendObject(boost::process::v1::pstream& pipe, T obj) {
 		boost::archive::binary_oarchive oa(pipe);
 		oa << obj;
 	}
 
 	template <class T>
-	static T receiveObject(boost::process::pstream& pipe) {
+	static T receiveObject(boost::process::v1::pstream& pipe) {
 		boost::archive::binary_iarchive ia(pipe);
 		T obj;
 		ia >> obj;
@@ -90,13 +90,14 @@ class AdminServer {
 	}
 
 	template <class RequestType>
-	static void sendResponse(boost::process::pstream& pipe, typename RequestType::ResponseType obj) {
+	static void sendResponse(boost::process::v1::pstream& pipe, typename RequestType::ResponseType obj) {
 		sendObject(pipe, std::move(obj));
 	}
 
 public:
 	explicit AdminServer(const Arguments& args)
-	  : args(args), server_pid(-1), pipe_to_server(boost::process::pipe()), pipe_to_client(boost::process::pipe()) {
+	  : args(args), server_pid(-1), pipe_to_server(boost::process::v1::pipe()),
+	    pipe_to_client(boost::process::v1::pipe()) {
 		start();
 	}
 	~AdminServer();

@@ -812,13 +812,8 @@ public:
 			// If we didn't get log versions above then seed them using the first log file
 			if (!desc.contiguousLogEnd.present()) {
 				desc.minLogBegin = logs.begin()->beginVersion;
-				if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {
-					// Cannot use the first file's end version, which may not be contiguous
-					// for other partitions. Set to its beginVersion to be safe.
-					desc.contiguousLogEnd = logs.begin()->beginVersion;
-				} else {
-					desc.contiguousLogEnd = logs.begin()->beginVersion;
-				}
+				// The first file's end version may not be contiguous for other partitions.
+				desc.contiguousLogEnd = logs.begin()->beginVersion;
 			}
 
 			if (desc.mutationLogType == MutationLogType::PARTITIONED_LOG) {

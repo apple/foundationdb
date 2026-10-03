@@ -624,7 +624,7 @@ void decodeServerKeysValue(const ValueRef& value,
                            DataMovementReason& dataMoveReason) {
 	dataMoveType = DataMoveType::LOGICAL;
 	dataMoveReason = DataMovementReason::INVALID;
-	if (value.empty()) {
+	if (value.empty() || value == serverKeysFalse) {
 		assigned = false;
 		emptyRange = false;
 		id = UID();
@@ -636,10 +636,6 @@ void decodeServerKeysValue(const ValueRef& value,
 		assigned = true;
 		emptyRange = true;
 		id = anonymousShardId;
-	} else if (value == serverKeysFalse) {
-		assigned = false;
-		emptyRange = false;
-		id = UID();
 	} else {
 		BinaryReader rd(value, IncludeVersion());
 		ASSERT(rd.protocolVersion().hasShardEncodeLocationMetaData());

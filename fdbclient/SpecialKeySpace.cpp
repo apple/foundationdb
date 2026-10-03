@@ -729,7 +729,7 @@ Future<RangeResult> DDStatsRangeImpl::getRange(ReadYourWritesTransaction* ryw,
 Key SpecialKeySpace::getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option) {
 	Key prefix = "options/"_sr.withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin);
 	auto pair = command + "/" + option;
-	ASSERT(options.find(pair) != options.end());
+	ASSERT(options.contains(pair));
 	return prefix.withSuffix(pair);
 }
 
@@ -755,8 +755,7 @@ Future<RangeResult> ManagementCommandsOptionsImpl::getRange(ReadYourWritesTransa
 void ManagementCommandsOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	std::string option = key.removePrefix(getKeyRange().begin).toString();
 	// ignore all invalid keys
-	if (SpecialKeySpace::getManagementApiOptionsSet().find(option) !=
-	    SpecialKeySpace::getManagementApiOptionsSet().end()) {
+	if (SpecialKeySpace::getManagementApiOptionsSet().contains(option)) {
 		TraceEvent(SevDebug, "ManagementApiOption").detail("Option", option).detail("Key", key);
 		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
 	}
@@ -769,8 +768,7 @@ void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const 
 void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	std::string option = key.removePrefix(getKeyRange().begin).toString();
 	// ignore all invalid keys
-	if (SpecialKeySpace::getManagementApiOptionsSet().find(option) !=
-	    SpecialKeySpace::getManagementApiOptionsSet().end()) {
+	if (SpecialKeySpace::getManagementApiOptionsSet().contains(option)) {
 		ryw->getSpecialKeySpaceWriteMap().rawErase(singleKeyRange(key));
 	}
 }
@@ -1062,7 +1060,7 @@ Future<bool> checkExclusion(Database db,
 					if (!excluded) {
 						totalKvStoreUsedBytesNotExcluded += used_bytes;
 
-						if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
+						if (disk_id.empty() || !diskLocalities.contains(disk_id)) {
 							totalKvStoreFreeBytesNotExcluded += free_bytes;
 							if (!disk_id.empty()) {
 								diskLocalities.insert(disk_id);

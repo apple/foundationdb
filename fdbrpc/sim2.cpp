@@ -218,7 +218,7 @@ struct SimClogging {
 
 	bool disconnected(const IPAddress& from, const IPAddress& to) {
 		auto pair = std::make_pair(from, to);
-		if (g_simulator->speedUpSimulation || disconnectPairUntil.find(pair) == disconnectPairUntil.end()) {
+		if (g_simulator->speedUpSimulation || !disconnectPairUntil.contains(pair)) {
 			return false;
 		}
 
@@ -2209,7 +2209,7 @@ public:
 					if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 						processesDead.push_back(processInfo);
 					} else if (isProtectedAddress(processInfo->address) ||
-					           datacenterMachines.find(processInfo->locality.machineId()) == datacenterMachines.end()) {
+					           !datacenterMachines.contains(processInfo->locality.machineId())) {
 						processesLeft.push_back(processInfo);
 					} else {
 						processesDead.push_back(processInfo);
@@ -2690,7 +2690,7 @@ public:
 	  : id(deterministicRandom()->randomUniqueID()), process(g_simulator->getCurrentProcess()),
 	    peerAddress(peerAddress), actors(false), _localAddress(localAddress) {
 		g_sim2.addressMap.emplace(_localAddress, process);
-		ASSERT(process->boundUDPSockets.find(localAddress) == process->boundUDPSockets.end());
+		ASSERT(!process->boundUDPSockets.contains(localAddress));
 		process->boundUDPSockets.emplace(localAddress, Reference<IUDPSocket>::addRef(this));
 	}
 	~UDPSimSocket() override {
@@ -2801,7 +2801,7 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(NetworkAddress toAddr) {
 		localAddress.ip = IPAddress(process->address.ip.toV4() + deterministicRandom()->randomInt(0, 256));
 	}
 	localAddress.port = deterministicRandom()->randomInt(40000, 60000);
-	while (process->boundUDPSockets.find(localAddress) != process->boundUDPSockets.end()) {
+	while (process->boundUDPSockets.contains(localAddress)) {
 		localAddress.port = deterministicRandom()->randomInt(40000, 60000);
 	}
 	return Reference<IUDPSocket>(makeReference<UDPSimSocket>(localAddress, toAddr));

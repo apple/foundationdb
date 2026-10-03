@@ -148,15 +148,13 @@ int main(int argc, char* argv[]) {
 	bool endOfArgs = false;
 	for (int i = 1; i < argc; ++i) {
 		std::string arg(argv[i]);
-		if (endOfArgs) {
+		if (endOfArgs || arg[0] != '-') {
 			files.emplace_back(arg);
 		} else if (arg == "--") {
 			endOfArgs = true;
 		} else if (arg == "-h" || arg == "--") {
 			usage(argv[0], std::cout);
 			return 0;
-		} else if (arg[0] != '-') {
-			files.emplace_back(arg);
 		} else {
 			std::cerr << "Unknown argument \"" << arg << "\"" << std::endl;
 			usage(argv[0], std::cerr);

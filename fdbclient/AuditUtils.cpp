@@ -38,15 +38,9 @@ void clearAuditProgressMetadata(Transaction* tr, AuditType auditType, UID auditI
 	// This function clears the progress metadata accordingly
 	if (auditType == AuditType::ValidateStorageServerShard) {
 		tr->clear(auditServerBasedProgressRangeFor(auditType, auditId));
-	} else if (auditType == AuditType::ValidateHA) {
-		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
-	} else if (auditType == AuditType::ValidateReplica) {
-		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
-	} else if (auditType == AuditType::ValidateLocationMetadata) {
-		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
-	} else if (auditType == AuditType::ValidateRestore) {
-		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
-	} else if (auditType == AuditType::RangeDigest) {
+	} else if (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
+	           auditType == AuditType::ValidateLocationMetadata || auditType == AuditType::ValidateRestore ||
+	           auditType == AuditType::RangeDigest) {
 		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
 	} else {
 		UNREACHABLE();
