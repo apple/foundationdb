@@ -3803,12 +3803,10 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					// Enable BulkDump mode at the DD level before submitting the job
 					co_await setBulkDumpMode(cx, 1);
 
-					// Configure BulkDump job for the full keyspace
-					// BulkDump/BulkLoad requires the load range to be a subset of the dump range.
-					// Using normalKeys for both ensures compatibility regardless of user-specified ranges.
+					// submitBackup rejects a multi-range bulkdump, so the caller's coverage is this one range.
 					// Store data under data/<container>/bulkdump_data/ to be consistent with backup container layout
 					std::string bulkDumpRoot = getBackupDataPath(bc->getURL(), "bulkdump_data");
-					bulkDumpJob = createBulkDumpJob(normalKeys, bulkDumpRoot, BulkLoadType::SST, transportMethod);
+					bulkDumpJob = createBulkDumpJob(backupRanges[0], bulkDumpRoot, BulkLoadType::SST, transportMethod);
 
 					// Submit the BulkDump job
 					co_await submitBulkDumpJob(cx, bulkDumpJob);
@@ -4395,9 +4393,16 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				BulkLoadTransportMethod loadTransportMethod =
 				    isBlobstoreUrl(backupUrl) ? BulkLoadTransportMethod::BLOBSTORE : BulkLoadTransportMethod::CP;
 
-				// BulkLoad range must match the BulkDump range (normalKeys)
-				// The actual restore ranges will be applied via mutation log replay
-				BulkLoadJobState bulkLoadJob = createBulkLoadJob(dumpJobUid, normalKeys, jobRoot, loadTransportMethod);
+				// submitRestore rejects a multi-range bulkload, so range 0 is the caller's whole request.
+				//
+				// TODO(BulkLoad): reject a restore range the backup never covered. Until the ranges were
+				// plumbed through, dump and load were both normalKeys, so an out-of-range request could not
+				// arise; now it submits a job over a range with no manifests and loads nothing rather than
+				// failing. The dump's actual coverage is the "ranges" array of the keyspace snapshot
+				// (written at BackupContainerFileSystem.cpp:236-243), i.e. the same JSONDoc parsed above for
+				// bulkDumpJobId, so the containment check needs no extra read.
+				BulkLoadJobState bulkLoadJob =
+				    createBulkLoadJob(dumpJobUid, restoreRanges[0], jobRoot, loadTransportMethod);
 
 				TraceEvent("BulkLoadRestoreJobCreated")
 				    .detail("RestoreUID", restore.getUid())
@@ -6848,8 +6853,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			                                          bulkDumpJobId,
 			                                          TaskCompletionKey::signal(bulkLoadDone));
 
-			// After BulkLoad completes, run RestoreDispatch to apply mutation logs
-			// Set onlyApplyMutationLogs so it only processes logs, not range files
+			// Sequencing, not user intent: the SSTs carry the range data, so the dispatch that follows must
+			// replay logs only. submitRestore rejects --incremental with bulkload, so this can only ever
+			// overwrite false.
 			restore.onlyApplyMutationLogs().set(tr, true);
 
 			// Add RestoreDispatch task that waits for BulkLoad to complete
@@ -6882,7 +6888,13 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			//  If this is an incremental restore, we need to set the applyMutationsMapPrefix
 			//  to the earliest log version so no mutations are missed
 			Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
-			co_await krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded);
+			std::vector<KeyRange> ranges = co_await restore.getRestoreRangesOrDefault(tr);
+			std::vector<Future<Void>> updateMap;
+			updateMap.reserve(ranges.size());
+			for (const auto& range : ranges) {
+				updateMap.push_back(krmSetRange(tr, restore.applyMutationsMapPrefix(), range, versionEncoded));
+			}
+			co_await waitForAll(updateMap);
 		}
 
 		co_await taskBucket->finish(tr, task);
@@ -7115,6 +7127,37 @@ public:
 			}
 		}
 
+		// A bulkdump job carries exactly one key range and the cluster admits one bulk job at a time, so
+		// several disjoint ranges cannot be expressed as a single snapshot. Rejecting here is what keeps
+		// the restore honest: the dump would otherwise widen to normalKeys and a later bulkload restore
+		// would overwrite every key between the caller's ranges. BulkDumpTaskFunc indexes range 0 on the
+		// strength of this check.
+		if (snapshotMode != static_cast<int>(SnapshotMode::RANGEFILE) && normalizedRanges.size() != 1) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkDumpRangeCount")
+			    .detail("TagName", tagName)
+			    .detail("SnapshotMode", snapshotMode)
+			    .detail("RangeCount", normalizedRanges.size());
+			fprintf(stderr,
+			        "ERROR: --mode bulkdump and --mode both require exactly one key range, but %d remain after "
+			        "coalescing adjacent ranges. Use --mode rangefile, or run one backup per range.\n",
+			        static_cast<int>(normalizedRanges.size()));
+			throw backup_error();
+		}
+
+		// --incremental suppresses the snapshot entirely (StartFullBackupTaskFunc skips the whole snapshot
+		// block), so pairing it with a bulkdump mode asks for an SST snapshot and for no snapshot at once.
+		// Taken silently, it yields a log-only backup that no bulkload restore can use, and the operator
+		// only discovers that when the restore aborts much later.
+		if (snapshotMode != static_cast<int>(SnapshotMode::RANGEFILE) && incrementalBackupOnly) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkDumpIncremental")
+			    .detail("TagName", tagName)
+			    .detail("SnapshotMode", snapshotMode);
+			fprintf(stderr,
+			        "ERROR: --incremental cannot be combined with --mode bulkdump or --mode both; it suppresses "
+			        "the snapshot those modes exist to produce, leaving a backup no bulkload restore can use.\n");
+			throw backup_error();
+		}
+
 		config.clear(tr);
 
 		Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
@@ -7200,6 +7243,31 @@ public:
 		}
 		for (auto& restoreRange : restoreRanges) {
 			ASSERT(restoreRange.begin.startsWith(removePrefix) && restoreRange.end.startsWith(removePrefix));
+		}
+
+		// Same one-range limit as bulkdump: the bulkload job that ingests the SSTs carries a single range.
+		// BulkLoadRestoreTaskFunc indexes range 0 on the strength of this check.
+		if (!useRangeFileRestore && restoreRanges.size() != 1) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadRangeCount")
+			    .detail("TagName", tagName)
+			    .detail("RangeCount", restoreRanges.size());
+			fprintf(stderr,
+			        "ERROR: --mode bulkload requires exactly one key range, but %d remain after coalescing "
+			        "adjacent ranges. Use --mode rangefile, or run one restore per range.\n",
+			        static_cast<int>(restoreRanges.size()));
+			throw restore_error();
+		}
+
+		// Mirror of the backup-side rejection. A bulkload restore ingests the snapshot via SST, which is
+		// precisely the range data --incremental declines, and StartFullRestoreTaskFunc picks the bulkload
+		// branch without consulting the flag. Accepting the pair would restore the whole snapshot the
+		// caller asked to skip, then overwrite their setting so even status misreports it.
+		if (!useRangeFileRestore && onlyApplyMutationLogs) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadIncremental").detail("TagName", tagName);
+			fprintf(stderr,
+			        "ERROR: --incremental cannot be combined with --mode bulkload; bulkload restores the "
+			        "snapshot that --incremental skips. Use --mode rangefile for a logs-only restore.\n");
+			throw restore_error();
 		}
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
