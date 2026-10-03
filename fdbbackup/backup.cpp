@@ -609,6 +609,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin-version", SO_REQ_SEP },
 	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent-snapshot-only", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
+	{ OPT_JSON, "--json", SO_NONE },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1009,6 +1010,9 @@ static void printRestoreUsage(bool devhelp) {
 	printf("                 The cluster file to restore data into.\n");
 	printf("  -t, --tagname TAGNAME\n");
 	printf("                 The restore tag to act on.  Default is 'default'\n");
+	printf("\n");
+	printf("  Options for status:\n\n");
+	printf("  --json         Emit the status as a JSON document instead of text.\n");
 	printf("\n");
 	printf("  Options for start:\n\n");
 	printf("  -r URL         The Backup URL for the restore to read from.\n");
@@ -2018,6 +2022,17 @@ Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, in
 	}
 }
 
+// Emit a machine-readable failure on stdout for the --json commands. Without this a failing --json
+// invocation writes nothing to stdout, leaving a consumer unable to tell a failure from an empty
+// result. The "error" key matches what fdbbackup query already emits rather than introducing a
+// second spelling for the same concept.
+static void printJsonError(std::string errorMessage) {
+	JsonBuilderObject doc;
+	doc.setKey("SchemaVersion", "1.0.0");
+	doc.setKey("error", errorMessage);
+	printf("%s\n", doc.getJson().c_str());
+}
+
 Future<Void> statusBackup(Database db, std::string tagName, ShowErrors showErrors, bool json) {
 	try {
 		FileBackupAgent backupAgent;
@@ -2028,6 +2043,26 @@ Future<Void> statusBackup(Database db, std::string tagName, ShowErrors showError
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
+		if (json)
+			printJsonError(e.what());
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		throw;
+	}
+}
+
+// Prints `fdbrestore status` for one tag, or for every tag when tag is empty.
+Future<Void> statusRestore(Database db, Key tag, bool json) {
+	try {
+		FileBackupAgent backupAgent;
+
+		std::string statusText =
+		    co_await (json ? backupAgent.restoreStatusJSON(db, tag) : backupAgent.restoreStatus(db, tag));
+		printf("%s\n", statusText.c_str());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		if (json)
+			printJsonError(e.what());
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -2497,6 +2532,8 @@ Future<Void> describeBackup(const char* name,
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
+		if (json)
+			printJsonError(e.what());
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
@@ -4375,10 +4412,7 @@ int main(int argc, char* argv[]) {
 				// If no tag is specifically provided then print all tag status, don't just use "default"
 				if (tagProvided)
 					tag = tagName;
-				f = stopAfter(map(ba.restoreStatus(db, KeyRef(tag)), [](std::string s) -> Void {
-					printf("%s\n", s.c_str());
-					return Void();
-				}));
+				f = stopAfter(statusRestore(db, tag, jsonOutput));
 				break;
 			default:
 				throw restore_error();
