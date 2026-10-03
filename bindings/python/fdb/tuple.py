@@ -362,11 +362,23 @@ def _bit_length(x):
     return x.bit_length()
 
 
+def _is_null(value):
+    """Return True for None and for fdb.impl.Value objects that wrap None.
+
+    ``fdb.impl.Value`` overrides ``__class__`` to ``bytes``, so
+    ``isinstance(value, bytes)`` is true for Values. Real ``bytes`` instances
+    are never equal to None, so the second clause only matches Values that
+    wrap None. Objects that merely override ``__eq__`` to match None must not
+    be treated as null (that would silently corrupt packed keys).
+    """
+    return value is None or (isinstance(value, bytes) and value == None)
+
+
 def _encode(value, nested=False):
     # returns [code][data] (code != 0xFF)
     # encoded values are self-terminating
     # sorting need to work too!
-    if value == None:  # ==, not is, because some fdb.impl.Value are equal to None
+    if _is_null(value):
         if nested:
             return b"".join([int2byte(NULL_CODE), int2byte(0xFF)]), -1
         else:
@@ -538,7 +550,7 @@ def range(t):
 
 
 def _code_for(value):
-    if value == None:
+    if _is_null(value):
         return NULL_CODE
     elif isinstance(value, bytes):
         return BYTES_CODE

@@ -140,7 +140,58 @@ def equalEnough(t1, t2):
     return True
 
 
+def test_none_packs_as_null():
+    assert pack((None,)) == b"\x00"
+    assert unpack(pack((None,))) == (None,)
+    assert unpack(pack(((None,),))) == ((None,),)
+
+
+def test_eq_none_object_rejected():
+    """Objects that override __eq__ to match None must not pack as NULL."""
+
+    class EqNone(object):
+        def __eq__(self, other):
+            return other is None
+
+        def __hash__(self):
+            return hash(id(self))
+
+    try:
+        pack((EqNone(),))
+    except ValueError:
+        return True
+    raise AssertionError(
+        "object equal to None via __eq__ was packed as NULL instead of raising"
+    )
+
+
+def test_value_like_none_still_null():
+    """Stand-in for fdb.impl.Value wrapping None (__class__ masquerades as bytes)."""
+
+    class ValueLikeNone(object):
+        def __init__(self):
+            self.value = None
+
+        @property
+        def __class__(self):
+            return bytes
+
+        def __eq__(self, other):
+            return self.value == other
+
+        def __hash__(self):
+            return hash(None)
+
+    assert pack((ValueLikeNone(),)) == b"\x00"
+    assert fdb.tuple._code_for(ValueLikeNone()) == fdb.tuple.NULL_CODE
+
+
 def tupleTest(N=10000):
+    test_none_packs_as_null()
+    test_eq_none_object_rejected()
+    test_value_like_none_still_null()
+    print("Null / __eq__ None checks OK")
+
     someTuples = [randomTuple() for i in range(N)]
     a = sorted(someTuples, cmp=compare)
     b = sorted(someTuples, key=pack)
