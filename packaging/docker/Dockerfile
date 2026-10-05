@@ -147,6 +147,7 @@ FROM foundationdb-base AS fdb-kubernetes-monitor
 COPY --from=go-build /fdb-kubernetes-monitor /usr/bin/
 
 # Runtime Configuration Options
+# fdb user, specified numerically for Kubernetes runAsNonRoot
 USER 4059
 WORKDIR /var/fdb
 VOLUME /var/fdb/data
