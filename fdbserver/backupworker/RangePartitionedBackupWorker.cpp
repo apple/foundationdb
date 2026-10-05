@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "BackupFileRetry.h"
 #include "BackupWorkerPause.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupFileFormat.h"
@@ -33,6 +34,9 @@
 #include "fdbserver/logsystem/LogSystemConsumer.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/CoroUtils.h"
+
+#include <functional>
+#include <memory>
 
 #define SevDebugMemory SevVerbose
 
@@ -62,8 +66,9 @@ struct RangePartitionedLogFileInfo {
 	int32_t partitionId;
 	KeyRange fileKeyRange;
 	Version beginVersion;
-	Reference<IBackupFile> file;
-	int64_t blockEnd = 0;
+	std::function<Future<Reference<IBackupFile>>()> createFile;
+	std::shared_ptr<const std::vector<RangePartitionedVersionedMessage>> messages;
+	std::vector<int> messageIndexes;
 };
 
 struct RangePartitionedBackupData {
@@ -256,13 +261,10 @@ struct RangePartitionedBackupData {
 	}
 };
 
-static Future<Void> computeKeyRangeToBackupAssignment(RangePartitionedBackupData* self) {
-	self->keyRangeToBackupAssignment = KeyRangeMap<std::vector<std::pair<UID, int32_t>>>();
-
-	while (!self->isAllBackupsReady()) {
-		co_await self->waitAllBackupsReady();
-	}
-
+static void snapshotKeyRangeToBackupAssignment(RangePartitionedBackupData* self,
+                                               KeyRangeMap<std::vector<std::pair<UID, int32_t>>>* assignment) {
+	ASSERT(self->isAllBackupsReady());
+	*assignment = KeyRangeMap<std::vector<std::pair<UID, int32_t>>>();
 	for (auto& [uid, info] : self->backups) {
 		const auto& backupRanges = info.ranges.get().get();
 
@@ -275,12 +277,19 @@ static Future<Void> computeKeyRangeToBackupAssignment(RangePartitionedBackupData
 				continue;
 
 			std::pair<UID, int32_t> bk{ uid, partitionId };
-			for (auto& range : self->keyRangeToBackupAssignment.modify(intersection.get())) {
+			for (auto& range : assignment->modify(intersection.get())) {
 				range->value().push_back(bk);
 			}
 		}
 	}
-	self->keyRangeToBackupAssignment.coalesce(allKeys);
+	assignment->coalesce(allKeys);
+}
+
+static Future<Void> computeKeyRangeToBackupAssignment(RangePartitionedBackupData* self) {
+	while (!self->isAllBackupsReady()) {
+		co_await self->waitAllBackupsReady();
+	}
+	snapshotKeyRangeToBackupAssignment(self, &self->keyRangeToBackupAssignment);
 }
 
 static Future<Void> onBackupChanges(RangePartitionedBackupData* self,
@@ -497,6 +506,42 @@ Future<Optional<std::pair<Version, PartitionMap>>> loadActivePartitionMapFromSS(
 	}
 }
 
+static Future<Void> waitForRangeBackupFileRetry(BackupFileRetry* retry,
+                                                Error error,
+                                                const bool* stopped,
+                                                AsyncTrigger* doneTrigger) {
+	if (*stopped) {
+		throw error;
+	}
+	Future<Void> backoff = retry->onError(error);
+	while (!backoff.isReady()) {
+		co_await race(backoff, doneTrigger->onTrigger());
+		if (*stopped) {
+			throw error;
+		}
+	}
+	co_await backoff;
+	if (*stopped) {
+		throw error;
+	}
+}
+
+static Future<Void> writePartitionListWithRetry(std::function<Future<Void>()> write,
+                                                BackupFileRetry retry,
+                                                const bool* stopped,
+                                                AsyncTrigger* doneTrigger) {
+	while (true) {
+		Error error;
+		try {
+			co_await write();
+			co_return;
+		} catch (Error& e) {
+			error = e;
+		}
+		co_await waitForRangeBackupFileRetry(&retry, error, stopped, doneTrigger);
+	}
+}
+
 // TODO akanksha:
 // 1. Test if concurrent uploads of identical content to the same path in blob storage is safe or not.
 // 2. When folder is advanced to next version, do we upload the partition map again to that version.
@@ -513,7 +558,13 @@ Future<Void> uploadPartitionList(RangePartitionedBackupData* self, PartitionMap 
 			continue;
 		}
 		Reference<IBackupContainer> container = it->second.container.get().get();
-		fileFutures.push_back(container->writePartitionListFile(self->logFolderBaseVersion, jsonContent));
+		fileFutures.push_back(writePartitionListWithRetry(
+		    [container, version = self->logFolderBaseVersion, jsonContent]() {
+			    return container->writePartitionListFile(version, jsonContent);
+		    },
+		    BackupFileRetry(self->myId),
+		    &self->stopped,
+		    &self->doneTrigger));
 		it++;
 	}
 	if (fileFutures.empty()) {
@@ -790,143 +841,160 @@ static Future<Void> updateLogBytesWritten(RangePartitionedBackupData* self, std:
 	}
 }
 
+static Future<int64_t> writeRangePartitionedFile(RangePartitionedLogFileInfo fileInfo,
+                                                 int blockSize,
+                                                 BackupFileRetry retry,
+                                                 const bool* stopped,
+                                                 AsyncTrigger* doneTrigger) {
+	while (true) {
+		Error error;
+		try {
+			// Failed append/finish operations may have consumed buffers or published the file already.
+			// Recreating the same complete segment preserves its bytes and resets all writer offsets.
+			Reference<IBackupFile> file = co_await fileInfo.createFile();
+			int64_t blockEnd = 0;
+			co_await writeFileHeader(file, fileInfo.partitionId, fileInfo.fileKeyRange);
+			for (int index : fileInfo.messageIndexes) {
+				const auto& message = (*fileInfo.messages)[index];
+				co_await addMutation(file, message, message.message, &blockEnd, blockSize);
+			}
+			co_await file->finish();
+			co_return file->size();
+		} catch (Error& e) {
+			error = e;
+		}
+		co_await waitForRangeBackupFileRetry(&retry, error, stopped, doneTrigger);
+	}
+}
+
 Future<Void> saveMutationsToFile(RangePartitionedBackupData* self, Version lastVersionInFile, int numMsg) {
-	// Make sure all backups are ready, otherwise mutations will be lost.
-	while (!self->isAllBackupsReady()) {
-		co_await self->waitAllBackupsReady();
-	}
-
-	std::vector<RangePartitionedLogFileInfo> activeFiles;
-	// Map of (backupUid, partitionId) -> index into activeFiles.
-	std::map<std::pair<UID, int32_t>, int> fileIndexByBackupPartition;
-	int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
-	std::vector<Future<Reference<IBackupFile>>> fileFutures;
-
-	for (auto entry = self->keyRangeToBackupAssignment.ranges().begin();
-	     entry != self->keyRangeToBackupAssignment.ranges().end();
-	     ++entry) {
-		for (const auto& [backupUid, partitionId] : entry->value()) {
-
-			auto it = self->backups.find(backupUid);
-			if (it == self->backups.end() || !it->second.container.get().present()) {
-				TraceEvent("RangePartitionedBWRemoveContainerInFileCreation", self->myId).detail("BackupId", backupUid);
-				continue;
-			}
-
-			std::pair<UID, int32_t> bpKey(backupUid, partitionId);
-			if (fileIndexByBackupPartition.contains(bpKey)) {
-				continue;
-			}
-
-			Version fileEndVersion = lastVersionInFile + 1;
-			if (it->second.nextFileBeginVersion == invalidVersion) {
-				it->second.nextFileBeginVersion = self->savedVersion + 1;
-			}
-			Version beginVersion = it->second.nextFileBeginVersion;
-
-			RangePartitionedLogFileInfo lf;
-			lf.backupUid = it->first;
-			lf.partitionId = partitionId;
-			lf.fileKeyRange = entry->range();
-			lf.beginVersion = beginVersion;
-			lf.blockEnd = 0;
-
-			activeFiles.push_back(lf);
-			fileIndexByBackupPartition[bpKey] = activeFiles.size() - 1;
-			fileFutures.push_back(it->second.container.get().get()->writeRangePartitionedLogFile(
-			    beginVersion, fileEndVersion, self->logFolderBaseVersion, partitionId, blockSize));
-		}
-	}
-
-	if (fileFutures.empty()) {
-		co_return;
-	}
-	co_await waitForAll(fileFutures);
-
-	std::vector<Future<Void>> headerWrites;
-	int i;
-	for (i = 0; i < activeFiles.size(); i++) {
-		activeFiles[i].file = fileFutures[i].get();
-		headerWrites.push_back(
-		    writeFileHeader(activeFiles[i].file, activeFiles[i].partitionId, activeFiles[i].fileKeyRange));
-	}
-	co_await waitForAll(headerWrites);
-
-	if (activeFiles.empty()) {
-		co_return;
-	}
-
-	// Process mutations
-	int idx;
-	for (idx = 0; idx < numMsg; idx++) {
-		auto& message = self->messages[idx];
-		MutationRef m;
-		if (!message.isCandidateBackupMessage(&m)) {
-			continue;
-		}
-
-		DEBUG_MUTATION("RangePartitionedBWAddMutation", message.version.version, m, self->myId)
-		    .detail("KCV", self->minKnownCommittedVersion)
-		    .detail("SavedVersion", self->savedVersion);
-
-		std::vector<Future<Void>> adds;
-		if (m.type != MutationRef::Type::ClearRange) {
-			for (const auto& entry : self->keyRangeToBackupAssignment[m.param1]) {
-				auto it = fileIndexByBackupPartition.find(entry);
-				ASSERT(it != fileIndexByBackupPartition.end());
-
-				int fileIdx = it->second;
-				auto& lf = activeFiles[fileIdx];
-				// Different backups may have different start version so need this check before writing.
-				if (message.getVersion() >= lf.beginVersion) {
-					adds.push_back(addMutation(lf.file, message, message.message, &lf.blockEnd, blockSize));
+	auto messages = std::make_shared<const std::vector<RangePartitionedVersionedMessage>>(
+	    self->messages.begin(), self->messages.begin() + numMsg);
+	std::set<std::pair<UID, int32_t>> completedFiles;
+	const int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
+	bool completedRound = false;
+	while (true) {
+		while (!self->isAllBackupsReady()) {
+			if (completedRound) {
+				if (self->stopped) {
+					throw worker_removed();
 				}
+				co_await race(self->waitAllBackupsReady(), self->doneTrigger.onTrigger());
+			} else {
+				co_await self->waitAllBackupsReady();
 			}
-		} else {
-			KeyRangeRef mutationRange(m.param1, m.param2);
-			std::unordered_set<int> writtenFiles;
-			for (auto range : self->keyRangeToBackupAssignment.intersectingRanges(mutationRange)) {
-				for (const auto& entry : range.value()) {
+		}
+		if (completedRound && self->stopped) {
+			throw worker_removed();
+		}
+
+		KeyRangeMap<std::vector<std::pair<UID, int32_t>>> assignment;
+		snapshotKeyRangeToBackupAssignment(self, &assignment);
+		std::vector<RangePartitionedLogFileInfo> activeFiles;
+		std::map<std::pair<UID, int32_t>, int> fileIndexByBackupPartition;
+		for (auto entry = assignment.ranges().begin(); entry != assignment.ranges().end(); ++entry) {
+			for (const auto& [backupUid, partitionId] : entry->value()) {
+				auto it = self->backups.find(backupUid);
+				if (it == self->backups.end() || !it->second.container.get().present()) {
+					TraceEvent("RangePartitionedBWRemoveContainerInFileCreation", self->myId)
+					    .detail("BackupId", backupUid);
+					continue;
+				}
+				std::pair<UID, int32_t> bpKey(backupUid, partitionId);
+				if (completedFiles.contains(bpKey) || fileIndexByBackupPartition.contains(bpKey)) {
+					continue;
+				}
+
+				const Version beginVersion = it->second.nextFileBeginVersion == invalidVersion
+				                                 ? self->savedVersion + 1
+				                                 : it->second.nextFileBeginVersion;
+				Reference<IBackupContainer> container = it->second.container.get().get();
+				RangePartitionedLogFileInfo lf;
+				lf.backupUid = backupUid;
+				lf.partitionId = partitionId;
+				lf.fileKeyRange = entry->range();
+				lf.beginVersion = beginVersion;
+				lf.messages = messages;
+				lf.createFile = [container,
+				                 beginVersion,
+				                 endVersion = lastVersionInFile + 1,
+				                 folderVersion = self->logFolderBaseVersion,
+				                 partitionId,
+				                 blockSize]() {
+					return container->writeRangePartitionedLogFile(
+					    beginVersion, endVersion, folderVersion, partitionId, blockSize);
+				};
+				fileIndexByBackupPartition[bpKey] = activeFiles.size();
+				activeFiles.push_back(std::move(lf));
+			}
+		}
+		if (activeFiles.empty()) {
+			break;
+		}
+
+		// Freeze routing and owning message references before yielding. A backup change during backoff
+		// cannot change bytes at a deterministic file path, and the queued prefix stays available to new backups.
+		for (int idx = 0; idx < numMsg; idx++) {
+			auto message = (*messages)[idx];
+			MutationRef m;
+			if (!message.isCandidateBackupMessage(&m)) {
+				continue;
+			}
+			DEBUG_MUTATION("RangePartitionedBWAddMutation", message.version.version, m, self->myId)
+			    .detail("KCV", self->minKnownCommittedVersion)
+			    .detail("SavedVersion", self->savedVersion);
+			std::set<int> fileIndexes;
+			if (m.type != MutationRef::Type::ClearRange) {
+				for (const auto& entry : assignment[m.param1]) {
 					auto it = fileIndexByBackupPartition.find(entry);
-					ASSERT(it != fileIndexByBackupPartition.end());
-
-					int fileIdx = it->second;
-					// For ClearRange, we only need to write the full mutation once for each file.
-					if (writtenFiles.contains(fileIdx)) {
-						continue;
+					if (it != fileIndexByBackupPartition.end()) {
+						fileIndexes.insert(it->second);
 					}
-					auto& lf = activeFiles[fileIdx];
-					if (message.getVersion() >= lf.beginVersion) {
-						adds.push_back(addMutation(lf.file, message, message.message, &lf.blockEnd, blockSize));
+				}
+			} else {
+				for (auto range : assignment.intersectingRanges(KeyRangeRef(m.param1, m.param2))) {
+					for (const auto& entry : range.value()) {
+						auto it = fileIndexByBackupPartition.find(entry);
+						if (it != fileIndexByBackupPartition.end()) {
+							fileIndexes.insert(it->second);
+						}
 					}
-					writtenFiles.insert(fileIdx);
+				}
+			}
+			for (int index : fileIndexes) {
+				auto& lf = activeFiles[index];
+				if (message.getVersion() >= lf.beginVersion) {
+					lf.messageIndexes.push_back(idx);
 				}
 			}
 		}
-		if (!adds.empty()) {
-			co_await waitForAll(adds);
+
+		std::vector<Future<int64_t>> writes;
+		for (auto& lf : activeFiles) {
+			writes.push_back(writeRangePartitionedFile(
+			    std::move(lf), blockSize, BackupFileRetry(self->myId), &self->stopped, &self->doneTrigger));
 		}
-	}
-
-	// Finish files
-	// TODO akanksha: Add FileLevel checksum.
-	std::vector<Future<Void>> finished;
-	finished.reserve(activeFiles.size());
-	for (auto& lf : activeFiles) {
-		finished.push_back(lf.file->finish());
-	}
-	co_await waitForAll(finished);
-
-	std::map<UID, int64_t> bytesPerBackup;
-	for (auto& lf : activeFiles) {
-		auto it = self->backups.find(lf.backupUid);
-		if (it != self->backups.end()) {
-			it->second.nextFileBeginVersion = lastVersionInFile + 1;
+		co_await waitForAll(writes);
+		completedRound = true;
+		std::map<UID, int64_t> bytesPerBackup;
+		for (const auto& [destination, index] : fileIndexByBackupPartition) {
+			completedFiles.insert(destination);
+			bytesPerBackup[destination.first] += writes[index].get();
 		}
-		bytesPerBackup[lf.backupUid] += lf.file->size();
+		for (const auto& [backupUid, bytes] : bytesPerBackup) {
+			auto it = self->backups.find(backupUid);
+			if (it != self->backups.end()) {
+				it->second.nextFileBeginVersion = lastVersionInFile + 1;
+			}
+		}
+		co_await updateLogBytesWritten(self, std::move(bytesPerBackup));
+		if (self->stopped) {
+			// A new recipient may have arrived while these files finished. Leave the queued prefix
+			// and durable progress unchanged so a replacement worker can safely cover that recipient.
+			throw worker_removed();
+		}
+		// Include backups discovered during both file retries and the accounting transaction.
 	}
-
-	co_await updateLogBytesWritten(self, std::move(bytesPerBackup));
 }
 
 // It closes the race between getMinBackupVersion's snapshot at master-recruit time and the actual state of
@@ -1416,6 +1484,147 @@ TEST_CASE("/RangePartitionedBackupWorker/PartitionMapMessage/IsNextInLeadingByte
 	ArenaReader otherReader(arena, otherBytes, AssumeVersion(g_network->protocolVersion()));
 	ASSERT(!PartitionMapMessage::isNextIn(otherReader));
 	return Void();
+}
+
+namespace {
+class RangeBackupRetryTestFile : public IBackupFile, public ReferenceCounted<RangeBackupRetryTestFile> {
+public:
+	RangeBackupRetryTestFile(bool failAppend, bool failFinish)
+	  : IBackupFile("range-retry-test"), failAppend(failAppend), failFinish(failFinish) {}
+
+	Future<Void> appendImpl(const void* data, size_t len) override {
+		ASSERT(!failed && !finished);
+		contents.append(static_cast<const char*>(data), len);
+		if (++appendCalls == 4 && failAppend) {
+			failed = true;
+			return io_error();
+		}
+		return Void();
+	}
+
+	Future<Void> finish() override {
+		ASSERT(!failed && !finished);
+		finished = true;
+		if (failFinish) {
+			failed = true;
+			return io_error();
+		}
+		return Void();
+	}
+
+	int64_t size() const override { return contents.size(); }
+	void addref() override { ReferenceCounted<RangeBackupRetryTestFile>::addref(); }
+	void delref() override { ReferenceCounted<RangeBackupRetryTestFile>::delref(); }
+	const std::string& bytes() const { return contents; }
+	bool isFinished() const { return finished; }
+
+private:
+	bool failAppend;
+	bool failFinish;
+	bool failed = false;
+	bool finished = false;
+	int appendCalls = 0;
+	std::string contents;
+};
+
+Future<Void> testRangeBackupFileRetry(int fault) {
+	bool stopped = false;
+	AsyncTrigger doneTrigger;
+	RangePartitionedLogFileInfo fileInfo;
+	fileInfo.partitionId = 3;
+	fileInfo.fileKeyRange = KeyRangeRef("a"_sr, "z"_sr);
+	Standalone<StringRef> messageBytes = StringRef(std::string(150, 'x'));
+	auto messages = std::make_shared<std::vector<RangePartitionedVersionedMessage>>();
+	messages->emplace_back(LogMessageVersion(10, 1), messageBytes, VectorRef<Tag>(), messageBytes.arena());
+	messages->emplace_back(LogMessageVersion(11, 2), messageBytes, VectorRef<Tag>(), messageBytes.arena());
+	fileInfo.messages = messages;
+	fileInfo.messageIndexes = { 0, 1 };
+
+	auto expected = makeReference<RangeBackupRetryTestFile>(false, false);
+	fileInfo.createFile = [expected]() -> Future<Reference<IBackupFile>> { return Reference<IBackupFile>(expected); };
+	int64_t expectedSize =
+	    co_await writeRangePartitionedFile(fileInfo, 128, BackupFileRetry(UID(), 2, 0, 0), &stopped, &doneTrigger);
+
+	int attempts = 0;
+	std::vector<Reference<RangeBackupRetryTestFile>> files;
+	fileInfo.createFile = [&attempts, &files, fault]() -> Future<Reference<IBackupFile>> {
+		bool firstAttempt = ++attempts == 1;
+		if (firstAttempt && fault == 0) {
+			return io_error();
+		}
+		auto file = makeReference<RangeBackupRetryTestFile>(firstAttempt && fault == 1, firstAttempt && fault == 2);
+		files.push_back(file);
+		return Reference<IBackupFile>(file);
+	};
+	Future<int64_t> write =
+	    writeRangePartitionedFile(fileInfo, 128, BackupFileRetry(UID(), 2, 0, 0), &stopped, &doneTrigger);
+	fileInfo.messages.reset();
+	fileInfo.messageIndexes.clear();
+	int64_t size = co_await write;
+	ASSERT_EQ(attempts, 2);
+	ASSERT_EQ(size, expectedSize);
+	ASSERT(files.back()->isFinished());
+	ASSERT(files.back()->bytes() == expected->bytes());
+	if (fault == 2) {
+		ASSERT(files.front()->isFinished());
+		ASSERT(files.front()->bytes() == files.back()->bytes());
+	}
+}
+} // namespace
+
+TEST_CASE("/RangePartitionedBackupWorker/FileRetry/Create") {
+	co_await testRangeBackupFileRetry(0);
+}
+
+TEST_CASE("/RangePartitionedBackupWorker/FileRetry/Append") {
+	co_await testRangeBackupFileRetry(1);
+}
+
+TEST_CASE("/RangePartitionedBackupWorker/FileRetry/PublishedFinish") {
+	co_await testRangeBackupFileRetry(2);
+}
+
+TEST_CASE("/RangePartitionedBackupWorker/FileRetry/PartitionList") {
+	bool stopped = false;
+	AsyncTrigger doneTrigger;
+	std::vector<std::string> published;
+	const std::string contents = serializePartitionListJSON(makeSamplePartitionMap());
+	co_await writePartitionListWithRetry(
+	    [&published, contents]() -> Future<Void> {
+		    published.push_back(contents);
+		    return published.size() == 1 ? Future<Void>(io_error()) : Future<Void>(Void());
+	    },
+	    BackupFileRetry(UID(), 2, 0, 0),
+	    &stopped,
+	    &doneTrigger);
+	ASSERT_EQ(published.size(), 2);
+	ASSERT(published[0] == contents && published[1] == contents);
+}
+
+TEST_CASE("/RangePartitionedBackupWorker/FileRetry/StopDuringBackoff") {
+	bool stopped = false;
+	AsyncTrigger doneTrigger;
+	int attempts = 0;
+	Future<Void> write = writePartitionListWithRetry(
+	    [&attempts]() -> Future<Void> {
+		    ++attempts;
+		    return io_error();
+	    },
+	    BackupFileRetry(UID(), 2, 60, 60),
+	    &stopped,
+	    &doneTrigger);
+	ASSERT_EQ(attempts, 1);
+	ASSERT(!write.isReady());
+	stopped = true;
+	doneTrigger.trigger();
+	Error error;
+	try {
+		co_await write;
+	} catch (Error& e) {
+		error = e;
+	}
+	ASSERT_EQ(error.code(), error_code_io_error);
+	ASSERT_EQ(attempts, 1);
 }
 
 // TODO akanksha: Remove once a production caller of rangePartitionedBackupWorker() is wired up;
