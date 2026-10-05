@@ -915,7 +915,6 @@ Future<RestoreConfig::StatusSnapshot> RestoreConfig::getStatusSnapshot_impl(Rest
 	Future<int64_t> fileBlocksDispatched = restore.filesBlocksDispatched().getD(tr);
 	Future<int64_t> fileBlocksFinished = restore.fileBlocksFinished().getD(tr);
 	Future<int64_t> bytesWritten = restore.bytesWritten().getD(tr);
-	Future<StringRef> status = restore.stateText(tr);
 	Future<Version> currentVersion = restore.getCurrentVersion(tr);
 	Future<Version> lag = restore.getApplyVersionLag(tr);
 	Future<Version> firstConsistentVersion = restore.firstConsistentVersion().getD(tr);
@@ -938,18 +937,17 @@ Future<RestoreConfig::StatusSnapshot> RestoreConfig::getStatusSnapshot_impl(Rest
 	UID uid = restore.getUid();
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	co_await (success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
-	          success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
-	          success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError) &&
-	          success(submittedTasks) && success(triggeredTasks) && success(runningTasks) && success(totalTasks) &&
-	          success(useRangeFileRestore) && success(ranges) && success(addPrefix) && success(removePrefix) &&
-	          success(url) && success(restoreVersion) && success(restoreState) && success(bulkLoadComplete) &&
-	          success(readVersion));
+	          success(fileBlocksFinished) && success(bytesWritten) && success(currentVersion) && success(lag) &&
+	          success(firstConsistentVersion) && success(tag) && success(lastError) && success(submittedTasks) &&
+	          success(triggeredTasks) && success(runningTasks) && success(totalTasks) && success(useRangeFileRestore) &&
+	          success(ranges) && success(addPrefix) && success(removePrefix) && success(url) &&
+	          success(restoreVersion) && success(restoreState) && success(bulkLoadComplete) && success(readVersion));
 
 	StatusSnapshot s;
 	s.uid = uid;
 	s.tag = tag.get();
-	s.stateText = status.get().toString();
 	s.state = restoreState.get();
+	s.stateText = FileBackupAgent::restoreStateText(s.state).toString();
 	s.useRangeFile = !useRangeFileRestore.get().present() || useRangeFileRestore.get().get();
 	s.fileCount = fileCount.get();
 	s.fileBlockCount = fileBlockCount.get();
