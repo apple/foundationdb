@@ -7,7 +7,7 @@ location metadata with persistent shard identities. It transitions the Data
 Distributor from reasoning about "which servers own which key ranges" to reasoning
 about "named shards with persistent identity."
 
-Default: `false` in production. Enabled 75% of the time in simulation.
+Default: `true`. Enabled 75% of the time in simulation.
 
 ## Two Parallel Data Move Paths
 
