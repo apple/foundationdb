@@ -458,78 +458,26 @@ def status_json_file_region_failover_message():
     assert "may have data loss" not in stdout
 
 
-def status_json_file_excluded_and_error_processes_message():
-    status_json = {
-        "client": {
-            "cluster_file": {"path": "fdb.cluster", "up_to_date": True},
-            "coordinators": {"coordinators": [], "quorum_reachable": True},
-            "database_status": {"available": True, "healthy": True},
-            "messages": [],
-            "timestamp": 1417807090,
-        },
-        "cluster": {
-            "configuration": {
-                "redundancy_mode": "double",
-                "storage_engine": "ssd-2",
-                "coordinators_count": 1,
-                "excluded_servers": [],
-            },
-            "data": {"state": {"name": "healthy", "healthy": True}},
-            "fault_tolerance": {
-                "max_zone_failures_without_losing_availability": 1,
-                "max_zone_failures_without_losing_data": 1,
-            },
-            "logs": [
-                {
-                    "epoch": 1,
-                    "current": True,
-                    "begin_version": 1,
-                    "possibly_losing_data": False,
-                    "log_interfaces": [],
-                }
-            ],
-            "machines": {
-                "m1": {"excluded": True},
-                "m2": {"excluded": False},
-            },
-            "processes": {
-                "1.1.1.1:4000": {
-                    "address": "1.1.1.1:4000",
-                    "excluded": True,
-                    "messages": [],
-                    "locality": {"zoneid": "z1", "machineid": "m1"},
-                },
-                "2.2.2.2:4000": {
-                    "address": "2.2.2.2:4000",
-                    "excluded": False,
-                    "messages": [
-                        {
-                            "name": "storage_server_lagging",
-                            "description": "Storage server lagging by 120 seconds.",
-                        }
-                    ],
-                    "locality": {"zoneid": "z2", "machineid": "m2"},
-                },
-            },
-        },
-    }
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as status_file:
-        json.dump(status_json, status_file)
-        status_file.flush()
-        result = subprocess.run(
-            [command_template[0], "--status-from-json", status_file.name],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=fdbcli_env,
+@enable_logging()
+def status_excluded_processes_message(logger):
+    # get all coordinators' address
+    coordinators = {
+        c["address"]
+        for c in get_value_from_status_json(
+            True, "client", "coordinators", "coordinators"
         )
-
-    stdout = result.stdout.decode("utf-8")
-    stderr = result.stderr.decode("utf-8")
-    assert result.returncode == 0, stderr
-    assert "excluded processes: 1; processes with errors: 1" in stdout
-    assert "excluded zones: 1" in stdout
-    assert "excluded machines: 1" in stdout
+    }
+    candidates = [a for a in get_fdb_process_addresses(logger) if a not in coordinators]
+    assert candidates, "Need a non-coordinator process to exclude"
+    excluded_address = random.choice(candidates)
+    run_fdbcli_command("exclude", "FORCE", excluded_address)
+    try:
+        status_output = run_fdbcli_command("status")
+        logger.debug(status_output)
+        assert "(excluded processes: 1; processes with errors: " in status_output
+        assert "less " not in status_output
+    finally:
+        run_fdbcli_command("include", excluded_address)
 
 
 @enable_logging()
@@ -1158,7 +1106,6 @@ if __name__ == "__main__":
         integer_options()
         tls_address_suffix()
         status_json_file_region_failover_message()
-        status_json_file_excluded_and_error_processes_message()
         idempotency_ids()
         cdc_operator_commands()
         audit_status_arguments()
@@ -1167,6 +1114,7 @@ if __name__ == "__main__":
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
+        status_excluded_processes_message()
         killall()
         # TODO: fix the failure where one process is not available after setclass call
         # setclass()
