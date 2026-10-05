@@ -18,12 +18,10 @@
  * limitations under the License.
  */
 
-#include "BackupFileRetry.h"
 #include "BackupWorkerPause.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SystemData.h"
@@ -288,6 +286,33 @@ struct BackupData {
 	bool allMessageSaved() const { return (endVersion.present() && savedVersion >= endVersion.get()) || stopped; }
 
 	Version maxPopVersion() const { return endVersion.present() ? endVersion.get() : minKnownCommittedVersion; }
+
+	// Inserts a backup's single range into rangeMap.
+	template <class T>
+	void insertRange(KeyRangeMap<std::set<T>>& keyRangeMap, KeyRangeRef range, T value) {
+		for (auto& logRange : keyRangeMap.modify(range)) {
+			logRange->value().insert(value);
+		}
+		for (auto& logRange : keyRangeMap.modify(singleKeyRange(metadataVersionKey))) {
+			logRange->value().insert(value);
+		}
+		TraceEvent("BackupWorkerInsertRange", myId)
+		    .detail("Value", value)
+		    .detail("Begin", range.begin)
+		    .detail("End", range.end);
+	}
+
+	// Inserts a backup's ranges into rangeMap.
+	template <class T>
+	void insertRanges(KeyRangeMap<std::set<T>>& keyRangeMap, const Optional<std::vector<KeyRange>>& ranges, T value) {
+		if (!ranges.present() || ranges.get().empty()) {
+			// insert full ranges of normal keys
+			return insertRange(keyRangeMap, normalKeys, value);
+		}
+		for (const auto& range : ranges.get()) {
+			insertRange(keyRangeMap, range, value);
+		}
+	}
 
 	void pop() {
 		if (backupEpoch > oldestBackupEpoch || stopped) {
@@ -687,244 +712,212 @@ static Future<Void> updateLogBytesWritten(BackupData* self,
 	}
 }
 
-struct MutationLogBackup {
-	UID uid;
-	Version beginVersion;
-	Reference<IBackupContainer> container;
-	Optional<std::vector<KeyRange>> ranges;
+struct MutationLogFiles {
+	std::vector<UID> backupUids;
+	std::vector<Reference<IBackupFile>> files;
 };
 
-// Recipient boundaries also determine ClearRange serialization. Keep them and the message arenas alive and
-// immutable until every recipient finishes, so a retry after ambiguous publication produces identical bytes.
-class MutationLogBatch : public ReferenceCounted<MutationLogBatch> {
-public:
-	MutationLogBatch(UID workerId,
-	                 Tag tag,
-	                 int totalTags,
-	                 Version popVersion,
-	                 int blockSize,
-	                 std::vector<VersionedMessage> messages,
-	                 std::vector<MutationLogBackup> backups)
-	  : workerId(workerId), tag(tag), totalTags(totalTags), popVersion(popVersion), blockSize(blockSize),
-	    messages(std::move(messages)), backups(std::move(backups)) {
-		for (int i = 0; i < this->backups.size(); ++i) {
-			const auto& backup = this->backups[i];
-			ASSERT(backup.container.isValid() && backup.beginVersion <= popVersion);
-			if (!backup.ranges.present() || backup.ranges.get().empty()) {
-				insertRange(normalKeys, i);
-			} else {
-				for (const auto& range : backup.ranges.get()) {
-					insertRange(range, i);
-				}
-			}
-		}
-		keyRangeMap.coalesce(allKeys);
+static bool retryableBackupFileError(Error error) {
+	switch (error.code()) {
+	case error_code_io_error:
+	case error_code_io_timeout:
+	case error_code_platform_error:
+	case error_code_timed_out:
+	case error_code_connection_failed:
+	case error_code_lookup_failed:
+	case error_code_http_request_failed:
+	case error_code_http_bad_response:
+		return true;
+	default:
+		return false;
 	}
+}
 
-	int size() const { return backups.size(); }
-	UID backupUid(int index) const { return backups[index].uid; }
-	Future<Reference<IBackupFile>> writeFile(int index) {
-		return writeFileImpl(Reference<MutationLogBatch>::addRef(this), index);
-	}
-
-private:
-	void insertRange(KeyRangeRef range, int index) {
-		for (auto& logRange : keyRangeMap.modify(range)) {
-			logRange->value().insert(index);
-		}
-		for (auto& logRange : keyRangeMap.modify(singleKeyRange(metadataVersionKey))) {
-			logRange->value().insert(index);
-		}
-		TraceEvent("BackupWorkerInsertRange", workerId)
-		    .detail("Value", index)
-		    .detail("Begin", range.begin)
-		    .detail("End", range.end);
-	}
-
-	static Future<Reference<IBackupFile>> writeFileImpl(Reference<MutationLogBatch> batch, int index) {
-		const auto& backup = batch->backups[index];
-		Reference<IBackupFile> file = co_await backup.container->writeTaggedLogFile(
-		    backup.beginVersion, batch->popVersion + 1, batch->blockSize, batch->tag.id, batch->totalTags);
-		TraceEvent("OpenMutationFile", batch->workerId)
-		    .detail("BackupID", backup.uid)
-		    .detail("TagId", batch->tag.id)
-		    .detail("File", file->getFileName());
-		int64_t blockEnd = 0;
-		for (auto message : batch->messages) {
-			MutationRef mutation;
-			if (message.getVersion() < backup.beginVersion || !message.isCandidateBackupMessage(&mutation)) {
-				continue;
-			}
-			DEBUG_MUTATION("addMutation", message.version.version, mutation, batch->workerId)
-			    .detail("BeginVersion", backup.beginVersion);
-			if (mutation.type != MutationRef::Type::ClearRange) {
-				if (batch->keyRangeMap[mutation.param1].contains(index)) {
-					co_await addMutation(file, message, message.message, &blockEnd, batch->blockSize);
-				}
-			} else {
-				KeyRangeRef mutationRange(mutation.param1, mutation.param2);
-				for (auto range : batch->keyRangeMap.intersectingRanges(mutationRange)) {
-					if (!range.value().contains(index)) {
-						continue;
-					}
-					KeyRangeRef intersection = mutationRange & range.range();
-					BinaryWriter writer(AssumeVersion(g_network->protocolVersion()));
-					writer << MutationRef(MutationRef::ClearRange, intersection.begin, intersection.end);
-					Standalone<StringRef> bytes = writer.toValue();
-					// A file permits only one append at a time, including fragments of the same clear.
-					co_await addMutation(file, message, bytes, &blockEnd, batch->blockSize);
-				}
-			}
-		}
-		co_await file->finish();
-		TraceEvent("CloseMutationFile", batch->workerId)
-		    .detail("FileSize", file->size())
-		    .detail("TagId", batch->tag.id)
-		    .detail("File", file->getFileName());
-		co_return file;
-	}
-
-	const UID workerId;
-	const Tag tag;
-	const int totalTags;
-	const Version popVersion;
-	const int blockSize;
-	const std::vector<VersionedMessage> messages;
-	const std::vector<MutationLogBackup> backups;
-	KeyRangeMap<std::set<int>> keyRangeMap;
-};
-
-template <class IsBackupStopped>
-static Future<Reference<IBackupFile>> writeMutationLogFile(Reference<MutationLogBatch> batch,
-                                                           int index,
-                                                           BackupFileRetry retry,
-                                                           const bool* workerStopped,
-                                                           AsyncTrigger* doneTrigger,
-                                                           IsBackupStopped isBackupStopped) {
-	while (!isBackupStopped()) {
-		Error error;
+template <class WriteFiles>
+static Future<MutationLogFiles> retryMutationLogFiles(
+    UID workerId,
+    const bool* stopped,
+    AsyncTrigger* doneTrigger,
+    Future<Void> configChanged,
+    WriteFiles writeFiles,
+    int retryLimit = SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_LIMIT,
+    double retryDelay = SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_DELAY,
+    double maxDelay = SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY) {
+	int retries = 0;
+	Optional<Error> lastError;
+	maxDelay = std::max(0.0, maxDelay);
+	retryDelay = std::max(0.0, std::min(retryDelay, maxDelay));
+	while (true) {
 		try {
-			co_return co_await batch->writeFile(index);
+			MutationLogFiles result = co_await writeFiles();
+			// Recipient changes can alter ClearRange splits. Recovery must replay the retained prefix if
+			// configuration drifted during a retry, even when that attempt's files finished successfully.
+			if (lastError.present() && configChanged.isReady()) {
+				throw lastError.get();
+			}
+			co_return result;
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled || *workerStopped) {
+			if (!retryableBackupFileError(e) || retries >= retryLimit || *stopped || configChanged.isReady()) {
 				throw;
 			}
-			error = e;
+			lastError = e;
 		}
-		Future<Void> backoff = retry.onError(error);
+		const double waitSeconds = retryDelay * (0.5 + 0.5 * deterministicRandom()->random01());
+		retryDelay = std::min(maxDelay, retryDelay * 2);
+		++retries;
+		TraceEvent(SevWarn, "BackupWorkerFileRetry", workerId)
+		    .errorUnsuppressed(lastError.get())
+		    .detail("Retry", retries)
+		    .detail("RetryLimit", retryLimit)
+		    .detail("Delay", waitSeconds);
+		Future<Void> backoff = delay(waitSeconds);
 		while (!backoff.isReady()) {
-			co_await (backoff || doneTrigger->onTrigger());
-			if (*workerStopped) {
-				throw error;
+			co_await (backoff || doneTrigger->onTrigger() || configChanged);
+			if (*stopped || configChanged.isReady()) {
+				throw lastError.get();
 			}
 		}
 		co_await backoff;
-		if (*workerStopped) {
-			throw error;
+		if (*stopped || configChanged.isReady()) {
+			throw lastError.get();
 		}
 	}
-	co_return Reference<IBackupFile>();
 }
 
-static std::vector<MutationLogBackup> snapshotMutationLogBackups(std::map<UID, BackupData::PerBackupInfo>& backups,
-                                                                 UID workerId,
-                                                                 Version workerStartVersion,
-                                                                 Version savedVersion,
-                                                                 Optional<Version> firstMessageVersion,
-                                                                 Version popVersion) {
-	std::vector<MutationLogBackup> snapshot;
-	for (auto it = backups.begin(); it != backups.end();) {
-		ASSERT(it->second.isReady());
+// One complete-file attempt for messages in [0, numMsg), without advancing progress or accounting.
+// The file content format is a sequence of (Version, sub#, msgSize, message).
+static Future<MutationLogFiles> writeMutationsToFile(BackupData* self, Version popVersion, int numMsg, int blockSize) {
+	std::vector<Future<Reference<IBackupFile>>> logFileFutures;
+	std::vector<Reference<IBackupFile>> logFiles;
+	std::vector<int64_t> blockEnds;
+	std::vector<UID> activeUids; // active Backups' UIDs
+	std::vector<Version> beginVersions; // logFiles' begin versions
+	KeyRangeMap<std::set<int>> keyRangeMap; // range to index in logFileFutures, logFiles, & blockEnds
+	std::vector<Standalone<StringRef>> mutations;
+	int idx{ 0 };
+
+	for (auto it = self->backups.begin(); it != self->backups.end();) {
 		if (it->second.stopped || !it->second.container.get().present()) {
-			TraceEvent("BackupWorkerNoContainer", workerId).detail("BackupId", it->first);
-			it = backups.erase(it);
+			TraceEvent("BackupWorkerNoContainer", self->myId).detail("BackupId", it->first);
+			it = self->backups.erase(it);
 			continue;
 		}
-		if (it->second.startVersion <= popVersion && it->second.lastSavedVersion <= popVersion) {
-			if (it->second.lastSavedVersion == invalidVersion) {
-				it->second.lastSavedVersion =
-				    it->second.startVersion > workerStartVersion && firstMessageVersion.present()
-				        ? firstMessageVersion.get()
-				        : std::max(savedVersion, workerStartVersion);
-				TraceEvent("BackupWorkerTrueUp", workerId).detail("LastSavedVersion", it->second.lastSavedVersion);
+		const int index = logFileFutures.size();
+		activeUids.push_back(it->first);
+		self->insertRanges(keyRangeMap, it->second.ranges.get(), index);
+
+		if (it->second.lastSavedVersion == invalidVersion) {
+			if (it->second.startVersion > self->startVersion && !self->messages.empty()) {
+				// True-up first mutation log's begin version
+				it->second.lastSavedVersion = self->messages[0].getVersion();
+			} else {
+				it->second.lastSavedVersion = std::max({ self->savedVersion, self->startVersion });
 			}
-			if (it->second.lastSavedVersion <= popVersion) {
-				snapshot.push_back({ it->first,
-				                     it->second.lastSavedVersion,
-				                     it->second.container.get().get(),
-				                     it->second.ranges.get() });
+			TraceEvent("BackupWorkerTrueUp", self->myId).detail("LastSavedVersion", it->second.lastSavedVersion);
+		}
+		// The true-up version can be larger than first message version, so keep
+		// the begin versions for later muation filtering.
+		beginVersions.push_back(it->second.lastSavedVersion);
+
+		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(
+		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id, self->totalTags));
+		it++;
+	}
+
+	keyRangeMap.coalesce(allKeys);
+	co_await waitForAll(logFileFutures);
+
+	std::transform(logFileFutures.begin(),
+	               logFileFutures.end(),
+	               std::back_inserter(logFiles),
+	               [](const Future<Reference<IBackupFile>>& f) { return f.get(); });
+
+	ASSERT(activeUids.size() == logFiles.size() && beginVersions.size() == logFiles.size());
+	for (int i = 0; i < logFiles.size(); i++) {
+		TraceEvent("OpenMutationFile", self->myId)
+		    .detail("BackupID", activeUids[i])
+		    .detail("TagId", self->tag.id)
+		    .detail("File", logFiles[i]->getFileName());
+	}
+
+	blockEnds = std::vector<int64_t>(logFiles.size(), 0);
+	for (idx = 0; idx < numMsg; idx++) {
+		auto message = self->messages[idx];
+		MutationRef m;
+		if (!message.isCandidateBackupMessage(&m)) {
+			continue;
+		}
+
+		DEBUG_MUTATION("addMutation", message.version.version, m, self->myId)
+		    .detail("KCV", self->minKnownCommittedVersion)
+		    .detail("SavedVersion", self->savedVersion);
+
+		std::vector<Future<Void>> adds;
+		if (m.type != MutationRef::Type::ClearRange) {
+			for (int index : keyRangeMap[m.param1]) {
+				if (message.getVersion() >= beginVersions[index]) {
+					adds.push_back(
+					    addMutation(logFiles[index], message, message.message, &blockEnds[index], blockSize));
+				}
+			}
+		} else {
+			KeyRangeRef mutationRange(m.param1, m.param2);
+			KeyRangeRef intersectionRange;
+
+			// Find intersection ranges and create mutations for sub-ranges
+			for (auto range : keyRangeMap.intersectingRanges(mutationRange)) {
+				const auto& subrange = range.range();
+				intersectionRange = mutationRange & subrange;
+				MutationRef subm(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
+				BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+				wr << subm;
+				mutations.push_back(wr.toValue());
+				for (int index : range.value()) {
+					if (message.getVersion() >= beginVersions[index]) {
+						adds.push_back(
+						    addMutation(logFiles[index], message, mutations.back(), &blockEnds[index], blockSize));
+					}
+				}
+				// Split clears can target the same file, which permits only one outstanding append.
+				co_await waitForAll(adds);
+				adds.clear();
 			}
 		}
-		++it;
+		co_await waitForAll(adds);
+		mutations.clear();
 	}
-	return snapshot;
+
+	std::vector<Future<Void>> finished;
+	std::transform(logFiles.begin(), logFiles.end(), std::back_inserter(finished), [](const Reference<IBackupFile>& f) {
+		return f->finish();
+	});
+
+	co_await waitForAll(finished);
+
+	for (const auto& file : logFiles) {
+		TraceEvent("CloseMutationFile", self->myId)
+		    .detail("FileSize", file->size())
+		    .detail("TagId", self->tag.id)
+		    .detail("File", file->getFileName());
+	}
+	co_return MutationLogFiles{ std::move(activeUids), std::move(logFiles) };
 }
 
-// Retain the message prefix until all applicable recipients, including ones discovered during retries, finish.
 Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
-	bool startedBatch = false;
-	while (true) {
-		while (!self->isAllInfoReady()) {
-			if (startedBatch) {
-				if (self->stopped) {
-					throw worker_removed();
-				}
-				co_await (self->waitAllInfoReady() || self->doneTrigger.onTrigger());
-			} else {
-				co_await self->waitAllInfoReady();
-			}
-		}
-		auto backups = snapshotMutationLogBackups(
-		    self->backups,
-		    self->myId,
-		    self->startVersion,
-		    self->savedVersion,
-		    self->messages.empty() ? Optional<Version>() : Optional<Version>(self->messages.front().getVersion()),
-		    popVersion);
-		if (backups.empty()) {
-			co_return;
-		}
-		if (startedBatch && self->stopped) {
-			throw worker_removed();
-		}
-		startedBatch = true;
-		ASSERT(numMsg <= self->messages.size());
-		auto batch = makeReference<MutationLogBatch>(
-		    self->myId,
-		    self->tag,
-		    self->totalTags,
-		    popVersion,
-		    SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES,
-		    std::vector<VersionedMessage>(self->messages.begin(), self->messages.begin() + numMsg),
-		    std::move(backups));
-		std::vector<Future<Reference<IBackupFile>>> writes;
-		for (int i = 0; i < batch->size(); ++i) {
-			writes.push_back(writeMutationLogFile(batch,
-			                                      i,
-			                                      BackupFileRetry(self->myId),
-			                                      &self->stopped,
-			                                      &self->doneTrigger,
-			                                      [self, uid = batch->backupUid(i)] {
-				                                      auto info = self->backups.find(uid);
-				                                      return info == self->backups.end() || info->second.stopped;
-			                                      }));
-		}
-		co_await waitForAll(writes);
-		std::vector<UID> activeUids;
-		std::vector<Reference<IBackupFile>> logFiles;
-		for (int i = 0; i < writes.size(); ++i) {
-			if (writes[i].get().isValid()) {
-				activeUids.push_back(batch->backupUid(i));
-				logFiles.push_back(writes[i].get());
-			}
-		}
-		if (!logFiles.empty()) {
-			co_await updateLogBytesWritten(self, activeUids, logFiles);
-			for (UID uid : activeUids) {
-				self->backups.at(uid).lastSavedVersion = popVersion + 1;
-			}
-		}
+	// Resolve metadata before the file retry boundary. The unchanged configuration and retained message prefix
+	// ensure each complete-file attempt has identical contents; accounting is performed only after success.
+	while (!self->isAllInfoReady()) {
+		co_await self->waitAllInfoReady();
 	}
+	const int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
+	MutationLogFiles completed = co_await retryMutationLogFiles(
+	    self->myId, &self->stopped, &self->doneTrigger, self->changedTrigger.onTrigger(), [=] {
+		    return writeMutationsToFile(self, popVersion, numMsg, blockSize);
+	    });
+	for (UID uid : completed.backupUids) {
+		self->backups[uid].lastSavedVersion = popVersion + 1;
+	}
+	co_await updateLogBytesWritten(self, completed.backupUids, completed.files);
 }
 
 // Uploads self->messages to cloud storage and updates savedVersion.
@@ -1222,348 +1215,172 @@ Future<Void> backupWorker(BackupInterface interf,
 }
 
 namespace {
-
-class MutationLogTestFile final : public IBackupFile, ReferenceCounted<MutationLogTestFile> {
+class FileRetryTestFile final : public IBackupFile, ReferenceCounted<FileRetryTestFile> {
 public:
-	enum class Failure { NONE, CREATE, APPEND, FINISH };
-
-	MutationLogTestFile(std::string name,
-	                    Failure failure,
-	                    Error error,
-	                    Future<Void> appendReady,
-	                    Future<Void> finishReady)
-	  : IBackupFile(name), failure(failure), error(error), appendReady(appendReady), finishReady(finishReady) {}
-
+	FileRetryTestFile(std::string name, bool failAppend, bool failFinish)
+	  : IBackupFile(name), failAppend(failAppend), failFinish(failFinish) {}
 	Future<Void> appendImpl(const void* data, size_t len) override {
-		ASSERT(!failed && !finished && !pendingAppend);
-		pendingAppend = true;
-		++appends;
-		return appendAfter(Reference<MutationLogTestFile>::addRef(this), data, len);
-	}
-
-	Future<Void> finish() override {
-		ASSERT(!failed && !finished && !pendingAppend);
-		finished = true;
-		if (failure == Failure::FINISH) {
+		ASSERT(!failed && !finished);
+		contents.append(static_cast<const char*>(data), len);
+		if (++appends == 2 && failAppend) {
 			failed = true;
-			return error;
+			return io_error();
 		}
-		return finishReady;
+		return Void();
 	}
-
+	Future<Void> finish() override {
+		ASSERT(!failed && !finished);
+		finished = true; // A failure may be reported after publication.
+		return failFinish ? Future<Void>(io_error()) : Future<Void>(Void());
+	}
 	int64_t size() const override { return contents.size(); }
-	void addref() override { ReferenceCounted<MutationLogTestFile>::addref(); }
-	void delref() override { ReferenceCounted<MutationLogTestFile>::delref(); }
+	void addref() override { ReferenceCounted<FileRetryTestFile>::addref(); }
+	void delref() override { ReferenceCounted<FileRetryTestFile>::delref(); }
 	const std::string& bytes() const { return contents; }
-	bool isFinished() const { return finished; }
 
 private:
-	static Future<Void> appendAfter(Reference<MutationLogTestFile> file, const void* data, size_t len) {
-		// Delay the first mutation body and read its bytes only after the delay. This also checks that
-		// subsequent ClearRange fragments never append concurrently to the same file.
-		if (file->appends == 3) {
-			co_await file->appendReady;
-		}
-		file->contents.append(static_cast<const char*>(data), len);
-		file->pendingAppend = false;
-		if (file->appends == 2 && file->failure == Failure::APPEND) {
-			file->failed = true;
-			throw file->error;
-		}
-	}
-
-	const Failure failure;
-	const Error error;
-	const Future<Void> appendReady;
-	const Future<Void> finishReady;
-	std::string contents;
+	const bool failAppend, failFinish;
+	bool failed = false, finished = false;
 	int appends = 0;
-	bool pendingAppend = false;
-	bool failed = false;
-	bool finished = false;
+	std::string contents;
 };
 
-class MutationLogTestContainer final : public BackupContainerFileSystem, ReferenceCounted<MutationLogTestContainer> {
-public:
-	using Failure = MutationLogTestFile::Failure;
-
-	explicit MutationLogTestContainer(std::vector<Failure> failures,
-	                                  Error error = io_error(),
-	                                  Future<Void> firstAppend = Void(),
-	                                  Future<Void> firstFinish = Void())
-	  : failures(std::move(failures)), error(error), firstAppend(firstAppend), firstFinish(firstFinish) {}
-
-	Future<Reference<IBackupFile>> writeFile(const std::string& name) override {
-		Failure failure = attempts < failures.size() ? failures[attempts] : Failure::NONE;
-		++attempts;
-		if (failure == Failure::CREATE) {
-			return error;
-		}
-		auto file = makeReference<MutationLogTestFile>(name,
-		                                               failure,
-		                                               error,
-		                                               attempts == 1 ? firstAppend : Future<Void>(Void()),
-		                                               attempts == 1 ? firstFinish : Future<Void>(Void()));
-		files.push_back(file);
-		return Reference<IBackupFile>(file);
-	}
-
-	int getAttempts() const { return attempts; }
-	const std::vector<Reference<MutationLogTestFile>>& getFiles() const { return files; }
-	void addref() override { ReferenceCounted<MutationLogTestContainer>::addref(); }
-	void delref() override { ReferenceCounted<MutationLogTestContainer>::delref(); }
-	Future<Void> create() override { return Void(); }
-	Future<bool> exists() override { return true; }
-	Future<Reference<IAsyncFile>> readFile(const std::string&) override { return operation_failed(); }
-	Future<Void> writeEntireFile(const std::string&, const std::string&) override { return operation_failed(); }
-	Future<Void> deleteFile(const std::string&) override { return operation_failed(); }
-	Future<FilesAndSizesT> listFiles(const std::string&, std::function<bool(std::string const&)>) override {
-		return operation_failed();
-	}
-	Future<Void> deleteContainer(int*) override { return operation_failed(); }
-
-private:
-	const std::vector<Failure> failures;
-	const Error error;
-	const Future<Void> firstAppend;
-	const Future<Void> firstFinish;
-	int attempts = 0;
-	std::vector<Reference<MutationLogTestFile>> files;
-};
-
-VersionedMessage mutationLogTestMessage(MutationRef mutation) {
+VersionedMessage fileRetryTestClear(KeyRef begin, KeyRef end) {
 	BinaryWriter writer(AssumeVersion(g_network->protocolVersion()));
-	writer << mutation;
+	writer << MutationRef(MutationRef::ClearRange, begin, end);
 	Standalone<StringRef> bytes = writer.toValue();
 	return VersionedMessage(LogMessageVersion(100, 7), bytes, {}, bytes.arena());
 }
-
-Reference<MutationLogBatch> mutationLogTestBatch(std::vector<VersionedMessage> messages,
-                                                 std::vector<MutationLogBackup> backups) {
-	return makeReference<MutationLogBatch>(
-	    UID(9, 9), Tag(tagLocalityLogRouter, 0), 1, 100, 1024, std::move(messages), std::move(backups));
-}
-
-BackupData::PerBackupInfo mutationLogTestBackup(Reference<IBackupContainer> container,
-                                                Version startVersion,
-                                                std::vector<KeyRange> ranges,
-                                                Version lastSavedVersion = invalidVersion) {
-	BackupData::PerBackupInfo info;
-	info.startVersion = startVersion;
-	info.lastSavedVersion = lastSavedVersion;
-	info.container = Optional<Reference<IBackupContainer>>(container);
-	info.ranges = Optional<std::vector<KeyRange>>(std::move(ranges));
-	return info;
-}
-
 } // namespace
 
-TEST_CASE("/BackupWorker/MutationLogUpload/RetryFreshFiles") {
-	using Failure = MutationLogTestFile::Failure;
-	auto container = makeReference<MutationLogTestContainer>(
-	    std::vector<Failure>{ Failure::CREATE, Failure::APPEND, Failure::FINISH, Failure::NONE });
-	auto batch = mutationLogTestBatch({ mutationLogTestMessage(MutationRef(MutationRef::SetValue, "key"_sr, "v"_sr)) },
-	                                  { { UID(1, 1), 100, container, {} } });
+TEST_CASE("/BackupWorker/FileRetry/FreshFiles") {
 	bool stopped = false;
-	AsyncTrigger done;
-	Reference<IBackupFile> completed =
-	    co_await writeMutationLogFile(batch, 0, BackupFileRetry(UID(), 3, 0, 0), &stopped, &done, [] { return false; });
-	ASSERT_EQ(container->getAttempts(), 4);
-	const auto& files = container->getFiles();
-	ASSERT_EQ(files.size(), 3);
-	ASSERT_EQ(completed->getFileName(), files.back()->getFileName());
-	ASSERT(!files[0]->isFinished());
-	ASSERT(files[1]->isFinished() && files[2]->isFinished());
-	ASSERT(files[2]->bytes().starts_with(files[0]->bytes()));
-	ASSERT(files[0]->bytes().size() < files[2]->bytes().size());
-	ASSERT_EQ(files[1]->bytes(), files[2]->bytes());
-	ASSERT(files[1]->getFileName() != files[2]->getFileName());
-	for (const auto& file : files) {
-		ASSERT(file->getFileName().find("/log,100,101,") != std::string::npos);
-	}
+	AsyncTrigger done, changed;
+	int attempts = 0;
+	std::vector<Reference<FileRetryTestFile>> files;
+	auto writeFiles = [&]() -> Future<MutationLogFiles> {
+		if (++attempts == 1) {
+			throw io_error(); // File creation failed.
+		}
+		MutationLogFiles result;
+		for (int i = 0; i < 2; ++i) {
+			auto file = makeReference<FileRetryTestFile>(
+			    format("attempt-%d-file-%d", attempts, i), i == 1 && attempts == 2, i == 1 && attempts == 3);
+			files.push_back(file);
+			int64_t blockEnd = 0;
+			auto left = fileRetryTestClear("a"_sr, "m"_sr);
+			co_await addMutation(file, left, left.message, &blockEnd, 64);
+			auto right = fileRetryTestClear("m"_sr, "z"_sr);
+			co_await addMutation(file, right, right.message, &blockEnd, 64);
+			co_await file->finish();
+			result.files.push_back(file);
+		}
+		co_return result;
+	};
+	MutationLogFiles result =
+	    co_await retryMutationLogFiles(UID(), &stopped, &done, changed.onTrigger(), writeFiles, 3, 0, 0);
+	ASSERT_EQ(attempts, 4);
+	ASSERT_EQ(result.files.size(), 2);
+	ASSERT_EQ(files.size(), 6);
+	// The successful sibling and an ambiguously finished file are replayed byte-for-byte with fresh identities.
+	ASSERT_EQ(files[0]->bytes(), files[2]->bytes());
+	ASSERT_EQ(files[2]->bytes(), files[4]->bytes());
+	ASSERT_EQ(files[3]->bytes(), files[5]->bytes());
+	ASSERT(files[5]->bytes().starts_with(files[1]->bytes()));
+	ASSERT(files[1]->size() < files[5]->size());
+	ASSERT(files[3]->getFileName() != files[5]->getFileName());
 }
 
-TEST_CASE("/BackupWorker/MutationLogUpload/PartialCompletionAndRecipients") {
-	using Failure = MutationLogTestFile::Failure;
-	const UID firstUid(1, 1);
-	const UID stoppedUid(2, 2);
-	const UID lateUid(3, 3);
-	Promise<Void> appendReady;
-	Promise<Void> finishReady;
-	auto first = makeReference<MutationLogTestContainer>(
-	    std::vector<Failure>{}, io_error(), appendReady.getFuture(), finishReady.getFuture());
-	auto other = makeReference<MutationLogTestContainer>(std::vector<Failure>{});
-	auto late = makeReference<MutationLogTestContainer>(std::vector<Failure>{});
-	std::map<UID, BackupData::PerBackupInfo> infos;
-	infos.emplace(firstUid, mutationLogTestBackup(first, 90, { KeyRangeRef("a"_sr, "z"_sr) }, 100));
-	infos.emplace(stoppedUid, mutationLogTestBackup(other, 90, { KeyRangeRef("m"_sr, "n"_sr) }, 100));
-	std::vector<VersionedMessage> messages{ mutationLogTestMessage(
-		MutationRef(MutationRef::ClearRange, "a"_sr, "z"_sr)) };
-	auto batch =
-	    mutationLogTestBatch(messages, snapshotMutationLogBackups(infos, UID(), 50, 99, Optional<Version>(100), 100));
+TEST_CASE("/BackupWorker/FileRetry/FailurePolicy") {
 	bool stopped = false;
-	AsyncTrigger done;
-	auto result = writeMutationLogFile(
-	    batch, 0, BackupFileRetry(UID(), 1, 0, 0), &stopped, &done, [&] { return infos.at(firstUid).stopped; });
-	auto otherResult = writeMutationLogFile(
-	    batch, 1, BackupFileRetry(UID(), 1, 0, 0), &stopped, &done, [&] { return infos.at(stoppedUid).stopped; });
-	ASSERT(!result.isReady());
-	ASSERT(otherResult.isReady() && !otherResult.isError());
-	messages.clear(); // The batch must retain the serialized message across suspension and retry.
-	appendReady.send(Void());
-	ASSERT(first->getFiles()[0]->isFinished());
-	infos.at(stoppedUid).stop();
-	infos.emplace(lateUid, mutationLogTestBackup(late, 99, { KeyRangeRef("g"_sr, "t"_sr) }));
-	finishReady.sendError(io_error());
-	Reference<IBackupFile> completed = co_await result;
-	ASSERT_EQ(first->getAttempts(), 2);
-	ASSERT_EQ(other->getAttempts(), 1);
-	ASSERT_EQ(first->getFiles()[0]->bytes(), first->getFiles()[1]->bytes());
-	infos.at(firstUid).lastSavedVersion = 101;
-	infos.at(stoppedUid).lastSavedVersion = 101;
-
-	// The retry preserves the stopped recipient's boundaries; without them the clear has one fragment.
-	auto unsplit = makeReference<MutationLogTestContainer>(std::vector<Failure>{});
-	auto unsplitBatch =
-	    mutationLogTestBatch({ mutationLogTestMessage(MutationRef(MutationRef::ClearRange, "a"_sr, "z"_sr)) },
-	                         { { firstUid, 100, unsplit, std::vector<KeyRange>{ KeyRangeRef("a"_sr, "z"_sr) } } });
-	Reference<IBackupFile> unsplitFile = co_await unsplitBatch->writeFile(0);
-	ASSERT(completed->size() > unsplitFile->size());
-
-	auto pending = snapshotMutationLogBackups(infos, UID(), 50, 99, Optional<Version>(100), 100);
-	ASSERT_EQ(pending.size(), 1);
-	ASSERT_EQ(pending.front().uid, lateUid);
-	ASSERT_EQ(pending.front().beginVersion, 100);
-	auto lateBatch = mutationLogTestBatch(
-	    { mutationLogTestMessage(MutationRef(MutationRef::ClearRange, "a"_sr, "z"_sr)) }, std::move(pending));
-	Reference<IBackupFile> lateFile = co_await lateBatch->writeFile(0);
-	infos.at(lateUid).lastSavedVersion = 101;
-	ASSERT(snapshotMutationLogBackups(infos, UID(), 50, 99, Optional<Version>(100), 100).empty());
-	auto expected = makeReference<MutationLogTestContainer>(std::vector<Failure>{});
-	auto expectedBatch =
-	    mutationLogTestBatch({ mutationLogTestMessage(MutationRef(MutationRef::ClearRange, "g"_sr, "t"_sr)) },
-	                         { { lateUid, 100, expected, {} } });
-	co_await expectedBatch->writeFile(0);
-	ASSERT_EQ(late->getFiles()[0]->bytes(), expected->getFiles()[0]->bytes());
-	ASSERT_EQ(lateFile->size(), expected->getFiles()[0]->size());
-}
-
-TEST_CASE("/BackupWorker/MutationLogUpload/StopDuringRetry") {
-	using Failure = MutationLogTestFile::Failure;
-	for (bool cancel : { false, true }) {
-		auto container = makeReference<MutationLogTestContainer>(std::vector<Failure>{ Failure::FINISH });
-		auto batch =
-		    mutationLogTestBatch({ mutationLogTestMessage(MutationRef(MutationRef::SetValue, "key"_sr, "v"_sr)) },
-		                         { { UID(1, 1), 100, container, {} } });
-		bool stopped = false;
-		AsyncTrigger done;
-		auto result =
-		    writeMutationLogFile(batch, 0, BackupFileRetry(UID(), 2, 10, 10), &stopped, &done, [] { return false; });
-		ASSERT(!result.isReady());
-		if (cancel) {
-			result.cancel();
-		} else {
-			stopped = true;
-			done.trigger();
-		}
-		ASSERT(result.isError());
-		ASSERT_EQ(result.getError().code(), cancel ? error_code_actor_cancelled : error_code_io_error);
-		ASSERT_EQ(container->getAttempts(), 1);
-	}
-	return Void();
-}
-
-TEST_CASE("/BackupWorker/MutationLogUpload/StopDuringWrite") {
-	using Failure = MutationLogTestFile::Failure;
-	for (bool fail : { false, true }) {
-		Promise<Void> finishReady;
-		auto container = makeReference<MutationLogTestContainer>(
-		    std::vector<Failure>{}, io_error(), Future<Void>(Void()), finishReady.getFuture());
-		auto batch =
-		    mutationLogTestBatch({ mutationLogTestMessage(MutationRef(MutationRef::SetValue, "key"_sr, "v"_sr)) },
-		                         { { UID(1, 1), 100, container, {} } });
-		bool stopped = false;
-		AsyncTrigger done;
-		auto result =
-		    writeMutationLogFile(batch, 0, BackupFileRetry(UID(), 2, 0, 0), &stopped, &done, [] { return false; });
-		ASSERT(!result.isReady());
-		stopped = true;
-		done.trigger();
-		if (fail) {
-			finishReady.sendError(io_error());
-		} else {
-			finishReady.send(Void());
-		}
-		ASSERT(result.isReady());
-		ASSERT_EQ(result.isError(), fail);
-		if (fail) {
-			ASSERT_EQ(result.getError().code(), error_code_io_error);
-		}
-		ASSERT_EQ(container->getAttempts(), 1);
-	}
-	return Void();
-}
-
-TEST_CASE("/BackupWorker/MutationLogUpload/TerminalAndExhausted") {
-	using Failure = MutationLogTestFile::Failure;
-	for (Error error : { io_error(), checksum_failed(), actor_cancelled(), broken_promise() }) {
-		auto container =
-		    makeReference<MutationLogTestContainer>(std::vector<Failure>{ Failure::FINISH, Failure::FINISH }, error);
-		auto batch =
-		    mutationLogTestBatch({ mutationLogTestMessage(MutationRef(MutationRef::SetValue, "key"_sr, "v"_sr)) },
-		                         { { UID(1, 1), 100, container, {} } });
-		bool stopped = false;
-		AsyncTrigger done;
-		auto result = co_await errorOr(
-		    writeMutationLogFile(batch, 0, BackupFileRetry(UID(), 1, 0, 0), &stopped, &done, [] { return false; }));
+	AsyncTrigger done, changed;
+	for (auto [error, expectedAttempts] : std::vector<std::pair<Error, int>>{ { io_error(), 2 },
+	                                                                          { platform_error(), 2 },
+	                                                                          { http_bad_response(), 2 },
+	                                                                          { checksum_failed(), 1 },
+	                                                                          { actor_cancelled(), 1 },
+	                                                                          { broken_promise(), 1 },
+	                                                                          { http_auth_failed(), 1 } }) {
+		int attempts = 0;
+		auto result = co_await errorOr(retryMutationLogFiles(
+		    UID(),
+		    &stopped,
+		    &done,
+		    changed.onTrigger(),
+		    [&]() -> Future<MutationLogFiles> {
+			    ++attempts;
+			    return error;
+		    },
+		    1,
+		    0,
+		    0));
 		ASSERT(result.isError());
 		ASSERT_EQ(result.getError().code(), error.code());
-		ASSERT_EQ(container->getAttempts(), error.code() == error_code_io_error ? 2 : 1);
+		ASSERT_EQ(attempts, expectedAttempts);
 	}
 }
 
-TEST_CASE("/BackupWorker/MutationLogUpload/StoppedRecipient") {
-	using Failure = MutationLogTestFile::Failure;
-	Promise<Void> finishReady;
-	auto container = makeReference<MutationLogTestContainer>(
-	    std::vector<Failure>{}, io_error(), Future<Void>(Void()), finishReady.getFuture());
-	auto batch = mutationLogTestBatch({ mutationLogTestMessage(MutationRef(MutationRef::SetValue, "key"_sr, "v"_sr)) },
-	                                  { { UID(1, 1), 100, container, {} } });
-	bool stopped = false;
-	bool backupStopped = false;
-	AsyncTrigger done;
-	auto result =
-	    writeMutationLogFile(batch, 0, BackupFileRetry(UID(), 1, 0, 0), &stopped, &done, [&] { return backupStopped; });
-	ASSERT(!result.isReady());
-	backupStopped = true;
-	finishReady.sendError(io_error());
-	Reference<IBackupFile> completed = co_await result;
-	ASSERT(!completed.isValid());
-	ASSERT_EQ(container->getAttempts(), 1);
+TEST_CASE("/BackupWorker/FileRetry/InterruptedBackoff") {
+	for (int interruption = 0; interruption < 3; ++interruption) {
+		bool stopped = false;
+		AsyncTrigger done, changed;
+		int attempts = 0;
+		auto result = retryMutationLogFiles(
+		    UID(),
+		    &stopped,
+		    &done,
+		    changed.onTrigger(),
+		    [&]() -> Future<MutationLogFiles> {
+			    ++attempts;
+			    return io_error();
+		    },
+		    2,
+		    10,
+		    10);
+		ASSERT(!result.isReady());
+		if (interruption == 0) {
+			stopped = true;
+			done.trigger();
+		} else if (interruption == 1) {
+			changed.trigger();
+		} else {
+			result.cancel();
+		}
+		auto outcome = co_await errorOr(result);
+		ASSERT(outcome.isError());
+		ASSERT_EQ(outcome.getError().code(), interruption == 2 ? error_code_actor_cancelled : error_code_io_error);
+		ASSERT_EQ(attempts, 1);
+	}
 }
 
-TEST_CASE("/BackupWorker/MutationLogUpload/CancelPendingClear") {
-	using Failure = MutationLogTestFile::Failure;
-	Promise<Void> appendReady;
-	auto container =
-	    makeReference<MutationLogTestContainer>(std::vector<Failure>{}, io_error(), appendReady.getFuture());
-	auto batch = mutationLogTestBatch({ mutationLogTestMessage(MutationRef(MutationRef::ClearRange, "a"_sr, "z"_sr)) },
-	                                  { { UID(1, 1), 100, container, {} } });
+TEST_CASE("/BackupWorker/FileRetry/ConfigChangedDuringSuccessfulRetry") {
 	bool stopped = false;
-	AsyncTrigger done;
-	auto result =
-	    writeMutationLogFile(batch, 0, BackupFileRetry(UID(), 1, 0, 0), &stopped, &done, [] { return false; });
-	ASSERT(!result.isReady());
-	batch.clear();
-	const auto bytesBeforeCancel = container->getFiles()[0]->bytes();
-	result.cancel();
-	appendReady.send(Void());
-	ASSERT(result.isError());
-	ASSERT_EQ(result.getError().code(), error_code_actor_cancelled);
-	ASSERT_EQ(container->getFiles()[0]->bytes(), bytesBeforeCancel);
-	ASSERT(!container->getFiles()[0]->isFinished());
-	ASSERT_EQ(container->getAttempts(), 1);
-	return Void();
+	AsyncTrigger done, changed;
+	int attempts = 0;
+	Promise<Void> retryStarted;
+	Promise<MutationLogFiles> finished;
+	const Error original = io_error().asInjectedFault();
+	auto result = retryMutationLogFiles(
+	    UID(),
+	    &stopped,
+	    &done,
+	    changed.onTrigger(),
+	    [&]() -> Future<MutationLogFiles> {
+		    if (++attempts == 1) {
+			    return original;
+		    }
+		    retryStarted.send(Void());
+		    return finished.getFuture();
+	    },
+	    1,
+	    0,
+	    0);
+	co_await retryStarted.getFuture();
+	changed.trigger();
+	finished.send(MutationLogFiles{});
+	auto outcome = co_await errorOr(result);
+	ASSERT(outcome.isError());
+	ASSERT_EQ(outcome.getError().code(), original.code());
+	ASSERT(outcome.getError().isInjectedFault());
+	ASSERT_EQ(attempts, 2);
 }
-
-void forceLinkBackupWorkerMutationLogTests() {}

@@ -1,28 +1,10 @@
 testClass = "Backup"
 
 [[test]]
-testTitle = 'BackupFileRetryPolicy'
+testTitle = 'BackupWorkerFileRetries'
 useDB = false
 startDelay = 0
 
     [[test.workload]]
     testName = 'UnitTests'
     testsMatching = '/BackupWorker/FileRetry/'
-
-[[test]]
-testTitle = 'BackupMutationLogFileRetries'
-useDB = false
-startDelay = 0
-
-    [[test.workload]]
-    testName = 'UnitTests'
-    testsMatching = '/BackupWorker/MutationLogUpload/'
-
-[[test]]
-testTitle = 'RangePartitionedBackupFileRetries'
-useDB = false
-startDelay = 0
-
-    [[test.workload]]
-    testName = 'UnitTests'
-    testsMatching = '/RangePartitionedBackupWorker/FileRetry/'
