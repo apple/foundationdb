@@ -459,6 +459,29 @@ def status_json_file_region_failover_message():
 
 
 @enable_logging()
+def status_excluded_processes_message(logger):
+    # get all coordinators' address
+    coordinators = {
+        c["address"]
+        for c in get_value_from_status_json(
+            True, "client", "coordinators", "coordinators"
+        )
+    }
+    candidates = [a for a in get_fdb_process_addresses(logger) if a not in coordinators]
+    # make sure that we do not exclude any coordinator process because excluding coordinator will print the warning
+    assert candidates, "Need a non-coordinator process to exclude"
+    excluded_address = random.choice(candidates)
+    run_fdbcli_command("exclude", "FORCE", excluded_address)
+    try:
+        status_output = run_fdbcli_command("status")
+        logger.debug(status_output)
+        assert "(excluded processes: 1; processes with errors: " in status_output
+        assert "less " not in status_output
+    finally:
+        run_fdbcli_command("include", excluded_address)
+
+
+@enable_logging()
 def consistencycheck(logger):
     consistency_check_on_output = "ConsistencyCheck is on"
     consistency_check_off_output = "ConsistencyCheck is off"
@@ -1092,6 +1115,7 @@ if __name__ == "__main__":
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
+        status_excluded_processes_message()
         killall()
         # TODO: fix the failure where one process is not available after setclass call
         # setclass()

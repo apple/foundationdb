@@ -623,7 +623,8 @@ void printStatus(StatusObjectReader statusObj,
 					}
 
 					if (errors > 0 || processExclusions) {
-						outputString += format(" (less %d excluded; %d with errors)", processExclusions, errors);
+						outputString +=
+						    format(" (excluded processes: %d; processes with errors: %d)", processExclusions, errors);
 					}
 
 				} else {
@@ -639,7 +640,7 @@ void printStatus(StatusObjectReader statusObj,
 						}
 					}
 					if (zoneExclusions > 0) {
-						outputString += format(" (less %d excluded)", zoneExclusions);
+						outputString += format(" (excluded zones: %d)", zoneExclusions);
 					}
 				} else {
 					outputString += "\n  Zones                  - unknown";
@@ -657,7 +658,7 @@ void printStatus(StatusObjectReader statusObj,
 					}
 
 					if (machineExclusions) {
-						outputString += format(" (less %d excluded)", machineExclusions);
+						outputString += format(" (excluded machines: %d)", machineExclusions);
 					}
 
 					int64_t minMemoryAvailable = std::numeric_limits<int64_t>::max();
