@@ -4572,7 +4572,8 @@ TEST_CASE("/flow/Platform/directoryOps") {
 // The first call looks the interface up and caches it; later calls use the cache. Both report the same interface.
 TEST_CASE("/flow/Platform/getNetworkTraffic") {
 	const IPAddress loopback(0x7f000001);
-	uint64_t sent[2], received[2], outSegs[2], retransSegs[2];
+	// Zero loopback traffic leaves the byte counters unchanged.
+	uint64_t sent[2] = {}, received[2] = {}, outSegs[2] = {}, retransSegs[2] = {};
 	for (int i = 0; i < 2; i++) {
 		getNetworkTraffic(loopback, sent[i], received[i], outSegs[i], retransSegs[i]);
 	}
