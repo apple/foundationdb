@@ -71,16 +71,16 @@ Key GlobalConfig::prefixedKey(KeyRef key) {
 	return key.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin);
 }
 
-Reference<ConfigValue> GlobalConfig::get(KeyRef name) {
+Reference<const ConfigValue> GlobalConfig::get(KeyRef name) {
 	auto it = data.find(name);
 	if (it == data.end()) {
-		return Reference<ConfigValue>();
+		return Reference<const ConfigValue>();
 	}
 	return it->second;
 }
 
-std::map<KeyRef, Reference<ConfigValue>> GlobalConfig::get(KeyRangeRef range) {
-	std::map<KeyRef, Reference<ConfigValue>> results;
+std::map<KeyRef, Reference<const ConfigValue>> GlobalConfig::get(KeyRangeRef range) {
+	std::map<KeyRef, Reference<const ConfigValue>> results;
 	for (const auto& [key, value] : data) {
 		if (range.contains(key)) {
 			results[key] = value;
@@ -128,7 +128,7 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 		data[stableKey] = makeReference<ConfigValue>(std::move(arena), std::move(any));
 
 		if (callbacks.find(stableKey) != callbacks.end()) {
-			callbacks[stableKey](data[stableKey]->value);
+			callbacks[stableKey](data[stableKey]->getValue());
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "GlobalConfigTupleParseError").detail("What", e.what());

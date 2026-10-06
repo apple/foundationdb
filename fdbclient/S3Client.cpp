@@ -166,7 +166,7 @@ Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
 		return endpoint;
 
 	} catch (Error& e) {
-		TraceEvent(SevError, "S3ClientGetEndpointFailed").detail("URL", StringRef(s3url)).detail("Error", e.what());
+		TraceEvent(SevError, "S3ClientGetEndpointFailed").error(e).detail("URL", StringRef(s3url));
 		throw;
 	}
 }
@@ -1112,7 +1112,7 @@ Future<Void> listFiles(std::string s3url, int maxDepth) {
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError, "S3ClientListFilesError").detail("URL", s3url).detail("Error", e.what());
+		TraceEvent(SevError, "S3ClientListFilesError").error(e).detail("URL", s3url);
 		if (e.code() == error_code_backup_invalid_url) {
 			std::cerr << "ERROR: Invalid blobstore URL: " << s3url << std::endl;
 		} else if (e.code() == error_code_backup_auth_missing) {

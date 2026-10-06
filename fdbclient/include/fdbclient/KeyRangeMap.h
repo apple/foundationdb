@@ -253,6 +253,59 @@ void insertCoalescedRange(Map<StoredKey, Val, MapPair<StoredKey, Val>, Metric>& 
 	}
 }
 
+// Coalesces adjacent equal-valued ranges in memory. The transaction sequencing requirements of the
+// database-backed krmSetRangeCoalescing operations do not apply to this synchronous update.
+template <class StoredKey, class Val, class Metric, class MetricFunc, class MakeKeyAfter>
+void insertCoalescedKey(Map<StoredKey, Val, MapPair<StoredKey, Val>, Metric>& map,
+                        const MetricFunc& mf,
+                        const Key& mapEnd,
+                        const KeyRef& key,
+                        const Val& value,
+                        MakeKeyAfter makeKeyAfter) {
+	ASSERT(key < mapEnd);
+
+	auto begin = map.lower_bound(key);
+	auto end = begin;
+	if (end->key == key)
+		++end;
+
+	bool insertEnd = false;
+	bool insertBegin = false;
+	Val endVal;
+
+	if (!equalsKeyAfter(key, end->key)) {
+		auto before_end = end;
+		before_end.decrementNonEnd();
+		if (value != before_end->value) {
+			insertEnd = true;
+			endVal = before_end->value;
+		}
+	}
+
+	if (!insertEnd && end->value == value && end->key != mapEnd) {
+		++end;
+	}
+
+	if (key == allKeys.begin) {
+		insertBegin = true;
+	} else {
+		auto before_begin = begin;
+		before_begin.decrementNonEnd();
+		if (before_begin->value != value)
+			insertBegin = true;
+	}
+
+	map.erase(begin, end);
+	if (insertEnd) {
+		MapPair<StoredKey, Val> p(makeKeyAfter(key), endVal);
+		map.insert(p, true, mf(p));
+	}
+	if (insertBegin) {
+		MapPair<StoredKey, Val> p(key, value);
+		map.insert(p, true, mf(p));
+	}
+}
+
 } // namespace KeyRangeMapImpl
 
 template <class Val, class Metric, class MetricFunc>
@@ -262,50 +315,8 @@ void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(const KeyRangeRef& ke
 
 template <class Val, class Metric, class MetricFunc>
 void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(const KeyRef& key, const Val& value) {
-	ASSERT(key < mapEnd);
-
-	auto begin = RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.lower_bound(key);
-	auto end = begin;
-	if (end->key == key)
-		++end;
-
-	bool insertEnd = false;
-	bool insertBegin = false;
-	Val endVal;
-
-	if (!equalsKeyAfter(key, end->key)) {
-		auto before_end = end;
-		before_end.decrementNonEnd();
-		if (value != before_end->value) {
-			insertEnd = true;
-			endVal = before_end->value;
-		}
-	}
-
-	if (!insertEnd && end->value == value && end->key != mapEnd) {
-		++end;
-	}
-
-	if (key == allKeys.begin) {
-		insertBegin = true;
-	} else {
-		auto before_begin = begin;
-		before_begin.decrementNonEnd();
-		if (before_begin->value != value)
-			insertBegin = true;
-	}
-
-	RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.erase(begin, end);
-	if (insertEnd) {
-		MapPair<Key, Val> p(keyAfter(key), endVal);
-		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.insert(
-		    p, true, RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::mf(p));
-	}
-	if (insertBegin) {
-		MapPair<Key, Val> p(key, value);
-		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.insert(
-		    p, true, RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::mf(p));
-	}
+	KeyRangeMapImpl::insertCoalescedKey(
+	    this->map, this->mf, mapEnd, key, value, [](const KeyRef& key) -> Key { return keyAfter(key); });
 }
 
 template <class Val, class Metric, class MetricFunc>
@@ -315,50 +326,9 @@ void CoalescedKeyRefRangeMap<Val, Metric, MetricFunc>::insert(const KeyRangeRef&
 
 template <class Val, class Metric, class MetricFunc>
 void CoalescedKeyRefRangeMap<Val, Metric, MetricFunc>::insert(const KeyRef& key, const Val& value, Arena& arena) {
-	ASSERT(key < mapEnd);
-
-	auto begin = RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::map.lower_bound(key);
-	auto end = begin;
-	if (end->key == key)
-		++end;
-
-	bool insertEnd = false;
-	bool insertBegin = false;
-	Val endVal;
-
-	if (!equalsKeyAfter(key, end->key)) {
-		auto before_end = end;
-		before_end.decrementNonEnd();
-		if (value != before_end->value) {
-			insertEnd = true;
-			endVal = before_end->value;
-		}
-	}
-
-	if (!insertEnd && end->value == value && end->key != mapEnd) {
-		++end;
-	}
-
-	if (key == allKeys.begin) {
-		insertBegin = true;
-	} else {
-		auto before_begin = begin;
-		before_begin.decrementNonEnd();
-		if (before_begin->value != value)
-			insertBegin = true;
-	}
-
-	RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::map.erase(begin, end);
-	if (insertEnd) {
-		MapPair<KeyRef, Val> p(keyAfter(key, arena), endVal);
-		RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::map.insert(
-		    p, true, RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::mf(p));
-	}
-	if (insertBegin) {
-		MapPair<KeyRef, Val> p(key, value);
-		RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::map.insert(
-		    p, true, RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::mf(p));
-	}
+	KeyRangeMapImpl::insertCoalescedKey(this->map, this->mf, mapEnd, key, value, [&arena](const KeyRef& key) -> KeyRef {
+		return keyAfter(key, arena);
+	});
 }
 
 #endif

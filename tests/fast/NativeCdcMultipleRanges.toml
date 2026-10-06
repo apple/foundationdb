@@ -1,0 +1,21 @@
+[configuration]
+config = 'single'
+singleRegion = true
+buggify = false
+faultInjection = false
+
+[[knobs]]
+enable_native_cdc = true
+native_cdc_tag_count = 1
+
+[[test]]
+testTitle = 'NativeCdcMultipleRanges'
+useDB = true
+waitForQuiescenceEnd = false
+connectionFailuresDisableDuration = 1000000
+runFailureWorkloads = false
+
+    [[test.workload]]
+    testName = 'NativeCdcEndToEnd'
+    testMultipleRanges = true
+    operationTimeout = 180.0

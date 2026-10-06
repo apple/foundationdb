@@ -159,6 +159,8 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
 	init( MAX_COMMIT_PROXY_CONNECTIONS,              5 ); if( randomize && buggify() ) MAX_COMMIT_PROXY_CONNECTIONS = 1;
 	init( MAX_GRV_PROXY_CONNECTIONS,                 3 ); if( randomize && buggify() ) MAX_GRV_PROXY_CONNECTIONS = 1;
+	init( SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD, true ); if( randomize && isSimulated ) SHRINK_PROXY_LIST_CLEAR_CACHE_BELOW_THRESHOLD = deterministicRandom()->coinflip();
+	init( DBCONTEXT_EAGER_PROXY_UPDATE,          true ); if( randomize && isSimulated ) DBCONTEXT_EAGER_PROXY_UPDATE = deterministicRandom()->coinflip();
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 	init( STATUS_TIMEOUT,                         30.0 );
 	init( GRPC_CTL_SERVICE_DEFAULT_TIMEOUT,        5.0 );
@@ -196,6 +198,8 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ENABLE_NATIVE_CDC,                     false ); if( randomize && buggify() ) ENABLE_NATIVE_CDC = true;
 	init( NATIVE_CDC_TAG_COUNT,                    256 ); if( randomize && buggify() ) NATIVE_CDC_TAG_COUNT = 2;
 	init( NATIVE_CDC_STATUS_TIMEOUT,               2.0 );
+	init( NATIVE_CDC_ORDERED_BUFFER_BYTES,      64 << 20 );
+	init( NATIVE_CDC_ORDERED_REPLY_BYTES,       10 << 20 );
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && buggify() ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && buggify() ) GRV_BATCH_TIMEOUT = 0.1;
@@ -206,6 +210,10 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && buggify() ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
+	init( LOCATION_CACHE_PEER_EVICTOR_ENABLED,          true ); if( randomize && isSimulated ) LOCATION_CACHE_PEER_EVICTOR_ENABLED = deterministicRandom()->coinflip();
+	init( LOCATION_CACHE_PEER_EVICTOR_DELAY,                    60.0 );
+	init( LOCATION_CACHE_PEER_EVICTOR_FAILED_THRESHOLD,      0 );
+	init( LOCATION_CACHE_PEER_EVICTOR_SCAN_CHUNK,         1000000 ); if( randomize && buggify() ) LOCATION_CACHE_PEER_EVICTOR_SCAN_CHUNK = deterministicRandom()->randomInt(1, 11);
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
@@ -264,7 +272,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BACKUP_SIMULATED_LIMIT_BYTES,            1e6 ); if( randomize && buggify() ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
 	init( BACKUP_GET_RANGE_LIMIT_BYTES,            1e6 );
 	init( BACKUP_LOCK_BYTES,                       1e8 );
-	init( BACKUP_RANGE_TIMEOUT, TASKBUCKET_TIMEOUT_VERSIONS/CORE_VERSIONSPERSECOND/2.0 );
+	init( BACKUP_RANGE_TIMEOUT, static_cast<double>(TASKBUCKET_TIMEOUT_VERSIONS)/CORE_VERSIONSPERSECOND/2.0 );
 	init( BACKUP_RANGE_MINWAIT, std::max(1.0, BACKUP_RANGE_TIMEOUT/2.0));
 	init( BULKDUMP_JOB_TIMEOUT,              3600 * 24 ); // 24 hours - large DBs may take days
 	init( BULKLOAD_JOB_TIMEOUT,              3600 * 24 ); // 24 hours - large DBs may take days

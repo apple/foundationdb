@@ -153,7 +153,7 @@ class DDTeamCollectionImpl {
 					start = now();
 				}
 			} catch (Error& e) {
-				TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId).detail("Error", e.what());
+				TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId).error(e);
 			}
 		}
 	}
@@ -3202,7 +3202,7 @@ public:
 							    .detail("NumExistingSS", numExistingSS);
 						}
 
-						if (hasHealthyTeam && !tssState->active && tssToRecruit > 0) {
+						if (hasHealthyTeam && !tssState->isActive() && tssToRecruit > 0) {
 							TraceEvent("TSS_Recruit", self->distributorId)
 							    .detail("Stage", "HoldTSS")
 							    .detail("Addr", candidateSSAddr.toString())
@@ -3218,7 +3218,7 @@ public:
 							    initializeStorage(self, candidateWorker, ddEnabledState, true, tssState));
 							checkTss = self->initialFailureReactionDelay;
 						} else {
-							if (tssState->active && tssState->inDataZone(candidateWorker.worker.locality)) {
+							if (tssState->isActive() && tssState->inDataZone(candidateWorker.worker.locality)) {
 								CODE_PROBE(true, "TSS recruits pair in same dc/datahall");
 								self->isTssRecruiting = false;
 								TraceEvent("TSS_Recruit", self->distributorId)
@@ -3232,7 +3232,7 @@ public:
 								tssState = makeReference<TSSPairState>();
 							} else {
 								CODE_PROBE(
-								    tssState->active,
+								    tssState->isActive(),
 								    "TSS recruitment skipped potential pair because it's in a different dc/datahall");
 								self->addActor.send(initializeStorage(
 								    self, candidateWorker, ddEnabledState, false, makeReference<TSSPairState>()));
@@ -3515,7 +3515,8 @@ public:
 			// Update server's storeType, especially when it was created
 			co_await server->updateStoreType();
 			if (server->getStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
-			    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			    !self->configuration.shardMetadataFormatIsEncoded().orDefault(
+			        SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				TraceEvent(SevError, "PhysicalShardNotEnabledForShardedRocks", self->getDistributorId())
 				    .detail("StorageServer", server->getId());
 				throw internal_error();
@@ -3690,6 +3691,7 @@ public:
 					    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 					    .detail("ZeroHealthy", self->zeroOptimalTeams.get())
 					    .detail("HighestPriority", highestPriority)
+					    .detail("HighestTeamPriority", self->getHighestTeamPriority())
 					    .trackLatest(self->primary ? "TotalDataInFlight"
 					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
 					                                                             // lifetime is controlled by
@@ -4638,6 +4640,31 @@ void DDTeamCollection::resetLocalitySet() {
 	}
 }
 
+int DDTeamCollection::getHighestTeamPriority() const {
+	if (teamCollections.empty()) {
+		return -1;
+	}
+	int highestPriority = 0;
+	for (const auto* collection : teamCollections) {
+		if (collection == nullptr || !collection->initialFailureReactionDelay.isReady()) {
+			return -1;
+		}
+		// Team health is updated independently of relocation admission and completion. Include both regions
+		// and conservatively keep counting degraded teams until their trackers are retired.
+		int collectionPriority = -1;
+		for (const auto& [priority, count] : collection->priority_teams) {
+			if (count > 0) {
+				collectionPriority = std::max(collectionPriority, priority);
+			}
+		}
+		if (collectionPriority < 0) {
+			return -1;
+		}
+		highestPriority = std::max(highestPriority, collectionPriority);
+	}
+	return highestPriority;
+}
+
 bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>>& team, int amount) const {
 	std::vector<LocalityEntry> forcedEntries, resultEntries;
 	if (amount == -1) {
@@ -5337,7 +5364,7 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 	for (auto& [_, machine] : machine_info) {
 		if (machine->serversOnMachine.empty()) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
-			    .detail("Machine", machine->machineID.toString())
+			    .detail("MachineID", machine->machineID.toString())
 			    .detail("NumServersOnMachine", 0);
 			continue;
 		}
@@ -5348,7 +5375,7 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 		auto& locality = representativeServer->getLastKnownInterface().locality;
 		if (!isValidLocality(configuration.storagePolicy, locality)) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
-			    .detail("Machine", machine->machineID.toString())
+			    .detail("MachineID", machine->machineID.toString())
 			    .detail("InvalidLocality", locality.toString());
 			continue;
 		}
@@ -6430,7 +6457,7 @@ bool DDTeamCollection::exclusionSafetyCheck(std::vector<UID>& excludeServerIDs) 
 
 std::pair<StorageWiggler::State, double> DDTeamCollection::getStorageWigglerState() const {
 	if (storageWiggler) {
-		return { storageWiggler->getWiggleState(), storageWiggler->lastStateChangeTs };
+		return storageWiggler->getWiggleStateSnapshot();
 	}
 	return { StorageWiggler::INVALID, 0.0 };
 }

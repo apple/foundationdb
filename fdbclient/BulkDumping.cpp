@@ -24,5 +24,5 @@ BulkDumpState createBulkDumpJob(const KeyRange& range,
                                 const std::string& jobRoot,
                                 const BulkLoadType& type,
                                 const BulkLoadTransportMethod& transportMethod) {
-	return BulkDumpState(range, type, transportMethod, jobRoot);
+	return BulkDumpState(range, type, transportMethod, jobRoot, Optional<UID>());
 }

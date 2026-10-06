@@ -40,6 +40,7 @@
 #include "flow/Buggify.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"
 #include "flow/genericactors.h"
@@ -302,26 +303,68 @@ Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 // Periodically refresh local copy of global configuration.
 Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cachedVersion, RangeResult* cachedData) {
 	auto tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
-	while (true) {
-		Error err;
-		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Future<Optional<Value>> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
-			Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
-			Optional<Value> globalConfigVersion = co_await globalConfigVersionFuture;
-			RangeResult tmpCachedData = co_await tmpCachedDataFuture;
-			*cachedData = tmpCachedData;
-			if (globalConfigVersion.present()) {
-				Version parsedVersion;
-				memcpy(&parsedVersion, globalConfigVersion.get().begin(), sizeof(Version));
-				*cachedVersion = bigEndian64(parsedVersion);
+	try {
+		while (true) {
+			Error err;
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Future<Optional<Value>> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
+				Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
+				Optional<Value> globalConfigVersion = co_await globalConfigVersionFuture;
+				RangeResult tmpCachedData = co_await tmpCachedDataFuture;
+				// Update together: these are served to clients as a matched pair.
+				if (globalConfigVersion.present()) {
+					Version parsedVersion =
+					    BinaryReader::fromStringRef<Version>(globalConfigVersion.get(), Unversioned());
+					*cachedVersion = bigEndian64(parsedVersion);
+				}
+				*cachedData = tmpCachedData;
+				co_return;
+			} catch (Error& e) {
+				err = e;
 			}
-			co_return;
-		} catch (Error& e) {
-			err = e;
+			co_await tr->onError(err);
 		}
-		co_await tr->onError(err);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		// Non-retryable error: keep the last-good cache and retry next refresh.
+		TraceEvent(SevWarnAlways, "GlobalConfigRefreshError").errorUnsuppressed(e).suppressFor(60.0);
 	}
+}
+
+TEST_CASE("/fdbserver/GrvProxyServer/GlobalConfigVersionKeyRejectsUndersizedValue") {
+	if (!g_network->isSimulated()) {
+		for (int size = 0; size < sizeof(Version); ++size) {
+			Standalone<StringRef> tooShort(std::string(size, '\x01'));
+			try {
+				BinaryReader::fromStringRef<Version>(tooShort, Unversioned());
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT_EQ(e.code(), error_code_serialization_failed);
+			}
+		}
+
+		// StringRef's default constructor is data(nullptr), length(0) -- distinct
+		// from the size-0 case above, whose backing std::string::c_str() is a
+		// valid non-null pointer even when empty. A genuinely null data pointer
+		// must not be dereferenced before the length check rejects the read.
+		StringRef nullValue;
+		ASSERT(nullValue.begin() == nullptr);
+		try {
+			BinaryReader::fromStringRef<Version>(nullValue, Unversioned());
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_serialization_failed);
+		}
+	}
+
+	// A versionstamp is 10 bytes; only the leading sizeof(Version) are used.
+	Standalone<StringRef> versionstamp("\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00"_sr);
+	ASSERT_EQ(BinaryReader::fromStringRef<Version>(versionstamp, Unversioned()), bigEndian64(Version(1)));
+
+	return Void();
 }
 
 // Handle common GlobalConfig transactions on the server side, because not all
@@ -411,13 +454,15 @@ Future<Void> getRate(UID myID,
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 
+			// Receive ratekeeper replies at socket priority so incoming GRVs cannot starve rate-lease updates.
 			reply = brokenPromiseToNever(
 			    db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID,
 			                                                                       *inTransactionCount,
 			                                                                       *inBatchTransactionCount,
 			                                                                       proxyData->version,
 			                                                                       *transactionTagCounter,
-			                                                                       detailed)));
+			                                                                       detailed),
+			                                                    TaskPriority::ReadSocket));
 			transactionTagCounter->clear();
 			expectingDetailedReply = detailed;
 		} else if (res.index() == 2) {
@@ -713,9 +758,10 @@ Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spa
 	double grvStart = now();
 	Optional<UID> debugID = getDebugID(debugIDs);
 	Future<GetRawCommittedVersionReply> replyFromMasterFuture;
+	// Receive master replies at socket priority so incoming GRVs cannot starve an already-arrived reply.
 	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
 	    GetRawCommittedVersionRequest(span.context, debugID, grvProxyData->ssVersionVectorCache.getMaxVersion()),
-	    TaskPriority::GetLiveCommittedVersionReply);
+	    TaskPriority::ReadSocket);
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
 		co_await transformError(updateLastCommit(grvProxyData, debugID), broken_promise(), tlog_failed());

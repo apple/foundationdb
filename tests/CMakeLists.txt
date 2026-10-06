@@ -1,5 +1,22 @@
 include(AddFdbTest)
 
+# Copy the fdb_test_runner package to the build dir, along with fdb_version.py
+# generated with this build's versions, for the venv to install from there.
+# "pyproject.toml" is used as proxy-marker for whether dir is up-to-date.
+set(test_runner_src_dir ${PROJECT_SOURCE_DIR}/tests/TestRunner)
+set(test_runner_pkg_dir ${PROJECT_BINARY_DIR}/tests/TestRunner)
+file(GLOB_RECURSE test_runner_srcs ${test_runner_src_dir}/*.py)
+add_custom_command(
+  OUTPUT  ${test_runner_pkg_dir}/pyproject.toml
+  DEPENDS ${test_runner_src_dir}/pyproject.toml ${test_runner_srcs}
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${test_runner_src_dir} ${test_runner_pkg_dir}
+  COMMENT "copy TestRunner")
+configure_file(${test_runner_src_dir}/fdb_version.py.cmake ${test_runner_pkg_dir}/fdb_test_runner/fdb_version.py)
+add_custom_target(test_runner_package ALL DEPENDS ${test_runner_pkg_dir}/pyproject.toml)
+
+# Used for ENABLE_SIMULATION_TESTS
+set(TestRunner "${test_runner_pkg_dir}/run_test_runner.py")
+
 # Test for setting up Python venv for client tests.
 # Adding this test as a fixture to another test allows the use of non-native Python packages within client test scripts
 # by installing dependencies from requirements.txt
@@ -7,7 +24,7 @@ set(test_venv_cmd "")
 string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
 string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
 string(APPEND test_venv_cmd "&& pip install --retries 9 -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt ")
-string(APPEND test_venv_cmd "&& pip install ${CMAKE_SOURCE_DIR}/tests/TestRunner ")
+string(APPEND test_venv_cmd "&& pip install ${test_runner_pkg_dir} ")
 string(APPEND test_venv_cmd "&& pip install ${CMAKE_BINARY_DIR}/bindings/python ")
 
 # The module is also included by fdbcli; register this shared fixture only once.
@@ -21,6 +38,7 @@ set_tests_properties(test_venv_setup PROPERTIES RESOURCE_LOCK TEST_VENV_SETUP)
 # We need some variables to configure the test setup
 set(ENABLE_BUGGIFY ON CACHE BOOL "Enable buggify for tests")
 set(ENABLE_SIMULATION_TESTS OFF CACHE BOOL "Enable simulation tests (useful if you can't run Joshua)")
+set(ENABLE_LONG_RUNNING_TESTS OFF CACHE BOOL "Add a long running tests package")
 set(RUN_IGNORED_TESTS OFF CACHE BOOL "Run tests that are marked for ignore")
 set(TEST_KEEP_LOGS "FAILED" CACHE STRING "Which logs to keep (NONE, FAILED, ALL)")
 set(TEST_KEEP_SIMDIR "NONE" CACHE STRING "Which simfdb directories to keep (NONE, FAILED, ALL)")
@@ -52,10 +70,6 @@ if(WITH_PYTHON)
   It is recommended to install the current stable version from https://github.com/apple/foundationdb/releases \
   Or provide a path to another fdbserver")
   endif()
-
-  configure_file(${PROJECT_SOURCE_DIR}/tests/TestRunner/fdb_version.py.cmake ${PROJECT_BINARY_DIR}/tests/TestRunner/fdb_test_runner/fdb_version.py)
-
-  set(TestRunner "${PROJECT_SOURCE_DIR}/tests/TestRunner/run_test_runner.py")
 
   configure_file(${PROJECT_SOURCE_DIR}/tests/CTestCustom.ctest.cmake ${PROJECT_BINARY_DIR}/CTestCustom.ctest @ONLY)
 
@@ -176,7 +190,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestore.toml)
   add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestoreWithChaos.toml)
   add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestoreMultiRange.toml)
-  add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestoreNarrowFleet.toml)
   add_fdb_test(TEST_FILES slow/BackupS3BlobBulkLoadRestoreJobIncomplete.toml)
   add_fdb_test(TEST_FILES fast/BulkLoading.toml)
   add_fdb_test(TEST_FILES fast/BulkLoadingDestTeamFailure.toml)
@@ -213,6 +226,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/CheckMetadataEncodingForward.toml)
   add_fdb_test(TEST_FILES fast/CheckMetadataEncodingOldPath.toml)
   add_fdb_test(TEST_FILES fast/ShardEncodeRollback.toml)
+  add_fdb_test(TEST_FILES fast/ShardEncodeRollbackConfig.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
 
   add_fdb_test(TEST_FILES fast/GetEstimatedRangeSize.toml)
@@ -225,11 +239,21 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
   add_fdb_test(TEST_FILES fast/RangeLocking.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcEndToEnd.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcBuggify.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcAssignmentPublication.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcProxyRebalance.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcProxyRebalanceAutomatic.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcSharedTag.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcThroughputRetagging.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcInitialPlacement.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcRetiredSharedTagSnapshot.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcMemoryBound.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcRetagCompatibility.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcRetaggingMemoryBound.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcReplyChunking.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcMultipleRanges.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcOrdered.toml)
+  add_fdb_test(TEST_FILES fast/NativeCdcOrderedBufferBackpressure.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcLargeVersionBatching.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcOversizedPeek.toml)
   add_fdb_test(TEST_FILES fast/NativeCdcDurableAckScan.toml)
@@ -239,12 +263,16 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES fast/NativeCdcDisableRestart-1.toml
     fast/NativeCdcDisableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES fast/NativeCdcRetagDisableRestart-1.toml
+    fast/NativeCdcRetagDisableRestart-2.toml)
   add_fdb_test(TEST_FILES fast/RangeLockCycle.toml)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
   add_fdb_test(TEST_FILES fast/ReportConflictingKeys.toml)
   add_fdb_test(TEST_FILES fast/RESTUnit.toml IGNORE)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.toml)
   add_fdb_test(TEST_FILES fast/ShardedRocksNondeterministicTest.toml)
+  add_fdb_test(TEST_FILES fast/StalePeerTest.toml)
   add_fdb_test(TEST_FILES fast/Sideband.toml)
   add_fdb_test(TEST_FILES fast/SidebandSingle.toml)
   add_fdb_test(TEST_FILES fast/SidebandWithStatus.toml)

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "BackupWorkerPause.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
@@ -1013,8 +1014,12 @@ Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogEpoch r
 	}
 }
 
-static Future<Void> monitorWorkerPause(BackupData* self) {
-	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
+Future<Void> monitorBackupPause(Database cx,
+                                UID workerId,
+                                AsyncVar<bool>* pauseState,
+                                const char* pausedEvent,
+                                const char* resumedEvent) {
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	Future<Void> watch;
 
 	while (true) {
@@ -1026,9 +1031,9 @@ static Future<Void> monitorWorkerPause(BackupData* self) {
 
 			Optional<Value> value = co_await tr->get(backupPausedKey);
 			bool paused = value.present() && value.get() == "1"_sr;
-			if (self->paused.get() != paused) {
-				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId).log();
-				self->paused.set(paused);
+			if (pauseState->get() != paused) {
+				TraceEvent(paused ? pausedEvent : resumedEvent, workerId).log();
+				pauseState->set(paused);
 			}
 
 			watch = tr->watch(backupPausedKey);
@@ -1067,7 +1072,11 @@ Future<Void> backupWorker(BackupInterface interf,
 		if (req.recruitedEpoch == req.backupEpoch && req.tag.id == 0) {
 			addActor.send(monitorBackupProgress(&self));
 		}
-		addActor.send(monitorWorkerPause(&self));
+		addActor.send(monitorBackupPause(self.cx,
+		                                 self.myId,
+		                                 &self.paused,
+		                                 /*pausedEvent=*/"BackupWorkerPaused",
+		                                 /*resumedEvent=*/"BackupWorkerResumed"));
 
 		// If the worker is on an old epoch and all backups starts a version >= the endVersion
 		bool exitEarly = co_await shouldBackupWorkerExitEarly(&self);

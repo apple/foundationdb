@@ -33,6 +33,7 @@
 #include "fdbclient/RunRYWTransaction.h"
 #include <algorithm>
 #include <cinttypes>
+#include <tuple>
 
 namespace IBackupFile_impl {
 
@@ -266,7 +267,14 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
                                                             const Optional<std::string>& proxy,
                                                             const Optional<std::string>& encryptionKeyFileName,
                                                             int encryptionBlockSize) {
-	static std::map<std::string, Reference<IBackupContainer>> m_cache;
+	using CacheKey = std::tuple<std::string, Optional<std::string>, Optional<std::string>, int>;
+	static std::map<CacheKey, Reference<IBackupContainer>> m_cache;
+
+	Optional<std::string> blobstoreProxy;
+	if (isBlobstoreUrl(url)) {
+		// The backup-agent fallback is part of the effective connection configuration.
+		blobstoreProxy = proxy.present() ? proxy : fileBackupAgentProxy;
+	}
 
 	// In simulation, disable caching for blobstore:// URLs to prevent cross-process connection issues.
 	//
@@ -286,7 +294,8 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 
 	// Use a reference to the cache entry (for automatic cache population) unless we're skipping cache
 	Reference<IBackupContainer> r_local;
-	Reference<IBackupContainer>& r = skipCache ? r_local : m_cache[url];
+	Reference<IBackupContainer>& r =
+	    skipCache ? r_local : m_cache[{ url, blobstoreProxy, encryptionKeyFileName, encryptionBlockSize }];
 	if (r) {
 		return r;
 	}
@@ -297,15 +306,6 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName, encryptionBlockSize);
 		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
-			Optional<std::string> blobstoreProxy;
-
-			// If no proxy is passed down to the openContainer method, try to fallback to the
-			// fileBackupAgentProxy which is a global variable and will be set for the backup_agent.
-			if (proxy.present()) {
-				blobstoreProxy = proxy.get();
-			} else if (fileBackupAgentProxy.present()) {
-				blobstoreProxy = fileBackupAgentProxy.get();
-			}
 
 			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
 			IBlobStoreEndpoint::ParametersT backupParams;

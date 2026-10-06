@@ -38,7 +38,6 @@ Severity getSeverityFromLogLevel(const InfoLogLevel& log_level) {
 	case InfoLogLevel::WARN_LEVEL:
 		return SevWarn;
 	case InfoLogLevel::ERROR_LEVEL:
-		return SevError;
 	case InfoLogLevel::FATAL_LEVEL:
 		return SevError;
 	case InfoLogLevel::HEADER_LEVEL:

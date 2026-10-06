@@ -61,6 +61,9 @@ public:
 	}
 
 	void operator=(Deque const& r) {
+		if (this == &r) {
+			return;
+		}
 		cleanup();
 
 		arr = nullptr;
@@ -92,6 +95,9 @@ public:
 	}
 
 	void operator=(Deque&& r) noexcept {
+		if (this == &r) {
+			return;
+		}
 		cleanup();
 
 		begin = r.begin;

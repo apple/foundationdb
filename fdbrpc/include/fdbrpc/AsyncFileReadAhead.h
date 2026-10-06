@@ -83,7 +83,7 @@ public:
 
 		// Start blocks up to the read ahead size beyond the last needed block but don't go past the end of the file
 		int lastBlockNumInFile = ((fileSize + f->m_block_size - 1) / f->m_block_size) - 1;
-		ASSERT(lastBlockNum <= lastBlockNumInFile);
+		ASSERT_LE(lastBlockNum, lastBlockNumInFile);
 		int lastBlockToStart = std::min<int>(lastBlockNum + f->m_read_ahead_blocks, lastBlockNumInFile);
 
 		int blockNum{ 0 };
@@ -138,7 +138,7 @@ public:
 			}
 		}
 
-		ASSERT(wpos == length);
+		ASSERT_EQ(wpos, length);
 		ASSERT(localCache.empty());
 
 		// If the cache is too large then go through the cache in block number order and remove any entries whose future

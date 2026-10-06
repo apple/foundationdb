@@ -53,7 +53,6 @@ Fitness machineClassFitness(ProcessClass const& processClass, ClusterRole role) 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::BlobWorkerClass:
-			return NeverAssign;
 		default:
 			return NeverAssign;
 		}

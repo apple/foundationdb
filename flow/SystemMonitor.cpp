@@ -262,19 +262,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			total_memory += FastAllocator<8192>::getTotalMemory();
 			total_memory += FastAllocator<16384>::getTotalMemory();
 
-			uint64_t unused_memory = 0;
-			unused_memory += FastAllocator<16>::getApproximateMemoryUnused();
-			unused_memory += FastAllocator<32>::getApproximateMemoryUnused();
-			unused_memory += FastAllocator<64>::getApproximateMemoryUnused();
-			unused_memory += FastAllocator<96>::getApproximateMemoryUnused();
-			unused_memory += FastAllocator<128>::getApproximateMemoryUnused();
-			unused_memory += FastAllocator<256>::getApproximateMemoryUnused();
-			unused_memory += FastAllocator<512>::getApproximateMemoryUnused();
-			unused_memory += FastAllocator<1024>::getApproximateMemoryUnused();
-			unused_memory += FastAllocator<2048>::getApproximateMemoryUnused();
-			unused_memory += FastAllocator<4096>::getApproximateMemoryUnused();
-			unused_memory += FastAllocator<8192>::getApproximateMemoryUnused();
-			unused_memory += FastAllocator<16384>::getApproximateMemoryUnused();
+			const uint64_t unused_memory = getTotalUnusedAllocatedMemory();
 
 			if (total_memory > 0) {
 				TraceEvent("FastAllocMemoryUsage")

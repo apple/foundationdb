@@ -162,7 +162,7 @@ public:
 		++countCacheReads;
 		if (offset + length > this->length) {
 			length = int(this->length - offset);
-			ASSERT(length >= 0);
+			ASSERT_GE(length, 0);
 		}
 		auto f = read_write_impl<false>(static_cast<uint8_t*>(data), length, offset);
 		if (f.isReady() && !f.isError())
@@ -446,7 +446,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 	void releaseZeroCopy() {
 		--zeroCopyRefCount;
-		ASSERT(zeroCopyRefCount >= 0);
+		ASSERT_GE(zeroCopyRefCount, 0);
 	}
 
 	Future<Void> read(void* data, int length, int offset) {
@@ -522,13 +522,13 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 					if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE > 0) {
 						allowance = (pageCache->pageSize + FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE - 1) /
 						            FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_IO_SIZE; // round up
-						ASSERT(allowance > 0);
+						ASSERT_GT(allowance, 0);
 					}
 					co_await owner->getRateControl()->getAllowance(allowance);
 				}
 
 				if (pageOffset + pageCache->pageSize > owner->length) {
-					ASSERT(pageOffset < owner->length);
+					ASSERT_LT(pageOffset, owner->length);
 					memset(static_cast<uint8_t*>(data) + owner->length - pageOffset,
 					       0,
 					       pageCache->pageSize - (owner->length - pageOffset));

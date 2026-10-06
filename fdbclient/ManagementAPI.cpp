@@ -186,6 +186,24 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			out[p + key] = format("%d", type);
 		}
 
+		if (key == DatabaseConfiguration::SHARD_METADATA_FORMAT_KEY) {
+			if (value != DatabaseConfiguration::SHARD_METADATA_FORMAT_ORIGINAL &&
+			    value != DatabaseConfiguration::SHARD_METADATA_FORMAT_ENCODED) {
+				printf("Error: shard_metadata_format must be `original' or `encoded'.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
+
+		if (key == DatabaseConfiguration::SHARD_METADATA_MIGRATION_KEY) {
+			if (value != DatabaseConfiguration::SHARD_METADATA_MIGRATION_ENABLED &&
+			    value != DatabaseConfiguration::SHARD_METADATA_MIGRATION_DISABLED) {
+				printf("Error: shard_metadata_migration must be `enabled' or `disabled'.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
+
 		if (key == "exclude") {
 			int p = 0;
 			while (p < value.size()) {
@@ -808,24 +826,20 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	return result;
 }
 
-Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
-	Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-	Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
-
-	co_await (success(processClasses) && success(processData));
-	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
-	ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
+std::vector<ProcessData> ManagementAPI::decodeWorkers(const RangeResult& processClasses,
+                                                      const RangeResult& processData) {
+	ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
+	ASSERT(!processData.more && processData.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
-	for (int i = 0; i < processClasses.get().size(); i++) {
-		id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
-		    decodeProcessClassValue(processClasses.get()[i].value);
+	for (int i = 0; i < processClasses.size(); i++) {
+		id_class[decodeProcessClassKey(processClasses[i].key)] = decodeProcessClassValue(processClasses[i].value);
 	}
 
 	std::vector<ProcessData> results;
 
-	for (int i = 0; i < processData.get().size(); i++) {
-		ProcessData data = decodeWorkerListValue(processData.get()[i].value);
+	for (int i = 0; i < processData.size(); i++) {
+		ProcessData data = decodeWorkerListValue(processData[i].value);
 		ProcessClass processClass = id_class[data.locality.processId()];
 
 		if (processClass.classSource() == ProcessClass::DBSource ||
@@ -836,7 +850,15 @@ Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
 			results.push_back(data);
 	}
 
-	co_return results;
+	return results;
+}
+
+Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
+	Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+	Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+
+	co_await (success(processClasses) && success(processData));
+	co_return ManagementAPI::decodeWorkers(processClasses.get(), processData.get());
 }
 
 Future<std::vector<ProcessData>> getWorkers(Database cx) {
@@ -1033,19 +1055,7 @@ Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	ClientCoordinators coord(makeReference<ClusterConnectionMemoryRecord>(*conn));
 
-	leaderServers.reserve(coord.clientLeaderServers.size());
-	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-		if (coord.clientLeaderServers[i].hostname.present()) {
-			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
-			                                                  coord.clientLeaderServers[i].hostname.get(),
-			                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
-			                                                  TaskPriority::CoordinationReply));
-		} else {
-			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-			                                           GetLeaderRequest(coord.clusterKey, UID()),
-			                                           TaskPriority::CoordinationReply));
-		}
-	}
+	leaderServers = coord.getLeaderReplies();
 
 	auto leaderServersResult = co_await timeout(waitForAll(leaderServers), 5.0);
 	if (!leaderServersResult.present()) {
@@ -1239,20 +1249,7 @@ struct AutoQuorumChange final : IQuorumChange {
 
 		// Check availability
 		ClientCoordinators coord(ccr);
-		std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-		leaderServers.reserve(coord.clientLeaderServers.size());
-		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			if (coord.clientLeaderServers[i].hostname.present()) {
-				leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
-				                                                  coord.clientLeaderServers[i].hostname.get(),
-				                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
-				                                                  TaskPriority::CoordinationReply));
-			} else {
-				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-				                                           GetLeaderRequest(coord.clusterKey, UID()),
-				                                           TaskPriority::CoordinationReply));
-			}
-		}
+		std::vector<Future<Optional<LeaderInfo>>> leaderServers = coord.getLeaderReplies();
 		Optional<std::vector<Optional<LeaderInfo>>> results =
 		    co_await timeout(getAll(leaderServers), CLIENT_KNOBS->IS_ACCEPTABLE_DELAY);
 		if (!results.present()) {
@@ -2320,7 +2317,8 @@ Future<Void> timeKeeperSetDisable(Database cx) {
 	}
 }
 
-Future<Void> lockDatabase(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> lockDatabaseImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2340,24 +2338,12 @@ Future<Void> lockDatabase(Transaction* tr, UID id) {
 	tr->addWriteConflictRange(normalKeys);
 }
 
+Future<Void> lockDatabase(Transaction* tr, UID id) {
+	return lockDatabaseImpl(tr, id);
+}
+
 Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
-
-	if (val.present()) {
-		if (BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
-			co_return;
-		} else {
-			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
-			throw database_locked();
-		}
-	}
-
-	tr->atomicOp(databaseLockedKey,
-	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
-	             MutationRef::SetVersionstampedValue);
-	tr->addWriteConflictRange(normalKeys);
+	return lockDatabaseImpl(std::move(tr), id);
 }
 
 Future<Void> lockDatabase(Database cx, UID id) {
@@ -2380,7 +2366,8 @@ Future<Void> lockDatabase(Database cx, UID id) {
 	}
 }
 
-Future<Void> unlockDatabase(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> unlockDatabaseImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2396,20 +2383,12 @@ Future<Void> unlockDatabase(Transaction* tr, UID id) {
 	tr->clear(singleKeyRange(databaseLockedKey));
 }
 
+Future<Void> unlockDatabase(Transaction* tr, UID id) {
+	return unlockDatabaseImpl(tr, id);
+}
+
 Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
-
-	if (!val.present())
-		co_return;
-
-	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
-		throw database_locked();
-	}
-
-	tr->clear(singleKeyRange(databaseLockedKey));
+	return unlockDatabaseImpl(std::move(tr), id);
 }
 
 Future<Void> unlockDatabase(Database cx, UID id) {
@@ -2429,7 +2408,8 @@ Future<Void> unlockDatabase(Database cx, UID id) {
 	}
 }
 
-Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
+template <class TransactionHandle>
+static Future<Void> checkDatabaseLockImpl(TransactionHandle tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = co_await tr->get(databaseLockedKey);
@@ -2440,15 +2420,12 @@ Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
 	}
 }
 
-Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = co_await tr->get(databaseLockedKey);
+Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
+	return checkDatabaseLockImpl(tr, id);
+}
 
-	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
-		throw database_locked();
-	}
+Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
+	return checkDatabaseLockImpl(std::move(tr), id);
 }
 
 Future<Void> advanceVersion(Database cx, Version v) {

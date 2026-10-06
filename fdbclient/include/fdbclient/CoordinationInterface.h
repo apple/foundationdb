@@ -300,6 +300,9 @@ public:
 	explicit ClientCoordinators(Reference<IClusterConnectionRecord> ccr);
 	explicit ClientCoordinators(Key clusterKey, std::vector<NetworkAddress> coordinators);
 	ClientCoordinators() = default;
+
+	// Requests a leader from each coordinator, in clientLeaderServers order.
+	std::vector<Future<Optional<LeaderInfo>>> getLeaderReplies() const;
 };
 
 struct ProtocolInfoReply {

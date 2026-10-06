@@ -22,12 +22,11 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/NativeAPI.h"
 #include "fdbclient/S3Client.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
-#include "fdbserver/core/StorageMetrics.h"
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
                                  const BulkDumpState& bulkDumpState) {
 	StorageServerInterface targetServer;
@@ -79,95 +78,6 @@ std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version
 	BulkLoadFileSet fileSetRemote(
 	    rootRemote, relativeFolder, manifestFileName, dataFileName, byteSampleFileName, BulkLoadChecksum());
 	return std::make_pair(fileSetLocal, fileSetRemote);
-}
-
-// Generate SST file given the input sortedKVS to the input filePath.
-// TODO(BulkDump): This copy of sortedKVS can be a slow task if data is large.
-void writeKVSToSSTFile(std::string filePath, std::map<Key, Value>& sortedKVS, UID logId) {
-	const std::string absFilePath = abspath(filePath);
-	// Check file
-	if (fileExists(absFilePath)) {
-		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
-		    .detail("Reason", "exist old File when writeKVSToSSTFile")
-		    .detail("DataFilePathLocal", absFilePath);
-		ASSERT_WE_THINK(false);
-		throw retry();
-	}
-	// Dump data to file
-	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
-	sstWriter->open(absFilePath);
-	for (const auto& [key, value] : sortedKVS) {
-		sstWriter->write(key, value); // assuming sorted
-	}
-	if (!sstWriter->finish()) {
-		// Unexpected: having data but failed to finish
-		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
-		    .detail("Reason", "failed to finish data sst writer when writeKVSToSSTFile")
-		    .detail("DataFilePath", absFilePath);
-		ASSERT_WE_THINK(false);
-		throw retry();
-	}
-	return;
-}
-
-Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
-                                                      std::shared_ptr<RangeDumpRawData> rangeDumpRawData,
-                                                      BulkLoadFileSet localFileSet,
-                                                      BulkLoadFileSet remoteFileSet,
-                                                      BulkLoadByteSampleSetting byteSampleSetting,
-                                                      Version dumpVersion,
-                                                      KeyRange dumpRange,
-                                                      BulkLoadType dumpType,
-                                                      BulkLoadTransportMethod transportMethod) {
-	// Step 1: Clean up local folder
-	resetFileFolder((abspath(localFileSet.getFolder())));
-
-	// Step 2: Dump data to file
-	bool containDataFile = false;
-	if (!rangeDumpRawData->kvs.empty()) {
-		writeKVSToSSTFile(abspath(localFileSet.getDataFileFullPath()), rangeDumpRawData->kvs, logId);
-		containDataFile = true;
-	} else {
-		ASSERT(rangeDumpRawData->sampled.empty());
-		containDataFile = false;
-	}
-
-	// Step 3: Dump sample to file
-	bool containByteSampleFile = false;
-	if (!rangeDumpRawData->sampled.empty()) {
-		writeKVSToSSTFile(abspath(localFileSet.getBytesSampleFileFullPath()), rangeDumpRawData->sampled, logId);
-		containByteSampleFile = true;
-	} else {
-		containByteSampleFile = false;
-	}
-
-	// Step 4: Generate manifest file
-	if (fileExists(abspath(localFileSet.getManifestFileFullPath()))) {
-		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
-		    .detail("Reason", "exist old manifestFile")
-		    .detail("ManifestFilePathLocal", abspath(localFileSet.getManifestFileFullPath()));
-		ASSERT_WE_THINK(false);
-		throw retry();
-	}
-	BulkLoadFileSet fileSetRemote(remoteFileSet.getRootPath(),
-	                              remoteFileSet.getRelativePath(),
-	                              remoteFileSet.getManifestFileName(),
-	                              containDataFile ? remoteFileSet.getDataFileName() : std::string(),
-	                              containByteSampleFile ? remoteFileSet.getByteSampleFileName() : std::string(),
-	                              BulkLoadChecksum());
-	BulkLoadManifest manifestMetadata(fileSetRemote,
-	                                  dumpRange.begin,
-	                                  dumpRange.end,
-	                                  dumpVersion,
-	                                  rangeDumpRawData->kvsBytes,
-	                                  rangeDumpRawData->kvs.size(),
-	                                  byteSampleSetting,
-	                                  dumpType,
-	                                  transportMethod);
-	std::string manifestStr = manifestMetadata.toString();
-	std::shared_ptr<std::string> manifest = std::make_shared<std::string>(std::move(manifestStr));
-	co_await writeBulkFileBytes(abspath(localFileSet.getManifestFileFullPath()), manifest);
-	co_return manifestMetadata;
 }
 
 // Validate the invariant of filenames. Source is the file stored locally. Destination is the file going to move to.

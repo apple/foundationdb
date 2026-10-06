@@ -149,17 +149,20 @@ __attribute__((no_instrument_function, noinline)) int captureFramesFP(void** out
 		initStackBoundsForThread();
 	}
 	void** fp = static_cast<void**>(__builtin_frame_address(0));
-	// Fallback for threads where pthread_getattr_np failed: ±8 MB around
-	// the initial frame.
-	// Caveat: this may need to be constrained more tightly to deal with
-	// smaller stacks.
-	uintptr_t lo = gStackLow ? gStackLow : reinterpret_cast<uintptr_t>(fp);
-	uintptr_t hi = gStackHigh ? gStackHigh : reinterpret_cast<uintptr_t>(fp) + (8u << 20);
+	uintptr_t base = reinterpret_cast<uintptr_t>(fp);
+	// gStackLow spans all of RLIMIT_STACK, mostly unmapped for the main thread; the walk only ascends.
+	uintptr_t lo = std::max(gStackLow, base);
+	// Fallback for threads where pthread_getattr_np failed: 8 MB above the initial frame.
+	uintptr_t hi = gStackHigh ? gStackHigh : base + (8u << 20);
+	if (hi < 16) {
+		return 0;
+	}
 	int n = 0;
 	while (fp && n < max) {
 		uintptr_t a = reinterpret_cast<uintptr_t>(fp);
-		// Reject out-of-stack or misaligned fp before dereferencing.
-		if (a < lo || a + 16 > hi) {
+		// Reject out-of-stack or misaligned fp before dereferencing. Subtraction, not
+		// `a + 16 > hi`: that addition wraps for an fp near the top of the address space.
+		if (a < lo || a > hi - 16) {
 			break;
 		}
 		if (a & (sizeof(void*) - 1)) {

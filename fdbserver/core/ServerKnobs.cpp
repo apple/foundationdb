@@ -189,6 +189,21 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CDC_PROXY_FAILURE_COALESCE_DELAY,                       0.0 );
 	init( CDC_PROXY_POP_MIN_INTERVAL,                             0.1 ); if( randomize && buggify() ) CDC_PROXY_POP_MIN_INTERVAL = 0.01;
 	init( CDC_PROXY_POP_SCAN_INTERVAL,                            5.0 ); if( randomize && buggify() ) CDC_PROXY_POP_SCAN_INTERVAL = 0.1;
+	init( CDC_PROXY_REBALANCE_ENABLED,                           false ); if( randomize && buggify() ) CDC_PROXY_REBALANCE_ENABLED = true;
+	init( CDC_PROXY_REBALANCE_INTERVAL,                           60.0 ); if( randomize && buggify() ) CDC_PROXY_REBALANCE_INTERVAL = deterministicRandom()->randomInt(10, 121);
+	init( NATIVE_CDC_RETAG_CLEANUP_INTERVAL,                     30.0 ); if( randomize && buggify() ) NATIVE_CDC_RETAG_CLEANUP_INTERVAL = 0.1;
+	init( NATIVE_CDC_TAG_BALANCING_ENABLED,                      true );
+	init( NATIVE_CDC_LIVE_RETAGGING_ENABLED,                    false );
+	init( NATIVE_CDC_TAG_SAMPLE_INTERVAL,                        30.0 );
+	init( NATIVE_CDC_TAG_SAMPLE_TIMEOUT,                          5.0 );
+	init( NATIVE_CDC_TAG_SAMPLE_MAX_AGE,                         90.0 );
+	init( NATIVE_CDC_TAG_MOVE_COOLDOWN,                         300.0 );
+	init( NATIVE_CDC_TAG_MIN_RELATIVE_IMPROVEMENT,                0.2 );
+	init( NATIVE_CDC_TAG_MIN_BYTES_PER_SECOND_IMPROVEMENT,      10000 );
+	init( NATIVE_CDC_TAG_MAX_STREAMS,                            1000 );
+	init( NATIVE_CDC_TAG_MODEL_MAX_ENTRIES,                   2000000 );
+	init( NATIVE_CDC_TAG_SAMPLE_CONCURRENCY,                        8 );
+	init( NATIVE_CDC_TAG_SAMPLE_SHARD_LIMIT,                     1000 );
 	init( APPLY_MUTATION_BYTES,                                  1e6 );
 	init( BUGGIFY_RECOVER_MEMORY_LIMIT,                          1e6 );
 	init( BUGGIFY_WORKER_REMOVED_MAX_LAG,                         30 );
@@ -336,6 +351,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ALLOW_LARGE_SHARD,                                   false ); if( randomize && buggify() )  ALLOW_LARGE_SHARD = true;
 	init( MAX_LARGE_SHARD_BYTES,                          1000000000 ); // 1G
 	init( SHARD_ENCODE_LOCATION_METADATA,                      false ); if( isSimulated ) { bool v = deterministicRandom()->random01() < 0.75; if( !explicitlySetKnobs.contains("shard_encode_location_metadata") ) SHARD_ENCODE_LOCATION_METADATA = v; }
+	init( SHARD_ENCODE_REWRITE_KS_BATCH_SIZE,                   1000 ); if( randomize && buggify() ) SHARD_ENCODE_REWRITE_KS_BATCH_SIZE = deterministicRandom()->randomInt(1, 11); // small batch forces multi-page Phase 2 pagination in sim
 	init( ENABLE_DD_PHYSICAL_SHARD,                            false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
 	init( DD_PHYSICAL_SHARD_MOVE_PROBABILITY,                    0.0 ); // FIXME: re-enable after ShardedRocksDB is well tested by simulation
 	init( ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT,               false ); // FIXME: re-enable after ShardedRocksDB is well tested by simulation
@@ -757,7 +773,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Does manual flushes at regular intervals(seconds), incase rocksdb did not flush. Feature disabled if the value is 0.
 	init( ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL,                    600 ); if( isSimulated ) ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL = deterministicRandom()->randomInt(4, 1200);
 	init( ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                    true );
-	init( ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                 true );
 	init( ROCKSDB_FULLFILE_CHECKSUM,                           false ); if ( randomize && buggify() ) ROCKSDB_FULLFILE_CHECKSUM = true;
 	// Enabling the below three PROTECTION_BYTES_PER_KEY knobs will have overhead(memory and performance). Be cautious to enable in prod.
 	// Writebatch key-value checksum

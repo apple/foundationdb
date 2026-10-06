@@ -729,7 +729,7 @@ Future<RangeResult> DDStatsRangeImpl::getRange(ReadYourWritesTransaction* ryw,
 Key SpecialKeySpace::getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option) {
 	Key prefix = "options/"_sr.withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin);
 	auto pair = command + "/" + option;
-	ASSERT(options.find(pair) != options.end());
+	ASSERT(options.contains(pair));
 	return prefix.withSuffix(pair);
 }
 
@@ -755,8 +755,7 @@ Future<RangeResult> ManagementCommandsOptionsImpl::getRange(ReadYourWritesTransa
 void ManagementCommandsOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	std::string option = key.removePrefix(getKeyRange().begin).toString();
 	// ignore all invalid keys
-	if (SpecialKeySpace::getManagementApiOptionsSet().find(option) !=
-	    SpecialKeySpace::getManagementApiOptionsSet().end()) {
+	if (SpecialKeySpace::getManagementApiOptionsSet().contains(option)) {
 		TraceEvent(SevDebug, "ManagementApiOption").detail("Option", option).detail("Key", key);
 		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
 	}
@@ -769,8 +768,7 @@ void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const 
 void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	std::string option = key.removePrefix(getKeyRange().begin).toString();
 	// ignore all invalid keys
-	if (SpecialKeySpace::getManagementApiOptionsSet().find(option) !=
-	    SpecialKeySpace::getManagementApiOptionsSet().end()) {
+	if (SpecialKeySpace::getManagementApiOptionsSet().contains(option)) {
 		ryw->getSpecialKeySpaceWriteMap().rawErase(singleKeyRange(key));
 	}
 }
@@ -1062,7 +1060,7 @@ Future<bool> checkExclusion(Database db,
 					if (!excluded) {
 						totalKvStoreUsedBytesNotExcluded += used_bytes;
 
-						if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
+						if (disk_id.empty() || !diskLocalities.contains(disk_id)) {
 							totalKvStoreFreeBytesNotExcluded += free_bytes;
 							if (!disk_id.empty()) {
 								diskLocalities.insert(disk_id);
@@ -1628,25 +1626,27 @@ Future<RangeResult> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
 	RangeResult result;
 	KeyRangeRef modified =
 	    KeyRangeRef(kr.begin.removePrefix(getKeyRange().begin), kr.end.removePrefix(getKeyRange().begin));
-	std::map<KeyRef, Reference<ConfigValue>> values = ryw->getDatabase()->globalConfig->get(modified);
+	std::map<KeyRef, Reference<const ConfigValue>> values = ryw->getDatabase()->globalConfig->get(modified);
 	for (const auto& [key, config] : values) {
 		Key prefixedKey = key.withPrefix(getKeyRange().begin);
-		if (config.isValid() && config->value.has_value()) {
-			if (config->value.type() == typeid(StringRef)) {
-				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::any_cast<StringRef>(config->value).toString()));
-			} else if (config->value.type() == typeid(int64_t)) {
-				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<int64_t>(config->value))));
-			} else if (config->value.type() == typeid(bool)) {
-				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<bool>(config->value))));
-			} else if (config->value.type() == typeid(float)) {
-				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<float>(config->value))));
-			} else if (config->value.type() == typeid(double)) {
-				result.push_back_deep(result.arena(),
-				                      KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config->value))));
+		if (config.isValid() && config->getValue().has_value()) {
+			if (config->getValue().type() == typeid(StringRef)) {
+				result.push_back_deep(
+				    result.arena(), KeyValueRef(prefixedKey, std::any_cast<StringRef>(config->getValue()).toString()));
+			} else if (config->getValue().type() == typeid(int64_t)) {
+				result.push_back_deep(
+				    result.arena(),
+				    KeyValueRef(prefixedKey, std::to_string(std::any_cast<int64_t>(config->getValue()))));
+			} else if (config->getValue().type() == typeid(bool)) {
+				result.push_back_deep(
+				    result.arena(), KeyValueRef(prefixedKey, std::to_string(std::any_cast<bool>(config->getValue()))));
+			} else if (config->getValue().type() == typeid(float)) {
+				result.push_back_deep(
+				    result.arena(), KeyValueRef(prefixedKey, std::to_string(std::any_cast<float>(config->getValue()))));
+			} else if (config->getValue().type() == typeid(double)) {
+				result.push_back_deep(
+				    result.arena(),
+				    KeyValueRef(prefixedKey, std::to_string(std::any_cast<double>(config->getValue()))));
 			} else {
 				ASSERT(false);
 			}

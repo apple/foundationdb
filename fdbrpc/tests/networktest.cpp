@@ -19,16 +19,15 @@
  */
 
 #include "fmt/format.h"
-#include "fdbserver/NetworkTest.h"
+#include "NetworkTest.h"
 #include "flow/ActorCollection.h"
 #include "flow/CoroUtils.h"
 #include "flow/Knobs.h"
-#include "flow/UnitTest.h"
+#include <algorithm>
 #include <inttypes.h>
+#include <limits>
 
 #include "flow/IConnection.h"
-
-constexpr int WLTOKEN_NETWORKTEST = WLTOKEN_FIRST_AVAILABLE;
 
 struct LatencyStats {
 	using sample = double;
@@ -75,7 +74,7 @@ private:
 		while (true) {
 			NetworkTestRequest req = co_await interf.test.getFuture();
 			LatencyStats::sample sample = latency.tick();
-			req.reply.send(NetworkTestReply(Value(std::string(req.replySize, '.'))));
+			req.reply.send(NetworkTestReply(Standalone<StringRef>(std::string(req.replySize, '.'))));
 			latency.tock(sample);
 			sent++;
 		}
@@ -246,31 +245,20 @@ Future<Void> networkTestClient(std::string const& testServers) {
 	co_await waitForAll(clients);
 }
 
-struct RandomIntRange {
-	int min;
-	int max;
-
-	explicit(false) RandomIntRange(int low = 0, int high = 0) : min(low), max(high) {}
-
-	// Accepts strings of the form "min:max" or "N"
-	// where N will be used for both min and max
-	explicit(false) RandomIntRange(std::string str) {
-		StringRef high = str;
-		StringRef low = high.eat(":");
-		if (high.empty()) {
-			high = low;
-		}
-		min = low.empty() ? 0 : atol(low.toString().c_str());
-		max = high.empty() ? 0 : atol(high.toString().c_str());
-		if (min > max) {
-			std::swap(min, max);
-		}
+NetworkTestIntRange::NetworkTestIntRange(int low, int high) : min(std::min(low, high)), max(std::max(low, high)) {
+	// Sampling uses an exclusive upper bound one greater than max.
+	if (min < 0 || max == std::numeric_limits<int>::max()) {
+		throw invalid_option_value();
 	}
+}
 
-	int get() const { return (max == 0) ? 0 : nondeterministicRandom()->randomInt(min, max + 1); }
+int NetworkTestIntRange::get() const {
+	return (max == 0) ? 0 : nondeterministicRandom()->randomInt(min, max + 1);
+}
 
-	std::string toString() const { return format("%d:%d", min, max); }
-};
+std::string NetworkTestIntRange::toString() const {
+	return format("%d:%d", min, max);
+}
 
 struct P2PNetworkTest {
 	// Addresses to listen on
@@ -280,17 +268,17 @@ struct P2PNetworkTest {
 	// Number of outgoing connections to maintain
 	int connectionsOut;
 	// Message size range to send on outgoing established connections
-	RandomIntRange requestBytes;
+	NetworkTestIntRange requestBytes;
 	// Message size to reply with on incoming established connections
-	RandomIntRange replyBytes;
+	NetworkTestIntRange replyBytes;
 	// Number of requests/replies per session
-	RandomIntRange requests;
+	NetworkTestIntRange requests;
 	// Delay after message send and receive are complete before closing connection
-	RandomIntRange idleMilliseconds;
+	NetworkTestIntRange idleMilliseconds;
 	// Random delay before socket reads
-	RandomIntRange waitReadMilliseconds;
+	NetworkTestIntRange waitReadMilliseconds;
 	// Random delay before socket writes
-	RandomIntRange waitWriteMilliseconds;
+	NetworkTestIntRange waitWriteMilliseconds;
 	double targetDuration;
 	double startTime;
 	double globalStartTime;
@@ -330,20 +318,11 @@ struct P2PNetworkTest {
 
 	P2PNetworkTest() = default;
 
-	P2PNetworkTest(std::string listenerAddresses,
-	               std::string remoteAddresses,
-	               int connectionsOut,
-	               RandomIntRange sendMsgBytes,
-	               RandomIntRange recvMsgBytes,
-	               RandomIntRange requests,
-	               RandomIntRange idleMilliseconds,
-	               RandomIntRange waitReadMilliseconds,
-	               RandomIntRange waitWriteMilliseconds,
-	               double targetDuration,
-	               bool oneshot)
-	  : connectionsOut(connectionsOut), requestBytes(sendMsgBytes), replyBytes(recvMsgBytes), requests(requests),
-	    idleMilliseconds(idleMilliseconds), waitReadMilliseconds(waitReadMilliseconds),
-	    waitWriteMilliseconds(waitWriteMilliseconds), targetDuration(targetDuration), oneshot(oneshot) {
+	P2PNetworkTest(const P2PNetworkTestOptions& options, bool oneshot)
+	  : remotes(options.remoteAddresses), connectionsOut(options.connectionsOut), requestBytes(options.requestBytes),
+	    replyBytes(options.replyBytes), requests(options.requests), idleMilliseconds(options.idleMilliseconds),
+	    waitReadMilliseconds(options.waitReadMilliseconds), waitWriteMilliseconds(options.waitWriteMilliseconds),
+	    targetDuration(options.targetDuration), oneshot(oneshot) {
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
@@ -351,16 +330,10 @@ struct P2PNetworkTest {
 		connectErrors = 0;
 		acceptErrors = 0;
 		sessionErrors = 0;
-		msgBuffer = makeString(std::max(sendMsgBytes.max, recvMsgBytes.max));
+		msgBuffer = makeString(std::max(requestBytes.maximum(), replyBytes.maximum()));
 
-		if (!remoteAddresses.empty()) {
-			remotes = NetworkAddress::parseList(remoteAddresses);
-		}
-
-		if (!listenerAddresses.empty()) {
-			for (auto a : NetworkAddress::parseList(listenerAddresses)) {
-				listeners.push_back(INetworkConnections::net()->listen(a));
-			}
+		for (auto address : options.listenerAddresses) {
+			listeners.push_back(INetworkConnections::net()->listen(address));
 		}
 	}
 
@@ -622,43 +595,13 @@ struct P2PNetworkTest {
 // Each instance
 //   - listens on 0 or more listenerAddresses
 //   - maintains 0 or more connectionsOut at a time, each to a random choice from remoteAddresses
-// Address lists are a string of comma-separated IP:port[:tls] strings.
-//
-// The other arguments can be specified as "fixedValue" or "minValue:maxValue".
 // Each outgoing connection will live for a random requests count.
 // Each request will
 //   - send a random requestBytes sized message
 //   - wait for a random replyBytes sized response.
 // The client will close the connection after a random idleMilliseconds.
 // Reads and writes can optionally preceded by random delays, waitReadMilliseconds and waitWriteMilliseconds.
-TEST_CASE(":/network/p2ptest") {
-	P2PNetworkTest p2p(params.get("listenerAddresses").orDefault(""),
-	                   params.get("remoteAddresses").orDefault(""),
-	                   params.getInt("connectionsOut").orDefault(1),
-	                   params.get("requestBytes").orDefault("50:100"),
-	                   params.get("replyBytes").orDefault("500:1000"),
-	                   params.get("requests").orDefault("10:10000"),
-	                   params.get("idleMilliseconds").orDefault("0"),
-	                   params.get("waitReadMilliseconds").orDefault("0"),
-	                   params.get("waitWriteMilliseconds").orDefault("0"),
-	                   params.getDouble("targetDuration").orDefault(0.0),
-	                   false);
-
-	co_await p2p.run();
-}
-
-TEST_CASE(":/network/p2poneshottest") {
-	P2PNetworkTest p2p(params.get("listenerAddresses").orDefault(""),
-	                   params.get("remoteAddresses").orDefault(""),
-	                   params.getInt("connectionsOut").orDefault(1),
-	                   params.get("requestBytes").orDefault("50:100"),
-	                   params.get("replyBytes").orDefault("500:1000"),
-	                   params.get("requests").orDefault("10:10000"),
-	                   params.get("idleMilliseconds").orDefault("0"),
-	                   params.get("waitReadMilliseconds").orDefault("0"),
-	                   params.get("waitWriteMilliseconds").orDefault("0"),
-	                   params.getDouble("targetDuration").orDefault(0.0),
-	                   true);
-
+Future<Void> networkTestP2P(P2PNetworkTestOptions options, bool oneshot) {
+	P2PNetworkTest p2p(options, oneshot);
 	co_await p2p.run();
 }

@@ -446,9 +446,7 @@ struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::func
 		return Reference<TaskFuncBase>(dispatch(taskFuncType)());
 	}
 
-	static bool isValidTaskType(StringRef type) {
-		return !type.empty() && (dispatches().find(type) != dispatches().end());
-	}
+	static bool isValidTaskType(StringRef type) { return !type.empty() && dispatches().contains(type); }
 
 	static bool isValidTask(Reference<Task> task) {
 		auto itor = task->params.find(Task::reservedTaskParamKeyType);

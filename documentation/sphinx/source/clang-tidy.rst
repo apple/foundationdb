@@ -3,28 +3,35 @@ Clang-Tidy
 ##########
 
 ``clang-tidy`` is a static analysis tool that detects common programming errors, enforces coding standards, and suggests modern C++ improvements.
-It runs as part of CI on pull requests targeting ``main``. CI checks eligible changed C/C++ files with ``--warnings-as-errors='*'``, so findings fail the clang-tidy job. The workflow currently describes this job as non-required.
+It runs as part of CI on pull requests targeting ``main`` and ``release-*``. CI checks entire eligible changed C/C++ files with ``--warnings-as-errors='*'``, so findings fail the clang-tidy job even outside changed lines. The workflow currently describes this job as non-required.
 
 This guide explains how to run ``clang-tidy`` locally so you can fix issues before pushing.
 
 What clang-tidy checks
 ======================
 
-FoundationDB configures 50 named checks in the ``.clang-tidy`` file at the repository root. The
-active set depends on the clang-tidy version and can be inspected with ``clang-tidy --list-checks``.
+FoundationDB configures 56 named checks in the ``.clang-tidy`` file at the repository root.
+Use clang-tidy 19 to match the Clang 19 build toolchain. CI uses the clang-tidy
+provided by the build image.
+Inspect enabled checks with ``clang-tidy --list-checks``.
 The intent is to enable more as we go forward. Here are some example rules:
 
-* **31 Bugprone rules** -- catch potential runtime errors, including mismatched argument comments, obvious infinite loops, chained comparisons, swapped arguments, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, and incorrect erase/remove calls
+* **37 Bugprone rules** -- catch potential runtime errors, including unsafe self-assignment, forwarding constructors that hide copy or move constructors, narrow accumulation initializers, mismatched argument comments, obvious infinite loops, chained comparisons, swapped arguments, integer division in floating-point calculations, missed base-class copy construction, repeated macro argument evaluation, near-miss virtual overrides, dangling returned references, incorrect erase/remove calls, incorrect POSIX error checks, and discarded return values
 * **1 C++ Core Guidelines rule** -- catch unsafe captures in coroutine lambdas (``cppcoreguidelines-avoid-capturing-lambda-coroutines``)
 * **2 Misc rules** -- catch redundant expressions and RAII objects held across coroutine suspension points
 * **4 Modernize rules** -- encourage modern C++ practices (e.g., ``modernize-use-auto``, ``modernize-use-override``)
-* **5 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, repeated vector growth in simple loops, pointless moves, and move constructors that copy movable members (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-inefficient-vector-operation``, ``performance-move-const-arg``, ``performance-move-constructor-init``)
-* **7 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
+* **6 Performance rules** -- avoid unnecessary copies, hidden range-loop conversions, repeated vector growth in simple loops, inefficient generic algorithms over associative containers, pointless moves, and move constructors that copy movable members (``performance-for-range-copy``, ``performance-implicit-conversion-in-loop``, ``performance-inefficient-vector-operation``, ``performance-inefficient-algorithm``, ``performance-move-const-arg``, ``performance-move-constructor-init``)
+* **6 Readability rules** -- improve code clarity (e.g., ``readability-container-contains``, ``readability-container-size-empty``)
 
 ``misc-coroutine-hostile-raii`` checks Flow's blocking ``MutexHolder`` and
 ``ThreadSpinLockHolder`` guards as well as ``std::lock_guard`` and
 ``std::scoped_lock``. These guards must leave scope before a coroutine suspension
 point; asynchronous locks designed to span suspension are not included.
+
+``bugprone-unhandled-self-assignment`` retains its default restriction to types
+with suspicious fields. Reference-counted assignments that acquire the incoming
+reference before releasing the old one use documented, check-specific
+``NOLINTNEXTLINE`` annotations where the checker cannot recognize their safety.
 
 Basic examples of ``clang-tidy`` style and performance improvement changes:
 
@@ -106,19 +113,22 @@ On macOS (with Homebrew LLVM):
 
 .. code-block:: shell
 
-   export TIDY_DIFF=$(find $(brew --prefix llvm)/share/clang -name "clang-tidy-diff.py")
+   export PATH="$(brew --prefix llvm@19)/bin:$PATH"
+   export TIDY_DIFF=$(find $(brew --prefix llvm@19)/share/clang -name "clang-tidy-diff.py")
 
 On Linux:
 
 .. code-block:: shell
 
-   export TIDY_DIFF=$(find /usr/lib/llvm-*/share/clang -name "clang-tidy-diff.py" | head -n 1)
+   export PATH="/usr/lib/llvm-19/bin:$PATH"
+   export TIDY_DIFF=$(find /usr/lib/llvm-19/share/clang -name "clang-tidy-diff.py")
 
-To make this permanent, add to your ``~/.bashrc`` or ``~/.zshrc``:
+To make this permanent, add the corresponding ``PATH`` and ``TIDY_DIFF`` exports
+above to your ``~/.bashrc`` or ``~/.zshrc``, followed by:
 
 .. code-block:: shell
 
-   alias fdb-tidy='python3 $(find $(brew --prefix llvm 2>/dev/null || echo "/usr/lib/llvm-*") -name "clang-tidy-diff.py" | head -n 1) -p 1 -path .'
+   alias fdb-tidy='python3 "$TIDY_DIFF" -p 1 -path .'
 
 Step 3: Run against your changes
 ---------------------------------

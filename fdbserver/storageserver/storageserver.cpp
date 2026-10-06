@@ -42,6 +42,8 @@
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.h"
+#include "fdbserver/checkpoint/BulkSstFiles.h"
+#include "fdbserver/checkpoint/Checkpoint.h"
 #include "fdbserver/core/FDBSimulationPolicy.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/kvstore/IKeyValueStore.h"
@@ -55,8 +57,7 @@
 #include "MappedKeyPlan.h"
 #include "ReadLatencySamples.h"
 #include "fdbserver/core/RecoveryState.h"
-#include "fdbserver/core/RocksDBCheckpointUtils.h"
-#include "fdbserver/core/ServerCheckpoint.h"
+#include "fdbserver/checkpoint/RocksDBCheckpointUtils.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/storageserver/StorageCorruptionBug.h"
 #include "fdbserver/core/StorageMetrics.h"
@@ -498,9 +499,7 @@ public:
 		} else {
 			ASSERT(this->getMoveInShard());
 			const MoveInPhase phase = this->getMoveInShard()->getPhase();
-			if (phase < MoveInPhase::ReadWritePending) {
-				st = StorageServerShard::MovingIn;
-			} else if (phase == MoveInPhase::ReadWritePending) {
+			if (phase == MoveInPhase::ReadWritePending) {
 				st = StorageServerShard::ReadWritePending;
 			} else if (phase == MoveInPhase::Complete) {
 				st = StorageServerShard::ReadWrite;
@@ -734,9 +733,9 @@ struct UpdateEagerReadInfo {
 
 	void addMutation(MutationRef const& m) {
 		// SOMEDAY: Theoretically we can avoid a read if there is an earlier overlapping ClearRange
-		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end) && enableClearRangeEagerReads)
+		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end) && enableClearRangeEagerReads) {
 			keyBegin.push_back(m.param2);
-		else if (m.type == MutationRef::CompareAndClear) {
+		} else if (m.type == MutationRef::CompareAndClear) {
 			if (enableClearRangeEagerReads)
 				keyBegin.push_back(keyAfter(m.param1, arena));
 			if (!keys.empty() && keys.back().first == m.param1) {
@@ -883,12 +882,6 @@ private:
 
 	VersionedData versionedData;
 	std::map<Version, Standalone<VerUpdateRef>> mutationLog; // versions (durableVersion, version]
-
-	using WatchMapKey = Key;
-	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
-	using WatchMapValue = Reference<ServerWatchMetadata>;
-	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
-	WatchMap_t watchMap; // keep track of server watches
 
 public:
 	struct PendingNewShard {
@@ -1194,6 +1187,8 @@ public:
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	Database cx;
 
+	// counters must be declared before every member that can own an actor (actors, watchMap, …): cancelling those
+	// actors runs CountedSection destructors that touch these counters, so counters must outlive them
 	struct Counters : CommonStorageCounters {
 
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
@@ -1349,6 +1344,14 @@ public:
 		}
 	} counters;
 
+private:
+	using WatchMapKey = Key;
+	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
+	using WatchMapValue = Reference<ServerWatchMetadata>;
+	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
+	WatchMap_t watchMap; // keep track of server watches
+
+public:
 	class GetValueQuery {
 	public:
 		GetValueQuery(GetValueRequest request, Counters& counters)
@@ -3431,9 +3434,9 @@ Future<Key> findKey(StorageServer* data,
 	// Don't limit the number of bytes if this is a trivial key selector (there will be at most two items returned from
 	// the read range in this case)
 	int maxBytes{ 0 };
-	if (sel.offset <= 1 && sel.offset >= 0)
+	if (sel.offset <= 1 && sel.offset >= 0) {
 		maxBytes = std::numeric_limits<int>::max();
-	else {
+	} else {
 		maxBytes = (g_network->isSimulated() &&
 		            fdbSimulationHasCapability(FDBSimulationCapability::LimitStorageServerReadBytes) && buggify())
 		               ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
@@ -6793,9 +6796,9 @@ bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, U
 		Optional<StringRef> oldVal;
 		auto it = data.latestLastLessOrEqual(m.param1);
 		auto latestEnd = data.latestEnd();
-		if (it != latestEnd && it->isValue() && it.key() == m.param1)
+		if (it != latestEnd && it->isValue() && it.key() == m.param1) {
 			oldVal = it->getValue();
-		else if (it != latestEnd && it->isClearTo() && it->getEndKey() > m.param1) {
+		} else if (it != latestEnd && it->isClearTo() && it->getEndKey() > m.param1) {
 			CODE_PROBE(true, "Atomic op right after a clear.");
 		} else {
 			Optional<Value>& oldThing = eager->getValue(m.param1);
@@ -8918,10 +8921,7 @@ Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 				co_await fetchShardIngestCheckpoint(data, moveInShard);
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
 				co_await fetchShardApplyUpdates(data, moveInShard, moveInUpdates);
-			} else if (phase == MoveInPhase::Complete) {
-				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
-				break;
-			} else if (phase == MoveInPhase::Error || phase == MoveInPhase::Cancel) {
+			} else if (phase == MoveInPhase::Complete || phase == MoveInPhase::Error || phase == MoveInPhase::Cancel) {
 				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
 			}
@@ -11214,9 +11214,10 @@ Future<Void> updateStorage(StorageServer* data) {
 		++data->counters.kvCommits;
 		recentCommitStats.back().seqId = data->counters.kvCommits.getValue();
 
-		// If the mutation bytes budget was not fully used then wait some time before the next commit
-		durableDelay =
-		    (bytesLeft > 0) ? delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage) : Void();
+		// Batch only while both budgets have capacity; otherwise keep draining pending mutations.
+		durableDelay = (bytesLeft > 0 && clearRangesLeft > 0)
+		                   ? delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage)
+		                   : Void();
 
 		recentCommitStats.back().whenCommit = now();
 		try {
@@ -12795,9 +12796,7 @@ Future<Void> serveAuditStorageRequests(StorageServer* self, FutureStream<AuditSt
 			continue;
 		}
 		// Start the new audit task
-		if (req.getType() == AuditType::ValidateHA) {
-			self->actors.add(auditStorageShardReplicaQ(self, req));
-		} else if (req.getType() == AuditType::ValidateReplica) {
+		if (req.getType() == AuditType::ValidateHA || req.getType() == AuditType::ValidateReplica) {
 			self->actors.add(auditStorageShardReplicaQ(self, req));
 		} else if (req.getType() == AuditType::ValidateStorageServerShard) {
 			self->actors.add(auditStorageServerShardQ(self, req));

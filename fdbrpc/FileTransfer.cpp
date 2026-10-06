@@ -19,6 +19,7 @@
  */
 #ifdef FLOW_GRPC_ENABLED
 #include <fstream>
+#include <utility>
 
 #include "FileTransfer.h"
 #include "flow/IRandom.h"
@@ -144,21 +145,9 @@ std::optional<size_t> FileTransferClient::DownloadFile(const std::string& filena
                                                        const std::string& output_filename,
                                                        bool verify) {
 
-	uint32_t expected_crc = 0;
-	uint32_t expected_size = 0;
-	{
-		fdbrpc::GetFileInfoRequest request;
-		grpc::ClientContext context;
-		request.set_file_name(filename);
-		request.set_get_crc_checksum(verify);
-		request.set_get_size(true);
-		fdbrpc::GetFileInfoReply response;
-		auto res = stub_->GetFileInfo(&context, request, &response);
-		if (!res.ok()) {
-			return std::nullopt;
-		}
-		expected_crc = response.crc_checksum();
-		expected_size = response.file_size();
+	const auto fileInfo = GetFileInfo(filename, verify);
+	if (!fileInfo.has_value()) {
+		return std::nullopt;
 	}
 
 	fdbrpc::DownloadRequest request;
@@ -188,13 +177,13 @@ std::optional<size_t> FileTransferClient::DownloadFile(const std::string& filena
 
 	// Close file after writing
 	output_file.close();
-	failed = failed || (bytes_read != expected_size);
+	failed = failed || std::cmp_not_equal(bytes_read, fileInfo->file_size());
 
 	// Verify checksum
 	if (!failed && verify) {
 		std::ifstream output_file_reader(output_filename);
 		uint32_t actual_crc = crc32_checksum_ifstream(&output_file_reader);
-		failed = (actual_crc != expected_crc);
+		failed = (actual_crc != fileInfo->crc_checksum());
 	}
 
 	// Check final gRPC status

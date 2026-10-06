@@ -6,12 +6,16 @@ Checks: >
   bugprone-chained-comparison,
   bugprone-copy-constructor-init,
   bugprone-dangling-handle,
+  bugprone-fold-init-type,
+  bugprone-forwarding-reference-overload,
   bugprone-implicit-widening-of-multiplication-result,
   bugprone-inaccurate-erase,
   bugprone-infinite-loop,
+  bugprone-integer-division,
   bugprone-macro-repeated-side-effects,
   bugprone-misplaced-widening-cast,
   bugprone-move-forwarding-reference,
+  bugprone-posix-return,
   bugprone-redundant-branch-condition,
   bugprone-return-const-ref-from-parameter,
   bugprone-shared-ptr-array-mismatch,
@@ -29,7 +33,9 @@ Checks: >
   bugprone-swapped-arguments,
   bugprone-too-small-loop-variable,
   bugprone-undefined-memory-manipulation,
+  bugprone-unhandled-self-assignment,
   bugprone-unique-ptr-array-mismatch,
+  bugprone-unused-return-value,
   bugprone-use-after-move,
   bugprone-virtual-near-miss,
   cppcoreguidelines-avoid-capturing-lambda-coroutines,
@@ -41,6 +47,7 @@ Checks: >
   modernize-use-using,
   performance-for-range-copy,
   performance-implicit-conversion-in-loop,
+  performance-inefficient-algorithm,
   performance-inefficient-vector-operation,
   performance-move-const-arg,
   performance-move-constructor-init,
@@ -49,8 +56,7 @@ Checks: >
   readability-const-return-type,
   readability-container-size-empty,
   readability-delete-null-pointer,
-  readability-duplicate-include,
-  readability-inconsistent-ifelse-braces
+  readability-duplicate-include
 CheckOptions:
   - key: bugprone-dangling-handle.HandleClasses
     value: 'std::basic_string_view;std::experimental::basic_string_view;std::span;StringRef'

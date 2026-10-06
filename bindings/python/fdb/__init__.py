@@ -109,6 +109,14 @@ def api_version(ver):
         "transactional",
         "options",
         "StreamingMode",
+        "CdcMutationType",
+        "CdcCursor",
+        "CdcKeyRange",
+        "CdcStreamInfo",
+        "CdcMutation",
+        "CdcVersionedMutations",
+        "CdcConsumeResult",
+        "CdcConsumer",
     )
 
     _add_symbols(fdb.impl, list)

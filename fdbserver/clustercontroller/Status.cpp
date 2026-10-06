@@ -178,7 +178,7 @@ class StatusCounter {
 public:
 	StatusCounter() : hz(0), roughness(0), counter(0) {}
 	StatusCounter(double hz, double roughness, int64_t counter) : hz(hz), roughness(roughness), counter(counter) {}
-	explicit(false) StatusCounter(const std::string& parsableText) { parseText(parsableText); }
+	explicit StatusCounter(const std::string& parsableText) { parseText(parsableText); }
 
 	StatusCounter& parseText(const std::string& parsableText) {
 		sscanf(parsableText.c_str(), "%lf %lf %" SCNd64 "", &hz, &roughness, &counter);
@@ -454,6 +454,16 @@ struct RolesInfo {
 		return latencyStats;
 	}
 
+	void appendLatencyStatistics(JsonBuilderObject& object,
+	                             EventMap const& metrics,
+	                             const char* eventName,
+	                             const char* jsonKey) {
+		TraceEventFields const& latencyMetrics = metrics.at(eventName);
+		if (latencyMetrics.size()) {
+			object[jsonKey] = addLatencyStatistics(latencyMetrics);
+		}
+	}
+
 	JsonBuilderObject addLatencyBandInfo(TraceEventFields const& metrics) {
 		JsonBuilderObject latencyBands;
 		std::map<std::string, JsonBuilderObject> bands;
@@ -547,10 +557,7 @@ struct RolesInfo {
 				    maxTLogVersion - version - SERVER_KNOBS->STORAGE_LOGGING_DELAY * SERVER_KNOBS->VERSIONS_PER_SECOND);
 			}
 
-			TraceEventFields const& readLatencyMetrics = metrics.at("ReadLatencyMetrics");
-			if (readLatencyMetrics.size()) {
-				obj["read_latency_statistics"] = addLatencyStatistics(readLatencyMetrics);
-			}
+			appendLatencyStatistics(obj, metrics, "ReadLatencyMetrics", "read_latency_statistics");
 
 			TraceEventFields const& readLatencyBands = metrics.at("ReadLatencyBands");
 			if (readLatencyBands.size()) {
@@ -662,60 +669,22 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			TraceEventFields const& commitLatencyMetrics = metrics.at("CommitLatencyMetrics");
-			if (commitLatencyMetrics.size()) {
-				obj["commit_latency_statistics"] = addLatencyStatistics(commitLatencyMetrics);
-			}
+			appendLatencyStatistics(obj, metrics, "CommitLatencyMetrics", "commit_latency_statistics");
 
 			TraceEventFields const& commitLatencyBands = metrics.at("CommitLatencyBands");
 			if (commitLatencyBands.size()) {
 				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyBands);
 			}
 
-			TraceEventFields const& commitBatchingWindowSize = metrics.at("CommitBatchingWindowSize");
-			if (commitBatchingWindowSize.size()) {
-				obj["commit_batching_window_size"] = addLatencyStatistics(commitBatchingWindowSize);
-			}
-
-			TraceEventFields const& commitBatchTransactions = metrics.at("CommitBatchTransactions");
-			if (commitBatchTransactions.size()) {
-				obj["commit_batch_transactions"] = addLatencyStatistics(commitBatchTransactions);
-			}
-
-			TraceEventFields const& commitBatchBytes = metrics.at("CommitBatchBytes");
-			if (commitBatchBytes.size()) {
-				obj["commit_batch_bytes"] = addLatencyStatistics(commitBatchBytes);
-			}
-
-			TraceEventFields const& commitBatchingWaiting = metrics.at("CommitBatchingWaiting");
-			if (commitBatchingWaiting.size()) {
-				obj["commit_batching_waiting"] = addLatencyStatistics(commitBatchingWaiting);
-			}
-
-			TraceEventFields const& commitPreresolutionLatency = metrics.at("CommitPreresolutionLatency");
-			if (commitPreresolutionLatency.size()) {
-				obj["commit_preresolution_latency"] = addLatencyStatistics(commitPreresolutionLatency);
-			}
-
-			TraceEventFields const& commitResolutionLatency = metrics.at("CommitResolutionLatency");
-			if (commitResolutionLatency.size()) {
-				obj["commit_resolution_latency"] = addLatencyStatistics(commitResolutionLatency);
-			}
-
-			TraceEventFields const& commitPostresolutionLatency = metrics.at("CommitPostresolutionLatency");
-			if (commitPostresolutionLatency.size()) {
-				obj["commit_postresolution_latency"] = addLatencyStatistics(commitPostresolutionLatency);
-			}
-
-			TraceEventFields const& commitTLogLoggingLatency = metrics.at("CommitTLogLoggingLatency");
-			if (commitTLogLoggingLatency.size()) {
-				obj["commit_tlog_logging_latency"] = addLatencyStatistics(commitTLogLoggingLatency);
-			}
-
-			TraceEventFields const& commitReplyLatency = metrics.at("CommitReplyLatency");
-			if (commitReplyLatency.size()) {
-				obj["commit_reply_latency"] = addLatencyStatistics(commitReplyLatency);
-			}
+			appendLatencyStatistics(obj, metrics, "CommitBatchingWindowSize", "commit_batching_window_size");
+			appendLatencyStatistics(obj, metrics, "CommitBatchTransactions", "commit_batch_transactions");
+			appendLatencyStatistics(obj, metrics, "CommitBatchBytes", "commit_batch_bytes");
+			appendLatencyStatistics(obj, metrics, "CommitBatchingWaiting", "commit_batching_waiting");
+			appendLatencyStatistics(obj, metrics, "CommitPreresolutionLatency", "commit_preresolution_latency");
+			appendLatencyStatistics(obj, metrics, "CommitResolutionLatency", "commit_resolution_latency");
+			appendLatencyStatistics(obj, metrics, "CommitPostresolutionLatency", "commit_postresolution_latency");
+			appendLatencyStatistics(obj, metrics, "CommitTLogLoggingLatency", "commit_tlog_logging_latency");
+			appendLatencyStatistics(obj, metrics, "CommitReplyLatency", "commit_reply_latency");
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found) {
 				throw e;
@@ -735,15 +704,8 @@ struct RolesInfo {
 
 			// GRV Latency metrics are grouped according to priority (currently batch or default).
 			// Other priorities can be added in the future.
-			TraceEventFields const& grvLatencyMetrics = metrics.at("GRVLatencyMetrics");
-			if (grvLatencyMetrics.size()) {
-				priorityStats["default"] = addLatencyStatistics(grvLatencyMetrics);
-			}
-
-			TraceEventFields const& grvBatchMetrics = metrics.at("GRVBatchLatencyMetrics");
-			if (grvBatchMetrics.size()) {
-				priorityStats["batch"] = addLatencyStatistics(grvBatchMetrics);
-			}
+			appendLatencyStatistics(priorityStats, metrics, "GRVLatencyMetrics", "default");
+			appendLatencyStatistics(priorityStats, metrics, "GRVBatchLatencyMetrics", "batch");
 
 			// Add GRV Latency metrics (for all priorities) to parent node.
 			if (!priorityStats.empty()) {
@@ -1738,8 +1700,8 @@ loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>
 						res.healthyZone = healthyZone.first;
 					} else if (healthyZone.second > tr.getReadVersion().get()) {
 						res.healthyZone = healthyZone.first;
-						res.healthyZoneSeconds =
-						    (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+						res.healthyZoneSeconds = static_cast<double>(healthyZone.second - tr.getReadVersion().get()) /
+						                         CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 					}
 				}
 				res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();

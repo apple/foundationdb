@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <compare>
+#include <set>
 #include <utility>
 
 #include "fdbclient/DatabaseContext.h"
@@ -1283,9 +1284,15 @@ public:
 					                                         exclusionWorkerIds);
 
 					if (g_network->isSimulated()) {
+						// The comparison below validates the TLog method, not recruitment, so its draws must
+						// not leak into the shared stream: the replay pass of the determinism check would
+						// otherwise continue from a different stream and report a divergence the
+						// recruitment did not cause.
+						uint64_t entryFingerprint = deterministicRandom()->peek();
 						try {
 							auto testWorkers = getWorkersForTlogsBackup(
 							    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
+							deterministicRandom()->resetSeed(entryFingerprint);
 							RoleFitness testFitness(testWorkers, recruitment::TLog, testUsed);
 							RoleFitness fitness(workers, recruitment::TLog, id_used);
 
@@ -1320,6 +1327,7 @@ public:
 								ASSERT(false);
 							}
 						} catch (Error& e) {
+							deterministicRandom()->resetSeed(entryFingerprint);
 							ASSERT(false); // Simulation only validation should not throw errors
 						}
 					}
@@ -1340,9 +1348,14 @@ public:
 			    getWorkersForTlogsSimple(conf, required, desired, id_used, checkStable, dcIds, exclusionWorkerIds);
 
 			if (g_network->isSimulated()) {
+				// The comparison below validates the TLog method, not recruitment, so its draws must not
+				// leak into the shared stream: the replay pass of the determinism check would otherwise
+				// continue from a different stream and report a divergence the recruitment did not cause.
+				uint64_t entryFingerprint = deterministicRandom()->peek();
 				try {
 					auto testWorkers = getWorkersForTlogsBackup(
 					    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
+					deterministicRandom()->resetSeed(entryFingerprint);
 					RoleFitness testFitness(testWorkers, recruitment::TLog, testUsed);
 					RoleFitness fitness(workers, recruitment::TLog, id_used);
 					// backup recruitment is not required to use degraded processes that have better fitness
@@ -1362,6 +1375,7 @@ public:
 						ASSERT(false);
 					}
 				} catch (Error& e) {
+					deterministicRandom()->resetSeed(entryFingerprint);
 					ASSERT(false); // Simulation only validation should not throw errors
 				}
 			}
@@ -1546,14 +1560,18 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = recruitment::machineClassFitness(it.second.details.processClass, role);
+			// Candidates must not be worse than the already-accepted minWorker. Usage is
+			// deliberately not part of this check: gating on it empties the pool whenever the
+			// desired count exceeds the number of least-used equal-fitness processes (e.g.
+			// every stateless process, when some of them already host the master or cluster
+			// controller). Spreading across processes is instead provided by the bucket
+			// ordering on `used` in the fill loop below.
 			if (workerAvailable(it.second, checkStable) &&
 			    !conf.isExcludedServer(it.second.details.interf.addresses(), it.second.details.interf.locality) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    it.second.details.interf.locality.dcId() == dcId &&
-			    (!minWorker.present() ||
-			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
-			      (fitness < minWorker.get().fitness ||
-			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
+			    (!minWorker.present() || (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
+			                              fitness <= minWorker.get().fitness))) {
 				auto sharing = preferredSharing.find(it.first);
 				fitness_workers[{ fitness,
 				                  id_used[it.first],
@@ -2234,38 +2252,79 @@ public:
 	                    recruitment::ClusterRole role,
 	                    std::string description) {
 		std::vector<WorkerDetails> firstDetails;
+		std::set<Optional<Standalone<StringRef>>> firstPids;
 		for (auto& worker : first) {
 			auto w = id_worker.find(worker.locality.processId());
 			ASSERT(w != id_worker.end());
 			auto const& [_, workerInfo] = *w;
 			ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses(), workerInfo.details.interf.locality));
 			firstDetails.push_back(workerInfo.details);
+			firstPids.insert(worker.locality.processId());
 			//TraceEvent("CompareAddressesFirst").detail(description.c_str(), w->second.details.interf.address());
 		}
 		RoleFitness firstFitness(firstDetails, role, firstUsed);
 
 		std::vector<WorkerDetails> secondDetails;
+		std::set<Optional<Standalone<StringRef>>> secondPids;
 		for (auto& worker : second) {
 			auto w = id_worker.find(worker.locality.processId());
 			ASSERT(w != id_worker.end());
 			auto const& [_, workerInfo] = *w;
 			ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses(), workerInfo.details.interf.locality));
 			secondDetails.push_back(workerInfo.details);
+			secondPids.insert(worker.locality.processId());
 			//TraceEvent("CompareAddressesSecond").detail(description.c_str(), w->second.details.interf.address());
 		}
 		RoleFitness secondFitness(secondDetails, role, secondUsed);
 
-		if (!(firstFitness == secondFitness)) {
+		// Compare the recruited process sets as well as the fitness summary: the summary alone can
+		// coincide for different sets, which would hide the divergence here and instead surface
+		// against a later role whose fitness is computed from the usage this role left behind.
+		bool sameWorkerSet = firstPids == secondPids;
+		if (!sameWorkerSet || !(firstFitness == secondFitness)) {
+			auto describe = [&](const std::vector<WorkerDetails>& details,
+			                    const std::map<Optional<Standalone<StringRef>>, int>& used) {
+				std::string s;
+				// Cap the dump so the trace event stays well under the size limit.
+				const int n = std::min<int>(details.size(), 8);
+				for (int i = 0; i < n; i++) {
+					auto pid = details[i].interf.locality.processId();
+					auto u = used.find(pid);
+					s += "(" + (pid.present() ? pid.get().toString() : std::string("[not set]")) + ",fit=" +
+					     std::to_string((int)recruitment::machineClassFitness(details[i].processClass, role)) +
+					     ",used=" + (u != used.end() ? std::to_string(u->second) : std::string("?")) + ") ";
+				}
+				if ((int)details.size() > n) {
+					s += "...(" + std::to_string(details.size()) + " total)";
+				}
+				return s;
+			};
 			TraceEvent(SevError, "NonDeterministicRecruitment")
+			    .detail("Kind", sameWorkerSet ? "Fitness" : "WorkerSet")
+			    .detail("Description", description)
 			    .detail("FirstFitness", firstFitness.toString())
 			    .detail("SecondFitness", secondFitness.toString())
-			    .detail("ClusterRole", role);
+			    .detail("ClusterRole", role)
+			    .detail("FirstWorkers", describe(firstDetails, firstUsed))
+			    .detail("SecondWorkers", describe(secondDetails, secondUsed));
 		}
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
+		// The determinism check below re-runs recruitment and compares the result against the first
+		// pass. Recruitment deliberately randomizes (randomShuffle/randomChoice among equal candidates),
+		// so both passes must start from the same RNG state or they would trivially disagree. Seed the
+		// generator before the first pass, then reseed it from the same value before the replay, so both
+		// passes draw an identical random sequence. This is simulation-only; production runs are unaffected
+		// because the generator there is not seeded deterministically.
+		uint64_t seed = 0;
+		if (g_network->isSimulated()) {
+			seed = deterministicRandom()->randomUInt64();
+			deterministicRandom()->resetSeed(seed);
+		}
 		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, true);
 		if (g_network->isSimulated()) {
+			deterministicRandom()->resetSeed(seed);
 			try {
 				// FIXME: The logic to pick a satellite in a remote region is not
 				// deterministic and can therefore break this nondeterminism check.
@@ -2302,12 +2361,12 @@ public:
 					               secondUsed,
 					               recruitment::TLog,
 					               "Satellite");
+					// Each role is compared against the usage map as it stood when that role was
+					// recruited: roles recruited later (grv proxies, resolvers) must not leak their
+					// usage into the comparison of an earlier role, which would compare it against a
+					// placement it never produced and blame it for a later divergence.
 					updateIdUsed(rep.commitProxies, firstUsed);
 					updateIdUsed(compare.commitProxies, secondUsed);
-					updateIdUsed(rep.grvProxies, firstUsed);
-					updateIdUsed(compare.grvProxies, secondUsed);
-					updateIdUsed(rep.resolvers, firstUsed);
-					updateIdUsed(compare.resolvers, secondUsed);
 					compareWorkers(req.configuration,
 					               rep.commitProxies,
 					               firstUsed,
@@ -2315,6 +2374,8 @@ public:
 					               secondUsed,
 					               recruitment::CommitProxy,
 					               "CommitProxy");
+					updateIdUsed(rep.grvProxies, firstUsed);
+					updateIdUsed(compare.grvProxies, secondUsed);
 					compareWorkers(req.configuration,
 					               rep.grvProxies,
 					               firstUsed,
@@ -2322,6 +2383,8 @@ public:
 					               secondUsed,
 					               recruitment::GrvProxy,
 					               "GrvProxy");
+					updateIdUsed(rep.resolvers, firstUsed);
+					updateIdUsed(compare.resolvers, secondUsed);
 					compareWorkers(req.configuration,
 					               rep.resolvers,
 					               firstUsed,
@@ -2458,31 +2521,8 @@ public:
 		std::vector<WorkerDetails> backup_workers;
 		std::set<NetworkAddress> backup_addresses;
 
-		if (dbi.recoveryState == RecoveryState::FULLY_RECOVERED) {
-			for (const auto& oldLog : dbi.logSystemConfig.oldTLogs) {
-				for (const auto& logSet : oldLog.tLogs) {
-					for (const auto& tlog : logSet.tLogs) {
-						if (!tlog.present()) {
-							continue;
-						}
-
-						auto tlogWorker = std::find_if(id_worker.begin(), id_worker.end(), [&tlog](const auto& worker) {
-							return worker.second.details.interf.address() == tlog.interf().address();
-						});
-						const auto& locality = tlogWorker == id_worker.end()
-						                           ? tlog.interf().filteredLocality
-						                           : tlogWorker->second.details.interf.locality;
-						if (db.config.isExcludedServer(tlog.interf().addresses(), locality)) {
-							TraceEvent("BetterMasterExists", id)
-							    .detail("Reason", "OldTLogExcluded")
-							    .detail("ProcessID", locality.processId());
-							return true;
-						}
-					}
-				}
-			}
-		}
-
+		// Old TLog roles retire after terminal recovery; their exclusion does not require another recovery.
+		// Excluded current TLogs still need a replacement transaction system.
 		for (auto& logSet : dbi.logSystemConfig.tLogs) {
 			for (auto& it : logSet.tLogs) {
 				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());

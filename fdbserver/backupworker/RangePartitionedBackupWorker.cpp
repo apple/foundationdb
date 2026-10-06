@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "BackupWorkerPause.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupFileFormat.h"
 #include "fdbclient/BackupContainer.h"
@@ -1051,36 +1052,6 @@ Future<Void> setBackupKeys(RangePartitionedBackupData* self, std::map<UID, Versi
 	}
 }
 
-static Future<Void> monitorWorkerPause(RangePartitionedBackupData* self) {
-	auto tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	Future<Void> watch;
-
-	while (true) {
-		Error err;
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			Optional<Value> value = co_await tr->get(backupPausedKey);
-			bool paused = value.present() && value.get() == "1"_sr;
-			if (self->paused.get() != paused) {
-				TraceEvent(paused ? "RangePartitionedBWPaused" : "RangePartitionedBWResumed", self->myId).log();
-				self->paused.set(paused);
-			}
-
-			watch = tr->watch(backupPausedKey);
-			co_await tr->commit();
-			co_await watch;
-			tr->reset();
-			continue;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tr->onError(err);
-	}
-}
-
 Future<Void> monitorRangePartitionedBackupProgress(RangePartitionedBackupData* self) {
 	Future<Void> interval;
 
@@ -1313,7 +1284,11 @@ Future<Void> rangePartitionedBackupWorker(BackupInterface interf,
 			addActor.send(monitorRangePartitionedBackupProgress(&self));
 		}
 
-		addActor.send(monitorWorkerPause(&self));
+		addActor.send(monitorBackupPause(self.cx,
+		                                 self.myId,
+		                                 &self.paused,
+		                                 /*pausedEvent=*/"RangePartitionedBWPaused",
+		                                 /*resumedEvent=*/"RangePartitionedBWResumed"));
 		// Must be sent before processPartitionMap so logSystem is populated before the partition-map peek.
 		addActor.send(monitorLogSystemFromDbInfo(db, &self));
 

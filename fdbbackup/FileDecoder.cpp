@@ -87,12 +87,13 @@ void printDecodeUsage() {
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --list-only    Print file list and exit.\n"
 	             "  --validate-filters Validate the default RangeMap filtering logic with a slower one.\n"
-	             "  -k KEY_PREFIX  Use a single prefix for filtering mutations.\n"
+	             "  -k KEY_PREFIX  Use a single prefix for filtering mutations and range files.\n"
 	             "  --filters PREFIX_FILTER_FILE\n"
 	             "                 A file containing a list of prefix filters in HEX format separated by \";\",\n"
 	             "                 e.g., \"\\x05\\x01;\\x15\\x2b\"\n"
 	             "  --hex-prefix   HEX_PREFIX\n"
 	             "                 The prefix specified in HEX format, e.g., --hex-prefix \"\\\\x05\\\\x01\".\n"
+	             "                 With none of -k, --filters or --hex-prefix, everything is decoded.\n"
 	             "  --begin-version-filter BEGIN_VERSION\n"
 	             "                 The version range's begin version (inclusive) for filtering.\n"
 	             "  --end-version-filter END_VERSION\n"
@@ -545,10 +546,11 @@ public:
 	// version batch data that are in the next file.
 	Optional<VersionedMutations> getNextBatch() {
 		for (auto& [version, m] : mutationBlocksByVersion) {
-			if (m.isComplete()) {
+			Optional<StringRef> completeMutations = m.getCompleteMutations();
+			if (completeMutations.present()) {
 				VersionedMutations vms;
 				vms.version = version;
-				vms.serializedMutations = m.serializedMutations;
+				vms.serializedMutations = completeMutations.get().toString();
 				vms.mutations = fileBackup::decodeMutationLogValue(vms.serializedMutations);
 				TraceEvent("Decode").detail("Version", vms.version).detail("N", vms.mutations.size());
 				mutationBlocksByVersion.erase(version);
@@ -775,8 +777,14 @@ Future<Void> process_file(Reference<IBackupContainer> container,
 // Use the snapshot metadata to quickly identify relevant range files and
 // then filter by versions.
 Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Reference<DecodeParams> params) {
+	// Only consider snapshots whose version range overlaps the requested filter. Reading a snapshot
+	// means downloading and parsing its entire manifest and checking every file it lists against the
+	// container, so snapshots that getRelevantRangeFiles() would discard below must not be read at
+	// all. A partially expired snapshot outside the filter would otherwise report every expired file
+	// it lists as a SevError, burying the result the caller asked for.
 	std::vector<KeyspaceSnapshotFile> snapshots =
-	    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->listKeyspaceSnapshots();
+	    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))
+	        ->listKeyspaceSnapshots(params->beginVersionFilter, params->endVersionFilter);
 	std::vector<RangeFile> files;
 
 	for (int i = 0; i < snapshots.size(); i++) {
@@ -784,6 +792,12 @@ Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Ref
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->readKeyspaceSnapshot(snapshots[i]);
 			for (const auto& rangeFile : results.first) {
+				// No prefix filter, or a manifest with no per-file key ranges (encrypted backups), selects
+				// every file. An empty RangeMapFilters matches nothing, so it cannot answer this.
+				if (params->prefixes.empty() || results.second.empty()) {
+					files.push_back(rangeFile);
+					continue;
+				}
 				const auto& keyRange = results.second.at(rangeFile.fileName);
 				if (params->matchFilters(keyRange)) {
 					files.push_back(rangeFile);

@@ -65,6 +65,9 @@ public:
 	}
 
 	static Future<int> read(Reference<AsyncFileEncrypted> self, void* data, int length, int64_t offset) {
+		if (length == 0) {
+			co_return 0;
+		}
 		if (self->fileSize == -1) {
 			int64_t rawSize = co_await self->file->size();
 			self->fileSize = AsyncFileEncrypted::rawToLogicalSize(rawSize, self->encryptionBlockSize);
@@ -152,7 +155,7 @@ public:
 
 AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode, int encryptionBlockSize)
   : file(file), mode(mode), currentBlock(0), encryptionBlockSize(encryptionBlockSize) {
-	ASSERT(encryptionBlockSize > 0);
+	ASSERT_GT(encryptionBlockSize, 0);
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (mode == Mode::APPEND_ONLY) {
 		writeBuffer = std::vector<unsigned char>(encryptionBlockSize, 0);
@@ -173,7 +176,7 @@ int64_t AsyncFileEncrypted::rawToLogicalSize(int64_t rawSize, int blockSize) {
 	const int64_t trailing = rawSize % rawBlockSize;
 	int64_t logical = fullBlocks * blockSize;
 	if (trailing > 0) {
-		ASSERT(trailing > GCM_TAG_LEN);
+		ASSERT_GT(trailing, GCM_TAG_LEN);
 		logical += trailing - GCM_TAG_LEN;
 	}
 	return logical;
@@ -298,4 +301,35 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 		bytesRead += bytesReadInChunk;
 	}
 	ASSERT(writeBuffer == readBuffer);
+}
+
+TEST_CASE("fdbrpc/AsyncFileEncrypted/ZeroLengthRead") {
+	const int encryptionBlockSize = 4096;
+	const int bytes = 2 * encryptionBlockSize + 1;
+	StreamCipherKey::initializeGlobalRandomTestKey();
+	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
+	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
+	Reference<IAsyncFile> rawFile = co_await IAsyncFileSystem::filesystem()->open(
+	    joinPath(params.getDataDir(), "test-encrypted-file-zero-length"), flags, 0600);
+	std::vector<unsigned char> readBuffer(encryptionBlockSize, 0xa5);
+	const auto untouchedBuffer = readBuffer;
+	Reference<IAsyncFile> file =
+	    makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
+	int bytesRead = co_await file->read(readBuffer.data(), 0, 0);
+	ASSERT_EQ(bytesRead, 0);
+	ASSERT(readBuffer == untouchedBuffer);
+
+	file = makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize);
+	std::vector<unsigned char> writeBuffer(bytes, 0x5a);
+	co_await file->write(writeBuffer.data(), bytes, 0);
+	co_await file->sync();
+	file = makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
+	for (int offset : { 0, 1, encryptionBlockSize, encryptionBlockSize + 1, bytes, bytes + 1 }) {
+		bytesRead = co_await file->read(readBuffer.data(), 0, offset);
+		ASSERT_EQ(bytesRead, 0);
+		ASSERT(readBuffer == untouchedBuffer);
+	}
+	bytesRead = co_await file->read(readBuffer.data(), 1, 0);
+	ASSERT_EQ(bytesRead, 1);
+	ASSERT_EQ(readBuffer[0], writeBuffer[0]);
 }

@@ -260,9 +260,9 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
 		int encBlockSize = encryptionBlockSize;
-		f = map(f, [encBlockSize](Reference<IAsyncFile> r) {
+		f = map(success(f) && encryptionSetupComplete(), [file = f, encBlockSize](Void) {
 			return Reference<IAsyncFile>(
-			    makeReference<AsyncFileEncrypted>(r, AsyncFileEncrypted::Mode::READ_ONLY, encBlockSize));
+			    makeReference<AsyncFileEncrypted>(file.get(), AsyncFileEncrypted::Mode::READ_ONLY, encBlockSize));
 		});
 	}
 
@@ -303,9 +303,9 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
 		int encBlockSize = encryptionBlockSize;
-		f = map(f, [encBlockSize](Reference<IAsyncFile> r) {
+		f = map(success(f) && encryptionSetupComplete(), [file = f, encBlockSize](Void) {
 			return Reference<IAsyncFile>(
-			    makeReference<AsyncFileEncrypted>(r, AsyncFileEncrypted::Mode::APPEND_ONLY, encBlockSize));
+			    makeReference<AsyncFileEncrypted>(file.get(), AsyncFileEncrypted::Mode::APPEND_ONLY, encBlockSize));
 		});
 	}
 	return map(f, [=](Reference<IAsyncFile> file) -> Reference<IBackupFile> {

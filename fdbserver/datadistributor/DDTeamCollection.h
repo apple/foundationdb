@@ -54,7 +54,7 @@ class TCMachineInfo;
 class TCMachineTeamInfo;
 
 // All state that represents an ongoing tss pair recruitment
-struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
+class TSSPairState : public ReferenceCounted<TSSPairState>, NonCopyable {
 	Promise<Optional<std::pair<UID, Version>>>
 	    ssPairInfo; // if set, for ss to pass its id to tss pair once it is successfully recruited
 	Promise<bool> tssPairDone; // if set, for tss to pass ss that it was successfully recruited
@@ -65,10 +65,13 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 
 	bool active;
 
+public:
 	TSSPairState() : active(false) {}
 
 	explicit TSSPairState(const LocalityData& locality)
 	  : dcId(locality.dcId()), dataHallId(locality.dataHallId()), active(true) {}
+
+	bool isActive() const { return active; }
 
 	bool inDataZone(const LocalityData& locality) const {
 		return locality.dcId() == dcId && locality.dataHallId() == dataHallId;
@@ -231,6 +234,8 @@ protected:
 	std::vector<UID> allServers;
 	int64_t unhealthyServers;
 	std::map<int, int> priority_teams;
+	// Across all team collections; -1 until each collection has initialized its team health.
+	int getHighestTeamPriority() const;
 	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
 	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a
 	                                                            // read-only concatenation of 2 data structures?

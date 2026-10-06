@@ -97,6 +97,10 @@ void StorageServerInterface::initEndpoints() {
 	streams.push_back(getCheckSum.getReceiver());
 	streams.push_back(bulkdump.getReceiver());
 	FlowTransport::transport().addEndpoints(streams);
+	if (FLOW_KNOBS->STALE_PEER_OBSERVABILITY) {
+		// streams[0] is `getValue` (base endpoint); streams[1..kNumAdjustedEndpoints] are adjusted endpoints.
+		ASSERT(streams.size() - 1 == kNumAdjustedEndpoints);
+	}
 }
 
 // if size + hex of checksum is shorter than value, record that instead of actual value. break-even point is 12

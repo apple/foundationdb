@@ -20,6 +20,8 @@
 
 #include "fdbserver/logsystem/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemConsumer.h"
+#include "fdbserver/logsystem/LogSystemFactory.h"
+#include "flow/CoroUtils.h"
 #include "flow/UnitTest.h"
 
 namespace {
@@ -32,6 +34,171 @@ Reference<LogSet> makeSingleLogSet(const std::vector<TLogInterface>& tlogs, bool
 		    makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(tlog)));
 	}
 	return logSet;
+}
+
+Reference<LogSet> makeRemotePrefixLogSet(const std::vector<TLogInterface>& tlogs,
+                                         bool isLocal,
+                                         int8_t locality,
+                                         Version startVersion) {
+	auto logSet = makeSingleLogSet(tlogs, isLocal);
+	logSet->locality = locality;
+	logSet->startVersion = startVersion;
+	logSet->tLogVersion = TLogVersion::V6;
+	logSet->tLogReplicationFactor = 1;
+	logSet->tLogPolicy = makeReference<PolicyOne>();
+	for (const auto& tlog : tlogs) {
+		logSet->tLogLocalities.push_back(tlog.filteredLocality);
+	}
+	return logSet;
+}
+
+TLogInterface makeRemotePrefixRouterClient(TLogInterface router) {
+	// Streaming health checks and reply backpressure require transport-backed peek streams.
+	router.peekMessages = RequestStream<TLogPeekRequest>(router.peekMessages.getEndpoint());
+	router.peekStreamMessages = RequestStream<TLogPeekStreamRequest>(router.peekStreamMessages.getEndpoint());
+	return router;
+}
+
+Reference<LogSystem> makeLaggingRemoteLogSystem(const std::vector<TLogInterface>& remoteLogs,
+                                                const TLogInterface& oldRouter,
+                                                const TLogInterface& currentRouter) {
+	constexpr LogEpoch epoch = 2;
+	LocalityData locality;
+	auto logSystem = makeReference<LogSystem>(UID(), locality, epoch);
+	logSystem->logSystemType = LogSystemType::tagPartitioned;
+	logSystem->expectedLogSets = 2;
+	logSystem->oldestBackupEpoch = epoch;
+	logSystem->repopulateRegionAntiQuorum = 1;
+	logSystem->recoveryComplete = Void();
+	logSystem->remoteRecovery = Void();
+	logSystem->remoteRecoveryComplete = Never();
+	logSystem->hasRemoteServers = true;
+	logSystem->logRouterTags = 1;
+	logSystem->tLogs.push_back(makeRemotePrefixLogSet({ TLogInterface(locality) }, true, 0, 100));
+	auto remote = makeRemotePrefixLogSet(remoteLogs, false, 1, 60);
+	remote->logRouters.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
+	    OptionalInterface<TLogInterface>(makeRemotePrefixRouterClient(currentRouter))));
+	logSystem->tLogs.push_back(remote);
+
+	OldLogData old;
+	old.epoch = epoch - 1;
+	old.epochBegin = 50;
+	old.epochEnd = 100;
+	old.recoverAt = 109;
+	old.logRouterTags = 1;
+	old.tLogs.push_back(makeRemotePrefixLogSet({ TLogInterface(locality) }, true, 0, 50));
+	auto oldRemote = makeRemotePrefixLogSet({ TLogInterface(locality) }, false, 1, 60);
+	oldRemote->logRouters.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
+	    OptionalInterface<TLogInterface>(makeRemotePrefixRouterClient(oldRouter))));
+	old.tLogs.push_back(oldRemote);
+	logSystem->oldLogData.push_back(old);
+	// Make the ordinary generation-purge criteria eligible so the prefix barrier is the only retention gate.
+	logSystem->recoveredVersion->set(old.recoverAt + 1);
+	logSystem->remoteRecoveredVersion->set(old.recoverAt + 1);
+	return logSystem;
+}
+
+DBCoreState makePendingRemotePrefixCoreState(const Reference<LogSystem>& logSystem) {
+	DBCoreState pendingState;
+	logSystem->toCoreState(pendingState);
+	pendingState.recoveryCount = logSystem->epoch;
+	ASSERT(!pendingState.oldTLogData.empty());
+	ASSERT_EQ(pendingState.oldTLogData.size(), logSystem->oldLogData.size());
+	ASSERT_EQ(pendingState.tLogs.size(), logSystem->expectedLogSets);
+	const auto oldGenerations = pendingState.oldTLogData;
+	logSystem->purgeOldRecoveredGenerationsCoreState(pendingState);
+	ASSERT(pendingState.oldTLogData == oldGenerations);
+	logSystem->coreStateWritten(pendingState);
+	ASSERT(logSystem->remoteLogsWrittenToCoreState);
+	ASSERT(!logSystem->recoveryCompleteWrittenToCoreState.get());
+	return pendingState;
+}
+
+DBCoreState makeRecoveredRemotePrefixCoreState(const Reference<LogSystem>& logSystem) {
+	DBCoreState finalState;
+	logSystem->toCoreState(finalState);
+	finalState.recoveryCount = logSystem->epoch;
+	ASSERT(finalState.oldTLogData.empty());
+	ASSERT_EQ(finalState.tLogs.size(), logSystem->expectedLogSets);
+	logSystem->coreStateWritten(finalState);
+	ASSERT(logSystem->recoveryCompleteWrittenToCoreState.get());
+	return finalState;
+}
+
+void assertRemotePrefixCoreStateError(const Reference<LogSystem>& logSystem, int errorCode) {
+	Optional<Error> error;
+	try {
+		DBCoreState state;
+		logSystem->toCoreState(state);
+	} catch (Error& e) {
+		error = e;
+	}
+	ASSERT(error.present());
+	ASSERT_EQ(error.get().code(), errorCode);
+	ASSERT(!logSystem->recoveryCompleteWrittenToCoreState.get());
+}
+
+TLogQueuingMetricsReply makeRemotePrefixMetricsReply(Version version) {
+	TLogQueuingMetricsReply reply{};
+	reply.localTime = now();
+	reply.instanceID = 1;
+	reply.v = version;
+	return reply;
+}
+
+Future<Void> serveRemotePrefixMetrics(TLogInterface tlog,
+                                      Reference<AsyncVar<Version>> version,
+                                      PromiseStream<Version> reports) {
+	while (true) {
+		TLogQueuingMetricsRequest req = co_await tlog.getQueuingMetrics.getFuture();
+		const Version reported = version->get();
+		req.reply.send(makeRemotePrefixMetricsReply(reported));
+		reports.send(reported);
+	}
+}
+
+TLogPeekReply makeRemotePrefixPeekReply(Version begin, Optional<Version> requestedEnd, Version end) {
+	TLogPeekReply reply;
+	reply.begin = begin;
+	reply.end = std::min(end, requestedEnd.orDefault(end));
+	ASSERT_LT(begin, reply.end);
+	reply.popped = begin;
+	reply.maxKnownVersion = reply.end - 1;
+	reply.minKnownCommittedVersion = reply.end - 1;
+	return reply;
+}
+
+Future<Void> serveRemotePrefixRouter(TLogInterface router,
+                                     Version begin,
+                                     Version end,
+                                     PromiseStream<Version> requests) {
+	while (true) {
+		co_await Choose()
+		    .When(router.peekMessages.getFuture(),
+		          [&](const TLogPeekRequest& req) {
+			          ASSERT_GE(req.begin, begin);
+			          req.reply.send(makeRemotePrefixPeekReply(req.begin, req.end, end));
+			          requests.send(req.begin);
+		          })
+		    .When(router.peekStreamMessages.getFuture(),
+		          [&](const TLogPeekStreamRequest& req) {
+			          ASSERT_GE(req.begin, begin);
+			          req.reply.setByteLimit(req.limitBytes);
+			          Future<Void> ready = req.reply.onReady();
+			          ASSERT(ready.isReady() && !ready.isError());
+			          req.reply.send(TLogPeekStreamReply(makeRemotePrefixPeekReply(req.begin, req.end, end)));
+			          req.reply.sendError(end_of_stream());
+			          requests.send(req.begin);
+		          })
+		    .run();
+	}
+}
+
+Future<Void> advanceRemotePrefixCursorTo(Reference<IPeekCursor> cursor, Version end) {
+	while (cursor->version().version < end) {
+		co_await cursor->getMore();
+	}
+	co_return;
 }
 
 std::tuple<int, std::vector<TLogLockResult>, bool> makeLogGroupResults(
@@ -57,6 +224,257 @@ std::tuple<int, std::vector<TLogLockResult>, bool> makeLogGroupResults(
 } // namespace
 
 void forceLinkLogSystemRecoveryTests() {}
+
+TEST_CASE("/LogSystem/RetireOldLogRoles/FinalCoreState") {
+	constexpr double timeoutSeconds = 30.0;
+	LocalityData locality;
+	TLogInterface currentRouter(locality);
+	auto logSystem = makeLaggingRemoteLogSystem({ TLogInterface(locality) }, TLogInterface(locality), currentRouter);
+	const LogEpoch epoch = logSystem->epoch;
+	logSystem->oldestBackupEpoch = epoch - 1;
+	Reference<LogSet> remoteSet = logSystem->tLogs.back();
+	remoteSet->startVersion = 100;
+	logSystem->tLogs.pop_back();
+	logSystem->remoteRecovery = Never();
+	const auto oldLogSets = logSystem->oldLogData.front().tLogs;
+	const auto oldRoles = logSystem->getLogSystemConfig().oldTLogs;
+
+	DBCoreState partialState;
+	logSystem->toCoreState(partialState);
+	partialState.recoveryCount = epoch;
+	ASSERT(!logSystem->storageRecovered());
+	ASSERT_EQ(partialState.oldTLogData.size(), 1);
+	logSystem->coreStateWritten(partialState);
+	ASSERT(!logSystem->recoveryCompleteWrittenToCoreState.get());
+	ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+
+	// Local recovery and backups can finish before the expected remote log set exists.
+	logSystem->oldestBackupEpoch = epoch;
+	logSystem->toCoreState(partialState);
+	ASSERT(logSystem->storageRecovered());
+	ASSERT_EQ(partialState.oldTLogData.size(), 1);
+	ASSERT_EQ(partialState.tLogs.size(), 1);
+	logSystem->coreStateWritten(partialState);
+	ASSERT(!logSystem->recoveryCompleteWrittenToCoreState.get());
+	ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+
+	logSystem->tLogs.push_back(remoteSet);
+	logSystem->remoteRecovery = Void();
+	ASSERT(!logSystem->remoteRecoveryComplete.isReady());
+	co_await timeoutError(logSystem->onRemoteLogPrefixDurable(), timeoutSeconds);
+	ASSERT(!logSystem->recoveryCompleteWrittenToCoreState.get());
+	ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+	const DBCoreState finalState = makeRecoveredRemotePrefixCoreState(logSystem);
+	LogSystemConfig expected = logSystem->getLogSystemConfig();
+	ASSERT_EQ(expected.tLogs.size(), 2);
+	ASSERT(expected.oldTLogs == oldRoles);
+	expected.oldTLogs.clear();
+
+	Future<Void> configChanged = logSystem->onLogSystemConfigChange();
+	ASSERT(!configChanged.isReady());
+	logSystem->retireOldLogRoles(finalState);
+	ASSERT(configChanged.isReady() && !configChanged.isError());
+	ASSERT(!logSystem->remoteRecoveryComplete.isReady());
+	ASSERT(logSystem->getLogSystemConfig() == expected);
+	ASSERT_EQ(logSystem->oldLogData.size(), 1);
+	ASSERT(logSystem->oldLogData.front().tLogs == oldLogSets);
+
+	Future<Void> unchanged = logSystem->onLogSystemConfigChange();
+	logSystem->retireOldLogRoles(finalState);
+	ASSERT(!unchanged.isReady());
+	ASSERT(logSystem->getLogSystemConfig() == expected);
+
+	PromiseStream<Version> currentRequests;
+	Future<Void> currentRouterServer = serveRemotePrefixRouter(currentRouter, 100, 110, currentRequests);
+	auto currentConsumer =
+	    makeLogSystemFromLogSystemConfig(UID(), locality, logSystem->getLogSystemConfig())->makeConsumer();
+	auto currentCursor = currentConsumer->peek(UID(), 100, Optional<Version>(109), Tag(tagLocalityRemoteLog, 0), false);
+	co_await timeoutError(advanceRemotePrefixCursorTo(currentCursor, 110) || currentRouterServer, timeoutSeconds);
+	const Version currentBegin = co_await timeoutError(waitAndForward(currentRequests.getFuture()), timeoutSeconds);
+	ASSERT_EQ(currentBegin, 100);
+	ASSERT_EQ(currentCursor->version().version, 110);
+	co_return;
+}
+
+TEST_CASE("/LogSystem/RemoteLogPrefix/TrackerInstallation") {
+	constexpr double timeoutSeconds = 30.0;
+	LocalityData locality;
+	TLogInterface remote(locality);
+	auto logSystem = makeLaggingRemoteLogSystem({ remote }, TLogInterface(locality), TLogInterface(locality));
+	Reference<LogSet> remoteSet = logSystem->tLogs.back();
+	logSystem->tLogs.pop_back();
+	Promise<Void> remoteRecruitment;
+	logSystem->remoteRecovery = remoteRecruitment.getFuture();
+
+	DBCoreState partialState;
+	logSystem->toCoreState(partialState);
+	partialState.recoveryCount = logSystem->epoch;
+	ASSERT_EQ(partialState.tLogs.size(), 1);
+	ASSERT_EQ(partialState.oldTLogData.size(), 1);
+	logSystem->coreStateWritten(partialState);
+	Future<Void> beforeInstallation = logSystem->onCoreStateChanged();
+	ASSERT(!beforeInstallation.isReady());
+
+	// The prefix tracker must be installed before remote recruitment reports completion.
+	logSystem->tLogs.push_back(remoteSet);
+	Future<Void> prefixDurable = logSystem->onRemoteLogPrefixDurable();
+	TLogQueuingMetricsRequest initialRequest =
+	    co_await timeoutError(waitAndForward(remote.getQueuingMetrics.getFuture()), timeoutSeconds);
+	initialRequest.reply.send(makeRemotePrefixMetricsReply(99));
+	ASSERT(!prefixDurable.isReady());
+	remoteRecruitment.send(Void());
+	co_await timeoutError(beforeInstallation, timeoutSeconds);
+
+	makePendingRemotePrefixCoreState(logSystem);
+	Future<Void> afterInstallation = logSystem->onCoreStateChanged();
+	ASSERT(!afterInstallation.isReady());
+	TLogQueuingMetricsRequest caughtUpRequest =
+	    co_await timeoutError(waitAndForward(remote.getQueuingMetrics.getFuture()), timeoutSeconds);
+	ASSERT(!afterInstallation.isReady());
+	caughtUpRequest.reply.send(makeRemotePrefixMetricsReply(100));
+	co_await timeoutError(afterInstallation, timeoutSeconds);
+	co_await timeoutError(prefixDurable, timeoutSeconds);
+	ASSERT(!logSystem->remoteRecoveryComplete.isReady());
+	makeRecoveredRemotePrefixCoreState(logSystem);
+	co_return;
+}
+
+TEST_CASE("/LogSystem/RemoteLogPrefix/RemainsReadable") {
+	constexpr double timeoutSeconds = 30.0;
+	LocalityData locality;
+	TLogInterface remoteA(locality);
+	TLogInterface remoteB(locality);
+	TLogInterface oldRouter(locality);
+	TLogInterface currentRouter(locality);
+	auto versionA = makeReference<AsyncVar<Version>>(100);
+	auto versionB = makeReference<AsyncVar<Version>>(99);
+	PromiseStream<Version> reportsA;
+	PromiseStream<Version> reportsB;
+	PromiseStream<Version> oldRequests;
+	PromiseStream<Version> currentRequests;
+	Future<Void> mockActors = waitForAll(std::vector<Future<Void>>{
+	    serveRemotePrefixMetrics(remoteA, versionA, reportsA),
+	    serveRemotePrefixMetrics(remoteB, versionB, reportsB),
+	    serveRemotePrefixRouter(oldRouter, 60, 100, oldRequests),
+	    serveRemotePrefixRouter(currentRouter, 100, 110, currentRequests),
+	});
+	auto logSystem = makeLaggingRemoteLogSystem({ remoteA, remoteB }, oldRouter, currentRouter);
+	const auto oldRoles = logSystem->getLogSystemConfig().oldTLogs;
+	ASSERT(logSystem->storageRecovered());
+	const DBCoreState beforeTracking = makePendingRemotePrefixCoreState(logSystem);
+	Future<Void> prefixDurable = logSystem->onRemoteLogPrefixDurable();
+	Future<Void> coreStateChanged = logSystem->onCoreStateChanged();
+	Future<Void> configChanged = logSystem->onLogSystemConfigChange();
+	const Version reportedA = co_await timeoutError(waitAndForward(reportsA.getFuture()), timeoutSeconds);
+	const Version reportedB = co_await timeoutError(waitAndForward(reportsB.getFuture()), timeoutSeconds);
+	ASSERT_EQ(reportedA, 100);
+	ASSERT_EQ(reportedB, 99);
+	ASSERT(!prefixDurable.isReady());
+	ASSERT(!coreStateChanged.isReady());
+	ASSERT(!configChanged.isReady());
+	const DBCoreState pendingState = makePendingRemotePrefixCoreState(logSystem);
+	ASSERT(pendingState.oldTLogData == beforeTracking.oldTLogData);
+	ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+
+	// The real remote cursor must still reach the handoff through the old router.
+	auto oldConsumer =
+	    makeLogSystemFromLogSystemConfig(UID(), locality, logSystem->getLogSystemConfig())->makeConsumer();
+	auto oldCursor = oldConsumer->peek(UID(), 60, Optional<Version>(99), Tag(tagLocalityRemoteLog, 0), false);
+	co_await timeoutError(advanceRemotePrefixCursorTo(oldCursor, 100) || mockActors, timeoutSeconds);
+	const Version oldBegin = co_await timeoutError(waitAndForward(oldRequests.getFuture()), timeoutSeconds);
+	ASSERT_EQ(oldBegin, 60);
+	ASSERT_EQ(oldCursor->version().version, 100);
+	ASSERT(!prefixDurable.isReady());
+
+	versionB->set(100);
+	co_await timeoutError(prefixDurable || mockActors, timeoutSeconds);
+	co_await timeoutError(coreStateChanged || mockActors, timeoutSeconds);
+	ASSERT(!configChanged.isReady());
+	ASSERT(!logSystem->remoteRecoveryComplete.isReady());
+	ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+	DBCoreState purgeCandidate = pendingState;
+	logSystem->purgeOldRecoveredGenerationsCoreState(purgeCandidate);
+	ASSERT(purgeCandidate.oldTLogData.empty());
+	makeRecoveredRemotePrefixCoreState(logSystem);
+	ASSERT(!configChanged.isReady());
+	ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+
+	auto currentConsumer =
+	    makeLogSystemFromLogSystemConfig(UID(), locality, logSystem->getLogSystemConfig())->makeConsumer();
+	auto currentCursor = currentConsumer->peek(UID(), 100, Optional<Version>(109), Tag(tagLocalityRemoteLog, 0), false);
+	co_await timeoutError(advanceRemotePrefixCursorTo(currentCursor, 110) || mockActors, timeoutSeconds);
+	const Version currentBegin = co_await timeoutError(waitAndForward(currentRequests.getFuture()), timeoutSeconds);
+	ASSERT_EQ(currentBegin, 100);
+	ASSERT_EQ(currentCursor->version().version, 110);
+	co_return;
+}
+
+TEST_CASE("/LogSystem/RemoteLogPrefix/InterruptedWait") {
+	constexpr double timeoutSeconds = 30.0;
+	LocalityData locality;
+	{
+		TLogInterface remote(locality);
+		auto logSystem = makeLaggingRemoteLogSystem({ remote }, TLogInterface(locality), TLogInterface(locality));
+		const auto oldRoles = logSystem->getLogSystemConfig().oldTLogs;
+		makePendingRemotePrefixCoreState(logSystem);
+		Future<Void> prefixDurable = logSystem->onRemoteLogPrefixDurable();
+		Future<Void> coreStateChanged = logSystem->onCoreStateChanged();
+		TLogQueuingMetricsRequest request =
+		    co_await timeoutError(waitAndForward(remote.getQueuingMetrics.getFuture()), timeoutSeconds);
+		prefixDurable.cancel();
+		ErrorOr<Void> result = co_await timeoutError(errorOr(prefixDurable), timeoutSeconds);
+		ASSERT(result.isError() && result.getError().code() == error_code_actor_cancelled);
+		ErrorOr<Void> changedResult = co_await timeoutError(errorOr(coreStateChanged), timeoutSeconds);
+		ASSERT(changedResult.isError() && changedResult.getError().code() == error_code_actor_cancelled);
+		request.reply.send(makeRemotePrefixMetricsReply(100));
+		ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+		assertRemotePrefixCoreStateError(logSystem, error_code_actor_cancelled);
+	}
+	{
+		TLogInterface remote(locality);
+		auto logSystem = makeLaggingRemoteLogSystem({ remote }, TLogInterface(locality), TLogInterface(locality));
+		const auto oldRoles = logSystem->getLogSystemConfig().oldTLogs;
+		makePendingRemotePrefixCoreState(logSystem);
+		Future<Void> prefixDurable = logSystem->onRemoteLogPrefixDurable();
+		Future<Void> coreStateChanged = logSystem->onCoreStateChanged();
+		TLogQueuingMetricsRequest request =
+		    co_await timeoutError(waitAndForward(remote.getQueuingMetrics.getFuture()), timeoutSeconds);
+		request.reply.sendError(operation_failed());
+		ErrorOr<Void> result = co_await timeoutError(errorOr(prefixDurable), timeoutSeconds);
+		ASSERT(result.isError() && result.getError().code() == error_code_tlog_failed);
+		ErrorOr<Void> changedResult = co_await timeoutError(errorOr(coreStateChanged), timeoutSeconds);
+		ASSERT(changedResult.isError() && changedResult.getError().code() == error_code_tlog_failed);
+		ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+		assertRemotePrefixCoreStateError(logSystem, error_code_tlog_failed);
+	}
+
+	TLogInterface original(locality);
+	TLogInterface replacement(original.id(), original.getSharedTLogID(), locality);
+	auto logSystem = makeLaggingRemoteLogSystem({ original }, TLogInterface(locality), TLogInterface(locality));
+	const auto oldRoles = logSystem->getLogSystemConfig().oldTLogs;
+	makePendingRemotePrefixCoreState(logSystem);
+	Future<Void> prefixDurable = logSystem->onRemoteLogPrefixDurable();
+	TLogQueuingMetricsRequest staleRequest =
+	    co_await timeoutError(waitAndForward(original.getQueuingMetrics.getFuture()), timeoutSeconds);
+	logSystem->tLogs[1]->logServers[0]->setUnconditional(OptionalInterface<TLogInterface>(replacement));
+	TLogQueuingMetricsRequest replacementRequest =
+	    co_await timeoutError(waitAndForward(replacement.getQueuingMetrics.getFuture()), timeoutSeconds);
+	staleRequest.reply.send(makeRemotePrefixMetricsReply(100));
+	replacementRequest.reply.send(makeRemotePrefixMetricsReply(99));
+	ASSERT(!prefixDurable.isReady());
+	makePendingRemotePrefixCoreState(logSystem);
+	ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+
+	TLogQueuingMetricsRequest caughtUpRequest =
+	    co_await timeoutError(waitAndForward(replacement.getQueuingMetrics.getFuture()), timeoutSeconds);
+	caughtUpRequest.reply.send(makeRemotePrefixMetricsReply(100));
+	co_await timeoutError(prefixDurable, timeoutSeconds);
+	ASSERT(!logSystem->remoteRecoveryComplete.isReady());
+	ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+	makeRecoveredRemotePrefixCoreState(logSystem);
+	ASSERT(logSystem->getLogSystemConfig().oldTLogs == oldRoles);
+	co_return;
+}
 
 TEST_CASE("/LogSystem/GetPseudoPopTag/LogRouterWithoutMappedLocality") {
 	LocalityData locality;

@@ -24,6 +24,7 @@
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileReadAhead.h"
 #include "fdbrpc/HTTP.h"
+#include "flow/Platform.h"
 #include "flow/UnitTest.h"
 
 class BackupContainerBlobStoreImpl {
@@ -227,7 +228,10 @@ Future<Reference<IAsyncFile>> BackupContainerBlobStore::readFile(const std::stri
 		                                           m_bstore->knobs.read_cache_blocks_per_file);
 	}
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY, encryptionBlockSize);
+		// Agents can open an existing container without calling create(), so key loading may still be in flight.
+		return map(encryptionSetupComplete(), [f, blockSize = encryptionBlockSize](Void) -> Reference<IAsyncFile> {
+			return makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::READ_ONLY, blockSize);
+		});
 	}
 	return f;
 }
@@ -239,11 +243,16 @@ Future<std::vector<std::string>> BackupContainerBlobStore::listURLs(Reference<IB
 }
 
 Future<Reference<IBackupFile>> BackupContainerBlobStore::writeFile(const std::string& path) {
-	Reference<IAsyncFile> f = makeReference<AsyncFileBlobStoreWrite>(m_bstore, m_bucket, dataPath(path));
+	Reference<IAsyncFile> rawFile = makeReference<AsyncFileBlobStoreWrite>(m_bstore, m_bucket, dataPath(path));
+	Future<Reference<IAsyncFile>> f = rawFile;
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
-		f = makeReference<AsyncFileEncrypted>(f, AsyncFileEncrypted::Mode::APPEND_ONLY, encryptionBlockSize);
+		f = map(encryptionSetupComplete(), [rawFile, blockSize = encryptionBlockSize](Void) -> Reference<IAsyncFile> {
+			return makeReference<AsyncFileEncrypted>(rawFile, AsyncFileEncrypted::Mode::APPEND_ONLY, blockSize);
+		});
 	}
-	return Future<Reference<IBackupFile>>(makeReference<BackupContainerBlobStoreImpl::BackupFile>(path, f));
+	return map(f, [path](Reference<IAsyncFile> file) -> Reference<IBackupFile> {
+		return makeReference<BackupContainerBlobStoreImpl::BackupFile>(path, file);
+	});
 }
 
 Future<Void> BackupContainerBlobStore::writeEntireFile(const std::string& path, const std::string& fileContents) {
@@ -279,6 +288,27 @@ std::string BackupContainerBlobStore::getBucket() const {
 
 std::string BackupContainerBlobStore::getPrefix() const {
 	return m_prefix;
+}
+
+TEST_CASE("/backup/containers/blobstore/encryptionSetup") {
+	std::string keyFile = joinPath(params.getDataDir(), "encryption-key");
+	co_await BackupContainerFileSystem::createTestEncryptionKeyFile(keyFile);
+	std::string resource;
+	IBlobStoreEndpoint::ParametersT backupParams;
+	auto endpoint = IBlobStoreEndpoint::fromString(
+	    "blobstore://localhost:9999/encryption-setup?bucket=test", {}, &resource, nullptr, &backupParams);
+	auto container = makeReference<BackupContainerBlobStore>(endpoint, resource, backupParams, keyFile, 4096, true);
+
+	// An agent reopening a container does not call create(). No blob requests are needed to open these handles.
+	auto read = container->readFile("range");
+	auto write = container->writeFile("range");
+	if (!container->encryptionSetupComplete().isReady()) {
+		ASSERT(!read.isReady());
+		ASSERT(!write.isReady());
+	}
+	co_await (success(read) && success(write));
+	ASSERT(container->encryptionSetupComplete().isReady());
+	ASSERT(!container->encryptionSetupComplete().isError());
 }
 
 TEST_CASE("/backup/containers/blobstore/prefix") {

@@ -1,5 +1,5 @@
 /*
- *RocksDBCheckpointUtils.h
+ * RocksDBCheckpointUtils.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,7 +21,7 @@
 #pragma once
 
 #include "fdbclient/NativeAPI.h"
-#include "fdbserver/core/ServerCheckpoint.h"
+#include "fdbserver/checkpoint/Checkpoint.h"
 #include "flow/flow.h"
 
 class ICheckpointByteSampleReader {

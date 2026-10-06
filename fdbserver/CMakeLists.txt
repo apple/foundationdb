@@ -26,6 +26,7 @@ if(WITH_ROCKSDB)
 endif()
 
 add_subdirectory(core)
+add_subdirectory(checkpoint)
 add_subdirectory(kvstore)
 add_subdirectory(logsystem)
 add_subdirectory(mocks3)
@@ -193,6 +194,7 @@ target_link_libraries(fdbserver PRIVATE
   fdbserver_storageserver
   fdbserver_tester
   fdbserver_tlog
+  fdbserver_checkpoint
   fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
@@ -228,12 +230,8 @@ if(GPERFTOOLS_FOUND)
 endif()
 
 if(NOT OPEN_FOR_IDE)
-  if(GENERATE_DEBUG_PACKAGES)
-    fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
-  else()
-    add_custom_target(prepare_fdbserver_install ALL DEPENDS strip_only_fdbserver)
-    fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbserver DESTINATION sbin COMPONENT server)
-  endif()
+  add_custom_target(stripped_fdbserver ALL DEPENDS strip_only_fdbserver)
+  fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
 endif()
 
 target_link_libraries(fdbserver PUBLIC fdbctl)

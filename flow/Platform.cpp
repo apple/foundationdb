@@ -2913,7 +2913,10 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 	pthread_t t;
 	pthread_attr_t attr;
 
-	pthread_attr_init(&attr);
+	int attrError = pthread_attr_init(&attr);
+	if (attrError != 0) {
+		criticalError(FDB_EXIT_ERROR, "ThreadAttributesError", strerror(attrError));
+	}
 	if (stackSize != 0) {
 		if (pthread_attr_setstacksize(&attr, stackSize) != 0) {
 			// If setting the stack size fails the default stack size will be used, so failure to set
@@ -2926,8 +2929,13 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 	}
 
 	auto* args = new ThreadCreateArgs(func, arg);
-	pthread_create(&t, &attr, &runFunc, args);
+	int createError = pthread_create(&t, &attr, &runFunc, args);
 	pthread_attr_destroy(&attr);
+	if (createError != 0) {
+		delete args;
+		// Callers transfer thread-owned state without a failed-launch recovery path.
+		criticalError(FDB_EXIT_ERROR, "ThreadCreationError", strerror(createError));
+	}
 
 #if defined(__linux__)
 	if (name != nullptr) {
@@ -3713,6 +3721,57 @@ void registerCrashHandlerCallback(void (*f)()) {
 	g_crashHandlerCallbacks.push_back(f);
 }
 
+#ifdef __linux__
+// Sampled at registration time, not in the handler: reading /proc/self/maps needs
+// malloc, and the handler can run with the allocator's locks held.
+uintptr_t g_reportedStackLow = 0;
+uintptr_t g_reportedStackHigh = 0;
+uintptr_t g_mainStackMappedLow = 0;
+uintptr_t g_mainStackMappedHigh = 0;
+uint64_t g_stackRlimit = 0;
+
+// Global because crashHandler keeps its plain sa_handler signature.
+uintptr_t g_faultAddress = 0;
+bool g_faultAddressValid = false;
+
+void sampleMainStackExtent() {
+	struct rlimit rl;
+	if (getrlimit(RLIMIT_STACK, &rl) == 0) {
+		g_stackRlimit = rl.rlim_cur;
+	}
+
+	// Must match initStackBoundsForThread in flow/MemoryTracker.cpp.
+	pthread_attr_t attr;
+	if (pthread_getattr_np(pthread_self(), &attr) == 0) {
+		void* base = nullptr;
+		size_t size = 0;
+		if (pthread_attr_getstack(&attr, &base, &size) == 0) {
+			g_reportedStackLow = reinterpret_cast<uintptr_t>(base);
+			g_reportedStackHigh = g_reportedStackLow + size;
+		}
+		pthread_attr_destroy(&attr);
+	}
+
+	FILE* maps = fopen("/proc/self/maps", "r");
+	if (maps == nullptr) {
+		return;
+	}
+	char line[512];
+	while (fgets(line, sizeof(line), maps) != nullptr) {
+		if (strstr(line, "[stack]") == nullptr) {
+			continue;
+		}
+		unsigned long low = 0, high = 0;
+		if (sscanf(line, "%lx-%lx", &low, &high) == 2) {
+			g_mainStackMappedLow = low;
+			g_mainStackMappedHigh = high;
+		}
+		break;
+	}
+	fclose(maps);
+}
+#endif
+
 // The crashHandler function is registered to handle signals before the process terminates.
 // Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
@@ -3732,6 +3791,9 @@ void crashHandler(int sig) {
 
 	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
 	if (error) {
+		if (g_faultAddressValid) {
+			fprintf(stderr, "FaultAddress: 0x%zx\n", (size_t)g_faultAddress);
+		}
 		fprintf(stderr, "Trace: %s\n", backtrace.c_str());
 	}
 
@@ -3739,6 +3801,18 @@ void crashHandler(int sig) {
 	{
 		TraceEvent te(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated");
 		te.detail("Signal", sig).detail("Name", strsignal(sig)).detail("Trace", backtrace);
+		if (g_faultAddressValid) {
+			// FaultInReportedStack separates a wild pointer from stack bounds that reach
+			// below what is mapped.
+			te.detail("FaultAddress", format("0x%zx", (size_t)g_faultAddress))
+			    .detail("ReportedStackLow", format("0x%zx", (size_t)g_reportedStackLow))
+			    .detail("ReportedStackHigh", format("0x%zx", (size_t)g_reportedStackHigh))
+			    .detail("MainStackMappedLow", format("0x%zx", (size_t)g_mainStackMappedLow))
+			    .detail("MainStackMappedHigh", format("0x%zx", (size_t)g_mainStackMappedHigh))
+			    .detail("StackRlimit", g_stackRlimit)
+			    .detail("FaultInReportedStack",
+			            g_faultAddress >= g_reportedStackLow && g_faultAddress < g_reportedStackHigh);
+		}
 		if (error) {
 			te.setErrorKind(ErrorKind::BugDetected);
 		}
@@ -3773,14 +3847,26 @@ void crashHandler(int sig) {
 #endif
 }
 
+#ifdef __linux__
+void crashHandlerSigInfo(int sig, siginfo_t* info, void*) {
+	if (info != nullptr && (sig == SIGSEGV || sig == SIGBUS)) {
+		g_faultAddress = reinterpret_cast<uintptr_t>(info->si_addr);
+		g_faultAddressValid = true;
+	}
+	crashHandler(sig);
+}
+#endif
+
 void registerCrashHandler() {
 #ifdef __linux__
+	sampleMainStackExtent();
+
 	// For these otherwise fatal errors, attempt to log a trace of
 	// what was happening and then exit
 	struct sigaction action;
-	action.sa_handler = crashHandler;
+	action.sa_sigaction = crashHandlerSigInfo;
 	sigfillset(&action.sa_mask);
-	action.sa_flags = 0;
+	action.sa_flags = SA_SIGINFO; // deliver siginfo_t so SIGSEGV reports its fault address
 
 	sigaction(SIGILL, &action, nullptr);
 	sigaction(SIGFPE, &action, nullptr);

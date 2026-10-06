@@ -2037,18 +2037,18 @@ void printReport(Arguments const& args,
 	}
 	const auto warmup_duration_sec = warmup_snapshot.has_value() ? warmup_snapshot->duration_sec : 0.0;
 	const auto measurement_duration_sec = std::max(run_duration_sec - warmup_duration_sec, 1e-9);
+	const auto num_worker_threads = static_cast<std::size_t>(args.num_processes) * args.num_threads;
 
 	double cpu_time_worker_threads =
-	    std::accumulate(thread_stats,
-	                    thread_stats + args.num_processes * args.num_threads,
-	                    0.0,
-	                    [](double x, const ThreadStatistics& s) { return x + s.getCPUTime(); });
+	    std::accumulate(thread_stats, thread_stats + num_worker_threads, 0.0, [](double x, const ThreadStatistics& s) {
+		    return x + s.getCPUTime();
+	    });
 	double total_duration_worker_threads =
 	    std::accumulate(thread_stats,
-	                    thread_stats + args.num_processes * args.num_threads,
+	                    thread_stats + num_worker_threads,
 	                    0.0,
 	                    [](double x, const ThreadStatistics& s) { return x + s.getTotalDuration(); }) /
-	    (args.num_processes * args.num_threads); // average
+	    num_worker_threads; // average
 
 	double cpu_util_worker_threads = 100. * cpu_time_worker_threads / total_duration_worker_threads;
 
@@ -2348,7 +2348,7 @@ int statsProcessMain(Arguments const& args,
 					throttle_factor = 1 - (sin_factor * (1.0 - (tpsmin / tpsmax)));
 					break;
 				case TPS_SQUARE:
-					if (pos < (args.tpsinterval / 2)) {
+					if (pos < tpsinterval / 2.0) {
 						/* set to max */
 						throttle_factor = 1.0;
 					} else {

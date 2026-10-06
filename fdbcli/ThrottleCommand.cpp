@@ -39,7 +39,9 @@ Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef
 	if (tokens.size() == 1) {
 		printUsage(tokens[0]);
 		co_return false;
-	} else if (tokencmp(tokens[1], "list")) {
+	}
+
+	if (tokencmp(tokens[1], "list")) {
 		if (tokens.size() > 4) {
 			fmt::print("Usage: throttle list [throttled|recommended|all] [LIMIT]\n\n");
 			fmt::print("Lists tags that are currently throttled.\n");

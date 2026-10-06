@@ -22,10 +22,7 @@
 
 #include <algorithm>
 
-// Define boost::asio::io_service
-#ifndef BOOST_SYSTEM_NO_LIB
-#define BOOST_SYSTEM_NO_LIB
-#endif
+// Define boost::asio::io_context
 #ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #endif
@@ -171,7 +168,7 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 		    filename,
 		    flags,
 		    mode,
-		    static_cast<boost::asio::io_service*>((void*)g_network->global(INetwork::enASIOService)));
+		    static_cast<boost::asio::io_context*>((void*)g_network->global(INetwork::enASIOService)));
 	}
 	if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0) {
 		f = map(f, [=](Reference<IAsyncFile> r) -> Reference<IAsyncFile> {

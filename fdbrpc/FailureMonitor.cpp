@@ -65,7 +65,7 @@ Future<Void> IFailureMonitor::onStateEqual(Endpoint const& endpoint, FailureStat
 }
 
 Future<Void> IFailureMonitor::onFailedFor(Endpoint const& endpoint, double sustainedFailureDuration, double slope) {
-	ASSERT(slope < 1.0);
+	ASSERT_LT(slope, 1.0);
 	return waitForContinuousFailure(this, endpoint, sustainedFailureDuration, slope);
 }
 
