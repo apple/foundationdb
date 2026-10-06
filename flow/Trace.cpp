@@ -313,7 +313,7 @@ public:
 		                  processName.c_str(),
 		                  timestamp.c_str(),
 		                  deterministicRandom()->randomAlphaNumeric(6).c_str());
-		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(
+		logWriter = Reference<ITraceLogWriter>(makeReference<FileTraceLogWriter>(
 		    directory,
 		    processName,
 		    basename,
