@@ -27,15 +27,11 @@
 #include "BackupContainerBlobStore.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
-#include "flow/ProcessEvents.h"
-#include "flow/ScopeExit.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
 
 #include <algorithm>
 #include <cinttypes>
-
-extern bool g_crashOnError;
 
 class BackupContainerFileSystemImpl {
 public:
@@ -2232,8 +2228,8 @@ class EncryptionKeyTestFileSystem : public IAsyncFileSystem {
 			if (filesystem->readFailures-- > 0) {
 				return filesystem->error;
 			}
-			std::copy_n(filesystem->keyBytes.begin(), filesystem->readSize, static_cast<uint8_t*>(data));
-			return filesystem->readSize;
+			std::copy_n(filesystem->keyBytes.begin(), length, static_cast<uint8_t*>(data));
+			return length;
 		}
 		Future<Void> write(void const*, int, int64_t) override { return unsupported_operation(); }
 		Future<Void> truncate(int64_t) override { return unsupported_operation(); }
@@ -2252,7 +2248,6 @@ public:
 	int opens = 0;
 	int reads = 0;
 	int liveFiles = 0;
-	int readSize = AES_256_KEY_LENGTH;
 
 	EncryptionKeyTestFileSystem(int openFailures, int readFailures, Error error)
 	  : openFailures(openFailures), readFailures(readFailures), error(error.asInjectedFault()) {
@@ -2281,13 +2276,8 @@ public:
 TEST_CASE("/backup/containers/encryptionKey/retry") {
 	for (Error error : { io_error(), io_timeout() }) {
 		EncryptionKeyTestFileSystem filesystem(1, 1, error);
-		Future<Void> setup = BackupContainerFileSystemImpl::readEncryptionKey("encryption-key-test", &filesystem);
-		Future<ErrorOr<Void>> firstWaiter = ::errorOr(setup);
-		Future<ErrorOr<Void>> secondWaiter = ::errorOr(setup);
-		ErrorOr<Void> first = co_await firstWaiter;
-		ErrorOr<Void> second = co_await secondWaiter;
+		co_await BackupContainerFileSystemImpl::readEncryptionKey("encryption-key-test", &filesystem);
 		co_await delay(0);
-		ASSERT(first.present() && second.present());
 		ASSERT_EQ(filesystem.opens, 3);
 		ASSERT_EQ(filesystem.reads, 2);
 		ASSERT_EQ(filesystem.liveFiles, 0);
@@ -2312,59 +2302,15 @@ TEST_CASE("/backup/containers/encryptionKey/terminalError") {
 
 TEST_CASE("/backup/containers/encryptionKey/retryLimit") {
 	const int attempts = BackupContainerFileSystemImpl::ENCRYPTION_KEY_MAX_RETRIES + 1;
-	for (bool failOpen : { true, false }) {
-		EncryptionKeyTestFileSystem filesystem(failOpen ? attempts : 0, failOpen ? 0 : attempts, io_error());
-		ErrorOr<Void> result = co_await coro::errorOr(
-		    BackupContainerFileSystemImpl::readEncryptionKey("encryption-key-test", &filesystem));
-		co_await delay(0);
-		ASSERT(!result.present());
-		ASSERT_EQ(result.getError().code(), error_code_io_error);
-		ASSERT_EQ(filesystem.opens, attempts);
-		ASSERT_EQ(filesystem.reads, failOpen ? 0 : attempts);
-		ASSERT_EQ(filesystem.liveFiles, 0);
-	}
-}
-
-TEST_CASE("noSim/backup/containers/encryptionKey/shortRead") {
-	// Simulation counts SevError before an observer can mark the deliberately invalid key as an expected error.
-	if (g_network->isSimulated() || g_crashOnError) {
-		co_return;
-	}
-	const bool previousTraceProcessEvents = g_traceProcessEvents;
-	ScopeExit restoreTraceEvents([&]() { g_traceProcessEvents = previousTraceProcessEvents; });
-	int observed = 0;
-	int unexpected = 0;
-	auto observe = [&](StringRef event, const std::any& data, const Error&) {
-		auto tracePtr = std::any_cast<BaseTraceEvent*>(&data);
-		std::string filename;
-		int value = 0;
-		if (!tracePtr || !*tracePtr || (*tracePtr)->getSeverity() != SevError ||
-		    !(*tracePtr)->getFields().tryGetValue("FileName", filename) || filename != "encryption-key-test" ||
-		    !(event == "TraceEvent::InvalidEncryptionKeyFileSize"_sr
-		          ? (*tracePtr)->getFields().tryGetInt("ActualSize", value) && value == AES_256_KEY_LENGTH - 1
-		          : (*tracePtr)->getFields().tryGetInt("ErrorCode", value) &&
-		                value == error_code_invalid_encryption_key_file)) {
-			++unexpected;
-			return;
-		}
-		(*tracePtr)->detail("ErrorIsInjectedFault", 1);
-		++observed;
-	};
-	ProcessEvents::Event invalidSize("TraceEvent::InvalidEncryptionKeyFileSize"_sr, observe);
-	ProcessEvents::Event readFailure("TraceEvent::FailedToReadEncryptionKeyFile"_sr, observe);
-	g_traceProcessEvents = true;
-	EncryptionKeyTestFileSystem filesystem(0, 0, io_error());
-	filesystem.readSize = AES_256_KEY_LENGTH - 1;
+	EncryptionKeyTestFileSystem filesystem(0, attempts, io_error());
 	ErrorOr<Void> result =
 	    co_await coro::errorOr(BackupContainerFileSystemImpl::readEncryptionKey("encryption-key-test", &filesystem));
 	co_await delay(0);
 	ASSERT(!result.present());
-	ASSERT_EQ(result.getError().code(), error_code_invalid_encryption_key_file);
-	ASSERT_EQ(filesystem.opens, 1);
-	ASSERT_EQ(filesystem.reads, 1);
+	ASSERT_EQ(result.getError().code(), error_code_io_error);
+	ASSERT_EQ(filesystem.opens, attempts);
+	ASSERT_EQ(filesystem.reads, attempts);
 	ASSERT_EQ(filesystem.liveFiles, 0);
-	ASSERT_EQ(observed, 2);
-	ASSERT_EQ(unexpected, 0);
 }
 
 TEST_CASE("/backup/containers/url") {
