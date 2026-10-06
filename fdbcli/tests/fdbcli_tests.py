@@ -468,6 +468,7 @@ def status_excluded_processes_message(logger):
         )
     }
     candidates = [a for a in get_fdb_process_addresses(logger) if a not in coordinators]
+    # make sure that we do not exclude any coordinator process because excluding coordinator will print the warning
     assert candidates, "Need a non-coordinator process to exclude"
     excluded_address = random.choice(candidates)
     run_fdbcli_command("exclude", "FORCE", excluded_address)
