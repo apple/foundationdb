@@ -732,57 +732,6 @@ static bool retryableBackupFileError(Error error) {
 	}
 }
 
-template <class WriteFiles>
-static Future<MutationLogFiles> retryMutationLogFiles(
-    UID workerId,
-    const bool* stopped,
-    AsyncTrigger* doneTrigger,
-    Future<Void> configChanged,
-    WriteFiles writeFiles,
-    int retryLimit = SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_LIMIT,
-    double retryDelay = SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_DELAY,
-    double maxDelay = SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY) {
-	int retries = 0;
-	Optional<Error> lastError;
-	maxDelay = std::max(0.0, maxDelay);
-	retryDelay = std::max(0.0, std::min(retryDelay, maxDelay));
-	while (true) {
-		try {
-			MutationLogFiles result = co_await writeFiles();
-			// Recipient changes can alter ClearRange splits. Recovery must replay the retained prefix if
-			// configuration drifted during a retry, even when that attempt's files finished successfully.
-			if (lastError.present() && configChanged.isReady()) {
-				throw lastError.get();
-			}
-			co_return result;
-		} catch (Error& e) {
-			if (!retryableBackupFileError(e) || retries >= retryLimit || *stopped || configChanged.isReady()) {
-				throw;
-			}
-			lastError = e;
-		}
-		const double waitSeconds = retryDelay * (0.5 + 0.5 * deterministicRandom()->random01());
-		retryDelay = std::min(maxDelay, retryDelay * 2);
-		++retries;
-		TraceEvent(SevWarn, "BackupWorkerFileRetry", workerId)
-		    .errorUnsuppressed(lastError.get())
-		    .detail("Retry", retries)
-		    .detail("RetryLimit", retryLimit)
-		    .detail("Delay", waitSeconds);
-		Future<Void> backoff = delay(waitSeconds);
-		while (!backoff.isReady()) {
-			co_await (backoff || doneTrigger->onTrigger() || configChanged);
-			if (*stopped || configChanged.isReady()) {
-				throw lastError.get();
-			}
-		}
-		co_await backoff;
-		if (*stopped || configChanged.isReady()) {
-			throw lastError.get();
-		}
-	}
-}
-
 // One complete-file attempt for messages in [0, numMsg), without advancing progress or accounting.
 // The file content format is a sequence of (Version, sub#, msgSize, message).
 static Future<MutationLogFiles> writeMutationsToFile(BackupData* self, Version popVersion, int numMsg, int blockSize) {
@@ -909,10 +858,48 @@ Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMs
 		co_await self->waitAllInfoReady();
 	}
 	const int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
-	MutationLogFiles completed = co_await retryMutationLogFiles(
-	    self->myId, &self->stopped, &self->doneTrigger, self->changedTrigger.onTrigger(), [=] {
-		    return writeMutationsToFile(self, popVersion, numMsg, blockSize);
-	    });
+	const int retryLimit = SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_LIMIT;
+	const double maxDelay = std::max(0.0, SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_MAX_DELAY);
+	double retryDelay = std::max(0.0, std::min(SERVER_KNOBS->BACKUP_WORKER_UPLOAD_RETRY_DELAY, maxDelay));
+	Future<Void> configChanged = self->changedTrigger.onTrigger();
+	MutationLogFiles completed;
+	Optional<Error> lastError;
+	int retries = 0;
+	while (true) {
+		try {
+			completed = co_await writeMutationsToFile(self, popVersion, numMsg, blockSize);
+			// Recipient changes can alter ClearRange splits. Recovery must replay the retained prefix if
+			// configuration drifted during a retry, even when that attempt's files finished successfully.
+			if (lastError.present() && configChanged.isReady()) {
+				throw lastError.get();
+			}
+			break;
+		} catch (Error& e) {
+			if (!retryableBackupFileError(e) || retries >= retryLimit || self->stopped || configChanged.isReady()) {
+				throw;
+			}
+			lastError = e;
+		}
+		const double waitSeconds = retryDelay * (0.5 + 0.5 * deterministicRandom()->random01());
+		retryDelay = std::min(maxDelay, retryDelay * 2);
+		++retries;
+		TraceEvent(SevWarn, "BackupWorkerFileRetry", self->myId)
+		    .errorUnsuppressed(lastError.get())
+		    .detail("Retry", retries)
+		    .detail("RetryLimit", retryLimit)
+		    .detail("Delay", waitSeconds);
+		Future<Void> backoff = delay(waitSeconds);
+		while (!backoff.isReady()) {
+			co_await (backoff || self->doneTrigger.onTrigger() || configChanged);
+			if (self->stopped || configChanged.isReady()) {
+				throw lastError.get();
+			}
+		}
+		co_await backoff;
+		if (self->stopped || configChanged.isReady()) {
+			throw lastError.get();
+		}
+	}
 	for (UID uid : completed.backupUids) {
 		self->backups[uid].lastSavedVersion = popVersion + 1;
 	}
