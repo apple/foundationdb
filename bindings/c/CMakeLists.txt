@@ -260,6 +260,18 @@ if(NOT WIN32)
     add_fdbclient_test(
       NAME fdb_c_setup_tests
       COMMAND $<TARGET_FILE:fdb_c_setup_tests>)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
+      add_test(NAME fdb_c_released_8_0_client_setup
+        COMMAND ${CMAKE_COMMAND} -E env
+        "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner:${CMAKE_BINARY_DIR}/tests/TestRunner"
+        "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_released_client_setup_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --setup-tester-bin $<TARGET_FILE:fdb_c_setup_tests>
+        --client-version 8.0.0
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+      set_tests_properties(fdb_c_released_8_0_client_setup PROPERTIES TIMEOUT 300)
+    endif()
     add_fdbclient_test(
       NAME fdb_c_unit_tests
       COMMAND $<TARGET_FILE:fdb_c_unit_tests>
