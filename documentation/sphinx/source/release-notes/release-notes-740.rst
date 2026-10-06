@@ -4,6 +4,13 @@
 Release Notes
 #############
 
+7.4.9
+=====
+
+AVX enabled release.
+
+* Update to RocksDB 8.11.5 again. This contains a disk format change (originally made in RocksDB 9.0) such that it cannot be downgraded back to RocksDB 8.11.4 or lower, and no other changes. This new disk format is fully forwards and backwards compatible with RocksDB 9.x. Note that RocksDB 9.x was included in the FoundationDB-7.4.0 release, then it was downgraded to RocksDB-8.11.5 in FoundationDB-7.4.6 release, and back down to RocksDB-8.11.4 in the FoundationDB-7.4.7 release. All 7.4 releases before FoundationDB-7.4.7 were considered pre-stable-release, apologies for the confusion. `(PR #14042) <https://github.com/apple/foundationdb/pull/14042>`_
+
 7.4.8
 =====
 
@@ -42,6 +49,7 @@ AVX enabled release.
 * Fixed ``minRestorableVersion`` and ``maxRestorableVersion`` updates when mutation logs are missing. `(PR #12710) <https://github.com/apple/foundationdb/pull/12710>`_
 * Restricted ``backup_worker_enabled`` configuration through ``fdbcli``. `(PR #12711) <https://github.com/apple/foundationdb/pull/12711>`_
 * Enabled TLS hostname validation against certificate CN and SAN values. `(PR #12730) <https://github.com/apple/foundationdb/pull/12730>`_
+* Downgraded RocksDB to 8.11.4. `(PR #13830) <https://github.com/apple/foundationdb/pull/13830>`_
 
 7.4.6
 =====
