@@ -973,6 +973,11 @@ void DLApi::init() {
 
 	loadClientFunction(&api->selectApiVersion, lib, fdbCPath, "fdb_select_api_version_impl", headerVersion >= 0);
 	loadClientFunction(&api->getClientVersion, lib, fdbCPath, "fdb_get_client_version", headerVersion >= 410);
+	// External clients with maximum API 800 or later can omit blob-granule
+	// exports. headerVersion is the caller's selected API, so query the library.
+	int (*getMaxApiVersion)() = nullptr;
+	loadClientFunction(&getMaxApiVersion, lib, fdbCPath, "fdb_get_max_api_version", false);
+	const bool requireBlobGranuleApi = getMaxApiVersion == nullptr || getMaxApiVersion() < 800;
 	loadClientFunction(&api->useFutureProtocolVersion,
 	                   lib,
 	                   fdbCPath,
@@ -1013,43 +1018,46 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
-	loadClientFunction(
-	    &api->databasePurgeBlobGranules, lib, fdbCPath, "fdb_database_purge_blob_granules", headerVersion >= 710);
+	loadClientFunction(&api->databasePurgeBlobGranules,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_purge_blob_granules",
+	                   headerVersion >= 710 && requireBlobGranuleApi);
 	loadClientFunction(&api->databaseWaitPurgeGranulesComplete,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_database_wait_purge_granules_complete",
-	                   headerVersion >= 710);
+	                   headerVersion >= 710 && requireBlobGranuleApi);
 	loadClientFunction(&api->databaseBlobbifyRange,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_database_blobbify_range",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->databaseBlobbifyRangeBlocking,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_database_blobbify_range_blocking",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->databaseUnblobbifyRange,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_database_unblobbify_range",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->databaseListBlobbifiedRanges,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_database_list_blobbified_ranges",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->databaseVerifyBlobRange,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_database_verify_blob_range",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->databaseFlushBlobRange,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_database_flush_blob_range",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->databaseGetClientStatus,
 	                   lib,
 	                   fdbCPath,
@@ -1061,42 +1069,42 @@ void DLApi::init() {
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_purge_blob_granules",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->tenantWaitPurgeGranulesComplete,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_wait_purge_granules_complete",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->tenantBlobbifyRange,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_blobbify_range",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->tenantBlobbifyRangeBlocking,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_blobbify_range_blocking",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->tenantUnblobbifyRange,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_unblobbify_range",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->tenantListBlobbifiedRanges,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_list_blobbified_ranges",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->tenantVerifyBlobRange,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_verify_blob_range",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->tenantFlushBlobRange,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_flush_blob_range",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->tenantGetId,
 	                   lib,
 	                   fdbCPath,
@@ -1168,24 +1176,27 @@ void DLApi::init() {
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_transaction_get_blob_granule_ranges",
-	                   headerVersion >= 710);
-	loadClientFunction(
-	    &api->transactionReadBlobGranules, lib, fdbCPath, "fdb_transaction_read_blob_granules", headerVersion >= 710);
+	                   headerVersion >= 710 && requireBlobGranuleApi);
+	loadClientFunction(&api->transactionReadBlobGranules,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_read_blob_granules",
+	                   headerVersion >= 710 && requireBlobGranuleApi);
 	loadClientFunction(&api->transactionReadBlobGranulesStart,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_transaction_read_blob_granules_start",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->transactionReadBlobGranulesFinish,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_transaction_read_blob_granules_finish",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->transactionSummarizeBlobGranules,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_transaction_summarize_blob_granules",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version() && requireBlobGranuleApi);
 	loadClientFunction(&api->futureGetDouble,
 	                   lib,
 	                   fdbCPath,
@@ -1217,7 +1228,7 @@ void DLApi::init() {
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_future_get_granule_summary_array",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	                   api->transactionSummarizeBlobGranules != nullptr);
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
