@@ -842,6 +842,23 @@ int sf_open(const char* filename, int flags, int convFlags, int mode) {
 #error How do i open a file on a new platform?
 #endif
 
+// Moves the corruption records of `from` onto `to`. Records `to` already had are
+// dropped, since the file it names is about to be replaced.
+void moveCorruptedBlocks(const std::string& from, const std::string& to) {
+	// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
+	using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
+	auto maxBlockValue = std::numeric_limits<block_value_type>::max();
+	g_simulator->corruptedBlocks.erase(g_simulator->corruptedBlocks.lower_bound(std::make_pair(to, 0u)),
+	                                   g_simulator->corruptedBlocks.upper_bound(std::make_pair(to, maxBlockValue)));
+	// In practice, the number of corruptions for a given file should be very small
+	auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(from, 0u)),
+	     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(from, maxBlockValue));
+	for (auto iter = begin; iter != end; ++iter) {
+		g_simulator->corruptedBlocks.emplace(to, iter->second);
+	}
+	g_simulator->corruptedBlocks.erase(begin, end);
+}
+
 class SimpleFile : public IAsyncFile, public ReferenceCounted<SimpleFile> {
 public:
 	static void init() {}
@@ -1021,25 +1038,12 @@ public:
 			std::string sourceFilename = this->filename + ".part";
 
 			if (machineCache.contains(sourceFilename)) {
-				// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
-				using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
 				TraceEvent("SimpleFileRename")
 				    .detail("From", sourceFilename)
 				    .detail("To", this->filename)
 				    .detail("SourceCount", machineCache.count(sourceFilename))
 				    .detail("FileCount", machineCache.count(this->filename));
-				auto maxBlockValue = std::numeric_limits<block_value_type>::max();
-				g_simulator->corruptedBlocks.erase(
-				    g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
-				    g_simulator->corruptedBlocks.upper_bound(std::make_pair(this->filename, maxBlockValue)));
-				// next we need to rename all files. In practice, the number of corruptions for a given file should be
-				// very small
-				auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(sourceFilename, 0u)),
-				     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(sourceFilename, maxBlockValue));
-				for (auto iter = begin; iter != end; ++iter) {
-					g_simulator->corruptedBlocks.emplace(this->filename, iter->second);
-				}
-				g_simulator->corruptedBlocks.erase(begin, end);
+				moveCorruptedBlocks(sourceFilename, this->filename);
 				renameFile(sourceFilename.c_str(), this->filename.c_str());
 
 				machineCache[this->filename] = machineCache[sourceFilename];
@@ -3117,18 +3121,7 @@ Future<Void> renameFileImpl(std::string from, std::string to) {
 	// rename all keys in the corrupted list
 	// first we have to delete all corruption of the destination, since this file will be unlinked if it exists
 	TraceEvent("RenamingFile").detail("From", from).detail("To", to).log();
-	// it seems gcc has some trouble with these types. Aliasing with typename is ugly, but seems to work.
-	using block_value_type = typename decltype(g_simulator->corruptedBlocks)::key_type::second_type;
-	auto maxBlockValue = std::numeric_limits<block_value_type>::max();
-	g_simulator->corruptedBlocks.erase(g_simulator->corruptedBlocks.lower_bound(std::make_pair(to, 0u)),
-	                                   g_simulator->corruptedBlocks.upper_bound(std::make_pair(to, maxBlockValue)));
-	// next we need to rename all files. In practice, the number of corruptions for a given file should be very small
-	auto begin = g_simulator->corruptedBlocks.lower_bound(std::make_pair(from, 0u)),
-	     end = g_simulator->corruptedBlocks.upper_bound(std::make_pair(from, maxBlockValue));
-	for (auto iter = begin; iter != end; ++iter) {
-		g_simulator->corruptedBlocks.emplace(to, iter->second);
-	}
-	g_simulator->corruptedBlocks.erase(begin, end);
+	moveCorruptedBlocks(from, to);
 	// do the rename
 	::renameFile(from, to);
 	co_await delay(0.5 * deterministicRandom()->random01());
@@ -3137,6 +3130,35 @@ Future<Void> renameFileImpl(std::string from, std::string to) {
 
 Future<Void> Sim2FileSystem::renameFile(std::string const& from, std::string const& to) {
 	return renameFileImpl(from, to);
+}
+
+TEST_CASE("/fdbrpc/sim2/moveCorruptedBlocks") {
+	if (!g_network->isSimulated()) {
+		return Void();
+	}
+
+	auto& corruptedBlocks = g_simulator->corruptedBlocks;
+	auto saved = corruptedBlocks;
+	corruptedBlocks.clear();
+
+	// A name that sorts between "x.sqlite" and "x.sqlite.part", since '-' precedes '.'.
+	corruptedBlocks.emplace("x.sqlite", 1u);
+	corruptedBlocks.emplace("x.sqlite-wal", 2u);
+	corruptedBlocks.emplace("x.sqlite.part", 3u);
+
+	moveCorruptedBlocks("x.sqlite.part", "x.sqlite");
+
+	// The source's records belong to the destination now.
+	ASSERT_EQ(corruptedBlocks.count(std::make_pair(std::string("x.sqlite"), 3u)), 1);
+	ASSERT_EQ(corruptedBlocks.count(std::make_pair(std::string("x.sqlite.part"), 3u)), 0);
+	// Whatever the destination held is gone, because its file was replaced.
+	ASSERT_EQ(corruptedBlocks.count(std::make_pair(std::string("x.sqlite"), 1u)), 0);
+	// An unrelated file that happens to sort between the two is left alone.
+	ASSERT_EQ(corruptedBlocks.count(std::make_pair(std::string("x.sqlite-wal"), 2u)), 1);
+	ASSERT_EQ(corruptedBlocks.size(), 2);
+
+	corruptedBlocks = saved;
+	return Void();
 }
 
 Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
