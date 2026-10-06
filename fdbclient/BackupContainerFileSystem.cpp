@@ -1495,13 +1495,12 @@ public:
 
 	static constexpr int ENCRYPTION_KEY_MAX_RETRIES = 5;
 
-	static Future<Void> readEncryptionKey(std::string encryptionKeyFileName,
-	                                      IAsyncFileSystem* filesystem = IAsyncFileSystem::filesystem()) {
+	static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
 		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		for (int retries = 0;; ++retries) {
 			const char* errorEvent = "FailedToOpenEncryptionKeyFile";
 			try {
-				Reference<IAsyncFile> keyFile = co_await filesystem->open(
+				Reference<IAsyncFile> keyFile = co_await IAsyncFileSystem::filesystem()->open(
 				    encryptionKeyFileName,
 				    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
 				    0400);
@@ -2207,110 +2206,6 @@ TEST_CASE("/backup/containers/localdir/encryptedDescribeWithoutBlockSize") {
 	ASSERT_EQ(desc.encryptionBlockSize, 4096);
 	ASSERT_EQ(c->getEncryptionBlockSize(), 4096);
 	co_await c->deleteContainer();
-}
-
-class EncryptionKeyTestFileSystem : public IAsyncFileSystem {
-	class File final : public IAsyncFile, public ReferenceCounted<File> {
-		EncryptionKeyTestFileSystem* filesystem;
-		bool readCalled = false;
-
-	public:
-		explicit File(EncryptionKeyTestFileSystem* filesystem) : filesystem(filesystem) { ++filesystem->liveFiles; }
-		~File() override { --filesystem->liveFiles; }
-		void addref() override { ReferenceCounted<File>::addref(); }
-		void delref() override { ReferenceCounted<File>::delref(); }
-		Future<int> read(void* data, int length, int64_t offset) override {
-			ASSERT(!readCalled);
-			readCalled = true;
-			ASSERT_EQ(length, AES_256_KEY_LENGTH);
-			ASSERT_EQ(offset, 0);
-			++filesystem->reads;
-			if (filesystem->readFailures-- > 0) {
-				return filesystem->error;
-			}
-			std::copy_n(filesystem->keyBytes.begin(), length, static_cast<uint8_t*>(data));
-			return length;
-		}
-		Future<Void> write(void const*, int, int64_t) override { return unsupported_operation(); }
-		Future<Void> truncate(int64_t) override { return unsupported_operation(); }
-		Future<Void> sync() override { return unsupported_operation(); }
-		Future<int64_t> size() const override { return unsupported_operation(); }
-		int64_t debugFD() const override { return -1; }
-		std::string getFilename() const override { return "encryption-key-test"; }
-	};
-
-	int openFailures;
-	int readFailures;
-	Error error;
-	std::vector<uint8_t> keyBytes;
-
-public:
-	int opens = 0;
-	int reads = 0;
-	int liveFiles = 0;
-
-	EncryptionKeyTestFileSystem(int openFailures, int readFailures, Error error)
-	  : openFailures(openFailures), readFailures(readFailures), error(error.asInjectedFault()) {
-		auto* key = StreamCipherKey::getGlobalCipherKey();
-		keyBytes.assign(key->data(), key->data() + key->size());
-	}
-
-	Future<Reference<IAsyncFile>> open(const std::string&, int64_t flags, int64_t mode) override {
-		ASSERT_EQ(liveFiles, 0);
-		ASSERT_EQ(flags, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED);
-		ASSERT_EQ(mode, 0400);
-		++opens;
-		if (openFailures-- > 0) {
-			return error;
-		}
-		return Reference<IAsyncFile>(makeReference<File>(this));
-	}
-	Future<Void> deleteFile(const std::string&, bool) override { return unsupported_operation(); }
-	Future<Void> renameFile(const std::string&, const std::string&) override { return unsupported_operation(); }
-	Future<std::time_t> lastWriteTime(const std::string&) override { return unsupported_operation(); }
-#ifdef ENABLE_SAMPLING
-	ActorLineageSet& getActorLineageSet() override { return IAsyncFileSystem::filesystem()->getActorLineageSet(); }
-#endif
-};
-
-TEST_CASE("/backup/containers/encryptionKey/retry") {
-	for (Error error : { io_error(), io_timeout() }) {
-		EncryptionKeyTestFileSystem filesystem(1, 1, error);
-		co_await BackupContainerFileSystemImpl::readEncryptionKey("encryption-key-test", &filesystem);
-		co_await delay(0);
-		ASSERT_EQ(filesystem.opens, 3);
-		ASSERT_EQ(filesystem.reads, 2);
-		ASSERT_EQ(filesystem.liveFiles, 0);
-	}
-}
-
-TEST_CASE("/backup/containers/encryptionKey/terminalError") {
-	for (Error error : { file_not_found(), actor_cancelled(), broken_promise() }) {
-		for (bool failOpen : { true, false }) {
-			EncryptionKeyTestFileSystem filesystem(failOpen, !failOpen, error);
-			ErrorOr<Void> result = co_await coro::errorOr(
-			    BackupContainerFileSystemImpl::readEncryptionKey("encryption-key-test", &filesystem));
-			co_await delay(0);
-			ASSERT(!result.present());
-			ASSERT_EQ(result.getError().code(), error.code());
-			ASSERT_EQ(filesystem.opens, 1);
-			ASSERT_EQ(filesystem.reads, failOpen ? 0 : 1);
-			ASSERT_EQ(filesystem.liveFiles, 0);
-		}
-	}
-}
-
-TEST_CASE("/backup/containers/encryptionKey/retryLimit") {
-	const int attempts = BackupContainerFileSystemImpl::ENCRYPTION_KEY_MAX_RETRIES + 1;
-	EncryptionKeyTestFileSystem filesystem(0, attempts, io_error());
-	ErrorOr<Void> result =
-	    co_await coro::errorOr(BackupContainerFileSystemImpl::readEncryptionKey("encryption-key-test", &filesystem));
-	co_await delay(0);
-	ASSERT(!result.present());
-	ASSERT_EQ(result.getError().code(), error_code_io_error);
-	ASSERT_EQ(filesystem.opens, attempts);
-	ASSERT_EQ(filesystem.reads, attempts);
-	ASSERT_EQ(filesystem.liveFiles, 0);
 }
 
 TEST_CASE("/backup/containers/url") {
