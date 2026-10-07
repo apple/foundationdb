@@ -720,6 +720,148 @@ static Future<Optional<Version>> getMinBackupVersion(Reference<ClusterRecoveryDa
 	}
 }
 
+// Re-recruits an old epoch's backup worker when it dies before finishing its range. Recovery is
+// otherwise the only code that replaces one, so without this the dead worker's slot pins
+// oldestBackupEpoch indefinitely: TLog data for that generation is never popped and the cluster never
+// re-reaches FULLY_RECOVERED.
+//
+// Repairing here rather than by raising backup_worker_failed is what keeps a repeatedly failing worker
+// affordable. Forcing a recovery per death is what #13712 removed this monitoring to avoid, and it costs
+// a recovery for every attempt that lands on an unhealthy host.
+//
+// Errors are retried rather than thrown: escaping here would fail cluster recovery, which is the outcome
+// repairing outside of recovery exists to avoid.
+//
+// This runs until its range drains or the next recovery begins: clusterWatchDatabase drops the
+// per-recovery actorCollection that owns it, so a monitor cannot observe a generation later than the
+// one that recruited it, and the next recovery starts fresh monitors for whatever is still undrained.
+//
+// Both Backup V2 variants recruit old-epoch workers the same way and share one backupWorkers list per
+// log set, so one monitor serves both; only the progress keyspace and the recruitment endpoint differ.
+template <class Request>
+static Future<Void> monitorOldEpochBackupWorker(Reference<ClusterRecoveryData> self,
+                                                Database cx,
+                                                Request req,
+                                                BackupInterface interf) {
+	constexpr bool rangePartitioned = std::is_same_v<Request, InitializeRangePartitionedBackupRequest>;
+	int nextWorker = 0;
+	// Repairing is only worth doing while it can still finish; a range that has outlived this many
+	// replacements is not going to drain by retrying harder.
+	constexpr int maxReplacements = 10;
+	while (true) {
+		co_await waitFailureClient(interf.waitFailure,
+		                           SERVER_KNOBS->BACKUP_TIMEOUT,
+		                           -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+		                           /*trace=*/true);
+
+		// A worker that completed its range also stops answering, so only durable progress can say
+		// whether work remains.
+		Reference<BackupProgress> progress(new BackupProgress(self->dbgid, {}));
+		co_await getBackupProgress(cx, self->dbgid, progress, SevDebug);
+
+		// One progress map covers both variants; the Tag's locality disambiguates.
+		std::map<Tag, Version> status = progress->getEpochStatus(req.backupEpoch);
+		auto it = status.find(req.tag);
+		Version savedVersion = it == status.end() ? invalidVersion : it->second;
+
+		// Progress alone cannot distinguish a range that still owes mutations from one no backup wants:
+		// a worker whose range starts beyond every live backup exits early via
+		// shouldBackupWorkerExitEarly and so never writes progress at all. recruitBackupWorkers declines
+		// such ranges rather than recruiting them, and a monitor that does not must re-recruit forever --
+		// measured at 13,059 replacements for a single range.
+		Optional<Version> minVersion = co_await getMinBackupVersion(self, cx);
+		if (!minVersion.present() || minVersion.get() >= req.endVersion.get()) {
+			CODE_PROBE(true, "Released an old epoch backup worker slot no backup needs");
+			TraceEvent("BackupWorkerReplacementUnneeded", self->dbgid)
+			    .detail("BackupEpoch", req.backupEpoch)
+			    .detail("Tag", req.tag.toString())
+			    .detail("WorkerID", interf.id())
+			    .detail("MinVersion", minVersion.present() ? minVersion.get() : invalidVersion)
+			    .detail("EndVersion", req.endVersion.get());
+			self->logSystem->releaseBackupWorker(interf.id(), req.backupEpoch);
+			co_return;
+		}
+
+		if (savedVersion >= req.endVersion.get()) {
+			// Durable progress covers the whole range, so those mutations reached the container and the
+			// slot can be released even though the worker died before reporting done.
+			CODE_PROBE(true, "Released an old epoch backup worker slot from durable progress");
+			TraceEvent("BackupWorkerReplacementDone", self->dbgid)
+			    .detail("BackupEpoch", req.backupEpoch)
+			    .detail("Tag", req.tag.toString())
+			    .detail("WorkerID", interf.id())
+			    .detail("SavedVersion", savedVersion)
+			    .detail("EndVersion", req.endVersion.get());
+			self->logSystem->releaseBackupWorker(interf.id(), req.backupEpoch);
+			co_return;
+		}
+
+		Request replacement(deterministicRandom()->randomUniqueID());
+		replacement.recruitedEpoch = req.recruitedEpoch;
+		replacement.backupEpoch = req.backupEpoch;
+		replacement.tag = req.tag;
+		replacement.totalTags = req.totalTags;
+		replacement.startVersion = std::max(req.startVersion, savedVersion + 1);
+		replacement.endVersion = req.endVersion;
+
+		// Advancing the target each attempt keeps a single unhealthy host from capturing the range.
+		const auto& worker = self->backupWorkers[nextWorker % self->backupWorkers.size()];
+		if (++nextWorker > maxReplacements) {
+			// Past this the range is left to the next recovery, which is where it stood before this
+			// monitor existed -- loudly, rather than by retrying until the trace overflows.
+			CODE_PROBE(true, "Gave up replacing an old epoch backup worker", probe::decoration::rare);
+			TraceEvent(SevWarnAlways, "BackupWorkerReplacementGaveUp", self->dbgid)
+			    .detail("BackupEpoch", req.backupEpoch)
+			    .detail("Tag", req.tag.toString())
+			    .detail("Attempts", nextWorker - 1)
+			    .detail("EndVersion", req.endVersion.get());
+			co_return;
+		}
+		CODE_PROBE(true, "Re-recruiting an old epoch backup worker that died before finishing");
+		TraceEvent("BackupWorkerReplacement", self->dbgid)
+		    .detail("RequestID", replacement.reqId)
+		    .detail("Tag", replacement.tag.toString())
+		    .detail("Epoch", replacement.recruitedEpoch)
+		    .detail("BackupEpoch", replacement.backupEpoch)
+		    .detail("StartVersion", replacement.startVersion)
+		    .detail("EndVersion", replacement.endVersion.get())
+		    .detail("DeadWorkerID", interf.id());
+
+		Error err;
+		try {
+			Future<ErrorOr<REPLY_TYPE(Request)>> sent;
+			if constexpr (rangePartitioned) {
+				sent = worker.rangePartitionedBackup.getReplyUnlessFailedFor(
+				    replacement, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY);
+			} else {
+				sent = worker.backup.getReplyUnlessFailedFor(
+				    replacement, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY);
+			}
+			auto reply = co_await throwErrorOr(sent);
+			if (!self->logSystem->replaceBackupWorker(interf.id(), reply.interf, reply.backupEpoch)) {
+				co_return;
+			}
+			interf = reply.interf;
+			// Rate-limit every attempt, not just failures. A replacement that is recruited and then
+			// stops answering immediately would otherwise spin at RPC speed.
+			co_await delay(SERVER_KNOBS->BACKUP_TIMEOUT);
+			continue;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			err = e;
+		}
+		CODE_PROBE(true, "Old epoch backup worker re-recruitment failed", probe::decoration::rare);
+		TraceEvent(SevWarn, "BackupWorkerReplacementFailed", self->dbgid)
+		    .error(err)
+		    .detail("BackupEpoch", req.backupEpoch)
+		    .detail("Tag", req.tag.toString())
+		    .detail("DeadWorkerID", interf.id());
+		co_await delay(SERVER_KNOBS->BACKUP_TIMEOUT);
+	}
+}
+
 static Future<Void> recruitRangePartitionedBackupWorkers(Reference<ClusterRecoveryData> self, Database cx) {
 	ASSERT(!self->backupWorkers.empty());
 
@@ -731,6 +873,7 @@ static Future<Void> recruitRangePartitionedBackupWorkers(Reference<ClusterRecove
 	    makeReference<BackupProgress>(self->dbgid, self->logSystem->getOldEpochRangePartitionedBackupTagsInfo());
 	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	std::vector<Future<InitializeRangePartitionedBackupReply>> initializationReplies;
+	std::vector<InitializeRangePartitionedBackupRequest> oldEpochRequests;
 
 	int rangePartitionedBackupTags = self->logSystem->rangePartitionedBackupWorkerTags;
 	std::vector<std::pair<UID, Tag>> idsTags;
@@ -800,6 +943,7 @@ static Future<Void> recruitRangePartitionedBackupWorkers(Reference<ClusterRecove
 			    throwErrorOr(worker.rangePartitionedBackup.getReplyUnlessFailedFor(
 			        req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 			    backup_worker_failed()));
+			oldEpochRequests.push_back(req);
 		}
 	}
 
@@ -807,6 +951,12 @@ static Future<Void> recruitRangePartitionedBackupWorkers(Reference<ClusterRecove
 	self->logSystem->setRangePartitionedBackupWorkers(newRecruits);
 	TraceEvent("RangePartitionedBWRecruitmentDone", self->dbgid).detail("NumWorkers", newRecruits.size());
 	self->registrationTrigger.trigger();
+
+	ASSERT(newRecruits.size() == rangePartitionedBackupTags + oldEpochRequests.size());
+	for (int j = 0; j < oldEpochRequests.size(); j++) {
+		self->addActor.send(monitorOldEpochBackupWorker(
+		    self, cx, oldEpochRequests[j], newRecruits[rangePartitionedBackupTags + j].interf));
+	}
 }
 
 static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Database cx) {
@@ -819,6 +969,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 	auto backupProgress = makeReference<BackupProgress>(self->dbgid, self->logSystem->getOldEpochLogRouterTagsInfo());
 	Future<Void> fBackupProgress = getBackupProgress(cx, self->dbgid, backupProgress, SevInfo);
 	std::vector<Future<InitializeBackupReply>> initializationReplies;
+	std::vector<InitializeBackupRequest> oldEpochRequests;
 
 	std::vector<std::pair<UID, Tag>> idsTags; // worker IDs and tags for current epoch
 	int logRouterTags = self->logSystem->getLogRouterTags();
@@ -887,6 +1038,7 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 			    throwErrorOr(worker.backup.getReplyUnlessFailedFor(
 			        req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 			    backup_worker_failed()));
+			oldEpochRequests.push_back(req);
 		}
 	}
 
@@ -894,6 +1046,12 @@ static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> self, Da
 	self->logSystem->setBackupWorkers(newRecruits);
 	TraceEvent("BackupRecruitmentDone", self->dbgid).log();
 	self->registrationTrigger.trigger();
+
+	ASSERT(newRecruits.size() == logRouterTags + oldEpochRequests.size());
+	for (int j = 0; j < oldEpochRequests.size(); j++) {
+		self->addActor.send(
+		    monitorOldEpochBackupWorker(self, cx, oldEpochRequests[j], newRecruits[logRouterTags + j].interf));
+	}
 }
 
 Future<Void> updateLogsValue(Reference<ClusterRecoveryData> self, Database cx) {

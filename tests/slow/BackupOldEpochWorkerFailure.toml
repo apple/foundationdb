@@ -1,0 +1,39 @@
+testClass = "Backup"
+
+# An old-generation backup worker only exists when a recovery happens while a partitioned-log backup
+# is draining the previous generation's tail. slow/BackupNewAndOldRestore.toml produces one only when a
+# recovery happens to land in that window: none did in 13 seeds, but it does occur. TriggerRecoveryLoop
+# creates the condition on every run instead of leaving it to chance.
+#
+# Kept to a single phase deliberately. A fork of BackupNewAndOldRestore ran 616-1064 simsec and wrote
+# 205-525 MB of trace, close enough to the line cap that an unlucky run died of TracedTooManyLines
+# with no bug involved.
+
+[configuration]
+
+[[test]]
+testTitle = 'OldEpochBackupWorkerFailure'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 1000.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Backup'
+    mutationLogType = 1 # partitioned-log-experimental
+    backupTag = 'newBackup'
+    backupAfter = 5.0
+    restoreAfter = 35.0
+
+    [[test.workload]]
+    testName = 'TriggerRecoveryLoop'
+    startTime = 8.0
+    numRecoveries = 2
+    delayBetweenRecoveries = 6.0
+    # Recover by changing the resolver count, not killAll: rebooting every process is logged as a
+    # SevError SimulatedFDBDTerminated, which fails the run on its own.
+    killAllProportion = 0.0
