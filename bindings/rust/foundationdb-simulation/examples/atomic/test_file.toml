@@ -1,0 +1,37 @@
+[[test]]
+testTitle = 'AtomicWorkload'
+
+  [[test.workload]]
+    testName = 'External'
+    useCAPI = true
+    libraryName = 'atomic'
+    workloadName = 'AtomicWorkload'
+    libraryPath = './target/release/examples'
+    count = 50
+
+  [[test.workload]]
+    # Introduce network partitions
+    testName = 'RandomClogging'
+    testDuration = 30.0
+    # Unclog them in reversed order
+    swizzle = 1
+
+  [[test.workload]]
+    # Reboot processes
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+  [[test.workload]]
+    # Introduce specific network partitions errors between proxies and tLogs
+    testName = 'Rollback'
+    testDuration = 30
+
+  [[test.workload]]
+    # Change configuration of the database
+    testName = 'ChangeConfig'
+    maxDelayBeforeChange = 30.0
+    # Move consensus-based processes around
+    coordinators = 'auto'

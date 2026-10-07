@@ -1,0 +1,10 @@
+[[test]]
+testTitle = 'NOOP_Test'
+
+  [[test.workload]]
+    useCAPI = true
+    testName = 'External'
+    workloadName = 'NoopWorkload'
+    libraryPath = './target/release/examples'
+    libraryName = 'noop'
+    my_c_option = 'my_value'

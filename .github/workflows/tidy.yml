@@ -88,6 +88,9 @@ jobs:
               flow/include/flow/sse2neon.h|flow/include/flow/xxhash.h)
                 continue
                 ;;
+              bindings/rust/foundationdb-sys/include/*)
+                continue  # historical C API snapshots for compatibility builds
+                ;;
             esac
             # These inputs are not parseable as standalone clang-tidy translation units in this workflow:
             # the public C headers require C consumer setup and intentionally use C typedefs, AWS headers are

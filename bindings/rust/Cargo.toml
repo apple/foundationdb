@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "foundationdb",
+    "foundationdb-tuple",
+    "foundationdb-sys",
+    "foundationdb-gen",
+    "foundationdb-bindingtester",
+    "foundationdb-macros",
+    "foundationdb-simulation",
+]
+default-members = [
+    "foundationdb",
+    "foundationdb-tuple",
+    "foundationdb-sys",
+    "foundationdb-gen",
+    "foundationdb-bindingtester",
+    "foundationdb-macros",
+]
+
+[profile.release]
+debug = true

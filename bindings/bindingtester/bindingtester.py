@@ -273,6 +273,10 @@ class TestRunner(object):
 
         min_api_version = max([tester.min_api_version for tester in self.testers])
         max_api_version = min([tester.max_api_version for tester in self.testers])
+        # Scripted cases exercise the newest common API; randomized suites also
+        # sample older versions. A tester's ceiling need not match the harness's.
+        if self.args.test_name == "scripted" and self.args.api_version is None:
+            self.args.api_version = min(max_api_version, self.test.max_api_version)
         self.args.api_version = choose_api_version(
             self.args.api_version,
             min_api_version,
@@ -646,8 +650,8 @@ def parse_args(argv):
         "--api-version",
         default=None,
         type=int,
-        help="The API version that the testers should use. Not supported in scripted mode. (default = random version supported by "
-        "all testers)",
+        help="The API version that the testers should use. (default = newest common version in scripted mode, "
+        "random version supported by all testers otherwise)",
     )
     parser.add_argument(
         "--cluster-file",
