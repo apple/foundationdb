@@ -459,25 +459,25 @@ def status_json_file_region_failover_message():
 
 
 def status_json_file_missing_data_remote_region_message():
-    header = "UNHEALTHY: No replicas remain of some data"
-    missing_data_state = {
+    primary_line = "UNHEALTHY: No replicas remain of some data"
+    missing_data = {
         "healthy": False,
         "name": "missing_data",
         "description": "No replicas remain of some data",
         "min_replicas_remaining": 0,
     }
 
-    def tracker(primary, name, healthy, state=None):
+    def team_tracker(is_primary, name, healthy, state=None):
         if state is None:
             state = {"healthy": healthy, "name": name, "min_replicas_remaining": 3}
         return {
-            "primary": primary,
+            "primary": is_primary,
             "in_flight_bytes": 0,
             "unhealthy_servers": 0,
             "state": state,
         }
 
-    def render(usable_regions, trackers, headline=missing_data_state):
+    def get_status_text(usable_regions, team_trackers, data_state=missing_data):
         configuration = {
             "redundancy_mode": "double",
             "storage_engine": "ssd-2",
@@ -496,7 +496,7 @@ def status_json_file_missing_data_remote_region_message():
             },
             "cluster": {
                 "configuration": configuration,
-                "data": {"state": headline, "team_trackers": trackers},
+                "data": {"state": data_state, "team_trackers": team_trackers},
                 "fault_tolerance": {
                     "max_zone_failures_without_losing_availability": 1,
                     "max_zone_failures_without_losing_data": 1,
@@ -526,42 +526,39 @@ def status_json_file_missing_data_remote_region_message():
         assert result.returncode == 0, result.stderr.decode("utf-8")
         return result.stdout.decode("utf-8")
 
-    def with_remote(summary):
-        return header + " (primary); " + summary + " (remote)"
+    def expected_line(remote_summary):
+        return primary_line + " (primary); " + remote_summary + " (remote)"
 
-    def assert_unchanged(out):
-        assert header in out, out
-        assert "(primary)" not in out, out
+    def assert_no_remote_summary(output):
+        assert primary_line in output, output
+        assert "(primary)" not in output, output
 
-    primary = tracker(True, "missing_data", False, missing_data_state)
+    primary_tracker = team_tracker(True, "missing_data", False, missing_data)
 
-    # Remote healthy: reported as healthy replicas.
-    out = render(2, [primary, tracker(False, "healthy", True)])
-    assert with_remote("Healthy replicas") in out, out
-
-    # Remote healthy but busy (rebalancing): still healthy replicas.
-    out = render(2, [primary, tracker(False, "healthy_rebalancing", True)])
-    assert with_remote("Healthy replicas") in out, out
-
-    # Remote healthy=false and healing: degraded replicas.
-    out = render(2, [primary, tracker(False, "healing", False)])
-    assert with_remote("Healing replicas") in out, out
-
-    # Remote healthy=true but populating: not yet a full copy.
-    out = render(2, [primary, tracker(False, "healthy_populating_region", True)])
-    assert with_remote("Populating replicas") in out, out
-
-    # Remote healthy=false and missing_data: the remote lost data too.
-    out = render(2, [primary, tracker(False, "missing_data", False)])
-    assert with_remote("No replicas remain of some data") in out, out
+    remote_cases = [
+        # (remote state name, remote healthy, expected summary)
+        ("healthy", True, "Healthy replicas"),
+        # A busy remote still holds a healthy copy.
+        ("healthy_rebalancing", True, "Healthy replicas"),
+        ("healing", False, "Healing replicas"),
+        # Reports healthy before it holds a full copy.
+        ("healthy_populating_region", True, "Populating replicas"),
+        # The remote lost data too.
+        ("missing_data", False, "No replicas remain of some data"),
+    ]
+    for name, healthy, summary in remote_cases:
+        output = get_status_text(
+            2, [primary_tracker, team_tracker(False, name, healthy)]
+        )
+        assert expected_line(summary) in output, (name, output)
 
     # Remote listed before the primary: order must not matter.
-    out = render(2, [tracker(False, "healthy", True), primary])
-    assert with_remote("Healthy replicas") in out, out
+    output = get_status_text(2, [team_tracker(False, "healthy", True), primary_tracker])
+    assert expected_line("Healthy replicas") in output, output
 
     # Single region with no remote entry: message unchanged.
-    out = render(1, [primary])
-    assert_unchanged(out)
+    output = get_status_text(1, [primary_tracker])
+    assert_no_remote_summary(output)
 
     # Primary healing (not missing_data): other branches are untouched.
     healing = {
@@ -570,12 +567,15 @@ def status_json_file_missing_data_remote_region_message():
         "description": "Only one replica remains of some data",
         "min_replicas_remaining": 1,
     }
-    out = render(
+    output = get_status_text(
         2,
-        [tracker(True, "healing", False, healing), tracker(False, "healthy", True)],
+        [
+            team_tracker(True, "healing", False, healing),
+            team_tracker(False, "healthy", True),
+        ],
         healing,
     )
-    assert "HEALING: Only one replica remains of some data" in out, out
+    assert "HEALING: Only one replica remains of some data" in output, output
 
 
 @enable_logging()
