@@ -233,11 +233,11 @@ typedef struct cdc_versioned_mutations {
 } FDBCdcVersionedMutations;
 
 /*
- * TODO: delete the following "blob granule" and "tenant" related data types
- * when we are sure it's safe to do so.
+ * FDBGranuleSummary and FDBReadBlobGranuleContext are part of the retained
+ * blob granule C stub signatures. Keep these types while the stubs exist.
  *
- * These features were always experimental and have now been removed, so probably
- * the data structures can be done away with also for the FDB 8.0.0 release.
+ * TODO: delete the other blob granule and tenant data types below after
+ * confirming that removing them is compatible with older clients and bindings.
  */
 typedef struct granulesummary {
 	FDBKeyRange key_range;
