@@ -9,7 +9,7 @@ Release Notes
 
 AVX enabled release.
 
-* Update to RocksDB 8.11.5 again. This contains a disk format change (originally made in RocksDB 9.0) such that it cannot be downgraded back to RocksDB 8.11.4 or lower, and no other changes. This new disk format is fully forwards and backwards compatible with RocksDB 9.x. Note that RocksDB-9.7.3 was used in FoundationDB-7.4.0, downgraded to RocksDB-8.11.5 in FoundationDB-7.4.6, and then to RocksDB-8.11.4 in FoundationDB-7.4.7. All 7.4 releases before FoundationDB-7.4.7 were considered pre-stable-release, apologies for the confusion. `(PR #14042) <https://github.com/apple/foundationdb/pull/14042>`_
+* Update to RocksDB 8.11.5 again. This contains a disk format change (originally made in RocksDB 9.0) such that it cannot be downgraded back to RocksDB 8.11.4 or lower, and no other changes. This new disk format is fully forwards and backwards compatible with RocksDB 9+ (for how FDB uses it). Note that RocksDB-9.7.3 was used in FoundationDB-7.4.0, downgraded to RocksDB-8.11.5 in FoundationDB-7.4.6, and then to RocksDB-8.11.4 in FoundationDB-7.4.7. All 7.4 releases before FoundationDB-7.4.7 were considered pre-stable-release, apologies for the confusion. `(PR #14042) <https://github.com/apple/foundationdb/pull/14042>`_
 
 If you use the RocksDB storage engine, and care about the possibility of rolling-back a deployment, this FoundationDB release is meant to be useful as a step to the new RocksDB disk format. Once you have upgraded to FDB 7.4.8 and have confidence in that version, this FDB 7.4.9 release should have identical behavior in all respects, but cannot be downgraded back.
 
