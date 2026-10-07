@@ -235,9 +235,6 @@ typedef struct cdc_versioned_mutations {
 /*
  * FDBGranuleSummary and FDBReadBlobGranuleContext are part of the retained
  * blob granule C stub signatures. Keep these types while the stubs exist.
- *
- * TODO: delete the other blob granule and tenant data types below after
- * confirming that removing them is compatible with older clients and bindings.
  */
 typedef struct granulesummary {
 	FDBKeyRange key_range;
