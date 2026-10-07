@@ -103,15 +103,15 @@ int getNumofNonExcludedMachines(StatusObjectReader statusObjCluster) {
 	return numOfNonExcludedMachines;
 }
 
-// True if the cluster has a remote region whose data tracker reports a usable copy of the data.
-bool remoteRegionHasHealthyData(StatusObjectReader statusObjCluster, StatusObjectReader statusObjData) {
+// Summarizes the remote region's replica state, or returns an empty string if that can't be determined.
+std::string getRemoteRegionSummary(StatusObjectReader statusObjCluster, StatusObjectReader statusObjData) {
 	try {
 		int usableRegions = 1;
 		if (!statusObjCluster.get("configuration.usable_regions", usableRegions) || usableRegions <= 1) {
-			return false;
+			return "";
 		}
 		if (!statusObjData.has("team_trackers")) {
-			return false;
+			return "";
 		}
 		for (auto const& value : statusObjData.last().get_array()) {
 			StatusObjectReader tracker(value);
@@ -122,15 +122,24 @@ bool remoteRegionHasHealthyData(StatusObjectReader statusObjCluster, StatusObjec
 			std::string name;
 			bool healthy = false;
 			if (!tracker.get("state.name", name) || !tracker.get("state.healthy", healthy)) {
-				return false;
+				return "";
+			}
+			if (name == "missing_data") {
+				return "No replicas remain of some data";
+			}
+			if (name == "healing") {
+				return "Healing replicas";
 			}
 			// A region being populated reports healthy before it holds a full copy.
-			return healthy && name != "healthy_populating_region";
+			if (name == "healthy_populating_region") {
+				return "Populating replicas";
+			}
+			return healthy ? "Healthy replicas" : "";
 		}
 	} catch (std::exception&) {
 		// Malformed status JSON counts as unknown.
 	}
-	return false;
+	return "";
 }
 
 bool logEpochsMayBeLosingData(StatusObjectReader statusObjCluster) {
@@ -824,11 +833,11 @@ void printStatus(StatusObjectReader statusObj,
 				if (statusObjDataState.get("healthy", healthy) && healthy) {
 					outputString += "Healthy" + (!description.empty() ? " (" + description + ")" : "");
 				} else if (dataState == "missing_data") {
-					if (remoteRegionHasHealthyData(statusObjCluster, statusObjData)) {
-						description = "No replicas remain of some data in the primary region, "
-						              "but the remote region is healthy";
-					}
 					outputString += "UNHEALTHY" + (!description.empty() ? ": " + description : "");
+					std::string remoteSummary = getRemoteRegionSummary(statusObjCluster, statusObjData);
+					if (!remoteSummary.empty()) {
+						outputString += " (primary); " + remoteSummary + " (remote)";
+					}
 				} else if (dataState == "healing") {
 					outputString += "HEALING" + (!description.empty() ? ": " + description : "");
 				} else if (!description.empty()) {

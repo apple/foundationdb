@@ -458,6 +458,126 @@ def status_json_file_region_failover_message():
     assert "may have data loss" not in stdout
 
 
+def status_json_file_missing_data_remote_region_message():
+    header = "UNHEALTHY: No replicas remain of some data"
+    missing_data_state = {
+        "healthy": False,
+        "name": "missing_data",
+        "description": "No replicas remain of some data",
+        "min_replicas_remaining": 0,
+    }
+
+    def tracker(primary, name, healthy, state=None):
+        if state is None:
+            state = {"healthy": healthy, "name": name, "min_replicas_remaining": 3}
+        return {
+            "primary": primary,
+            "in_flight_bytes": 0,
+            "unhealthy_servers": 0,
+            "state": state,
+        }
+
+    def render(usable_regions, trackers, headline=missing_data_state):
+        configuration = {
+            "redundancy_mode": "double",
+            "storage_engine": "ssd-2",
+            "coordinators_count": 1,
+            "excluded_servers": [],
+        }
+        if usable_regions is not None:
+            configuration["usable_regions"] = usable_regions
+        status_json = {
+            "client": {
+                "cluster_file": {"path": "fdb.cluster", "up_to_date": True},
+                "coordinators": {"coordinators": [], "quorum_reachable": True},
+                "database_status": {"available": True, "healthy": False},
+                "messages": [],
+                "timestamp": 1417807090,
+            },
+            "cluster": {
+                "configuration": configuration,
+                "data": {"state": headline, "team_trackers": trackers},
+                "fault_tolerance": {
+                    "max_zone_failures_without_losing_availability": 1,
+                    "max_zone_failures_without_losing_data": 1,
+                },
+                "logs": [
+                    {
+                        "epoch": 1,
+                        "current": True,
+                        "begin_version": 1,
+                        "possibly_losing_data": False,
+                        "log_interfaces": [],
+                    }
+                ],
+                "machines": {},
+                "processes": {},
+            },
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as status_file:
+            json.dump(status_json, status_file)
+            status_file.flush()
+            result = subprocess.run(
+                [command_template[0], "--status-from-json", status_file.name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=fdbcli_env,
+            )
+        assert result.returncode == 0, result.stderr.decode("utf-8")
+        return result.stdout.decode("utf-8")
+
+    def with_remote(summary):
+        return header + " (primary); " + summary + " (remote)"
+
+    def assert_unchanged(out):
+        assert header in out, out
+        assert "(primary)" not in out, out
+
+    primary = tracker(True, "missing_data", False, missing_data_state)
+
+    # Remote healthy: reported as healthy replicas.
+    out = render(2, [primary, tracker(False, "healthy", True)])
+    assert with_remote("Healthy replicas") in out, out
+
+    # Remote healthy but busy (rebalancing): still healthy replicas.
+    out = render(2, [primary, tracker(False, "healthy_rebalancing", True)])
+    assert with_remote("Healthy replicas") in out, out
+
+    # Remote healthy=false and healing: degraded replicas.
+    out = render(2, [primary, tracker(False, "healing", False)])
+    assert with_remote("Healing replicas") in out, out
+
+    # Remote healthy=true but populating: not yet a full copy.
+    out = render(2, [primary, tracker(False, "healthy_populating_region", True)])
+    assert with_remote("Populating replicas") in out, out
+
+    # Remote healthy=false and missing_data: the remote lost data too.
+    out = render(2, [primary, tracker(False, "missing_data", False)])
+    assert with_remote("No replicas remain of some data") in out, out
+
+    # Remote listed before the primary: order must not matter.
+    out = render(2, [tracker(False, "healthy", True), primary])
+    assert with_remote("Healthy replicas") in out, out
+
+    # Single region with no remote entry: message unchanged.
+    out = render(1, [primary])
+    assert_unchanged(out)
+
+    # Primary healing (not missing_data): other branches are untouched.
+    healing = {
+        "healthy": False,
+        "name": "healing",
+        "description": "Only one replica remains of some data",
+        "min_replicas_remaining": 1,
+    }
+    out = render(
+        2,
+        [tracker(True, "healing", False, healing), tracker(False, "healthy", True)],
+        healing,
+    )
+    assert "HEALING: Only one replica remains of some data" in out, out
+
+
 @enable_logging()
 def consistencycheck(logger):
     consistency_check_on_output = "ConsistencyCheck is on"
@@ -1084,6 +1204,7 @@ if __name__ == "__main__":
         integer_options()
         tls_address_suffix()
         status_json_file_region_failover_message()
+        status_json_file_missing_data_remote_region_message()
         idempotency_ids()
         cdc_operator_commands()
         audit_status_arguments()
