@@ -25,6 +25,8 @@
 #include "fmt/core.h"
 #include "test/fdb_api.hpp"
 #include "SimpleOpt/SimpleOpt.h"
+#include <algorithm>
+#include <chrono>
 #include <thread>
 #include <string_view>
 #include "foundationdb/fdb_c_shim.h"
@@ -194,27 +196,59 @@ void applyNetworkOptions(TesterOptions& options) {
 }
 
 void testBasicApi(const TesterOptions& options) {
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+	auto remainingTimeoutMs = [&deadline]() {
+		auto remaining =
+		    std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+		if (remaining <= 0) {
+			fmt::print(stderr, "Basic read/write deadline expired\n");
+			std::abort();
+		}
+		return std::min<int64_t>(remaining, 5000);
+	};
+	auto retryOnError = [&remainingTimeoutMs](fdb::Transaction& tx, fdb::Error error) {
+		(void)remainingTimeoutMs();
+		auto retryFuture = tx.onError(error);
+		fdb_check(retryFuture.blockUntilReady(), "Wait on transaction retry failed");
+		fdb_check(retryFuture.error(), "Transaction retry failed");
+	};
+
 	fdb::Database db(options.clusterFile);
 	std::string expectedValue = "val1";
 	if (!options.expectedLocalClientVersion.empty()) {
 		expectedValue += "-" + options.expectedLocalClientVersion;
 	}
-	fdb::Transaction writeTx = db.createTransaction();
-	writeTx.setOption(FDB_TR_OPTION_TIMEOUT, 5000);
-	writeTx.set(fdb::toBytesRef("key1"sv), fdb::toBytesRef(expectedValue));
-	auto commitFuture = writeTx.commit();
-	fdb_check(commitFuture.blockUntilReady(), "Wait on commit failed");
-	fdb_check(commitFuture.error(), "Commit failed");
+	// TIMEOUT is measured from transaction creation, so retries use fresh transactions.
+	while (true) {
+		fdb::Transaction writeTx = db.createTransaction();
+		writeTx.setOption(FDB_TR_OPTION_TIMEOUT, remainingTimeoutMs());
+		writeTx.set(fdb::toBytesRef("key1"sv), fdb::toBytesRef(expectedValue));
+		auto commitFuture = writeTx.commit();
+		fdb_check(commitFuture.blockUntilReady(), "Wait on commit failed");
+		auto error = commitFuture.error();
+		if (!error) {
+			break;
+		}
+		retryOnError(writeTx, error);
+	}
 
-	fdb::Transaction readTx = db.createTransaction();
-	readTx.setOption(FDB_TR_OPTION_TIMEOUT, 5000);
-	auto readFuture = readTx.get(fdb::toBytesRef("key1"sv), false);
-	fdb_check(readFuture.blockUntilReady(), "Wait on readback failed");
-	fdb_check(readFuture.error(), "Readback failed");
-	auto value = readFuture.get();
-	if (!value || *value != fdb::toBytesRef(expectedValue)) {
-		fmt::print(stderr, "Committed value did not match readback\n");
-		std::abort();
+	while (true) {
+		fdb::Transaction readTx = db.createTransaction();
+		readTx.setOption(FDB_TR_OPTION_TIMEOUT, remainingTimeoutMs());
+		auto readFuture = readTx.get(fdb::toBytesRef("key1"sv), false);
+		fdb_check(readFuture.blockUntilReady(), "Wait on readback failed");
+		auto error = readFuture.error();
+		if (error) {
+			retryOnError(readTx, error);
+			continue;
+		}
+		auto value = readFuture.get();
+		if (!value || *value != fdb::toBytesRef(expectedValue)) {
+			fmt::print(stderr, "Committed value did not match readback\n");
+			std::abort();
+		}
+		(void)remainingTimeoutMs();
+		break;
 	}
 }
 
