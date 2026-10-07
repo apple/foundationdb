@@ -39,6 +39,16 @@ void writeKVSToSSTFile(std::string filePath, std::map<Key, Value>& sortedKVS, UI
 	}
 	// Dump data to file
 	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+	if (sstWriter == nullptr) {
+		// The factory returns null when the binary was built without RocksDB, so there is no SST writer
+		// to be had. Report it rather than dereferencing: a bulkdump otherwise segfaults the storage
+		// server on its first range, a hard crash carrying no diagnosis. Not retriable -- no amount of
+		// retrying puts RocksDB into the binary.
+		TraceEvent(SevWarnAlways, "SSBulkDumpNoSstWriter", logId)
+		    .detail("Reason", "Binary was built without RocksDB and cannot write SST files")
+		    .detail("DataFilePathLocal", absFilePath);
+		throw unsupported_operation();
+	}
 	sstWriter->open(absFilePath);
 	for (const auto& [key, value] : sortedKVS) {
 		sstWriter->write(key, value); // assuming sorted
@@ -127,9 +137,18 @@ Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // input fi
 		Error err;
 		try {
 			std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+			std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
+			if (sstWriter == nullptr || reader == nullptr) {
+				// Built without RocksDB: see the note in writeKVSToSSTFile. Checked before either is
+				// opened, and outside the retry loop's error handling, since retrying cannot help.
+				TraceEvent(SevWarnAlways, "SSBulkDumpNoSstWriterOrReader", logId)
+				    .detail("Reason", "Binary was built without RocksDB and cannot read or write SST files")
+				    .detail("DataFilePath", dataFileFullPath)
+				    .detail("ByteSampleFilePath", byteSampleFileFullPath);
+				throw unsupported_operation();
+			}
 			sstWriter->open(abspath(byteSampleFileFullPath));
 			bool anySampled = false;
-			std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
 			reader->open(abspath(dataFileFullPath));
 			while (reader->hasNext()) {
 				KeyValue kv = reader->next();
