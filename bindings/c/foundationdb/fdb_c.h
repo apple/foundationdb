@@ -233,8 +233,9 @@ typedef struct cdc_versioned_mutations {
 } FDBCdcVersionedMutations;
 
 /*
- * FDBGranuleSummary and FDBReadBlobGranuleContext are part of the retained
- * blob granule C stub signatures. Keep these types while the stubs exist.
+ * Blob granule and tenant features were removed in 8.0.
+ * FDBGranuleSummary and FDBReadBlobGranuleContext are still used by the
+ * compatibility stub signatures. Keep these types while the stubs exist.
  */
 typedef struct granulesummary {
 	FDBKeyRange key_range;
@@ -331,10 +332,7 @@ typedef struct bgfiledescription {
 
 #pragma pack(pop)
 
-/*
- * TODO: end of section of blob granule and tenant related
- * data types that can probably be removed.
- */
+/* End of legacy blob granule and tenant data types. */
 
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
 
