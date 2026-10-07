@@ -103,7 +103,9 @@ int getNumofNonExcludedMachines(StatusObjectReader statusObjCluster) {
 	return numOfNonExcludedMachines;
 }
 
-// Summarizes the remote region's replica state, or returns an empty string if that can't be determined.
+// Summarizes the remote region's replica state for appending to the primary's missing_data message. Returns one of
+// "No replicas remain of some data", "Healing replicas", "Populating replicas" or "Healthy replicas", or an empty
+// string if the cluster isn't multi-region or the remote state can't be determined.
 std::string getRemoteRegionSummary(StatusObjectReader statusObjCluster, StatusObjectReader statusObjData) {
 	try {
 		int usableRegions = 1;
