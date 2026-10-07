@@ -25,6 +25,8 @@ FoundationDB  RocksDB  Can Downgrade FDB
 8.0.0         11.1.2   TO 7.4.9, 7.4.6
 ============  =======  =================
 
+See also :ref:`note about encrypted backups <enc-backup-stable>` in release 7.4.7 below.
+
 7.4.8
 =====
 
@@ -64,6 +66,10 @@ AVX enabled release.
 * Restricted ``backup_worker_enabled`` configuration through ``fdbcli``. `(PR #12711) <https://github.com/apple/foundationdb/pull/12711>`_
 * Enabled TLS hostname validation against certificate CN and SAN values. `(PR #12730) <https://github.com/apple/foundationdb/pull/12730>`_
 * Downgraded RocksDB to 8.11.4. `(PR #13830) <https://github.com/apple/foundationdb/pull/13830>`_
+
+.. _enc-backup-stable:
+
+Encrypted Backups are production-ready starting with 7.4.7. Encrypted backups created with earlier versions are not compatible with 7.4.7+ and cannot be restored due to a format change. If using this feature, create a new encrypted backup with 7.4.7+.
 
 7.4.6
 =====
