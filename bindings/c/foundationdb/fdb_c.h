@@ -275,65 +275,6 @@ typedef struct readgranulecontext {
 	int granuleParallelism;
 } FDBReadBlobGranuleContext;
 
-typedef enum { FDB_BG_MUTATION_TYPE_SET_VALUE = 0, FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1 } FDBBGMutationType;
-
-#pragma pack(push, 4)
-
-typedef struct bgtenantprefix {
-	fdb_bool_t present;
-	FDBKey prefix;
-} FDBBGTenantPrefix;
-
-/* encryption structs correspond to similar ones in BlobGranuleCommon.h */
-typedef struct bgencryptionkey {
-	int64_t domain_id;
-	uint64_t base_key_id;
-	uint32_t base_kcv;
-	uint64_t random_salt;
-	FDBKey base_key;
-} FDBBGEncryptionKey;
-
-typedef struct bgencryptionctx {
-	fdb_bool_t present;
-	FDBBGEncryptionKey textKey;
-	uint32_t textKCV;
-	FDBBGEncryptionKey headerKey;
-	uint32_t headerKCV;
-	FDBKey iv;
-} FDBBGEncryptionCtx;
-
-typedef struct bgfilepointer {
-	const uint8_t* filename_ptr;
-	int filename_length;
-	int64_t file_offset;
-	int64_t file_length;
-	int64_t full_file_length;
-	int64_t file_version;
-	FDBBGEncryptionCtx encryption_ctx;
-} FDBBGFilePointer;
-
-typedef struct bgmutation {
-	/* FDBBGMutationType */ uint8_t type;
-	int64_t version;
-	const uint8_t* param1_ptr;
-	int param1_length;
-	const uint8_t* param2_ptr;
-	int param2_length;
-} FDBBGMutation;
-
-typedef struct bgfiledescription {
-	FDBKeyRange key_range;
-	fdb_bool_t snapshot_present;
-	FDBBGFilePointer snapshot_file_pointer;
-	int delta_file_count;
-	FDBBGFilePointer* delta_files;
-	int memory_mutation_count;
-	FDBBGMutation* memory_mutations;
-	FDBBGTenantPrefix tenant_prefix;
-} FDBBGFileDescription;
-
-#pragma pack(pop)
-
 /*
  * TODO: end of section of blob granule and tenant related
  * data types that can probably be removed.
