@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-// touch
 #include "fmt/format.h"
 #include "flow/Arena.h"
 #include "flow/DeterministicRandom.h"

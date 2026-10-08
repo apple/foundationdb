@@ -35,7 +35,6 @@
  * compile-time configuration.
  */
 
-// touch
 #if !defined(HAVE_OPENSSL)
 
 #include <string.h>
