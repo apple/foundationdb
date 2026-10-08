@@ -48,7 +48,7 @@ jobs:
           fi
 
           # RocksDB headers
-          ninja -C build_output fdbserver/rocksdb-prefix/src/rocksdb-stamp/rocksdb-download
+          ninja fdbserver/rocksdb-prefix/src/rocksdb-stamp/rocksdb-download
 
           ninja -v                      \
             processed_compile_commands  \
