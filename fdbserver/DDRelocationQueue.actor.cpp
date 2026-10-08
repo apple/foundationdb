@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <limits>
 #include <numeric>
 #include <utility>
@@ -523,6 +524,15 @@ void completeDest(RelocateData const& relocation, std::map<UID, Busyness>& destB
 	int destWorkFactor = getDestWorkFactor();
 	for (UID id : relocation.completeDests) {
 		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
+	}
+}
+
+static void completeOwnedDest(RelocateData const& relocation,
+                              std::map<UID, Busyness>& destBusymap,
+                              bool& ownsDestBusyness) {
+	if (ownsDestBusyness) {
+		completeDest(relocation, destBusymap);
+		ownsDestBusyness = false;
 	}
 }
 
@@ -1331,6 +1341,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state PromiseStream<RelocateData> dataTransferComplete(self->dataTransferComplete);
 	state PromiseStream<RelocateData> relocationComplete(self->relocationComplete);
 	state bool signalledTransferComplete = false;
+	// Source transfer completion is shared across retries, while each attempt registers new destination work.
+	state bool ownsDestBusyness = false;
 	state UID distributorId = self->distributorId;
 	state ParallelTCInfo healthyDestinations;
 
@@ -1780,7 +1792,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
 			healthyDestinations.addReadInFlightToTeam(+metrics.readLoadKSecond());
 
+			ASSERT(!ownsDestBusyness);
 			launchDest(rd, bestTeams, self->destBusymap);
+			ownsDestBusyness = true;
 
 			if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
 				// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
@@ -1905,6 +1919,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								if (!signalledTransferComplete) {
 									signalledTransferComplete = true;
 									self->dataTransferComplete.send(rd);
+									ownsDestBusyness = false;
 								}
 							}
 							pollHealth = signalledTransferComplete ? Never()
@@ -1916,6 +1931,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							if (!signalledTransferComplete) {
 								signalledTransferComplete = true;
 								self->dataTransferComplete.send(rd);
+								ownsDestBusyness = false;
 							}
 						}
 					}
@@ -1977,6 +1993,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					if (!signalledTransferComplete) {
 						signalledTransferComplete = true;
 						dataTransferComplete.send(rd);
+						ownsDestBusyness = false;
+					} else {
+						completeOwnedDest(rd, self->destBusymap, ownsDestBusyness);
 					}
 
 					self->bytesWritten += metrics.bytes;
@@ -2011,11 +2030,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
 				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
-				if (!signalledTransferComplete) {
-					// signalling transferComplete calls completeDest() in complete(), so doing so here would
-					// double-complete the work
-					completeDest(rd, self->destBusymap);
-				}
+				completeOwnedDest(rd, self->destBusymap, ownsDestBusyness);
 				rd.completeDests.clear();
 
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
@@ -2036,8 +2051,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			    .detail("Dest", describe(destIds))
 			    .detail("Src", describe(rd.src));
 		}
-		if (!signalledTransferComplete)
+		if (!signalledTransferComplete) {
 			dataTransferComplete.send(rd);
+			ownsDestBusyness = false;
+		} else {
+			completeOwnedDest(rd, self->destBusymap, ownsDestBusyness);
+		}
 
 		relocationComplete.send(rd);
 
@@ -2717,5 +2736,66 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 		}
 	}
 	std::cout << "Finished.";
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/DDQueue/DestinationRetryBusynessAccounting") {
+	Reference<LocalitySet> locality = makeReference<LocalityMap<UID>>();
+	auto makeTeam = [&locality](UID id) -> Reference<IDataDistributionTeam> {
+		StorageServerInterface ssi(id);
+		ssi.locality.set("machineid"_sr, Standalone<StringRef>(id.toString()));
+		ssi.locality.set("zoneid"_sr, Standalone<StringRef>(id.toString()));
+		auto server = makeReference<TCServerInfo>(ssi, nullptr, ProcessClass(), true, locality);
+		return makeReference<TCTeamInfo>(std::vector<Reference<TCServerInfo>>{ server },
+		                                 Optional<Reference<TCTenantInfo>>());
+	};
+	auto ledgerIsEmpty = [](Busyness const& busyness) {
+		return std::all_of(busyness.ledger.begin(), busyness.ledger.end(), [](int work) { return work == 0; });
+	};
+
+	const UID firstId(1, 0);
+	const UID secondId(2, 0);
+	const UID sourceId(3, 0);
+	Reference<IDataDistributionTeam> firstTeam = makeTeam(firstId);
+	Reference<IDataDistributionTeam> secondTeam = makeTeam(secondId);
+	const int workFactor = getDestWorkFactor();
+
+	RelocateData rd;
+	rd.priority = SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY;
+	rd.src = { sourceId };
+	rd.workFactor = workFactor;
+	std::map<UID, Busyness> sourceBusymap;
+	std::map<UID, Busyness> destBusymap;
+	PromiseStream<RelocateData> dataTransferComplete;
+	FutureStream<RelocateData> completedTransfers = dataTransferComplete.getFuture();
+	bool ownsDestBusyness = false;
+	sourceBusymap[sourceId].addWork(rd.priority, rd.workFactor);
+
+	launchDest(rd, { { firstTeam, false } }, destBusymap);
+	ownsDestBusyness = true;
+
+	// Fetch completes before finishMoveKeys: the queue now owns the first attempt's busyness.
+	dataTransferComplete.send(rd);
+	ownsDestBusyness = false;
+
+	// finishMoveKeys gives up and the relocator retries with a new destination.
+	completeOwnedDest(rd, destBusymap, ownsDestBusyness);
+	rd.completeDests.clear();
+	ASSERT_EQ(destBusymap[firstId].ledger[rd.priority / 100], workFactor);
+
+	launchDest(rd, { { secondTeam, false } }, destBusymap);
+	ownsDestBusyness = true;
+	ASSERT_EQ(destBusymap[secondId].ledger[rd.priority / 100], workFactor);
+
+	// The retry succeeds after the transfer was already signalled, so it must release its own destination.
+	completeOwnedDest(rd, destBusymap, ownsDestBusyness);
+	ASSERT(!ownsDestBusyness);
+	ASSERT(ledgerIsEmpty(destBusymap[secondId]));
+
+	RelocateData transferComplete = completedTransfers.pop();
+	ASSERT(transferComplete.completeDests == std::vector<UID>{ firstId });
+	complete(transferComplete, sourceBusymap, destBusymap);
+	ASSERT(ledgerIsEmpty(sourceBusymap[sourceId]));
+	ASSERT(ledgerIsEmpty(destBusymap[firstId]));
 	return Void();
 }
