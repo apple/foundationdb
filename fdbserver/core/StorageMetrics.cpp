@@ -748,9 +748,26 @@ Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Fut
 			}
 
 			if (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)) {
-				CODE_PROBE(true, "ShardWaitMetrics return case 2 (delayed)");
-				req.reply.send(metrics);
-				break;
+				// The running sum can be a partial view of one update: rewriting a sampled key arrives as a
+				// clear (-bytes) followed by a set (+bytes). Let the update finish and re-read before replying,
+				// otherwise the caller sees a transient value (e.g. 0) that never existed at any version.
+				co_await delay(0);
+				metrics = self->getMetrics(req.keys);
+				try {
+					while (change.getFuture().isReady()) {
+						change.getFuture().pop();
+					}
+				} catch (Error& e) {
+					// notifyNotReadable() can queue wrong_shard_server while we yielded
+					error = e;
+					break;
+				}
+				if (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)) {
+					CODE_PROBE(true, "ShardWaitMetrics return case 2 (delayed)");
+					req.reply.send(metrics);
+					break;
+				}
+				CODE_PROBE(true, "ShardWaitMetrics transient out-of-bounds sum discarded");
 			}
 		}
 
@@ -1146,4 +1163,69 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/equalDivide") {
 	ASSERT_EQ(t.at(3).readBandwidthSec, 5000 * sampleUnit / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
 	ASSERT_EQ(t.at(3).bytes, 0);
 	return Void();
+}
+
+namespace {
+
+// A request that fires when the shard's bytes leave [bytes - 100, bytes + 100]; other metrics are unbounded.
+WaitMetricsRequest boundedBytesRequest(KeyRangeRef keys, int64_t bytes) {
+	StorageMetrics min, max;
+	min.bytes = bytes - 100;
+	max.bytes = bytes + 100;
+	max.bytesWrittenPerKSecond = max.iosPerKSecond = max.bytesReadPerKSecond = max.opsReadPerKSecond =
+	    StorageMetrics::infinity;
+	return WaitMetricsRequest(0, keys, min, max);
+}
+
+void setSampledBytes(StorageServerMetrics& ssm, KeyRef key, int64_t bytes) {
+	ssm.byteSample.sample.insert(key, bytes);
+	ssm.notifyBytes(key, bytes);
+}
+
+void clearSampledBytes(StorageServerMetrics& ssm, KeyRef key, int64_t bytes) {
+	ssm.byteSample.sample.erase(key);
+	ssm.notifyBytes(key, -bytes);
+}
+
+} // namespace
+
+TEST_CASE("/fdbserver/StorageMetrics/waitMetrics/ignoresTransientPartialUpdate") {
+	StorageServerMetrics ssm;
+	const KeyRange keys = KeyRangeRef("A"_sr, "B"_sr);
+	ssm.byteSample.sample.insert("Apple"_sr, 1000);
+
+	WaitMetricsRequest req = boundedBytesRequest(keys, 1000);
+	Future<StorageMetrics> reply = req.reply.getFuture();
+	Future<Void> waiter = ssm.waitMetrics(req, Never());
+
+	// Rewriting a sampled key in one update: the waiter sees -1000 before +1000.
+	clearSampledBytes(ssm, "Apple"_sr, 1000);
+	setSampledBytes(ssm, "Apple"_sr, 1000);
+	co_await delay(0);
+	co_await delay(0);
+	ASSERT(!reply.isReady());
+
+	// A real change is still reported.
+	clearSampledBytes(ssm, "Apple"_sr, 1000);
+	co_await waiter;
+	ASSERT(reply.isReady() && !reply.isError());
+	ASSERT_EQ(reply.get().bytes, 0);
+}
+
+TEST_CASE("/fdbserver/StorageMetrics/waitMetrics/notReadableWhileRevalidating") {
+	StorageServerMetrics ssm;
+	const KeyRange keys = KeyRangeRef("A"_sr, "B"_sr);
+	ssm.byteSample.sample.insert("Apple"_sr, 1000);
+
+	WaitMetricsRequest req = boundedBytesRequest(keys, 1000);
+	Future<StorageMetrics> reply = req.reply.getFuture();
+	Future<Void> waiter = ssm.waitMetrics(req, Never());
+
+	// The range becomes unreadable while the waiter is revalidating an out-of-bounds sum: the request must fail
+	// with wrong_shard_server instead of the waiter throwing it.
+	clearSampledBytes(ssm, "Apple"_sr, 1000);
+	ssm.notifyNotReadable(keys);
+	co_await waiter;
+	ASSERT(reply.isReady() && reply.isError());
+	ASSERT_EQ(reply.getError().code(), error_code_wrong_shard_server);
 }
