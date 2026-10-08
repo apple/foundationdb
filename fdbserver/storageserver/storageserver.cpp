@@ -7346,8 +7346,6 @@ static Future<Void> processSampleFiles(StorageServer* data,
 						rawSamples.clear();
 						reader = newRocksDBSstFileReader();
 						if (reader == nullptr) {
-							// Built without RocksDB: there is no SST reader, so report it rather than
-							// dereferencing null.
 							TraceEvent(SevWarnAlways, "StorageServerNoSstReader", data->thisServerID)
 							    .detail("Reason", "Binary was built without RocksDB and cannot read SST files")
 							    .detail("File", sampleFilePath);
@@ -10794,9 +10792,7 @@ Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* data,
 				}
 				anyFileCreated = false;
 				sstWriter = newRocksDBSstFileWriter();
-				// Check before opening, not after: the factory returns null in a build without RocksDB,
-				// so the open() below was dereferencing null one line ahead of the guard meant to catch
-				// it, and this bailout could never be reached.
+				// Null when built without RocksDB.
 				if (sstWriter == nullptr) {
 					break;
 				}
