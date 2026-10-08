@@ -104,7 +104,9 @@ enum {
 	OPT_DEBUG_TLS,
 	OPT_API_VERSION,
 	OPT_MEMORY,
-	OPT_USE_FUTURE_PROTOCOL_VERSION
+	OPT_USE_FUTURE_PROTOCOL_VERSION,
+	OPT_AUDIT_LOG,
+	OPT_AUDIT_LOG_VALUES
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -130,6 +132,8 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
 	                                  { OPT_USE_FUTURE_PROTOCOL_VERSION, "--use-future-protocol-version", SO_NONE },
+	                                  { OPT_AUDIT_LOG, "--audit-log", SO_NONE },
+	                                  { OPT_AUDIT_LOG_VALUES, "--audit-log-values", SO_REQ_SEP },
 	                                  TLS_OPTION_FLAGS,
 	                                  SO_END_OF_OPTIONS };
 
@@ -488,6 +492,14 @@ static void printProgramUsage(const char* name) {
 	       "  --trace-format FORMAT\n"
 	       "                 Select the format of the log files. xml (the default) and json\n"
 	       "                 are supported. Has no effect unless --log is specified.\n"
+	       "  --audit-log    Logs the keys returned by get, getrange, getrangekeys and\n"
+	       "                 getall to the trace file, plus values per --audit-log-values.\n"
+	       "                 Also enabled by setting FDB_CLI_AUDIT_LOG_ENABLE. Requires\n"
+	       "                 tracing (--log or FDB_NETWORK_OPTION_TRACE_ENABLE).\n"
+	       "  --audit-log-values MODE\n"
+	       "                 Which returned values are audit logged: none, system (only\n"
+	       "                 values of system and special keys, the default) or all. Has\n"
+	       "                 no effect unless audit logging is enabled.\n"
 	       "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
 	       "                 and then exits.\n"
 	       "  --no-status    Disables the initial status check done when starting\n"
@@ -908,6 +920,8 @@ struct CLIOptions {
 
 	std::string clusterFile;
 	bool trace = false;
+	bool auditLog = false;
+	AuditLogValues auditLogValues = AuditLogValues::System;
 	std::string traceDir;
 	std::string traceFormat;
 	std::string logGroup;
@@ -945,6 +959,10 @@ struct CLIOptions {
 				exit_code = ec;
 				return;
 			}
+		}
+		std::string auditLogEnv;
+		if (platform::getEnvironmentVar("FDB_CLI_AUDIT_LOG_ENABLE", auditLogEnv)) {
+			auditLog = true;
 		}
 		if (exit_timeout && !exec.present()) {
 			fprintf(stderr, "ERROR: --timeout may only be specified with --exec\n");
@@ -997,6 +1015,24 @@ struct CLIOptions {
 		case OPT_TRACE_DIR:
 			traceDir = args.OptionArg();
 			break;
+		case OPT_AUDIT_LOG:
+			auditLog = true;
+			break;
+		case OPT_AUDIT_LOG_VALUES: {
+			std::string mode = args.OptionArg();
+			if (mode == "none") {
+				auditLogValues = AuditLogValues::None;
+			} else if (mode == "system") {
+				auditLogValues = AuditLogValues::System;
+			} else if (mode == "all") {
+				auditLogValues = AuditLogValues::All;
+			} else {
+				fprintf(
+				    stderr, "ERROR: invalid --audit-log-values `%s' (expected none, system or all)\n", mode.c_str());
+				return FDB_EXIT_ERROR;
+			}
+			break;
+		}
 		case OPT_LOGGROUP:
 			logGroup = args.OptionArg();
 			break;
@@ -1137,6 +1173,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 		printf("Unable to connect to cluster from `%s'\n", ccf->getLocation().c_str());
 		return 1;
 	}
+
+	// Client tracing is initialized when the local database is created, whether it was enabled by --log or by
+	// FDB_NETWORK_OPTION_TRACE_ENABLE. Audit records only go to the trace file, so refuse to run without one.
+	if (opt.auditLog && !traceFileIsOpen()) {
+		fprintf(stderr,
+		        "ERROR: audit logging is enabled but tracing is not. Enable tracing with --log or "
+		        "FDB_NETWORK_OPTION_TRACE_ENABLE.\n");
+		ASSERT_ABORT(false);
+	}
+	auditLogEnabled = opt.auditLog;
+	fdb_cli::auditLogValues = opt.auditLogValues;
 
 	if (opt.trace) {
 		TraceEvent("CLIProgramStart")
@@ -1612,9 +1659,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						    getTransaction(db, tenant, tr, options, intrans)->get(tokens[1]);
 						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
 
-						if (v.present())
+						if (v.present()) {
+							auditLogReturnedKey(
+							    localDb, "get", deterministicRandom()->randomUniqueID(), tokens[1], v.get());
 							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(), printable(v.get()).c_str());
-						else
+						} else
 							printf("`%s': not found\n", printable(tokens[1]).c_str());
 					}
 					continue;
@@ -1826,12 +1875,16 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						RangeResult kvs = wait(makeInterruptable(safeThreadFutureToFuture(kvsF)));
 
 						printf("\nRange limited to %d keys\n", limit);
+						UID auditId = deterministicRandom()->randomUniqueID();
 						for (auto iter = kvs.begin(); iter < kvs.end(); iter++) {
-							if (tokencmp(tokens[0], "getrangekeys"))
+							if (tokencmp(tokens[0], "getrangekeys")) {
+								auditLogReturnedKey(localDb, "getrangekeys", auditId, (*iter).key);
 								printf("`%s'\n", printable((*iter).key).c_str());
-							else
+							} else {
+								auditLogReturnedKey(localDb, "getrange", auditId, (*iter).key, (*iter).value);
 								printf(
 								    "`%s' is `%s'\n", printable((*iter).key).c_str(), printable((*iter).value).c_str());
+							}
 						}
 						printf("\n");
 					}
