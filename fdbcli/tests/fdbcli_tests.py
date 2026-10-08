@@ -10,6 +10,9 @@ import json
 import tempfile
 import time
 import random
+import itertools
+import signal
+import xml.etree.ElementTree as ET
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
 
@@ -1487,6 +1490,183 @@ def tls_address_suffix():
                 assert err_out == err_output_server_tls, f"unexpected output: {err_out}"
 
 
+def read_audit_events(trace_dir):
+    events = []
+    for name in sorted(os.listdir(trace_dir)):
+        if name.startswith("trace.") and name.endswith(".xml"):
+            with open(os.path.join(trace_dir, name)) as f:
+                events += [ET.fromstring(line).attrib for line in f if 'Type="FdbCliAudit"' in line]
+    return events
+
+
+def run_fdbcli_in(cwd, args, env, commands):
+    return subprocess.run(
+        command_template[:3] + args + ["--exec", commands],
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={**fdbcli_env, **env},
+    )
+
+
+def cluster_description():
+    with open(command_template[2]) as f:
+        return f.read().strip().split("\n")[-1].split(":")[0]
+
+
+@enable_logging()
+def audit_log_flags(logger):
+    cwd, log_dir = tempfile.mkdtemp(), tempfile.mkdtemp()
+    audit_modes = {
+        "off": ([], {}),
+        "flag": (["--audit-log"], {}),
+        "env": ([], {"FDB_CLI_AUDIT_LOG_ENABLE": "1"}),
+    }
+    # mode -> (args, env, directory the trace file should land in)
+    trace_modes = {
+        "off": ([], {}, None),
+        "log": (["--log"], {}, cwd),
+        "log_dir": (["--log", "--log-dir", log_dir], {}, log_dir),
+        "env": ([], {"FDB_NETWORK_OPTION_TRACE_ENABLE": log_dir}, log_dir),
+    }
+    for audit, (audit_args, audit_env) in audit_modes.items():
+        for trace, (trace_args, trace_env, trace_dir) in trace_modes.items():
+            process = run_fdbcli_in(
+                cwd, audit_args + trace_args, {**audit_env, **trace_env}, "get audit_a"
+            )
+            case = (audit, trace, process.returncode)
+            if audit != "off" and trace_dir is None:
+                assert process.returncode == -signal.SIGABRT, case
+                assert b"audit logging is enabled but tracing is not" in process.stderr
+            else:
+                assert process.returncode == 0, case
+            if trace_dir:
+                assert any(n.endswith(".xml") for n in os.listdir(trace_dir)), case
+                events = read_audit_events(trace_dir)
+                assert len(events) == (0 if audit == "off" else 1), (case, events)
+            logger.debug("audit={} trace={} exit={}".format(*case))
+            for d in (cwd, log_dir):
+                for name in os.listdir(d):
+                    os.remove(os.path.join(d, name))
+    shutil.rmtree(cwd)
+    shutil.rmtree(log_dir)
+
+
+@enable_logging()
+def audit_log_values(logger):
+    # mode -> expected Value for a user key and a system key. No mode means the default, system.
+    expected = {
+        None: [None, "1"],
+        "none": [None, None],
+        "system": [None, "1"],
+        "all": ["1", "1"],
+    }
+    for mode, values in expected.items():
+        log_dir = tempfile.mkdtemp()
+        mode_args = [] if mode is None else ["--audit-log-values", mode]
+        process = run_fdbcli_in(
+            log_dir,
+            ["--log", "--log-dir", log_dir, "--audit-log"] + mode_args,
+            {},
+            "option on READ_SYSTEM_KEYS; get audit_a; get \\xff\\x02/audit_a",
+        )
+        assert process.returncode == 0, process.stderr
+        events = read_audit_events(log_dir)
+        logger.debug("mode={} values={}".format(mode, [e.get("Value") for e in events]))
+        assert [e.get("Value") for e in events] == values, (mode, events)
+        shutil.rmtree(log_dir)
+
+    process = run_fdbcli_in(None, ["--audit-log", "--audit-log-values", "bogus"], {}, "get audit_a")
+    assert process.returncode == 1
+    assert b"invalid --audit-log-values" in process.stderr
+
+
+@enable_logging()
+def audit_log_commands(logger):
+    log_dir = tempfile.mkdtemp()
+    args = ["--log", "--log-dir", log_dir, "--audit-log"]
+    reads, expected, group_sizes = ["option on READ_SYSTEM_KEYS"], [], []
+    for prefix, a, b in [("", None, None), ("\\xff\\x02/", "1", "2")]:
+        k = lambda name: prefix + name
+        reads += [
+            "get " + k("audit_a"),
+            "get " + k("audit_missing"),
+            "getrange {} {}".format(k("audit_a"), k("audit_b")),
+            "getrange {} {}".format(k("audit_"), k("audit_z")),
+            "getrange {} {}".format(k("audit_x"), k("audit_y")),
+            "getrangekeys {} {}".format(k("audit_a"), k("audit_b")),
+            "getrangekeys {} {}".format(k("audit_"), k("audit_z")),
+            "getall " + k("audit_a"),
+            "getall " + k("audit_missing"),
+        ]
+        expected += [
+            ("get", k("audit_a"), a),
+            ("getrange", k("audit_a"), a),
+            ("getrange", k("audit_a"), a),
+            ("getrange", k("audit_b"), b),
+            ("getrangekeys", k("audit_a"), None),
+            ("getrangekeys", k("audit_a"), None),
+            ("getrangekeys", k("audit_b"), None),
+            ("getall", k("audit_a"), a),
+        ]
+        # missing keys and the empty range log nothing
+        group_sizes += [1, 1, 2, 1, 2, 1]
+
+    process = run_fdbcli_in(log_dir, args, {}, "; ".join(reads))
+    assert process.returncode == 0, process.stderr
+    events = read_audit_events(log_dir)
+    fields = ["Command", "AuditID", "Cluster", "Key", "Value", "StorageServer"]
+    for e in events:
+        logger.debug(" ".join('{}="{}"'.format(f, e[f]) for f in fields if f in e))
+    assert [(e["Command"], e["Key"], e.get("Value")) for e in events] == expected
+    assert [len(list(g)) for _, g in itertools.groupby(e["AuditID"] for e in events)] == group_sizes
+    assert all(e["Cluster"] == cluster_description() for e in events)
+    assert all(("StorageServer" in e) == (e["Command"] == "getall") for e in events)
+    shutil.rmtree(log_dir)
+
+    # A read that fails exits with the usual error, not a crash, and logs nothing
+    log_dir = tempfile.mkdtemp()
+    args = ["--log", "--log-dir", log_dir, "--audit-log"]
+    process = run_fdbcli_in(log_dir, args, {}, "get \\xff\\x02/audit_a")
+    assert process.returncode == 1, process.returncode
+    assert read_audit_events(log_dir) == []
+    shutil.rmtree(log_dir)
+
+
+@enable_logging()
+def audit_log_cluster(logger):
+    # Cluster is read when logging, so it follows a description change made mid-session
+    description = cluster_description()
+    log_dir = tempfile.mkdtemp()
+    process = run_fdbcli_in(
+        log_dir,
+        ["--log", "--log-dir", log_dir, "--audit-log"],
+        {},
+        "get audit_a; coordinators description=audit_renamed; sleep 5; get audit_a; "
+        "coordinators description=" + description,
+    )
+    assert process.returncode == 0, process.stderr
+    clusters = [e["Cluster"] for e in read_audit_events(log_dir)]
+    logger.debug("clusters={}".format(clusters))
+    assert clusters == [description, "audit_renamed"], clusters
+    shutil.rmtree(log_dir)
+
+
+def audit_log():
+    run_fdbcli_command(
+        "writemode on; set audit_a 1; set audit_b 2; option on ACCESS_SYSTEM_KEYS;",
+        "set \\xff\\x02/audit_a 1; set \\xff\\x02/audit_b 2",
+    )
+    audit_log_flags()
+    audit_log_values()
+    audit_log_commands()
+    audit_log_cluster()
+    run_fdbcli_command(
+        "writemode on; clear audit_a; clear audit_b; option on ACCESS_SYSTEM_KEYS;",
+        "clear \\xff\\x02/audit_a; clear \\xff\\x02/audit_b",
+    )
+
+
 if __name__ == "__main__":
     parser = ArgumentParser(
         formatter_class=RawDescriptionHelpFormatter,
@@ -1563,6 +1743,7 @@ if __name__ == "__main__":
         # TODO: fix the issue when running through the external client
         # quota()
         idempotency_ids()
+        audit_log()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
