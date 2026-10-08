@@ -7233,6 +7233,12 @@ Future<Void> tryGetRangeForBulkLoadFromSST(PromiseStream<RangeResult> results,
 	try {
 		std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader(
 		    keys, SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE, SERVER_KNOBS->FETCH_BLOCK_BYTES);
+		if (reader == nullptr) {
+			TraceEvent(SevWarnAlways, "SSBulkLoadNoSstReader")
+			    .detail("Reason", "Binary was built without RocksDB and cannot read SST files")
+			    .detail("File", sstFilePath);
+			throw unsupported_operation();
+		}
 		// TODO(BulkLoad): this can be a slow task. We will make this as async call.
 		reader->open(abspath(sstFilePath));
 		while (true) {

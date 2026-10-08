@@ -135,7 +135,7 @@ Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // input fi
 			std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 			std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
 			if (sstWriter == nullptr || reader == nullptr) {
-				TraceEvent(SevWarnAlways, "SSBulkDumpNoSstWriterOrReader", logId)
+				TraceEvent(SevWarnAlways, "SSBulkLoadNoSstWriterOrReader", logId)
 				    .detail("Reason", "Binary was built without RocksDB and cannot read or write SST files")
 				    .detail("DataFilePath", dataFileFullPath)
 				    .detail("ByteSampleFilePath", byteSampleFileFullPath);
