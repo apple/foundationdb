@@ -1,0 +1,84 @@
+# Two or three concurrent S3/blobstore (MockS3Server) backups with distinct tags and containers, next to a Cycle
+# workload. The seed picks the key-range scenario and the number of active backups (the third block is idle when only
+# two are chosen); see MultiBackupRanges.h.
+#
+# Every active backup is validated: it is restored under the validation prefix and audited against the live data. The
+# stop times are staggered so earlier backups are validated while later ones are still running. Then the first backup
+# that covers all Cycle data is restored in place.
+#
+# Otherwise mirrors BackupS3BlobCorrectness.toml:
+# - Uses S3 blobstore URL instead of file-based backup
+# - Connection failures (60s) during initial workload and backup to test resilience
+# - Tests the full backup/restore cycle with simulated S3 operations
+
+testClass = "Backup"
+
+[configuration]
+buggify = false
+faultInjection = false
+
+[[test]]
+testTitle = 'MultiBackupS3BlobCorrectness'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+waitForQuiescenceEnd = false
+runConsistencyCheck = false
+# Disable connection failures after 90s to match RandomClogging/Rollback duration.
+# This ensures backup completes under full chaos (10s-90s) while avoiding extreme
+# queue buildup during restore (90s-170s) that causes simulator slowdown.
+connectionFailuresDisableDuration = 90
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 10000
+    transactionsPerSecond = 1000.0
+    # Cycle runs continuously. During clear+restore, the database is locked,
+    # so Cycle gets database_locked errors (retriable) instead of missing keys.
+    # After restore unlocks, Cycle continues normally on restored data.
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'BackupS3BlobCorrectness'
+    backupTag = 'backupA'
+    multiBackupIndex = 0
+    backupAfter = 10.0
+    restoreAfter = 80.0
+    abortAndRestartAfter = 0.0
+    # Cycle stops writing after 30s; each backup is held until it covers a version read at validateAfter.
+    validateRestoredData = true
+    validateAfter = 35.0
+    differentialBackup = true
+    stopDifferentialAfter = 40.0
+    backupRangesCount = -1
+    skipDirtyRestore = false
+    backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_containerA?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
+
+    [[test.workload]]
+    testName = 'BackupS3BlobCorrectness'
+    backupTag = 'backupB'
+    multiBackupIndex = 1
+    backupAfter = 10.0
+    restoreAfter = 80.0
+    abortAndRestartAfter = 0.0
+    validateRestoredData = true
+    validateAfter = 35.0
+    differentialBackup = true
+    stopDifferentialAfter = 55.0
+    backupRangesCount = -1
+    skipDirtyRestore = false
+    backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_containerB?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
+
+    [[test.workload]]
+    testName = 'BackupS3BlobCorrectness'
+    backupTag = 'backupC'
+    multiBackupIndex = 2
+    backupAfter = 10.0
+    restoreAfter = 80.0
+    abortAndRestartAfter = 0.0
+    validateRestoredData = true
+    validateAfter = 35.0
+    differentialBackup = true
+    stopDifferentialAfter = 70.0
+    backupRangesCount = -1
+    skipDirtyRestore = false
+    backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_containerC?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
