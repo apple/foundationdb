@@ -13,6 +13,7 @@
         -- Volker Grabsch <vog@notjusthosting.com>
 */
 
+// touch
 #include "SHA1.h"
 #include <sstream>
 
