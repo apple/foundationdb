@@ -224,7 +224,9 @@ public:
 
 	Optional<int> getMaxOngoingBulkLoadTaskCount() const override;
 
-	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
+	int64_t getLoadBytes(bool includeInFlight = true,
+	                     double inflightPenalty = 1.0,
+	                     bool rankOnWorstMember = false) const override;
 
 	double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 
@@ -268,6 +270,8 @@ private:
 	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive all
 	// replies.
 	int64_t getLoadAverage() const;
+	// Load of the team's fullest member, penalized the same way as getLoadAverage when replies are missing.
+	int64_t getLoadMaximum() const;
 
 	bool allServersHaveHealthyAvailableSpace() const;
 };
