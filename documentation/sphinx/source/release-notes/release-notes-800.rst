@@ -27,8 +27,10 @@ Compatibility and removed features
   `(PR #12667) <https://github.com/apple/foundationdb/pull/12667>`_
 * Removed experimental **blob granules**, the storage-server **ChangeFeed**
   feature, and **storage cache servers**, together with their associated APIs
-  and commands. Native CDC is a separate interface, not a compatible replacement
-  for the removed ChangeFeed API.
+  and commands. The blob granule C symbols retained for older multiversion
+  clients to load are stubs that **abort the process when called**; they do not
+  preserve blob granule functionality. Native CDC is a separate interface, not
+  a compatible replacement for the removed ChangeFeed API.
   `(PR #12435) <https://github.com/apple/foundationdb/pull/12435>`_,
   `(PR #12470) <https://github.com/apple/foundationdb/pull/12470>`_,
   `(PR #12486) <https://github.com/apple/foundationdb/pull/12486>`_
