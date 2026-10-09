@@ -6853,8 +6853,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			                                          bulkDumpJobId,
 			                                          TaskCompletionKey::signal(bulkLoadDone));
 
-			// After BulkLoad completes, run RestoreDispatch to apply mutation logs
-			// Set onlyApplyMutationLogs so it only processes logs, not range files
+			// Sequencing, not user intent: the SSTs carry the range data, so the dispatch that follows must
+			// replay logs only. submitRestore rejects --incremental with bulkload, so this can only ever
+			// overwrite false.
 			restore.onlyApplyMutationLogs().set(tr, true);
 
 			// Add RestoreDispatch task that waits for BulkLoad to complete
@@ -7143,6 +7144,20 @@ public:
 			throw backup_error();
 		}
 
+		// --incremental suppresses the snapshot entirely (StartFullBackupTaskFunc skips the whole snapshot
+		// block), so pairing it with a bulkdump mode asks for an SST snapshot and for no snapshot at once.
+		// Taken silently, it yields a log-only backup that no bulkload restore can use, and the operator
+		// only discovers that when the restore aborts much later.
+		if (snapshotMode != static_cast<int>(SnapshotMode::RANGEFILE) && incrementalBackupOnly) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitBackupBulkDumpIncremental")
+			    .detail("TagName", tagName)
+			    .detail("SnapshotMode", snapshotMode);
+			fprintf(stderr,
+			        "ERROR: --incremental cannot be combined with --mode bulkdump or --mode both; it suppresses "
+			        "the snapshot those modes exist to produce, leaving a backup no bulkload restore can use.\n");
+			throw backup_error();
+		}
+
 		config.clear(tr);
 
 		Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
@@ -7240,6 +7255,18 @@ public:
 			        "ERROR: --mode bulkload requires exactly one key range, but %d remain after coalescing "
 			        "adjacent ranges. Use --mode rangefile, or run one restore per range.\n",
 			        static_cast<int>(restoreRanges.size()));
+			throw restore_error();
+		}
+
+		// Mirror of the backup-side rejection. A bulkload restore ingests the snapshot via SST, which is
+		// precisely the range data --incremental declines, and StartFullRestoreTaskFunc picks the bulkload
+		// branch without consulting the flag. Accepting the pair would restore the whole snapshot the
+		// caller asked to skip, then overwrite their setting so even status misreports it.
+		if (!useRangeFileRestore && onlyApplyMutationLogs) {
+			TraceEvent(SevWarnAlways, "FBA_SubmitRestoreBulkLoadIncremental").detail("TagName", tagName);
+			fprintf(stderr,
+			        "ERROR: --incremental cannot be combined with --mode bulkload; bulkload restores the "
+			        "snapshot that --incremental skips. Use --mode rangefile for a logs-only restore.\n");
 			throw restore_error();
 		}
 
