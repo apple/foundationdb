@@ -4704,8 +4704,10 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 		errors.push_back(error);
 	}
 
-	// Check for any remaining restored keys that don't have matching source keys
-	if (errors.empty() && restoredIdx < restoredReply.data.size() && !restoredReply.more) {
+	// Check for any remaining restored keys that don't have matching source keys. As with missing source keys
+	// above, this is only conclusive once the source has no more data either: a source read can come back short
+	// (e.g. at a shard boundary) with more=true while the restored read is already complete.
+	if (errors.empty() && restoredIdx < restoredReply.data.size() && !sourceReply.more && !restoredReply.more) {
 		// Extra keys found in restored data - treat as validation error
 		std::string error = format("Extra key(s) in restored data, first extra key: %s",
 		                           Traceable<StringRef>::toString(restoredReply.data[restoredIdx].key).c_str());

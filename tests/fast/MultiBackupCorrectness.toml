@@ -1,0 +1,73 @@
+# Two or three concurrent v1 file backups with distinct tags, next to a Cycle workload. The seed picks the key-range
+# scenario and the number of active backups (the third block is idle when only two are chosen); see
+# MultiBackupRanges.h.
+#
+# Every active backup is validated: it is restored under the validation prefix and audited against the live data. The
+# stop times are staggered so earlier backups are validated while later ones are still running. Then the first backup
+# that covers all Cycle data is restored in place and checked with the Cycle invariant.
+
+testClass = "Backup"
+
+[[test]]
+testTitle = 'MultiBackupAndRestore'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'BackupAndRestoreCorrectness'
+    backupTag = 'backupA'
+    multiBackupIndex = 0
+    backupAfter = 10.0
+    minBackupAfter = 5.0
+    restoreAfter = 60.0
+    # Cycle stops writing after 30s; each backup is held until it covers a version read at validateAfter.
+    validateRestoredData = true
+    validateAfter = 35.0
+    differentialBackup = true
+    stopDifferentialAfter = 40.0
+
+    [[test.workload]]
+    testName = 'BackupAndRestoreCorrectness'
+    backupTag = 'backupB'
+    multiBackupIndex = 1
+    backupAfter = 10.0
+    minBackupAfter = 5.0
+    restoreAfter = 60.0
+    validateRestoredData = true
+    validateAfter = 35.0
+    differentialBackup = true
+    stopDifferentialAfter = 55.0
+
+    [[test.workload]]
+    testName = 'BackupAndRestoreCorrectness'
+    backupTag = 'backupC'
+    multiBackupIndex = 2
+    backupAfter = 10.0
+    minBackupAfter = 5.0
+    restoreAfter = 60.0
+    validateRestoredData = true
+    validateAfter = 35.0
+    differentialBackup = true
+    stopDifferentialAfter = 70.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 90.0
+    testDuration = 90.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 90.0

@@ -93,6 +93,8 @@
 #include "fdbserver/tester/workloads.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "BulkSetup.h"
+#include "MultiBackupRanges.h"
+#include "ValidateRestoreAudit.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #include "fdbserver/mocks3/MockS3ServerChaos.h"
 #include "flow/IRandom.h"
@@ -124,11 +126,28 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	std::vector<Key> outOfRangeSentinels;
 	Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 	static int backupAgentRequests;
+	// Validation restores share a single destination prefix, so they run one at a time, and the in-place restore
+	// (which overwrites the live data they compare against) waits for all of them. State is process-wide: all
+	// instances of a test run in the same tester.
+	static inline FlowLock validationLock{ 1 };
+	static inline Reference<AsyncVar<int>> validationsPending = makeReference<AsyncVar<int>>(0);
 	LockDB locked{ false };
 	bool allowPauses;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
 	bool defaultBackup;
+	// Restore the backup under the validation prefix and audit it against the live data before the in-place restore.
+	// Only valid when the data is quiescent and the backup captured all of it.
+	bool validateRestoredData;
+	// Earliest time (from workload start) at which the backup is validated; defaults to restoreAfter.
+	double validateAfter;
+	// Read version taken after the data has been written; backups being validated must cover it.
+	Future<Version> quiescentVersion;
+	bool countedAsPendingValidation = false;
+	// -1 for a standalone backup; otherwise this instance's index in a multi-backup scenario (see MultiBackupRanges.h).
+	int multiBackupIndex;
+	// An instance beyond the scenario's active backup count does nothing.
+	bool multiBackupIdle = false;
 	Optional<std::string> encryptionKeyFileName;
 
 	// S3-specific additions
@@ -190,6 +209,25 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
 		defaultBackup = getOption(options, "defaultBackup"_sr, false);
+		validateRestoredData = getOption(options, "validateRestoredData"_sr, false);
+		validateAfter = getOption(options, "validateAfter"_sr, restoreAfter);
+		multiBackupIndex = getOption(options, "multiBackupIndex"_sr, -1);
+		MultiBackupRanges::Scenario multiBackupScenario = MultiBackupRanges::scenarioFor(sharedRandomNumber);
+		int multiBackupCount = MultiBackupRanges::activeBackupCount(sharedRandomNumber);
+		if (multiBackupIndex >= 0) {
+			ASSERT(multiBackupIndex < MultiBackupRanges::MAX_BACKUPS);
+			multiBackupIdle = multiBackupIndex >= multiBackupCount;
+			// A peer backup may still be running when this one finishes, so the log range can legitimately be shared.
+			shareLogRange = true;
+			performRestore = performRestore && !multiBackupIdle &&
+			                 MultiBackupRanges::shouldRestore(multiBackupScenario, multiBackupIndex, multiBackupCount);
+			TraceEvent("BS3BCW_MultiBackup")
+			    .detail("Index", multiBackupIndex)
+			    .detail("ActiveBackups", multiBackupCount)
+			    .detail("Idle", multiBackupIdle)
+			    .detail("Scenario", MultiBackupRanges::toString(multiBackupScenario))
+			    .detail("PerformRestore", performRestore);
+		}
 
 		// S3-specific options
 		backupURL = getOption(options, "backupURL"_sr, "file://simfdb/backups/"_sr).toString();
@@ -219,6 +257,11 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		corruptionRate = getOption(options, "corruptionRate"_sr, 0.0);
 		maxDelay = getOption(options, "maxDelay"_sr, 0.0);
 
+		if (validateRestoredData && clientId == 0 && !multiBackupIdle) {
+			countedAsPendingValidation = true;
+			validationsPending->set(validationsPending->get() + 1);
+		}
+
 		std::vector<std::string> restorePrefixesToInclude =
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
 
@@ -232,7 +275,11 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 		TraceEvent("BS3BCW_ClientId").detail("Id", wcx.clientId);
 
-		if (backupRangesCount <= 0) {
+		if (multiBackupIndex >= 0) {
+			// An idle instance still needs non-empty ranges to construct; reuse the last active backup's.
+			MultiBackupRanges::addRanges(
+			    multiBackupScenario, std::min(multiBackupIndex, multiBackupCount - 1), multiBackupCount, backupRanges);
+		} else if (backupRangesCount <= 0) {
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		} else {
 			// Add backup ranges
@@ -250,7 +297,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		if (shouldSkipRestoreRanges && backupRangesCount > 1) {
+		// Multi-backup scenarios restore every range: skipping one could leave nothing to restore.
+		if (shouldSkipRestoreRanges && backupRangesCount > 1 && multiBackupIndex < 0) {
 			skippedRestoreRanges.push_back(backupRanges[deterministicRandom()->randomInt(0, backupRanges.size())]);
 		}
 
@@ -278,7 +326,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		if (clientId != 0) {
+		if (clientId != 0 || multiBackupIdle) {
 			return Void();
 		}
 		return _setup(cx, this);
@@ -288,7 +336,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		// S3-specific: Register MockS3Server or MockS3ServerChaos for blobstore URLs in simulation
 		// Only client 0 registers the server to avoid duplicates
 		// Persistence is automatically enabled in registration
-		if (self->clientId == 0 && self->backupURL.rfind("blobstore://", 0) == 0 &&
+		// With two backup workloads sharing one mock server, only role 0 registers it.
+		if (self->clientId == 0 && self->multiBackupIndex <= 0 && self->backupURL.rfind("blobstore://", 0) == 0 &&
 		    (self->backupURL.find("127.0.0.1") != std::string::npos ||
 		     self->backupURL.find("localhost") != std::string::npos) &&
 		    g_network->isSimulated()) {
@@ -361,7 +410,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		// Only client 0 runs backup/restore operations
 		// Other clients do nothing - the test harness waits for all clients to complete
-		if (clientId != 0) {
+		if (clientId != 0 || multiBackupIdle) {
 			return Void();
 		}
 		return _start(cx);
@@ -603,6 +652,23 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			}
 		}
 
+		// A differential backup only completes once it is discontinued, so end the log copy at the requested time.
+		if (stopDifferentialDelay) {
+			co_await stopDifferentialFuture;
+			TraceEvent("BS3BCW_DoBackupStopDifferential", randomID).detail("Tag", printable(tag));
+			// A discontinued backup stops at the version its log copy has reached, so let it catch up first.
+			if (validateRestoredData) {
+				Version target = co_await quiescentVersion;
+				co_await waitForRestorableVersion(cx, backupAgent, tag.toString(), target);
+			}
+			try {
+				co_await backupAgent->discontinueBackup(cx, tag);
+			} catch (Error& e) {
+				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
+					throw;
+			}
+		}
+
 		TraceEvent("BS3BCW_DoBackupWaitToDiscontinue", randomID)
 		    .detail("Tag", printable(tag))
 		    .detail("DifferentialAfter", stopDifferentialDelay);
@@ -644,8 +710,67 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		TraceEvent("BS3BCW_DoBackupComplete", randomID).detail("Tag", printable(tag));
 	}
 
+	// Releases this instance's claim on the pending-validation count on every exit path, so a failed instance cannot
+	// leave the in-place restore waiting forever.
+	struct PendingValidationClaim : NonCopyable {
+		bool held;
+		explicit PendingValidationClaim(bool held) : held(held) {}
+		void release() {
+			if (held) {
+				held = false;
+				validationsPending->set(validationsPending->get() - 1);
+			}
+		}
+		~PendingValidationClaim() { release(); }
+	};
+
+	Future<Void> validateAgainstPrefixedRestore(Database cx,
+	                                            FileBackupAgent* backupAgent,
+	                                            Reference<IBackupContainer> container) {
+		Key prefix = validateRestoreLogKeys.begin;
+		Standalone<StringRef> validationTag(backupTag.toString() + "_validate");
+		TraceEvent("BS3BCW_ValidateRestoreStart").detail("Tag", printable(backupTag));
+		// Latest restorable version: the data is quiescent, so it must equal the live data.
+		co_await backupAgent->restore(cx,
+		                              cx,
+		                              validationTag,
+		                              KeyRef(container->getURL()),
+		                              container->getProxy(),
+		                              backupRanges,
+		                              WaitForComplete::True,
+		                              ::invalidVersion,
+		                              Verbose::True,
+		                              prefix,
+		                              Key(),
+		                              LockDB::False,
+		                              UnlockDB::False,
+		                              OnlyApplyMutationLogs::False,
+		                              InconsistentSnapshotOnly::False,
+		                              ::invalidVersion,
+		                              container->getEncryptionKeyFileName());
+		for (const auto& range : backupRanges) {
+			// The audit only covers user keys.
+			KeyRangeRef userRange = range & normalKeys;
+			if (!userRange.empty()) {
+				co_await runValidateRestoreAudit(cx, userRange);
+			}
+		}
+		TraceEvent("BS3BCW_ValidateRestoreDone").detail("Tag", printable(backupTag));
+		co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->clear(validateRestoreLogKeys);
+			return Void();
+		});
+	}
+
 	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;
+		PendingValidationClaim validationClaim(countedAsPendingValidation);
+		if (validateRestoredData) {
+			quiescentVersion = readVersionAfter(cx, validateAfter);
+		}
+		Future<Void> startValidation = delay(validateAfter);
 		Future<Void> stopDifferentialBackup = delay(stopDifferentialAfter);
 
 		TraceEvent("BS3BCW_Arguments")
@@ -704,6 +829,23 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				             Promise<Void>());
 			}
 
+			if (validateRestoredData) {
+				co_await b;
+				// Validation compares against the live data, so wait until the workloads writing it have finished.
+				co_await startValidation;
+				KeyBackedTag keyBackedTag = makeBackupTag(backupTag.toString());
+				UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
+				Reference<IBackupContainer> validationContainer =
+				    co_await BackupConfig(uidFlag.first).backupContainer().getD(cx.getReference());
+				if (validationContainer) {
+					co_await waitForRestorable(validationContainer, 150);
+					co_await validationLock.take();
+					FlowLock::Releaser releaser(validationLock);
+					co_await validateAgainstPrefixedRestore(cx, &backupAgent, validationContainer);
+				}
+				validationClaim.release();
+			}
+
 			if (performRestore) {
 				// Adaptive timing: Wait for backup to complete, then wait additional time
 				// This ensures the backup metadata is written before restore starts
@@ -731,6 +873,11 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				// Increased timeout for complex multi-region configs
 				if (lastBackupContainer) {
 					co_await waitForRestorable(lastBackupContainer, 150);
+
+					// Other backups' validation restores read the live data this restore is about to overwrite.
+					while (validationsPending->get() > 0) {
+						co_await validationsPending->onChange();
+					}
 
 					// Generate a lock UID for the entire clear+restore operation
 					UID lockUID = deterministicRandom()->randomUniqueID();
